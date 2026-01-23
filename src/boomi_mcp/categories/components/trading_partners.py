@@ -248,10 +248,17 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 get_opts = getattr(disk_opts, 'disk_get_options', None)
                 send_opts = getattr(disk_opts, 'disk_send_options', None)
                 if get_opts:
-                    disk_info["get_directory"] = getattr(get_opts, 'get_directory', None)
-                    disk_info["file_filter"] = getattr(get_opts, 'file_filter', None)
+                    disk_info["get_directory"] = getattr(get_opts, 'get_directory', None) or getattr(get_opts, 'getDirectory', None)
+                    disk_info["file_filter"] = getattr(get_opts, 'file_filter', None) or getattr(get_opts, 'fileFilter', None)
+                    disk_info["filter_match_type"] = getattr(get_opts, 'filter_match_type', None) or getattr(get_opts, 'filterMatchType', None)
+                    disk_info["delete_after_read"] = getattr(get_opts, 'delete_after_read', None) or getattr(get_opts, 'deleteAfterRead', None)
+                    disk_info["max_file_count"] = getattr(get_opts, 'max_file_count', None) or getattr(get_opts, 'maxFileCount', None)
                 if send_opts:
-                    disk_info["send_directory"] = getattr(send_opts, 'send_directory', None)
+                    disk_info["send_directory"] = getattr(send_opts, 'send_directory', None) or getattr(send_opts, 'sendDirectory', None)
+                    disk_info["create_directory"] = getattr(send_opts, 'create_directory', None) or getattr(send_opts, 'createDirectory', None)
+                    disk_info["write_option"] = getattr(send_opts, 'write_option', None) or getattr(send_opts, 'writeOption', None)
+                # Filter out None values
+                disk_info = {k: v for k, v in disk_info.items() if v is not None}
                 communication_protocols.append(disk_info)
 
             # FTP protocol
@@ -269,9 +276,25 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     if ftpssl_opts:
                         ftp_info["ssl_mode"] = getattr(ftpssl_opts, 'sslmode', None)
                         ftp_info["use_client_authentication"] = getattr(ftpssl_opts, 'use_client_authentication', None)
+                        # Extract client SSL certificate alias
+                        client_ssl_cert = getattr(ftpssl_opts, 'client_ssl_certificate', None) or getattr(ftpssl_opts, 'clientSSLCertificate', None)
+                        if client_ssl_cert:
+                            ftp_info["client_ssl_alias"] = getattr(client_ssl_cert, 'alias', None)
+                # Extract FTP get options
                 get_opts = getattr(ftp_opts, 'ftp_get_options', None)
                 if get_opts:
                     ftp_info["remote_directory"] = getattr(get_opts, 'remote_directory', None)
+                    ftp_info["get_transfer_type"] = getattr(get_opts, 'transfer_type', None)
+                    ftp_info["get_action"] = getattr(get_opts, 'ftp_action', None) or getattr(get_opts, 'ftpAction', None)
+                    ftp_info["max_file_count"] = getattr(get_opts, 'max_file_count', None) or getattr(get_opts, 'maxFileCount', None)
+                    ftp_info["file_to_move"] = getattr(get_opts, 'file_to_move', None) or getattr(get_opts, 'fileToMove', None)
+                # Extract FTP send options
+                send_opts = getattr(ftp_opts, 'ftp_send_options', None)
+                if send_opts:
+                    ftp_info["send_remote_directory"] = getattr(send_opts, 'remote_directory', None)
+                    ftp_info["send_transfer_type"] = getattr(send_opts, 'transfer_type', None)
+                    ftp_info["send_action"] = getattr(send_opts, 'ftp_action', None) or getattr(send_opts, 'ftpAction', None)
+                    ftp_info["move_to_directory"] = getattr(send_opts, 'move_to_directory', None) or getattr(send_opts, 'moveToDirectory', None)
                 # Filter out None values
                 ftp_info = {k: v for k, v in ftp_info.items() if v is not None}
                 communication_protocols.append(ftp_info)
@@ -289,17 +312,32 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     sftpssh_opts = getattr(settings, 'sftpssh_options', None)
                     if sftpssh_opts:
                         sftp_info["ssh_key_auth"] = getattr(sftpssh_opts, 'sshkeyauth', None)
-                        sftp_info["known_host_entry"] = getattr(sftpssh_opts, 'known_host_entry', None)
+                        sftp_info["known_host_entry"] = getattr(sftpssh_opts, 'known_host_entry', None) or getattr(sftpssh_opts, 'knownHostEntry', None)
                         sftp_info["ssh_key_path"] = getattr(sftpssh_opts, 'sshkeypath', None)
+                        sftp_info["dh_key_max_1024"] = getattr(sftpssh_opts, 'dh_key_size_max1024', None) or getattr(sftpssh_opts, 'dhKeySizeMax1024', None)
                     # Extract SFTP proxy settings
                     proxy_settings = getattr(settings, 'sftp_proxy_settings', None)
                     if proxy_settings:
+                        sftp_info["proxy_enabled"] = getattr(proxy_settings, 'proxy_enabled', None) or getattr(proxy_settings, 'proxyEnabled', None)
                         sftp_info["proxy_host"] = getattr(proxy_settings, 'host', None)
                         sftp_info["proxy_port"] = getattr(proxy_settings, 'port', None)
-                        sftp_info["proxy_type"] = getattr(proxy_settings, 'type_', None)
+                        sftp_info["proxy_type"] = getattr(proxy_settings, 'type_', None) or getattr(proxy_settings, 'type', None)
+                        sftp_info["proxy_user"] = getattr(proxy_settings, 'user', None)
+                # Extract SFTP get options
                 get_opts = getattr(sftp_opts, 'sftp_get_options', None)
                 if get_opts:
-                    sftp_info["remote_directory"] = getattr(get_opts, 'remote_directory', None)
+                    sftp_info["remote_directory"] = getattr(get_opts, 'remote_directory', None) or getattr(get_opts, 'remoteDirectory', None)
+                    sftp_info["get_action"] = getattr(get_opts, 'ftp_action', None) or getattr(get_opts, 'ftpAction', None)
+                    sftp_info["max_file_count"] = getattr(get_opts, 'max_file_count', None) or getattr(get_opts, 'maxFileCount', None)
+                    sftp_info["file_to_move"] = getattr(get_opts, 'file_to_move', None) or getattr(get_opts, 'fileToMove', None)
+                    sftp_info["move_to_directory"] = getattr(get_opts, 'move_to_directory', None) or getattr(get_opts, 'moveToDirectory', None)
+                    sftp_info["move_force_override"] = getattr(get_opts, 'move_to_force_override', None) or getattr(get_opts, 'moveToForceOverride', None)
+                # Extract SFTP send options
+                send_opts = getattr(sftp_opts, 'sftp_send_options', None)
+                if send_opts:
+                    sftp_info["send_remote_directory"] = getattr(send_opts, 'remote_directory', None) or getattr(send_opts, 'remoteDirectory', None)
+                    sftp_info["send_action"] = getattr(send_opts, 'ftp_action', None) or getattr(send_opts, 'ftpAction', None)
+                    sftp_info["send_move_to_directory"] = getattr(send_opts, 'move_to_directory', None) or getattr(send_opts, 'moveToDirectory', None)
                 # Filter out None values
                 sftp_info = {k: v for k, v in sftp_info.items() if v is not None}
                 communication_protocols.append(sftp_info)
@@ -311,25 +349,46 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 settings = getattr(http_opts, 'http_settings', None)
                 if settings:
                     http_info["url"] = getattr(settings, 'url', None)
-                    http_info["authentication_type"] = getattr(settings, 'authentication_type', None)
-                    http_info["connect_timeout"] = getattr(settings, 'connect_timeout', None)
-                    http_info["read_timeout"] = getattr(settings, 'read_timeout', None)
+                    http_info["authentication_type"] = getattr(settings, 'authentication_type', None) or getattr(settings, 'authenticationType', None)
+                    http_info["connect_timeout"] = getattr(settings, 'connect_timeout', None) or getattr(settings, 'connectTimeout', None)
+                    http_info["read_timeout"] = getattr(settings, 'read_timeout', None) or getattr(settings, 'readTimeout', None)
+                    http_info["cookie_scope"] = getattr(settings, 'cookie_scope', None) or getattr(settings, 'cookieScope', None)
                     # Extract HTTP auth settings
-                    http_auth = getattr(settings, 'http_auth_settings', None)
+                    http_auth = getattr(settings, 'http_auth_settings', None) or getattr(settings, 'HTTPAuthSettings', None)
                     if http_auth:
                         http_info["username"] = getattr(http_auth, 'user', None)
+                    # Extract HTTP OAuth2 settings
+                    oauth2_settings = getattr(settings, 'http_oauth2_settings', None) or getattr(settings, 'HTTPOAuth2Settings', None)
+                    if oauth2_settings:
+                        http_info["oauth_scope"] = getattr(oauth2_settings, 'scope', None)
+                        http_info["oauth_grant_type"] = getattr(oauth2_settings, 'grant_type', None) or getattr(oauth2_settings, 'grantType', None)
+                        # Extract token endpoint
+                        token_endpoint = getattr(oauth2_settings, 'access_token_endpoint', None) or getattr(oauth2_settings, 'accessTokenEndpoint', None)
+                        if token_endpoint:
+                            http_info["oauth_token_url"] = getattr(token_endpoint, 'url', None)
+                        # Extract credentials
+                        credentials = getattr(oauth2_settings, 'credentials', None)
+                        if credentials:
+                            http_info["oauth_client_id"] = getattr(credentials, 'client_id', None) or getattr(credentials, 'clientId', None)
                     # Extract HTTP SSL options
-                    httpssl_opts = getattr(settings, 'httpssl_options', None)
+                    httpssl_opts = getattr(settings, 'httpssl_options', None) or getattr(settings, 'HTTPSSLOptions', None)
                     if httpssl_opts:
                         http_info["client_auth"] = getattr(httpssl_opts, 'clientauth', None)
-                        http_info["trust_server_cert"] = getattr(httpssl_opts, 'trust_server_cert', None)
+                        http_info["trust_server_cert"] = getattr(httpssl_opts, 'trust_server_cert', None) or getattr(httpssl_opts, 'trustServerCert', None)
+                        http_info["client_ssl_alias"] = getattr(httpssl_opts, 'clientsslalias', None)
+                        http_info["trusted_cert_alias"] = getattr(httpssl_opts, 'trustedcertalias', None)
                 # Extract HTTP send options
-                send_opts = getattr(http_opts, 'http_send_options', None)
+                send_opts = getattr(http_opts, 'http_send_options', None) or getattr(http_opts, 'HTTPSendOptions', None)
                 if send_opts:
-                    http_info["method_type"] = getattr(send_opts, 'method_type', None)
-                    http_info["data_content_type"] = getattr(send_opts, 'data_content_type', None)
-                    http_info["follow_redirects"] = getattr(send_opts, 'follow_redirects', None)
-                    http_info["return_errors"] = getattr(send_opts, 'return_errors', None)
+                    http_info["method_type"] = getattr(send_opts, 'method_type', None) or getattr(send_opts, 'methodType', None)
+                    http_info["data_content_type"] = getattr(send_opts, 'data_content_type', None) or getattr(send_opts, 'dataContentType', None)
+                    http_info["follow_redirects"] = getattr(send_opts, 'follow_redirects', None) or getattr(send_opts, 'followRedirects', None)
+                    http_info["return_errors"] = getattr(send_opts, 'return_errors', None) or getattr(send_opts, 'returnErrors', None)
+                    http_info["return_responses"] = getattr(send_opts, 'return_responses', None) or getattr(send_opts, 'returnResponses', None)
+                    http_info["request_profile"] = getattr(send_opts, 'request_profile', None) or getattr(send_opts, 'requestProfile', None)
+                    http_info["request_profile_type"] = getattr(send_opts, 'request_profile_type', None) or getattr(send_opts, 'requestProfileType', None)
+                    http_info["response_profile"] = getattr(send_opts, 'response_profile', None) or getattr(send_opts, 'responseProfile', None)
+                    http_info["response_profile_type"] = getattr(send_opts, 'response_profile_type', None) or getattr(send_opts, 'responseProfileType', None)
                 # Filter out None values
                 http_info = {k: v for k, v in http_info.items() if v is not None}
                 communication_protocols.append(http_info)
@@ -343,36 +402,65 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 settings = getattr(as2_opts, 'as2_send_settings', None)
                 if settings:
                     as2_info["url"] = getattr(settings, 'url', None)
-                    as2_info["authentication_type"] = getattr(settings, 'authentication_type', None)
-                    as2_info["verify_hostname"] = getattr(settings, 'verify_hostname', None)
+                    as2_info["authentication_type"] = getattr(settings, 'authentication_type', None) or getattr(settings, 'authenticationType', None)
+                    as2_info["verify_hostname"] = getattr(settings, 'verify_hostname', None) or getattr(settings, 'verifyHostname', None)
                     # Extract basic auth info
-                    auth_settings = getattr(settings, 'auth_settings', None)
+                    auth_settings = getattr(settings, 'auth_settings', None) or getattr(settings, 'AuthSettings', None)
                     if auth_settings:
-                        as2_info["username"] = getattr(auth_settings, 'username', None)
+                        as2_info["username"] = getattr(auth_settings, 'username', None) or getattr(auth_settings, 'user', None)
+                    # Extract SSL settings
+                    ssl_settings = getattr(settings, 'as2ssl_options', None) or getattr(settings, 'AS2SSLOptions', None)
+                    if ssl_settings:
+                        as2_info["client_ssl_alias"] = getattr(ssl_settings, 'clientsslalias', None) or getattr(ssl_settings, 'clientSSLAlias', None)
 
                 # Extract AS2SendOptions
-                send_options = getattr(as2_opts, 'as2_send_options', None)
+                send_options = getattr(as2_opts, 'as2_send_options', None) or getattr(as2_opts, 'AS2SendOptions', None)
                 if send_options:
                     # Partner info (as2_id)
-                    partner_info = getattr(send_options, 'as2_partner_info', None)
+                    partner_info = getattr(send_options, 'as2_partner_info', None) or getattr(send_options, 'AS2PartnerInfo', None)
                     if partner_info:
-                        as2_info["as2_partner_id"] = getattr(partner_info, 'as2_id', None)
+                        as2_info["as2_partner_id"] = getattr(partner_info, 'as2_id', None) or getattr(partner_info, 'as2Id', None)
+                        as2_info["reject_duplicates"] = getattr(partner_info, 'reject_duplicates', None) or getattr(partner_info, 'rejectDuplicates', None)
+                        as2_info["duplicate_check_count"] = getattr(partner_info, 'duplicate_check_count', None) or getattr(partner_info, 'duplicateCheckCount', None)
+                        as2_info["legacy_smime"] = getattr(partner_info, 'legacy_smime', None) or getattr(partner_info, 'legacySMIME', None)
 
                     # Message options
-                    msg_opts = getattr(send_options, 'as2_message_options', None)
+                    msg_opts = getattr(send_options, 'as2_message_options', None) or getattr(send_options, 'AS2MessageOptions', None)
                     if msg_opts:
                         as2_info["signed"] = getattr(msg_opts, 'signed', None)
                         as2_info["encrypted"] = getattr(msg_opts, 'encrypted', None)
                         as2_info["compressed"] = getattr(msg_opts, 'compressed', None)
-                        as2_info["encryption_algorithm"] = getattr(msg_opts, 'encryption_algorithm', None)
-                        as2_info["signing_digest_alg"] = getattr(msg_opts, 'signing_digest_alg', None)
+                        as2_info["encryption_algorithm"] = getattr(msg_opts, 'encryption_algorithm', None) or getattr(msg_opts, 'encryptionAlgorithm', None)
+                        as2_info["signing_digest_alg"] = getattr(msg_opts, 'signing_digest_alg', None) or getattr(msg_opts, 'signingDigestAlg', None)
+                        as2_info["data_content_type"] = getattr(msg_opts, 'data_content_type', None) or getattr(msg_opts, 'dataContentType', None)
+                        as2_info["subject"] = getattr(msg_opts, 'subject', None)
+                        as2_info["multiple_attachments"] = getattr(msg_opts, 'multiple_attachments', None) or getattr(msg_opts, 'multipleAttachments', None)
+                        as2_info["max_document_count"] = getattr(msg_opts, 'max_document_count', None) or getattr(msg_opts, 'maxDocumentCount', None)
+                        as2_info["attachment_option"] = getattr(msg_opts, 'attachment_option', None) or getattr(msg_opts, 'attachmentOption', None)
+                        as2_info["attachment_cache"] = getattr(msg_opts, 'attachment_cache', None) or getattr(msg_opts, 'attachmentCache', None)
+                        # Certificate aliases
+                        encrypt_cert = getattr(msg_opts, 'encrypt_cert', None) or getattr(msg_opts, 'encryptCert', None)
+                        if encrypt_cert:
+                            as2_info["encrypt_alias"] = getattr(encrypt_cert, 'alias', None)
+                        sign_cert = getattr(msg_opts, 'sign_cert', None) or getattr(msg_opts, 'signCert', None)
+                        if sign_cert:
+                            as2_info["sign_alias"] = getattr(sign_cert, 'alias', None)
 
                     # MDN options
-                    mdn_opts = getattr(send_options, 'as2_mdn_options', None)
+                    mdn_opts = getattr(send_options, 'as2_mdn_options', None) or getattr(send_options, 'AS2MDNOptions', None)
                     if mdn_opts:
-                        as2_info["request_mdn"] = getattr(mdn_opts, 'request_mdn', None)
+                        as2_info["request_mdn"] = getattr(mdn_opts, 'request_mdn', None) or getattr(mdn_opts, 'requestMDN', None)
                         as2_info["mdn_signed"] = getattr(mdn_opts, 'signed', None)
+                        as2_info["mdn_digest_alg"] = getattr(mdn_opts, 'mdn_digest_alg', None) or getattr(mdn_opts, 'mdnDigestAlg', None)
                         as2_info["synchronous_mdn"] = getattr(mdn_opts, 'synchronous', None)
+                        as2_info["fail_on_negative_mdn"] = getattr(mdn_opts, 'fail_on_negative_mdn', None) or getattr(mdn_opts, 'failOnNegativeMDN', None)
+                        as2_info["mdn_external_url"] = getattr(mdn_opts, 'external_url', None) or getattr(mdn_opts, 'externalURL', None)
+                        as2_info["mdn_use_external_url"] = getattr(mdn_opts, 'use_external_url', None) or getattr(mdn_opts, 'useExternalURL', None)
+                        as2_info["mdn_use_ssl"] = getattr(mdn_opts, 'use_ssl', None) or getattr(mdn_opts, 'useSSL', None)
+                        # MDN certificate aliases
+                        mdn_cert = getattr(mdn_opts, 'mdn_cert', None) or getattr(mdn_opts, 'mdnCert', None)
+                        if mdn_cert:
+                            as2_info["mdn_alias"] = getattr(mdn_cert, 'alias', None)
 
                 # Filter out None values
                 as2_info = {k: v for k, v in as2_info.items() if v is not None}
@@ -382,23 +470,24 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
             if getattr(comm, 'mllp_communication_options', None):
                 mllp_opts = comm.mllp_communication_options
                 mllp_info = {"protocol": "mllp"}
-                settings = getattr(mllp_opts, 'mllp_send_settings', None)
+                settings = getattr(mllp_opts, 'mllp_send_settings', None) or getattr(mllp_opts, 'MLLPSendSettings', None)
                 if settings:
                     mllp_info["host"] = getattr(settings, 'host', None)
                     mllp_info["port"] = getattr(settings, 'port', None)
                     mllp_info["persistent"] = getattr(settings, 'persistent', None)
-                    mllp_info["receive_timeout"] = getattr(settings, 'receive_timeout', None)
-                    mllp_info["send_timeout"] = getattr(settings, 'send_timeout', None)
-                    mllp_info["max_connections"] = getattr(settings, 'max_connections', None)
-                    mllp_info["inactivity_timeout"] = getattr(settings, 'inactivity_timeout', None)
-                    mllp_info["max_retry"] = getattr(settings, 'max_retry', None)
+                    mllp_info["receive_timeout"] = getattr(settings, 'receive_timeout', None) or getattr(settings, 'receiveTimeout', None)
+                    mllp_info["send_timeout"] = getattr(settings, 'send_timeout', None) or getattr(settings, 'sendTimeout', None)
+                    mllp_info["max_connections"] = getattr(settings, 'max_connections', None) or getattr(settings, 'maxConnections', None)
+                    mllp_info["inactivity_timeout"] = getattr(settings, 'inactivity_timeout', None) or getattr(settings, 'inactivityTimeout', None)
+                    mllp_info["max_retry"] = getattr(settings, 'max_retry', None) or getattr(settings, 'maxRetry', None)
+                    mllp_info["halt_timeout"] = getattr(settings, 'halt_timeout', None) or getattr(settings, 'haltTimeout', None)
                     # Extract MLLP SSL options
-                    mllpssl_opts = getattr(settings, 'mllpssl_options', None)
+                    mllpssl_opts = getattr(settings, 'mllpssl_options', None) or getattr(settings, 'MLLPSSLOptions', None)
                     if mllpssl_opts:
-                        mllp_info["use_ssl"] = getattr(mllpssl_opts, 'use_ssl', None)
-                        mllp_info["use_client_ssl"] = getattr(mllpssl_opts, 'use_client_ssl', None)
-                        mllp_info["client_ssl_alias"] = getattr(mllpssl_opts, 'client_ssl_alias', None)
-                        mllp_info["ssl_alias"] = getattr(mllpssl_opts, 'ssl_alias', None)
+                        mllp_info["use_ssl"] = getattr(mllpssl_opts, 'use_ssl', None) or getattr(mllpssl_opts, 'useSSL', None)
+                        mllp_info["use_client_ssl"] = getattr(mllpssl_opts, 'use_client_ssl', None) or getattr(mllpssl_opts, 'useClientSSL', None)
+                        mllp_info["client_ssl_alias"] = getattr(mllpssl_opts, 'client_ssl_alias', None) or getattr(mllpssl_opts, 'clientSSLAlias', None)
+                        mllp_info["ssl_alias"] = getattr(mllpssl_opts, 'ssl_alias', None) or getattr(mllpssl_opts, 'sslAlias', None)
                 # Filter out None values
                 mllp_info = {k: v for k, v in mllp_info.items() if v is not None}
                 communication_protocols.append(mllp_info)
@@ -407,24 +496,26 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
             if getattr(comm, 'oftp_communication_options', None):
                 oftp_opts = comm.oftp_communication_options
                 oftp_info = {"protocol": "oftp"}
-                conn_settings = getattr(oftp_opts, 'oftp_connection_settings', None)
+                conn_settings = getattr(oftp_opts, 'oftp_connection_settings', None) or getattr(oftp_opts, 'OFTPConnectionSettings', None)
                 if conn_settings:
                     # Check both direct attrs and default_oftp_connection_settings
-                    default_settings = getattr(conn_settings, 'default_oftp_connection_settings', None)
+                    default_settings = getattr(conn_settings, 'default_oftp_connection_settings', None) or getattr(conn_settings, 'defaultOFTPConnectionSettings', None)
                     # Try direct attributes first, fall back to default settings
                     oftp_info["host"] = getattr(conn_settings, 'host', None) or (getattr(default_settings, 'host', None) if default_settings else None)
                     oftp_info["port"] = getattr(conn_settings, 'port', None) or (getattr(default_settings, 'port', None) if default_settings else None)
                     oftp_info["tls"] = getattr(conn_settings, 'tls', None) if hasattr(conn_settings, 'tls') else (getattr(default_settings, 'tls', None) if default_settings else None)
                     oftp_info["ssid_auth"] = getattr(conn_settings, 'ssidauth', None) if hasattr(conn_settings, 'ssidauth') else (getattr(default_settings, 'ssidauth', None) if default_settings else None)
                     oftp_info["sfid_cipher"] = getattr(conn_settings, 'sfidciph', None) if hasattr(conn_settings, 'sfidciph') else (getattr(default_settings, 'sfidciph', None) if default_settings else None)
-                    oftp_info["use_gateway"] = getattr(conn_settings, 'use_gateway', None) if hasattr(conn_settings, 'use_gateway') else (getattr(default_settings, 'use_gateway', None) if default_settings else None)
-                    oftp_info["use_client_ssl"] = getattr(conn_settings, 'use_client_ssl', None) if hasattr(conn_settings, 'use_client_ssl') else (getattr(default_settings, 'use_client_ssl', None) if default_settings else None)
-                    oftp_info["client_ssl_alias"] = getattr(conn_settings, 'client_ssl_alias', None) or (getattr(default_settings, 'client_ssl_alias', None) if default_settings else None)
+                    oftp_info["use_gateway"] = getattr(conn_settings, 'use_gateway', None) or getattr(conn_settings, 'useGateway', None) if hasattr(conn_settings, 'use_gateway') or hasattr(conn_settings, 'useGateway') else (getattr(default_settings, 'use_gateway', None) or getattr(default_settings, 'useGateway', None) if default_settings else None)
+                    oftp_info["use_client_ssl"] = getattr(conn_settings, 'use_client_ssl', None) or getattr(conn_settings, 'useClientSSL', None) if hasattr(conn_settings, 'use_client_ssl') or hasattr(conn_settings, 'useClientSSL') else (getattr(default_settings, 'use_client_ssl', None) or getattr(default_settings, 'useClientSSL', None) if default_settings else None)
+                    oftp_info["client_ssl_alias"] = getattr(conn_settings, 'client_ssl_alias', None) or getattr(conn_settings, 'clientSSLAlias', None) or (getattr(default_settings, 'client_ssl_alias', None) or getattr(default_settings, 'clientSSLAlias', None) if default_settings else None)
                     # Extract partner info from both locations
-                    partner_info = getattr(conn_settings, 'my_partner_info', None) or (getattr(default_settings, 'my_partner_info', None) if default_settings else None)
+                    partner_info = getattr(conn_settings, 'my_partner_info', None) or getattr(conn_settings, 'myPartnerInfo', None) or (getattr(default_settings, 'my_partner_info', None) or getattr(default_settings, 'myPartnerInfo', None) if default_settings else None)
                     if partner_info:
                         oftp_info["ssid_code"] = getattr(partner_info, 'ssidcode', None)
                         oftp_info["compress"] = getattr(partner_info, 'ssidcmpr', None)
+                        oftp_info["sfid_sign"] = getattr(partner_info, 'sfidsign', None)
+                        oftp_info["sfid_encrypt"] = getattr(partner_info, 'sfidsec_encrypt', None) or getattr(partner_info, 'sfidsec-encrypt', None)
                 # Filter out None values
                 oftp_info = {k: v for k, v in oftp_info.items() if v is not None}
                 communication_protocols.append(oftp_info)
