@@ -860,29 +860,145 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                 disk_params = {k: v for k, v in updates.items() if k.startswith('disk_')}
 
                 if as2_params:
-                    # For updates, merge with existing AS2 values if as2_url not provided
-                    if 'as2_url' not in as2_params:
-                        # Try to get existing AS2 URL from the trading partner
-                        existing_comm = getattr(existing_tp, 'partner_communication', None)
-                        if existing_comm:
-                            existing_as2 = getattr(existing_comm, 'as2_communication_options', None)
-                            if existing_as2:
-                                existing_send_settings = getattr(existing_as2, 'as2_send_settings', None)
-                                if existing_send_settings:
+                    # For updates, merge with existing AS2 values for partial updates
+                    existing_comm = getattr(existing_tp, 'partner_communication', None)
+                    if existing_comm:
+                        existing_as2 = getattr(existing_comm, 'as2_communication_options', None)
+                        if existing_as2:
+                            # Preserve AS2 Send Settings (connection)
+                            existing_send_settings = getattr(existing_as2, 'as2_send_settings', None)
+                            if existing_send_settings:
+                                if 'as2_url' not in as2_params:
                                     existing_url = getattr(existing_send_settings, 'url', None)
                                     if existing_url:
                                         as2_params['as2_url'] = existing_url
+                                if 'as2_authentication_type' not in as2_params:
                                     existing_auth = getattr(existing_send_settings, 'authentication_type', None)
-                                    if existing_auth and 'as2_authentication_type' not in as2_params:
+                                    if existing_auth:
                                         as2_params['as2_authentication_type'] = existing_auth
-                                # Also get existing partner ID if not provided
-                                existing_send_opts = getattr(existing_as2, 'as2_send_options', None)
-                                if existing_send_opts:
-                                    existing_partner_info = getattr(existing_send_opts, 'as2_partner_info', None)
-                                    if existing_partner_info and 'as2_partner_identifier' not in as2_params:
-                                        existing_partner_id = getattr(existing_partner_info, 'as2_id', None)
+                                if 'as2_username' not in as2_params:
+                                    existing_user = getattr(existing_send_settings, 'user', None)
+                                    if existing_user:
+                                        as2_params['as2_username'] = existing_user
+                                if 'as2_password' not in as2_params:
+                                    existing_pass = getattr(existing_send_settings, 'password', None)
+                                    if existing_pass:
+                                        as2_params['as2_password'] = existing_pass
+                                if 'as2_verify_hostname' not in as2_params:
+                                    existing_verify = getattr(existing_send_settings, 'verify_hostname', None) or getattr(existing_send_settings, 'verifyHostname', None)
+                                    if existing_verify is not None:
+                                        as2_params['as2_verify_hostname'] = str(existing_verify).lower()
+                                if 'as2_client_ssl_alias' not in as2_params:
+                                    client_ssl = getattr(existing_send_settings, 'client_ssl_certificate', None)
+                                    if client_ssl:
+                                        existing_alias = getattr(client_ssl, 'alias', None)
+                                        if existing_alias:
+                                            as2_params['as2_client_ssl_alias'] = existing_alias
+
+                            # Preserve AS2 Send Options (message settings)
+                            existing_send_opts = getattr(existing_as2, 'as2_send_options', None)
+                            if existing_send_opts:
+                                # Partner info
+                                existing_partner_info = getattr(existing_send_opts, 'as2_partner_info', None)
+                                if existing_partner_info:
+                                    if 'as2_partner_identifier' not in as2_params:
+                                        existing_partner_id = getattr(existing_partner_info, 'as2_id', None) or getattr(existing_partner_info, 'as2Id', None)
                                         if existing_partner_id:
                                             as2_params['as2_partner_identifier'] = existing_partner_id
+                                # Signing and encryption certificates
+                                if 'as2_encrypt_alias' not in as2_params:
+                                    encrypt_cert = getattr(existing_send_opts, 'encrypt_certificate', None) or getattr(existing_send_opts, 'encryptCertificate', None)
+                                    if encrypt_cert:
+                                        existing_alias = getattr(encrypt_cert, 'alias', None)
+                                        if existing_alias:
+                                            as2_params['as2_encrypt_alias'] = existing_alias
+                                if 'as2_sign_alias' not in as2_params:
+                                    sign_cert = getattr(existing_send_opts, 'sign_certificate', None) or getattr(existing_send_opts, 'signCertificate', None)
+                                    if sign_cert:
+                                        existing_alias = getattr(sign_cert, 'alias', None)
+                                        if existing_alias:
+                                            as2_params['as2_sign_alias'] = existing_alias
+                                # Message options
+                                if 'as2_signed' not in as2_params:
+                                    existing_signed = getattr(existing_send_opts, 'signed', None)
+                                    if existing_signed is not None:
+                                        as2_params['as2_signed'] = str(existing_signed).lower()
+                                if 'as2_encrypted' not in as2_params:
+                                    existing_encrypted = getattr(existing_send_opts, 'encrypted', None)
+                                    if existing_encrypted is not None:
+                                        as2_params['as2_encrypted'] = str(existing_encrypted).lower()
+                                if 'as2_compressed' not in as2_params:
+                                    existing_compressed = getattr(existing_send_opts, 'compressed', None)
+                                    if existing_compressed is not None:
+                                        as2_params['as2_compressed'] = str(existing_compressed).lower()
+                                if 'as2_encryption_algorithm' not in as2_params:
+                                    existing_algo = getattr(existing_send_opts, 'encryption_algorithm', None) or getattr(existing_send_opts, 'encryptionAlgorithm', None)
+                                    if existing_algo:
+                                        as2_params['as2_encryption_algorithm'] = existing_algo
+                                if 'as2_signing_digest_alg' not in as2_params:
+                                    existing_digest = getattr(existing_send_opts, 'signing_digest_algorithm', None) or getattr(existing_send_opts, 'signingDigestAlgorithm', None)
+                                    if existing_digest:
+                                        as2_params['as2_signing_digest_alg'] = existing_digest
+                                if 'as2_data_content_type' not in as2_params:
+                                    existing_content = getattr(existing_send_opts, 'data_content_type', None) or getattr(existing_send_opts, 'dataContentType', None)
+                                    if existing_content:
+                                        as2_params['as2_data_content_type'] = existing_content
+                                if 'as2_subject' not in as2_params:
+                                    existing_subject = getattr(existing_send_opts, 'subject', None)
+                                    if existing_subject:
+                                        as2_params['as2_subject'] = existing_subject
+                                # MDN options
+                                if 'as2_request_mdn' not in as2_params:
+                                    existing_req_mdn = getattr(existing_send_opts, 'request_mdn', None) or getattr(existing_send_opts, 'requestMdn', None)
+                                    if existing_req_mdn is not None:
+                                        as2_params['as2_request_mdn'] = str(existing_req_mdn).lower()
+                                if 'as2_mdn_signed' not in as2_params:
+                                    existing_mdn_signed = getattr(existing_send_opts, 'mdn_signed', None) or getattr(existing_send_opts, 'mdnSigned', None)
+                                    if existing_mdn_signed is not None:
+                                        as2_params['as2_mdn_signed'] = str(existing_mdn_signed).lower()
+                                if 'as2_mdn_digest_alg' not in as2_params:
+                                    existing_mdn_digest = getattr(existing_send_opts, 'mdn_digest_algorithm', None) or getattr(existing_send_opts, 'mdnDigestAlgorithm', None)
+                                    if existing_mdn_digest:
+                                        as2_params['as2_mdn_digest_alg'] = existing_mdn_digest
+                                if 'as2_synchronous_mdn' not in as2_params:
+                                    existing_sync_mdn = getattr(existing_send_opts, 'synchronous_mdn', None) or getattr(existing_send_opts, 'synchronousMdn', None)
+                                    if existing_sync_mdn is not None:
+                                        as2_params['as2_synchronous_mdn'] = str(existing_sync_mdn).lower()
+                                if 'as2_fail_on_negative_mdn' not in as2_params:
+                                    existing_fail_mdn = getattr(existing_send_opts, 'fail_on_negative_mdn', None) or getattr(existing_send_opts, 'failOnNegativeMdn', None)
+                                    if existing_fail_mdn is not None:
+                                        as2_params['as2_fail_on_negative_mdn'] = str(existing_fail_mdn).lower()
+                                # Attachments
+                                if 'as2_multiple_attachments' not in as2_params:
+                                    existing_multi = getattr(existing_send_opts, 'multiple_attachments', None) or getattr(existing_send_opts, 'multipleAttachments', None)
+                                    if existing_multi is not None:
+                                        as2_params['as2_multiple_attachments'] = str(existing_multi).lower()
+                                if 'as2_max_document_count' not in as2_params:
+                                    existing_max = getattr(existing_send_opts, 'max_document_count', None) or getattr(existing_send_opts, 'maxDocumentCount', None)
+                                    if existing_max:
+                                        as2_params['as2_max_document_count'] = existing_max
+                                if 'as2_legacy_smime' not in as2_params:
+                                    existing_legacy = getattr(existing_send_opts, 'legacy_smime', None) or getattr(existing_send_opts, 'legacySMIME', None)
+                                    if existing_legacy is not None:
+                                        as2_params['as2_legacy_smime'] = str(existing_legacy).lower()
+
+                            # Preserve AS2 Receive Options (MDN delivery)
+                            existing_recv_opts = getattr(existing_as2, 'as2_receive_options', None)
+                            if existing_recv_opts:
+                                if 'as2_mdn_alias' not in as2_params:
+                                    mdn_cert = getattr(existing_recv_opts, 'mdn_certificate', None) or getattr(existing_recv_opts, 'mdnCertificate', None)
+                                    if mdn_cert:
+                                        existing_alias = getattr(mdn_cert, 'alias', None)
+                                        if existing_alias:
+                                            as2_params['as2_mdn_alias'] = existing_alias
+                                if 'as2_reject_duplicates' not in as2_params:
+                                    existing_reject = getattr(existing_recv_opts, 'reject_duplicates', None) or getattr(existing_recv_opts, 'rejectDuplicates', None)
+                                    if existing_reject is not None:
+                                        as2_params['as2_reject_duplicates'] = str(existing_reject).lower()
+                                if 'as2_duplicate_check_count' not in as2_params:
+                                    existing_check = getattr(existing_recv_opts, 'duplicate_check_count', None) or getattr(existing_recv_opts, 'duplicateCheckCount', None)
+                                    if existing_check:
+                                        as2_params['as2_duplicate_check_count'] = existing_check
 
                     as2_opts = build_as2_communication_options(**as2_params)
                     if as2_opts:
@@ -890,44 +1006,236 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
 
                 if http_params:
                     # Merge with existing HTTP values for partial updates
-                    if 'http_url' not in http_params:
-                        existing_comm = getattr(existing_tp, 'partner_communication', None)
-                        if existing_comm:
-                            existing_http = getattr(existing_comm, 'http_communication_options', None)
-                            if existing_http:
-                                existing_settings = getattr(existing_http, 'http_settings', None)
-                                if existing_settings:
+                    existing_comm = getattr(existing_tp, 'partner_communication', None)
+                    if existing_comm:
+                        existing_http = getattr(existing_comm, 'http_communication_options', None)
+                        if existing_http:
+                            existing_settings = getattr(existing_http, 'http_settings', None)
+                            if existing_settings:
+                                # Basic connection settings
+                                if 'http_url' not in http_params:
                                     existing_url = getattr(existing_settings, 'url', None)
                                     if existing_url:
                                         http_params['http_url'] = existing_url
-                                    if 'http_authentication_type' not in http_params:
-                                        existing_auth = getattr(existing_settings, 'authentication_type', None)
-                                        if existing_auth:
-                                            http_params['http_authentication_type'] = existing_auth
+                                if 'http_authentication_type' not in http_params:
+                                    existing_auth = getattr(existing_settings, 'authentication_type', None)
+                                    if existing_auth:
+                                        http_params['http_authentication_type'] = existing_auth
+                                if 'http_username' not in http_params:
+                                    existing_user = getattr(existing_settings, 'user', None)
+                                    if existing_user:
+                                        http_params['http_username'] = existing_user
+                                if 'http_password' not in http_params:
+                                    existing_pass = getattr(existing_settings, 'password', None)
+                                    if existing_pass:
+                                        http_params['http_password'] = existing_pass
+                                # Timeout settings
+                                if 'http_connect_timeout' not in http_params:
+                                    existing_timeout = getattr(existing_settings, 'connect_timeout', None) or getattr(existing_settings, 'connectTimeout', None)
+                                    if existing_timeout:
+                                        http_params['http_connect_timeout'] = str(existing_timeout)
+                                if 'http_read_timeout' not in http_params:
+                                    existing_timeout = getattr(existing_settings, 'read_timeout', None) or getattr(existing_settings, 'readTimeout', None)
+                                    if existing_timeout:
+                                        http_params['http_read_timeout'] = str(existing_timeout)
+                                # Method and content settings
+                                if 'http_method_type' not in http_params:
+                                    existing_method = getattr(existing_settings, 'method_type', None) or getattr(existing_settings, 'methodType', None)
+                                    if existing_method:
+                                        http_params['http_method_type'] = existing_method
+                                if 'http_data_content_type' not in http_params:
+                                    existing_content = getattr(existing_settings, 'data_content_type', None) or getattr(existing_settings, 'dataContentType', None)
+                                    if existing_content:
+                                        http_params['http_data_content_type'] = existing_content
+                                # SSL settings
+                                if 'http_client_auth' not in http_params:
+                                    existing_client_auth = getattr(existing_settings, 'use_client_authentication', None)
+                                    if existing_client_auth is not None:
+                                        http_params['http_client_auth'] = str(existing_client_auth).lower()
+                                if 'http_trust_server_cert' not in http_params:
+                                    existing_trust = getattr(existing_settings, 'trust_ssl_server_certificate', None)
+                                    if existing_trust is not None:
+                                        http_params['http_trust_server_cert'] = str(existing_trust).lower()
+                                if 'http_client_ssl_alias' not in http_params:
+                                    client_ssl = getattr(existing_settings, 'client_ssl_certificate', None)
+                                    if client_ssl:
+                                        existing_alias = getattr(client_ssl, 'alias', None)
+                                        if existing_alias:
+                                            http_params['http_client_ssl_alias'] = existing_alias
+                                if 'http_trusted_cert_alias' not in http_params:
+                                    trusted_ssl = getattr(existing_settings, 'trusted_ssl_certificate', None)
+                                    if trusted_ssl:
+                                        existing_alias = getattr(trusted_ssl, 'alias', None)
+                                        if existing_alias:
+                                            http_params['http_trusted_cert_alias'] = existing_alias
+                                # Behavior settings
+                                if 'http_follow_redirects' not in http_params:
+                                    existing_follow = getattr(existing_settings, 'follow_redirects', None) or getattr(existing_settings, 'followRedirects', None)
+                                    if existing_follow is not None:
+                                        http_params['http_follow_redirects'] = str(existing_follow).lower()
+                                if 'http_return_errors' not in http_params:
+                                    existing_errors = getattr(existing_settings, 'return_error_response_payload', None)
+                                    if existing_errors is not None:
+                                        http_params['http_return_errors'] = str(existing_errors).lower()
+                                if 'http_return_responses' not in http_params:
+                                    existing_responses = getattr(existing_settings, 'return_response_payload', None)
+                                    if existing_responses is not None:
+                                        http_params['http_return_responses'] = str(existing_responses).lower()
+                                if 'http_cookie_scope' not in http_params:
+                                    existing_cookie = getattr(existing_settings, 'cookie_scope', None) or getattr(existing_settings, 'cookieScope', None)
+                                    if existing_cookie:
+                                        http_params['http_cookie_scope'] = existing_cookie
+                                # Request/Response profiles
+                                if 'http_request_profile_type' not in http_params:
+                                    existing_req_type = getattr(existing_settings, 'request_profile_type', None) or getattr(existing_settings, 'requestProfileType', None)
+                                    if existing_req_type:
+                                        http_params['http_request_profile_type'] = existing_req_type
+                                if 'http_request_profile' not in http_params:
+                                    req_profile = getattr(existing_settings, 'request_profile', None) or getattr(existing_settings, 'requestProfile', None)
+                                    if req_profile:
+                                        existing_id = getattr(req_profile, 'component_id', None) or getattr(req_profile, 'componentId', None)
+                                        if existing_id:
+                                            http_params['http_request_profile'] = existing_id
+                                if 'http_response_profile_type' not in http_params:
+                                    existing_resp_type = getattr(existing_settings, 'response_profile_type', None) or getattr(existing_settings, 'responseProfileType', None)
+                                    if existing_resp_type:
+                                        http_params['http_response_profile_type'] = existing_resp_type
+                                if 'http_response_profile' not in http_params:
+                                    resp_profile = getattr(existing_settings, 'response_profile', None) or getattr(existing_settings, 'responseProfile', None)
+                                    if resp_profile:
+                                        existing_id = getattr(resp_profile, 'component_id', None) or getattr(resp_profile, 'componentId', None)
+                                        if existing_id:
+                                            http_params['http_response_profile'] = existing_id
+                                # OAuth2 settings
+                                oauth = getattr(existing_settings, 'oauth2_settings', None) or getattr(existing_settings, 'oAuth2Settings', None)
+                                if oauth:
+                                    if 'http_oauth_token_url' not in http_params:
+                                        existing_token_url = getattr(oauth, 'access_token_url', None) or getattr(oauth, 'accessTokenUrl', None)
+                                        if existing_token_url:
+                                            http_params['http_oauth_token_url'] = existing_token_url
+                                    if 'http_oauth_client_id' not in http_params:
+                                        existing_client = getattr(oauth, 'client_id', None) or getattr(oauth, 'clientId', None)
+                                        if existing_client:
+                                            http_params['http_oauth_client_id'] = existing_client
+                                    if 'http_oauth_client_secret' not in http_params:
+                                        existing_secret = getattr(oauth, 'client_secret', None) or getattr(oauth, 'clientSecret', None)
+                                        if existing_secret:
+                                            http_params['http_oauth_client_secret'] = existing_secret
+                                    if 'http_oauth_scope' not in http_params:
+                                        existing_scope = getattr(oauth, 'scope', None)
+                                        if existing_scope:
+                                            http_params['http_oauth_scope'] = existing_scope
                     http_opts = build_http_communication_options(**http_params)
                     if http_opts:
                         comm_dict["HTTPCommunicationOptions"] = http_opts
 
                 if sftp_params:
                     # Merge with existing SFTP values for partial updates
-                    if 'sftp_host' not in sftp_params:
-                        existing_comm = getattr(existing_tp, 'partner_communication', None)
-                        if existing_comm:
-                            existing_sftp = getattr(existing_comm, 'sftp_communication_options', None)
-                            if existing_sftp:
-                                existing_settings = getattr(existing_sftp, 'sftp_settings', None)
-                                if existing_settings:
+                    existing_comm = getattr(existing_tp, 'partner_communication', None)
+                    if existing_comm:
+                        existing_sftp = getattr(existing_comm, 'sftp_communication_options', None)
+                        if existing_sftp:
+                            # Preserve SFTP Settings (connection parameters)
+                            existing_settings = getattr(existing_sftp, 'sftp_settings', None)
+                            if existing_settings:
+                                if 'sftp_host' not in sftp_params:
                                     existing_host = getattr(existing_settings, 'host', None)
                                     if existing_host:
                                         sftp_params['sftp_host'] = existing_host
-                                    if 'sftp_port' not in sftp_params:
-                                        existing_port = getattr(existing_settings, 'port', None)
-                                        if existing_port:
-                                            sftp_params['sftp_port'] = existing_port
-                                    if 'sftp_username' not in sftp_params:
-                                        existing_user = getattr(existing_settings, 'user', None)
-                                        if existing_user:
-                                            sftp_params['sftp_username'] = existing_user
+                                if 'sftp_port' not in sftp_params:
+                                    existing_port = getattr(existing_settings, 'port', None)
+                                    if existing_port:
+                                        sftp_params['sftp_port'] = existing_port
+                                if 'sftp_username' not in sftp_params:
+                                    existing_user = getattr(existing_settings, 'user', None)
+                                    if existing_user:
+                                        sftp_params['sftp_username'] = existing_user
+                                if 'sftp_password' not in sftp_params:
+                                    existing_pass = getattr(existing_settings, 'password', None)
+                                    if existing_pass:
+                                        sftp_params['sftp_password'] = existing_pass
+                                if 'sftp_known_host_entry' not in sftp_params:
+                                    existing_known_host = getattr(existing_settings, 'known_host_entry', None)
+                                    if existing_known_host:
+                                        sftp_params['sftp_known_host_entry'] = existing_known_host
+                                if 'sftp_dh_key_max_1024' not in sftp_params:
+                                    existing_dh = getattr(existing_settings, 'dh_key_max1024', None) or getattr(existing_settings, 'dhKeyMax1024', None)
+                                    if existing_dh is not None:
+                                        sftp_params['sftp_dh_key_max_1024'] = str(existing_dh).lower()
+                                # Preserve SSH key settings
+                                if 'sftp_ssh_key_auth' not in sftp_params:
+                                    existing_ssh_auth = getattr(existing_settings, 'use_ssh_key_authentication', None)
+                                    if existing_ssh_auth is not None:
+                                        sftp_params['sftp_ssh_key_auth'] = str(existing_ssh_auth).lower()
+                                if 'sftp_ssh_key_path' not in sftp_params:
+                                    existing_ssh_path = getattr(existing_settings, 'ssh_key_file_path', None)
+                                    if existing_ssh_path:
+                                        sftp_params['sftp_ssh_key_path'] = existing_ssh_path
+                                if 'sftp_ssh_key_password' not in sftp_params:
+                                    existing_ssh_pass = getattr(existing_settings, 'ssh_key_password', None)
+                                    if existing_ssh_pass:
+                                        sftp_params['sftp_ssh_key_password'] = existing_ssh_pass
+                                # Preserve proxy settings
+                                if 'sftp_proxy_enabled' not in sftp_params:
+                                    existing_proxy = getattr(existing_settings, 'proxy_enabled', None)
+                                    if existing_proxy is not None:
+                                        sftp_params['sftp_proxy_enabled'] = str(existing_proxy).lower()
+                                if 'sftp_proxy_type' not in sftp_params:
+                                    existing_proxy_type = getattr(existing_settings, 'proxy_type', None)
+                                    if existing_proxy_type:
+                                        sftp_params['sftp_proxy_type'] = existing_proxy_type
+                                if 'sftp_proxy_host' not in sftp_params:
+                                    existing_proxy_host = getattr(existing_settings, 'proxy_host', None)
+                                    if existing_proxy_host:
+                                        sftp_params['sftp_proxy_host'] = existing_proxy_host
+                                if 'sftp_proxy_port' not in sftp_params:
+                                    existing_proxy_port = getattr(existing_settings, 'proxy_port', None)
+                                    if existing_proxy_port:
+                                        sftp_params['sftp_proxy_port'] = str(existing_proxy_port)
+                                if 'sftp_proxy_user' not in sftp_params:
+                                    existing_proxy_user = getattr(existing_settings, 'proxy_user', None)
+                                    if existing_proxy_user:
+                                        sftp_params['sftp_proxy_user'] = existing_proxy_user
+                                if 'sftp_proxy_password' not in sftp_params:
+                                    existing_proxy_pass = getattr(existing_settings, 'proxy_password', None)
+                                    if existing_proxy_pass:
+                                        sftp_params['sftp_proxy_password'] = existing_proxy_pass
+
+                            # Preserve SFTP Get Options (download settings)
+                            existing_get_opts = getattr(existing_sftp, 'sftp_get_options', None)
+                            if existing_get_opts:
+                                if 'sftp_remote_directory' not in sftp_params:
+                                    existing_dir = getattr(existing_get_opts, 'remote_directory', None)
+                                    if existing_dir:
+                                        sftp_params['sftp_remote_directory'] = existing_dir
+                                if 'sftp_get_action' not in sftp_params:
+                                    existing_action = getattr(existing_get_opts, 'sftp_action', None) or getattr(existing_get_opts, 'sftpAction', None)
+                                    if existing_action:
+                                        sftp_params['sftp_get_action'] = existing_action
+                                if 'sftp_max_file_count' not in sftp_params:
+                                    existing_count = getattr(existing_get_opts, 'max_file_count', None) or getattr(existing_get_opts, 'maxFileCount', None)
+                                    if existing_count:
+                                        sftp_params['sftp_max_file_count'] = str(existing_count)
+                                if 'sftp_file_to_move' not in sftp_params:
+                                    existing_file = getattr(existing_get_opts, 'file_to_move', None) or getattr(existing_get_opts, 'fileToMove', None)
+                                    if existing_file:
+                                        sftp_params['sftp_file_to_move'] = existing_file
+                                if 'sftp_move_to_directory' not in sftp_params:
+                                    existing_move_dir = getattr(existing_get_opts, 'move_to_directory', None) or getattr(existing_get_opts, 'moveToDirectory', None)
+                                    if existing_move_dir:
+                                        sftp_params['sftp_move_to_directory'] = existing_move_dir
+                                if 'sftp_move_force_override' not in sftp_params:
+                                    existing_force = getattr(existing_get_opts, 'move_force_override', None) or getattr(existing_get_opts, 'moveForceOverride', None)
+                                    if existing_force is not None:
+                                        sftp_params['sftp_move_force_override'] = str(existing_force).lower()
+
+                            # Preserve SFTP Send Options (upload settings)
+                            existing_send_opts = getattr(existing_sftp, 'sftp_send_options', None)
+                            if existing_send_opts:
+                                if 'sftp_send_action' not in sftp_params:
+                                    existing_action = getattr(existing_send_opts, 'sftp_action', None) or getattr(existing_send_opts, 'sftpAction', None)
+                                    if existing_action:
+                                        sftp_params['sftp_send_action'] = existing_action
                     sftp_opts = build_sftp_communication_options(**sftp_params)
                     if sftp_opts:
                         comm_dict["SFTPCommunicationOptions"] = sftp_opts
@@ -938,6 +1246,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     if existing_comm:
                         existing_ftp = getattr(existing_comm, 'ftp_communication_options', None)
                         if existing_ftp:
+                            # Preserve FTP Settings (connection parameters)
                             existing_settings = getattr(existing_ftp, 'ftp_settings', None)
                             if existing_settings:
                                 if 'ftp_host' not in ftp_params:
@@ -960,13 +1269,57 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_mode = getattr(existing_settings, 'connection_mode', None)
                                     if existing_mode:
                                         ftp_params['ftp_connection_mode'] = existing_mode
-                                # Preserve SSL mode from existing SSL options
-                                if 'ftp_ssl_mode' not in ftp_params:
-                                    existing_ssl = getattr(existing_settings, 'ftpssl_options', None)
-                                    if existing_ssl:
+                                # Preserve SSL options
+                                existing_ssl = getattr(existing_settings, 'ftpssl_options', None)
+                                if existing_ssl:
+                                    if 'ftp_ssl_mode' not in ftp_params:
                                         existing_ssl_mode = getattr(existing_ssl, 'sslmode', None)
                                         if existing_ssl_mode:
                                             ftp_params['ftp_ssl_mode'] = existing_ssl_mode
+                                    if 'ftp_client_ssl_alias' not in ftp_params:
+                                        client_ssl_cert = getattr(existing_ssl, 'client_ssl_certificate', None) or getattr(existing_ssl, 'clientSSLCertificate', None)
+                                        if client_ssl_cert:
+                                            existing_alias = getattr(client_ssl_cert, 'alias', None)
+                                            if existing_alias:
+                                                ftp_params['ftp_client_ssl_alias'] = existing_alias
+
+                            # Preserve FTP Get Options (download settings)
+                            existing_get_opts = getattr(existing_ftp, 'ftp_get_options', None)
+                            if existing_get_opts:
+                                if 'ftp_remote_directory' not in ftp_params:
+                                    existing_dir = getattr(existing_get_opts, 'remote_directory', None)
+                                    if existing_dir:
+                                        ftp_params['ftp_remote_directory'] = existing_dir
+                                if 'ftp_transfer_type' not in ftp_params:
+                                    existing_type = getattr(existing_get_opts, 'transfer_type', None)
+                                    if existing_type:
+                                        ftp_params['ftp_transfer_type'] = existing_type
+                                if 'ftp_get_action' not in ftp_params:
+                                    existing_action = getattr(existing_get_opts, 'ftp_action', None) or getattr(existing_get_opts, 'ftpAction', None)
+                                    if existing_action:
+                                        ftp_params['ftp_get_action'] = existing_action
+                                if 'ftp_max_file_count' not in ftp_params:
+                                    existing_count = getattr(existing_get_opts, 'max_file_count', None) or getattr(existing_get_opts, 'maxFileCount', None)
+                                    if existing_count:
+                                        ftp_params['ftp_max_file_count'] = str(existing_count)
+                                if 'ftp_file_to_move' not in ftp_params:
+                                    existing_file = getattr(existing_get_opts, 'file_to_move', None) or getattr(existing_get_opts, 'fileToMove', None)
+                                    if existing_file:
+                                        ftp_params['ftp_file_to_move'] = existing_file
+                                if 'ftp_move_to_directory' not in ftp_params:
+                                    existing_move_dir = getattr(existing_get_opts, 'move_to_directory', None) or getattr(existing_get_opts, 'moveToDirectory', None)
+                                    if existing_move_dir:
+                                        ftp_params['ftp_move_to_directory'] = existing_move_dir
+
+                            # Preserve FTP Send Options (upload settings)
+                            existing_send_opts = getattr(existing_ftp, 'ftp_send_options', None)
+                            if existing_send_opts:
+                                # Note: send options use same field names in builder
+                                # Check if we're updating send-specific fields
+                                if 'ftp_send_action' not in ftp_params:
+                                    existing_action = getattr(existing_send_opts, 'ftp_action', None) or getattr(existing_send_opts, 'ftpAction', None)
+                                    if existing_action:
+                                        ftp_params['ftp_send_action'] = existing_action
                     ftp_opts = build_ftp_communication_options(**ftp_params)
                     if ftp_opts:
                         comm_dict["FTPCommunicationOptions"] = ftp_opts
@@ -977,18 +1330,45 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     if existing_comm:
                         existing_disk = getattr(existing_comm, 'disk_communication_options', None)
                         if existing_disk:
-                            if 'disk_get_directory' not in disk_params:
-                                existing_get = getattr(existing_disk, 'disk_get_options', None)
-                                if existing_get:
+                            # Preserve Disk Get Options (read settings)
+                            existing_get = getattr(existing_disk, 'disk_get_options', None)
+                            if existing_get:
+                                if 'disk_get_directory' not in disk_params:
                                     existing_dir = getattr(existing_get, 'get_directory', None)
                                     if existing_dir:
                                         disk_params['disk_get_directory'] = existing_dir
-                            if 'disk_send_directory' not in disk_params:
-                                existing_send = getattr(existing_disk, 'disk_send_options', None)
-                                if existing_send:
+                                if 'disk_file_filter' not in disk_params:
+                                    existing_filter = getattr(existing_get, 'file_filter', None) or getattr(existing_get, 'fileFilter', None)
+                                    if existing_filter:
+                                        disk_params['disk_file_filter'] = existing_filter
+                                if 'disk_filter_match_type' not in disk_params:
+                                    existing_match = getattr(existing_get, 'filter_match_type', None) or getattr(existing_get, 'filterMatchType', None)
+                                    if existing_match:
+                                        disk_params['disk_filter_match_type'] = existing_match
+                                if 'disk_delete_after_read' not in disk_params:
+                                    existing_delete = getattr(existing_get, 'delete_after_read', None) or getattr(existing_get, 'deleteAfterRead', None)
+                                    if existing_delete is not None:
+                                        disk_params['disk_delete_after_read'] = str(existing_delete).lower()
+                                if 'disk_max_file_count' not in disk_params:
+                                    existing_count = getattr(existing_get, 'max_file_count', None) or getattr(existing_get, 'maxFileCount', None)
+                                    if existing_count:
+                                        disk_params['disk_max_file_count'] = str(existing_count)
+
+                            # Preserve Disk Send Options (write settings)
+                            existing_send = getattr(existing_disk, 'disk_send_options', None)
+                            if existing_send:
+                                if 'disk_send_directory' not in disk_params:
                                     existing_dir = getattr(existing_send, 'send_directory', None)
                                     if existing_dir:
                                         disk_params['disk_send_directory'] = existing_dir
+                                if 'disk_create_directory' not in disk_params:
+                                    existing_create = getattr(existing_send, 'create_directory', None) or getattr(existing_send, 'createDirectory', None)
+                                    if existing_create is not None:
+                                        disk_params['disk_create_directory'] = str(existing_create).lower()
+                                if 'disk_write_option' not in disk_params:
+                                    existing_option = getattr(existing_send, 'write_option', None) or getattr(existing_send, 'writeOption', None)
+                                    if existing_option:
+                                        disk_params['disk_write_option'] = existing_option
                     disk_opts = build_disk_communication_options(**disk_params)
                     if disk_opts:
                         comm_dict["DiskCommunicationOptions"] = disk_opts
@@ -1003,6 +1383,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                         if existing_mllp:
                             existing_settings = getattr(existing_mllp, 'mllp_send_settings', None)
                             if existing_settings:
+                                # Basic connection settings
                                 if 'mllp_host' not in mllp_params:
                                     existing_host = getattr(existing_settings, 'host', None)
                                     if existing_host:
@@ -1014,15 +1395,54 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 if 'mllp_persistent' not in mllp_params:
                                     existing_persistent = getattr(existing_settings, 'persistent', None)
                                     if existing_persistent is not None:
-                                        mllp_params['mllp_persistent'] = existing_persistent
+                                        mllp_params['mllp_persistent'] = str(existing_persistent).lower()
+                                # Timeout settings
                                 if 'mllp_send_timeout' not in mllp_params:
-                                    existing_timeout = getattr(existing_settings, 'send_timeout', None)
+                                    existing_timeout = getattr(existing_settings, 'send_timeout', None) or getattr(existing_settings, 'sendTimeout', None)
                                     if existing_timeout:
-                                        mllp_params['mllp_send_timeout'] = existing_timeout
+                                        mllp_params['mllp_send_timeout'] = str(existing_timeout)
                                 if 'mllp_receive_timeout' not in mllp_params:
-                                    existing_timeout = getattr(existing_settings, 'receive_timeout', None)
+                                    existing_timeout = getattr(existing_settings, 'receive_timeout', None) or getattr(existing_settings, 'receiveTimeout', None)
                                     if existing_timeout:
-                                        mllp_params['mllp_receive_timeout'] = existing_timeout
+                                        mllp_params['mllp_receive_timeout'] = str(existing_timeout)
+                                if 'mllp_halt_timeout' not in mllp_params:
+                                    existing_timeout = getattr(existing_settings, 'halt_timeout', None) or getattr(existing_settings, 'haltTimeout', None)
+                                    if existing_timeout:
+                                        mllp_params['mllp_halt_timeout'] = str(existing_timeout)
+                                # Connection settings
+                                if 'mllp_max_connections' not in mllp_params:
+                                    existing_max = getattr(existing_settings, 'max_connections', None) or getattr(existing_settings, 'maxConnections', None)
+                                    if existing_max:
+                                        mllp_params['mllp_max_connections'] = str(existing_max)
+                                if 'mllp_max_retry' not in mllp_params:
+                                    existing_retry = getattr(existing_settings, 'max_retry', None) or getattr(existing_settings, 'maxRetry', None)
+                                    if existing_retry:
+                                        mllp_params['mllp_max_retry'] = existing_retry
+                                if 'mllp_inactivity_timeout' not in mllp_params:
+                                    existing_inactivity = getattr(existing_settings, 'inactivity_timeout', None) or getattr(existing_settings, 'inactivityTimeout', None)
+                                    if existing_inactivity:
+                                        mllp_params['mllp_inactivity_timeout'] = existing_inactivity
+                                # SSL settings
+                                if 'mllp_use_ssl' not in mllp_params:
+                                    existing_ssl = getattr(existing_settings, 'use_ssl', None) or getattr(existing_settings, 'useSsl', None)
+                                    if existing_ssl is not None:
+                                        mllp_params['mllp_use_ssl'] = str(existing_ssl).lower()
+                                if 'mllp_ssl_alias' not in mllp_params:
+                                    ssl_cert = getattr(existing_settings, 'ssl_certificate', None) or getattr(existing_settings, 'sslCertificate', None)
+                                    if ssl_cert:
+                                        existing_alias = getattr(ssl_cert, 'alias', None)
+                                        if existing_alias:
+                                            mllp_params['mllp_ssl_alias'] = existing_alias
+                                if 'mllp_use_client_ssl' not in mllp_params:
+                                    existing_client_ssl = getattr(existing_settings, 'use_client_ssl', None) or getattr(existing_settings, 'useClientSsl', None)
+                                    if existing_client_ssl is not None:
+                                        mllp_params['mllp_use_client_ssl'] = str(existing_client_ssl).lower()
+                                if 'mllp_client_ssl_alias' not in mllp_params:
+                                    client_ssl = getattr(existing_settings, 'client_ssl_certificate', None) or getattr(existing_settings, 'clientSslCertificate', None)
+                                    if client_ssl:
+                                        existing_alias = getattr(client_ssl, 'alias', None)
+                                        if existing_alias:
+                                            mllp_params['mllp_client_ssl_alias'] = existing_alias
                     mllp_opts = build_mllp_communication_options(**mllp_params)
                     if mllp_opts:
                         comm_dict["MLLPCommunicationOptions"] = mllp_opts
