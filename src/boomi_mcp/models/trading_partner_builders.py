@@ -776,9 +776,11 @@ def build_mllp_communication_options(**kwargs):
     if halt_timeout is not None:
         mllp_settings['haltTimeout'] = str(halt_timeout).lower() == 'true'
 
-    # Max retry must be between 1-5 per Boomi API
+    # Max retry must be between 1-5 per Boomi API (default to 1)
     if max_retry:
-        mllp_settings['maxRetry'] = int(max_retry)
+        mllp_settings['maxRetry'] = min(max(int(max_retry), 1), 5)
+    else:
+        mllp_settings['maxRetry'] = 1  # API requires 1-5, default to 1
 
     # Standard MLLP delimiters (hex 0B for start, hex 1C hex 0D for end) with @type
     mllp_settings['startBlock'] = {'@type': 'EdiDelimiter', 'delimiterValue': 'bytecharacter', 'delimiterSpecial': '0B'}

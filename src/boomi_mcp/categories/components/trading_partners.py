@@ -686,6 +686,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
 
         # Update contact information
         # Support both nested dict format and flat parameter format
+        # IMPORTANT: Merge with existing contact info to preserve unchanged fields
         contact_updates = {}
         if "contact_info" in updates:
             # Nested format
@@ -697,8 +698,30 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     contact_updates[key] = updates[key]
 
         if contact_updates:
-            # Build ContactInfo model from updates
-            contact_info = build_contact_info(**contact_updates)
+            # First, get existing contact info values to preserve unchanged fields
+            existing_contact = getattr(existing_tp, 'contact_info', None)
+            merged_contact = {}
+
+            if existing_contact:
+                # Extract existing values
+                merged_contact = {
+                    'contact_name': getattr(existing_contact, 'contact_name', None) or getattr(existing_contact, 'name', None) or '',
+                    'contact_email': getattr(existing_contact, 'email', '') or '',
+                    'contact_phone': getattr(existing_contact, 'phone', '') or '',
+                    'contact_fax': getattr(existing_contact, 'fax', '') or '',
+                    'contact_address': getattr(existing_contact, 'address1', '') or '',
+                    'contact_address2': getattr(existing_contact, 'address2', '') or '',
+                    'contact_city': getattr(existing_contact, 'city', '') or '',
+                    'contact_state': getattr(existing_contact, 'state', '') or '',
+                    'contact_country': getattr(existing_contact, 'country', '') or '',
+                    'contact_postalcode': getattr(existing_contact, 'postalcode', '') or '',
+                }
+
+            # Merge updates on top of existing values
+            merged_contact.update(contact_updates)
+
+            # Build ContactInfo model from merged values
+            contact_info = build_contact_info(**merged_contact)
             if contact_info:
                 existing_tp.contact_info = contact_info
 
