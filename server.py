@@ -507,6 +507,48 @@ if manage_trading_partner_action:
         http_oauth_client_secret: str = None,
         http_oauth_scope: str = None,
         http_oauth_grant_type: str = None,
+        # HTTP settings flags
+        http_use_custom_auth: str = None,
+        http_use_basic_auth: str = None,
+        http_use_default_settings: str = None,
+        # HTTP OAuth 1.0 fields
+        http_oauth1_consumer_key: str = None,
+        http_oauth1_consumer_secret: str = None,
+        http_oauth1_access_token: str = None,
+        http_oauth1_token_secret: str = None,
+        http_oauth1_realm: str = None,
+        http_oauth1_signature_method: str = None,
+        http_oauth1_request_token_url: str = None,
+        http_oauth1_access_token_url: str = None,
+        http_oauth1_authorization_url: str = None,
+        http_oauth1_suppress_blank_access_token: str = None,
+        # HTTP OAuth 2.0 extended fields
+        http_oauth2_authorization_token_url: str = None,
+        http_oauth2_access_token: str = None,
+        http_oauth2_use_refresh_token: str = None,
+        http_oauth2_access_token_params: str = None,
+        http_oauth2_authorization_params: str = None,
+        # HTTP separate Get options
+        http_get_method_type: str = None,
+        http_get_content_type: str = None,
+        http_get_follow_redirects: str = None,
+        http_get_return_errors: str = None,
+        http_get_request_profile: str = None,
+        http_get_request_profile_type: str = None,
+        http_get_response_profile: str = None,
+        http_get_response_profile_type: str = None,
+        # HTTP Listen options
+        http_listen_mime_passthrough: str = None,
+        http_listen_object_name: str = None,
+        http_listen_operation_type: str = None,
+        http_listen_password: str = None,
+        http_listen_use_default: str = None,
+        http_listen_username: str = None,
+        # HTTP headers and path elements (JSON strings)
+        http_request_headers: str = None,
+        http_response_header_mapping: str = None,
+        http_reflect_headers: str = None,
+        http_path_elements: str = None,
         # AS2 protocol fields
         as2_url: str = None,
         as2_identifier: str = None,
@@ -697,6 +739,42 @@ if manage_trading_partner_action:
             http_oauth_client_secret: OAuth2 client secret
             http_oauth_scope: OAuth2 scope
             http_oauth_grant_type: OAuth2 grant type - client_credentials, password, code (default: client_credentials)
+            http_use_custom_auth: Enable custom authentication (true/false)
+            http_use_basic_auth: Enable basic auth flag in HTTPSettings (true/false)
+            http_use_default_settings: Use default HTTP settings (true/false)
+            http_oauth1_consumer_key: OAuth 1.0 consumer key
+            http_oauth1_consumer_secret: OAuth 1.0 consumer secret
+            http_oauth1_access_token: OAuth 1.0 access token
+            http_oauth1_token_secret: OAuth 1.0 token secret
+            http_oauth1_realm: OAuth 1.0 realm
+            http_oauth1_signature_method: OAuth 1.0 signature method - SHA1, SHA256 (default: SHA1)
+            http_oauth1_request_token_url: OAuth 1.0 request token URL
+            http_oauth1_access_token_url: OAuth 1.0 access token URL
+            http_oauth1_authorization_url: OAuth 1.0 authorization URL
+            http_oauth1_suppress_blank_access_token: Suppress blank access token (true/false)
+            http_oauth2_authorization_token_url: OAuth2 authorization endpoint URL
+            http_oauth2_access_token: OAuth2 access token
+            http_oauth2_use_refresh_token: Use OAuth2 refresh token (true/false)
+            http_oauth2_access_token_params: OAuth2 access token parameters (JSON string)
+            http_oauth2_authorization_params: OAuth2 authorization parameters (JSON string)
+            http_get_method_type: HTTP method for GET operations - GET, POST, PUT, DELETE
+            http_get_content_type: Content type for GET operations
+            http_get_follow_redirects: Follow redirects for GET operations (true/false)
+            http_get_return_errors: Return errors for GET operations (true/false)
+            http_get_request_profile: Request profile for GET operations
+            http_get_request_profile_type: Request profile type for GET operations - NONE, XML, JSON
+            http_get_response_profile: Response profile for GET operations
+            http_get_response_profile_type: Response profile type for GET operations - NONE, XML, JSON
+            http_listen_mime_passthrough: Pass through MIME type for listen (true/false)
+            http_listen_object_name: Object name for listen endpoint
+            http_listen_operation_type: Operation type for listen
+            http_listen_password: Password for listen endpoint
+            http_listen_use_default: Use default listen options (true/false)
+            http_listen_username: Username for listen endpoint
+            http_request_headers: Request headers JSON - [{"headerFieldName": "...", "targetPropertyName": "..."}]
+            http_response_header_mapping: Response header mapping JSON - same format as request_headers
+            http_reflect_headers: Reflect headers JSON - [{"name": "..."}]
+            http_path_elements: Path elements JSON - [{"name": "..."}]
             as2_authentication_type: AS2 authentication type - NONE, BASIC
             as2_verify_hostname: Verify SSL hostname - "true" or "false"
             as2_client_ssl_alias: Client SSL certificate alias
@@ -962,6 +1040,78 @@ if manage_trading_partner_action:
                     request_data["http_oauth_scope"] = http_oauth_scope
                 if http_oauth_grant_type:
                     request_data["http_oauth_grant_type"] = http_oauth_grant_type
+                if http_use_custom_auth:
+                    request_data["http_use_custom_auth"] = http_use_custom_auth
+                if http_use_basic_auth:
+                    request_data["http_use_basic_auth"] = http_use_basic_auth
+                if http_use_default_settings:
+                    request_data["http_use_default_settings"] = http_use_default_settings
+                if http_oauth1_consumer_key:
+                    request_data["http_oauth1_consumer_key"] = http_oauth1_consumer_key
+                if http_oauth1_consumer_secret:
+                    request_data["http_oauth1_consumer_secret"] = http_oauth1_consumer_secret
+                if http_oauth1_access_token:
+                    request_data["http_oauth1_access_token"] = http_oauth1_access_token
+                if http_oauth1_token_secret:
+                    request_data["http_oauth1_token_secret"] = http_oauth1_token_secret
+                if http_oauth1_realm:
+                    request_data["http_oauth1_realm"] = http_oauth1_realm
+                if http_oauth1_signature_method:
+                    request_data["http_oauth1_signature_method"] = http_oauth1_signature_method
+                if http_oauth1_request_token_url:
+                    request_data["http_oauth1_request_token_url"] = http_oauth1_request_token_url
+                if http_oauth1_access_token_url:
+                    request_data["http_oauth1_access_token_url"] = http_oauth1_access_token_url
+                if http_oauth1_authorization_url:
+                    request_data["http_oauth1_authorization_url"] = http_oauth1_authorization_url
+                if http_oauth1_suppress_blank_access_token:
+                    request_data["http_oauth1_suppress_blank_access_token"] = http_oauth1_suppress_blank_access_token
+                if http_oauth2_authorization_token_url:
+                    request_data["http_oauth2_authorization_token_url"] = http_oauth2_authorization_token_url
+                if http_oauth2_access_token:
+                    request_data["http_oauth2_access_token"] = http_oauth2_access_token
+                if http_oauth2_use_refresh_token:
+                    request_data["http_oauth2_use_refresh_token"] = http_oauth2_use_refresh_token
+                if http_oauth2_access_token_params:
+                    request_data["http_oauth2_access_token_params"] = http_oauth2_access_token_params
+                if http_oauth2_authorization_params:
+                    request_data["http_oauth2_authorization_params"] = http_oauth2_authorization_params
+                if http_get_method_type:
+                    request_data["http_get_method_type"] = http_get_method_type
+                if http_get_content_type:
+                    request_data["http_get_content_type"] = http_get_content_type
+                if http_get_follow_redirects:
+                    request_data["http_get_follow_redirects"] = http_get_follow_redirects
+                if http_get_return_errors:
+                    request_data["http_get_return_errors"] = http_get_return_errors
+                if http_get_request_profile:
+                    request_data["http_get_request_profile"] = http_get_request_profile
+                if http_get_request_profile_type:
+                    request_data["http_get_request_profile_type"] = http_get_request_profile_type
+                if http_get_response_profile:
+                    request_data["http_get_response_profile"] = http_get_response_profile
+                if http_get_response_profile_type:
+                    request_data["http_get_response_profile_type"] = http_get_response_profile_type
+                if http_listen_mime_passthrough:
+                    request_data["http_listen_mime_passthrough"] = http_listen_mime_passthrough
+                if http_listen_object_name:
+                    request_data["http_listen_object_name"] = http_listen_object_name
+                if http_listen_operation_type:
+                    request_data["http_listen_operation_type"] = http_listen_operation_type
+                if http_listen_password:
+                    request_data["http_listen_password"] = http_listen_password
+                if http_listen_use_default:
+                    request_data["http_listen_use_default"] = http_listen_use_default
+                if http_listen_username:
+                    request_data["http_listen_username"] = http_listen_username
+                if http_request_headers:
+                    request_data["http_request_headers"] = http_request_headers
+                if http_response_header_mapping:
+                    request_data["http_response_header_mapping"] = http_response_header_mapping
+                if http_reflect_headers:
+                    request_data["http_reflect_headers"] = http_reflect_headers
+                if http_path_elements:
+                    request_data["http_path_elements"] = http_path_elements
 
                 # Pass AS2 fields flat
                 if as2_url:
@@ -1341,6 +1491,78 @@ if manage_trading_partner_action:
                     updates["http_oauth_scope"] = http_oauth_scope
                 if http_oauth_grant_type:
                     updates["http_oauth_grant_type"] = http_oauth_grant_type
+                if http_use_custom_auth:
+                    updates["http_use_custom_auth"] = http_use_custom_auth
+                if http_use_basic_auth:
+                    updates["http_use_basic_auth"] = http_use_basic_auth
+                if http_use_default_settings:
+                    updates["http_use_default_settings"] = http_use_default_settings
+                if http_oauth1_consumer_key:
+                    updates["http_oauth1_consumer_key"] = http_oauth1_consumer_key
+                if http_oauth1_consumer_secret:
+                    updates["http_oauth1_consumer_secret"] = http_oauth1_consumer_secret
+                if http_oauth1_access_token:
+                    updates["http_oauth1_access_token"] = http_oauth1_access_token
+                if http_oauth1_token_secret:
+                    updates["http_oauth1_token_secret"] = http_oauth1_token_secret
+                if http_oauth1_realm:
+                    updates["http_oauth1_realm"] = http_oauth1_realm
+                if http_oauth1_signature_method:
+                    updates["http_oauth1_signature_method"] = http_oauth1_signature_method
+                if http_oauth1_request_token_url:
+                    updates["http_oauth1_request_token_url"] = http_oauth1_request_token_url
+                if http_oauth1_access_token_url:
+                    updates["http_oauth1_access_token_url"] = http_oauth1_access_token_url
+                if http_oauth1_authorization_url:
+                    updates["http_oauth1_authorization_url"] = http_oauth1_authorization_url
+                if http_oauth1_suppress_blank_access_token:
+                    updates["http_oauth1_suppress_blank_access_token"] = http_oauth1_suppress_blank_access_token
+                if http_oauth2_authorization_token_url:
+                    updates["http_oauth2_authorization_token_url"] = http_oauth2_authorization_token_url
+                if http_oauth2_access_token:
+                    updates["http_oauth2_access_token"] = http_oauth2_access_token
+                if http_oauth2_use_refresh_token:
+                    updates["http_oauth2_use_refresh_token"] = http_oauth2_use_refresh_token
+                if http_oauth2_access_token_params:
+                    updates["http_oauth2_access_token_params"] = http_oauth2_access_token_params
+                if http_oauth2_authorization_params:
+                    updates["http_oauth2_authorization_params"] = http_oauth2_authorization_params
+                if http_get_method_type:
+                    updates["http_get_method_type"] = http_get_method_type
+                if http_get_content_type:
+                    updates["http_get_content_type"] = http_get_content_type
+                if http_get_follow_redirects:
+                    updates["http_get_follow_redirects"] = http_get_follow_redirects
+                if http_get_return_errors:
+                    updates["http_get_return_errors"] = http_get_return_errors
+                if http_get_request_profile:
+                    updates["http_get_request_profile"] = http_get_request_profile
+                if http_get_request_profile_type:
+                    updates["http_get_request_profile_type"] = http_get_request_profile_type
+                if http_get_response_profile:
+                    updates["http_get_response_profile"] = http_get_response_profile
+                if http_get_response_profile_type:
+                    updates["http_get_response_profile_type"] = http_get_response_profile_type
+                if http_listen_mime_passthrough:
+                    updates["http_listen_mime_passthrough"] = http_listen_mime_passthrough
+                if http_listen_object_name:
+                    updates["http_listen_object_name"] = http_listen_object_name
+                if http_listen_operation_type:
+                    updates["http_listen_operation_type"] = http_listen_operation_type
+                if http_listen_password:
+                    updates["http_listen_password"] = http_listen_password
+                if http_listen_use_default:
+                    updates["http_listen_use_default"] = http_listen_use_default
+                if http_listen_username:
+                    updates["http_listen_username"] = http_listen_username
+                if http_request_headers:
+                    updates["http_request_headers"] = http_request_headers
+                if http_response_header_mapping:
+                    updates["http_response_header_mapping"] = http_response_header_mapping
+                if http_reflect_headers:
+                    updates["http_reflect_headers"] = http_reflect_headers
+                if http_path_elements:
+                    updates["http_path_elements"] = http_path_elements
 
                 # AS2 fields
                 if as2_url:
