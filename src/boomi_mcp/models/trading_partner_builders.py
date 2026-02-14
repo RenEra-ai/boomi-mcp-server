@@ -378,7 +378,7 @@ def build_http_communication_options(**kwargs):
 
     Args:
         http_url: HTTP endpoint URL (required)
-        http_authentication_type: Authentication type - NONE, BASIC, OAUTH2 (default: NONE)
+        http_authentication_type: Authentication type - NONE, BASIC, PASSWORD_DIGEST, CUSTOM, OAUTH, OAUTH2 (default: NONE)
         http_username: Username for BASIC authentication
         http_password: Password for BASIC authentication
         http_connect_timeout: Connection timeout in milliseconds
@@ -388,7 +388,7 @@ def build_http_communication_options(**kwargs):
         http_client_ssl_alias: Client SSL certificate alias
         http_trusted_cert_alias: Trusted server certificate alias
         http_cookie_scope: Cookie handling - IGNORED, GLOBAL, CONNECTOR_SHAPE
-        http_method_type: HTTP method - GET, POST, PUT, DELETE, PATCH (default: POST)
+        http_method_type: HTTP method - GET, POST, PUT, DELETE (default: POST)
         http_data_content_type: Content type for request data
         http_follow_redirects: Follow redirects (true/false)
         http_return_errors: Return errors in response (true/false)
@@ -402,14 +402,52 @@ def build_http_communication_options(**kwargs):
         http_oauth_client_secret: OAuth2 client secret
         http_oauth_scope: OAuth2 scope
         http_oauth_grant_type: OAuth2 grant type - client_credentials, password, code (default: client_credentials)
+        http_use_custom_auth: Enable custom authentication (true/false)
+        http_use_basic_auth: Enable basic auth flag in HTTPSettings (true/false)
+        http_use_default_settings: Use default HTTP settings (true/false)
+        http_oauth1_consumer_key: OAuth 1.0 consumer key
+        http_oauth1_consumer_secret: OAuth 1.0 consumer secret
+        http_oauth1_access_token: OAuth 1.0 access token
+        http_oauth1_token_secret: OAuth 1.0 token secret
+        http_oauth1_realm: OAuth 1.0 realm
+        http_oauth1_signature_method: OAuth 1.0 signature method - SHA1, SHA256 (default: SHA1)
+        http_oauth1_request_token_url: OAuth 1.0 request token URL
+        http_oauth1_access_token_url: OAuth 1.0 access token URL
+        http_oauth1_authorization_url: OAuth 1.0 authorization URL
+        http_oauth1_suppress_blank_access_token: Suppress blank access token (true/false)
+        http_oauth2_authorization_token_url: OAuth2 authorization endpoint URL
+        http_oauth2_access_token: OAuth2 access token
+        http_oauth2_use_refresh_token: Use OAuth2 refresh token (true/false)
+        http_oauth2_access_token_params: OAuth2 access token parameters (JSON string)
+        http_oauth2_authorization_params: OAuth2 authorization parameters (JSON string)
+        http_get_method_type: HTTP method for GET operations - GET, POST, PUT, DELETE
+        http_get_content_type: Content type for GET operations
+        http_get_follow_redirects: Follow redirects for GET operations (true/false)
+        http_get_return_errors: Return errors for GET operations (true/false)
+        http_get_request_profile: Request profile for GET operations
+        http_get_request_profile_type: Request profile type for GET operations - NONE, XML, JSON
+        http_get_response_profile: Response profile for GET operations
+        http_get_response_profile_type: Response profile type for GET operations - NONE, XML, JSON
+        http_listen_mime_passthrough: Pass through MIME type for listen (true/false)
+        http_listen_object_name: Object name for listen endpoint
+        http_listen_operation_type: Operation type for listen
+        http_listen_password: Password for listen endpoint
+        http_listen_use_default: Use default listen options (true/false)
+        http_listen_username: Username for listen endpoint
+        http_request_headers: Request headers JSON - [{"headerFieldName": "...", "targetPropertyName": "..."}]
+        http_response_header_mapping: Response header mapping JSON - [{"headerFieldName": "...", "targetPropertyName": "..."}]
+        http_reflect_headers: Reflect headers JSON - [{"name": "..."}]
+        http_path_elements: Path elements JSON - [{"name": "..."}]
 
     Returns dict (not SDK model) - API accepts minimal structure
     """
+    import json as _json
+
     url = kwargs.get('http_url')
     if not url:
         return None
 
-    # Extract all parameters
+    # Extract existing parameters
     auth_type = kwargs.get('http_authentication_type', 'NONE')
     username = kwargs.get('http_username')
     password = kwargs.get('http_password')
@@ -435,10 +473,77 @@ def build_http_communication_options(**kwargs):
     oauth_scope = kwargs.get('http_oauth_scope')
     oauth_grant_type = kwargs.get('http_oauth_grant_type')
 
+    # Extract new settings flags
+    use_custom_auth = kwargs.get('http_use_custom_auth')
+    use_basic_auth = kwargs.get('http_use_basic_auth')
+    use_default_settings = kwargs.get('http_use_default_settings')
+
+    # Extract OAuth 1.0 parameters
+    oauth1_consumer_key = kwargs.get('http_oauth1_consumer_key')
+    oauth1_consumer_secret = kwargs.get('http_oauth1_consumer_secret')
+    oauth1_access_token = kwargs.get('http_oauth1_access_token')
+    oauth1_token_secret = kwargs.get('http_oauth1_token_secret')
+    oauth1_realm = kwargs.get('http_oauth1_realm')
+    oauth1_signature_method = kwargs.get('http_oauth1_signature_method')
+    oauth1_request_token_url = kwargs.get('http_oauth1_request_token_url')
+    oauth1_access_token_url = kwargs.get('http_oauth1_access_token_url')
+    oauth1_authorization_url = kwargs.get('http_oauth1_authorization_url')
+    oauth1_suppress_blank = kwargs.get('http_oauth1_suppress_blank_access_token')
+
+    # Extract OAuth 2.0 extended parameters
+    oauth2_auth_token_url = kwargs.get('http_oauth2_authorization_token_url')
+    oauth2_access_token = kwargs.get('http_oauth2_access_token')
+    oauth2_use_refresh_token = kwargs.get('http_oauth2_use_refresh_token')
+    oauth2_access_token_params = kwargs.get('http_oauth2_access_token_params')
+    oauth2_authorization_params = kwargs.get('http_oauth2_authorization_params')
+
+    # Extract separate Get options
+    get_method_type = kwargs.get('http_get_method_type')
+    get_content_type = kwargs.get('http_get_content_type')
+    get_follow_redirects = kwargs.get('http_get_follow_redirects')
+    get_return_errors = kwargs.get('http_get_return_errors')
+    get_request_profile = kwargs.get('http_get_request_profile')
+    get_request_profile_type = kwargs.get('http_get_request_profile_type')
+    get_response_profile = kwargs.get('http_get_response_profile')
+    get_response_profile_type = kwargs.get('http_get_response_profile_type')
+
+    # Extract Listen options
+    listen_mime_passthrough = kwargs.get('http_listen_mime_passthrough')
+    listen_object_name = kwargs.get('http_listen_object_name')
+    listen_operation_type = kwargs.get('http_listen_operation_type')
+    listen_password = kwargs.get('http_listen_password')
+    listen_use_default = kwargs.get('http_listen_use_default')
+    listen_username = kwargs.get('http_listen_username')
+
+    # Extract headers/path elements (JSON strings)
+    raw_request_headers = kwargs.get('http_request_headers')
+    raw_response_header_mapping = kwargs.get('http_response_header_mapping')
+    raw_reflect_headers = kwargs.get('http_reflect_headers')
+    raw_path_elements = kwargs.get('http_path_elements')
+
+    # Parse JSON string parameters
+    def _parse_json(raw):
+        if not raw:
+            return None
+        try:
+            return _json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+
+    parsed_request_headers = _parse_json(raw_request_headers)
+    parsed_response_header_mapping = _parse_json(raw_response_header_mapping)
+    parsed_reflect_headers = _parse_json(raw_reflect_headers)
+    parsed_path_elements = _parse_json(raw_path_elements)
+
     # Build HTTP settings
+    normalized_auth = auth_type.upper() if auth_type else 'NONE'
+    valid_auth_types = {'NONE', 'BASIC', 'PASSWORD_DIGEST', 'CUSTOM', 'OAUTH', 'OAUTH2'}
+    if normalized_auth not in valid_auth_types:
+        normalized_auth = 'NONE'
+
     http_settings = {
         'url': url,
-        'authenticationType': auth_type.upper() if auth_type else 'NONE'
+        'authenticationType': normalized_auth
     }
 
     # Add timeouts if specified
@@ -451,30 +556,81 @@ def build_http_communication_options(**kwargs):
     if cookie_scope:
         http_settings['cookieScope'] = cookie_scope.upper()
 
-    # Add BASIC auth credentials if auth type is BASIC
-    if auth_type and auth_type.upper() == 'BASIC' and (username or password):
+    # Add settings flags
+    if use_custom_auth is not None:
+        http_settings['useCustomAuth'] = str(use_custom_auth).lower() == 'true'
+    if use_basic_auth is not None:
+        http_settings['useBasicAuth'] = str(use_basic_auth).lower() == 'true'
+    if use_default_settings is not None:
+        http_settings['useDefaultSettings'] = str(use_default_settings).lower() == 'true'
+
+    # Add BASIC or PASSWORD_DIGEST auth credentials
+    if normalized_auth in ('BASIC', 'PASSWORD_DIGEST') and (username or password):
         http_settings['HTTPAuthSettings'] = {
             'user': username or '',
             'password': password or ''
         }
 
+    # Add OAuth 1.0 settings if auth type is OAUTH
+    if normalized_auth == 'OAUTH':
+        oauth1_settings = {}
+        if oauth1_consumer_key:
+            oauth1_settings['consumerKey'] = oauth1_consumer_key
+        if oauth1_consumer_secret:
+            oauth1_settings['consumerSecret'] = oauth1_consumer_secret
+        if oauth1_access_token:
+            oauth1_settings['accessToken'] = oauth1_access_token
+        if oauth1_token_secret:
+            oauth1_settings['tokenSecret'] = oauth1_token_secret
+        if oauth1_realm:
+            oauth1_settings['realm'] = oauth1_realm
+        if oauth1_signature_method:
+            oauth1_settings['signatureMethod'] = oauth1_signature_method.upper()
+        if oauth1_request_token_url:
+            oauth1_settings['requestTokenUrl'] = oauth1_request_token_url
+        if oauth1_access_token_url:
+            oauth1_settings['accessTokenUrl'] = oauth1_access_token_url
+        if oauth1_authorization_url:
+            oauth1_settings['authorizationUrl'] = oauth1_authorization_url
+        if oauth1_suppress_blank is not None:
+            oauth1_settings['suppressBlankAccessToken'] = str(oauth1_suppress_blank).lower() == 'true'
+        if oauth1_settings:
+            http_settings['HTTPOAuthSettings'] = oauth1_settings
+
     # Add OAuth2 settings if auth type is OAUTH2
-    if auth_type and auth_type.upper() == 'OAUTH2':
+    if normalized_auth == 'OAUTH2':
         oauth2_settings = {}
         if oauth_token_url:
             oauth2_settings['accessTokenEndpoint'] = {
                 'url': oauth_token_url,
                 'sslOptions': {}
             }
-        if oauth_client_id or oauth_client_secret:
-            oauth2_settings['credentials'] = {}
-            if oauth_client_id:
-                oauth2_settings['credentials']['clientId'] = oauth_client_id
-            if oauth_client_secret:
-                oauth2_settings['credentials']['clientSecret'] = oauth_client_secret
+        if oauth2_auth_token_url:
+            oauth2_settings['authorizationTokenEndpoint'] = {
+                'url': oauth2_auth_token_url,
+                'sslOptions': {}
+            }
+        credentials = {}
+        if oauth_client_id:
+            credentials['clientId'] = oauth_client_id
+        if oauth_client_secret:
+            credentials['clientSecret'] = oauth_client_secret
+        if oauth2_access_token:
+            credentials['accessToken'] = oauth2_access_token
+        if oauth2_use_refresh_token is not None:
+            credentials['useRefreshToken'] = str(oauth2_use_refresh_token).lower() == 'true'
+        if credentials:
+            oauth2_settings['credentials'] = credentials
         if oauth_scope:
             oauth2_settings['scope'] = oauth_scope
         oauth2_settings['grantType'] = oauth_grant_type or 'client_credentials'
+        # Extended OAuth2 params
+        parsed_at_params = _parse_json(oauth2_access_token_params)
+        if parsed_at_params:
+            oauth2_settings['accessTokenParameters'] = parsed_at_params
+        parsed_auth_params = _parse_json(oauth2_authorization_params)
+        if parsed_auth_params:
+            oauth2_settings['authorizationParameters'] = parsed_auth_params
         if oauth2_settings:
             http_settings['HTTPOAuth2Settings'] = oauth2_settings
 
@@ -494,7 +650,7 @@ def build_http_communication_options(**kwargs):
 
     result = {'HTTPSettings': http_settings}
 
-    # Add send options if method or content type specified
+    # Build send options
     send_options = {}
     if method_type:
         send_options['methodType'] = method_type.upper()
@@ -515,10 +671,85 @@ def build_http_communication_options(**kwargs):
     if response_profile_type:
         send_options['responseProfileType'] = response_profile_type.upper()
 
+    # Add headers/path elements to send options
+    # Boomi API requires @type annotations on nested header/element objects
+    # NOTE: requestHeaders causes 400 on both create and update — Boomi API doesn't accept it
+    # at the trading partner level. The param is kept in the signature for GET extraction only.
+    if parsed_response_header_mapping:
+        typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
+        send_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
+    if parsed_reflect_headers:
+        typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_reflect_headers]
+        send_options['reflectHeaders'] = {'@type': 'HttpReflectHeaders', 'element': typed_elements}
+    if parsed_path_elements:
+        typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_path_elements]
+        send_options['pathElements'] = {'@type': 'HttpPathElements', 'element': typed_elements}
+
     if send_options:
         send_options['useDefaultOptions'] = False
         result['HTTPSendOptions'] = send_options
-        result['HTTPGetOptions'] = send_options.copy()
+
+    # Build get options - separate if http_get_* provided, otherwise copy from send
+    has_explicit_get = any([
+        get_method_type, get_content_type, get_follow_redirects, get_return_errors,
+        get_request_profile, get_request_profile_type, get_response_profile, get_response_profile_type
+    ])
+
+    if has_explicit_get:
+        get_options = {}
+        if get_method_type:
+            get_options['methodType'] = get_method_type.upper()
+        if get_content_type:
+            get_options['dataContentType'] = get_content_type
+        if get_follow_redirects is not None:
+            get_options['followRedirects'] = str(get_follow_redirects).lower() == 'true'
+        if get_return_errors is not None:
+            get_options['returnErrors'] = str(get_return_errors).lower() == 'true'
+        if get_request_profile:
+            get_options['requestProfile'] = get_request_profile
+        if get_request_profile_type:
+            get_options['requestProfileType'] = get_request_profile_type.upper()
+        if get_response_profile:
+            get_options['responseProfile'] = get_response_profile
+        if get_response_profile_type:
+            get_options['responseProfileType'] = get_response_profile_type.upper()
+        # Copy headers/path elements to get options too (with @type annotations)
+        # NOTE: requestHeaders not included — Boomi API rejects it at trading partner level
+        if parsed_response_header_mapping:
+            typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
+            get_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
+        if parsed_reflect_headers:
+            typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_reflect_headers]
+            get_options['reflectHeaders'] = {'@type': 'HttpReflectHeaders', 'element': typed_elements}
+        if parsed_path_elements:
+            typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_path_elements]
+            get_options['pathElements'] = {'@type': 'HttpPathElements', 'element': typed_elements}
+        if get_options:
+            get_options['useDefaultOptions'] = False
+            result['HTTPGetOptions'] = get_options
+    elif send_options:
+        # Copy from send but remove returnResponses (not valid for GetOptions)
+        get_options = send_options.copy()
+        get_options.pop('returnResponses', None)
+        result['HTTPGetOptions'] = get_options
+
+    # Build listen options if any listen params provided
+    listen_options = {}
+    if listen_mime_passthrough is not None:
+        listen_options['mimePassthrough'] = str(listen_mime_passthrough).lower() == 'true'
+    if listen_object_name:
+        listen_options['objectName'] = listen_object_name
+    if listen_operation_type:
+        listen_options['operationType'] = listen_operation_type
+    if listen_password:
+        listen_options['password'] = listen_password
+    if listen_use_default is not None:
+        listen_options['useDefault'] = str(listen_use_default).lower() == 'true'
+    if listen_username:
+        listen_options['userName'] = listen_username
+
+    if listen_options:
+        result['HTTPListenOptions'] = listen_options
 
     return result
 

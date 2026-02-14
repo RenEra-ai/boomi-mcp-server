@@ -436,10 +436,24 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     http_info["connect_timeout"] = getattr(settings, 'connect_timeout', None) or getattr(settings, 'connectTimeout', None)
                     http_info["read_timeout"] = getattr(settings, 'read_timeout', None) or getattr(settings, 'readTimeout', None)
                     http_info["cookie_scope"] = getattr(settings, 'cookie_scope', None) or getattr(settings, 'cookieScope', None)
+                    # Settings flags
+                    http_info["use_custom_auth"] = getattr(settings, 'use_custom_auth', None) or getattr(settings, 'useCustomAuth', None)
+                    http_info["use_basic_auth"] = getattr(settings, 'use_basic_auth', None) or getattr(settings, 'useBasicAuth', None)
+                    http_info["use_default_settings"] = getattr(settings, 'use_default_settings', None) or getattr(settings, 'useDefaultSettings', None)
                     # Extract HTTP auth settings
                     http_auth = getattr(settings, 'http_auth_settings', None) or getattr(settings, 'HTTPAuthSettings', None)
                     if http_auth:
                         http_info["username"] = getattr(http_auth, 'user', None)
+                    # Extract HTTP OAuth 1.0 settings
+                    oauth1_settings = getattr(settings, 'httpo_auth_settings', None) or getattr(settings, 'HTTPOAuthSettings', None)
+                    if oauth1_settings:
+                        http_info["oauth1_consumer_key"] = getattr(oauth1_settings, 'consumer_key', None) or getattr(oauth1_settings, 'consumerKey', None)
+                        http_info["oauth1_realm"] = getattr(oauth1_settings, 'realm', None)
+                        http_info["oauth1_signature_method"] = getattr(oauth1_settings, 'signature_method', None) or getattr(oauth1_settings, 'signatureMethod', None)
+                        http_info["oauth1_request_token_url"] = getattr(oauth1_settings, 'request_token_url', None) or getattr(oauth1_settings, 'requestTokenUrl', None)
+                        http_info["oauth1_access_token_url"] = getattr(oauth1_settings, 'access_token_url', None) or getattr(oauth1_settings, 'accessTokenUrl', None)
+                        http_info["oauth1_authorization_url"] = getattr(oauth1_settings, 'authorization_url', None) or getattr(oauth1_settings, 'authorizationUrl', None)
+                        http_info["oauth1_suppress_blank_access_token"] = getattr(oauth1_settings, 'suppress_blank_access_token', None) or getattr(oauth1_settings, 'suppressBlankAccessToken', None)
                     # Extract HTTP OAuth2 settings
                     oauth2_settings = getattr(settings, 'http_oauth2_settings', None) or getattr(settings, 'HTTPOAuth2Settings', None)
                     if oauth2_settings:
@@ -449,10 +463,16 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         token_endpoint = getattr(oauth2_settings, 'access_token_endpoint', None) or getattr(oauth2_settings, 'accessTokenEndpoint', None)
                         if token_endpoint:
                             http_info["oauth_token_url"] = getattr(token_endpoint, 'url', None)
+                        # Extract authorization token endpoint
+                        auth_token_endpoint = getattr(oauth2_settings, 'authorization_token_endpoint', None) or getattr(oauth2_settings, 'authorizationTokenEndpoint', None)
+                        if auth_token_endpoint:
+                            http_info["oauth2_authorization_token_url"] = getattr(auth_token_endpoint, 'url', None)
                         # Extract credentials
                         credentials = getattr(oauth2_settings, 'credentials', None)
                         if credentials:
                             http_info["oauth_client_id"] = getattr(credentials, 'client_id', None) or getattr(credentials, 'clientId', None)
+                            http_info["oauth2_access_token"] = getattr(credentials, 'access_token', None) or getattr(credentials, 'accessToken', None)
+                            http_info["oauth2_use_refresh_token"] = getattr(credentials, 'use_refresh_token', None) or getattr(credentials, 'useRefreshToken', None)
                     # Extract HTTP SSL options
                     httpssl_opts = getattr(settings, 'httpssl_options', None) or getattr(settings, 'HTTPSSLOptions', None)
                     if httpssl_opts:
@@ -472,6 +492,69 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     http_info["request_profile_type"] = getattr(send_opts, 'request_profile_type', None) or getattr(send_opts, 'requestProfileType', None)
                     http_info["response_profile"] = getattr(send_opts, 'response_profile', None) or getattr(send_opts, 'responseProfile', None)
                     http_info["response_profile_type"] = getattr(send_opts, 'response_profile_type', None) or getattr(send_opts, 'responseProfileType', None)
+                    # Extract headers/path elements from send options
+                    # SDK returns model objects; convert to dicts for clean output
+                    def _header_to_dict(h):
+                        return {
+                            "headerFieldName": getattr(h, 'header_field_name', None) or getattr(h, 'headerFieldName', None),
+                            "targetPropertyName": getattr(h, 'target_property_name', None) or getattr(h, 'targetPropertyName', None)
+                        }
+                    def _element_to_dict(e):
+                        return {"name": getattr(e, 'name', None)}
+
+                    req_headers = getattr(send_opts, 'request_headers', None) or getattr(send_opts, 'requestHeaders', None)
+                    if req_headers:
+                        header_list = getattr(req_headers, 'header', None)
+                        if header_list:
+                            http_info["request_headers"] = [_header_to_dict(h) for h in header_list]
+                    resp_header_map = getattr(send_opts, 'response_header_mapping', None) or getattr(send_opts, 'responseHeaderMapping', None)
+                    if resp_header_map:
+                        header_list = getattr(resp_header_map, 'header', None)
+                        if header_list:
+                            http_info["response_header_mapping"] = [_header_to_dict(h) for h in header_list]
+                    reflect_hdrs = getattr(send_opts, 'reflect_headers', None) or getattr(send_opts, 'reflectHeaders', None)
+                    if reflect_hdrs:
+                        elem_list = getattr(reflect_hdrs, 'element', None)
+                        if elem_list:
+                            http_info["reflect_headers"] = [_element_to_dict(e) for e in elem_list]
+                    path_elems = getattr(send_opts, 'path_elements', None) or getattr(send_opts, 'pathElements', None)
+                    if path_elems:
+                        elem_list = getattr(path_elems, 'element', None)
+                        if elem_list:
+                            http_info["path_elements"] = [_element_to_dict(e) for e in elem_list]
+                # Extract HTTP get options (only if different from send)
+                get_opts = getattr(http_opts, 'http_get_options', None) or getattr(http_opts, 'HTTPGetOptions', None)
+                if get_opts:
+                    get_method = getattr(get_opts, 'method_type', None) or getattr(get_opts, 'methodType', None)
+                    send_method = http_info.get("method_type")
+                    # Only report get options if they differ from send
+                    get_differs = False
+                    get_info = {}
+                    if get_method and get_method != send_method:
+                        get_info["get_method_type"] = get_method
+                        get_differs = True
+                    get_ct = getattr(get_opts, 'data_content_type', None) or getattr(get_opts, 'dataContentType', None)
+                    if get_ct and get_ct != http_info.get("data_content_type"):
+                        get_info["get_content_type"] = get_ct
+                        get_differs = True
+                    get_follow = getattr(get_opts, 'follow_redirects', None) or getattr(get_opts, 'followRedirects', None)
+                    if get_follow is not None and get_follow != http_info.get("follow_redirects"):
+                        get_info["get_follow_redirects"] = get_follow
+                        get_differs = True
+                    get_errors = getattr(get_opts, 'return_errors', None) or getattr(get_opts, 'returnErrors', None)
+                    if get_errors is not None and get_errors != http_info.get("return_errors"):
+                        get_info["get_return_errors"] = get_errors
+                        get_differs = True
+                    if get_differs:
+                        http_info.update(get_info)
+                # Extract HTTP listen options
+                listen_opts = getattr(http_opts, 'http_listen_options', None) or getattr(http_opts, 'HTTPListenOptions', None)
+                if listen_opts:
+                    http_info["listen_mime_passthrough"] = getattr(listen_opts, 'mime_passthrough', None) or getattr(listen_opts, 'mimePassthrough', None)
+                    http_info["listen_object_name"] = getattr(listen_opts, 'object_name', None) or getattr(listen_opts, 'objectName', None)
+                    http_info["listen_operation_type"] = getattr(listen_opts, 'operation_type', None) or getattr(listen_opts, 'operationType', None)
+                    http_info["listen_use_default"] = getattr(listen_opts, 'use_default', None) or getattr(listen_opts, 'useDefault', None)
+                    http_info["listen_username"] = getattr(listen_opts, 'user_name', None) or getattr(listen_opts, 'userName', None)
                 # Filter out None values
                 http_info = {k: v for k, v in http_info.items() if v is not None}
                 communication_protocols.append(http_info)
@@ -761,7 +844,7 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
 
 
 # HTTP fields that cause 400 errors when sent in UPDATE payloads (create-only)
-HTTP_UPDATE_DENYLIST = {'http_return_responses', 'http_return_errors'}
+HTTP_UPDATE_DENYLIST = {'http_return_responses', 'http_return_errors', 'http_request_headers'}
 
 
 def update_trading_partner(boomi_client, profile: str, component_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -1199,25 +1282,205 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_id = getattr(resp_profile, 'component_id', None) or getattr(resp_profile, 'componentId', None)
                                         if existing_id:
                                             http_params['http_response_profile'] = existing_id
+                                # Settings flags
+                                if 'http_use_custom_auth' not in http_params:
+                                    existing_val = getattr(existing_settings, 'use_custom_auth', None) or getattr(existing_settings, 'useCustomAuth', None)
+                                    if existing_val is not None:
+                                        http_params['http_use_custom_auth'] = str(existing_val).lower()
+                                if 'http_use_basic_auth' not in http_params:
+                                    existing_val = getattr(existing_settings, 'use_basic_auth', None) or getattr(existing_settings, 'useBasicAuth', None)
+                                    if existing_val is not None:
+                                        http_params['http_use_basic_auth'] = str(existing_val).lower()
+                                if 'http_use_default_settings' not in http_params:
+                                    existing_val = getattr(existing_settings, 'use_default_settings', None) or getattr(existing_settings, 'useDefaultSettings', None)
+                                    if existing_val is not None:
+                                        http_params['http_use_default_settings'] = str(existing_val).lower()
+                                # OAuth 1.0 settings
+                                oauth1 = getattr(existing_settings, 'httpo_auth_settings', None) or getattr(existing_settings, 'HTTPOAuthSettings', None)
+                                if oauth1:
+                                    if 'http_oauth1_consumer_key' not in http_params:
+                                        existing_val = getattr(oauth1, 'consumer_key', None) or getattr(oauth1, 'consumerKey', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_consumer_key'] = existing_val
+                                    if 'http_oauth1_consumer_secret' not in http_params:
+                                        existing_val = getattr(oauth1, 'consumer_secret', None) or getattr(oauth1, 'consumerSecret', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_consumer_secret'] = existing_val
+                                    if 'http_oauth1_access_token' not in http_params:
+                                        existing_val = getattr(oauth1, 'access_token', None) or getattr(oauth1, 'accessToken', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_access_token'] = existing_val
+                                    if 'http_oauth1_token_secret' not in http_params:
+                                        existing_val = getattr(oauth1, 'token_secret', None) or getattr(oauth1, 'tokenSecret', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_token_secret'] = existing_val
+                                    if 'http_oauth1_realm' not in http_params:
+                                        existing_val = getattr(oauth1, 'realm', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_realm'] = existing_val
+                                    if 'http_oauth1_signature_method' not in http_params:
+                                        existing_val = getattr(oauth1, 'signature_method', None) or getattr(oauth1, 'signatureMethod', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_signature_method'] = existing_val
+                                    if 'http_oauth1_request_token_url' not in http_params:
+                                        existing_val = getattr(oauth1, 'request_token_url', None) or getattr(oauth1, 'requestTokenUrl', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_request_token_url'] = existing_val
+                                    if 'http_oauth1_access_token_url' not in http_params:
+                                        existing_val = getattr(oauth1, 'access_token_url', None) or getattr(oauth1, 'accessTokenUrl', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_access_token_url'] = existing_val
+                                    if 'http_oauth1_authorization_url' not in http_params:
+                                        existing_val = getattr(oauth1, 'authorization_url', None) or getattr(oauth1, 'authorizationUrl', None)
+                                        if existing_val:
+                                            http_params['http_oauth1_authorization_url'] = existing_val
+                                    if 'http_oauth1_suppress_blank_access_token' not in http_params:
+                                        existing_val = getattr(oauth1, 'suppress_blank_access_token', None) or getattr(oauth1, 'suppressBlankAccessToken', None)
+                                        if existing_val is not None:
+                                            http_params['http_oauth1_suppress_blank_access_token'] = str(existing_val).lower()
                                 # OAuth2 settings
-                                oauth = getattr(existing_settings, 'oauth2_settings', None) or getattr(existing_settings, 'oAuth2Settings', None)
+                                oauth = getattr(existing_settings, 'http_oauth2_settings', None) or getattr(existing_settings, 'HTTPOAuth2Settings', None)
                                 if oauth:
                                     if 'http_oauth_token_url' not in http_params:
-                                        existing_token_url = getattr(oauth, 'access_token_url', None) or getattr(oauth, 'accessTokenUrl', None)
-                                        if existing_token_url:
-                                            http_params['http_oauth_token_url'] = existing_token_url
-                                    if 'http_oauth_client_id' not in http_params:
-                                        existing_client = getattr(oauth, 'client_id', None) or getattr(oauth, 'clientId', None)
-                                        if existing_client:
-                                            http_params['http_oauth_client_id'] = existing_client
-                                    if 'http_oauth_client_secret' not in http_params:
-                                        existing_secret = getattr(oauth, 'client_secret', None) or getattr(oauth, 'clientSecret', None)
-                                        if existing_secret:
-                                            http_params['http_oauth_client_secret'] = existing_secret
+                                        token_ep = getattr(oauth, 'access_token_endpoint', None) or getattr(oauth, 'accessTokenEndpoint', None)
+                                        if token_ep:
+                                            existing_url = getattr(token_ep, 'url', None)
+                                            if existing_url:
+                                                http_params['http_oauth_token_url'] = existing_url
+                                    if 'http_oauth2_authorization_token_url' not in http_params:
+                                        auth_ep = getattr(oauth, 'authorization_token_endpoint', None) or getattr(oauth, 'authorizationTokenEndpoint', None)
+                                        if auth_ep:
+                                            existing_url = getattr(auth_ep, 'url', None)
+                                            if existing_url:
+                                                http_params['http_oauth2_authorization_token_url'] = existing_url
+                                    creds = getattr(oauth, 'credentials', None)
+                                    if creds:
+                                        if 'http_oauth_client_id' not in http_params:
+                                            existing_val = getattr(creds, 'client_id', None) or getattr(creds, 'clientId', None)
+                                            if existing_val:
+                                                http_params['http_oauth_client_id'] = existing_val
+                                        if 'http_oauth_client_secret' not in http_params:
+                                            existing_val = getattr(creds, 'client_secret', None) or getattr(creds, 'clientSecret', None)
+                                            if existing_val:
+                                                http_params['http_oauth_client_secret'] = existing_val
+                                        if 'http_oauth2_access_token' not in http_params:
+                                            existing_val = getattr(creds, 'access_token', None) or getattr(creds, 'accessToken', None)
+                                            if existing_val:
+                                                http_params['http_oauth2_access_token'] = existing_val
+                                        if 'http_oauth2_use_refresh_token' not in http_params:
+                                            existing_val = getattr(creds, 'use_refresh_token', None) or getattr(creds, 'useRefreshToken', None)
+                                            if existing_val is not None:
+                                                http_params['http_oauth2_use_refresh_token'] = str(existing_val).lower()
                                     if 'http_oauth_scope' not in http_params:
                                         existing_scope = getattr(oauth, 'scope', None)
                                         if existing_scope:
                                             http_params['http_oauth_scope'] = existing_scope
+                                    if 'http_oauth_grant_type' not in http_params:
+                                        existing_grant = getattr(oauth, 'grant_type', None) or getattr(oauth, 'grantType', None)
+                                        if existing_grant:
+                                            http_params['http_oauth_grant_type'] = existing_grant
+                            # Preserve Listen options
+                            existing_listen = getattr(existing_http, 'http_listen_options', None) or getattr(existing_http, 'HTTPListenOptions', None)
+                            if existing_listen:
+                                if 'http_listen_mime_passthrough' not in http_params:
+                                    existing_val = getattr(existing_listen, 'mime_passthrough', None) or getattr(existing_listen, 'mimePassthrough', None)
+                                    if existing_val is not None:
+                                        http_params['http_listen_mime_passthrough'] = str(existing_val).lower()
+                                if 'http_listen_object_name' not in http_params:
+                                    existing_val = getattr(existing_listen, 'object_name', None) or getattr(existing_listen, 'objectName', None)
+                                    if existing_val:
+                                        http_params['http_listen_object_name'] = existing_val
+                                if 'http_listen_operation_type' not in http_params:
+                                    existing_val = getattr(existing_listen, 'operation_type', None) or getattr(existing_listen, 'operationType', None)
+                                    if existing_val:
+                                        http_params['http_listen_operation_type'] = existing_val
+                                if 'http_listen_password' not in http_params:
+                                    existing_val = getattr(existing_listen, 'password', None)
+                                    if existing_val:
+                                        http_params['http_listen_password'] = existing_val
+                                if 'http_listen_use_default' not in http_params:
+                                    existing_val = getattr(existing_listen, 'use_default', None) or getattr(existing_listen, 'useDefault', None)
+                                    if existing_val is not None:
+                                        http_params['http_listen_use_default'] = str(existing_val).lower()
+                                if 'http_listen_username' not in http_params:
+                                    existing_val = getattr(existing_listen, 'user_name', None) or getattr(existing_listen, 'userName', None)
+                                    if existing_val:
+                                        http_params['http_listen_username'] = existing_val
+                            # Preserve Send options headers/path elements
+                            existing_send = getattr(existing_http, 'http_send_options', None) or getattr(existing_http, 'HTTPSendOptions', None)
+                            if existing_send:
+                                import json as _json
+                                if 'http_request_headers' not in http_params:
+                                    req_hdrs = getattr(existing_send, 'request_headers', None) or getattr(existing_send, 'requestHeaders', None)
+                                    if req_hdrs:
+                                        hdr_list = getattr(req_hdrs, 'header', None)
+                                        if hdr_list:
+                                            try:
+                                                http_params['http_request_headers'] = _json.dumps(hdr_list)
+                                            except (TypeError, ValueError):
+                                                pass
+                                if 'http_response_header_mapping' not in http_params:
+                                    resp_hdrs = getattr(existing_send, 'response_header_mapping', None) or getattr(existing_send, 'responseHeaderMapping', None)
+                                    if resp_hdrs:
+                                        hdr_list = getattr(resp_hdrs, 'header', None)
+                                        if hdr_list:
+                                            try:
+                                                http_params['http_response_header_mapping'] = _json.dumps(hdr_list)
+                                            except (TypeError, ValueError):
+                                                pass
+                                if 'http_reflect_headers' not in http_params:
+                                    reflect = getattr(existing_send, 'reflect_headers', None) or getattr(existing_send, 'reflectHeaders', None)
+                                    if reflect:
+                                        hdr_list = getattr(reflect, 'header', None)
+                                        if hdr_list:
+                                            try:
+                                                http_params['http_reflect_headers'] = _json.dumps(hdr_list)
+                                            except (TypeError, ValueError):
+                                                pass
+                                if 'http_path_elements' not in http_params:
+                                    path_elems = getattr(existing_send, 'path_elements', None) or getattr(existing_send, 'pathElements', None)
+                                    if path_elems:
+                                        elem_list = getattr(path_elems, 'element', None)
+                                        if elem_list:
+                                            try:
+                                                http_params['http_path_elements'] = _json.dumps(elem_list)
+                                            except (TypeError, ValueError):
+                                                pass
+                            # Preserve Get options (separate from send)
+                            existing_get = getattr(existing_http, 'http_get_options', None) or getattr(existing_http, 'HTTPGetOptions', None)
+                            if existing_get:
+                                if 'http_get_method_type' not in http_params:
+                                    existing_val = getattr(existing_get, 'method_type', None) or getattr(existing_get, 'methodType', None)
+                                    if existing_val:
+                                        http_params['http_get_method_type'] = existing_val
+                                if 'http_get_content_type' not in http_params:
+                                    existing_val = getattr(existing_get, 'data_content_type', None) or getattr(existing_get, 'dataContentType', None)
+                                    if existing_val:
+                                        http_params['http_get_content_type'] = existing_val
+                                if 'http_get_follow_redirects' not in http_params:
+                                    existing_val = getattr(existing_get, 'follow_redirects', None) or getattr(existing_get, 'followRedirects', None)
+                                    if existing_val is not None:
+                                        http_params['http_get_follow_redirects'] = str(existing_val).lower()
+                                if 'http_get_return_errors' not in http_params:
+                                    existing_val = getattr(existing_get, 'return_errors', None) or getattr(existing_get, 'returnErrors', None)
+                                    if existing_val is not None:
+                                        http_params['http_get_return_errors'] = str(existing_val).lower()
+                                if 'http_get_request_profile' not in http_params:
+                                    existing_val = getattr(existing_get, 'request_profile', None) or getattr(existing_get, 'requestProfile', None)
+                                    if existing_val:
+                                        http_params['http_get_request_profile'] = existing_val
+                                if 'http_get_request_profile_type' not in http_params:
+                                    existing_val = getattr(existing_get, 'request_profile_type', None) or getattr(existing_get, 'requestProfileType', None)
+                                    if existing_val:
+                                        http_params['http_get_request_profile_type'] = existing_val
+                                if 'http_get_response_profile' not in http_params:
+                                    existing_val = getattr(existing_get, 'response_profile', None) or getattr(existing_get, 'responseProfile', None)
+                                    if existing_val:
+                                        http_params['http_get_response_profile'] = existing_val
+                                if 'http_get_response_profile_type' not in http_params:
+                                    existing_val = getattr(existing_get, 'response_profile_type', None) or getattr(existing_get, 'responseProfileType', None)
+                                    if existing_val:
+                                        http_params['http_get_response_profile_type'] = existing_val
                     http_opts = build_http_communication_options(**http_params)
                     if http_opts:
                         comm_dict["HTTPCommunicationOptions"] = http_opts
