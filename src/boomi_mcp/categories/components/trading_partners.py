@@ -493,26 +493,35 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     http_info["response_profile"] = getattr(send_opts, 'response_profile', None) or getattr(send_opts, 'responseProfile', None)
                     http_info["response_profile_type"] = getattr(send_opts, 'response_profile_type', None) or getattr(send_opts, 'responseProfileType', None)
                     # Extract headers/path elements from send options
+                    # SDK returns model objects; convert to dicts for clean output
+                    def _header_to_dict(h):
+                        return {
+                            "headerFieldName": getattr(h, 'header_field_name', None) or getattr(h, 'headerFieldName', None),
+                            "targetPropertyName": getattr(h, 'target_property_name', None) or getattr(h, 'targetPropertyName', None)
+                        }
+                    def _element_to_dict(e):
+                        return {"name": getattr(e, 'name', None)}
+
                     req_headers = getattr(send_opts, 'request_headers', None) or getattr(send_opts, 'requestHeaders', None)
                     if req_headers:
                         header_list = getattr(req_headers, 'header', None)
                         if header_list:
-                            http_info["request_headers"] = header_list
+                            http_info["request_headers"] = [_header_to_dict(h) for h in header_list]
                     resp_header_map = getattr(send_opts, 'response_header_mapping', None) or getattr(send_opts, 'responseHeaderMapping', None)
                     if resp_header_map:
                         header_list = getattr(resp_header_map, 'header', None)
                         if header_list:
-                            http_info["response_header_mapping"] = header_list
+                            http_info["response_header_mapping"] = [_header_to_dict(h) for h in header_list]
                     reflect_hdrs = getattr(send_opts, 'reflect_headers', None) or getattr(send_opts, 'reflectHeaders', None)
                     if reflect_hdrs:
-                        header_list = getattr(reflect_hdrs, 'header', None)
-                        if header_list:
-                            http_info["reflect_headers"] = header_list
+                        elem_list = getattr(reflect_hdrs, 'element', None)
+                        if elem_list:
+                            http_info["reflect_headers"] = [_element_to_dict(e) for e in elem_list]
                     path_elems = getattr(send_opts, 'path_elements', None) or getattr(send_opts, 'pathElements', None)
                     if path_elems:
                         elem_list = getattr(path_elems, 'element', None)
                         if elem_list:
-                            http_info["path_elements"] = elem_list
+                            http_info["path_elements"] = [_element_to_dict(e) for e in elem_list]
                 # Extract HTTP get options (only if different from send)
                 get_opts = getattr(http_opts, 'http_get_options', None) or getattr(http_opts, 'HTTPGetOptions', None)
                 if get_opts:
@@ -835,7 +844,7 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
 
 
 # HTTP fields that cause 400 errors when sent in UPDATE payloads (create-only)
-HTTP_UPDATE_DENYLIST = {'http_return_responses', 'http_return_errors'}
+HTTP_UPDATE_DENYLIST = {'http_return_responses', 'http_return_errors', 'http_request_headers'}
 
 
 def update_trading_partner(boomi_client, profile: str, component_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:

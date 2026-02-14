@@ -672,14 +672,18 @@ def build_http_communication_options(**kwargs):
         send_options['responseProfileType'] = response_profile_type.upper()
 
     # Add headers/path elements to send options
-    if parsed_request_headers:
-        send_options['requestHeaders'] = {'header': parsed_request_headers}
+    # Boomi API requires @type annotations on nested header/element objects
+    # NOTE: requestHeaders causes 400 on both create and update — Boomi API doesn't accept it
+    # at the trading partner level. The param is kept in the signature for GET extraction only.
     if parsed_response_header_mapping:
-        send_options['responseHeaderMapping'] = {'header': parsed_response_header_mapping}
+        typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
+        send_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
     if parsed_reflect_headers:
-        send_options['reflectHeaders'] = {'header': parsed_reflect_headers}
+        typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_reflect_headers]
+        send_options['reflectHeaders'] = {'@type': 'HttpReflectHeaders', 'element': typed_elements}
     if parsed_path_elements:
-        send_options['pathElements'] = {'element': parsed_path_elements}
+        typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_path_elements]
+        send_options['pathElements'] = {'@type': 'HttpPathElements', 'element': typed_elements}
 
     if send_options:
         send_options['useDefaultOptions'] = False
@@ -709,15 +713,17 @@ def build_http_communication_options(**kwargs):
             get_options['responseProfile'] = get_response_profile
         if get_response_profile_type:
             get_options['responseProfileType'] = get_response_profile_type.upper()
-        # Copy headers/path elements to get options too
-        if parsed_request_headers:
-            get_options['requestHeaders'] = {'header': parsed_request_headers}
+        # Copy headers/path elements to get options too (with @type annotations)
+        # NOTE: requestHeaders not included — Boomi API rejects it at trading partner level
         if parsed_response_header_mapping:
-            get_options['responseHeaderMapping'] = {'header': parsed_response_header_mapping}
+            typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
+            get_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
         if parsed_reflect_headers:
-            get_options['reflectHeaders'] = {'header': parsed_reflect_headers}
+            typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_reflect_headers]
+            get_options['reflectHeaders'] = {'@type': 'HttpReflectHeaders', 'element': typed_elements}
         if parsed_path_elements:
-            get_options['pathElements'] = {'element': parsed_path_elements}
+            typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_path_elements]
+            get_options['pathElements'] = {'@type': 'HttpPathElements', 'element': typed_elements}
         if get_options:
             get_options['useDefaultOptions'] = False
             result['HTTPGetOptions'] = get_options
