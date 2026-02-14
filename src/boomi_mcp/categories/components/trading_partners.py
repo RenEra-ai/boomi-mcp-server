@@ -1056,10 +1056,6 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_sync_mdn = getattr(existing_send_opts, 'synchronous_mdn', None) or getattr(existing_send_opts, 'synchronousMdn', None)
                                     if existing_sync_mdn is not None:
                                         as2_params['as2_synchronous_mdn'] = str(existing_sync_mdn).lower()
-                                if 'as2_fail_on_negative_mdn' not in as2_params:
-                                    existing_fail_mdn = getattr(existing_send_opts, 'fail_on_negative_mdn', None) or getattr(existing_send_opts, 'failOnNegativeMdn', None)
-                                    if existing_fail_mdn is not None:
-                                        as2_params['as2_fail_on_negative_mdn'] = str(existing_fail_mdn).lower()
                                 # Attachments
                                 if 'as2_multiple_attachments' not in as2_params:
                                     existing_multi = getattr(existing_send_opts, 'multiple_attachments', None) or getattr(existing_send_opts, 'multipleAttachments', None)

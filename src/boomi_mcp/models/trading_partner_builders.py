@@ -401,6 +401,7 @@ def build_http_communication_options(**kwargs):
         http_oauth_client_id: OAuth2 client ID
         http_oauth_client_secret: OAuth2 client secret
         http_oauth_scope: OAuth2 scope
+        http_oauth_grant_type: OAuth2 grant type - client_credentials, password, code (default: client_credentials)
 
     Returns dict (not SDK model) - API accepts minimal structure
     """
@@ -432,6 +433,7 @@ def build_http_communication_options(**kwargs):
     oauth_client_id = kwargs.get('http_oauth_client_id')
     oauth_client_secret = kwargs.get('http_oauth_client_secret')
     oauth_scope = kwargs.get('http_oauth_scope')
+    oauth_grant_type = kwargs.get('http_oauth_grant_type')
 
     # Build HTTP settings
     http_settings = {
@@ -472,8 +474,7 @@ def build_http_communication_options(**kwargs):
                 oauth2_settings['credentials']['clientSecret'] = oauth_client_secret
         if oauth_scope:
             oauth2_settings['scope'] = oauth_scope
-        # Default to client_credentials grant type
-        oauth2_settings['grantType'] = 'client_credentials'
+        oauth2_settings['grantType'] = oauth_grant_type or 'client_credentials'
         if oauth2_settings:
             http_settings['HTTPOAuth2Settings'] = oauth2_settings
 
@@ -593,6 +594,12 @@ def build_as2_communication_options(**kwargs):
     mdn_client_ssl_cert = kwargs.get('as2_mdn_client_ssl_cert')
     mdn_ssl_cert = kwargs.get('as2_mdn_ssl_cert')
 
+    # Certificate aliases
+    client_ssl_alias = kwargs.get('as2_client_ssl_alias')
+    encrypt_alias = kwargs.get('as2_encrypt_alias')
+    sign_alias = kwargs.get('as2_sign_alias')
+    mdn_alias = kwargs.get('as2_mdn_alias')
+
     # Partner info
     as2_identifier = kwargs.get('as2_identifier')
     partner_identifier = kwargs.get('as2_partner_identifier')
@@ -608,6 +615,8 @@ def build_as2_communication_options(**kwargs):
 
     if verify_hostname is not None:
         send_settings['verifyHostname'] = str(verify_hostname).lower() == 'true'
+    if client_ssl_alias:
+        send_settings['clientSSLCertificate'] = {'alias': client_ssl_alias}
 
     # Add BASIC auth if specified (SDK maps auth_settings to AuthSettings)
     if auth_type and auth_type.upper() == 'BASIC' and (username or password):
@@ -683,6 +692,12 @@ def build_as2_communication_options(**kwargs):
         partner_info['messagesToCheckForDuplicates'] = int(duplicate_check_count)
     if legacy_smime is not None:
         partner_info['enabledLegacySMIME'] = str(legacy_smime).lower() == 'true'
+    if encrypt_alias:
+        partner_info['encryptionPublicCertificate'] = {'alias': encrypt_alias}
+    if sign_alias:
+        partner_info['signingPublicCertificate'] = {'alias': sign_alias}
+    if mdn_alias:
+        partner_info['mdnSignaturePublicCertificate'] = {'alias': mdn_alias}
 
     # Build AS2SendOptions
     # IMPORTANT: AS2MDNOptions and AS2MessageOptions are REQUIRED by the API
@@ -807,6 +822,10 @@ def build_oftp_communication_options(**kwargs):
         oftp_client_ssl_alias: Client SSL certificate alias
         oftp_sfid_sign: Sign files (true/false)
         oftp_sfid_encrypt: Encrypt files (true/false)
+        oftp_encrypting_cert: Encrypting certificate alias
+        oftp_session_challenge_cert: Session challenge certificate alias
+        oftp_verifying_eerp_cert: Verifying EERP certificate alias
+        oftp_verifying_signature_cert: Verifying signature certificate alias
 
     Returns dict (not SDK model) - API accepts minimal structure
     """
@@ -826,6 +845,10 @@ def build_oftp_communication_options(**kwargs):
     client_ssl_alias = kwargs.get('oftp_client_ssl_alias')
     sfid_sign = kwargs.get('oftp_sfid_sign')
     sfid_encrypt = kwargs.get('oftp_sfid_encrypt')
+    encrypting_cert = kwargs.get('oftp_encrypting_cert')
+    session_challenge_cert = kwargs.get('oftp_session_challenge_cert')
+    verifying_eerp_cert = kwargs.get('oftp_verifying_eerp_cert')
+    verifying_signature_cert = kwargs.get('oftp_verifying_signature_cert')
 
     # Build my partner info (ODETTE partner settings)
     my_partner_info = {'@type': 'OFTPPartnerInfo'}
@@ -839,6 +862,14 @@ def build_oftp_communication_options(**kwargs):
         my_partner_info['sfidsign'] = str(sfid_sign).lower() == 'true'
     if sfid_encrypt is not None:
         my_partner_info['sfidsec-encrypt'] = str(sfid_encrypt).lower() == 'true'
+    if encrypting_cert:
+        my_partner_info['encrypting-certificate'] = encrypting_cert
+    if session_challenge_cert:
+        my_partner_info['session-challenge-certificate'] = session_challenge_cert
+    if verifying_eerp_cert:
+        my_partner_info['verifying-eerp-certificate'] = verifying_eerp_cert
+    if verifying_signature_cert:
+        my_partner_info['verifying-signature-certificate'] = verifying_signature_cert
 
     # Build defaultOFTPConnectionSettings - Boomi stores values here
     default_settings = {
