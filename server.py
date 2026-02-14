@@ -529,7 +529,6 @@ if manage_trading_partner_action:
         as2_mdn_signed: str = None,
         as2_mdn_digest_alg: str = None,
         as2_synchronous_mdn: str = None,
-        as2_fail_on_negative_mdn: str = None,
         as2_subject: str = None,
         as2_multiple_attachments: str = None,
         as2_max_document_count: int = None,
@@ -715,7 +714,6 @@ if manage_trading_partner_action:
             as2_mdn_signed: Signed MDN - "true" or "false"
             as2_mdn_digest_alg: MDN digest algorithm - SHA1, SHA224, SHA256, SHA384, SHA512
             as2_synchronous_mdn: Synchronous MDN - "true" or "false"
-            as2_fail_on_negative_mdn: Fail on negative MDN - "true" or "false"
             as2_subject: AS2 message subject header
             as2_multiple_attachments: Enable multiple attachments - "true" or "false"
             as2_max_document_count: Maximum documents per message
@@ -1008,8 +1006,6 @@ if manage_trading_partner_action:
                     request_data["as2_data_content_type"] = as2_data_content_type
                 if as2_mdn_digest_alg:
                     request_data["as2_mdn_digest_alg"] = as2_mdn_digest_alg
-                if as2_fail_on_negative_mdn:
-                    request_data["as2_fail_on_negative_mdn"] = as2_fail_on_negative_mdn
                 if as2_subject:
                     request_data["as2_subject"] = as2_subject
                 if as2_multiple_attachments:
@@ -1389,8 +1385,6 @@ if manage_trading_partner_action:
                     updates["as2_mdn_digest_alg"] = as2_mdn_digest_alg
                 if as2_synchronous_mdn:
                     updates["as2_synchronous_mdn"] = as2_synchronous_mdn
-                if as2_fail_on_negative_mdn:
-                    updates["as2_fail_on_negative_mdn"] = as2_fail_on_negative_mdn
                 if as2_subject:
                     updates["as2_subject"] = as2_subject
                 if as2_multiple_attachments:
