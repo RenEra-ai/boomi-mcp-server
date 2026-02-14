@@ -16,8 +16,9 @@ This MCP server provides secure Boomi API access for Claude Code with:
 
 ## ⚠️ Development Rules (READ FIRST)
 
-### Rule 1: NEVER Develop Directly in Main
-- All new features MUST be developed in dev branch first
+### Rule 1: NEVER Modify Main Directly
+- All changes MUST be made in dev branch first, then merged to main
+- Never commit or push directly to main — only merge from dev
 - Test locally using `server_local.py` before any merge
 - Main branch is for production-ready, tested code only
 

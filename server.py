@@ -577,10 +577,8 @@ if manage_trading_partner_action:
         edifact_syntax_version: str = None,
         edifact_test_indicator: str = None,
         # HL7 standard fields
-        hl7_sending_application: str = None,
-        hl7_sending_facility: str = None,
-        hl7_receiving_application: str = None,
-        hl7_receiving_facility: str = None,
+        hl7_application: str = None,
+        hl7_facility: str = None,
         # RosettaNet standard fields
         rosettanet_partner_id: str = None,
         rosettanet_partner_location: str = None,
@@ -1096,14 +1094,10 @@ if manage_trading_partner_action:
                     request_data["edifact_test_indicator"] = edifact_test_indicator
 
                 # Pass HL7 fields
-                if hl7_sending_application:
-                    request_data["hl7_sending_application"] = hl7_sending_application
-                if hl7_sending_facility:
-                    request_data["hl7_sending_facility"] = hl7_sending_facility
-                if hl7_receiving_application:
-                    request_data["hl7_receiving_application"] = hl7_receiving_application
-                if hl7_receiving_facility:
-                    request_data["hl7_receiving_facility"] = hl7_receiving_facility
+                if hl7_application:
+                    request_data["hl7_application"] = hl7_application
+                if hl7_facility:
+                    request_data["hl7_facility"] = hl7_facility
 
                 # Pass RosettaNet fields
                 if rosettanet_partner_id:
@@ -1471,14 +1465,10 @@ if manage_trading_partner_action:
                     updates["edifact_test_indicator"] = edifact_test_indicator
 
                 # HL7 fields
-                if hl7_sending_application:
-                    updates["hl7_sending_application"] = hl7_sending_application
-                if hl7_sending_facility:
-                    updates["hl7_sending_facility"] = hl7_sending_facility
-                if hl7_receiving_application:
-                    updates["hl7_receiving_application"] = hl7_receiving_application
-                if hl7_receiving_facility:
-                    updates["hl7_receiving_facility"] = hl7_receiving_facility
+                if hl7_application:
+                    updates["hl7_application"] = hl7_application
+                if hl7_facility:
+                    updates["hl7_facility"] = hl7_facility
 
                 # RosettaNet fields
                 if rosettanet_partner_id:
