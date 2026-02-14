@@ -1110,13 +1110,15 @@ def build_hl7_partner_info(**kwargs):
         return None
 
     # Build MSH control info with HdType objects
+    # Boomi stores one Application + Facility per partner component.
+    # Use sending fields first, fall back to receiving fields.
     msh_kwargs = {}
-    if sending_app:
-        msh_kwargs['application'] = HdType(namespace_id=sending_app)
-    if sending_fac:
-        msh_kwargs['facility'] = HdType(namespace_id=sending_fac)
-    # Note: receiving_app and receiving_fac are for the partner (not our MSH)
-    # They would be used when building "my company" trading partner
+    app = sending_app or receiving_app
+    fac = sending_fac or receiving_fac
+    if app:
+        msh_kwargs['application'] = HdType(namespace_id=app)
+    if fac:
+        msh_kwargs['facility'] = HdType(namespace_id=fac)
 
     if not msh_kwargs:
         return None
