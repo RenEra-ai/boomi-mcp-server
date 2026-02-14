@@ -1301,7 +1301,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_dir:
                                         sftp_params['sftp_remote_directory'] = existing_dir
                                 if 'sftp_get_action' not in sftp_params:
-                                    existing_action = getattr(existing_get_opts, 'sftp_action', None) or getattr(existing_get_opts, 'sftpAction', None)
+                                    existing_action = getattr(existing_get_opts, 'ftp_action', None) or getattr(existing_get_opts, 'ftpAction', None)
                                     if existing_action:
                                         sftp_params['sftp_get_action'] = existing_action
                                 if 'sftp_max_file_count' not in sftp_params:
@@ -1325,7 +1325,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                             existing_send_opts = getattr(existing_sftp, 'sftp_send_options', None)
                             if existing_send_opts:
                                 if 'sftp_send_action' not in sftp_params:
-                                    existing_action = getattr(existing_send_opts, 'sftp_action', None) or getattr(existing_send_opts, 'sftpAction', None)
+                                    existing_action = getattr(existing_send_opts, 'ftp_action', None) or getattr(existing_send_opts, 'ftpAction', None)
                                     if existing_action:
                                         sftp_params['sftp_send_action'] = existing_action
                     sftp_opts = build_sftp_communication_options(**sftp_params)
