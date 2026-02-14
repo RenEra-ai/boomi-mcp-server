@@ -760,6 +760,10 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
         }
 
 
+# HTTP fields that cause 400 errors when sent in UPDATE payloads (create-only)
+HTTP_UPDATE_DENYLIST = {'http_return_responses', 'http_return_errors'}
+
+
 def update_trading_partner(boomi_client, profile: str, component_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
     """
     Update an existing trading partner component using JSON-based TradingPartnerComponent API.
@@ -947,6 +951,13 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                 # Extract flat params by prefix
                 as2_params = {k: v for k, v in updates.items() if k.startswith('as2_')}
                 http_params = {k: v for k, v in updates.items() if k.startswith('http_')}
+                # Strip create-only HTTP fields to prevent Boomi 400 errors
+                for field in HTTP_UPDATE_DENYLIST:
+                    if field in http_params:
+                        del http_params[field]
+                        warnings.append(
+                            f"{field} is not supported on update and was ignored to prevent Boomi 400 error"
+                        )
                 sftp_params = {k: v for k, v in updates.items() if k.startswith('sftp_')}
                 ftp_params = {k: v for k, v in updates.items() if k.startswith('ftp_')}
                 disk_params = {k: v for k, v in updates.items() if k.startswith('disk_')}
@@ -1161,14 +1172,8 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_follow = getattr(existing_settings, 'follow_redirects', None) or getattr(existing_settings, 'followRedirects', None)
                                     if existing_follow is not None:
                                         http_params['http_follow_redirects'] = str(existing_follow).lower()
-                                if 'http_return_errors' not in http_params:
-                                    existing_errors = getattr(existing_settings, 'return_error_response_payload', None)
-                                    if existing_errors is not None:
-                                        http_params['http_return_errors'] = str(existing_errors).lower()
-                                if 'http_return_responses' not in http_params:
-                                    existing_responses = getattr(existing_settings, 'return_response_payload', None)
-                                    if existing_responses is not None:
-                                        http_params['http_return_responses'] = str(existing_responses).lower()
+                                # NOTE: http_return_errors and http_return_responses are
+                                # deliberately NOT preserved here — they cause 400 on update
                                 if 'http_cookie_scope' not in http_params:
                                     existing_cookie = getattr(existing_settings, 'cookie_scope', None) or getattr(existing_settings, 'cookieScope', None)
                                     if existing_cookie:
