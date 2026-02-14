@@ -1092,29 +1092,20 @@ def build_hl7_partner_info(**kwargs):
     """Build HL7-specific partner information.
 
     Args:
-        hl7_sending_application: Sending application name (MSH-3)
-        hl7_sending_facility: Sending facility name (MSH-4)
-        hl7_receiving_application: Receiving application name (MSH-5)
-        hl7_receiving_facility: Receiving facility name (MSH-6)
+        hl7_application: Application name (MSH Application)
+        hl7_facility: Facility name (MSH Facility)
 
     Structure: Hl7PartnerInfo → Hl7ControlInfo → MshControlInfo → HdType
     """
     from boomi.models import Hl7PartnerInfo, Hl7ControlInfo, MshControlInfo, HdType
 
-    sending_app = kwargs.get('hl7_sending_application')
-    sending_fac = kwargs.get('hl7_sending_facility')
-    receiving_app = kwargs.get('hl7_receiving_application')
-    receiving_fac = kwargs.get('hl7_receiving_facility')
+    app = kwargs.get('hl7_application')
+    fac = kwargs.get('hl7_facility')
 
-    if not any([sending_app, sending_fac, receiving_app, receiving_fac]):
+    if not any([app, fac]):
         return None
 
-    # Build MSH control info with HdType objects
-    # Boomi stores one Application + Facility per partner component.
-    # Use sending fields first, fall back to receiving fields.
     msh_kwargs = {}
-    app = sending_app or receiving_app
-    fac = sending_fac or receiving_fac
     if app:
         msh_kwargs['application'] = HdType(namespace_id=app)
     if fac:

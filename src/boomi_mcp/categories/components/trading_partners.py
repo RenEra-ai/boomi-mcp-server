@@ -254,10 +254,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     if msh_ctrl:
                         app = getattr(msh_ctrl, 'application', None)
                         if app:
-                            partner_info["hl7_sending_application"] = getattr(app, 'namespace_id', None)
+                            partner_info["hl7_application"] = getattr(app, 'namespace_id', None)
                         fac = getattr(msh_ctrl, 'facility', None)
                         if fac:
-                            partner_info["hl7_sending_facility"] = getattr(fac, 'namespace_id', None)
+                            partner_info["hl7_facility"] = getattr(fac, 'namespace_id', None)
 
             # RosettaNet partner info
             rosettanet_info = getattr(info, 'rosetta_net_partner_info', None)
