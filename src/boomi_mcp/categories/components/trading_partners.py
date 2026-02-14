@@ -1709,13 +1709,20 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
 
         # Sanitize partner_info for Custom standard to prevent 400 errors
         # The API rejects empty CustomPartnerInfo structures on UPDATE
+        # The SDK returns {'@type': 'CustomPartnerInfo'} for empty custom partners
         existing_standard = getattr(existing_tp, 'standard', None)
         std_val = existing_standard.value if hasattr(existing_standard, 'value') else str(existing_standard) if existing_standard else None
         if std_val and std_val.lower() == 'custom':
             existing_pi = getattr(existing_tp, 'partner_info', None)
             if existing_pi:
                 custom_pi = getattr(existing_pi, 'custom_partner_info', None)
-                if custom_pi is None or custom_pi == {}:
+                # Empty custom partner info: None, {}, or just {'@type': 'CustomPartnerInfo'}
+                is_empty = (
+                    custom_pi is None
+                    or custom_pi == {}
+                    or (isinstance(custom_pi, dict) and set(custom_pi.keys()) <= {'@type'})
+                )
+                if is_empty:
                     existing_tp.partner_info = None
 
         # Fix BigInteger format in existing partner_communication (e.g., MLLP port)
