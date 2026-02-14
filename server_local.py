@@ -442,6 +442,7 @@ if manage_trading_partner_action:
         http_oauth_client_id: str = None,
         http_oauth_client_secret: str = None,
         http_oauth_scope: str = None,
+        http_oauth_grant_type: str = None,
         as2_authentication_type: str = None,
         as2_verify_hostname: str = None,
         as2_client_ssl_alias: str = None,
@@ -535,6 +536,10 @@ if manage_trading_partner_action:
         oftp_client_ssl_alias: str = None,
         oftp_sfid_sign: str = None,
         oftp_sfid_encrypt: str = None,
+        oftp_encrypting_cert: str = None,
+        oftp_session_challenge_cert: str = None,
+        oftp_verifying_eerp_cert: str = None,
+        oftp_verifying_signature_cert: str = None,
         # Organization linking
         organization_id: str = None
     ):
@@ -619,13 +624,17 @@ if manage_trading_partner_action:
             oftp_client_ssl_alias: Client SSL certificate alias
             oftp_sfid_sign: Sign files - "true" or "false"
             oftp_sfid_encrypt: Encrypt files - "true" or "false"
+            oftp_encrypting_cert: OFTP encrypting certificate alias
+            oftp_session_challenge_cert: OFTP session challenge certificate alias
+            oftp_verifying_eerp_cert: OFTP verifying EERP certificate alias
+            oftp_verifying_signature_cert: OFTP verifying signature certificate alias
             http_authentication_type: HTTP authentication type - NONE, BASIC, OAUTH2
             http_connect_timeout: HTTP connection timeout in ms
             http_read_timeout: HTTP read timeout in ms
             http_username: HTTP username
             http_client_auth: Enable client SSL authentication - "true" or "false"
             http_trust_server_cert: Trust server certificate - "true" or "false"
-            http_method_type: HTTP method - GET, POST, PUT, DELETE, PATCH
+            http_method_type: HTTP method - GET, POST, PUT, DELETE
             http_data_content_type: HTTP content type
             http_follow_redirects: Follow redirects - "true" or "false"
             http_return_errors: Return errors in response - "true" or "false"
@@ -641,6 +650,7 @@ if manage_trading_partner_action:
             http_oauth_client_id: OAuth2 client ID
             http_oauth_client_secret: OAuth2 client secret
             http_oauth_scope: OAuth2 scope
+            http_oauth_grant_type: OAuth2 grant type - client_credentials, password, code (default: client_credentials)
             as2_authentication_type: AS2 authentication type - NONE, BASIC
             as2_verify_hostname: Verify SSL hostname - "true" or "false"
             as2_client_ssl_alias: Client SSL certificate alias
@@ -651,12 +661,12 @@ if manage_trading_partner_action:
             as2_signed: Sign AS2 messages - "true" or "false"
             as2_encrypted: Encrypt AS2 messages - "true" or "false"
             as2_compressed: Compress AS2 messages - "true" or "false"
-            as2_encryption_algorithm: Encryption algorithm - tripledes, rc2, aes128, aes192, aes256
-            as2_signing_digest_alg: Signing digest algorithm - SHA1, SHA256, SHA384, SHA512
+            as2_encryption_algorithm: Encryption algorithm - na, tripledes, des, rc2-128, rc2-64, rc2-40, aes128, aes192, aes256
+            as2_signing_digest_alg: Signing digest algorithm - SHA1, SHA224, SHA256, SHA384, SHA512
             as2_data_content_type: AS2 content type - textplain, binary, edifact, edix12, applicationxml, textxml
             as2_request_mdn: Request MDN - "true" or "false"
             as2_mdn_signed: Signed MDN - "true" or "false"
-            as2_mdn_digest_alg: MDN digest algorithm - SHA1, SHA256, SHA384, SHA512
+            as2_mdn_digest_alg: MDN digest algorithm - SHA1, SHA224, SHA256, SHA384, SHA512
             as2_synchronous_mdn: Synchronous MDN - "true" or "false"
             as2_fail_on_negative_mdn: Fail on negative MDN - "true" or "false"
             as2_subject: AS2 message subject header
@@ -1029,6 +1039,8 @@ if manage_trading_partner_action:
                     request_data["http_oauth_client_secret"] = http_oauth_client_secret
                 if http_oauth_scope:
                     request_data["http_oauth_scope"] = http_oauth_scope
+                if http_oauth_grant_type:
+                    request_data["http_oauth_grant_type"] = http_oauth_grant_type
 
                 # Pass MLLP fields flat
                 if mllp_host:
@@ -1085,6 +1097,14 @@ if manage_trading_partner_action:
                     request_data["oftp_sfid_sign"] = oftp_sfid_sign
                 if oftp_sfid_encrypt:
                     request_data["oftp_sfid_encrypt"] = oftp_sfid_encrypt
+                if oftp_encrypting_cert:
+                    request_data["oftp_encrypting_cert"] = oftp_encrypting_cert
+                if oftp_session_challenge_cert:
+                    request_data["oftp_session_challenge_cert"] = oftp_session_challenge_cert
+                if oftp_verifying_eerp_cert:
+                    request_data["oftp_verifying_eerp_cert"] = oftp_verifying_eerp_cert
+                if oftp_verifying_signature_cert:
+                    request_data["oftp_verifying_signature_cert"] = oftp_verifying_signature_cert
 
                 # Organization linking
                 if organization_id:
@@ -1278,6 +1298,8 @@ if manage_trading_partner_action:
                     updates["http_oauth_client_secret"] = http_oauth_client_secret
                 if http_oauth_scope:
                     updates["http_oauth_scope"] = http_oauth_scope
+                if http_oauth_grant_type:
+                    updates["http_oauth_grant_type"] = http_oauth_grant_type
 
                 # AS2 protocol fields (flat)
                 if as2_url:
@@ -1406,6 +1428,14 @@ if manage_trading_partner_action:
                     updates["oftp_sfid_sign"] = oftp_sfid_sign
                 if oftp_sfid_encrypt:
                     updates["oftp_sfid_encrypt"] = oftp_sfid_encrypt
+                if oftp_encrypting_cert:
+                    updates["oftp_encrypting_cert"] = oftp_encrypting_cert
+                if oftp_session_challenge_cert:
+                    updates["oftp_session_challenge_cert"] = oftp_session_challenge_cert
+                if oftp_verifying_eerp_cert:
+                    updates["oftp_verifying_eerp_cert"] = oftp_verifying_eerp_cert
+                if oftp_verifying_signature_cert:
+                    updates["oftp_verifying_signature_cert"] = oftp_verifying_signature_cert
 
                 # EDIFACT standard fields
                 if edifact_interchange_id:
