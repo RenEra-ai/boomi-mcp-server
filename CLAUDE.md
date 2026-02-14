@@ -161,11 +161,15 @@ Checking manage_trading_partner...
 
 ### Files That Should ONLY Be in Dev Branch
 
-These local development files should **NEVER** be in main:
+These files should **NEVER** be in main:
+- `CLAUDE.md` - Project instructions (dev-only, not needed in production)
 - `server_local.py` - Local dev server without OAuth
 - `run_local.sh` - Script to run local server
 - `setup_local.sh` - Local environment setup
 - `src/boomi_mcp/local_secrets.py` - Local file-based credential storage
+- `scripts/verify_sync.py` - Sync verification (requires both server files, dev-only)
+- `MCP_TOOL_DESIGN.md` - Dev design documentation
+- `docs/` - Dev documentation (architecture, XML reference, gap analysis)
 
 ### Selective Merge Process
 
