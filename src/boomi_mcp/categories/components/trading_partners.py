@@ -448,11 +448,14 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     oauth1_settings = getattr(settings, 'httpo_auth_settings', None) or getattr(settings, 'HTTPOAuthSettings', None)
                     if oauth1_settings:
                         http_info["oauth1_consumer_key"] = getattr(oauth1_settings, 'consumer_key', None) or getattr(oauth1_settings, 'consumerKey', None)
+                        http_info["oauth1_consumer_secret"] = getattr(oauth1_settings, 'consumer_secret', None) or getattr(oauth1_settings, 'consumerSecret', None)
+                        http_info["oauth1_access_token"] = getattr(oauth1_settings, 'access_token', None) or getattr(oauth1_settings, 'accessToken', None)
+                        http_info["oauth1_token_secret"] = getattr(oauth1_settings, 'token_secret', None) or getattr(oauth1_settings, 'tokenSecret', None)
                         http_info["oauth1_realm"] = getattr(oauth1_settings, 'realm', None)
                         http_info["oauth1_signature_method"] = getattr(oauth1_settings, 'signature_method', None) or getattr(oauth1_settings, 'signatureMethod', None)
-                        http_info["oauth1_request_token_url"] = getattr(oauth1_settings, 'request_token_url', None) or getattr(oauth1_settings, 'requestTokenUrl', None)
-                        http_info["oauth1_access_token_url"] = getattr(oauth1_settings, 'access_token_url', None) or getattr(oauth1_settings, 'accessTokenUrl', None)
-                        http_info["oauth1_authorization_url"] = getattr(oauth1_settings, 'authorization_url', None) or getattr(oauth1_settings, 'authorizationUrl', None)
+                        http_info["oauth1_request_token_url"] = getattr(oauth1_settings, 'request_token_url', None) or getattr(oauth1_settings, 'requestTokenURL', None)
+                        http_info["oauth1_access_token_url"] = getattr(oauth1_settings, 'access_token_url', None) or getattr(oauth1_settings, 'accessTokenURL', None)
+                        http_info["oauth1_authorization_url"] = getattr(oauth1_settings, 'authorization_url', None) or getattr(oauth1_settings, 'authorizationURL', None)
                         http_info["oauth1_suppress_blank_access_token"] = getattr(oauth1_settings, 'suppress_blank_access_token', None) or getattr(oauth1_settings, 'suppressBlankAccessToken', None)
                     # Extract HTTP OAuth2 settings
                     oauth2_settings = getattr(settings, 'http_oauth2_settings', None) or getattr(settings, 'HTTPOAuth2Settings', None)
@@ -473,6 +476,13 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                             http_info["oauth_client_id"] = getattr(credentials, 'client_id', None) or getattr(credentials, 'clientId', None)
                             http_info["oauth2_access_token"] = getattr(credentials, 'access_token', None) or getattr(credentials, 'accessToken', None)
                             http_info["oauth2_use_refresh_token"] = getattr(credentials, 'use_refresh_token', None) or getattr(credentials, 'useRefreshToken', None)
+                        # Extract OAuth2 parameter sets
+                        access_params = getattr(oauth2_settings, 'access_token_parameters', None) or getattr(oauth2_settings, 'accessTokenParameters', None)
+                        if access_params:
+                            http_info["oauth2_access_token_params"] = access_params
+                        auth_params = getattr(oauth2_settings, 'authorization_parameters', None) or getattr(oauth2_settings, 'authorizationParameters', None)
+                        if auth_params:
+                            http_info["oauth2_authorization_params"] = auth_params
                     # Extract HTTP SSL options
                     httpssl_opts = getattr(settings, 'httpssl_options', None) or getattr(settings, 'HTTPSSLOptions', None)
                     if httpssl_opts:
@@ -522,39 +532,26 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         elem_list = getattr(path_elems, 'element', None)
                         if elem_list:
                             http_info["path_elements"] = [_element_to_dict(e) for e in elem_list]
-                # Extract HTTP get options (only if different from send)
+                # Extract HTTP get options
                 get_opts = getattr(http_opts, 'http_get_options', None) or getattr(http_opts, 'HTTPGetOptions', None)
                 if get_opts:
-                    get_method = getattr(get_opts, 'method_type', None) or getattr(get_opts, 'methodType', None)
-                    send_method = http_info.get("method_type")
-                    # Only report get options if they differ from send
-                    get_differs = False
-                    get_info = {}
-                    if get_method and get_method != send_method:
-                        get_info["get_method_type"] = get_method
-                        get_differs = True
-                    get_ct = getattr(get_opts, 'data_content_type', None) or getattr(get_opts, 'dataContentType', None)
-                    if get_ct and get_ct != http_info.get("data_content_type"):
-                        get_info["get_content_type"] = get_ct
-                        get_differs = True
-                    get_follow = getattr(get_opts, 'follow_redirects', None) or getattr(get_opts, 'followRedirects', None)
-                    if get_follow is not None and get_follow != http_info.get("follow_redirects"):
-                        get_info["get_follow_redirects"] = get_follow
-                        get_differs = True
-                    get_errors = getattr(get_opts, 'return_errors', None) or getattr(get_opts, 'returnErrors', None)
-                    if get_errors is not None and get_errors != http_info.get("return_errors"):
-                        get_info["get_return_errors"] = get_errors
-                        get_differs = True
-                    if get_differs:
-                        http_info.update(get_info)
+                    http_info["get_method_type"] = getattr(get_opts, 'method_type', None) or getattr(get_opts, 'methodType', None)
+                    http_info["get_content_type"] = getattr(get_opts, 'data_content_type', None) or getattr(get_opts, 'dataContentType', None)
+                    http_info["get_follow_redirects"] = getattr(get_opts, 'follow_redirects', None) or getattr(get_opts, 'followRedirects', None)
+                    http_info["get_return_errors"] = getattr(get_opts, 'return_errors', None) or getattr(get_opts, 'returnErrors', None)
+                    http_info["get_request_profile"] = getattr(get_opts, 'request_profile', None) or getattr(get_opts, 'requestProfile', None)
+                    http_info["get_request_profile_type"] = getattr(get_opts, 'request_profile_type', None) or getattr(get_opts, 'requestProfileType', None)
+                    http_info["get_response_profile"] = getattr(get_opts, 'response_profile', None) or getattr(get_opts, 'responseProfile', None)
+                    http_info["get_response_profile_type"] = getattr(get_opts, 'response_profile_type', None) or getattr(get_opts, 'responseProfileType', None)
                 # Extract HTTP listen options
                 listen_opts = getattr(http_opts, 'http_listen_options', None) or getattr(http_opts, 'HTTPListenOptions', None)
                 if listen_opts:
                     http_info["listen_mime_passthrough"] = getattr(listen_opts, 'mime_passthrough', None) or getattr(listen_opts, 'mimePassthrough', None)
                     http_info["listen_object_name"] = getattr(listen_opts, 'object_name', None) or getattr(listen_opts, 'objectName', None)
                     http_info["listen_operation_type"] = getattr(listen_opts, 'operation_type', None) or getattr(listen_opts, 'operationType', None)
-                    http_info["listen_use_default"] = getattr(listen_opts, 'use_default', None) or getattr(listen_opts, 'useDefault', None)
-                    http_info["listen_username"] = getattr(listen_opts, 'user_name', None) or getattr(listen_opts, 'userName', None)
+                    http_info["listen_password"] = getattr(listen_opts, 'password', None)
+                    http_info["listen_use_default"] = getattr(listen_opts, 'use_default_listen_options', None) or getattr(listen_opts, 'useDefaultListenOptions', None)
+                    http_info["listen_username"] = getattr(listen_opts, 'username', None)
                 # Filter out None values
                 http_info = {k: v for k, v in http_info.items() if v is not None}
                 communication_protocols.append(http_info)
