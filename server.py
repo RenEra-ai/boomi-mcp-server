@@ -458,12 +458,16 @@ if manage_trading_partner_action:
         ftp_file_to_move: str = None,
         ftp_move_to_directory: str = None,
         ftp_client_ssl_alias: str = None,
+        ftp_send_remote_directory: str = None,
+        ftp_send_transfer_type: str = None,
+        ftp_move_force_override: str = None,
         # SFTP protocol fields
         sftp_host: str = None,
         sftp_port: str = None,
         sftp_username: str = None,
         sftp_password: str = None,
         sftp_remote_directory: str = None,
+        sftp_send_remote_directory: str = None,
         sftp_ssh_key_auth: str = None,
         sftp_known_host_entry: str = None,
         sftp_ssh_key_path: str = None,
@@ -942,6 +946,12 @@ if manage_trading_partner_action:
                     request_data["ftp_move_to_directory"] = ftp_move_to_directory
                 if ftp_client_ssl_alias:
                     request_data["ftp_client_ssl_alias"] = ftp_client_ssl_alias
+                if ftp_send_remote_directory:
+                    request_data["ftp_send_remote_directory"] = ftp_send_remote_directory
+                if ftp_send_transfer_type:
+                    request_data["ftp_send_transfer_type"] = ftp_send_transfer_type
+                if ftp_move_force_override:
+                    request_data["ftp_move_force_override"] = ftp_move_force_override
 
                 # Pass SFTP fields flat
                 if sftp_host:
@@ -988,6 +998,8 @@ if manage_trading_partner_action:
                     request_data["sftp_proxy_user"] = sftp_proxy_user
                 if sftp_proxy_password:
                     request_data["sftp_proxy_password"] = sftp_proxy_password
+                if sftp_send_remote_directory:
+                    request_data["sftp_send_remote_directory"] = sftp_send_remote_directory
 
                 # Pass HTTP fields flat
                 if http_url:
@@ -1393,6 +1405,12 @@ if manage_trading_partner_action:
                     updates["ftp_move_to_directory"] = ftp_move_to_directory
                 if ftp_client_ssl_alias:
                     updates["ftp_client_ssl_alias"] = ftp_client_ssl_alias
+                if ftp_send_remote_directory:
+                    updates["ftp_send_remote_directory"] = ftp_send_remote_directory
+                if ftp_send_transfer_type:
+                    updates["ftp_send_transfer_type"] = ftp_send_transfer_type
+                if ftp_move_force_override:
+                    updates["ftp_move_force_override"] = ftp_move_force_override
 
                 # SFTP fields
                 if sftp_host:
@@ -1439,6 +1457,8 @@ if manage_trading_partner_action:
                     updates["sftp_proxy_user"] = sftp_proxy_user
                 if sftp_proxy_password:
                     updates["sftp_proxy_password"] = sftp_proxy_password
+                if sftp_send_remote_directory:
+                    updates["sftp_send_remote_directory"] = sftp_send_remote_directory
 
                 # HTTP fields
                 if http_url:
