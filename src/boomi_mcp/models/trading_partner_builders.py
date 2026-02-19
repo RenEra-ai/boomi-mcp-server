@@ -587,11 +587,11 @@ def build_http_communication_options(**kwargs):
         if oauth1_signature_method:
             oauth1_settings['signatureMethod'] = oauth1_signature_method.upper()
         if oauth1_request_token_url:
-            oauth1_settings['requestTokenUrl'] = oauth1_request_token_url
+            oauth1_settings['requestTokenURL'] = oauth1_request_token_url
         if oauth1_access_token_url:
-            oauth1_settings['accessTokenUrl'] = oauth1_access_token_url
+            oauth1_settings['accessTokenURL'] = oauth1_access_token_url
         if oauth1_authorization_url:
-            oauth1_settings['authorizationUrl'] = oauth1_authorization_url
+            oauth1_settings['authorizationURL'] = oauth1_authorization_url
         if oauth1_suppress_blank is not None:
             oauth1_settings['suppressBlankAccessToken'] = str(oauth1_suppress_blank).lower() == 'true'
         if oauth1_settings:
@@ -744,9 +744,9 @@ def build_http_communication_options(**kwargs):
     if listen_password:
         listen_options['password'] = listen_password
     if listen_use_default is not None:
-        listen_options['useDefault'] = str(listen_use_default).lower() == 'true'
+        listen_options['useDefaultListenOptions'] = str(listen_use_default).lower() == 'true'
     if listen_username:
-        listen_options['userName'] = listen_username
+        listen_options['username'] = listen_username
 
     if listen_options:
         result['HTTPListenOptions'] = listen_options
