@@ -30,6 +30,15 @@ from boomi.models import (
 )
 
 
+def _ga(obj, *attrs):
+    """Get first non-None attribute value, safely handling False/0."""
+    for attr in attrs:
+        val = getattr(obj, attr, None)
+        if val is not None:
+            return val
+    return None
+
+
 # ============================================================================
 # Trading Partner CRUD Operations
 # ============================================================================
@@ -331,15 +340,15 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 get_opts = getattr(disk_opts, 'disk_get_options', None)
                 send_opts = getattr(disk_opts, 'disk_send_options', None)
                 if get_opts:
-                    disk_info["get_directory"] = getattr(get_opts, 'get_directory', None) or getattr(get_opts, 'getDirectory', None)
-                    disk_info["file_filter"] = getattr(get_opts, 'file_filter', None) or getattr(get_opts, 'fileFilter', None)
-                    disk_info["filter_match_type"] = getattr(get_opts, 'filter_match_type', None) or getattr(get_opts, 'filterMatchType', None)
-                    disk_info["delete_after_read"] = getattr(get_opts, 'delete_after_read', None) or getattr(get_opts, 'deleteAfterRead', None)
-                    disk_info["max_file_count"] = getattr(get_opts, 'max_file_count', None) or getattr(get_opts, 'maxFileCount', None)
+                    disk_info["get_directory"] = _ga(get_opts, 'get_directory', 'getDirectory')
+                    disk_info["file_filter"] = _ga(get_opts, 'file_filter', 'fileFilter')
+                    disk_info["filter_match_type"] = _ga(get_opts, 'filter_match_type', 'filterMatchType')
+                    disk_info["delete_after_read"] = _ga(get_opts, 'delete_after_read', 'deleteAfterRead')
+                    disk_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
                 if send_opts:
-                    disk_info["send_directory"] = getattr(send_opts, 'send_directory', None) or getattr(send_opts, 'sendDirectory', None)
-                    disk_info["create_directory"] = getattr(send_opts, 'create_directory', None) or getattr(send_opts, 'createDirectory', None)
-                    disk_info["write_option"] = getattr(send_opts, 'write_option', None) or getattr(send_opts, 'writeOption', None)
+                    disk_info["send_directory"] = _ga(send_opts, 'send_directory', 'sendDirectory')
+                    disk_info["create_directory"] = _ga(send_opts, 'create_directory', 'createDirectory')
+                    disk_info["write_option"] = _ga(send_opts, 'write_option', 'writeOption')
                 # Filter out None values
                 disk_info = {k: v for k, v in disk_info.items() if v is not None}
                 communication_protocols.append(disk_info)
@@ -360,7 +369,7 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         ftp_info["ssl_mode"] = getattr(ftpssl_opts, 'sslmode', None)
                         ftp_info["use_client_authentication"] = getattr(ftpssl_opts, 'use_client_authentication', None)
                         # Extract client SSL certificate alias
-                        client_ssl_cert = getattr(ftpssl_opts, 'client_ssl_certificate', None) or getattr(ftpssl_opts, 'clientSSLCertificate', None)
+                        client_ssl_cert = _ga(ftpssl_opts, 'client_ssl_certificate', 'clientSSLCertificate')
                         if client_ssl_cert:
                             ftp_info["client_ssl_alias"] = getattr(client_ssl_cert, 'alias', None)
                 # Extract FTP get options
@@ -368,16 +377,16 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 if get_opts:
                     ftp_info["remote_directory"] = getattr(get_opts, 'remote_directory', None)
                     ftp_info["get_transfer_type"] = getattr(get_opts, 'transfer_type', None)
-                    ftp_info["get_action"] = getattr(get_opts, 'ftp_action', None) or getattr(get_opts, 'ftpAction', None)
-                    ftp_info["max_file_count"] = getattr(get_opts, 'max_file_count', None) or getattr(get_opts, 'maxFileCount', None)
-                    ftp_info["file_to_move"] = getattr(get_opts, 'file_to_move', None) or getattr(get_opts, 'fileToMove', None)
+                    ftp_info["get_action"] = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    ftp_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
+                    ftp_info["file_to_move"] = _ga(get_opts, 'file_to_move', 'fileToMove')
                 # Extract FTP send options
                 send_opts = getattr(ftp_opts, 'ftp_send_options', None)
                 if send_opts:
                     ftp_info["send_remote_directory"] = getattr(send_opts, 'remote_directory', None)
                     ftp_info["send_transfer_type"] = getattr(send_opts, 'transfer_type', None)
-                    ftp_info["send_action"] = getattr(send_opts, 'ftp_action', None) or getattr(send_opts, 'ftpAction', None)
-                    ftp_info["move_to_directory"] = getattr(send_opts, 'move_to_directory', None) or getattr(send_opts, 'moveToDirectory', None)
+                    ftp_info["send_action"] = _ga(send_opts, 'ftp_action', 'ftpAction')
+                    ftp_info["move_to_directory"] = _ga(send_opts, 'move_to_directory', 'moveToDirectory')
                 # Filter out None values
                 ftp_info = {k: v for k, v in ftp_info.items() if v is not None}
                 communication_protocols.append(ftp_info)
@@ -395,32 +404,32 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     sftpssh_opts = getattr(settings, 'sftpssh_options', None)
                     if sftpssh_opts:
                         sftp_info["ssh_key_auth"] = getattr(sftpssh_opts, 'sshkeyauth', None)
-                        sftp_info["known_host_entry"] = getattr(sftpssh_opts, 'known_host_entry', None) or getattr(sftpssh_opts, 'knownHostEntry', None)
+                        sftp_info["known_host_entry"] = _ga(sftpssh_opts, 'known_host_entry', 'knownHostEntry')
                         sftp_info["ssh_key_path"] = getattr(sftpssh_opts, 'sshkeypath', None)
-                        sftp_info["dh_key_max_1024"] = getattr(sftpssh_opts, 'dh_key_size_max1024', None) or getattr(sftpssh_opts, 'dhKeySizeMax1024', None)
+                        sftp_info["dh_key_max_1024"] = _ga(sftpssh_opts, 'dh_key_size_max1024', 'dhKeySizeMax1024')
                     # Extract SFTP proxy settings
                     proxy_settings = getattr(settings, 'sftp_proxy_settings', None)
                     if proxy_settings:
-                        sftp_info["proxy_enabled"] = getattr(proxy_settings, 'proxy_enabled', None) or getattr(proxy_settings, 'proxyEnabled', None)
+                        sftp_info["proxy_enabled"] = _ga(proxy_settings, 'proxy_enabled', 'proxyEnabled')
                         sftp_info["proxy_host"] = getattr(proxy_settings, 'host', None)
                         sftp_info["proxy_port"] = getattr(proxy_settings, 'port', None)
-                        sftp_info["proxy_type"] = getattr(proxy_settings, 'type_', None) or getattr(proxy_settings, 'type', None)
+                        sftp_info["proxy_type"] = _ga(proxy_settings, 'type_', 'type')
                         sftp_info["proxy_user"] = getattr(proxy_settings, 'user', None)
                 # Extract SFTP get options
                 get_opts = getattr(sftp_opts, 'sftp_get_options', None)
                 if get_opts:
-                    sftp_info["remote_directory"] = getattr(get_opts, 'remote_directory', None) or getattr(get_opts, 'remoteDirectory', None)
-                    sftp_info["get_action"] = getattr(get_opts, 'ftp_action', None) or getattr(get_opts, 'ftpAction', None)
-                    sftp_info["max_file_count"] = getattr(get_opts, 'max_file_count', None) or getattr(get_opts, 'maxFileCount', None)
-                    sftp_info["file_to_move"] = getattr(get_opts, 'file_to_move', None) or getattr(get_opts, 'fileToMove', None)
-                    sftp_info["move_to_directory"] = getattr(get_opts, 'move_to_directory', None) or getattr(get_opts, 'moveToDirectory', None)
-                    sftp_info["move_force_override"] = getattr(get_opts, 'move_to_force_override', None) or getattr(get_opts, 'moveToForceOverride', None)
+                    sftp_info["remote_directory"] = _ga(get_opts, 'remote_directory', 'remoteDirectory')
+                    sftp_info["get_action"] = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    sftp_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
+                    sftp_info["file_to_move"] = _ga(get_opts, 'file_to_move', 'fileToMove')
+                    sftp_info["move_to_directory"] = _ga(get_opts, 'move_to_directory', 'moveToDirectory')
+                    sftp_info["move_force_override"] = _ga(get_opts, 'move_to_force_override', 'moveToForceOverride')
                 # Extract SFTP send options
                 send_opts = getattr(sftp_opts, 'sftp_send_options', None)
                 if send_opts:
-                    sftp_info["send_remote_directory"] = getattr(send_opts, 'remote_directory', None) or getattr(send_opts, 'remoteDirectory', None)
-                    sftp_info["send_action"] = getattr(send_opts, 'ftp_action', None) or getattr(send_opts, 'ftpAction', None)
-                    sftp_info["send_move_to_directory"] = getattr(send_opts, 'move_to_directory', None) or getattr(send_opts, 'moveToDirectory', None)
+                    sftp_info["send_remote_directory"] = _ga(send_opts, 'remote_directory', 'remoteDirectory')
+                    sftp_info["send_action"] = _ga(send_opts, 'ftp_action', 'ftpAction')
+                    sftp_info["send_move_to_directory"] = _ga(send_opts, 'move_to_directory', 'moveToDirectory')
                 # Filter out None values
                 sftp_info = {k: v for k, v in sftp_info.items() if v is not None}
                 communication_protocols.append(sftp_info)
@@ -432,125 +441,125 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 settings = getattr(http_opts, 'http_settings', None)
                 if settings:
                     http_info["url"] = getattr(settings, 'url', None)
-                    http_info["authentication_type"] = getattr(settings, 'authentication_type', None) or getattr(settings, 'authenticationType', None)
-                    http_info["connect_timeout"] = getattr(settings, 'connect_timeout', None) or getattr(settings, 'connectTimeout', None)
-                    http_info["read_timeout"] = getattr(settings, 'read_timeout', None) or getattr(settings, 'readTimeout', None)
-                    http_info["cookie_scope"] = getattr(settings, 'cookie_scope', None) or getattr(settings, 'cookieScope', None)
+                    http_info["authentication_type"] = _ga(settings, 'authentication_type', 'authenticationType')
+                    http_info["connect_timeout"] = _ga(settings, 'connect_timeout', 'connectTimeout')
+                    http_info["read_timeout"] = _ga(settings, 'read_timeout', 'readTimeout')
+                    http_info["cookie_scope"] = _ga(settings, 'cookie_scope', 'cookieScope')
                     # Settings flags
-                    http_info["use_custom_auth"] = getattr(settings, 'use_custom_auth', None) or getattr(settings, 'useCustomAuth', None)
-                    http_info["use_basic_auth"] = getattr(settings, 'use_basic_auth', None) or getattr(settings, 'useBasicAuth', None)
-                    http_info["use_default_settings"] = getattr(settings, 'use_default_settings', None) or getattr(settings, 'useDefaultSettings', None)
+                    http_info["use_custom_auth"] = _ga(settings, 'use_custom_auth', 'useCustomAuth')
+                    http_info["use_basic_auth"] = _ga(settings, 'use_basic_auth', 'useBasicAuth')
+                    http_info["use_default_settings"] = _ga(settings, 'use_default_settings', 'useDefaultSettings')
                     # Extract HTTP auth settings
-                    http_auth = getattr(settings, 'http_auth_settings', None) or getattr(settings, 'HTTPAuthSettings', None)
+                    http_auth = _ga(settings, 'http_auth_settings', 'HTTPAuthSettings')
                     if http_auth:
                         http_info["username"] = getattr(http_auth, 'user', None)
                     # Extract HTTP OAuth 1.0 settings
-                    oauth1_settings = getattr(settings, 'httpo_auth_settings', None) or getattr(settings, 'HTTPOAuthSettings', None)
+                    oauth1_settings = _ga(settings, 'httpo_auth_settings', 'HTTPOAuthSettings')
                     if oauth1_settings:
-                        http_info["oauth1_consumer_key"] = getattr(oauth1_settings, 'consumer_key', None) or getattr(oauth1_settings, 'consumerKey', None)
-                        http_info["oauth1_consumer_secret"] = getattr(oauth1_settings, 'consumer_secret', None) or getattr(oauth1_settings, 'consumerSecret', None)
-                        http_info["oauth1_access_token"] = getattr(oauth1_settings, 'access_token', None) or getattr(oauth1_settings, 'accessToken', None)
-                        http_info["oauth1_token_secret"] = getattr(oauth1_settings, 'token_secret', None) or getattr(oauth1_settings, 'tokenSecret', None)
+                        http_info["oauth1_consumer_key"] = _ga(oauth1_settings, 'consumer_key', 'consumerKey')
+                        http_info["oauth1_consumer_secret"] = _ga(oauth1_settings, 'consumer_secret', 'consumerSecret')
+                        http_info["oauth1_access_token"] = _ga(oauth1_settings, 'access_token', 'accessToken')
+                        http_info["oauth1_token_secret"] = _ga(oauth1_settings, 'token_secret', 'tokenSecret')
                         http_info["oauth1_realm"] = getattr(oauth1_settings, 'realm', None)
-                        http_info["oauth1_signature_method"] = getattr(oauth1_settings, 'signature_method', None) or getattr(oauth1_settings, 'signatureMethod', None)
-                        http_info["oauth1_request_token_url"] = getattr(oauth1_settings, 'request_token_url', None) or getattr(oauth1_settings, 'requestTokenURL', None)
-                        http_info["oauth1_access_token_url"] = getattr(oauth1_settings, 'access_token_url', None) or getattr(oauth1_settings, 'accessTokenURL', None)
-                        http_info["oauth1_authorization_url"] = getattr(oauth1_settings, 'authorization_url', None) or getattr(oauth1_settings, 'authorizationURL', None)
-                        http_info["oauth1_suppress_blank_access_token"] = getattr(oauth1_settings, 'suppress_blank_access_token', None) or getattr(oauth1_settings, 'suppressBlankAccessToken', None)
+                        http_info["oauth1_signature_method"] = _ga(oauth1_settings, 'signature_method', 'signatureMethod')
+                        http_info["oauth1_request_token_url"] = _ga(oauth1_settings, 'request_token_url', 'requestTokenURL')
+                        http_info["oauth1_access_token_url"] = _ga(oauth1_settings, 'access_token_url', 'accessTokenURL')
+                        http_info["oauth1_authorization_url"] = _ga(oauth1_settings, 'authorization_url', 'authorizationURL')
+                        http_info["oauth1_suppress_blank_access_token"] = _ga(oauth1_settings, 'suppress_blank_access_token', 'suppressBlankAccessToken')
                     # Extract HTTP OAuth2 settings
-                    oauth2_settings = getattr(settings, 'http_oauth2_settings', None) or getattr(settings, 'HTTPOAuth2Settings', None)
+                    oauth2_settings = _ga(settings, 'http_oauth2_settings', 'HTTPOAuth2Settings')
                     if oauth2_settings:
                         http_info["oauth_scope"] = getattr(oauth2_settings, 'scope', None)
-                        http_info["oauth_grant_type"] = getattr(oauth2_settings, 'grant_type', None) or getattr(oauth2_settings, 'grantType', None)
+                        http_info["oauth_grant_type"] = _ga(oauth2_settings, 'grant_type', 'grantType')
                         # Extract token endpoint
-                        token_endpoint = getattr(oauth2_settings, 'access_token_endpoint', None) or getattr(oauth2_settings, 'accessTokenEndpoint', None)
+                        token_endpoint = _ga(oauth2_settings, 'access_token_endpoint', 'accessTokenEndpoint')
                         if token_endpoint:
                             http_info["oauth_token_url"] = getattr(token_endpoint, 'url', None)
                         # Extract authorization token endpoint
-                        auth_token_endpoint = getattr(oauth2_settings, 'authorization_token_endpoint', None) or getattr(oauth2_settings, 'authorizationTokenEndpoint', None)
+                        auth_token_endpoint = _ga(oauth2_settings, 'authorization_token_endpoint', 'authorizationTokenEndpoint')
                         if auth_token_endpoint:
                             http_info["oauth2_authorization_token_url"] = getattr(auth_token_endpoint, 'url', None)
                         # Extract credentials
                         credentials = getattr(oauth2_settings, 'credentials', None)
                         if credentials:
-                            http_info["oauth_client_id"] = getattr(credentials, 'client_id', None) or getattr(credentials, 'clientId', None)
-                            http_info["oauth2_access_token"] = getattr(credentials, 'access_token', None) or getattr(credentials, 'accessToken', None)
-                            http_info["oauth2_use_refresh_token"] = getattr(credentials, 'use_refresh_token', None) or getattr(credentials, 'useRefreshToken', None)
+                            http_info["oauth_client_id"] = _ga(credentials, 'client_id', 'clientId')
+                            http_info["oauth2_access_token"] = _ga(credentials, 'access_token', 'accessToken')
+                            http_info["oauth2_use_refresh_token"] = _ga(credentials, 'use_refresh_token', 'useRefreshToken')
                         # Extract OAuth2 parameter sets
-                        access_params = getattr(oauth2_settings, 'access_token_parameters', None) or getattr(oauth2_settings, 'accessTokenParameters', None)
+                        access_params = _ga(oauth2_settings, 'access_token_parameters', 'accessTokenParameters')
                         if access_params:
                             http_info["oauth2_access_token_params"] = access_params
-                        auth_params = getattr(oauth2_settings, 'authorization_parameters', None) or getattr(oauth2_settings, 'authorizationParameters', None)
+                        auth_params = _ga(oauth2_settings, 'authorization_parameters', 'authorizationParameters')
                         if auth_params:
                             http_info["oauth2_authorization_params"] = auth_params
                     # Extract HTTP SSL options
-                    httpssl_opts = getattr(settings, 'httpssl_options', None) or getattr(settings, 'HTTPSSLOptions', None)
+                    httpssl_opts = _ga(settings, 'httpssl_options', 'HTTPSSLOptions')
                     if httpssl_opts:
                         http_info["client_auth"] = getattr(httpssl_opts, 'clientauth', None)
-                        http_info["trust_server_cert"] = getattr(httpssl_opts, 'trust_server_cert', None) or getattr(httpssl_opts, 'trustServerCert', None)
+                        http_info["trust_server_cert"] = _ga(httpssl_opts, 'trust_server_cert', 'trustServerCert')
                         http_info["client_ssl_alias"] = getattr(httpssl_opts, 'clientsslalias', None)
                         http_info["trusted_cert_alias"] = getattr(httpssl_opts, 'trustedcertalias', None)
                 # Extract HTTP send options
-                send_opts = getattr(http_opts, 'http_send_options', None) or getattr(http_opts, 'HTTPSendOptions', None)
+                send_opts = _ga(http_opts, 'http_send_options', 'HTTPSendOptions')
                 if send_opts:
-                    http_info["method_type"] = getattr(send_opts, 'method_type', None) or getattr(send_opts, 'methodType', None)
-                    http_info["data_content_type"] = getattr(send_opts, 'data_content_type', None) or getattr(send_opts, 'dataContentType', None)
-                    http_info["follow_redirects"] = getattr(send_opts, 'follow_redirects', None) or getattr(send_opts, 'followRedirects', None)
-                    http_info["return_errors"] = getattr(send_opts, 'return_errors', None) or getattr(send_opts, 'returnErrors', None)
-                    http_info["return_responses"] = getattr(send_opts, 'return_responses', None) or getattr(send_opts, 'returnResponses', None)
-                    http_info["request_profile"] = getattr(send_opts, 'request_profile', None) or getattr(send_opts, 'requestProfile', None)
-                    http_info["request_profile_type"] = getattr(send_opts, 'request_profile_type', None) or getattr(send_opts, 'requestProfileType', None)
-                    http_info["response_profile"] = getattr(send_opts, 'response_profile', None) or getattr(send_opts, 'responseProfile', None)
-                    http_info["response_profile_type"] = getattr(send_opts, 'response_profile_type', None) or getattr(send_opts, 'responseProfileType', None)
+                    http_info["method_type"] = _ga(send_opts, 'method_type', 'methodType')
+                    http_info["data_content_type"] = _ga(send_opts, 'data_content_type', 'dataContentType')
+                    http_info["follow_redirects"] = _ga(send_opts, 'follow_redirects', 'followRedirects')
+                    http_info["return_errors"] = _ga(send_opts, 'return_errors', 'returnErrors')
+                    http_info["return_responses"] = _ga(send_opts, 'return_responses', 'returnResponses')
+                    http_info["request_profile"] = _ga(send_opts, 'request_profile', 'requestProfile')
+                    http_info["request_profile_type"] = _ga(send_opts, 'request_profile_type', 'requestProfileType')
+                    http_info["response_profile"] = _ga(send_opts, 'response_profile', 'responseProfile')
+                    http_info["response_profile_type"] = _ga(send_opts, 'response_profile_type', 'responseProfileType')
                     # Extract headers/path elements from send options
                     # SDK returns model objects; convert to dicts for clean output
                     def _header_to_dict(h):
                         return {
-                            "headerFieldName": getattr(h, 'header_field_name', None) or getattr(h, 'headerFieldName', None),
-                            "targetPropertyName": getattr(h, 'target_property_name', None) or getattr(h, 'targetPropertyName', None)
+                            "headerFieldName": _ga(h, 'header_field_name', 'headerFieldName'),
+                            "targetPropertyName": _ga(h, 'target_property_name', 'targetPropertyName')
                         }
                     def _element_to_dict(e):
                         return {"name": getattr(e, 'name', None)}
 
-                    req_headers = getattr(send_opts, 'request_headers', None) or getattr(send_opts, 'requestHeaders', None)
+                    req_headers = _ga(send_opts, 'request_headers', 'requestHeaders')
                     if req_headers:
                         header_list = getattr(req_headers, 'header', None)
                         if header_list:
                             http_info["request_headers"] = [_header_to_dict(h) for h in header_list]
-                    resp_header_map = getattr(send_opts, 'response_header_mapping', None) or getattr(send_opts, 'responseHeaderMapping', None)
+                    resp_header_map = _ga(send_opts, 'response_header_mapping', 'responseHeaderMapping')
                     if resp_header_map:
                         header_list = getattr(resp_header_map, 'header', None)
                         if header_list:
                             http_info["response_header_mapping"] = [_header_to_dict(h) for h in header_list]
-                    reflect_hdrs = getattr(send_opts, 'reflect_headers', None) or getattr(send_opts, 'reflectHeaders', None)
+                    reflect_hdrs = _ga(send_opts, 'reflect_headers', 'reflectHeaders')
                     if reflect_hdrs:
                         elem_list = getattr(reflect_hdrs, 'element', None)
                         if elem_list:
                             http_info["reflect_headers"] = [_element_to_dict(e) for e in elem_list]
-                    path_elems = getattr(send_opts, 'path_elements', None) or getattr(send_opts, 'pathElements', None)
+                    path_elems = _ga(send_opts, 'path_elements', 'pathElements')
                     if path_elems:
                         elem_list = getattr(path_elems, 'element', None)
                         if elem_list:
                             http_info["path_elements"] = [_element_to_dict(e) for e in elem_list]
                 # Extract HTTP get options
-                get_opts = getattr(http_opts, 'http_get_options', None) or getattr(http_opts, 'HTTPGetOptions', None)
+                get_opts = _ga(http_opts, 'http_get_options', 'HTTPGetOptions')
                 if get_opts:
-                    http_info["get_method_type"] = getattr(get_opts, 'method_type', None) or getattr(get_opts, 'methodType', None)
-                    http_info["get_content_type"] = getattr(get_opts, 'data_content_type', None) or getattr(get_opts, 'dataContentType', None)
-                    http_info["get_follow_redirects"] = getattr(get_opts, 'follow_redirects', None) or getattr(get_opts, 'followRedirects', None)
-                    http_info["get_return_errors"] = getattr(get_opts, 'return_errors', None) or getattr(get_opts, 'returnErrors', None)
-                    http_info["get_request_profile"] = getattr(get_opts, 'request_profile', None) or getattr(get_opts, 'requestProfile', None)
-                    http_info["get_request_profile_type"] = getattr(get_opts, 'request_profile_type', None) or getattr(get_opts, 'requestProfileType', None)
-                    http_info["get_response_profile"] = getattr(get_opts, 'response_profile', None) or getattr(get_opts, 'responseProfile', None)
-                    http_info["get_response_profile_type"] = getattr(get_opts, 'response_profile_type', None) or getattr(get_opts, 'responseProfileType', None)
+                    http_info["get_method_type"] = _ga(get_opts, 'method_type', 'methodType')
+                    http_info["get_content_type"] = _ga(get_opts, 'data_content_type', 'dataContentType')
+                    http_info["get_follow_redirects"] = _ga(get_opts, 'follow_redirects', 'followRedirects')
+                    http_info["get_return_errors"] = _ga(get_opts, 'return_errors', 'returnErrors')
+                    http_info["get_request_profile"] = _ga(get_opts, 'request_profile', 'requestProfile')
+                    http_info["get_request_profile_type"] = _ga(get_opts, 'request_profile_type', 'requestProfileType')
+                    http_info["get_response_profile"] = _ga(get_opts, 'response_profile', 'responseProfile')
+                    http_info["get_response_profile_type"] = _ga(get_opts, 'response_profile_type', 'responseProfileType')
                 # Extract HTTP listen options
-                listen_opts = getattr(http_opts, 'http_listen_options', None) or getattr(http_opts, 'HTTPListenOptions', None)
+                listen_opts = _ga(http_opts, 'http_listen_options', 'HTTPListenOptions')
                 if listen_opts:
-                    http_info["listen_mime_passthrough"] = getattr(listen_opts, 'mime_passthrough', None) or getattr(listen_opts, 'mimePassthrough', None)
-                    http_info["listen_object_name"] = getattr(listen_opts, 'object_name', None) or getattr(listen_opts, 'objectName', None)
-                    http_info["listen_operation_type"] = getattr(listen_opts, 'operation_type', None) or getattr(listen_opts, 'operationType', None)
+                    http_info["listen_mime_passthrough"] = _ga(listen_opts, 'mime_passthrough', 'mimePassthrough')
+                    http_info["listen_object_name"] = _ga(listen_opts, 'object_name', 'objectName')
+                    http_info["listen_operation_type"] = _ga(listen_opts, 'operation_type', 'operationType')
                     http_info["listen_password"] = getattr(listen_opts, 'password', None)
-                    http_info["listen_use_default"] = getattr(listen_opts, 'use_default_listen_options', None) or getattr(listen_opts, 'useDefaultListenOptions', None)
+                    http_info["listen_use_default"] = _ga(listen_opts, 'use_default_listen_options', 'useDefaultListenOptions')
                     http_info["listen_username"] = getattr(listen_opts, 'username', None)
                 # Filter out None values
                 http_info = {k: v for k, v in http_info.items() if v is not None}
@@ -565,63 +574,63 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 settings = getattr(as2_opts, 'as2_send_settings', None)
                 if settings:
                     as2_info["url"] = getattr(settings, 'url', None)
-                    as2_info["authentication_type"] = getattr(settings, 'authentication_type', None) or getattr(settings, 'authenticationType', None)
-                    as2_info["verify_hostname"] = getattr(settings, 'verify_hostname', None) or getattr(settings, 'verifyHostname', None)
+                    as2_info["authentication_type"] = _ga(settings, 'authentication_type', 'authenticationType')
+                    as2_info["verify_hostname"] = _ga(settings, 'verify_hostname', 'verifyHostname')
                     # Extract basic auth info
-                    auth_settings = getattr(settings, 'auth_settings', None) or getattr(settings, 'AuthSettings', None)
+                    auth_settings = _ga(settings, 'auth_settings', 'AuthSettings')
                     if auth_settings:
-                        as2_info["username"] = getattr(auth_settings, 'username', None) or getattr(auth_settings, 'user', None)
+                        as2_info["username"] = _ga(auth_settings, 'username', 'user')
                     # Extract SSL settings
-                    ssl_settings = getattr(settings, 'as2ssl_options', None) or getattr(settings, 'AS2SSLOptions', None)
+                    ssl_settings = _ga(settings, 'as2ssl_options', 'AS2SSLOptions')
                     if ssl_settings:
-                        as2_info["client_ssl_alias"] = getattr(ssl_settings, 'clientsslalias', None) or getattr(ssl_settings, 'clientSSLAlias', None)
+                        as2_info["client_ssl_alias"] = _ga(ssl_settings, 'clientsslalias', 'clientSSLAlias')
 
                 # Extract AS2SendOptions
-                send_options = getattr(as2_opts, 'as2_send_options', None) or getattr(as2_opts, 'AS2SendOptions', None)
+                send_options = _ga(as2_opts, 'as2_send_options', 'AS2SendOptions')
                 if send_options:
                     # Partner info (as2_id)
-                    partner_info = getattr(send_options, 'as2_partner_info', None) or getattr(send_options, 'AS2PartnerInfo', None)
+                    partner_info = _ga(send_options, 'as2_partner_info', 'AS2PartnerInfo')
                     if partner_info:
-                        as2_info["as2_partner_id"] = getattr(partner_info, 'as2_id', None) or getattr(partner_info, 'as2Id', None)
-                        as2_info["reject_duplicates"] = getattr(partner_info, 'reject_duplicates', None) or getattr(partner_info, 'rejectDuplicates', None)
-                        as2_info["duplicate_check_count"] = getattr(partner_info, 'duplicate_check_count', None) or getattr(partner_info, 'duplicateCheckCount', None)
-                        as2_info["legacy_smime"] = getattr(partner_info, 'legacy_smime', None) or getattr(partner_info, 'legacySMIME', None)
+                        as2_info["as2_partner_id"] = _ga(partner_info, 'as2_id', 'as2Id')
+                        as2_info["reject_duplicates"] = _ga(partner_info, 'reject_duplicates', 'rejectDuplicates')
+                        as2_info["duplicate_check_count"] = _ga(partner_info, 'duplicate_check_count', 'duplicateCheckCount')
+                        as2_info["legacy_smime"] = _ga(partner_info, 'legacy_smime', 'legacySMIME')
 
                     # Message options
-                    msg_opts = getattr(send_options, 'as2_message_options', None) or getattr(send_options, 'AS2MessageOptions', None)
+                    msg_opts = _ga(send_options, 'as2_message_options', 'AS2MessageOptions')
                     if msg_opts:
                         as2_info["signed"] = getattr(msg_opts, 'signed', None)
                         as2_info["encrypted"] = getattr(msg_opts, 'encrypted', None)
                         as2_info["compressed"] = getattr(msg_opts, 'compressed', None)
-                        as2_info["encryption_algorithm"] = getattr(msg_opts, 'encryption_algorithm', None) or getattr(msg_opts, 'encryptionAlgorithm', None)
-                        as2_info["signing_digest_alg"] = getattr(msg_opts, 'signing_digest_alg', None) or getattr(msg_opts, 'signingDigestAlg', None)
-                        as2_info["data_content_type"] = getattr(msg_opts, 'data_content_type', None) or getattr(msg_opts, 'dataContentType', None)
+                        as2_info["encryption_algorithm"] = _ga(msg_opts, 'encryption_algorithm', 'encryptionAlgorithm')
+                        as2_info["signing_digest_alg"] = _ga(msg_opts, 'signing_digest_alg', 'signingDigestAlg')
+                        as2_info["data_content_type"] = _ga(msg_opts, 'data_content_type', 'dataContentType')
                         as2_info["subject"] = getattr(msg_opts, 'subject', None)
-                        as2_info["multiple_attachments"] = getattr(msg_opts, 'multiple_attachments', None) or getattr(msg_opts, 'multipleAttachments', None)
-                        as2_info["max_document_count"] = getattr(msg_opts, 'max_document_count', None) or getattr(msg_opts, 'maxDocumentCount', None)
-                        as2_info["attachment_option"] = getattr(msg_opts, 'attachment_option', None) or getattr(msg_opts, 'attachmentOption', None)
-                        as2_info["attachment_cache"] = getattr(msg_opts, 'attachment_cache', None) or getattr(msg_opts, 'attachmentCache', None)
+                        as2_info["multiple_attachments"] = _ga(msg_opts, 'multiple_attachments', 'multipleAttachments')
+                        as2_info["max_document_count"] = _ga(msg_opts, 'max_document_count', 'maxDocumentCount')
+                        as2_info["attachment_option"] = _ga(msg_opts, 'attachment_option', 'attachmentOption')
+                        as2_info["attachment_cache"] = _ga(msg_opts, 'attachment_cache', 'attachmentCache')
                         # Certificate aliases
-                        encrypt_cert = getattr(msg_opts, 'encrypt_cert', None) or getattr(msg_opts, 'encryptCert', None)
+                        encrypt_cert = _ga(msg_opts, 'encrypt_cert', 'encryptCert')
                         if encrypt_cert:
                             as2_info["encrypt_alias"] = getattr(encrypt_cert, 'alias', None)
-                        sign_cert = getattr(msg_opts, 'sign_cert', None) or getattr(msg_opts, 'signCert', None)
+                        sign_cert = _ga(msg_opts, 'sign_cert', 'signCert')
                         if sign_cert:
                             as2_info["sign_alias"] = getattr(sign_cert, 'alias', None)
 
                     # MDN options
-                    mdn_opts = getattr(send_options, 'as2_mdn_options', None) or getattr(send_options, 'AS2MDNOptions', None)
+                    mdn_opts = _ga(send_options, 'as2_mdn_options', 'AS2MDNOptions')
                     if mdn_opts:
-                        as2_info["request_mdn"] = getattr(mdn_opts, 'request_mdn', None) or getattr(mdn_opts, 'requestMDN', None)
+                        as2_info["request_mdn"] = _ga(mdn_opts, 'request_mdn', 'requestMDN')
                         as2_info["mdn_signed"] = getattr(mdn_opts, 'signed', None)
-                        as2_info["mdn_digest_alg"] = getattr(mdn_opts, 'mdn_digest_alg', None) or getattr(mdn_opts, 'mdnDigestAlg', None)
+                        as2_info["mdn_digest_alg"] = _ga(mdn_opts, 'mdn_digest_alg', 'mdnDigestAlg')
                         as2_info["synchronous_mdn"] = getattr(mdn_opts, 'synchronous', None)
-                        as2_info["fail_on_negative_mdn"] = getattr(mdn_opts, 'fail_on_negative_mdn', None) or getattr(mdn_opts, 'failOnNegativeMDN', None)
-                        as2_info["mdn_external_url"] = getattr(mdn_opts, 'external_url', None) or getattr(mdn_opts, 'externalURL', None)
-                        as2_info["mdn_use_external_url"] = getattr(mdn_opts, 'use_external_url', None) or getattr(mdn_opts, 'useExternalURL', None)
-                        as2_info["mdn_use_ssl"] = getattr(mdn_opts, 'use_ssl', None) or getattr(mdn_opts, 'useSSL', None)
+                        as2_info["fail_on_negative_mdn"] = _ga(mdn_opts, 'fail_on_negative_mdn', 'failOnNegativeMDN')
+                        as2_info["mdn_external_url"] = _ga(mdn_opts, 'external_url', 'externalURL')
+                        as2_info["mdn_use_external_url"] = _ga(mdn_opts, 'use_external_url', 'useExternalURL')
+                        as2_info["mdn_use_ssl"] = _ga(mdn_opts, 'use_ssl', 'useSSL')
                         # MDN certificate aliases
-                        mdn_cert = getattr(mdn_opts, 'mdn_cert', None) or getattr(mdn_opts, 'mdnCert', None)
+                        mdn_cert = _ga(mdn_opts, 'mdn_cert', 'mdnCert')
                         if mdn_cert:
                             as2_info["mdn_alias"] = getattr(mdn_cert, 'alias', None)
 
@@ -633,24 +642,24 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
             if getattr(comm, 'mllp_communication_options', None):
                 mllp_opts = comm.mllp_communication_options
                 mllp_info = {"protocol": "mllp"}
-                settings = getattr(mllp_opts, 'mllp_send_settings', None) or getattr(mllp_opts, 'MLLPSendSettings', None)
+                settings = _ga(mllp_opts, 'mllp_send_settings', 'MLLPSendSettings')
                 if settings:
                     mllp_info["host"] = getattr(settings, 'host', None)
                     mllp_info["port"] = getattr(settings, 'port', None)
                     mllp_info["persistent"] = getattr(settings, 'persistent', None)
-                    mllp_info["receive_timeout"] = getattr(settings, 'receive_timeout', None) or getattr(settings, 'receiveTimeout', None)
-                    mllp_info["send_timeout"] = getattr(settings, 'send_timeout', None) or getattr(settings, 'sendTimeout', None)
-                    mllp_info["max_connections"] = getattr(settings, 'max_connections', None) or getattr(settings, 'maxConnections', None)
-                    mllp_info["inactivity_timeout"] = getattr(settings, 'inactivity_timeout', None) or getattr(settings, 'inactivityTimeout', None)
-                    mllp_info["max_retry"] = getattr(settings, 'max_retry', None) or getattr(settings, 'maxRetry', None)
-                    mllp_info["halt_timeout"] = getattr(settings, 'halt_timeout', None) or getattr(settings, 'haltTimeout', None)
+                    mllp_info["receive_timeout"] = _ga(settings, 'receive_timeout', 'receiveTimeout')
+                    mllp_info["send_timeout"] = _ga(settings, 'send_timeout', 'sendTimeout')
+                    mllp_info["max_connections"] = _ga(settings, 'max_connections', 'maxConnections')
+                    mllp_info["inactivity_timeout"] = _ga(settings, 'inactivity_timeout', 'inactivityTimeout')
+                    mllp_info["max_retry"] = _ga(settings, 'max_retry', 'maxRetry')
+                    mllp_info["halt_timeout"] = _ga(settings, 'halt_timeout', 'haltTimeout')
                     # Extract MLLP SSL options
-                    mllpssl_opts = getattr(settings, 'mllpssl_options', None) or getattr(settings, 'MLLPSSLOptions', None)
+                    mllpssl_opts = _ga(settings, 'mllpssl_options', 'MLLPSSLOptions')
                     if mllpssl_opts:
-                        mllp_info["use_ssl"] = getattr(mllpssl_opts, 'use_ssl', None) or getattr(mllpssl_opts, 'useSSL', None)
-                        mllp_info["use_client_ssl"] = getattr(mllpssl_opts, 'use_client_ssl', None) or getattr(mllpssl_opts, 'useClientSSL', None)
-                        mllp_info["client_ssl_alias"] = getattr(mllpssl_opts, 'client_ssl_alias', None) or getattr(mllpssl_opts, 'clientSSLAlias', None)
-                        mllp_info["ssl_alias"] = getattr(mllpssl_opts, 'ssl_alias', None) or getattr(mllpssl_opts, 'sslAlias', None)
+                        mllp_info["use_ssl"] = _ga(mllpssl_opts, 'use_ssl', 'useSSL')
+                        mllp_info["use_client_ssl"] = _ga(mllpssl_opts, 'use_client_ssl', 'useClientSSL')
+                        mllp_info["client_ssl_alias"] = _ga(mllpssl_opts, 'client_ssl_alias', 'clientSSLAlias')
+                        mllp_info["ssl_alias"] = _ga(mllpssl_opts, 'ssl_alias', 'sslAlias')
                 # Filter out None values
                 mllp_info = {k: v for k, v in mllp_info.items() if v is not None}
                 communication_protocols.append(mllp_info)
@@ -659,26 +668,26 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
             if getattr(comm, 'oftp_communication_options', None):
                 oftp_opts = comm.oftp_communication_options
                 oftp_info = {"protocol": "oftp"}
-                conn_settings = getattr(oftp_opts, 'oftp_connection_settings', None) or getattr(oftp_opts, 'OFTPConnectionSettings', None)
+                conn_settings = _ga(oftp_opts, 'oftp_connection_settings', 'OFTPConnectionSettings')
                 if conn_settings:
                     # Check both direct attrs and default_oftp_connection_settings
-                    default_settings = getattr(conn_settings, 'default_oftp_connection_settings', None) or getattr(conn_settings, 'defaultOFTPConnectionSettings', None)
+                    default_settings = _ga(conn_settings, 'default_oftp_connection_settings', 'defaultOFTPConnectionSettings')
                     # Try direct attributes first, fall back to default settings
                     oftp_info["host"] = getattr(conn_settings, 'host', None) or (getattr(default_settings, 'host', None) if default_settings else None)
                     oftp_info["port"] = getattr(conn_settings, 'port', None) or (getattr(default_settings, 'port', None) if default_settings else None)
                     oftp_info["tls"] = getattr(conn_settings, 'tls', None) if hasattr(conn_settings, 'tls') else (getattr(default_settings, 'tls', None) if default_settings else None)
                     oftp_info["ssid_auth"] = getattr(conn_settings, 'ssidauth', None) if hasattr(conn_settings, 'ssidauth') else (getattr(default_settings, 'ssidauth', None) if default_settings else None)
                     oftp_info["sfid_cipher"] = getattr(conn_settings, 'sfidciph', None) if hasattr(conn_settings, 'sfidciph') else (getattr(default_settings, 'sfidciph', None) if default_settings else None)
-                    oftp_info["use_gateway"] = getattr(conn_settings, 'use_gateway', None) or getattr(conn_settings, 'useGateway', None) if hasattr(conn_settings, 'use_gateway') or hasattr(conn_settings, 'useGateway') else (getattr(default_settings, 'use_gateway', None) or getattr(default_settings, 'useGateway', None) if default_settings else None)
-                    oftp_info["use_client_ssl"] = getattr(conn_settings, 'use_client_ssl', None) or getattr(conn_settings, 'useClientSSL', None) if hasattr(conn_settings, 'use_client_ssl') or hasattr(conn_settings, 'useClientSSL') else (getattr(default_settings, 'use_client_ssl', None) or getattr(default_settings, 'useClientSSL', None) if default_settings else None)
-                    oftp_info["client_ssl_alias"] = getattr(conn_settings, 'client_ssl_alias', None) or getattr(conn_settings, 'clientSSLAlias', None) or (getattr(default_settings, 'client_ssl_alias', None) or getattr(default_settings, 'clientSSLAlias', None) if default_settings else None)
+                    oftp_info["use_gateway"] = _ga(conn_settings, 'use_gateway', 'useGateway') if hasattr(conn_settings, 'use_gateway') or hasattr(conn_settings, 'useGateway') else (_ga(default_settings, 'use_gateway', 'useGateway') if default_settings else None)
+                    oftp_info["use_client_ssl"] = _ga(conn_settings, 'use_client_ssl', 'useClientSSL') if hasattr(conn_settings, 'use_client_ssl') or hasattr(conn_settings, 'useClientSSL') else (_ga(default_settings, 'use_client_ssl', 'useClientSSL') if default_settings else None)
+                    oftp_info["client_ssl_alias"] = _ga(conn_settings, 'client_ssl_alias', 'clientSSLAlias') or (_ga(default_settings, 'client_ssl_alias', 'clientSSLAlias') if default_settings else None)
                     # Extract partner info from both locations
-                    partner_info = getattr(conn_settings, 'my_partner_info', None) or getattr(conn_settings, 'myPartnerInfo', None) or (getattr(default_settings, 'my_partner_info', None) or getattr(default_settings, 'myPartnerInfo', None) if default_settings else None)
+                    partner_info = _ga(conn_settings, 'my_partner_info', 'myPartnerInfo') or (_ga(default_settings, 'my_partner_info', 'myPartnerInfo') if default_settings else None)
                     if partner_info:
                         oftp_info["ssid_code"] = getattr(partner_info, 'ssidcode', None)
                         oftp_info["compress"] = getattr(partner_info, 'ssidcmpr', None)
                         oftp_info["sfid_sign"] = getattr(partner_info, 'sfidsign', None)
-                        oftp_info["sfid_encrypt"] = getattr(partner_info, 'sfidsec_encrypt', None) or getattr(partner_info, 'sfidsec-encrypt', None)
+                        oftp_info["sfid_encrypt"] = _ga(partner_info, 'sfidsec_encrypt', 'sfidsec-encrypt')
                 # Filter out None values
                 oftp_info = {k: v for k, v in oftp_info.items() if v is not None}
                 communication_protocols.append(oftp_info)
@@ -972,7 +981,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
             if existing_contact:
                 # Extract existing values
                 merged_contact = {
-                    'contact_name': getattr(existing_contact, 'contact_name', None) or getattr(existing_contact, 'name', None) or '',
+                    'contact_name': _ga(existing_contact, 'contact_name', 'name') or '',
                     'contact_email': getattr(existing_contact, 'email', '') or '',
                     'contact_phone': getattr(existing_contact, 'phone', '') or '',
                     'contact_fax': getattr(existing_contact, 'fax', '') or '',
@@ -1068,7 +1077,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_pass:
                                         as2_params['as2_password'] = existing_pass
                                 if 'as2_verify_hostname' not in as2_params:
-                                    existing_verify = getattr(existing_send_settings, 'verify_hostname', None) or getattr(existing_send_settings, 'verifyHostname', None)
+                                    existing_verify = _ga(existing_send_settings, 'verify_hostname', 'verifyHostname')
                                     if existing_verify is not None:
                                         as2_params['as2_verify_hostname'] = str(existing_verify).lower()
                                 if 'as2_client_ssl_alias' not in as2_params:
@@ -1085,18 +1094,18 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 existing_partner_info = getattr(existing_send_opts, 'as2_partner_info', None)
                                 if existing_partner_info:
                                     if 'as2_partner_identifier' not in as2_params:
-                                        existing_partner_id = getattr(existing_partner_info, 'as2_id', None) or getattr(existing_partner_info, 'as2Id', None)
+                                        existing_partner_id = _ga(existing_partner_info, 'as2_id', 'as2Id')
                                         if existing_partner_id:
                                             as2_params['as2_partner_identifier'] = existing_partner_id
                                 # Signing and encryption certificates
                                 if 'as2_encrypt_alias' not in as2_params:
-                                    encrypt_cert = getattr(existing_send_opts, 'encrypt_certificate', None) or getattr(existing_send_opts, 'encryptCertificate', None)
+                                    encrypt_cert = _ga(existing_send_opts, 'encrypt_certificate', 'encryptCertificate')
                                     if encrypt_cert:
                                         existing_alias = getattr(encrypt_cert, 'alias', None)
                                         if existing_alias:
                                             as2_params['as2_encrypt_alias'] = existing_alias
                                 if 'as2_sign_alias' not in as2_params:
-                                    sign_cert = getattr(existing_send_opts, 'sign_certificate', None) or getattr(existing_send_opts, 'signCertificate', None)
+                                    sign_cert = _ga(existing_send_opts, 'sign_certificate', 'signCertificate')
                                     if sign_cert:
                                         existing_alias = getattr(sign_cert, 'alias', None)
                                         if existing_alias:
@@ -1115,15 +1124,15 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_compressed is not None:
                                         as2_params['as2_compressed'] = str(existing_compressed).lower()
                                 if 'as2_encryption_algorithm' not in as2_params:
-                                    existing_algo = getattr(existing_send_opts, 'encryption_algorithm', None) or getattr(existing_send_opts, 'encryptionAlgorithm', None)
+                                    existing_algo = _ga(existing_send_opts, 'encryption_algorithm', 'encryptionAlgorithm')
                                     if existing_algo:
                                         as2_params['as2_encryption_algorithm'] = existing_algo
                                 if 'as2_signing_digest_alg' not in as2_params:
-                                    existing_digest = getattr(existing_send_opts, 'signing_digest_algorithm', None) or getattr(existing_send_opts, 'signingDigestAlgorithm', None)
+                                    existing_digest = _ga(existing_send_opts, 'signing_digest_algorithm', 'signingDigestAlgorithm')
                                     if existing_digest:
                                         as2_params['as2_signing_digest_alg'] = existing_digest
                                 if 'as2_data_content_type' not in as2_params:
-                                    existing_content = getattr(existing_send_opts, 'data_content_type', None) or getattr(existing_send_opts, 'dataContentType', None)
+                                    existing_content = _ga(existing_send_opts, 'data_content_type', 'dataContentType')
                                     if existing_content:
                                         as2_params['as2_data_content_type'] = existing_content
                                 if 'as2_subject' not in as2_params:
@@ -1132,32 +1141,32 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         as2_params['as2_subject'] = existing_subject
                                 # MDN options
                                 if 'as2_request_mdn' not in as2_params:
-                                    existing_req_mdn = getattr(existing_send_opts, 'request_mdn', None) or getattr(existing_send_opts, 'requestMdn', None)
+                                    existing_req_mdn = _ga(existing_send_opts, 'request_mdn', 'requestMdn')
                                     if existing_req_mdn is not None:
                                         as2_params['as2_request_mdn'] = str(existing_req_mdn).lower()
                                 if 'as2_mdn_signed' not in as2_params:
-                                    existing_mdn_signed = getattr(existing_send_opts, 'mdn_signed', None) or getattr(existing_send_opts, 'mdnSigned', None)
+                                    existing_mdn_signed = _ga(existing_send_opts, 'mdn_signed', 'mdnSigned')
                                     if existing_mdn_signed is not None:
                                         as2_params['as2_mdn_signed'] = str(existing_mdn_signed).lower()
                                 if 'as2_mdn_digest_alg' not in as2_params:
-                                    existing_mdn_digest = getattr(existing_send_opts, 'mdn_digest_algorithm', None) or getattr(existing_send_opts, 'mdnDigestAlgorithm', None)
+                                    existing_mdn_digest = _ga(existing_send_opts, 'mdn_digest_algorithm', 'mdnDigestAlgorithm')
                                     if existing_mdn_digest:
                                         as2_params['as2_mdn_digest_alg'] = existing_mdn_digest
                                 if 'as2_synchronous_mdn' not in as2_params:
-                                    existing_sync_mdn = getattr(existing_send_opts, 'synchronous_mdn', None) or getattr(existing_send_opts, 'synchronousMdn', None)
+                                    existing_sync_mdn = _ga(existing_send_opts, 'synchronous_mdn', 'synchronousMdn')
                                     if existing_sync_mdn is not None:
                                         as2_params['as2_synchronous_mdn'] = str(existing_sync_mdn).lower()
                                 # Attachments
                                 if 'as2_multiple_attachments' not in as2_params:
-                                    existing_multi = getattr(existing_send_opts, 'multiple_attachments', None) or getattr(existing_send_opts, 'multipleAttachments', None)
+                                    existing_multi = _ga(existing_send_opts, 'multiple_attachments', 'multipleAttachments')
                                     if existing_multi is not None:
                                         as2_params['as2_multiple_attachments'] = str(existing_multi).lower()
                                 if 'as2_max_document_count' not in as2_params:
-                                    existing_max = getattr(existing_send_opts, 'max_document_count', None) or getattr(existing_send_opts, 'maxDocumentCount', None)
+                                    existing_max = _ga(existing_send_opts, 'max_document_count', 'maxDocumentCount')
                                     if existing_max:
                                         as2_params['as2_max_document_count'] = existing_max
                                 if 'as2_legacy_smime' not in as2_params:
-                                    existing_legacy = getattr(existing_send_opts, 'legacy_smime', None) or getattr(existing_send_opts, 'legacySMIME', None)
+                                    existing_legacy = _ga(existing_send_opts, 'legacy_smime', 'legacySMIME')
                                     if existing_legacy is not None:
                                         as2_params['as2_legacy_smime'] = str(existing_legacy).lower()
 
@@ -1165,17 +1174,17 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                             existing_recv_opts = getattr(existing_as2, 'as2_receive_options', None)
                             if existing_recv_opts:
                                 if 'as2_mdn_alias' not in as2_params:
-                                    mdn_cert = getattr(existing_recv_opts, 'mdn_certificate', None) or getattr(existing_recv_opts, 'mdnCertificate', None)
+                                    mdn_cert = _ga(existing_recv_opts, 'mdn_certificate', 'mdnCertificate')
                                     if mdn_cert:
                                         existing_alias = getattr(mdn_cert, 'alias', None)
                                         if existing_alias:
                                             as2_params['as2_mdn_alias'] = existing_alias
                                 if 'as2_reject_duplicates' not in as2_params:
-                                    existing_reject = getattr(existing_recv_opts, 'reject_duplicates', None) or getattr(existing_recv_opts, 'rejectDuplicates', None)
+                                    existing_reject = _ga(existing_recv_opts, 'reject_duplicates', 'rejectDuplicates')
                                     if existing_reject is not None:
                                         as2_params['as2_reject_duplicates'] = str(existing_reject).lower()
                                 if 'as2_duplicate_check_count' not in as2_params:
-                                    existing_check = getattr(existing_recv_opts, 'duplicate_check_count', None) or getattr(existing_recv_opts, 'duplicateCheckCount', None)
+                                    existing_check = _ga(existing_recv_opts, 'duplicate_check_count', 'duplicateCheckCount')
                                     if existing_check:
                                         as2_params['as2_duplicate_check_count'] = existing_check
 
@@ -1210,22 +1219,13 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         http_params['http_password'] = existing_pass
                                 # Timeout settings
                                 if 'http_connect_timeout' not in http_params:
-                                    existing_timeout = getattr(existing_settings, 'connect_timeout', None) or getattr(existing_settings, 'connectTimeout', None)
+                                    existing_timeout = _ga(existing_settings, 'connect_timeout', 'connectTimeout')
                                     if existing_timeout:
                                         http_params['http_connect_timeout'] = str(existing_timeout)
                                 if 'http_read_timeout' not in http_params:
-                                    existing_timeout = getattr(existing_settings, 'read_timeout', None) or getattr(existing_settings, 'readTimeout', None)
+                                    existing_timeout = _ga(existing_settings, 'read_timeout', 'readTimeout')
                                     if existing_timeout:
                                         http_params['http_read_timeout'] = str(existing_timeout)
-                                # Method and content settings
-                                if 'http_method_type' not in http_params:
-                                    existing_method = getattr(existing_settings, 'method_type', None) or getattr(existing_settings, 'methodType', None)
-                                    if existing_method:
-                                        http_params['http_method_type'] = existing_method
-                                if 'http_data_content_type' not in http_params:
-                                    existing_content = getattr(existing_settings, 'data_content_type', None) or getattr(existing_settings, 'dataContentType', None)
-                                    if existing_content:
-                                        http_params['http_data_content_type'] = existing_content
                                 # SSL settings
                                 if 'http_client_auth' not in http_params:
                                     existing_client_auth = getattr(existing_settings, 'use_client_authentication', None)
@@ -1247,68 +1247,42 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_alias = getattr(trusted_ssl, 'alias', None)
                                         if existing_alias:
                                             http_params['http_trusted_cert_alias'] = existing_alias
-                                # Behavior settings
-                                if 'http_follow_redirects' not in http_params:
-                                    existing_follow = getattr(existing_settings, 'follow_redirects', None) or getattr(existing_settings, 'followRedirects', None)
-                                    if existing_follow is not None:
-                                        http_params['http_follow_redirects'] = str(existing_follow).lower()
                                 # NOTE: http_return_errors and http_return_responses are
                                 # deliberately NOT preserved here — they cause 400 on update
                                 if 'http_cookie_scope' not in http_params:
-                                    existing_cookie = getattr(existing_settings, 'cookie_scope', None) or getattr(existing_settings, 'cookieScope', None)
+                                    existing_cookie = _ga(existing_settings, 'cookie_scope', 'cookieScope')
                                     if existing_cookie:
                                         http_params['http_cookie_scope'] = existing_cookie
-                                # Request/Response profiles
-                                if 'http_request_profile_type' not in http_params:
-                                    existing_req_type = getattr(existing_settings, 'request_profile_type', None) or getattr(existing_settings, 'requestProfileType', None)
-                                    if existing_req_type:
-                                        http_params['http_request_profile_type'] = existing_req_type
-                                if 'http_request_profile' not in http_params:
-                                    req_profile = getattr(existing_settings, 'request_profile', None) or getattr(existing_settings, 'requestProfile', None)
-                                    if req_profile:
-                                        existing_id = getattr(req_profile, 'component_id', None) or getattr(req_profile, 'componentId', None)
-                                        if existing_id:
-                                            http_params['http_request_profile'] = existing_id
-                                if 'http_response_profile_type' not in http_params:
-                                    existing_resp_type = getattr(existing_settings, 'response_profile_type', None) or getattr(existing_settings, 'responseProfileType', None)
-                                    if existing_resp_type:
-                                        http_params['http_response_profile_type'] = existing_resp_type
-                                if 'http_response_profile' not in http_params:
-                                    resp_profile = getattr(existing_settings, 'response_profile', None) or getattr(existing_settings, 'responseProfile', None)
-                                    if resp_profile:
-                                        existing_id = getattr(resp_profile, 'component_id', None) or getattr(resp_profile, 'componentId', None)
-                                        if existing_id:
-                                            http_params['http_response_profile'] = existing_id
                                 # Settings flags
                                 if 'http_use_custom_auth' not in http_params:
-                                    existing_val = getattr(existing_settings, 'use_custom_auth', None) or getattr(existing_settings, 'useCustomAuth', None)
+                                    existing_val = _ga(existing_settings, 'use_custom_auth', 'useCustomAuth')
                                     if existing_val is not None:
                                         http_params['http_use_custom_auth'] = str(existing_val).lower()
                                 if 'http_use_basic_auth' not in http_params:
-                                    existing_val = getattr(existing_settings, 'use_basic_auth', None) or getattr(existing_settings, 'useBasicAuth', None)
+                                    existing_val = _ga(existing_settings, 'use_basic_auth', 'useBasicAuth')
                                     if existing_val is not None:
                                         http_params['http_use_basic_auth'] = str(existing_val).lower()
                                 if 'http_use_default_settings' not in http_params:
-                                    existing_val = getattr(existing_settings, 'use_default_settings', None) or getattr(existing_settings, 'useDefaultSettings', None)
+                                    existing_val = _ga(existing_settings, 'use_default_settings', 'useDefaultSettings')
                                     if existing_val is not None:
                                         http_params['http_use_default_settings'] = str(existing_val).lower()
                                 # OAuth 1.0 settings
-                                oauth1 = getattr(existing_settings, 'httpo_auth_settings', None) or getattr(existing_settings, 'HTTPOAuthSettings', None)
+                                oauth1 = _ga(existing_settings, 'httpo_auth_settings', 'HTTPOAuthSettings')
                                 if oauth1:
                                     if 'http_oauth1_consumer_key' not in http_params:
-                                        existing_val = getattr(oauth1, 'consumer_key', None) or getattr(oauth1, 'consumerKey', None)
+                                        existing_val = _ga(oauth1, 'consumer_key', 'consumerKey')
                                         if existing_val:
                                             http_params['http_oauth1_consumer_key'] = existing_val
                                     if 'http_oauth1_consumer_secret' not in http_params:
-                                        existing_val = getattr(oauth1, 'consumer_secret', None) or getattr(oauth1, 'consumerSecret', None)
+                                        existing_val = _ga(oauth1, 'consumer_secret', 'consumerSecret')
                                         if existing_val:
                                             http_params['http_oauth1_consumer_secret'] = existing_val
                                     if 'http_oauth1_access_token' not in http_params:
-                                        existing_val = getattr(oauth1, 'access_token', None) or getattr(oauth1, 'accessToken', None)
+                                        existing_val = _ga(oauth1, 'access_token', 'accessToken')
                                         if existing_val:
                                             http_params['http_oauth1_access_token'] = existing_val
                                     if 'http_oauth1_token_secret' not in http_params:
-                                        existing_val = getattr(oauth1, 'token_secret', None) or getattr(oauth1, 'tokenSecret', None)
+                                        existing_val = _ga(oauth1, 'token_secret', 'tokenSecret')
                                         if existing_val:
                                             http_params['http_oauth1_token_secret'] = existing_val
                                     if 'http_oauth1_realm' not in http_params:
@@ -1316,36 +1290,36 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         if existing_val:
                                             http_params['http_oauth1_realm'] = existing_val
                                     if 'http_oauth1_signature_method' not in http_params:
-                                        existing_val = getattr(oauth1, 'signature_method', None) or getattr(oauth1, 'signatureMethod', None)
+                                        existing_val = _ga(oauth1, 'signature_method', 'signatureMethod')
                                         if existing_val:
                                             http_params['http_oauth1_signature_method'] = existing_val
                                     if 'http_oauth1_request_token_url' not in http_params:
-                                        existing_val = getattr(oauth1, 'request_token_url', None) or getattr(oauth1, 'requestTokenUrl', None)
+                                        existing_val = _ga(oauth1, 'request_token_url', 'requestTokenUrl')
                                         if existing_val:
                                             http_params['http_oauth1_request_token_url'] = existing_val
                                     if 'http_oauth1_access_token_url' not in http_params:
-                                        existing_val = getattr(oauth1, 'access_token_url', None) or getattr(oauth1, 'accessTokenUrl', None)
+                                        existing_val = _ga(oauth1, 'access_token_url', 'accessTokenUrl')
                                         if existing_val:
                                             http_params['http_oauth1_access_token_url'] = existing_val
                                     if 'http_oauth1_authorization_url' not in http_params:
-                                        existing_val = getattr(oauth1, 'authorization_url', None) or getattr(oauth1, 'authorizationUrl', None)
+                                        existing_val = _ga(oauth1, 'authorization_url', 'authorizationUrl')
                                         if existing_val:
                                             http_params['http_oauth1_authorization_url'] = existing_val
                                     if 'http_oauth1_suppress_blank_access_token' not in http_params:
-                                        existing_val = getattr(oauth1, 'suppress_blank_access_token', None) or getattr(oauth1, 'suppressBlankAccessToken', None)
+                                        existing_val = _ga(oauth1, 'suppress_blank_access_token', 'suppressBlankAccessToken')
                                         if existing_val is not None:
                                             http_params['http_oauth1_suppress_blank_access_token'] = str(existing_val).lower()
                                 # OAuth2 settings
-                                oauth = getattr(existing_settings, 'http_oauth2_settings', None) or getattr(existing_settings, 'HTTPOAuth2Settings', None)
+                                oauth = _ga(existing_settings, 'http_oauth2_settings', 'HTTPOAuth2Settings')
                                 if oauth:
                                     if 'http_oauth_token_url' not in http_params:
-                                        token_ep = getattr(oauth, 'access_token_endpoint', None) or getattr(oauth, 'accessTokenEndpoint', None)
+                                        token_ep = _ga(oauth, 'access_token_endpoint', 'accessTokenEndpoint')
                                         if token_ep:
                                             existing_url = getattr(token_ep, 'url', None)
                                             if existing_url:
                                                 http_params['http_oauth_token_url'] = existing_url
                                     if 'http_oauth2_authorization_token_url' not in http_params:
-                                        auth_ep = getattr(oauth, 'authorization_token_endpoint', None) or getattr(oauth, 'authorizationTokenEndpoint', None)
+                                        auth_ep = _ga(oauth, 'authorization_token_endpoint', 'authorizationTokenEndpoint')
                                         if auth_ep:
                                             existing_url = getattr(auth_ep, 'url', None)
                                             if existing_url:
@@ -1353,19 +1327,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     creds = getattr(oauth, 'credentials', None)
                                     if creds:
                                         if 'http_oauth_client_id' not in http_params:
-                                            existing_val = getattr(creds, 'client_id', None) or getattr(creds, 'clientId', None)
+                                            existing_val = _ga(creds, 'client_id', 'clientId')
                                             if existing_val:
                                                 http_params['http_oauth_client_id'] = existing_val
                                         if 'http_oauth_client_secret' not in http_params:
-                                            existing_val = getattr(creds, 'client_secret', None) or getattr(creds, 'clientSecret', None)
+                                            existing_val = _ga(creds, 'client_secret', 'clientSecret')
                                             if existing_val:
                                                 http_params['http_oauth_client_secret'] = existing_val
                                         if 'http_oauth2_access_token' not in http_params:
-                                            existing_val = getattr(creds, 'access_token', None) or getattr(creds, 'accessToken', None)
+                                            existing_val = _ga(creds, 'access_token', 'accessToken')
                                             if existing_val:
                                                 http_params['http_oauth2_access_token'] = existing_val
                                         if 'http_oauth2_use_refresh_token' not in http_params:
-                                            existing_val = getattr(creds, 'use_refresh_token', None) or getattr(creds, 'useRefreshToken', None)
+                                            existing_val = _ga(creds, 'use_refresh_token', 'useRefreshToken')
                                             if existing_val is not None:
                                                 http_params['http_oauth2_use_refresh_token'] = str(existing_val).lower()
                                     if 'http_oauth_scope' not in http_params:
@@ -1373,22 +1347,22 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         if existing_scope:
                                             http_params['http_oauth_scope'] = existing_scope
                                     if 'http_oauth_grant_type' not in http_params:
-                                        existing_grant = getattr(oauth, 'grant_type', None) or getattr(oauth, 'grantType', None)
+                                        existing_grant = _ga(oauth, 'grant_type', 'grantType')
                                         if existing_grant:
                                             http_params['http_oauth_grant_type'] = existing_grant
                             # Preserve Listen options
-                            existing_listen = getattr(existing_http, 'http_listen_options', None) or getattr(existing_http, 'HTTPListenOptions', None)
+                            existing_listen = _ga(existing_http, 'http_listen_options', 'HTTPListenOptions')
                             if existing_listen:
                                 if 'http_listen_mime_passthrough' not in http_params:
-                                    existing_val = getattr(existing_listen, 'mime_passthrough', None) or getattr(existing_listen, 'mimePassthrough', None)
+                                    existing_val = _ga(existing_listen, 'mime_passthrough', 'mimePassthrough')
                                     if existing_val is not None:
                                         http_params['http_listen_mime_passthrough'] = str(existing_val).lower()
                                 if 'http_listen_object_name' not in http_params:
-                                    existing_val = getattr(existing_listen, 'object_name', None) or getattr(existing_listen, 'objectName', None)
+                                    existing_val = _ga(existing_listen, 'object_name', 'objectName')
                                     if existing_val:
                                         http_params['http_listen_object_name'] = existing_val
                                 if 'http_listen_operation_type' not in http_params:
-                                    existing_val = getattr(existing_listen, 'operation_type', None) or getattr(existing_listen, 'operationType', None)
+                                    existing_val = _ga(existing_listen, 'operation_type', 'operationType')
                                     if existing_val:
                                         http_params['http_listen_operation_type'] = existing_val
                                 if 'http_listen_password' not in http_params:
@@ -1396,19 +1370,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_val:
                                         http_params['http_listen_password'] = existing_val
                                 if 'http_listen_use_default' not in http_params:
-                                    existing_val = getattr(existing_listen, 'use_default', None) or getattr(existing_listen, 'useDefault', None)
+                                    existing_val = _ga(existing_listen, 'use_default_listen_options', 'useDefaultListenOptions')
                                     if existing_val is not None:
                                         http_params['http_listen_use_default'] = str(existing_val).lower()
                                 if 'http_listen_username' not in http_params:
-                                    existing_val = getattr(existing_listen, 'user_name', None) or getattr(existing_listen, 'userName', None)
+                                    existing_val = getattr(existing_listen, 'username', None)
                                     if existing_val:
                                         http_params['http_listen_username'] = existing_val
                             # Preserve Send options headers/path elements
-                            existing_send = getattr(existing_http, 'http_send_options', None) or getattr(existing_http, 'HTTPSendOptions', None)
+                            existing_send = _ga(existing_http, 'http_send_options', 'HTTPSendOptions')
                             if existing_send:
                                 import json as _json
                                 if 'http_request_headers' not in http_params:
-                                    req_hdrs = getattr(existing_send, 'request_headers', None) or getattr(existing_send, 'requestHeaders', None)
+                                    req_hdrs = _ga(existing_send, 'request_headers', 'requestHeaders')
                                     if req_hdrs:
                                         hdr_list = getattr(req_hdrs, 'header', None)
                                         if hdr_list:
@@ -1417,7 +1391,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                             except (TypeError, ValueError):
                                                 pass
                                 if 'http_response_header_mapping' not in http_params:
-                                    resp_hdrs = getattr(existing_send, 'response_header_mapping', None) or getattr(existing_send, 'responseHeaderMapping', None)
+                                    resp_hdrs = _ga(existing_send, 'response_header_mapping', 'responseHeaderMapping')
                                     if resp_hdrs:
                                         hdr_list = getattr(resp_hdrs, 'header', None)
                                         if hdr_list:
@@ -1426,7 +1400,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                             except (TypeError, ValueError):
                                                 pass
                                 if 'http_reflect_headers' not in http_params:
-                                    reflect = getattr(existing_send, 'reflect_headers', None) or getattr(existing_send, 'reflectHeaders', None)
+                                    reflect = _ga(existing_send, 'reflect_headers', 'reflectHeaders')
                                     if reflect:
                                         hdr_list = getattr(reflect, 'header', None)
                                         if hdr_list:
@@ -1435,7 +1409,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                             except (TypeError, ValueError):
                                                 pass
                                 if 'http_path_elements' not in http_params:
-                                    path_elems = getattr(existing_send, 'path_elements', None) or getattr(existing_send, 'pathElements', None)
+                                    path_elems = _ga(existing_send, 'path_elements', 'pathElements')
                                     if path_elems:
                                         elem_list = getattr(path_elems, 'element', None)
                                         if elem_list:
@@ -1443,39 +1417,72 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                                 http_params['http_path_elements'] = _json.dumps(elem_list)
                                             except (TypeError, ValueError):
                                                 pass
+                                # Preserve send-level fields (method, content, follow, profiles)
+                                if 'http_method_type' not in http_params:
+                                    existing_method = _ga(existing_send, 'method_type', 'methodType')
+                                    if existing_method:
+                                        http_params['http_method_type'] = existing_method
+                                if 'http_data_content_type' not in http_params:
+                                    existing_content = _ga(existing_send, 'data_content_type', 'dataContentType')
+                                    if existing_content:
+                                        http_params['http_data_content_type'] = existing_content
+                                if 'http_follow_redirects' not in http_params:
+                                    existing_follow = _ga(existing_send, 'follow_redirects', 'followRedirects')
+                                    if existing_follow is not None:
+                                        http_params['http_follow_redirects'] = str(existing_follow).lower()
+                                if 'http_request_profile_type' not in http_params:
+                                    existing_req_type = _ga(existing_send, 'request_profile_type', 'requestProfileType')
+                                    if existing_req_type:
+                                        http_params['http_request_profile_type'] = existing_req_type
+                                if 'http_request_profile' not in http_params:
+                                    req_profile = _ga(existing_send, 'request_profile', 'requestProfile')
+                                    if req_profile:
+                                        existing_id = _ga(req_profile, 'component_id', 'componentId')
+                                        if existing_id:
+                                            http_params['http_request_profile'] = existing_id
+                                if 'http_response_profile_type' not in http_params:
+                                    existing_resp_type = _ga(existing_send, 'response_profile_type', 'responseProfileType')
+                                    if existing_resp_type:
+                                        http_params['http_response_profile_type'] = existing_resp_type
+                                if 'http_response_profile' not in http_params:
+                                    resp_profile = _ga(existing_send, 'response_profile', 'responseProfile')
+                                    if resp_profile:
+                                        existing_id = _ga(resp_profile, 'component_id', 'componentId')
+                                        if existing_id:
+                                            http_params['http_response_profile'] = existing_id
                             # Preserve Get options (separate from send)
-                            existing_get = getattr(existing_http, 'http_get_options', None) or getattr(existing_http, 'HTTPGetOptions', None)
+                            existing_get = _ga(existing_http, 'http_get_options', 'HTTPGetOptions')
                             if existing_get:
                                 if 'http_get_method_type' not in http_params:
-                                    existing_val = getattr(existing_get, 'method_type', None) or getattr(existing_get, 'methodType', None)
+                                    existing_val = _ga(existing_get, 'method_type', 'methodType')
                                     if existing_val:
                                         http_params['http_get_method_type'] = existing_val
                                 if 'http_get_content_type' not in http_params:
-                                    existing_val = getattr(existing_get, 'data_content_type', None) or getattr(existing_get, 'dataContentType', None)
+                                    existing_val = _ga(existing_get, 'data_content_type', 'dataContentType')
                                     if existing_val:
                                         http_params['http_get_content_type'] = existing_val
                                 if 'http_get_follow_redirects' not in http_params:
-                                    existing_val = getattr(existing_get, 'follow_redirects', None) or getattr(existing_get, 'followRedirects', None)
+                                    existing_val = _ga(existing_get, 'follow_redirects', 'followRedirects')
                                     if existing_val is not None:
                                         http_params['http_get_follow_redirects'] = str(existing_val).lower()
                                 if 'http_get_return_errors' not in http_params:
-                                    existing_val = getattr(existing_get, 'return_errors', None) or getattr(existing_get, 'returnErrors', None)
+                                    existing_val = _ga(existing_get, 'return_errors', 'returnErrors')
                                     if existing_val is not None:
                                         http_params['http_get_return_errors'] = str(existing_val).lower()
                                 if 'http_get_request_profile' not in http_params:
-                                    existing_val = getattr(existing_get, 'request_profile', None) or getattr(existing_get, 'requestProfile', None)
+                                    existing_val = _ga(existing_get, 'request_profile', 'requestProfile')
                                     if existing_val:
                                         http_params['http_get_request_profile'] = existing_val
                                 if 'http_get_request_profile_type' not in http_params:
-                                    existing_val = getattr(existing_get, 'request_profile_type', None) or getattr(existing_get, 'requestProfileType', None)
+                                    existing_val = _ga(existing_get, 'request_profile_type', 'requestProfileType')
                                     if existing_val:
                                         http_params['http_get_request_profile_type'] = existing_val
                                 if 'http_get_response_profile' not in http_params:
-                                    existing_val = getattr(existing_get, 'response_profile', None) or getattr(existing_get, 'responseProfile', None)
+                                    existing_val = _ga(existing_get, 'response_profile', 'responseProfile')
                                     if existing_val:
                                         http_params['http_get_response_profile'] = existing_val
                                 if 'http_get_response_profile_type' not in http_params:
-                                    existing_val = getattr(existing_get, 'response_profile_type', None) or getattr(existing_get, 'responseProfileType', None)
+                                    existing_val = _ga(existing_get, 'response_profile_type', 'responseProfileType')
                                     if existing_val:
                                         http_params['http_get_response_profile_type'] = existing_val
                     http_opts = build_http_communication_options(**http_params)
@@ -1512,7 +1519,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_known_host:
                                         sftp_params['sftp_known_host_entry'] = existing_known_host
                                 if 'sftp_dh_key_max_1024' not in sftp_params:
-                                    existing_dh = getattr(existing_settings, 'dh_key_max1024', None) or getattr(existing_settings, 'dhKeyMax1024', None)
+                                    existing_dh = _ga(existing_settings, 'dh_key_max1024', 'dhKeyMax1024')
                                     if existing_dh is not None:
                                         sftp_params['sftp_dh_key_max_1024'] = str(existing_dh).lower()
                                 # Preserve SSH key settings
@@ -1562,23 +1569,23 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_dir:
                                         sftp_params['sftp_remote_directory'] = existing_dir
                                 if 'sftp_get_action' not in sftp_params:
-                                    existing_action = getattr(existing_get_opts, 'ftp_action', None) or getattr(existing_get_opts, 'ftpAction', None)
+                                    existing_action = _ga(existing_get_opts, 'ftp_action', 'ftpAction')
                                     if existing_action:
                                         sftp_params['sftp_get_action'] = existing_action
                                 if 'sftp_max_file_count' not in sftp_params:
-                                    existing_count = getattr(existing_get_opts, 'max_file_count', None) or getattr(existing_get_opts, 'maxFileCount', None)
+                                    existing_count = _ga(existing_get_opts, 'max_file_count', 'maxFileCount')
                                     if existing_count:
                                         sftp_params['sftp_max_file_count'] = str(existing_count)
                                 if 'sftp_file_to_move' not in sftp_params:
-                                    existing_file = getattr(existing_get_opts, 'file_to_move', None) or getattr(existing_get_opts, 'fileToMove', None)
+                                    existing_file = _ga(existing_get_opts, 'file_to_move', 'fileToMove')
                                     if existing_file:
                                         sftp_params['sftp_file_to_move'] = existing_file
                                 if 'sftp_move_to_directory' not in sftp_params:
-                                    existing_move_dir = getattr(existing_get_opts, 'move_to_directory', None) or getattr(existing_get_opts, 'moveToDirectory', None)
+                                    existing_move_dir = _ga(existing_get_opts, 'move_to_directory', 'moveToDirectory')
                                     if existing_move_dir:
                                         sftp_params['sftp_move_to_directory'] = existing_move_dir
                                 if 'sftp_move_force_override' not in sftp_params:
-                                    existing_force = getattr(existing_get_opts, 'move_force_override', None) or getattr(existing_get_opts, 'moveForceOverride', None)
+                                    existing_force = _ga(existing_get_opts, 'move_force_override', 'moveForceOverride')
                                     if existing_force is not None:
                                         sftp_params['sftp_move_force_override'] = str(existing_force).lower()
 
@@ -1586,7 +1593,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                             existing_send_opts = getattr(existing_sftp, 'sftp_send_options', None)
                             if existing_send_opts:
                                 if 'sftp_send_action' not in sftp_params:
-                                    existing_action = getattr(existing_send_opts, 'ftp_action', None) or getattr(existing_send_opts, 'ftpAction', None)
+                                    existing_action = _ga(existing_send_opts, 'ftp_action', 'ftpAction')
                                     if existing_action:
                                         sftp_params['sftp_send_action'] = existing_action
                     sftp_opts = build_sftp_communication_options(**sftp_params)
@@ -1630,7 +1637,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         if existing_ssl_mode:
                                             ftp_params['ftp_ssl_mode'] = existing_ssl_mode
                                     if 'ftp_client_ssl_alias' not in ftp_params:
-                                        client_ssl_cert = getattr(existing_ssl, 'client_ssl_certificate', None) or getattr(existing_ssl, 'clientSSLCertificate', None)
+                                        client_ssl_cert = _ga(existing_ssl, 'client_ssl_certificate', 'clientSSLCertificate')
                                         if client_ssl_cert:
                                             existing_alias = getattr(client_ssl_cert, 'alias', None)
                                             if existing_alias:
@@ -1648,19 +1655,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_type:
                                         ftp_params['ftp_transfer_type'] = existing_type
                                 if 'ftp_get_action' not in ftp_params:
-                                    existing_action = getattr(existing_get_opts, 'ftp_action', None) or getattr(existing_get_opts, 'ftpAction', None)
+                                    existing_action = _ga(existing_get_opts, 'ftp_action', 'ftpAction')
                                     if existing_action:
                                         ftp_params['ftp_get_action'] = existing_action
                                 if 'ftp_max_file_count' not in ftp_params:
-                                    existing_count = getattr(existing_get_opts, 'max_file_count', None) or getattr(existing_get_opts, 'maxFileCount', None)
+                                    existing_count = _ga(existing_get_opts, 'max_file_count', 'maxFileCount')
                                     if existing_count:
                                         ftp_params['ftp_max_file_count'] = str(existing_count)
                                 if 'ftp_file_to_move' not in ftp_params:
-                                    existing_file = getattr(existing_get_opts, 'file_to_move', None) or getattr(existing_get_opts, 'fileToMove', None)
+                                    existing_file = _ga(existing_get_opts, 'file_to_move', 'fileToMove')
                                     if existing_file:
                                         ftp_params['ftp_file_to_move'] = existing_file
                                 if 'ftp_move_to_directory' not in ftp_params:
-                                    existing_move_dir = getattr(existing_get_opts, 'move_to_directory', None) or getattr(existing_get_opts, 'moveToDirectory', None)
+                                    existing_move_dir = _ga(existing_get_opts, 'move_to_directory', 'moveToDirectory')
                                     if existing_move_dir:
                                         ftp_params['ftp_move_to_directory'] = existing_move_dir
 
@@ -1668,19 +1675,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                             existing_send_opts = getattr(existing_ftp, 'ftp_send_options', None)
                             if existing_send_opts:
                                 if 'ftp_send_action' not in ftp_params:
-                                    existing_action = getattr(existing_send_opts, 'ftp_action', None) or getattr(existing_send_opts, 'ftpAction', None)
+                                    existing_action = _ga(existing_send_opts, 'ftp_action', 'ftpAction')
                                     if existing_action:
                                         ftp_params['ftp_send_action'] = existing_action
                                 if 'ftp_move_to_directory' not in ftp_params:
-                                    existing_move_dir = getattr(existing_send_opts, 'move_to_directory', None) or getattr(existing_send_opts, 'moveToDirectory', None)
+                                    existing_move_dir = _ga(existing_send_opts, 'move_to_directory', 'moveToDirectory')
                                     if existing_move_dir:
                                         ftp_params['ftp_move_to_directory'] = existing_move_dir
                                 if 'ftp_remote_directory' not in ftp_params:
-                                    existing_dir = getattr(existing_send_opts, 'remote_directory', None) or getattr(existing_send_opts, 'remoteDirectory', None)
+                                    existing_dir = _ga(existing_send_opts, 'remote_directory', 'remoteDirectory')
                                     if existing_dir:
                                         ftp_params['ftp_remote_directory'] = existing_dir
                                 if 'ftp_transfer_type' not in ftp_params:
-                                    existing_type = getattr(existing_send_opts, 'transfer_type', None) or getattr(existing_send_opts, 'transferType', None)
+                                    existing_type = _ga(existing_send_opts, 'transfer_type', 'transferType')
                                     if existing_type:
                                         ftp_params['ftp_transfer_type'] = existing_type
                     ftp_opts = build_ftp_communication_options(**ftp_params)
@@ -1701,19 +1708,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_dir:
                                         disk_params['disk_get_directory'] = existing_dir
                                 if 'disk_file_filter' not in disk_params:
-                                    existing_filter = getattr(existing_get, 'file_filter', None) or getattr(existing_get, 'fileFilter', None)
+                                    existing_filter = _ga(existing_get, 'file_filter', 'fileFilter')
                                     if existing_filter:
                                         disk_params['disk_file_filter'] = existing_filter
                                 if 'disk_filter_match_type' not in disk_params:
-                                    existing_match = getattr(existing_get, 'filter_match_type', None) or getattr(existing_get, 'filterMatchType', None)
+                                    existing_match = _ga(existing_get, 'filter_match_type', 'filterMatchType')
                                     if existing_match:
                                         disk_params['disk_filter_match_type'] = existing_match
                                 if 'disk_delete_after_read' not in disk_params:
-                                    existing_delete = getattr(existing_get, 'delete_after_read', None) or getattr(existing_get, 'deleteAfterRead', None)
+                                    existing_delete = _ga(existing_get, 'delete_after_read', 'deleteAfterRead')
                                     if existing_delete is not None:
                                         disk_params['disk_delete_after_read'] = str(existing_delete).lower()
                                 if 'disk_max_file_count' not in disk_params:
-                                    existing_count = getattr(existing_get, 'max_file_count', None) or getattr(existing_get, 'maxFileCount', None)
+                                    existing_count = _ga(existing_get, 'max_file_count', 'maxFileCount')
                                     if existing_count:
                                         disk_params['disk_max_file_count'] = str(existing_count)
 
@@ -1725,11 +1732,11 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_dir:
                                         disk_params['disk_send_directory'] = existing_dir
                                 if 'disk_create_directory' not in disk_params:
-                                    existing_create = getattr(existing_send, 'create_directory', None) or getattr(existing_send, 'createDirectory', None)
+                                    existing_create = _ga(existing_send, 'create_directory', 'createDirectory')
                                     if existing_create is not None:
                                         disk_params['disk_create_directory'] = str(existing_create).lower()
                                 if 'disk_write_option' not in disk_params:
-                                    existing_option = getattr(existing_send, 'write_option', None) or getattr(existing_send, 'writeOption', None)
+                                    existing_option = _ga(existing_send, 'write_option', 'writeOption')
                                     if existing_option:
                                         disk_params['disk_write_option'] = existing_option
                     disk_opts = build_disk_communication_options(**disk_params)
@@ -1761,47 +1768,47 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         mllp_params['mllp_persistent'] = str(existing_persistent).lower()
                                 # Timeout settings
                                 if 'mllp_send_timeout' not in mllp_params:
-                                    existing_timeout = getattr(existing_settings, 'send_timeout', None) or getattr(existing_settings, 'sendTimeout', None)
+                                    existing_timeout = _ga(existing_settings, 'send_timeout', 'sendTimeout')
                                     if existing_timeout:
                                         mllp_params['mllp_send_timeout'] = str(existing_timeout)
                                 if 'mllp_receive_timeout' not in mllp_params:
-                                    existing_timeout = getattr(existing_settings, 'receive_timeout', None) or getattr(existing_settings, 'receiveTimeout', None)
+                                    existing_timeout = _ga(existing_settings, 'receive_timeout', 'receiveTimeout')
                                     if existing_timeout:
                                         mllp_params['mllp_receive_timeout'] = str(existing_timeout)
                                 if 'mllp_halt_timeout' not in mllp_params:
-                                    existing_timeout = getattr(existing_settings, 'halt_timeout', None) or getattr(existing_settings, 'haltTimeout', None)
+                                    existing_timeout = _ga(existing_settings, 'halt_timeout', 'haltTimeout')
                                     if existing_timeout:
                                         mllp_params['mllp_halt_timeout'] = str(existing_timeout)
                                 # Connection settings
                                 if 'mllp_max_connections' not in mllp_params:
-                                    existing_max = getattr(existing_settings, 'max_connections', None) or getattr(existing_settings, 'maxConnections', None)
+                                    existing_max = _ga(existing_settings, 'max_connections', 'maxConnections')
                                     if existing_max:
                                         mllp_params['mllp_max_connections'] = str(existing_max)
                                 if 'mllp_max_retry' not in mllp_params:
-                                    existing_retry = getattr(existing_settings, 'max_retry', None) or getattr(existing_settings, 'maxRetry', None)
+                                    existing_retry = _ga(existing_settings, 'max_retry', 'maxRetry')
                                     if existing_retry:
                                         mllp_params['mllp_max_retry'] = existing_retry
                                 if 'mllp_inactivity_timeout' not in mllp_params:
-                                    existing_inactivity = getattr(existing_settings, 'inactivity_timeout', None) or getattr(existing_settings, 'inactivityTimeout', None)
+                                    existing_inactivity = _ga(existing_settings, 'inactivity_timeout', 'inactivityTimeout')
                                     if existing_inactivity:
                                         mllp_params['mllp_inactivity_timeout'] = existing_inactivity
                                 # SSL settings
                                 if 'mllp_use_ssl' not in mllp_params:
-                                    existing_ssl = getattr(existing_settings, 'use_ssl', None) or getattr(existing_settings, 'useSsl', None)
+                                    existing_ssl = _ga(existing_settings, 'use_ssl', 'useSsl')
                                     if existing_ssl is not None:
                                         mllp_params['mllp_use_ssl'] = str(existing_ssl).lower()
                                 if 'mllp_ssl_alias' not in mllp_params:
-                                    ssl_cert = getattr(existing_settings, 'ssl_certificate', None) or getattr(existing_settings, 'sslCertificate', None)
+                                    ssl_cert = _ga(existing_settings, 'ssl_certificate', 'sslCertificate')
                                     if ssl_cert:
                                         existing_alias = getattr(ssl_cert, 'alias', None)
                                         if existing_alias:
                                             mllp_params['mllp_ssl_alias'] = existing_alias
                                 if 'mllp_use_client_ssl' not in mllp_params:
-                                    existing_client_ssl = getattr(existing_settings, 'use_client_ssl', None) or getattr(existing_settings, 'useClientSsl', None)
+                                    existing_client_ssl = _ga(existing_settings, 'use_client_ssl', 'useClientSsl')
                                     if existing_client_ssl is not None:
                                         mllp_params['mllp_use_client_ssl'] = str(existing_client_ssl).lower()
                                 if 'mllp_client_ssl_alias' not in mllp_params:
-                                    client_ssl = getattr(existing_settings, 'client_ssl_certificate', None) or getattr(existing_settings, 'clientSslCertificate', None)
+                                    client_ssl = _ga(existing_settings, 'client_ssl_certificate', 'clientSslCertificate')
                                     if client_ssl:
                                         existing_alias = getattr(client_ssl, 'alias', None)
                                         if existing_alias:
