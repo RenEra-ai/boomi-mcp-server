@@ -146,15 +146,18 @@ def build_ftp_communication_options(**kwargs):
         ftp_port: FTP server port (default: 21)
         ftp_username: FTP username
         ftp_password: FTP password
-        ftp_remote_directory: Remote directory path
+        ftp_remote_directory: Remote directory path (used for get; also used for send if ftp_send_remote_directory not set)
+        ftp_send_remote_directory: Remote directory for send/upload (falls back to ftp_remote_directory)
         ftp_ssl_mode: SSL mode - NONE, EXPLICIT, IMPLICIT (default: NONE)
         ftp_connection_mode: Connection mode - ACTIVE, PASSIVE (default: PASSIVE)
-        ftp_transfer_type: Transfer type - ascii, binary (default: binary)
+        ftp_transfer_type: Transfer type for get - ascii, binary (default: binary; also used for send if ftp_send_transfer_type not set)
+        ftp_send_transfer_type: Transfer type for send - ascii, binary (falls back to ftp_transfer_type)
         ftp_get_action: Get action - actionget, actiongetdelete, actiongetmove
         ftp_send_action: Send action - actionputrename, actionputappend, actionputerror, actionputoverwrite
         ftp_max_file_count: Maximum files to retrieve per poll
         ftp_file_to_move: Directory to move files after get (when action=actiongetmove)
         ftp_move_to_directory: Directory to move files after send
+        ftp_move_force_override: Force overwrite when moving files (true/false)
         ftp_client_ssl_alias: Client SSL certificate alias for mutual TLS
 
     Returns dict (not SDK model) - API accepts minimal structure
@@ -167,16 +170,18 @@ def build_ftp_communication_options(**kwargs):
     username = kwargs.get('ftp_username', '')
     password = kwargs.get('ftp_password', '')
     remote_directory = kwargs.get('ftp_remote_directory')
+    send_remote_directory = kwargs.get('ftp_send_remote_directory')
     ssl_mode = kwargs.get('ftp_ssl_mode', 'NONE')
     connection_mode = kwargs.get('ftp_connection_mode', 'passive')
 
-    # New parameters
     transfer_type = kwargs.get('ftp_transfer_type')
+    send_transfer_type = kwargs.get('ftp_send_transfer_type')
     get_action = kwargs.get('ftp_get_action')
     send_action = kwargs.get('ftp_send_action')
     max_file_count = kwargs.get('ftp_max_file_count')
     file_to_move = kwargs.get('ftp_file_to_move')
     move_to_directory = kwargs.get('ftp_move_to_directory')
+    move_force_override = kwargs.get('ftp_move_force_override')
     client_ssl_alias = kwargs.get('ftp_client_ssl_alias')
 
     # Build FTP settings
@@ -188,13 +193,15 @@ def build_ftp_communication_options(**kwargs):
         'connectionMode': connection_mode.lower()  # SDK expects lowercase: 'active' or 'passive'
     }
 
-    # Add SSL options if not NONE or if client SSL alias is specified
+    # Add SSL options - always include sslmode when any SSL config is needed
     # SDK expects lowercase: 'none', 'explicit', 'implicit'
+    has_ssl_config = (ssl_mode and ssl_mode.lower() != 'none') or client_ssl_alias
     ssl_options = {}
-    if ssl_mode and ssl_mode.lower() != 'none':
-        ssl_options['sslmode'] = ssl_mode.lower()
+    if has_ssl_config:
+        # Default to 'explicit' if client SSL is requested but mode not specified
+        effective_ssl_mode = ssl_mode.lower() if ssl_mode and ssl_mode.lower() != 'none' else 'explicit'
+        ssl_options['sslmode'] = effective_ssl_mode
     if client_ssl_alias:
-        # clientSSLCertificate must be an object with 'alias' field
         ssl_options['clientSSLCertificate'] = {'alias': client_ssl_alias}
         ssl_options['useClientAuthentication'] = True
 
@@ -215,17 +222,21 @@ def build_ftp_communication_options(**kwargs):
         get_options['maxFileCount'] = int(max_file_count)
     if file_to_move:
         get_options['fileToMove'] = file_to_move
+    if move_force_override is not None:
+        get_options['moveToForceOverride'] = str(move_force_override).lower() == 'true'
 
     if get_options:
         get_options['useDefaultGetOptions'] = False
         result['FTPGetOptions'] = get_options
 
-    # Build send options
+    # Build send options (use separate send params with fallback to get params)
     send_options = {}
-    if remote_directory:
-        send_options['remoteDirectory'] = remote_directory
-    if transfer_type:
-        send_options['transferType'] = transfer_type.lower()
+    effective_send_dir = send_remote_directory or remote_directory
+    if effective_send_dir:
+        send_options['remoteDirectory'] = effective_send_dir
+    effective_send_type = send_transfer_type or transfer_type
+    if effective_send_type:
+        send_options['transferType'] = effective_send_type.lower()
     if send_action:
         send_options['ftpAction'] = send_action.lower()  # 'actionputrename', 'actionputappend', etc.
     if move_to_directory:
@@ -246,7 +257,8 @@ def build_sftp_communication_options(**kwargs):
         sftp_port: SFTP server port (default: 22)
         sftp_username: SFTP username
         sftp_password: SFTP password
-        sftp_remote_directory: Remote directory path
+        sftp_remote_directory: Remote directory path (used for get; also used for send if sftp_send_remote_directory not set)
+        sftp_send_remote_directory: Remote directory for send/upload (falls back to sftp_remote_directory)
         sftp_ssh_key_auth: Enable SSH key authentication (true/false)
         sftp_known_host_entry: Known hosts entry for server verification
         sftp_ssh_key_path: Path to SSH private key file
@@ -275,6 +287,7 @@ def build_sftp_communication_options(**kwargs):
     username = kwargs.get('sftp_username', '')
     password = kwargs.get('sftp_password', '')
     remote_directory = kwargs.get('sftp_remote_directory')
+    send_remote_directory = kwargs.get('sftp_send_remote_directory')
     ssh_key_auth = kwargs.get('sftp_ssh_key_auth')
     known_host_entry = kwargs.get('sftp_known_host_entry')
     ssh_key_path = kwargs.get('sftp_ssh_key_path')
@@ -355,10 +368,11 @@ def build_sftp_communication_options(**kwargs):
         get_options['useDefaultGetOptions'] = False
         result['SFTPGetOptions'] = get_options
 
-    # Build send options
+    # Build send options (use separate send dir with fallback to get dir)
     send_options = {}
-    if remote_directory:
-        send_options['remoteDirectory'] = remote_directory
+    effective_send_dir = send_remote_directory or remote_directory
+    if effective_send_dir:
+        send_options['remoteDirectory'] = effective_send_dir
     if send_action:
         send_options['ftpAction'] = send_action.lower()
     if move_to_directory:

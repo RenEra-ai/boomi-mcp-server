@@ -407,11 +407,15 @@ if manage_trading_partner_action:
         ftp_file_to_move: str = None,
         ftp_move_to_directory: str = None,
         ftp_client_ssl_alias: str = None,
+        ftp_send_remote_directory: str = None,
+        ftp_send_transfer_type: str = None,
+        ftp_move_force_override: str = None,
         sftp_host: str = None,
         sftp_port: str = None,
         sftp_username: str = None,
         sftp_password: str = None,
         sftp_remote_directory: str = None,
+        sftp_send_remote_directory: str = None,
         http_url: str = None,
         http_password: str = None,
         as2_url: str = None,
@@ -639,14 +643,21 @@ if manage_trading_partner_action:
             ftp_host: FTP server hostname/IP
             ftp_port: FTP server port
             ftp_username: FTP username
+            ftp_remote_directory: Remote directory for get (also used for send if ftp_send_remote_directory not set)
+            ftp_send_remote_directory: Remote directory for send/upload (falls back to ftp_remote_directory)
+            ftp_transfer_type: Transfer type for get - ascii, binary (also used for send if ftp_send_transfer_type not set)
+            ftp_send_transfer_type: Transfer type for send - ascii, binary (falls back to ftp_transfer_type)
             ftp_get_action: Get action - actionget, actiongetdelete, actiongetmove
             ftp_send_action: Send action - actionputrename, actionputappend, actionputerror, actionputoverwrite
             ftp_connection_mode: Connection mode - passive, active
             ftp_ssl_mode: SSL mode - none, implicit, explicit
+            ftp_move_force_override: Force overwrite when moving files (true/false)
             # SFTP Protocol
             sftp_host: SFTP server hostname/IP
             sftp_port: SFTP server port
             sftp_username: SFTP username
+            sftp_remote_directory: Remote directory for get (also used for send if sftp_send_remote_directory not set)
+            sftp_send_remote_directory: Remote directory for send/upload (falls back to sftp_remote_directory)
             sftp_get_action: Get action - actionget, actiongetdelete, actiongetmove
             sftp_send_action: Send action - actionputrename, actionputappend, actionputerror, actionputoverwrite
             # HTTP Protocol
@@ -1037,6 +1048,12 @@ if manage_trading_partner_action:
                     request_data["ftp_move_to_directory"] = ftp_move_to_directory
                 if ftp_client_ssl_alias:
                     request_data["ftp_client_ssl_alias"] = ftp_client_ssl_alias
+                if ftp_send_remote_directory:
+                    request_data["ftp_send_remote_directory"] = ftp_send_remote_directory
+                if ftp_send_transfer_type:
+                    request_data["ftp_send_transfer_type"] = ftp_send_transfer_type
+                if ftp_move_force_override:
+                    request_data["ftp_move_force_override"] = ftp_move_force_override
 
                 # Pass enhanced SFTP fields flat
                 if sftp_ssh_key_auth:
@@ -1073,6 +1090,8 @@ if manage_trading_partner_action:
                     request_data["sftp_proxy_password"] = sftp_proxy_password
                 if sftp_proxy_type:
                     request_data["sftp_proxy_type"] = sftp_proxy_type
+                if sftp_send_remote_directory:
+                    request_data["sftp_send_remote_directory"] = sftp_send_remote_directory
 
                 # Pass HTTP additional fields flat
                 if http_authentication_type:
@@ -1348,6 +1367,12 @@ if manage_trading_partner_action:
                     updates["ftp_move_to_directory"] = ftp_move_to_directory
                 if ftp_client_ssl_alias:
                     updates["ftp_client_ssl_alias"] = ftp_client_ssl_alias
+                if ftp_send_remote_directory:
+                    updates["ftp_send_remote_directory"] = ftp_send_remote_directory
+                if ftp_send_transfer_type:
+                    updates["ftp_send_transfer_type"] = ftp_send_transfer_type
+                if ftp_move_force_override:
+                    updates["ftp_move_force_override"] = ftp_move_force_override
 
                 # SFTP protocol fields (flat)
                 if sftp_host:
@@ -1394,6 +1419,8 @@ if manage_trading_partner_action:
                     updates["sftp_proxy_user"] = sftp_proxy_user
                 if sftp_proxy_password:
                     updates["sftp_proxy_password"] = sftp_proxy_password
+                if sftp_send_remote_directory:
+                    updates["sftp_send_remote_directory"] = sftp_send_remote_directory
 
                 # HTTP protocol fields (flat)
                 if http_url:
