@@ -202,7 +202,7 @@ def build_ftp_communication_options(**kwargs):
         effective_ssl_mode = ssl_mode.lower() if ssl_mode and ssl_mode.lower() != 'none' else 'explicit'
         ssl_options['sslmode'] = effective_ssl_mode
     if client_ssl_alias:
-        ssl_options['clientSSLCertificate'] = {'alias': client_ssl_alias}
+        ssl_options['clientSSLCertificate'] = {'@type': 'PrivateCertificate', 'alias': client_ssl_alias}
         ssl_options['useClientAuthentication'] = True
 
     if ssl_options:
@@ -861,7 +861,7 @@ def build_as2_communication_options(**kwargs):
     if verify_hostname is not None:
         send_settings['verifyHostname'] = str(verify_hostname).lower() == 'true'
     if client_ssl_alias:
-        send_settings['clientSSLCertificate'] = {'alias': client_ssl_alias}
+        send_settings['clientSSLCertificate'] = {'@type': 'PrivateCertificate', 'alias': client_ssl_alias}
 
     # Add BASIC auth if specified (SDK maps auth_settings to AuthSettings)
     if auth_type and auth_type.upper() == 'BASIC' and (username or password):
@@ -922,10 +922,10 @@ def build_as2_communication_options(**kwargs):
         mdn_options['useSSL'] = str(mdn_use_ssl).lower() == 'true'
     if mdn_client_ssl_cert:
         # Certificate alias format
-        mdn_options['mdnClientSSLCert'] = {'alias': mdn_client_ssl_cert}
+        mdn_options['mdnClientSSLCert'] = {'@type': 'PrivateCertificate', 'alias': mdn_client_ssl_cert}
     if mdn_ssl_cert:
         # Certificate alias format
-        mdn_options['mdnSSLCert'] = {'alias': mdn_ssl_cert}
+        mdn_options['mdnSSLCert'] = {'@type': 'PublicCertificate', 'alias': mdn_ssl_cert}
 
     # Build AS2 partner info
     partner_info = {}
@@ -938,11 +938,11 @@ def build_as2_communication_options(**kwargs):
     if legacy_smime is not None:
         partner_info['enabledLegacySMIME'] = str(legacy_smime).lower() == 'true'
     if encrypt_alias:
-        partner_info['encryptionPublicCertificate'] = {'alias': encrypt_alias}
+        partner_info['encryptionPublicCertificate'] = {'@type': 'PublicCertificate', 'alias': encrypt_alias}
     if sign_alias:
-        partner_info['signingPublicCertificate'] = {'alias': sign_alias}
+        partner_info['signingPublicCertificate'] = {'@type': 'PublicCertificate', 'alias': sign_alias}
     if mdn_alias:
-        partner_info['mdnSignaturePublicCertificate'] = {'alias': mdn_alias}
+        partner_info['mdnSignaturePublicCertificate'] = {'@type': 'PublicCertificate', 'alias': mdn_alias}
 
     # Build AS2SendOptions
     # IMPORTANT: AS2MDNOptions and AS2MessageOptions are REQUIRED by the API
