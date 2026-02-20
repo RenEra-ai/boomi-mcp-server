@@ -369,19 +369,24 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     if ftpssl_opts:
                         ftp_info["ssl_mode"] = getattr(ftpssl_opts, 'sslmode', None)
                         ftp_info["use_client_authentication"] = getattr(ftpssl_opts, 'use_client_authentication', None)
-                        # Extract client SSL certificate alias
+                        # Extract client SSL certificate (componentId is the correct identifier)
                         client_ssl_cert = _ga(ftpssl_opts, 'client_ssl_certificate', 'clientSSLCertificate')
                         if client_ssl_cert:
-                            ftp_info["client_ssl_alias"] = getattr(client_ssl_cert, 'alias', None)
+                            ftp_info["client_ssl_alias"] = _ga(client_ssl_cert, 'component_id', 'componentId') or getattr(client_ssl_cert, 'alias', None)
                 # Extract FTP get options
                 get_opts = getattr(ftp_opts, 'ftp_get_options', None)
                 if get_opts:
                     ftp_info["remote_directory"] = getattr(get_opts, 'remote_directory', None)
                     ftp_info["get_transfer_type"] = getattr(get_opts, 'transfer_type', None)
-                    ftp_info["get_action"] = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    ftp_action = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    file_to_move = _ga(get_opts, 'file_to_move', 'fileToMove')
+                    # Boomi normalizes actiongetmove → actionget + fileToMove; reconstruct
+                    ftp_action_str = getattr(ftp_action, 'value', ftp_action) if ftp_action else ftp_action
+                    if ftp_action_str == 'actionget' and file_to_move:
+                        ftp_action_str = 'actiongetmove'
+                    ftp_info["get_action"] = ftp_action_str
                     ftp_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
-                    ftp_info["file_to_move"] = _ga(get_opts, 'file_to_move', 'fileToMove')
-                    ftp_info["move_force_override"] = _ga(get_opts, 'move_to_force_override', 'moveToForceOverride')
+                    ftp_info["file_to_move"] = file_to_move
                 # Extract FTP send options
                 send_opts = getattr(ftp_opts, 'ftp_send_options', None)
                 if send_opts:
@@ -421,9 +426,15 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 get_opts = getattr(sftp_opts, 'sftp_get_options', None)
                 if get_opts:
                     sftp_info["remote_directory"] = _ga(get_opts, 'remote_directory', 'remoteDirectory')
-                    sftp_info["get_action"] = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    sftp_action = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    file_to_move = _ga(get_opts, 'file_to_move', 'fileToMove')
+                    # Boomi normalizes actiongetmove → actionget + fileToMove; reconstruct
+                    sftp_action_str = getattr(sftp_action, 'value', sftp_action) if sftp_action else sftp_action
+                    if sftp_action_str == 'actionget' and file_to_move:
+                        sftp_action_str = 'actiongetmove'
+                    sftp_info["get_action"] = sftp_action_str
                     sftp_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
-                    sftp_info["file_to_move"] = _ga(get_opts, 'file_to_move', 'fileToMove')
+                    sftp_info["file_to_move"] = file_to_move
                     sftp_info["move_to_directory"] = _ga(get_opts, 'move_to_directory', 'moveToDirectory')
                     sftp_info["move_force_override"] = _ga(get_opts, 'move_to_force_override', 'moveToForceOverride')
                 # Extract SFTP send options
@@ -615,10 +626,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         # Certificate aliases
                         encrypt_cert = _ga(msg_opts, 'encrypt_cert', 'encryptCert')
                         if encrypt_cert:
-                            as2_info["encrypt_alias"] = getattr(encrypt_cert, 'alias', None)
+                            as2_info["encrypt_alias"] = _ga(encrypt_cert, 'component_id', 'componentId') or getattr(encrypt_cert, 'alias', None)
                         sign_cert = _ga(msg_opts, 'sign_cert', 'signCert')
                         if sign_cert:
-                            as2_info["sign_alias"] = getattr(sign_cert, 'alias', None)
+                            as2_info["sign_alias"] = _ga(sign_cert, 'component_id', 'componentId') or getattr(sign_cert, 'alias', None)
 
                     # MDN options
                     mdn_opts = _ga(send_options, 'as2_mdn_options', 'AS2MDNOptions')
@@ -634,7 +645,7 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         # MDN certificate aliases
                         mdn_cert = _ga(mdn_opts, 'mdn_cert', 'mdnCert')
                         if mdn_cert:
-                            as2_info["mdn_alias"] = getattr(mdn_cert, 'alias', None)
+                            as2_info["mdn_alias"] = _ga(mdn_cert, 'component_id', 'componentId') or getattr(mdn_cert, 'alias', None)
 
                 # Filter out None values
                 as2_info = {k: v for k, v in as2_info.items() if v is not None}
