@@ -369,10 +369,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     if ftpssl_opts:
                         ftp_info["ssl_mode"] = getattr(ftpssl_opts, 'sslmode', None)
                         ftp_info["use_client_authentication"] = getattr(ftpssl_opts, 'use_client_authentication', None)
-                        # Extract client SSL certificate alias
+                        # Extract client SSL certificate (componentId is the correct identifier)
                         client_ssl_cert = _ga(ftpssl_opts, 'client_ssl_certificate', 'clientSSLCertificate')
                         if client_ssl_cert:
-                            ftp_info["client_ssl_alias"] = getattr(client_ssl_cert, 'alias', None)
+                            ftp_info["client_ssl_alias"] = _ga(client_ssl_cert, 'component_id', 'componentId') or getattr(client_ssl_cert, 'alias', None)
                 # Extract FTP get options
                 get_opts = getattr(ftp_opts, 'ftp_get_options', None)
                 if get_opts:
@@ -626,10 +626,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         # Certificate aliases
                         encrypt_cert = _ga(msg_opts, 'encrypt_cert', 'encryptCert')
                         if encrypt_cert:
-                            as2_info["encrypt_alias"] = getattr(encrypt_cert, 'alias', None)
+                            as2_info["encrypt_alias"] = _ga(encrypt_cert, 'component_id', 'componentId') or getattr(encrypt_cert, 'alias', None)
                         sign_cert = _ga(msg_opts, 'sign_cert', 'signCert')
                         if sign_cert:
-                            as2_info["sign_alias"] = getattr(sign_cert, 'alias', None)
+                            as2_info["sign_alias"] = _ga(sign_cert, 'component_id', 'componentId') or getattr(sign_cert, 'alias', None)
 
                     # MDN options
                     mdn_opts = _ga(send_options, 'as2_mdn_options', 'AS2MDNOptions')
@@ -645,7 +645,7 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         # MDN certificate aliases
                         mdn_cert = _ga(mdn_opts, 'mdn_cert', 'mdnCert')
                         if mdn_cert:
-                            as2_info["mdn_alias"] = getattr(mdn_cert, 'alias', None)
+                            as2_info["mdn_alias"] = _ga(mdn_cert, 'component_id', 'componentId') or getattr(mdn_cert, 'alias', None)
 
                 # Filter out None values
                 as2_info = {k: v for k, v in as2_info.items() if v is not None}
