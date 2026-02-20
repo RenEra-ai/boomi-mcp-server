@@ -685,29 +685,38 @@ def deploy_package(
 def manage_trading_partner(
     profile: str,
     action: Literal["list", "get", "create", "update", "delete", "analyze_usage"],
-    partner_id: Optional[str] = None,
-    partner_name: Optional[str] = None,
-    standard: Optional[Literal["x12", "edifact", "hl7", "rosettanet", "custom", "tradacoms", "odette"]] = None,
-    classification: Optional[Literal["mytradingpartner", "mycompany"]] = None,
-    folder_name: Optional[str] = "Home",
-    partner_config: Optional[dict] = None,  # Standard-specific configuration
-    filters: Optional[dict] = None  # For list
+    resource_id: Optional[str] = None,
+    config: Optional[str] = None,
 ) -> dict:
     """Manage B2B/EDI trading partners (all 7 standards).
 
     Consolidates 6 existing tools into 1.
 
-    XML builders handle complexity internally based on standard:
-    - x12: ISA/GS control info, acknowledgment options
-    - edifact: UNB/UNG headers, syntax identifiers
-    - hl7: MSH segment configuration
-    - rosettanet: PIP configuration
-    - custom: Custom EDI formats
-    - tradacoms: UK retail EDI
-    - odette: Automotive industry standard
+    - list: Returns all partners. Optional config: {"name": "...", "classification": "..."}
+    - get: Returns partner details as flat JSON (use as template for create/update)
+    - create/update: Pass flat JSON config string with partner fields
+    - delete: Pass resource_id only
+    - analyze_usage: Shows processes referencing this partner
 
-    User provides simple parameters, tool builds XML internally.
+    Config is a JSON string with flat keys. Use action="get" output as reference
+    for available fields. Builder maps flat keys → nested Pydantic models → SDK.
     """
+```
+
+**Config JSON examples:**
+
+X12 partner with FTP:
+```json
+{"partner_name": "Acme Corp", "standard": "x12", "classification": "mytradingpartner",
+ "isa_qualifier": "ZZ", "isa_id": "ACME123", "gs_id": "ACME",
+ "ftp_host": "ftp.acme.com", "ftp_port": 21, "ftp_user": "edi"}
+```
+
+EDIFACT partner with AS2:
+```json
+{"partner_name": "Euro Trade", "standard": "edifact", "classification": "mytradingpartner",
+ "unb_syntax_id": "UNOB", "unb_id": "EUROTRADE",
+ "as2_url": "https://as2.eurotrade.com/receive", "as2_id": "EUROTRADE-AS2"}
 ```
 
 **SDK Examples Covered:**
@@ -729,36 +738,30 @@ def manage_trading_partner(
 def manage_organization(
     profile: str,
     action: Literal["list", "get", "create", "update", "delete"],
-    organization_id: Optional[str] = None,
-    component_name: Optional[str] = None,
-    folder_name: Optional[str] = "Home",
-    # Contact Information (11 fields)
-    contact_name: Optional[str] = None,
-    contact_email: Optional[str] = None,
-    contact_phone: Optional[str] = None,
-    contact_fax: Optional[str] = None,
-    contact_url: Optional[str] = None,
-    contact_address: Optional[str] = None,
-    contact_address2: Optional[str] = None,
-    contact_city: Optional[str] = None,
-    contact_state: Optional[str] = None,
-    contact_country: Optional[str] = None,
-    contact_postalcode: Optional[str] = None
+    resource_id: Optional[str] = None,
+    config: Optional[str] = None,
 ) -> dict:
     """Manage Boomi organizations (shared contact info for trading partners).
 
     Organizations provide centralized contact information that can be linked
     to multiple trading partners via the organization_id field.
 
-    Actions:
-    - list: List all organizations with optional name filter
-    - get: Get specific organization by ID with full contact details
-    - create: Create new organization with contact information
-    - update: Update existing organization fields
-    - delete: Remove organization component
+    - list: Returns all organizations. Optional config: {"name": "..."}
+    - get: Returns organization details as flat JSON
+    - create/update: Pass flat JSON config string with organization fields
+    - delete: Pass resource_id only
 
-    JSON-based API (no XML required).
+    Config is a JSON string with flat keys. JSON-based API (no XML required).
     """
+```
+
+**Config JSON example:**
+```json
+{"component_name": "Acme Corp HQ", "folder_name": "Home",
+ "contact_name": "John Doe", "contact_email": "john@acme.com",
+ "contact_phone": "555-0100", "contact_address": "123 Main St",
+ "contact_city": "Austin", "contact_state": "TX",
+ "contact_country": "US", "contact_postalcode": "78701"}
 ```
 
 **SDK Examples Covered:**
@@ -1348,6 +1351,143 @@ def list_capabilities() -> dict:
 - **Coverage**: 85% direct + 15% via generic invoker = 100%
 
 **21 is the sweet spot** between efficiency and practicality
+
+---
+
+## Parameter Design Pattern
+
+### Two Patterns Based on API Type
+
+| Pattern | When | Config Format | Builder Layer | Tools |
+|---------|------|---------------|---------------|-------|
+| JSON config | JSON-based APIs (99% of Boomi endpoints) | `config` JSON string with flat keys | `build_*_model()` → Pydantic → SDK | Trading partners, organizations, environments, atoms, etc. |
+| YAML config | XML-based APIs (Component create/update only) | `config_yaml` YAML string | YAML parser → ProcessBuilder → XML → SDK | Processes, maps, connectors |
+
+All consolidated tools share a minimal signature:
+
+```python
+@mcp.tool()
+def manage_<resource>(
+    profile: str,
+    action: Literal["list", "get", "create", "update", "delete", ...],
+    resource_id: Optional[str] = None,
+    config: Optional[str] = None,       # JSON config (flat keys)
+    # OR
+    config_yaml: Optional[str] = None,  # YAML config (XML endpoints only)
+) -> dict:
+```
+
+### Why Flat Keys in JSON Config (Not Boomi-Native Nested JSON)
+
+The boomi-python SDK requires typed Pydantic model instances (e.g., `TradingPartnerComponent`), not raw dicts. The data flow is:
+
+```
+LLM sends flat JSON → build_*_model(**flat_dict) → nested Pydantic model → SDK call
+```
+
+- `build_trading_partner_model(**flat_dict)` maps flat keys to nested models — this builder is essential and stays
+- Flat keys match the builder's interface and the existing `action="get"` output format (round-trip consistency)
+- LLMs construct flat JSON easily; the builder handles nested complexity internally
+- Example: `{"as2_url": "...", "as2_signing_cert_id": "..."}` instead of `{"communication": {"AS2": {"url": "...", "signingCertId": "..."}}}`
+
+### Why YAML for XML Endpoints
+
+Only `POST /Component` and `POST /Component/{componentId}` require XML (2 of 100+ endpoints):
+
+- Boomi XML is deeply nested with coordinates, dragpoints, shape IDs — not LLM-friendly
+- YAML → builder → XML pipeline already works (`manage_process`)
+- Builder handles coordinate calculation, template rendering, connection logic
+- Example: a 5-shape process is ~10 lines of YAML but ~200 lines of XML
+
+### Which Tools Use Which Pattern
+
+| Pattern | Tools |
+|---------|-------|
+| `config` (JSON) | `manage_trading_partner`, `manage_organization`, future `manage_environment`, `manage_runtime`, `manage_atom` |
+| `config_yaml` (YAML) | `manage_process`, future `manage_component` for XML-based types (maps, connectors) |
+| Neither (few params) | `set_boomi_credentials`, `list_boomi_profiles`, `execute_process`, `get_execution_status`, meta tools |
+
+### Token Impact
+
+The config pattern dramatically reduces tool definition size:
+
+| Tool | Before (flat params) | After (config JSON) | Reduction |
+|------|---------------------|---------------------|-----------|
+| `manage_trading_partner` | ~8,000 tokens | ~300 tokens | 96% |
+| `manage_organization` | ~600 tokens | ~300 tokens | 50% |
+| Overall tool budget | ~8,800 tokens | Well below target | Significant |
+
+The LLM discovers available config keys from `action="get"` responses or documentation, not from the tool signature itself.
+
+### Implementation Recipe for New JSON Config Tools
+
+When adding a new tool (e.g., `manage_environment`, `manage_runtime`, `manage_atom`), follow this template:
+
+**1. Server file signature (4 params):**
+
+```python
+@mcp.tool()
+def manage_<resource>(
+    profile: str,
+    action: str,
+    resource_id: str = None,
+    config: str = None,
+):
+```
+
+**2. Dispatch body template:**
+
+```python
+config_data = {}
+if config:
+    try:
+        config_data = json.loads(config)
+    except json.JSONDecodeError as e:
+        return {"_success": False, "error": f"Invalid JSON in config: {e}"}
+
+try:
+    creds = get_secret(subject, profile)
+    sdk = Boomi(account_id=creds["account_id"], username=creds["username"], password=creds["password"])
+
+    params = {}
+    if action == "list":
+        if config_data:
+            params["filters"] = config_data
+    elif action == "get":
+        params["<resource>_id"] = resource_id       # Map to action handler's param name
+    elif action == "create":
+        params["request_data"] = config_data
+    elif action == "update":
+        params["<resource>_id"] = resource_id
+        params["updates"] = config_data
+    elif action == "delete":
+        params["<resource>_id"] = resource_id
+
+    return manage_<resource>_action(sdk, profile, action, **params)
+except Exception as e:
+    return {"_success": False, "error": str(e)}
+```
+
+**3. Param key mapping convention:**
+
+The MCP parameter is always `resource_id`. Map it to the action handler's expected name in dispatch:
+- `manage_trading_partner` → `partner_id`
+- `manage_organization` → `organization_id`
+- `manage_environment` → `environment_id` (future)
+
+**4. Docstring requirements:**
+- Parameter descriptions for profile, action, resource_id, config
+- Per-action config examples (JSON strings)
+- Config field reference grouped by category
+- Tip: "Use action='get' output as template for create/update config"
+
+**5. Checklist before merging:**
+- [ ] Add to both `server.py` and `server_local.py`
+- [ ] Add to `scripts/verify_sync.py` with `check_create=False, check_update=False`
+- [ ] Add tests to `tests/test_config_parsing.py`
+- [ ] Run `python3 scripts/verify_sync.py` — must pass
+
+**Canonical example:** `manage_trading_partner` in `server_local.py`
 
 ---
 
@@ -3674,16 +3814,18 @@ This 21-tool hybrid architecture represents the optimal balance between:
 
 ### Token Budget Breakdown
 
+With the config JSON pattern, component tools (trading partners, organizations) drop from 400+ tokens to ~300 each.
+
 | Category | Tools | Tokens/Tool | Total |
 |----------|-------|-------------|-------|
-| Components | 3 | 400 | 1,200 |
-| Env/Runtime | 3 | 400 | 1,200 |
+| Components | 3 | 300 | 900 |
+| Env/Runtime | 3 | 300 | 900 |
 | Deployment | 3 | 400 | 1,200 |
 | Execution | 3 | 400 | 1,200 |
 | Monitoring | 4 | 400 | 1,600 |
 | Organization | 2 | 400 | 800 |
 | Meta | 3 | 400 | 1,200 |
-| **TOTAL** | **21** | **avg 400** | **~8,400** |
+| **TOTAL** | **21** | **avg 370** | **~7,800** |
 
 ### Implementation Effort Estimate
 

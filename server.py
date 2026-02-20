@@ -11,6 +11,7 @@ Security features:
 - Secure logging (no password leaks)
 """
 
+import json
 import os
 import sys
 import secrets
@@ -411,414 +412,156 @@ if manage_trading_partner_action:
     def manage_trading_partner(
         profile: str,
         action: str,
-        partner_id: str = None,
-        component_name: str = None,
-        standard: str = None,
-        classification: str = None,
-        folder_name: str = None,
-        # X12 standard fields
-        isa_id: str = None,
-        isa_qualifier: str = None,
-        gs_id: str = None,
-        # Contact Information (10 fields)
-        contact_name: str = None,
-        contact_email: str = None,
-        contact_phone: str = None,
-        contact_fax: str = None,
-        contact_address: str = None,
-        contact_address2: str = None,
-        contact_city: str = None,
-        contact_state: str = None,
-        contact_country: str = None,
-        contact_postalcode: str = None,
-        # Communication Protocols
-        communication_protocols: str = None,
-        # Disk protocol fields
-        disk_directory: str = None,
-        disk_get_directory: str = None,
-        disk_send_directory: str = None,
-        disk_file_filter: str = None,
-        disk_filter_match_type: str = None,
-        disk_delete_after_read: str = None,
-        disk_max_file_count: str = None,
-        disk_create_directory: str = None,
-        disk_write_option: str = None,
-        # FTP protocol fields
-        ftp_host: str = None,
-        ftp_port: str = None,
-        ftp_username: str = None,
-        ftp_password: str = None,
-        ftp_remote_directory: str = None,
-        ftp_ssl_mode: str = None,
-        ftp_connection_mode: str = None,
-        ftp_transfer_type: str = None,
-        ftp_get_action: str = None,
-        ftp_send_action: str = None,
-        ftp_max_file_count: str = None,
-        ftp_file_to_move: str = None,
-        ftp_move_to_directory: str = None,
-        ftp_client_ssl_alias: str = None,
-        ftp_send_remote_directory: str = None,
-        ftp_send_transfer_type: str = None,
-        ftp_move_force_override: str = None,
-        # SFTP protocol fields
-        sftp_host: str = None,
-        sftp_port: str = None,
-        sftp_username: str = None,
-        sftp_password: str = None,
-        sftp_remote_directory: str = None,
-        sftp_send_remote_directory: str = None,
-        sftp_ssh_key_auth: str = None,
-        sftp_known_host_entry: str = None,
-        sftp_ssh_key_path: str = None,
-        sftp_ssh_key_password: str = None,
-        sftp_dh_key_max_1024: str = None,
-        sftp_get_action: str = None,
-        sftp_send_action: str = None,
-        sftp_max_file_count: str = None,
-        sftp_file_to_move: str = None,
-        sftp_move_to_directory: str = None,
-        sftp_move_force_override: str = None,
-        sftp_proxy_enabled: str = None,
-        sftp_proxy_host: str = None,
-        sftp_proxy_port: str = None,
-        sftp_proxy_user: str = None,
-        sftp_proxy_password: str = None,
-        sftp_proxy_type: str = None,
-        # HTTP protocol fields
-        http_url: str = None,
-        http_username: str = None,
-        http_password: str = None,
-        http_authentication_type: str = None,
-        http_connect_timeout: str = None,
-        http_read_timeout: str = None,
-        http_client_auth: str = None,
-        http_trust_server_cert: str = None,
-        http_method_type: str = None,
-        http_data_content_type: str = None,
-        http_follow_redirects: str = None,
-        http_return_errors: str = None,
-        http_return_responses: str = None,
-        http_cookie_scope: str = None,
-        http_client_ssl_alias: str = None,
-        http_trusted_cert_alias: str = None,
-        http_request_profile: str = None,
-        http_request_profile_type: str = None,
-        http_response_profile: str = None,
-        http_response_profile_type: str = None,
-        http_oauth_token_url: str = None,
-        http_oauth_client_id: str = None,
-        http_oauth_client_secret: str = None,
-        http_oauth_scope: str = None,
-        http_oauth_grant_type: str = None,
-        # HTTP settings flags
-        http_use_custom_auth: str = None,
-        http_use_basic_auth: str = None,
-        http_use_default_settings: str = None,
-        # HTTP OAuth 1.0 fields
-        http_oauth1_consumer_key: str = None,
-        http_oauth1_consumer_secret: str = None,
-        http_oauth1_access_token: str = None,
-        http_oauth1_token_secret: str = None,
-        http_oauth1_realm: str = None,
-        http_oauth1_signature_method: str = None,
-        http_oauth1_request_token_url: str = None,
-        http_oauth1_access_token_url: str = None,
-        http_oauth1_authorization_url: str = None,
-        http_oauth1_suppress_blank_access_token: str = None,
-        # HTTP OAuth 2.0 extended fields
-        http_oauth2_authorization_token_url: str = None,
-        http_oauth2_access_token: str = None,
-        http_oauth2_use_refresh_token: str = None,
-        http_oauth2_access_token_params: str = None,
-        http_oauth2_authorization_params: str = None,
-        # HTTP separate Get options
-        http_get_method_type: str = None,
-        http_get_content_type: str = None,
-        http_get_follow_redirects: str = None,
-        http_get_return_errors: str = None,
-        http_get_request_profile: str = None,
-        http_get_request_profile_type: str = None,
-        http_get_response_profile: str = None,
-        http_get_response_profile_type: str = None,
-        # HTTP Listen options
-        http_listen_mime_passthrough: str = None,
-        http_listen_object_name: str = None,
-        http_listen_operation_type: str = None,
-        http_listen_password: str = None,
-        http_listen_use_default: str = None,
-        http_listen_username: str = None,
-        # HTTP headers and path elements (JSON strings)
-        http_request_headers: str = None,
-        http_response_header_mapping: str = None,
-        http_reflect_headers: str = None,
-        http_path_elements: str = None,
-        # AS2 protocol fields
-        as2_url: str = None,
-        as2_identifier: str = None,
-        as2_partner_identifier: str = None,
-        as2_username: str = None,
-        as2_password: str = None,
-        as2_authentication_type: str = None,
-        as2_verify_hostname: str = None,
-        as2_client_ssl_alias: str = None,
-        as2_encrypt_alias: str = None,
-        as2_sign_alias: str = None,
-        as2_mdn_alias: str = None,
-        as2_signed: str = None,
-        as2_encrypted: str = None,
-        as2_compressed: str = None,
-        as2_encryption_algorithm: str = None,
-        as2_signing_digest_alg: str = None,
-        as2_data_content_type: str = None,
-        as2_request_mdn: str = None,
-        as2_mdn_signed: str = None,
-        as2_mdn_digest_alg: str = None,
-        as2_synchronous_mdn: str = None,
-        as2_subject: str = None,
-        as2_multiple_attachments: str = None,
-        as2_max_document_count: int = None,
-        as2_attachment_option: str = None,
-        as2_attachment_cache: str = None,
-        as2_mdn_external_url: str = None,
-        as2_mdn_use_external_url: str = None,
-        as2_mdn_use_ssl: str = None,
-        as2_mdn_client_ssl_cert: str = None,
-        as2_mdn_ssl_cert: str = None,
-        as2_reject_duplicates: str = None,
-        as2_duplicate_check_count: int = None,
-        as2_legacy_smime: str = None,
-        # MLLP protocol fields (for HL7)
-        mllp_host: str = None,
-        mllp_port: str = None,
-        mllp_use_ssl: str = None,
-        mllp_persistent: str = None,
-        mllp_receive_timeout: str = None,
-        mllp_send_timeout: str = None,
-        mllp_max_connections: str = None,
-        mllp_inactivity_timeout: int = None,
-        mllp_max_retry: int = None,
-        mllp_halt_timeout: str = None,
-        mllp_use_client_ssl: str = None,
-        mllp_client_ssl_alias: str = None,
-        mllp_ssl_alias: str = None,
-        # OFTP protocol fields
-        oftp_host: str = None,
-        oftp_port: str = None,
-        oftp_tls: str = None,
-        oftp_ssid_code: str = None,
-        oftp_ssid_password: str = None,
-        oftp_compress: str = None,
-        oftp_ssid_auth: str = None,
-        oftp_sfid_cipher: int = None,
-        oftp_use_gateway: str = None,
-        oftp_use_client_ssl: str = None,
-        oftp_client_ssl_alias: str = None,
-        oftp_sfid_sign: str = None,
-        oftp_sfid_encrypt: str = None,
-        oftp_encrypting_cert: str = None,
-        oftp_session_challenge_cert: str = None,
-        oftp_verifying_eerp_cert: str = None,
-        oftp_verifying_signature_cert: str = None,
-        # EDIFACT standard fields
-        edifact_interchange_id: str = None,
-        edifact_interchange_id_qual: str = None,
-        edifact_syntax_id: str = None,
-        edifact_syntax_version: str = None,
-        edifact_test_indicator: str = None,
-        # HL7 standard fields
-        hl7_application: str = None,
-        hl7_facility: str = None,
-        # RosettaNet standard fields
-        rosettanet_partner_id: str = None,
-        rosettanet_partner_location: str = None,
-        rosettanet_global_usage_code: str = None,
-        rosettanet_supply_chain_code: str = None,
-        rosettanet_classification_code: str = None,
-        # TRADACOMS standard fields
-        tradacoms_interchange_id: str = None,
-        tradacoms_interchange_id_qualifier: str = None,
-        # ODETTE standard fields
-        odette_interchange_id: str = None,
-        odette_interchange_id_qual: str = None,
-        odette_syntax_id: str = None,
-        odette_syntax_version: str = None,
-        odette_test_indicator: str = None,
-        # Organization linking
-        organization_id: str = None
+        resource_id: str = None,
+        config: str = None,
     ):
         """
-        Manage B2B/EDI trading partners (all 7 standards).
-
-        Consolidated tool for all trading partner operations.
-        Now uses JSON-based TradingPartnerComponent API for cleaner, type-safe operations.
+        Manage B2B/EDI trading partners (all 7 standards) via JSON config.
 
         Args:
             profile: Boomi profile name (required)
-            action: Action to perform - must be one of: list, get, create, update, delete, analyze_usage
-            partner_id: Trading partner component ID (required for get, update, delete, analyze_usage)
-            component_name: Trading partner name (required for create, optional for update)
-            standard: Trading standard (required for create, optional filter for list)
-                      Options: x12, edifact, hl7, rosettanet, custom, tradacoms, odette
-            classification: Partner classification (optional for create/list)
-                           Options: tradingpartner, mycompany
-            folder_name: Folder to place partner in (optional for create/list)
+            action: One of: list, get, create, update, delete, analyze_usage
+            resource_id: Trading partner component ID (required for get, update, delete, analyze_usage)
+            config: JSON string with action-specific configuration (see examples below)
 
-            # Standard-specific fields (X12, EDIFACT, HL7, RosettaNet, TRADACOMS, ODETTE)
-            isa_id: ISA ID for X12 partners (X12 only)
-            isa_qualifier: ISA Qualifier for X12 partners (X12 only)
-            gs_id: GS ID for X12 partners (X12 only)
+        Tip: Use action="get" with a known resource_id to retrieve the full structure,
+        then use that output as a template for create/update config.
 
-            # Contact Information (10 fields)
-            contact_name: Contact person name (optional)
-            contact_email: Contact email address (optional)
-            contact_phone: Contact phone number (optional)
-            contact_fax: Contact fax number (optional)
-            contact_address: Contact street address line 1 (optional)
-            contact_address2: Contact street address line 2 (optional)
-            contact_city: Contact city (optional)
-            contact_state: Contact state/province (optional)
-            contact_country: Contact country (optional)
-            contact_postalcode: Contact postal/zip code (optional)
+        Actions and config examples:
 
-            # Communication Protocols
-            communication_protocols: Comma-separated list of communication protocols to enable (optional for create)
-                                    Available: ftp, sftp, http, as2, mllp, oftp, disk
-                                    Example: "ftp,http" or "as2,sftp"
-                                    If not provided, creates partner with no communication configured
+            list - List trading partners, optional filters:
+                config='{"standard": "x12", "classification": "tradingpartner", "folder_name": "Partners"}'
 
-            # Protocol-specific fields
-            disk_directory: Main directory for Disk protocol
-            disk_get_directory: Get/Receive directory for Disk protocol
-            disk_send_directory: Send directory for Disk protocol
-            disk_file_filter: File filter pattern (default: *)
-            disk_filter_match_type: Filter type - wildcard or regex (default: wildcard)
-            disk_delete_after_read: Delete files after reading - "true" or "false"
-            disk_max_file_count: Maximum files to retrieve per poll
-            disk_create_directory: Create directory if not exists - "true" or "false"
-            disk_write_option: Write option - unique, over, append, abort (default: unique)
-            ftp_host: FTP server hostname/IP
-            ftp_port: FTP server port
-            ftp_username: FTP username
-            sftp_host: SFTP server hostname/IP
-            sftp_port: SFTP server port
-            sftp_username: SFTP username
-            http_url: HTTP/HTTPS URL
-            as2_url: AS2 endpoint URL
-            as2_identifier: Local AS2 identifier
-            as2_partner_identifier: Partner AS2 identifier
-            oftp_host: OFTP server hostname/IP
-            oftp_tls: Enable TLS for OFTP - "true" or "false"
-            oftp_ssid_auth: Enable SSID authentication - "true" or "false"
-            oftp_sfid_cipher: SFID cipher strength (0=none, 1=3DES, 2=AES-128, 3=AES-192, 4=AES-256)
-            oftp_use_gateway: Use OFTP gateway - "true" or "false"
-            oftp_use_client_ssl: Use client SSL certificate - "true" or "false"
-            oftp_client_ssl_alias: Client SSL certificate alias
-            oftp_sfid_sign: Sign files - "true" or "false"
-            oftp_sfid_encrypt: Encrypt files - "true" or "false"
-            oftp_encrypting_cert: OFTP encrypting certificate alias
-            oftp_session_challenge_cert: OFTP session challenge certificate alias
-            oftp_verifying_eerp_cert: OFTP verifying EERP certificate alias
-            oftp_verifying_signature_cert: OFTP verifying signature certificate alias
-            http_authentication_type: HTTP authentication type - NONE, BASIC, OAUTH2
-            http_connect_timeout: HTTP connection timeout in ms
-            http_read_timeout: HTTP read timeout in ms
-            http_username: HTTP username
-            http_client_auth: Enable client SSL authentication - "true" or "false"
-            http_trust_server_cert: Trust server certificate - "true" or "false"
-            http_method_type: HTTP method - GET, POST, PUT, DELETE
-            http_data_content_type: HTTP content type
-            http_follow_redirects: Follow redirects - "true" or "false"
-            http_return_errors: Return errors in response - "true" or "false"
-            http_return_responses: Return response body - "true" or "false"
-            http_cookie_scope: Cookie handling - IGNORED, GLOBAL, CONNECTOR_SHAPE
-            http_client_ssl_alias: Client SSL certificate alias
-            http_trusted_cert_alias: Trusted server certificate alias
-            http_request_profile: Request profile component ID
-            http_request_profile_type: Request profile type - NONE, XML, JSON
-            http_response_profile: Response profile component ID
-            http_response_profile_type: Response profile type - NONE, XML, JSON
-            http_oauth_token_url: OAuth2 token endpoint URL
-            http_oauth_client_id: OAuth2 client ID
-            http_oauth_client_secret: OAuth2 client secret
-            http_oauth_scope: OAuth2 scope
-            http_oauth_grant_type: OAuth2 grant type - client_credentials, password, code (default: client_credentials)
-            http_use_custom_auth: Enable custom authentication (true/false)
-            http_use_basic_auth: Enable basic auth flag in HTTPSettings (true/false)
-            http_use_default_settings: Use default HTTP settings (true/false)
-            http_oauth1_consumer_key: OAuth 1.0 consumer key
-            http_oauth1_consumer_secret: OAuth 1.0 consumer secret
-            http_oauth1_access_token: OAuth 1.0 access token
-            http_oauth1_token_secret: OAuth 1.0 token secret
-            http_oauth1_realm: OAuth 1.0 realm
-            http_oauth1_signature_method: OAuth 1.0 signature method - SHA1, SHA256 (default: SHA1)
-            http_oauth1_request_token_url: OAuth 1.0 request token URL
-            http_oauth1_access_token_url: OAuth 1.0 access token URL
-            http_oauth1_authorization_url: OAuth 1.0 authorization URL
-            http_oauth1_suppress_blank_access_token: Suppress blank access token (true/false)
-            http_oauth2_authorization_token_url: OAuth2 authorization endpoint URL
-            http_oauth2_access_token: OAuth2 access token
-            http_oauth2_use_refresh_token: Use OAuth2 refresh token (true/false)
-            http_oauth2_access_token_params: OAuth2 access token parameters (JSON string)
-            http_oauth2_authorization_params: OAuth2 authorization parameters (JSON string)
-            http_get_method_type: HTTP method for GET operations - GET, POST, PUT, DELETE
-            http_get_content_type: Content type for GET operations
-            http_get_follow_redirects: Follow redirects for GET operations (true/false)
-            http_get_return_errors: Return errors for GET operations (true/false)
-            http_get_request_profile: Request profile for GET operations
-            http_get_request_profile_type: Request profile type for GET operations - NONE, XML, JSON
-            http_get_response_profile: Response profile for GET operations
-            http_get_response_profile_type: Response profile type for GET operations - NONE, XML, JSON
-            http_listen_mime_passthrough: Pass through MIME type for listen (true/false)
-            http_listen_object_name: Object name for listen endpoint
-            http_listen_operation_type: Operation type for listen
-            http_listen_password: Password for listen endpoint
-            http_listen_use_default: Use default listen options (true/false)
-            http_listen_username: Username for listen endpoint
-            http_request_headers: Request headers JSON - [{"headerFieldName": "...", "targetPropertyName": "..."}]
-            http_response_header_mapping: Response header mapping JSON - same format as request_headers
-            http_reflect_headers: Reflect headers JSON - [{"name": "..."}]
-            http_path_elements: Path elements JSON - [{"name": "..."}]
-            as2_authentication_type: AS2 authentication type - NONE, BASIC
-            as2_verify_hostname: Verify SSL hostname - "true" or "false"
-            as2_client_ssl_alias: Client SSL certificate alias
-            as2_username: AS2 username
-            as2_encrypt_alias: AS2 encryption certificate alias
-            as2_sign_alias: AS2 signing certificate alias
-            as2_mdn_alias: AS2 MDN certificate alias
-            as2_signed: Sign AS2 messages - "true" or "false"
-            as2_encrypted: Encrypt AS2 messages - "true" or "false"
-            as2_compressed: Compress AS2 messages - "true" or "false"
-            as2_encryption_algorithm: Encryption algorithm - na, tripledes, des, rc2-128, rc2-64, rc2-40, aes128, aes192, aes256
-            as2_signing_digest_alg: Signing digest algorithm - SHA1, SHA224, SHA256, SHA384, SHA512
-            as2_data_content_type: AS2 content type
-            as2_request_mdn: Request MDN - "true" or "false"
-            as2_mdn_signed: Signed MDN - "true" or "false"
-            as2_mdn_digest_alg: MDN digest algorithm - SHA1, SHA224, SHA256, SHA384, SHA512
-            as2_synchronous_mdn: Synchronous MDN - "true" or "false"
-            as2_subject: AS2 message subject header
-            as2_multiple_attachments: Enable multiple attachments - "true" or "false"
-            as2_max_document_count: Maximum documents per message
-            as2_attachment_option: Attachment handling - BATCH, DOCUMENT_CACHE
-            as2_attachment_cache: Attachment cache component ID
-            as2_mdn_external_url: External URL for async MDN delivery
-            as2_mdn_use_external_url: Use external URL for MDN - "true" or "false"
-            as2_mdn_use_ssl: Use SSL for MDN delivery - "true" or "false"
-            as2_mdn_client_ssl_cert: Client SSL certificate alias for MDN
-            as2_mdn_ssl_cert: Server SSL certificate alias for MDN
-            as2_reject_duplicates: Reject duplicate messages - "true" or "false"
-            as2_duplicate_check_count: Number of messages to check for duplicates
-            as2_legacy_smime: Enable legacy S/MIME compatibility - "true" or "false"
+            get - Get partner by ID (no config needed):
+                resource_id="abc-123-def"
+
+            create - Create new partner (config required):
+                config='{
+                    "component_name": "Acme Corp",
+                    "standard": "x12",
+                    "classification": "tradingpartner",
+                    "folder_name": "Partners",
+                    "isa_id": "ACME",
+                    "isa_qualifier": "ZZ",
+                    "gs_id": "ACMECORP",
+                    "contact_name": "John Doe",
+                    "contact_email": "john@acme.com",
+                    "communication_protocols": ["http", "as2"],
+                    "http_url": "https://api.acme.com/edi",
+                    "as2_url": "https://as2.acme.com",
+                    "as2_identifier": "ACME-AS2"
+                }'
+
+            update - Update existing partner (config required):
+                resource_id="abc-123-def"
+                config='{"contact_email": "new@acme.com", "http_url": "https://new.acme.com"}'
+
+            delete - Delete partner (no config needed):
+                resource_id="abc-123-def"
+
+            analyze_usage - Analyze partner usage (no config needed):
+                resource_id="abc-123-def"
+
+        Config field reference (all optional, grouped by category):
+
+            Basic: component_name, standard (x12|edifact|hl7|rosettanet|custom|tradacoms|odette),
+                   classification (tradingpartner|mycompany), folder_name
+
+            X12: isa_id, isa_qualifier, gs_id
+            EDIFACT: edifact_interchange_id, edifact_interchange_id_qual, edifact_syntax_id,
+                     edifact_syntax_version, edifact_test_indicator
+            HL7: hl7_application, hl7_facility
+            RosettaNet: rosettanet_partner_id, rosettanet_partner_location,
+                        rosettanet_global_usage_code, rosettanet_supply_chain_code,
+                        rosettanet_classification_code
+            TRADACOMS: tradacoms_interchange_id, tradacoms_interchange_id_qualifier
+            ODETTE: odette_interchange_id, odette_interchange_id_qual, odette_syntax_id,
+                    odette_syntax_version, odette_test_indicator
+
+            Contact: contact_name, contact_email, contact_phone, contact_fax,
+                     contact_address, contact_address2, contact_city, contact_state,
+                     contact_country, contact_postalcode
+
+            Protocols: communication_protocols (JSON array: ["http", "as2", "ftp", "sftp", "disk", "mllp", "oftp"])
+            Organization: organization_id
+
+            Disk: disk_directory, disk_get_directory, disk_send_directory, disk_file_filter,
+                  disk_filter_match_type, disk_delete_after_read, disk_max_file_count,
+                  disk_create_directory, disk_write_option
+
+            FTP: ftp_host, ftp_port, ftp_username, ftp_password, ftp_remote_directory,
+                 ftp_send_remote_directory, ftp_transfer_type, ftp_send_transfer_type,
+                 ftp_get_action, ftp_send_action, ftp_connection_mode, ftp_ssl_mode,
+                 ftp_max_file_count, ftp_file_to_move, ftp_move_to_directory,
+                 ftp_client_ssl_alias, ftp_move_force_override
+
+            SFTP: sftp_host, sftp_port, sftp_username, sftp_password, sftp_remote_directory,
+                  sftp_send_remote_directory, sftp_ssh_key_auth, sftp_known_host_entry,
+                  sftp_ssh_key_path, sftp_ssh_key_password, sftp_dh_key_max_1024,
+                  sftp_get_action, sftp_send_action, sftp_max_file_count, sftp_file_to_move,
+                  sftp_move_to_directory, sftp_move_force_override, sftp_proxy_enabled,
+                  sftp_proxy_host, sftp_proxy_port, sftp_proxy_user, sftp_proxy_password,
+                  sftp_proxy_type
+
+            HTTP: http_url, http_username, http_password, http_authentication_type,
+                  http_connect_timeout, http_read_timeout, http_client_auth,
+                  http_trust_server_cert, http_method_type, http_data_content_type,
+                  http_follow_redirects, http_return_errors, http_return_responses,
+                  http_cookie_scope, http_client_ssl_alias, http_trusted_cert_alias,
+                  http_request_profile, http_request_profile_type, http_response_profile,
+                  http_response_profile_type, http_use_custom_auth, http_use_basic_auth,
+                  http_use_default_settings,
+                  http_oauth_token_url, http_oauth_client_id, http_oauth_client_secret,
+                  http_oauth_scope, http_oauth_grant_type,
+                  http_oauth1_consumer_key, http_oauth1_consumer_secret,
+                  http_oauth1_access_token, http_oauth1_token_secret, http_oauth1_realm,
+                  http_oauth1_signature_method, http_oauth1_request_token_url,
+                  http_oauth1_access_token_url, http_oauth1_authorization_url,
+                  http_oauth1_suppress_blank_access_token,
+                  http_oauth2_authorization_token_url, http_oauth2_access_token,
+                  http_oauth2_use_refresh_token, http_oauth2_access_token_params,
+                  http_oauth2_authorization_params,
+                  http_get_method_type, http_get_content_type, http_get_follow_redirects,
+                  http_get_return_errors, http_get_request_profile, http_get_request_profile_type,
+                  http_get_response_profile, http_get_response_profile_type,
+                  http_listen_mime_passthrough, http_listen_object_name,
+                  http_listen_operation_type, http_listen_password, http_listen_use_default,
+                  http_listen_username, http_request_headers, http_response_header_mapping,
+                  http_reflect_headers, http_path_elements
+
+            AS2: as2_url, as2_identifier, as2_partner_identifier, as2_password,
+                 as2_authentication_type, as2_verify_hostname, as2_client_ssl_alias,
+                 as2_username, as2_encrypt_alias, as2_sign_alias, as2_mdn_alias,
+                 as2_signed, as2_encrypted, as2_compressed, as2_encryption_algorithm,
+                 as2_signing_digest_alg, as2_data_content_type, as2_request_mdn,
+                 as2_mdn_signed, as2_mdn_digest_alg, as2_synchronous_mdn, as2_subject,
+                 as2_multiple_attachments, as2_max_document_count, as2_attachment_option,
+                 as2_attachment_cache, as2_mdn_external_url, as2_mdn_use_external_url,
+                 as2_mdn_use_ssl, as2_mdn_client_ssl_cert, as2_mdn_ssl_cert,
+                 as2_reject_duplicates, as2_duplicate_check_count, as2_legacy_smime
+
+            MLLP: mllp_host, mllp_port, mllp_use_ssl, mllp_persistent,
+                  mllp_receive_timeout, mllp_send_timeout, mllp_max_connections,
+                  mllp_inactivity_timeout, mllp_max_retry, mllp_halt_timeout,
+                  mllp_use_client_ssl, mllp_client_ssl_alias, mllp_ssl_alias
+
+            OFTP: oftp_host, oftp_port, oftp_tls, oftp_ssid_code, oftp_ssid_password,
+                  oftp_compress, oftp_ssid_auth, oftp_sfid_cipher, oftp_use_gateway,
+                  oftp_use_client_ssl, oftp_client_ssl_alias, oftp_sfid_sign,
+                  oftp_sfid_encrypt, oftp_encrypting_cert, oftp_session_challenge_cert,
+                  oftp_verifying_eerp_cert, oftp_verifying_signature_cert
 
         Returns:
             Action result with success status and data/error
-
-        Implementation Note:
-            This tool now uses JSON-based TradingPartnerComponent models internally,
-            providing better type safety and maintainability compared to the previous
-            XML-based approach. Protocol-specific and standard-specific field support
-            is currently limited to basic fields and will be expanded in future updates.
         """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except json.JSONDecodeError as e:
+                return {"_success": False, "error": f"Invalid JSON in config: {e}"}
+
         try:
             subject = get_user_subject()
             print(f"[INFO] manage_trading_partner called by user: {subject}, profile: {profile}, action: {action}")
@@ -837,948 +580,25 @@ if manage_trading_partner_action:
             params = {}
 
             if action == "list":
-                # Build filters
-                filters = {}
-                if standard:
-                    filters["standard"] = standard
-                if classification:
-                    filters["classification"] = classification
-                if folder_name:
-                    filters["folder_name"] = folder_name
-                params["filters"] = filters
+                if config_data:
+                    params["filters"] = config_data
 
             elif action == "get":
-                params["partner_id"] = partner_id
+                params["partner_id"] = resource_id
 
             elif action == "create":
-                # Build request data - pass all fields flat (builder expects flat kwargs)
-                request_data = {}
-                if component_name:
-                    request_data["component_name"] = component_name
-                if standard:
-                    request_data["standard"] = standard
-                if classification:
-                    request_data["classification"] = classification
-                if folder_name:
-                    request_data["folder_name"] = folder_name
-
-                # Pass X12 fields flat
-                if isa_id:
-                    request_data["isa_id"] = isa_id
-                if isa_qualifier:
-                    request_data["isa_qualifier"] = isa_qualifier
-                if gs_id:
-                    request_data["gs_id"] = gs_id
-
-                # Pass contact fields flat
-                if contact_name:
-                    request_data["contact_name"] = contact_name
-                if contact_email:
-                    request_data["contact_email"] = contact_email
-                if contact_phone:
-                    request_data["contact_phone"] = contact_phone
-                if contact_fax:
-                    request_data["contact_fax"] = contact_fax
-                if contact_address:
-                    request_data["contact_address"] = contact_address
-                if contact_address2:
-                    request_data["contact_address2"] = contact_address2
-                if contact_city:
-                    request_data["contact_city"] = contact_city
-                if contact_state:
-                    request_data["contact_state"] = contact_state
-                if contact_country:
-                    request_data["contact_country"] = contact_country
-                if contact_postalcode:
-                    request_data["contact_postalcode"] = contact_postalcode
-
-                # Communication protocols
-                if communication_protocols:
-                    protocols_list = [p.strip() for p in communication_protocols.split(',')]
-                    request_data["communication_protocols"] = protocols_list
-
-                # Pass disk fields flat
-                if disk_directory:
-                    request_data["disk_directory"] = disk_directory
-                if disk_get_directory:
-                    request_data["disk_get_directory"] = disk_get_directory
-                if disk_send_directory:
-                    request_data["disk_send_directory"] = disk_send_directory
-                if disk_file_filter:
-                    request_data["disk_file_filter"] = disk_file_filter
-                if disk_filter_match_type:
-                    request_data["disk_filter_match_type"] = disk_filter_match_type
-                if disk_delete_after_read:
-                    request_data["disk_delete_after_read"] = disk_delete_after_read
-                if disk_max_file_count:
-                    request_data["disk_max_file_count"] = disk_max_file_count
-                if disk_create_directory:
-                    request_data["disk_create_directory"] = disk_create_directory
-                if disk_write_option:
-                    request_data["disk_write_option"] = disk_write_option
-
-                # Pass FTP fields flat
-                if ftp_host:
-                    request_data["ftp_host"] = ftp_host
-                if ftp_port:
-                    request_data["ftp_port"] = ftp_port
-                if ftp_username:
-                    request_data["ftp_username"] = ftp_username
-                if ftp_password:
-                    request_data["ftp_password"] = ftp_password
-                if ftp_remote_directory:
-                    request_data["ftp_remote_directory"] = ftp_remote_directory
-                if ftp_ssl_mode:
-                    request_data["ftp_ssl_mode"] = ftp_ssl_mode
-                if ftp_connection_mode:
-                    request_data["ftp_connection_mode"] = ftp_connection_mode
-                if ftp_transfer_type:
-                    request_data["ftp_transfer_type"] = ftp_transfer_type
-                if ftp_get_action:
-                    request_data["ftp_get_action"] = ftp_get_action
-                if ftp_send_action:
-                    request_data["ftp_send_action"] = ftp_send_action
-                if ftp_max_file_count:
-                    request_data["ftp_max_file_count"] = ftp_max_file_count
-                if ftp_file_to_move:
-                    request_data["ftp_file_to_move"] = ftp_file_to_move
-                if ftp_move_to_directory:
-                    request_data["ftp_move_to_directory"] = ftp_move_to_directory
-                if ftp_client_ssl_alias:
-                    request_data["ftp_client_ssl_alias"] = ftp_client_ssl_alias
-                if ftp_send_remote_directory:
-                    request_data["ftp_send_remote_directory"] = ftp_send_remote_directory
-                if ftp_send_transfer_type:
-                    request_data["ftp_send_transfer_type"] = ftp_send_transfer_type
-                if ftp_move_force_override:
-                    request_data["ftp_move_force_override"] = ftp_move_force_override
-
-                # Pass SFTP fields flat
-                if sftp_host:
-                    request_data["sftp_host"] = sftp_host
-                if sftp_port:
-                    request_data["sftp_port"] = sftp_port
-                if sftp_username:
-                    request_data["sftp_username"] = sftp_username
-                if sftp_password:
-                    request_data["sftp_password"] = sftp_password
-                if sftp_remote_directory:
-                    request_data["sftp_remote_directory"] = sftp_remote_directory
-                if sftp_ssh_key_auth:
-                    request_data["sftp_ssh_key_auth"] = sftp_ssh_key_auth
-                if sftp_known_host_entry:
-                    request_data["sftp_known_host_entry"] = sftp_known_host_entry
-                if sftp_ssh_key_path:
-                    request_data["sftp_ssh_key_path"] = sftp_ssh_key_path
-                if sftp_ssh_key_password:
-                    request_data["sftp_ssh_key_password"] = sftp_ssh_key_password
-                if sftp_dh_key_max_1024:
-                    request_data["sftp_dh_key_max_1024"] = sftp_dh_key_max_1024
-                if sftp_get_action:
-                    request_data["sftp_get_action"] = sftp_get_action
-                if sftp_send_action:
-                    request_data["sftp_send_action"] = sftp_send_action
-                if sftp_max_file_count:
-                    request_data["sftp_max_file_count"] = sftp_max_file_count
-                if sftp_file_to_move:
-                    request_data["sftp_file_to_move"] = sftp_file_to_move
-                if sftp_move_to_directory:
-                    request_data["sftp_move_to_directory"] = sftp_move_to_directory
-                if sftp_move_force_override:
-                    request_data["sftp_move_force_override"] = sftp_move_force_override
-                if sftp_proxy_enabled:
-                    request_data["sftp_proxy_enabled"] = sftp_proxy_enabled
-                if sftp_proxy_host:
-                    request_data["sftp_proxy_host"] = sftp_proxy_host
-                if sftp_proxy_port:
-                    request_data["sftp_proxy_port"] = sftp_proxy_port
-                if sftp_proxy_type:
-                    request_data["sftp_proxy_type"] = sftp_proxy_type
-                if sftp_proxy_user:
-                    request_data["sftp_proxy_user"] = sftp_proxy_user
-                if sftp_proxy_password:
-                    request_data["sftp_proxy_password"] = sftp_proxy_password
-                if sftp_send_remote_directory:
-                    request_data["sftp_send_remote_directory"] = sftp_send_remote_directory
-
-                # Pass HTTP fields flat
-                if http_url:
-                    request_data["http_url"] = http_url
-                if http_username:
-                    request_data["http_username"] = http_username
-                if http_password:
-                    request_data["http_password"] = http_password
-                if http_authentication_type:
-                    request_data["http_authentication_type"] = http_authentication_type
-                if http_connect_timeout:
-                    request_data["http_connect_timeout"] = http_connect_timeout
-                if http_read_timeout:
-                    request_data["http_read_timeout"] = http_read_timeout
-                if http_client_auth:
-                    request_data["http_client_auth"] = http_client_auth
-                if http_trust_server_cert:
-                    request_data["http_trust_server_cert"] = http_trust_server_cert
-                if http_method_type:
-                    request_data["http_method_type"] = http_method_type
-                if http_data_content_type:
-                    request_data["http_data_content_type"] = http_data_content_type
-                if http_follow_redirects:
-                    request_data["http_follow_redirects"] = http_follow_redirects
-                if http_return_errors:
-                    request_data["http_return_errors"] = http_return_errors
-                if http_return_responses:
-                    request_data["http_return_responses"] = http_return_responses
-                if http_cookie_scope:
-                    request_data["http_cookie_scope"] = http_cookie_scope
-                if http_client_ssl_alias:
-                    request_data["http_client_ssl_alias"] = http_client_ssl_alias
-                if http_trusted_cert_alias:
-                    request_data["http_trusted_cert_alias"] = http_trusted_cert_alias
-                if http_request_profile:
-                    request_data["http_request_profile"] = http_request_profile
-                if http_request_profile_type:
-                    request_data["http_request_profile_type"] = http_request_profile_type
-                if http_response_profile:
-                    request_data["http_response_profile"] = http_response_profile
-                if http_response_profile_type:
-                    request_data["http_response_profile_type"] = http_response_profile_type
-                if http_oauth_token_url:
-                    request_data["http_oauth_token_url"] = http_oauth_token_url
-                if http_oauth_client_id:
-                    request_data["http_oauth_client_id"] = http_oauth_client_id
-                if http_oauth_client_secret:
-                    request_data["http_oauth_client_secret"] = http_oauth_client_secret
-                if http_oauth_scope:
-                    request_data["http_oauth_scope"] = http_oauth_scope
-                if http_oauth_grant_type:
-                    request_data["http_oauth_grant_type"] = http_oauth_grant_type
-                if http_use_custom_auth:
-                    request_data["http_use_custom_auth"] = http_use_custom_auth
-                if http_use_basic_auth:
-                    request_data["http_use_basic_auth"] = http_use_basic_auth
-                if http_use_default_settings:
-                    request_data["http_use_default_settings"] = http_use_default_settings
-                if http_oauth1_consumer_key:
-                    request_data["http_oauth1_consumer_key"] = http_oauth1_consumer_key
-                if http_oauth1_consumer_secret:
-                    request_data["http_oauth1_consumer_secret"] = http_oauth1_consumer_secret
-                if http_oauth1_access_token:
-                    request_data["http_oauth1_access_token"] = http_oauth1_access_token
-                if http_oauth1_token_secret:
-                    request_data["http_oauth1_token_secret"] = http_oauth1_token_secret
-                if http_oauth1_realm:
-                    request_data["http_oauth1_realm"] = http_oauth1_realm
-                if http_oauth1_signature_method:
-                    request_data["http_oauth1_signature_method"] = http_oauth1_signature_method
-                if http_oauth1_request_token_url:
-                    request_data["http_oauth1_request_token_url"] = http_oauth1_request_token_url
-                if http_oauth1_access_token_url:
-                    request_data["http_oauth1_access_token_url"] = http_oauth1_access_token_url
-                if http_oauth1_authorization_url:
-                    request_data["http_oauth1_authorization_url"] = http_oauth1_authorization_url
-                if http_oauth1_suppress_blank_access_token:
-                    request_data["http_oauth1_suppress_blank_access_token"] = http_oauth1_suppress_blank_access_token
-                if http_oauth2_authorization_token_url:
-                    request_data["http_oauth2_authorization_token_url"] = http_oauth2_authorization_token_url
-                if http_oauth2_access_token:
-                    request_data["http_oauth2_access_token"] = http_oauth2_access_token
-                if http_oauth2_use_refresh_token:
-                    request_data["http_oauth2_use_refresh_token"] = http_oauth2_use_refresh_token
-                if http_oauth2_access_token_params:
-                    request_data["http_oauth2_access_token_params"] = http_oauth2_access_token_params
-                if http_oauth2_authorization_params:
-                    request_data["http_oauth2_authorization_params"] = http_oauth2_authorization_params
-                if http_get_method_type:
-                    request_data["http_get_method_type"] = http_get_method_type
-                if http_get_content_type:
-                    request_data["http_get_content_type"] = http_get_content_type
-                if http_get_follow_redirects:
-                    request_data["http_get_follow_redirects"] = http_get_follow_redirects
-                if http_get_return_errors:
-                    request_data["http_get_return_errors"] = http_get_return_errors
-                if http_get_request_profile:
-                    request_data["http_get_request_profile"] = http_get_request_profile
-                if http_get_request_profile_type:
-                    request_data["http_get_request_profile_type"] = http_get_request_profile_type
-                if http_get_response_profile:
-                    request_data["http_get_response_profile"] = http_get_response_profile
-                if http_get_response_profile_type:
-                    request_data["http_get_response_profile_type"] = http_get_response_profile_type
-                if http_listen_mime_passthrough:
-                    request_data["http_listen_mime_passthrough"] = http_listen_mime_passthrough
-                if http_listen_object_name:
-                    request_data["http_listen_object_name"] = http_listen_object_name
-                if http_listen_operation_type:
-                    request_data["http_listen_operation_type"] = http_listen_operation_type
-                if http_listen_password:
-                    request_data["http_listen_password"] = http_listen_password
-                if http_listen_use_default:
-                    request_data["http_listen_use_default"] = http_listen_use_default
-                if http_listen_username:
-                    request_data["http_listen_username"] = http_listen_username
-                if http_request_headers:
-                    request_data["http_request_headers"] = http_request_headers
-                if http_response_header_mapping:
-                    request_data["http_response_header_mapping"] = http_response_header_mapping
-                if http_reflect_headers:
-                    request_data["http_reflect_headers"] = http_reflect_headers
-                if http_path_elements:
-                    request_data["http_path_elements"] = http_path_elements
-
-                # Pass AS2 fields flat
-                if as2_url:
-                    request_data["as2_url"] = as2_url
-                if as2_identifier:
-                    request_data["as2_identifier"] = as2_identifier
-                if as2_partner_identifier:
-                    request_data["as2_partner_identifier"] = as2_partner_identifier
-                if as2_username:
-                    request_data["as2_username"] = as2_username
-                if as2_password:
-                    request_data["as2_password"] = as2_password
-                if as2_signed:
-                    request_data["as2_signed"] = as2_signed
-                if as2_encrypted:
-                    request_data["as2_encrypted"] = as2_encrypted
-                if as2_compressed:
-                    request_data["as2_compressed"] = as2_compressed
-                if as2_encryption_algorithm:
-                    request_data["as2_encryption_algorithm"] = as2_encryption_algorithm
-                if as2_signing_digest_alg:
-                    request_data["as2_signing_digest_alg"] = as2_signing_digest_alg
-                if as2_request_mdn:
-                    request_data["as2_request_mdn"] = as2_request_mdn
-                if as2_mdn_signed:
-                    request_data["as2_mdn_signed"] = as2_mdn_signed
-                if as2_synchronous_mdn:
-                    request_data["as2_synchronous_mdn"] = as2_synchronous_mdn
-                if as2_authentication_type:
-                    request_data["as2_authentication_type"] = as2_authentication_type
-                if as2_verify_hostname:
-                    request_data["as2_verify_hostname"] = as2_verify_hostname
-                if as2_client_ssl_alias:
-                    request_data["as2_client_ssl_alias"] = as2_client_ssl_alias
-                if as2_encrypt_alias:
-                    request_data["as2_encrypt_alias"] = as2_encrypt_alias
-                if as2_sign_alias:
-                    request_data["as2_sign_alias"] = as2_sign_alias
-                if as2_mdn_alias:
-                    request_data["as2_mdn_alias"] = as2_mdn_alias
-                if as2_data_content_type:
-                    request_data["as2_data_content_type"] = as2_data_content_type
-                if as2_mdn_digest_alg:
-                    request_data["as2_mdn_digest_alg"] = as2_mdn_digest_alg
-                if as2_subject:
-                    request_data["as2_subject"] = as2_subject
-                if as2_multiple_attachments:
-                    request_data["as2_multiple_attachments"] = as2_multiple_attachments
-                if as2_max_document_count:
-                    request_data["as2_max_document_count"] = as2_max_document_count
-                if as2_attachment_option:
-                    request_data["as2_attachment_option"] = as2_attachment_option
-                if as2_attachment_cache:
-                    request_data["as2_attachment_cache"] = as2_attachment_cache
-                if as2_mdn_external_url:
-                    request_data["as2_mdn_external_url"] = as2_mdn_external_url
-                if as2_mdn_use_external_url:
-                    request_data["as2_mdn_use_external_url"] = as2_mdn_use_external_url
-                if as2_mdn_use_ssl:
-                    request_data["as2_mdn_use_ssl"] = as2_mdn_use_ssl
-                if as2_mdn_client_ssl_cert:
-                    request_data["as2_mdn_client_ssl_cert"] = as2_mdn_client_ssl_cert
-                if as2_mdn_ssl_cert:
-                    request_data["as2_mdn_ssl_cert"] = as2_mdn_ssl_cert
-                if as2_reject_duplicates:
-                    request_data["as2_reject_duplicates"] = as2_reject_duplicates
-                if as2_duplicate_check_count:
-                    request_data["as2_duplicate_check_count"] = as2_duplicate_check_count
-                if as2_legacy_smime:
-                    request_data["as2_legacy_smime"] = as2_legacy_smime
-
-                # Pass MLLP fields flat
-                if mllp_host:
-                    request_data["mllp_host"] = mllp_host
-                if mllp_port:
-                    request_data["mllp_port"] = mllp_port
-                if mllp_use_ssl:
-                    request_data["mllp_use_ssl"] = mllp_use_ssl
-                if mllp_persistent:
-                    request_data["mllp_persistent"] = mllp_persistent
-                if mllp_receive_timeout:
-                    request_data["mllp_receive_timeout"] = mllp_receive_timeout
-                if mllp_send_timeout:
-                    request_data["mllp_send_timeout"] = mllp_send_timeout
-                if mllp_max_connections:
-                    request_data["mllp_max_connections"] = mllp_max_connections
-                if mllp_inactivity_timeout:
-                    request_data["mllp_inactivity_timeout"] = mllp_inactivity_timeout
-                if mllp_max_retry:
-                    request_data["mllp_max_retry"] = mllp_max_retry
-                if mllp_halt_timeout:
-                    request_data["mllp_halt_timeout"] = mllp_halt_timeout
-                if mllp_use_client_ssl:
-                    request_data["mllp_use_client_ssl"] = mllp_use_client_ssl
-                if mllp_client_ssl_alias:
-                    request_data["mllp_client_ssl_alias"] = mllp_client_ssl_alias
-                if mllp_ssl_alias:
-                    request_data["mllp_ssl_alias"] = mllp_ssl_alias
-
-                # Pass OFTP fields flat
-                if oftp_host:
-                    request_data["oftp_host"] = oftp_host
-                if oftp_port:
-                    request_data["oftp_port"] = oftp_port
-                if oftp_tls:
-                    request_data["oftp_tls"] = oftp_tls
-                if oftp_ssid_code:
-                    request_data["oftp_ssid_code"] = oftp_ssid_code
-                if oftp_ssid_password:
-                    request_data["oftp_ssid_password"] = oftp_ssid_password
-                if oftp_compress:
-                    request_data["oftp_compress"] = oftp_compress
-                if oftp_ssid_auth:
-                    request_data["oftp_ssid_auth"] = oftp_ssid_auth
-                if oftp_sfid_cipher:
-                    request_data["oftp_sfid_cipher"] = oftp_sfid_cipher
-                if oftp_use_gateway:
-                    request_data["oftp_use_gateway"] = oftp_use_gateway
-                if oftp_use_client_ssl:
-                    request_data["oftp_use_client_ssl"] = oftp_use_client_ssl
-                if oftp_client_ssl_alias:
-                    request_data["oftp_client_ssl_alias"] = oftp_client_ssl_alias
-                if oftp_sfid_sign:
-                    request_data["oftp_sfid_sign"] = oftp_sfid_sign
-                if oftp_sfid_encrypt:
-                    request_data["oftp_sfid_encrypt"] = oftp_sfid_encrypt
-                if oftp_encrypting_cert:
-                    request_data["oftp_encrypting_cert"] = oftp_encrypting_cert
-                if oftp_session_challenge_cert:
-                    request_data["oftp_session_challenge_cert"] = oftp_session_challenge_cert
-                if oftp_verifying_eerp_cert:
-                    request_data["oftp_verifying_eerp_cert"] = oftp_verifying_eerp_cert
-                if oftp_verifying_signature_cert:
-                    request_data["oftp_verifying_signature_cert"] = oftp_verifying_signature_cert
-
-                # Pass EDIFACT fields
-                if edifact_interchange_id:
-                    request_data["edifact_interchange_id"] = edifact_interchange_id
-                if edifact_interchange_id_qual:
-                    request_data["edifact_interchange_id_qual"] = edifact_interchange_id_qual
-                if edifact_syntax_id:
-                    request_data["edifact_syntax_id"] = edifact_syntax_id
-                if edifact_syntax_version:
-                    request_data["edifact_syntax_version"] = edifact_syntax_version
-                if edifact_test_indicator:
-                    request_data["edifact_test_indicator"] = edifact_test_indicator
-
-                # Pass HL7 fields
-                if hl7_application:
-                    request_data["hl7_application"] = hl7_application
-                if hl7_facility:
-                    request_data["hl7_facility"] = hl7_facility
-
-                # Pass RosettaNet fields
-                if rosettanet_partner_id:
-                    request_data["rosettanet_partner_id"] = rosettanet_partner_id
-                if rosettanet_partner_location:
-                    request_data["rosettanet_partner_location"] = rosettanet_partner_location
-                if rosettanet_global_usage_code:
-                    request_data["rosettanet_global_usage_code"] = rosettanet_global_usage_code
-                if rosettanet_supply_chain_code:
-                    request_data["rosettanet_supply_chain_code"] = rosettanet_supply_chain_code
-                if rosettanet_classification_code:
-                    request_data["rosettanet_classification_code"] = rosettanet_classification_code
-
-                # Pass TRADACOMS fields
-                if tradacoms_interchange_id:
-                    request_data["tradacoms_interchange_id"] = tradacoms_interchange_id
-                if tradacoms_interchange_id_qualifier:
-                    request_data["tradacoms_interchange_id_qualifier"] = tradacoms_interchange_id_qualifier
-
-                # Pass ODETTE fields
-                if odette_interchange_id:
-                    request_data["odette_interchange_id"] = odette_interchange_id
-                if odette_interchange_id_qual:
-                    request_data["odette_interchange_id_qual"] = odette_interchange_id_qual
-                if odette_syntax_id:
-                    request_data["odette_syntax_id"] = odette_syntax_id
-                if odette_syntax_version:
-                    request_data["odette_syntax_version"] = odette_syntax_version
-                if odette_test_indicator:
-                    request_data["odette_test_indicator"] = odette_test_indicator
-
-                # Organization linking
-                if organization_id:
-                    request_data["organization_id"] = organization_id
-
-                params["request_data"] = request_data
+                params["request_data"] = config_data
 
             elif action == "update":
-                params["partner_id"] = partner_id
-
-                # Build updates - pass all fields flat
-                updates = {}
-                if component_name:
-                    updates["component_name"] = component_name
-
-                # Contact fields
-                if contact_name:
-                    updates["contact_name"] = contact_name
-                if contact_email:
-                    updates["contact_email"] = contact_email
-                if contact_phone:
-                    updates["contact_phone"] = contact_phone
-                if contact_fax:
-                    updates["contact_fax"] = contact_fax
-                if contact_address:
-                    updates["contact_address"] = contact_address
-                if contact_address2:
-                    updates["contact_address2"] = contact_address2
-                if contact_city:
-                    updates["contact_city"] = contact_city
-                if contact_state:
-                    updates["contact_state"] = contact_state
-                if contact_country:
-                    updates["contact_country"] = contact_country
-                if contact_postalcode:
-                    updates["contact_postalcode"] = contact_postalcode
-
-                # X12 fields
-                if isa_id:
-                    updates["isa_id"] = isa_id
-                if isa_qualifier:
-                    updates["isa_qualifier"] = isa_qualifier
-                if gs_id:
-                    updates["gs_id"] = gs_id
-
-                # Communication protocols
-                if communication_protocols:
-                    protocols_list = [p.strip() for p in communication_protocols.split(',')]
-                    updates["communication_protocols"] = protocols_list
-
-                # Disk fields
-                if disk_directory:
-                    updates["disk_directory"] = disk_directory
-                if disk_get_directory:
-                    updates["disk_get_directory"] = disk_get_directory
-                if disk_send_directory:
-                    updates["disk_send_directory"] = disk_send_directory
-                if disk_file_filter:
-                    updates["disk_file_filter"] = disk_file_filter
-                if disk_filter_match_type:
-                    updates["disk_filter_match_type"] = disk_filter_match_type
-                if disk_delete_after_read:
-                    updates["disk_delete_after_read"] = disk_delete_after_read
-                if disk_max_file_count:
-                    updates["disk_max_file_count"] = disk_max_file_count
-                if disk_create_directory:
-                    updates["disk_create_directory"] = disk_create_directory
-                if disk_write_option:
-                    updates["disk_write_option"] = disk_write_option
-
-                # FTP fields
-                if ftp_host:
-                    updates["ftp_host"] = ftp_host
-                if ftp_port:
-                    updates["ftp_port"] = ftp_port
-                if ftp_username:
-                    updates["ftp_username"] = ftp_username
-                if ftp_password:
-                    updates["ftp_password"] = ftp_password
-                if ftp_remote_directory:
-                    updates["ftp_remote_directory"] = ftp_remote_directory
-                if ftp_ssl_mode:
-                    updates["ftp_ssl_mode"] = ftp_ssl_mode
-                if ftp_connection_mode:
-                    updates["ftp_connection_mode"] = ftp_connection_mode
-                if ftp_transfer_type:
-                    updates["ftp_transfer_type"] = ftp_transfer_type
-                if ftp_get_action:
-                    updates["ftp_get_action"] = ftp_get_action
-                if ftp_send_action:
-                    updates["ftp_send_action"] = ftp_send_action
-                if ftp_max_file_count:
-                    updates["ftp_max_file_count"] = ftp_max_file_count
-                if ftp_file_to_move:
-                    updates["ftp_file_to_move"] = ftp_file_to_move
-                if ftp_move_to_directory:
-                    updates["ftp_move_to_directory"] = ftp_move_to_directory
-                if ftp_client_ssl_alias:
-                    updates["ftp_client_ssl_alias"] = ftp_client_ssl_alias
-                if ftp_send_remote_directory:
-                    updates["ftp_send_remote_directory"] = ftp_send_remote_directory
-                if ftp_send_transfer_type:
-                    updates["ftp_send_transfer_type"] = ftp_send_transfer_type
-                if ftp_move_force_override:
-                    updates["ftp_move_force_override"] = ftp_move_force_override
-
-                # SFTP fields
-                if sftp_host:
-                    updates["sftp_host"] = sftp_host
-                if sftp_port:
-                    updates["sftp_port"] = sftp_port
-                if sftp_username:
-                    updates["sftp_username"] = sftp_username
-                if sftp_password:
-                    updates["sftp_password"] = sftp_password
-                if sftp_remote_directory:
-                    updates["sftp_remote_directory"] = sftp_remote_directory
-                if sftp_ssh_key_auth:
-                    updates["sftp_ssh_key_auth"] = sftp_ssh_key_auth
-                if sftp_known_host_entry:
-                    updates["sftp_known_host_entry"] = sftp_known_host_entry
-                if sftp_ssh_key_path:
-                    updates["sftp_ssh_key_path"] = sftp_ssh_key_path
-                if sftp_ssh_key_password:
-                    updates["sftp_ssh_key_password"] = sftp_ssh_key_password
-                if sftp_dh_key_max_1024:
-                    updates["sftp_dh_key_max_1024"] = sftp_dh_key_max_1024
-                if sftp_get_action:
-                    updates["sftp_get_action"] = sftp_get_action
-                if sftp_send_action:
-                    updates["sftp_send_action"] = sftp_send_action
-                if sftp_max_file_count:
-                    updates["sftp_max_file_count"] = sftp_max_file_count
-                if sftp_file_to_move:
-                    updates["sftp_file_to_move"] = sftp_file_to_move
-                if sftp_move_to_directory:
-                    updates["sftp_move_to_directory"] = sftp_move_to_directory
-                if sftp_move_force_override:
-                    updates["sftp_move_force_override"] = sftp_move_force_override
-                if sftp_proxy_enabled:
-                    updates["sftp_proxy_enabled"] = sftp_proxy_enabled
-                if sftp_proxy_host:
-                    updates["sftp_proxy_host"] = sftp_proxy_host
-                if sftp_proxy_port:
-                    updates["sftp_proxy_port"] = sftp_proxy_port
-                if sftp_proxy_type:
-                    updates["sftp_proxy_type"] = sftp_proxy_type
-                if sftp_proxy_user:
-                    updates["sftp_proxy_user"] = sftp_proxy_user
-                if sftp_proxy_password:
-                    updates["sftp_proxy_password"] = sftp_proxy_password
-                if sftp_send_remote_directory:
-                    updates["sftp_send_remote_directory"] = sftp_send_remote_directory
-
-                # HTTP fields
-                if http_url:
-                    updates["http_url"] = http_url
-                if http_username:
-                    updates["http_username"] = http_username
-                if http_password:
-                    updates["http_password"] = http_password
-                if http_authentication_type:
-                    updates["http_authentication_type"] = http_authentication_type
-                if http_connect_timeout:
-                    updates["http_connect_timeout"] = http_connect_timeout
-                if http_read_timeout:
-                    updates["http_read_timeout"] = http_read_timeout
-                if http_client_auth:
-                    updates["http_client_auth"] = http_client_auth
-                if http_trust_server_cert:
-                    updates["http_trust_server_cert"] = http_trust_server_cert
-                if http_method_type:
-                    updates["http_method_type"] = http_method_type
-                if http_data_content_type:
-                    updates["http_data_content_type"] = http_data_content_type
-                if http_follow_redirects:
-                    updates["http_follow_redirects"] = http_follow_redirects
-                if http_return_errors:
-                    updates["http_return_errors"] = http_return_errors
-                if http_return_responses:
-                    updates["http_return_responses"] = http_return_responses
-                if http_cookie_scope:
-                    updates["http_cookie_scope"] = http_cookie_scope
-                if http_client_ssl_alias:
-                    updates["http_client_ssl_alias"] = http_client_ssl_alias
-                if http_trusted_cert_alias:
-                    updates["http_trusted_cert_alias"] = http_trusted_cert_alias
-                if http_request_profile:
-                    updates["http_request_profile"] = http_request_profile
-                if http_request_profile_type:
-                    updates["http_request_profile_type"] = http_request_profile_type
-                if http_response_profile:
-                    updates["http_response_profile"] = http_response_profile
-                if http_response_profile_type:
-                    updates["http_response_profile_type"] = http_response_profile_type
-                if http_oauth_token_url:
-                    updates["http_oauth_token_url"] = http_oauth_token_url
-                if http_oauth_client_id:
-                    updates["http_oauth_client_id"] = http_oauth_client_id
-                if http_oauth_client_secret:
-                    updates["http_oauth_client_secret"] = http_oauth_client_secret
-                if http_oauth_scope:
-                    updates["http_oauth_scope"] = http_oauth_scope
-                if http_oauth_grant_type:
-                    updates["http_oauth_grant_type"] = http_oauth_grant_type
-                if http_use_custom_auth:
-                    updates["http_use_custom_auth"] = http_use_custom_auth
-                if http_use_basic_auth:
-                    updates["http_use_basic_auth"] = http_use_basic_auth
-                if http_use_default_settings:
-                    updates["http_use_default_settings"] = http_use_default_settings
-                if http_oauth1_consumer_key:
-                    updates["http_oauth1_consumer_key"] = http_oauth1_consumer_key
-                if http_oauth1_consumer_secret:
-                    updates["http_oauth1_consumer_secret"] = http_oauth1_consumer_secret
-                if http_oauth1_access_token:
-                    updates["http_oauth1_access_token"] = http_oauth1_access_token
-                if http_oauth1_token_secret:
-                    updates["http_oauth1_token_secret"] = http_oauth1_token_secret
-                if http_oauth1_realm:
-                    updates["http_oauth1_realm"] = http_oauth1_realm
-                if http_oauth1_signature_method:
-                    updates["http_oauth1_signature_method"] = http_oauth1_signature_method
-                if http_oauth1_request_token_url:
-                    updates["http_oauth1_request_token_url"] = http_oauth1_request_token_url
-                if http_oauth1_access_token_url:
-                    updates["http_oauth1_access_token_url"] = http_oauth1_access_token_url
-                if http_oauth1_authorization_url:
-                    updates["http_oauth1_authorization_url"] = http_oauth1_authorization_url
-                if http_oauth1_suppress_blank_access_token:
-                    updates["http_oauth1_suppress_blank_access_token"] = http_oauth1_suppress_blank_access_token
-                if http_oauth2_authorization_token_url:
-                    updates["http_oauth2_authorization_token_url"] = http_oauth2_authorization_token_url
-                if http_oauth2_access_token:
-                    updates["http_oauth2_access_token"] = http_oauth2_access_token
-                if http_oauth2_use_refresh_token:
-                    updates["http_oauth2_use_refresh_token"] = http_oauth2_use_refresh_token
-                if http_oauth2_access_token_params:
-                    updates["http_oauth2_access_token_params"] = http_oauth2_access_token_params
-                if http_oauth2_authorization_params:
-                    updates["http_oauth2_authorization_params"] = http_oauth2_authorization_params
-                if http_get_method_type:
-                    updates["http_get_method_type"] = http_get_method_type
-                if http_get_content_type:
-                    updates["http_get_content_type"] = http_get_content_type
-                if http_get_follow_redirects:
-                    updates["http_get_follow_redirects"] = http_get_follow_redirects
-                if http_get_return_errors:
-                    updates["http_get_return_errors"] = http_get_return_errors
-                if http_get_request_profile:
-                    updates["http_get_request_profile"] = http_get_request_profile
-                if http_get_request_profile_type:
-                    updates["http_get_request_profile_type"] = http_get_request_profile_type
-                if http_get_response_profile:
-                    updates["http_get_response_profile"] = http_get_response_profile
-                if http_get_response_profile_type:
-                    updates["http_get_response_profile_type"] = http_get_response_profile_type
-                if http_listen_mime_passthrough:
-                    updates["http_listen_mime_passthrough"] = http_listen_mime_passthrough
-                if http_listen_object_name:
-                    updates["http_listen_object_name"] = http_listen_object_name
-                if http_listen_operation_type:
-                    updates["http_listen_operation_type"] = http_listen_operation_type
-                if http_listen_password:
-                    updates["http_listen_password"] = http_listen_password
-                if http_listen_use_default:
-                    updates["http_listen_use_default"] = http_listen_use_default
-                if http_listen_username:
-                    updates["http_listen_username"] = http_listen_username
-                if http_request_headers:
-                    updates["http_request_headers"] = http_request_headers
-                if http_response_header_mapping:
-                    updates["http_response_header_mapping"] = http_response_header_mapping
-                if http_reflect_headers:
-                    updates["http_reflect_headers"] = http_reflect_headers
-                if http_path_elements:
-                    updates["http_path_elements"] = http_path_elements
-
-                # AS2 fields
-                if as2_url:
-                    updates["as2_url"] = as2_url
-                if as2_identifier:
-                    updates["as2_identifier"] = as2_identifier
-                if as2_partner_identifier:
-                    updates["as2_partner_identifier"] = as2_partner_identifier
-                if as2_username:
-                    updates["as2_username"] = as2_username
-                if as2_password:
-                    updates["as2_password"] = as2_password
-                if as2_authentication_type:
-                    updates["as2_authentication_type"] = as2_authentication_type
-                if as2_verify_hostname:
-                    updates["as2_verify_hostname"] = as2_verify_hostname
-                if as2_client_ssl_alias:
-                    updates["as2_client_ssl_alias"] = as2_client_ssl_alias
-                if as2_encrypt_alias:
-                    updates["as2_encrypt_alias"] = as2_encrypt_alias
-                if as2_sign_alias:
-                    updates["as2_sign_alias"] = as2_sign_alias
-                if as2_mdn_alias:
-                    updates["as2_mdn_alias"] = as2_mdn_alias
-                if as2_signed:
-                    updates["as2_signed"] = as2_signed
-                if as2_encrypted:
-                    updates["as2_encrypted"] = as2_encrypted
-                if as2_compressed:
-                    updates["as2_compressed"] = as2_compressed
-                if as2_encryption_algorithm:
-                    updates["as2_encryption_algorithm"] = as2_encryption_algorithm
-                if as2_signing_digest_alg:
-                    updates["as2_signing_digest_alg"] = as2_signing_digest_alg
-                if as2_data_content_type:
-                    updates["as2_data_content_type"] = as2_data_content_type
-                if as2_request_mdn:
-                    updates["as2_request_mdn"] = as2_request_mdn
-                if as2_mdn_signed:
-                    updates["as2_mdn_signed"] = as2_mdn_signed
-                if as2_mdn_digest_alg:
-                    updates["as2_mdn_digest_alg"] = as2_mdn_digest_alg
-                if as2_synchronous_mdn:
-                    updates["as2_synchronous_mdn"] = as2_synchronous_mdn
-                if as2_subject:
-                    updates["as2_subject"] = as2_subject
-                if as2_multiple_attachments:
-                    updates["as2_multiple_attachments"] = as2_multiple_attachments
-                if as2_max_document_count:
-                    updates["as2_max_document_count"] = as2_max_document_count
-                if as2_attachment_option:
-                    updates["as2_attachment_option"] = as2_attachment_option
-                if as2_attachment_cache:
-                    updates["as2_attachment_cache"] = as2_attachment_cache
-                if as2_mdn_external_url:
-                    updates["as2_mdn_external_url"] = as2_mdn_external_url
-                if as2_mdn_use_external_url:
-                    updates["as2_mdn_use_external_url"] = as2_mdn_use_external_url
-                if as2_mdn_use_ssl:
-                    updates["as2_mdn_use_ssl"] = as2_mdn_use_ssl
-                if as2_mdn_client_ssl_cert:
-                    updates["as2_mdn_client_ssl_cert"] = as2_mdn_client_ssl_cert
-                if as2_mdn_ssl_cert:
-                    updates["as2_mdn_ssl_cert"] = as2_mdn_ssl_cert
-                if as2_reject_duplicates:
-                    updates["as2_reject_duplicates"] = as2_reject_duplicates
-                if as2_duplicate_check_count:
-                    updates["as2_duplicate_check_count"] = as2_duplicate_check_count
-                if as2_legacy_smime:
-                    updates["as2_legacy_smime"] = as2_legacy_smime
-
-                # MLLP fields (HL7)
-                if mllp_host:
-                    updates["mllp_host"] = mllp_host
-                if mllp_port:
-                    updates["mllp_port"] = mllp_port
-                if mllp_use_ssl:
-                    updates["mllp_use_ssl"] = mllp_use_ssl
-                if mllp_persistent:
-                    updates["mllp_persistent"] = mllp_persistent
-                if mllp_receive_timeout:
-                    updates["mllp_receive_timeout"] = mllp_receive_timeout
-                if mllp_send_timeout:
-                    updates["mllp_send_timeout"] = mllp_send_timeout
-                if mllp_max_connections:
-                    updates["mllp_max_connections"] = mllp_max_connections
-                if mllp_inactivity_timeout:
-                    updates["mllp_inactivity_timeout"] = mllp_inactivity_timeout
-                if mllp_max_retry:
-                    updates["mllp_max_retry"] = mllp_max_retry
-                if mllp_halt_timeout:
-                    updates["mllp_halt_timeout"] = mllp_halt_timeout
-                if mllp_use_client_ssl:
-                    updates["mllp_use_client_ssl"] = mllp_use_client_ssl
-                if mllp_client_ssl_alias:
-                    updates["mllp_client_ssl_alias"] = mllp_client_ssl_alias
-                if mllp_ssl_alias:
-                    updates["mllp_ssl_alias"] = mllp_ssl_alias
-
-                # OFTP fields
-                if oftp_host:
-                    updates["oftp_host"] = oftp_host
-                if oftp_port:
-                    updates["oftp_port"] = oftp_port
-                if oftp_tls:
-                    updates["oftp_tls"] = oftp_tls
-                if oftp_ssid_code:
-                    updates["oftp_ssid_code"] = oftp_ssid_code
-                if oftp_ssid_password:
-                    updates["oftp_ssid_password"] = oftp_ssid_password
-                if oftp_compress:
-                    updates["oftp_compress"] = oftp_compress
-                if oftp_ssid_auth:
-                    updates["oftp_ssid_auth"] = oftp_ssid_auth
-                if oftp_sfid_cipher:
-                    updates["oftp_sfid_cipher"] = oftp_sfid_cipher
-                if oftp_use_gateway:
-                    updates["oftp_use_gateway"] = oftp_use_gateway
-                if oftp_use_client_ssl:
-                    updates["oftp_use_client_ssl"] = oftp_use_client_ssl
-                if oftp_client_ssl_alias:
-                    updates["oftp_client_ssl_alias"] = oftp_client_ssl_alias
-                if oftp_sfid_sign:
-                    updates["oftp_sfid_sign"] = oftp_sfid_sign
-                if oftp_sfid_encrypt:
-                    updates["oftp_sfid_encrypt"] = oftp_sfid_encrypt
-                if oftp_encrypting_cert:
-                    updates["oftp_encrypting_cert"] = oftp_encrypting_cert
-                if oftp_session_challenge_cert:
-                    updates["oftp_session_challenge_cert"] = oftp_session_challenge_cert
-                if oftp_verifying_eerp_cert:
-                    updates["oftp_verifying_eerp_cert"] = oftp_verifying_eerp_cert
-                if oftp_verifying_signature_cert:
-                    updates["oftp_verifying_signature_cert"] = oftp_verifying_signature_cert
-
-                # EDIFACT fields
-                if edifact_interchange_id:
-                    updates["edifact_interchange_id"] = edifact_interchange_id
-                if edifact_interchange_id_qual:
-                    updates["edifact_interchange_id_qual"] = edifact_interchange_id_qual
-                if edifact_syntax_id:
-                    updates["edifact_syntax_id"] = edifact_syntax_id
-                if edifact_syntax_version:
-                    updates["edifact_syntax_version"] = edifact_syntax_version
-                if edifact_test_indicator:
-                    updates["edifact_test_indicator"] = edifact_test_indicator
-
-                # HL7 fields
-                if hl7_application:
-                    updates["hl7_application"] = hl7_application
-                if hl7_facility:
-                    updates["hl7_facility"] = hl7_facility
-
-                # RosettaNet fields
-                if rosettanet_partner_id:
-                    updates["rosettanet_partner_id"] = rosettanet_partner_id
-                if rosettanet_partner_location:
-                    updates["rosettanet_partner_location"] = rosettanet_partner_location
-                if rosettanet_global_usage_code:
-                    updates["rosettanet_global_usage_code"] = rosettanet_global_usage_code
-                if rosettanet_supply_chain_code:
-                    updates["rosettanet_supply_chain_code"] = rosettanet_supply_chain_code
-                if rosettanet_classification_code:
-                    updates["rosettanet_classification_code"] = rosettanet_classification_code
-
-                # TRADACOMS fields
-                if tradacoms_interchange_id:
-                    updates["tradacoms_interchange_id"] = tradacoms_interchange_id
-                if tradacoms_interchange_id_qualifier:
-                    updates["tradacoms_interchange_id_qualifier"] = tradacoms_interchange_id_qualifier
-
-                # ODETTE fields
-                if odette_interchange_id:
-                    updates["odette_interchange_id"] = odette_interchange_id
-                if odette_interchange_id_qual:
-                    updates["odette_interchange_id_qual"] = odette_interchange_id_qual
-                if odette_syntax_id:
-                    updates["odette_syntax_id"] = odette_syntax_id
-                if odette_syntax_version:
-                    updates["odette_syntax_version"] = odette_syntax_version
-                if odette_test_indicator:
-                    updates["odette_test_indicator"] = odette_test_indicator
-
-                # Organization linking
-                if organization_id:
-                    updates["organization_id"] = organization_id
-
-                params["updates"] = updates
+                params["partner_id"] = resource_id
+                params["updates"] = config_data
 
             elif action == "delete":
-                params["partner_id"] = partner_id
+                params["partner_id"] = resource_id
 
             elif action == "analyze_usage":
-                params["partner_id"] = partner_id
+                params["partner_id"] = resource_id
 
-            # Route to appropriate function
             return manage_trading_partner_action(sdk, profile, action, **params)
 
         except Exception as e:
@@ -1914,7 +734,6 @@ if manage_process_action:
 
             if action == "list":
                 if filters:
-                    import json
                     params["filters"] = json.loads(filters)
 
             elif action == "get":
@@ -1948,73 +767,67 @@ if manage_organization_action:
     def manage_organization(
         profile: str,
         action: str,
-        organization_id: str = None,
-        component_name: str = None,
-        folder_name: str = None,
-        contact_name: str = None,
-        contact_email: str = None,
-        contact_phone: str = None,
-        contact_fax: str = None,
-        contact_url: str = None,
-        contact_address: str = None,
-        contact_address2: str = None,
-        contact_city: str = None,
-        contact_state: str = None,
-        contact_country: str = None,
-        contact_postalcode: str = None
+        resource_id: str = None,
+        config: str = None,
     ):
         """
-        Manage Boomi organizations (shared contact info for trading partners).
-
-        Organizations provide centralized contact information that can be linked
-        to multiple trading partners via the organization_id field.
+        Manage Boomi organizations (shared contact info for trading partners) via JSON config.
 
         Args:
             profile: Boomi profile name (required)
-            action: Action to perform - must be one of: list, get, create, update, delete
-            organization_id: Organization component ID (required for get, update, delete)
-            component_name: Organization name (required for create)
-            folder_name: Folder to place organization in (default: Home)
+            action: One of: list, get, create, update, delete
+            resource_id: Organization component ID (required for get, update, delete)
+            config: JSON string with action-specific configuration (see examples below)
 
-            # Contact Information (all fields used for create/update)
-            contact_name: Contact person name
-            contact_email: Contact email address
-            contact_phone: Contact phone number
-            contact_fax: Contact fax number
-            contact_url: Contact URL/website
-            contact_address: Street address line 1
-            contact_address2: Street address line 2
-            contact_city: City
-            contact_state: State/Province
-            contact_country: Country
-            contact_postalcode: Postal/ZIP code
+        Tip: Use action="get" with a known resource_id to retrieve the full structure,
+        then use that output as a template for create/update config.
+
+        Actions and config examples:
+
+            list - List organizations, optional filters:
+                config='{"folder_name": "Home/Organizations"}'
+
+            get - Get organization by ID (no config needed):
+                resource_id="abc-123-def"
+
+            create - Create new organization (config required):
+                config='{
+                    "component_name": "Acme Corp",
+                    "folder_name": "Home/Organizations",
+                    "contact_name": "John Doe",
+                    "contact_email": "john@acme.com",
+                    "contact_phone": "555-1234",
+                    "contact_address": "123 Main St",
+                    "contact_city": "New York",
+                    "contact_state": "NY",
+                    "contact_country": "USA",
+                    "contact_postalcode": "10001"
+                }'
+
+            update - Update existing organization (config required):
+                resource_id="abc-123-def"
+                config='{"contact_email": "new@acme.com", "contact_phone": "555-5678"}'
+
+            delete - Delete organization (no config needed):
+                resource_id="abc-123-def"
+
+        Config field reference:
+            component_name, folder_name,
+            contact_name, contact_email, contact_phone, contact_fax, contact_url,
+            contact_address, contact_address2, contact_city, contact_state,
+            contact_country, contact_postalcode
 
         Returns:
             Action result with success status and data/error
-
-        Examples:
-            # List all organizations
-            manage_organization(profile="sandbox", action="list")
-
-            # Create organization with contact info
-            manage_organization(
-                profile="sandbox",
-                action="create",
-                component_name="Acme Corp",
-                folder_name="Home/Organizations",
-                contact_name="John Doe",
-                contact_email="john@acme.com",
-                contact_phone="555-1234",
-                contact_address="123 Main St",
-                contact_city="New York",
-                contact_state="NY",
-                contact_country="USA",
-                contact_postalcode="10001"
-            )
-
-            # Link trading partner to organization
-            # Use manage_trading_partner with organization_id parameter
         """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except json.JSONDecodeError as e:
+                return {"_success": False, "error": f"Invalid JSON in config: {e}"}
+
         try:
             subject = get_user_subject()
             print(f"[INFO] manage_organization called by user: {subject}, profile: {profile}, action: {action}")
@@ -2033,90 +846,26 @@ if manage_organization_action:
             params = {}
 
             if action == "list":
-                filters = {}
-                if folder_name:
-                    filters["folder_name"] = folder_name
-                params["filters"] = filters if filters else None
+                if config_data:
+                    params["filters"] = config_data
 
             elif action == "get":
-                params["organization_id"] = organization_id
+                params["organization_id"] = resource_id
 
             elif action == "create":
-                request_data = {}
-                if component_name:
-                    request_data["component_name"] = component_name
-                if folder_name:
-                    request_data["folder_name"] = folder_name
-
-                # Contact fields
-                if contact_name:
-                    request_data["contact_name"] = contact_name
-                if contact_email:
-                    request_data["contact_email"] = contact_email
-                if contact_phone:
-                    request_data["contact_phone"] = contact_phone
-                if contact_fax:
-                    request_data["contact_fax"] = contact_fax
-                if contact_url:
-                    request_data["contact_url"] = contact_url
-                if contact_address:
-                    request_data["contact_address"] = contact_address
-                if contact_address2:
-                    request_data["contact_address2"] = contact_address2
-                if contact_city:
-                    request_data["contact_city"] = contact_city
-                if contact_state:
-                    request_data["contact_state"] = contact_state
-                if contact_country:
-                    request_data["contact_country"] = contact_country
-                if contact_postalcode:
-                    request_data["contact_postalcode"] = contact_postalcode
-
-                params["request_data"] = request_data
+                params["request_data"] = config_data
 
             elif action == "update":
-                params["organization_id"] = organization_id
-                updates = {}
-                if component_name:
-                    updates["component_name"] = component_name
-                if folder_name:
-                    updates["folder_name"] = folder_name
-
-                # Contact fields
-                if contact_name:
-                    updates["contact_name"] = contact_name
-                if contact_email:
-                    updates["contact_email"] = contact_email
-                if contact_phone:
-                    updates["contact_phone"] = contact_phone
-                if contact_fax:
-                    updates["contact_fax"] = contact_fax
-                if contact_url:
-                    updates["contact_url"] = contact_url
-                if contact_address:
-                    updates["contact_address"] = contact_address
-                if contact_address2:
-                    updates["contact_address2"] = contact_address2
-                if contact_city:
-                    updates["contact_city"] = contact_city
-                if contact_state:
-                    updates["contact_state"] = contact_state
-                if contact_country:
-                    updates["contact_country"] = contact_country
-                if contact_postalcode:
-                    updates["contact_postalcode"] = contact_postalcode
-
-                params["updates"] = updates
+                params["organization_id"] = resource_id
+                params["updates"] = config_data
 
             elif action == "delete":
-                params["organization_id"] = organization_id
+                params["organization_id"] = resource_id
 
             return manage_organization_action(sdk, profile, action, **params)
 
         except Exception as e:
             print(f"[ERROR] Failed to {action} organization: {e}")
-            import traceback
-            traceback.print_exc()
             return {"_success": False, "error": str(e)}
 
     print("[INFO] Organization tool registered successfully (1 consolidated tool)")

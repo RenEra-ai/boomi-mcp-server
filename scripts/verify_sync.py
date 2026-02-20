@@ -179,23 +179,21 @@ def main():
 
     all_passed = True
 
-    # Check manage_trading_partner (has CREATE and UPDATE)
+    # All three tools use config-based patterns (no inline field assignments)
     all_passed = check_function(
         main_content, dev_content,
         "manage_trading_partner",
-        check_create=True,
-        check_update=True
+        check_create=False,
+        check_update=False
     ) and all_passed
 
-    # Check manage_organization (has CREATE and UPDATE)
     all_passed = check_function(
         main_content, dev_content,
         "manage_organization",
-        check_create=True,
-        check_update=True
+        check_create=False,
+        check_update=False
     ) and all_passed
 
-    # Check manage_process (uses YAML, no CREATE/UPDATE sections)
     all_passed = check_function(
         main_content, dev_content,
         "manage_process",
