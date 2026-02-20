@@ -114,10 +114,11 @@ def create_trading_partner(boomi_client, profile: str, request_data: Dict[str, A
         warnings = []
         ftp_get_action = request_data.get('ftp_get_action', '')
         if ftp_get_action and ftp_get_action.lower() == 'actiongetmove':
-            warnings.append(
-                "FTP get_action 'actiongetmove' may not be supported by the Boomi API "
-                "and could be silently reverted to 'actionget'. Consider using 'actiongetdelete' instead."
-            )
+            if not request_data.get('ftp_file_to_move'):
+                warnings.append(
+                    "FTP get_action 'actiongetmove' requires ftp_file_to_move (target directory). "
+                    "Also consider setting ftp_move_force_override='true' if target may already exist."
+                )
 
         # Extract main fields and pass remaining fields as kwargs
         component_name = request_data.get("component_name")
@@ -380,6 +381,7 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     ftp_info["get_action"] = _ga(get_opts, 'ftp_action', 'ftpAction')
                     ftp_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
                     ftp_info["file_to_move"] = _ga(get_opts, 'file_to_move', 'fileToMove')
+                    ftp_info["move_force_override"] = _ga(get_opts, 'move_to_force_override', 'moveToForceOverride')
                 # Extract FTP send options
                 send_opts = getattr(ftp_opts, 'ftp_send_options', None)
                 if send_opts:
@@ -905,10 +907,11 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
         warnings = []
         ftp_get_action = updates.get('ftp_get_action', '')
         if ftp_get_action and ftp_get_action.lower() == 'actiongetmove':
-            warnings.append(
-                "FTP get_action 'actiongetmove' may not be supported by the Boomi API "
-                "and could be silently reverted to 'actionget'. Consider using 'actiongetdelete' instead."
-            )
+            if not updates.get('ftp_file_to_move'):
+                warnings.append(
+                    "FTP get_action 'actiongetmove' requires ftp_file_to_move (target directory). "
+                    "Also consider setting ftp_move_force_override='true' if target may already exist."
+                )
 
         # Step 1: Get the existing trading partner using JSON-based API
         try:
@@ -1596,6 +1599,10 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_action = _ga(existing_send_opts, 'ftp_action', 'ftpAction')
                                     if existing_action:
                                         sftp_params['sftp_send_action'] = existing_action
+                                if 'sftp_send_remote_directory' not in sftp_params:
+                                    existing_dir = _ga(existing_send_opts, 'remote_directory', 'remoteDirectory')
+                                    if existing_dir:
+                                        sftp_params['sftp_send_remote_directory'] = existing_dir
                     sftp_opts = build_sftp_communication_options(**sftp_params)
                     if sftp_opts:
                         comm_dict["SFTPCommunicationOptions"] = sftp_opts
@@ -1670,6 +1677,10 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_move_dir = _ga(existing_get_opts, 'move_to_directory', 'moveToDirectory')
                                     if existing_move_dir:
                                         ftp_params['ftp_move_to_directory'] = existing_move_dir
+                                if 'ftp_move_force_override' not in ftp_params:
+                                    existing_force = _ga(existing_get_opts, 'move_to_force_override', 'moveToForceOverride')
+                                    if existing_force is not None:
+                                        ftp_params['ftp_move_force_override'] = str(existing_force).lower()
 
                             # Preserve FTP Send Options (upload settings)
                             existing_send_opts = getattr(existing_ftp, 'ftp_send_options', None)
@@ -1690,6 +1701,14 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_type = _ga(existing_send_opts, 'transfer_type', 'transferType')
                                     if existing_type:
                                         ftp_params['ftp_transfer_type'] = existing_type
+                                if 'ftp_send_remote_directory' not in ftp_params:
+                                    existing_dir = _ga(existing_send_opts, 'remote_directory', 'remoteDirectory')
+                                    if existing_dir:
+                                        ftp_params['ftp_send_remote_directory'] = existing_dir
+                                if 'ftp_send_transfer_type' not in ftp_params:
+                                    existing_type = _ga(existing_send_opts, 'transfer_type', 'transferType')
+                                    if existing_type:
+                                        ftp_params['ftp_send_transfer_type'] = existing_type
                     ftp_opts = build_ftp_communication_options(**ftp_params)
                     if ftp_opts:
                         comm_dict["FTPCommunicationOptions"] = ftp_opts
