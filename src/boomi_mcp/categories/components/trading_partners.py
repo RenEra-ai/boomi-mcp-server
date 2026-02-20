@@ -378,10 +378,15 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 if get_opts:
                     ftp_info["remote_directory"] = getattr(get_opts, 'remote_directory', None)
                     ftp_info["get_transfer_type"] = getattr(get_opts, 'transfer_type', None)
-                    ftp_info["get_action"] = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    ftp_action = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    file_to_move = _ga(get_opts, 'file_to_move', 'fileToMove')
+                    # Boomi normalizes actiongetmove → actionget + fileToMove; reconstruct
+                    ftp_action_str = getattr(ftp_action, 'value', ftp_action) if ftp_action else ftp_action
+                    if ftp_action_str == 'actionget' and file_to_move:
+                        ftp_action_str = 'actiongetmove'
+                    ftp_info["get_action"] = ftp_action_str
                     ftp_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
-                    ftp_info["file_to_move"] = _ga(get_opts, 'file_to_move', 'fileToMove')
-                    ftp_info["move_force_override"] = _ga(get_opts, 'move_to_force_override', 'moveToForceOverride')
+                    ftp_info["file_to_move"] = file_to_move
                 # Extract FTP send options
                 send_opts = getattr(ftp_opts, 'ftp_send_options', None)
                 if send_opts:
@@ -421,9 +426,15 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 get_opts = getattr(sftp_opts, 'sftp_get_options', None)
                 if get_opts:
                     sftp_info["remote_directory"] = _ga(get_opts, 'remote_directory', 'remoteDirectory')
-                    sftp_info["get_action"] = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    sftp_action = _ga(get_opts, 'ftp_action', 'ftpAction')
+                    file_to_move = _ga(get_opts, 'file_to_move', 'fileToMove')
+                    # Boomi normalizes actiongetmove → actionget + fileToMove; reconstruct
+                    sftp_action_str = getattr(sftp_action, 'value', sftp_action) if sftp_action else sftp_action
+                    if sftp_action_str == 'actionget' and file_to_move:
+                        sftp_action_str = 'actiongetmove'
+                    sftp_info["get_action"] = sftp_action_str
                     sftp_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
-                    sftp_info["file_to_move"] = _ga(get_opts, 'file_to_move', 'fileToMove')
+                    sftp_info["file_to_move"] = file_to_move
                     sftp_info["move_to_directory"] = _ga(get_opts, 'move_to_directory', 'moveToDirectory')
                     sftp_info["move_force_override"] = _ga(get_opts, 'move_to_force_override', 'moveToForceOverride')
                 # Extract SFTP send options
