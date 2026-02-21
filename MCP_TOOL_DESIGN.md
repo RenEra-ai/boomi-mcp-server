@@ -1417,7 +1417,7 @@ The config pattern dramatically reduces tool definition size:
 | `manage_organization` | ~600 tokens | ~300 tokens | 50% |
 | Overall tool budget | ~8,800 tokens | Well below target | Significant |
 
-The LLM discovers available config keys from `action="get"` responses or documentation, not from the tool signature itself.
+The ~300 token figure reflects the trimmed docstring format: summary with key fields per category plus abbreviated protocol listings, not exhaustive field enumeration. The LLM discovers available config keys from `action="get"` responses or documentation, not from the tool signature itself.
 
 ### Implementation Recipe for New JSON Config Tools
 

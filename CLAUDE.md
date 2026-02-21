@@ -107,14 +107,10 @@ python scripts/verify_sync.py
 **Expected output when in sync:**
 ```
 Checking manage_trading_partner...
-  Function params: 173 = 173 ✅
-  CREATE fields:   170 = 170 ✅
-  UPDATE fields:   167 = 167 ✅
+  Function params: 4 = 4 ✅
 
 Checking manage_organization...
-  Function params: 16 = 16 ✅
-  CREATE fields:   13 = 13 ✅
-  UPDATE fields:   13 = 13 ✅
+  Function params: 4 = 4 ✅
 
 Checking manage_process...
   Function params: 5 = 5 ✅
@@ -125,9 +121,8 @@ All checks passed! ✅
 **If files are out of sync:**
 ```
 Checking manage_trading_partner...
-  Function params: 173 = 173 ✅
-  CREATE fields:   170 vs 161 ❌
-    Missing in dev: as2_authentication_type, as2_verify_hostname, ...
+  Function params: 4 vs 3 ❌
+    Missing in dev: config
 
 ❌ Files are out of sync!
 ```

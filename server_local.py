@@ -439,71 +439,14 @@ if manage_trading_partner_action:
             Protocols: communication_protocols (JSON array: ["http", "as2", "ftp", "sftp", "disk", "mllp", "oftp"])
             Organization: organization_id
 
-            Disk: disk_directory, disk_get_directory, disk_send_directory, disk_file_filter,
-                  disk_filter_match_type, disk_delete_after_read, disk_max_file_count,
-                  disk_create_directory, disk_write_option
-
-            FTP: ftp_host, ftp_port, ftp_username, ftp_password, ftp_remote_directory,
-                 ftp_send_remote_directory, ftp_transfer_type, ftp_send_transfer_type,
-                 ftp_get_action, ftp_send_action, ftp_connection_mode, ftp_ssl_mode,
-                 ftp_max_file_count, ftp_file_to_move, ftp_move_to_directory,
-                 ftp_client_ssl_alias, ftp_move_force_override
-
-            SFTP: sftp_host, sftp_port, sftp_username, sftp_password, sftp_remote_directory,
-                  sftp_send_remote_directory, sftp_ssh_key_auth, sftp_known_host_entry,
-                  sftp_ssh_key_path, sftp_ssh_key_password, sftp_dh_key_max_1024,
-                  sftp_get_action, sftp_send_action, sftp_max_file_count, sftp_file_to_move,
-                  sftp_move_to_directory, sftp_move_force_override, sftp_proxy_enabled,
-                  sftp_proxy_host, sftp_proxy_port, sftp_proxy_user, sftp_proxy_password,
-                  sftp_proxy_type
-
-            HTTP: http_url, http_username, http_password, http_authentication_type,
-                  http_connect_timeout, http_read_timeout, http_client_auth,
-                  http_trust_server_cert, http_method_type, http_data_content_type,
-                  http_follow_redirects, http_return_errors, http_return_responses,
-                  http_cookie_scope, http_client_ssl_alias, http_trusted_cert_alias,
-                  http_request_profile, http_request_profile_type, http_response_profile,
-                  http_response_profile_type, http_use_custom_auth, http_use_basic_auth,
-                  http_use_default_settings,
-                  http_oauth_token_url, http_oauth_client_id, http_oauth_client_secret,
-                  http_oauth_scope, http_oauth_grant_type,
-                  http_oauth1_consumer_key, http_oauth1_consumer_secret,
-                  http_oauth1_access_token, http_oauth1_token_secret, http_oauth1_realm,
-                  http_oauth1_signature_method, http_oauth1_request_token_url,
-                  http_oauth1_access_token_url, http_oauth1_authorization_url,
-                  http_oauth1_suppress_blank_access_token,
-                  http_oauth2_authorization_token_url, http_oauth2_access_token,
-                  http_oauth2_use_refresh_token, http_oauth2_access_token_params,
-                  http_oauth2_authorization_params,
-                  http_get_method_type, http_get_content_type, http_get_follow_redirects,
-                  http_get_return_errors, http_get_request_profile, http_get_request_profile_type,
-                  http_get_response_profile, http_get_response_profile_type,
-                  http_listen_mime_passthrough, http_listen_object_name,
-                  http_listen_operation_type, http_listen_password, http_listen_use_default,
-                  http_listen_username, http_request_headers, http_response_header_mapping,
-                  http_reflect_headers, http_path_elements
-
-            AS2: as2_url, as2_identifier, as2_partner_identifier, as2_password,
-                 as2_authentication_type, as2_verify_hostname, as2_client_ssl_alias,
-                 as2_username, as2_encrypt_alias, as2_sign_alias, as2_mdn_alias,
-                 as2_signed, as2_encrypted, as2_compressed, as2_encryption_algorithm,
-                 as2_signing_digest_alg, as2_data_content_type, as2_request_mdn,
-                 as2_mdn_signed, as2_mdn_digest_alg, as2_synchronous_mdn, as2_subject,
-                 as2_multiple_attachments, as2_max_document_count, as2_attachment_option,
-                 as2_attachment_cache, as2_mdn_external_url, as2_mdn_use_external_url,
-                 as2_mdn_use_ssl, as2_mdn_client_ssl_cert, as2_mdn_ssl_cert,
-                 as2_reject_duplicates, as2_duplicate_check_count, as2_legacy_smime
-
-            MLLP: mllp_host, mllp_port, mllp_use_ssl, mllp_persistent,
-                  mllp_receive_timeout, mllp_send_timeout, mllp_max_connections,
-                  mllp_inactivity_timeout, mllp_max_retry, mllp_halt_timeout,
-                  mllp_use_client_ssl, mllp_client_ssl_alias, mllp_ssl_alias
-
-            OFTP: oftp_host, oftp_port, oftp_tls, oftp_ssid_code, oftp_ssid_password,
-                  oftp_compress, oftp_ssid_auth, oftp_sfid_cipher, oftp_use_gateway,
-                  oftp_use_client_ssl, oftp_client_ssl_alias, oftp_sfid_sign,
-                  oftp_sfid_encrypt, oftp_encrypting_cert, oftp_session_challenge_cert,
-                  oftp_verifying_eerp_cert, oftp_verifying_signature_cert
+            Protocol-specific keys (use action="get" to see all fields for a protocol):
+                Disk: disk_directory, disk_get_directory, disk_send_directory, ... (9 fields)
+                FTP: ftp_host, ftp_port, ftp_username, ftp_password, ... (17 fields)
+                SFTP: sftp_host, sftp_port, sftp_username, sftp_password, ... (22 fields)
+                HTTP: http_url, http_username, http_authentication_type, ... (40+ fields incl. OAuth)
+                AS2: as2_url, as2_identifier, as2_signed, as2_encrypted, ... (30 fields)
+                MLLP: mllp_host, mllp_port, mllp_use_ssl, ... (13 fields)
+                OFTP: oftp_host, oftp_port, oftp_tls, ... (14 fields)
 
         Returns:
             Action result with success status and data/error
