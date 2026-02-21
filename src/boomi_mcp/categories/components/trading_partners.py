@@ -1198,7 +1198,8 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if 'as2_synchronous_mdn' not in as2_params:
                                         existing_sync_mdn = getattr(existing_mdn_opts, 'synchronous', None)
                                         if existing_sync_mdn is not None:
-                                            as2_params['as2_synchronous_mdn'] = str(existing_sync_mdn).lower()
+                                            # API returns 'sync'/'async' but builder expects 'true'/'false'
+                                            as2_params['as2_synchronous_mdn'] = 'true' if str(existing_sync_mdn).lower() == 'sync' else 'false'
 
                                 # Legacy S/MIME (under partner info, not send options)
                                 if existing_partner_info:
