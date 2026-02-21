@@ -530,9 +530,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     # Extract headers/path elements from send options
                     # SDK returns model objects; convert to dicts for clean output
                     def _header_to_dict(h):
+                        kw = getattr(h, '_kwargs', {})
                         return {
-                            "headerName": _ga(h, 'header_name', 'headerName') or _ga(h, 'header_field_name', 'headerFieldName'),
-                            "headerValue": _ga(h, 'header_value', 'headerValue') or _ga(h, 'target_property_name', 'targetPropertyName')
+                            "headerName": _ga(h, 'header_name', 'headerName') or kw.get('headerName') or _ga(h, 'header_field_name', 'headerFieldName') or kw.get('headerFieldName'),
+                            "headerValue": _ga(h, 'header_value', 'headerValue') or kw.get('headerValue') or _ga(h, 'target_property_name', 'targetPropertyName') or kw.get('targetPropertyName')
                         }
                     def _element_to_dict(e):
                         return {"name": getattr(e, 'name', None)}
@@ -1454,13 +1455,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                             existing_send = _ga(existing_http, 'http_send_options', 'HTTPSendOptions')
                             if existing_send:
                                 import json as _json
+                                def _serialize_sdk_list(items):
+                                    """Serialize SDK model objects to JSON via _kwargs fallback."""
+                                    try:
+                                        return _json.dumps(items)
+                                    except (TypeError, ValueError):
+                                        return _json.dumps([getattr(i, '_kwargs', {}) for i in items])
                                 if 'http_request_headers' not in http_params:
                                     req_hdrs = _ga(existing_send, 'request_headers', 'requestHeaders')
                                     if req_hdrs:
                                         hdr_list = getattr(req_hdrs, 'header', None)
                                         if hdr_list:
                                             try:
-                                                http_params['http_request_headers'] = _json.dumps(hdr_list)
+                                                http_params['http_request_headers'] = _serialize_sdk_list(hdr_list)
                                             except (TypeError, ValueError):
                                                 pass
                                 if 'http_response_header_mapping' not in http_params:
@@ -1469,16 +1476,16 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         hdr_list = getattr(resp_hdrs, 'header', None)
                                         if hdr_list:
                                             try:
-                                                http_params['http_response_header_mapping'] = _json.dumps(hdr_list)
+                                                http_params['http_response_header_mapping'] = _serialize_sdk_list(hdr_list)
                                             except (TypeError, ValueError):
                                                 pass
                                 if 'http_reflect_headers' not in http_params:
                                     reflect = _ga(existing_send, 'reflect_headers', 'reflectHeaders')
                                     if reflect:
-                                        hdr_list = getattr(reflect, 'header', None)
+                                        hdr_list = getattr(reflect, 'element', None)
                                         if hdr_list:
                                             try:
-                                                http_params['http_reflect_headers'] = _json.dumps(hdr_list)
+                                                http_params['http_reflect_headers'] = _serialize_sdk_list(hdr_list)
                                             except (TypeError, ValueError):
                                                 pass
                                 if 'http_path_elements' not in http_params:
@@ -1487,7 +1494,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         elem_list = getattr(path_elems, 'element', None)
                                         if elem_list:
                                             try:
-                                                http_params['http_path_elements'] = _json.dumps(elem_list)
+                                                http_params['http_path_elements'] = _serialize_sdk_list(elem_list)
                                             except (TypeError, ValueError):
                                                 pass
                                 # Preserve send-level fields (method, content, follow, profiles)
@@ -1572,7 +1579,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         hdr_list = getattr(req_hdrs, 'header', None)
                                         if hdr_list:
                                             try:
-                                                http_params['http_get_request_headers'] = _json.dumps(hdr_list)
+                                                http_params['http_get_request_headers'] = _serialize_sdk_list(hdr_list)
                                             except (TypeError, ValueError):
                                                 pass
                     http_opts = build_http_communication_options(**http_params)
