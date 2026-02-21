@@ -402,8 +402,7 @@ if manage_trading_partner_action:
                     "contact_email": "john@acme.com",
                     "communication_protocols": ["http", "as2"],
                     "http_url": "https://api.acme.com/edi",
-                    "as2_url": "https://as2.acme.com",
-                    "as2_identifier": "ACME-AS2"
+                    "as2_url": "https://as2.acme.com"
                 }'
 
             update - Update existing partner (config required):
@@ -444,7 +443,7 @@ if manage_trading_partner_action:
                 FTP: ftp_host, ftp_port, ftp_username, ftp_password, ... (17 fields)
                 SFTP: sftp_host, sftp_port, sftp_username, sftp_password, ... (22 fields)
                 HTTP: http_url, http_username, http_authentication_type, ... (40+ fields incl. OAuth)
-                AS2: as2_url, as2_identifier, as2_signed, as2_encrypted, ... (30 fields)
+                AS2: as2_url, as2_signed, as2_encrypted, ... (30 fields)
                 MLLP: mllp_host, mllp_port, mllp_use_ssl, ... (13 fields)
                 OFTP: oftp_host, oftp_port, oftp_tls, ... (14 fields)
 

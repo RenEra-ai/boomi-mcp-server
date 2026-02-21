@@ -92,7 +92,7 @@ def build_disk_communication_options(**kwargs):
         disk_delete_after_read: Delete files after reading (true/false)
         disk_max_file_count: Maximum files to retrieve per poll
         disk_create_directory: Create directory if not exists (true/false)
-        disk_write_option: Write option - unique, over, append, abort (default: unique)
+        disk_write_option: Write option - unique, over/overwrite, append, abort (default: unique)
 
     Returns dict (not SDK model) - for consistency with other builders
     """
@@ -132,7 +132,11 @@ def build_disk_communication_options(**kwargs):
         if create_directory is not None:
             send_options['createDirectory'] = str(create_directory).lower() == 'true'
         if write_option:
-            send_options['writeOption'] = write_option
+            # Normalize: API accepts 'unique', 'over', 'append', 'abort' (lowercase)
+            wo = write_option.lower()
+            if wo == 'overwrite':
+                wo = 'over'
+            send_options['writeOption'] = wo
         result['DiskSendOptions'] = send_options
 
     return result
@@ -781,8 +785,6 @@ def build_as2_communication_options(**kwargs):
 
     Args:
         as2_url: AS2 endpoint URL (required)
-        as2_identifier: Local AS2 identifier
-        as2_partner_identifier: Partner AS2 identifier
         as2_authentication_type: Authentication type - NONE, BASIC (default: NONE)
         as2_verify_hostname: Verify SSL hostname (true/false)
         as2_username: Username for BASIC authentication
@@ -854,8 +856,6 @@ def build_as2_communication_options(**kwargs):
     mdn_alias = kwargs.get('as2_mdn_alias')
 
     # Partner info
-    as2_identifier = kwargs.get('as2_identifier')
-    partner_identifier = kwargs.get('as2_partner_identifier')
     reject_duplicates = kwargs.get('as2_reject_duplicates')
     duplicate_check_count = kwargs.get('as2_duplicate_check_count')
     legacy_smime = kwargs.get('as2_legacy_smime')
@@ -940,8 +940,6 @@ def build_as2_communication_options(**kwargs):
 
     # Build AS2 partner info
     partner_info = {}
-    if partner_identifier:
-        partner_info['as2Id'] = partner_identifier
     if reject_duplicates is not None:
         partner_info['rejectDuplicateMessages'] = str(reject_duplicates).lower() == 'true'
     if duplicate_check_count:
@@ -959,7 +957,7 @@ def build_as2_communication_options(**kwargs):
     # IMPORTANT: AS2MDNOptions and AS2MessageOptions are REQUIRED by the API
     # If we're sending AS2SendOptions at all (e.g., with partner_info), we must include them
 
-    has_send_options_content = bool(partner_info or mdn_options or message_options or as2_identifier)
+    has_send_options_content = bool(partner_info or mdn_options or message_options)
 
     if has_send_options_content:
         # When AS2SendOptions is present, AS2MDNOptions and AS2MessageOptions are required
@@ -969,12 +967,6 @@ def build_as2_communication_options(**kwargs):
         }
         if partner_info:
             send_options['AS2PartnerInfo'] = partner_info
-        # AS2 partner identifier options (our AS2 From ID)
-        if as2_identifier:
-            partner_id_opts = {'as2From': as2_identifier}
-            if partner_identifier:
-                partner_id_opts['as2To'] = partner_identifier
-            send_options['AS2PartnerIdentifierOptions'] = partner_id_opts
         result['AS2SendOptions'] = send_options
 
     return result
@@ -1133,32 +1125,26 @@ def build_oftp_communication_options(**kwargs):
     if verifying_signature_cert:
         my_partner_info['verifying-signature-certificate'] = verifying_signature_cert
 
-    # Build defaultOFTPConnectionSettings - Boomi stores values here
-    default_settings = {
-        '@type': 'DefaultOFTPConnectionSettings',
+    # Build OFTPConnectionSettings - settings go directly here (not nested)
+    connection_settings = {
+        '@type': 'OFTPConnectionSettings',
         'host': host,
         'port': port,
         'myPartnerInfo': my_partner_info
     }
 
     if tls is not None:
-        default_settings['tls'] = str(tls).lower() == 'true'
+        connection_settings['tls'] = str(tls).lower() == 'true'
     if ssid_auth is not None:
-        default_settings['ssidauth'] = str(ssid_auth).lower() == 'true'
+        connection_settings['ssidauth'] = str(ssid_auth).lower() == 'true'
     if sfid_cipher is not None:
-        default_settings['sfidciph'] = int(sfid_cipher)
+        connection_settings['sfidciph'] = int(sfid_cipher)
     if use_gateway is not None:
-        default_settings['useGateway'] = str(use_gateway).lower() == 'true'
+        connection_settings['useGateway'] = str(use_gateway).lower() == 'true'
     if use_client_ssl is not None:
-        default_settings['useClientSSL'] = str(use_client_ssl).lower() == 'true'
+        connection_settings['useClientSSL'] = str(use_client_ssl).lower() == 'true'
     if client_ssl_alias:
-        default_settings['clientSSLAlias'] = client_ssl_alias
-
-    # Build OFTP connection settings with nested default settings
-    connection_settings = {
-        '@type': 'OFTPConnectionSettings',
-        'defaultOFTPConnectionSettings': default_settings
-    }
+        connection_settings['clientSSLAlias'] = client_ssl_alias
 
     return {'@type': 'OFTPCommunicationOptions', 'OFTPConnectionSettings': connection_settings}
 

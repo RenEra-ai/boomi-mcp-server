@@ -618,11 +618,6 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         as2_info["duplicate_check_count"] = _ga(partner_info, 'duplicate_check_count', 'duplicateCheckCount')
                         as2_info["legacy_smime"] = _ga(partner_info, 'legacy_smime', 'legacySMIME')
 
-                    # Partner identifier options (our AS2 From ID)
-                    partner_id_opts = _ga(send_options, 'as2_partner_identifier_options', 'AS2PartnerIdentifierOptions')
-                    if partner_id_opts:
-                        as2_info["as2_identifier"] = _ga(partner_id_opts, 'as2_from', 'as2From')
-
                     # Message options
                     msg_opts = _ga(send_options, 'as2_message_options', 'AS2MessageOptions')
                     if msg_opts:
@@ -697,32 +692,17 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 oftp_info = {"protocol": "oftp"}
                 conn_settings = _ga(oftp_opts, 'oftp_connection_settings', 'OFTPConnectionSettings')
                 if conn_settings:
-                    # Boomi stores actual values in defaultOFTPConnectionSettings;
-                    # conn_settings has SDK model defaults that mask real values
-                    default_settings = _ga(conn_settings, 'default_oftp_connection_settings', 'defaultOFTPConnectionSettings')
-
-                    def _oftp_val(*attrs):
-                        """Get OFTP value from default_settings first, then conn_settings."""
-                        if default_settings:
-                            val = _ga(default_settings, *attrs)
-                            if val is not None:
-                                return val
-                        return _ga(conn_settings, *attrs)
-
-                    oftp_info["host"] = _oftp_val('host')
-                    oftp_info["port"] = _oftp_val('port')
-                    oftp_info["tls"] = _oftp_val('tls')
-                    oftp_info["ssid_auth"] = _oftp_val('ssidauth')
-                    oftp_info["sfid_cipher"] = _oftp_val('sfidciph')
-                    oftp_info["use_gateway"] = _oftp_val('use_gateway', 'useGateway')
-                    oftp_info["use_client_ssl"] = _oftp_val('use_client_ssl', 'useClientSSL')
-                    oftp_info["client_ssl_alias"] = _oftp_val('client_ssl_alias', 'clientSSLAlias')
-                    # Extract partner info (default_settings first)
-                    partner_info_obj = None
-                    if default_settings:
-                        partner_info_obj = _ga(default_settings, 'my_partner_info', 'myPartnerInfo')
-                    if not partner_info_obj:
-                        partner_info_obj = _ga(conn_settings, 'my_partner_info', 'myPartnerInfo')
+                    # OFTP values are directly in OFTPConnectionSettings
+                    oftp_info["host"] = _ga(conn_settings, 'host')
+                    oftp_info["port"] = _ga(conn_settings, 'port')
+                    oftp_info["tls"] = _ga(conn_settings, 'tls')
+                    oftp_info["ssid_auth"] = _ga(conn_settings, 'ssidauth')
+                    oftp_info["sfid_cipher"] = _ga(conn_settings, 'sfidciph')
+                    oftp_info["use_gateway"] = _ga(conn_settings, 'use_gateway', 'useGateway')
+                    oftp_info["use_client_ssl"] = _ga(conn_settings, 'use_client_ssl', 'useClientSSL')
+                    oftp_info["client_ssl_alias"] = _ga(conn_settings, 'client_ssl_alias', 'clientSSLAlias')
+                    # Extract partner info
+                    partner_info_obj = _ga(conn_settings, 'my_partner_info', 'myPartnerInfo')
                     if partner_info_obj:
                         oftp_info["ssid_code"] = getattr(partner_info_obj, 'ssidcode', None)
                         oftp_info["compress"] = getattr(partner_info_obj, 'ssidcmpr', None)
@@ -1136,10 +1116,6 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 # Partner info
                                 existing_partner_info = getattr(existing_send_opts, 'as2_partner_info', None)
                                 if existing_partner_info:
-                                    if 'as2_partner_identifier' not in as2_params:
-                                        existing_partner_id = _ga(existing_partner_info, 'as2_id', 'as2Id')
-                                        if existing_partner_id:
-                                            as2_params['as2_partner_identifier'] = existing_partner_id
                                     if 'as2_reject_duplicates' not in as2_params:
                                         existing_reject = _ga(existing_partner_info, 'reject_duplicates', 'rejectDuplicates')
                                         if existing_reject is not None:
@@ -1148,13 +1124,6 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_check = _ga(existing_partner_info, 'duplicate_check_count', 'duplicateCheckCount')
                                         if existing_check is not None:
                                             as2_params['as2_duplicate_check_count'] = existing_check
-                                # Partner identifier options (our AS2 From ID)
-                                if 'as2_identifier' not in as2_params:
-                                    partner_id_opts = _ga(existing_send_opts, 'as2_partner_identifier_options', 'AS2PartnerIdentifierOptions')
-                                    if partner_id_opts:
-                                        existing_as2_from = _ga(partner_id_opts, 'as2_from', 'as2From')
-                                        if existing_as2_from:
-                                            as2_params['as2_identifier'] = existing_as2_from
                                 # Navigate to sub-objects matching GET extraction paths
                                 existing_msg_opts = _ga(existing_send_opts, 'as2_message_options', 'AS2MessageOptions')
                                 existing_mdn_opts = _ga(existing_send_opts, 'as2_mdn_options', 'AS2MDNOptions')
@@ -1943,43 +1912,43 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                         existing_oftp = getattr(existing_comm, 'oftp_communication_options', None)
                         if existing_oftp:
                             existing_settings = getattr(existing_oftp, 'oftp_connection_settings', None)
-                            # OFTP values are in default_oftp_connection_settings
-                            default_settings = getattr(existing_settings, 'default_oftp_connection_settings', None) if existing_settings else None
-                            if default_settings:
+                            # OFTP values are directly in connection_settings (not nested)
+                            settings_source = existing_settings
+                            if settings_source:
                                 if 'oftp_host' not in oftp_params:
-                                    existing_host = getattr(default_settings, 'host', None)
+                                    existing_host = getattr(settings_source, 'host', None)
                                     if existing_host:
                                         oftp_params['oftp_host'] = existing_host
                                 if 'oftp_port' not in oftp_params:
-                                    existing_port = getattr(default_settings, 'port', None)
+                                    existing_port = getattr(settings_source, 'port', None)
                                     if existing_port:
                                         oftp_params['oftp_port'] = existing_port
                                 if 'oftp_tls' not in oftp_params:
-                                    existing_tls = getattr(default_settings, 'tls', None)
+                                    existing_tls = getattr(settings_source, 'tls', None)
                                     if existing_tls is not None:
                                         oftp_params['oftp_tls'] = existing_tls
                                 if 'oftp_ssid_auth' not in oftp_params:
-                                    existing_auth = getattr(default_settings, 'ssidauth', None)
+                                    existing_auth = getattr(settings_source, 'ssidauth', None)
                                     if existing_auth is not None:
                                         oftp_params['oftp_ssid_auth'] = existing_auth
                                 if 'oftp_sfid_cipher' not in oftp_params:
-                                    existing_cipher = getattr(default_settings, 'sfidciph', None)
+                                    existing_cipher = getattr(settings_source, 'sfidciph', None)
                                     if existing_cipher is not None:
                                         oftp_params['oftp_sfid_cipher'] = existing_cipher
                                 if 'oftp_use_gateway' not in oftp_params:
-                                    existing_gateway = getattr(default_settings, 'use_gateway', None)
+                                    existing_gateway = getattr(settings_source, 'use_gateway', None)
                                     if existing_gateway is not None:
                                         oftp_params['oftp_use_gateway'] = existing_gateway
                                 if 'oftp_use_client_ssl' not in oftp_params:
-                                    existing_client_ssl = getattr(default_settings, 'use_client_ssl', None)
+                                    existing_client_ssl = getattr(settings_source, 'use_client_ssl', None)
                                     if existing_client_ssl is not None:
                                         oftp_params['oftp_use_client_ssl'] = existing_client_ssl
                                 if 'oftp_client_ssl_alias' not in oftp_params:
-                                    existing_alias = getattr(default_settings, 'client_ssl_alias', None)
+                                    existing_alias = getattr(settings_source, 'client_ssl_alias', None)
                                     if existing_alias:
                                         oftp_params['oftp_client_ssl_alias'] = existing_alias
-                                # Get partner info from default_settings
-                                partner_info = getattr(default_settings, 'my_partner_info', None)
+                                # Get partner info from connection settings
+                                partner_info = getattr(settings_source, 'my_partner_info', None)
                                 if partner_info:
                                     if 'oftp_ssid_code' not in oftp_params:
                                         existing_code = getattr(partner_info, 'ssidcode', None)
@@ -2013,10 +1982,6 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     as2_params = {}
                     if "url" in as2:
                         as2_params["as2_url"] = as2["url"]
-                    if "as2_identifier" in as2:
-                        as2_params["as2_identifier"] = as2["as2_identifier"]
-                    if "partner_as2_identifier" in as2:
-                        as2_params["as2_partner_identifier"] = as2["partner_as2_identifier"]
                     if "authentication_type" in as2:
                         as2_params["as2_authentication_type"] = as2["authentication_type"]
                     if "username" in as2:
