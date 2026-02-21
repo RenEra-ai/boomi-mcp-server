@@ -715,13 +715,21 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     oftp_info["use_gateway"] = _oftp_val('use_gateway', 'useGateway')
                     oftp_info["use_client_ssl"] = _oftp_val('use_client_ssl', 'useClientSSL')
                     oftp_info["client_ssl_alias"] = _oftp_val('client_ssl_alias', 'clientSSLAlias')
-                    # Extract partner info - check default_settings first, then conn_settings
-                    partner_info_obj = _oftp_val('my_partner_info', 'myPartnerInfo')
-                    if partner_info_obj:
-                        oftp_info["ssid_code"] = getattr(partner_info_obj, 'ssidcode', None)
-                        oftp_info["compress"] = getattr(partner_info_obj, 'ssidcmpr', None)
-                        oftp_info["sfid_sign"] = getattr(partner_info_obj, 'sfidsign', None)
-                        oftp_info["sfid_encrypt"] = _ga(partner_info_obj, 'sfidsec_encrypt', 'sfidsec-encrypt')
+                    # Extract partner info - per-field fallback across both levels
+                    default_partner = _ga(default_settings, 'my_partner_info', 'myPartnerInfo') if default_settings else None
+                    direct_partner = _ga(conn_settings, 'my_partner_info', 'myPartnerInfo')
+                    if default_partner or direct_partner:
+                        def _partner_val(attr, alt=None):
+                            for obj in (default_partner, direct_partner):
+                                if obj:
+                                    val = _ga(obj, attr, alt) if alt else getattr(obj, attr, None)
+                                    if val is not None:
+                                        return val
+                            return None
+                        oftp_info["ssid_code"] = _partner_val('ssidcode')
+                        oftp_info["compress"] = _partner_val('ssidcmpr')
+                        oftp_info["sfid_sign"] = _partner_val('sfidsign')
+                        oftp_info["sfid_encrypt"] = _partner_val('sfidsec_encrypt', 'sfidsec-encrypt')
                 # Filter out None values
                 oftp_info = {k: v for k, v in oftp_info.items() if v is not None}
                 communication_protocols.append(oftp_info)
@@ -1957,27 +1965,35 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_alias = _existing_oftp_val('client_ssl_alias')
                                     if existing_alias:
                                         oftp_params['oftp_client_ssl_alias'] = existing_alias
-                                # Get partner info - check default_settings first, then existing_settings
-                                partner_info = _existing_oftp_val('my_partner_info', 'myPartnerInfo')
-                                if partner_info:
+                                # Get partner info - per-field fallback across both levels
+                                default_partner = _ga(default_settings, 'my_partner_info', 'myPartnerInfo') if default_settings else None
+                                direct_partner = _ga(existing_settings, 'my_partner_info', 'myPartnerInfo') if existing_settings else None
+                                def _partner_val(attr, alt=None):
+                                    for obj in (default_partner, direct_partner):
+                                        if obj:
+                                            val = _ga(obj, attr, alt) if alt else getattr(obj, attr, None)
+                                            if val is not None:
+                                                return val
+                                    return None
+                                if default_partner or direct_partner:
                                     if 'oftp_ssid_code' not in oftp_params:
-                                        existing_code = getattr(partner_info, 'ssidcode', None)
+                                        existing_code = _partner_val('ssidcode')
                                         if existing_code:
                                             oftp_params['oftp_ssid_code'] = existing_code
                                     if 'oftp_ssid_password' not in oftp_params:
-                                        existing_pwd = getattr(partner_info, 'ssidpswd', None)
+                                        existing_pwd = _partner_val('ssidpswd')
                                         if existing_pwd:
                                             oftp_params['oftp_ssid_password'] = existing_pwd
                                     if 'oftp_compress' not in oftp_params:
-                                        existing_compress = getattr(partner_info, 'ssidcmpr', None)
+                                        existing_compress = _partner_val('ssidcmpr')
                                         if existing_compress is not None:
                                             oftp_params['oftp_compress'] = existing_compress
                                     if 'oftp_sfid_sign' not in oftp_params:
-                                        existing_sign = getattr(partner_info, 'sfidsign', None)
+                                        existing_sign = _partner_val('sfidsign')
                                         if existing_sign is not None:
                                             oftp_params['oftp_sfid_sign'] = existing_sign
                                     if 'oftp_sfid_encrypt' not in oftp_params:
-                                        existing_encrypt = getattr(partner_info, 'sfidsec-encrypt', None)
+                                        existing_encrypt = _partner_val('sfidsec_encrypt', 'sfidsec-encrypt')
                                         if existing_encrypt is not None:
                                             oftp_params['oftp_sfid_encrypt'] = existing_encrypt
                     oftp_opts = build_oftp_communication_options(**oftp_params)
