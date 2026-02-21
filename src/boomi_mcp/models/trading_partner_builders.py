@@ -1589,7 +1589,7 @@ def build_partner_info(standard: str, **kwargs) -> Optional[PartnerInfo]:
             partner_info_data['odette_partner_info'] = odette_info
 
     elif standard == 'custom':
-        # Custom standard uses dict for partner info
+        # Custom standard - SDK auto-deserializes dict to CustomPartnerInfo model
         custom_info = kwargs.get('custom_partner_info', {})
         if custom_info:
             partner_info_data['custom_partner_info'] = custom_info

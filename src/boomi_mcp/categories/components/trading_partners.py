@@ -2092,11 +2092,16 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
             existing_pi = getattr(existing_tp, 'partner_info', None)
             if existing_pi:
                 custom_pi = getattr(existing_pi, 'custom_partner_info', None)
-                # Empty custom partner info: None, {}, or just {'@type': 'CustomPartnerInfo'}
+                # Empty custom partner info: None, empty dict, dict with only @type,
+                # or a CustomPartnerInfo model with no meaningful attributes set
                 is_empty = (
                     custom_pi is None
                     or custom_pi == {}
                     or (isinstance(custom_pi, dict) and set(custom_pi.keys()) <= {'@type'})
+                    or (hasattr(custom_pi, '__dict__') and not any(
+                        v for k, v in vars(custom_pi).items()
+                        if not k.startswith('_')
+                    ))
                 )
                 if is_empty:
                     existing_tp.partner_info = None
