@@ -609,6 +609,11 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         as2_info["duplicate_check_count"] = _ga(partner_info, 'duplicate_check_count', 'duplicateCheckCount')
                         as2_info["legacy_smime"] = _ga(partner_info, 'legacy_smime', 'legacySMIME')
 
+                    # Partner identifier options (our AS2 From ID)
+                    partner_id_opts = _ga(send_options, 'as2_partner_identifier_options', 'AS2PartnerIdentifierOptions')
+                    if partner_id_opts:
+                        as2_info["as2_identifier"] = _ga(partner_id_opts, 'as2_from', 'as2From')
+
                     # Message options
                     msg_opts = _ga(send_options, 'as2_message_options', 'AS2MessageOptions')
                     if msg_opts:
@@ -1082,14 +1087,17 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_auth = getattr(existing_send_settings, 'authentication_type', None)
                                     if existing_auth:
                                         as2_params['as2_authentication_type'] = existing_auth
-                                if 'as2_username' not in as2_params:
-                                    existing_user = getattr(existing_send_settings, 'user', None)
-                                    if existing_user:
-                                        as2_params['as2_username'] = existing_user
-                                if 'as2_password' not in as2_params:
-                                    existing_pass = getattr(existing_send_settings, 'password', None)
-                                    if existing_pass:
-                                        as2_params['as2_password'] = existing_pass
+                                if 'as2_username' not in as2_params or 'as2_password' not in as2_params:
+                                    auth_settings = _ga(existing_send_settings, 'auth_settings', 'AuthSettings')
+                                    if auth_settings:
+                                        if 'as2_username' not in as2_params:
+                                            existing_user = _ga(auth_settings, 'username', 'user')
+                                            if existing_user:
+                                                as2_params['as2_username'] = existing_user
+                                        if 'as2_password' not in as2_params:
+                                            existing_pass = getattr(auth_settings, 'password', None)
+                                            if existing_pass:
+                                                as2_params['as2_password'] = existing_pass
                                 if 'as2_verify_hostname' not in as2_params:
                                     existing_verify = _ga(existing_send_settings, 'verify_hostname', 'verifyHostname')
                                     if existing_verify is not None:
@@ -1111,78 +1119,94 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_partner_id = _ga(existing_partner_info, 'as2_id', 'as2Id')
                                         if existing_partner_id:
                                             as2_params['as2_partner_identifier'] = existing_partner_id
-                                # Signing and encryption certificates
-                                if 'as2_encrypt_alias' not in as2_params:
-                                    encrypt_cert = _ga(existing_send_opts, 'encrypt_certificate', 'encryptCertificate')
-                                    if encrypt_cert:
-                                        existing_alias = getattr(encrypt_cert, 'alias', None)
-                                        if existing_alias:
-                                            as2_params['as2_encrypt_alias'] = existing_alias
-                                if 'as2_sign_alias' not in as2_params:
-                                    sign_cert = _ga(existing_send_opts, 'sign_certificate', 'signCertificate')
-                                    if sign_cert:
-                                        existing_alias = getattr(sign_cert, 'alias', None)
-                                        if existing_alias:
-                                            as2_params['as2_sign_alias'] = existing_alias
-                                # Message options
-                                if 'as2_signed' not in as2_params:
-                                    existing_signed = getattr(existing_send_opts, 'signed', None)
-                                    if existing_signed is not None:
-                                        as2_params['as2_signed'] = str(existing_signed).lower()
-                                if 'as2_encrypted' not in as2_params:
-                                    existing_encrypted = getattr(existing_send_opts, 'encrypted', None)
-                                    if existing_encrypted is not None:
-                                        as2_params['as2_encrypted'] = str(existing_encrypted).lower()
-                                if 'as2_compressed' not in as2_params:
-                                    existing_compressed = getattr(existing_send_opts, 'compressed', None)
-                                    if existing_compressed is not None:
-                                        as2_params['as2_compressed'] = str(existing_compressed).lower()
-                                if 'as2_encryption_algorithm' not in as2_params:
-                                    existing_algo = _ga(existing_send_opts, 'encryption_algorithm', 'encryptionAlgorithm')
-                                    if existing_algo:
-                                        as2_params['as2_encryption_algorithm'] = existing_algo
-                                if 'as2_signing_digest_alg' not in as2_params:
-                                    existing_digest = _ga(existing_send_opts, 'signing_digest_algorithm', 'signingDigestAlgorithm')
-                                    if existing_digest:
-                                        as2_params['as2_signing_digest_alg'] = existing_digest
-                                if 'as2_data_content_type' not in as2_params:
-                                    existing_content = _ga(existing_send_opts, 'data_content_type', 'dataContentType')
-                                    if existing_content:
-                                        as2_params['as2_data_content_type'] = existing_content
-                                if 'as2_subject' not in as2_params:
-                                    existing_subject = getattr(existing_send_opts, 'subject', None)
-                                    if existing_subject:
-                                        as2_params['as2_subject'] = existing_subject
-                                # MDN options
-                                if 'as2_request_mdn' not in as2_params:
-                                    existing_req_mdn = _ga(existing_send_opts, 'request_mdn', 'requestMdn')
-                                    if existing_req_mdn is not None:
-                                        as2_params['as2_request_mdn'] = str(existing_req_mdn).lower()
-                                if 'as2_mdn_signed' not in as2_params:
-                                    existing_mdn_signed = _ga(existing_send_opts, 'mdn_signed', 'mdnSigned')
-                                    if existing_mdn_signed is not None:
-                                        as2_params['as2_mdn_signed'] = str(existing_mdn_signed).lower()
-                                if 'as2_mdn_digest_alg' not in as2_params:
-                                    existing_mdn_digest = _ga(existing_send_opts, 'mdn_digest_algorithm', 'mdnDigestAlgorithm')
-                                    if existing_mdn_digest:
-                                        as2_params['as2_mdn_digest_alg'] = existing_mdn_digest
-                                if 'as2_synchronous_mdn' not in as2_params:
-                                    existing_sync_mdn = _ga(existing_send_opts, 'synchronous_mdn', 'synchronousMdn')
-                                    if existing_sync_mdn is not None:
-                                        as2_params['as2_synchronous_mdn'] = str(existing_sync_mdn).lower()
-                                # Attachments
-                                if 'as2_multiple_attachments' not in as2_params:
-                                    existing_multi = _ga(existing_send_opts, 'multiple_attachments', 'multipleAttachments')
-                                    if existing_multi is not None:
-                                        as2_params['as2_multiple_attachments'] = str(existing_multi).lower()
-                                if 'as2_max_document_count' not in as2_params:
-                                    existing_max = _ga(existing_send_opts, 'max_document_count', 'maxDocumentCount')
-                                    if existing_max:
-                                        as2_params['as2_max_document_count'] = existing_max
-                                if 'as2_legacy_smime' not in as2_params:
-                                    existing_legacy = _ga(existing_send_opts, 'legacy_smime', 'legacySMIME')
-                                    if existing_legacy is not None:
-                                        as2_params['as2_legacy_smime'] = str(existing_legacy).lower()
+                                # Partner identifier options (our AS2 From ID)
+                                if 'as2_identifier' not in as2_params:
+                                    partner_id_opts = _ga(existing_send_opts, 'as2_partner_identifier_options', 'AS2PartnerIdentifierOptions')
+                                    if partner_id_opts:
+                                        existing_as2_from = _ga(partner_id_opts, 'as2_from', 'as2From')
+                                        if existing_as2_from:
+                                            as2_params['as2_identifier'] = existing_as2_from
+                                # Navigate to sub-objects matching GET extraction paths
+                                existing_msg_opts = _ga(existing_send_opts, 'as2_message_options', 'AS2MessageOptions')
+                                existing_mdn_opts = _ga(existing_send_opts, 'as2_mdn_options', 'AS2MDNOptions')
+
+                                # Certs and message options (under AS2MessageOptions)
+                                if existing_msg_opts:
+                                    if 'as2_encrypt_alias' not in as2_params:
+                                        encrypt_cert = _ga(existing_msg_opts, 'encrypt_cert', 'encryptCert')
+                                        if encrypt_cert:
+                                            existing_alias = _ga(encrypt_cert, 'component_id', 'componentId') or getattr(encrypt_cert, 'alias', None)
+                                            if existing_alias:
+                                                as2_params['as2_encrypt_alias'] = existing_alias
+                                    if 'as2_sign_alias' not in as2_params:
+                                        sign_cert = _ga(existing_msg_opts, 'sign_cert', 'signCert')
+                                        if sign_cert:
+                                            existing_alias = _ga(sign_cert, 'component_id', 'componentId') or getattr(sign_cert, 'alias', None)
+                                            if existing_alias:
+                                                as2_params['as2_sign_alias'] = existing_alias
+                                    if 'as2_signed' not in as2_params:
+                                        existing_signed = getattr(existing_msg_opts, 'signed', None)
+                                        if existing_signed is not None:
+                                            as2_params['as2_signed'] = str(existing_signed).lower()
+                                    if 'as2_encrypted' not in as2_params:
+                                        existing_encrypted = getattr(existing_msg_opts, 'encrypted', None)
+                                        if existing_encrypted is not None:
+                                            as2_params['as2_encrypted'] = str(existing_encrypted).lower()
+                                    if 'as2_compressed' not in as2_params:
+                                        existing_compressed = getattr(existing_msg_opts, 'compressed', None)
+                                        if existing_compressed is not None:
+                                            as2_params['as2_compressed'] = str(existing_compressed).lower()
+                                    if 'as2_encryption_algorithm' not in as2_params:
+                                        existing_algo = _ga(existing_msg_opts, 'encryption_algorithm', 'encryptionAlgorithm')
+                                        if existing_algo:
+                                            as2_params['as2_encryption_algorithm'] = existing_algo
+                                    if 'as2_signing_digest_alg' not in as2_params:
+                                        existing_digest = _ga(existing_msg_opts, 'signing_digest_alg', 'signingDigestAlg')
+                                        if existing_digest:
+                                            as2_params['as2_signing_digest_alg'] = existing_digest
+                                    if 'as2_data_content_type' not in as2_params:
+                                        existing_content = _ga(existing_msg_opts, 'data_content_type', 'dataContentType')
+                                        if existing_content:
+                                            as2_params['as2_data_content_type'] = existing_content
+                                    if 'as2_subject' not in as2_params:
+                                        existing_subject = getattr(existing_msg_opts, 'subject', None)
+                                        if existing_subject:
+                                            as2_params['as2_subject'] = existing_subject
+                                    if 'as2_multiple_attachments' not in as2_params:
+                                        existing_multi = _ga(existing_msg_opts, 'multiple_attachments', 'multipleAttachments')
+                                        if existing_multi is not None:
+                                            as2_params['as2_multiple_attachments'] = str(existing_multi).lower()
+                                    if 'as2_max_document_count' not in as2_params:
+                                        existing_max = _ga(existing_msg_opts, 'max_document_count', 'maxDocumentCount')
+                                        if existing_max:
+                                            as2_params['as2_max_document_count'] = existing_max
+
+                                # MDN options (under AS2MDNOptions)
+                                if existing_mdn_opts:
+                                    if 'as2_request_mdn' not in as2_params:
+                                        existing_req_mdn = _ga(existing_mdn_opts, 'request_mdn', 'requestMDN')
+                                        if existing_req_mdn is not None:
+                                            as2_params['as2_request_mdn'] = str(existing_req_mdn).lower()
+                                    if 'as2_mdn_signed' not in as2_params:
+                                        existing_mdn_signed = getattr(existing_mdn_opts, 'signed', None)
+                                        if existing_mdn_signed is not None:
+                                            as2_params['as2_mdn_signed'] = str(existing_mdn_signed).lower()
+                                    if 'as2_mdn_digest_alg' not in as2_params:
+                                        existing_mdn_digest = _ga(existing_mdn_opts, 'mdn_digest_alg', 'mdnDigestAlg')
+                                        if existing_mdn_digest:
+                                            as2_params['as2_mdn_digest_alg'] = existing_mdn_digest
+                                    if 'as2_synchronous_mdn' not in as2_params:
+                                        existing_sync_mdn = getattr(existing_mdn_opts, 'synchronous', None)
+                                        if existing_sync_mdn is not None:
+                                            # API returns 'sync'/'async' but builder expects 'true'/'false'
+                                            as2_params['as2_synchronous_mdn'] = 'true' if str(existing_sync_mdn).lower() == 'sync' else 'false'
+
+                                # Legacy S/MIME (under partner info, not send options)
+                                if existing_partner_info:
+                                    if 'as2_legacy_smime' not in as2_params:
+                                        existing_legacy = _ga(existing_partner_info, 'legacy_smime', 'legacySMIME')
+                                        if existing_legacy is not None:
+                                            as2_params['as2_legacy_smime'] = str(existing_legacy).lower()
 
                             # Preserve AS2 Receive Options (MDN delivery)
                             existing_recv_opts = getattr(existing_as2, 'as2_receive_options', None)
@@ -1223,14 +1247,17 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_auth = getattr(existing_settings, 'authentication_type', None)
                                     if existing_auth:
                                         http_params['http_authentication_type'] = existing_auth
-                                if 'http_username' not in http_params:
-                                    existing_user = getattr(existing_settings, 'user', None)
-                                    if existing_user:
-                                        http_params['http_username'] = existing_user
-                                if 'http_password' not in http_params:
-                                    existing_pass = getattr(existing_settings, 'password', None)
-                                    if existing_pass:
-                                        http_params['http_password'] = existing_pass
+                                if 'http_username' not in http_params or 'http_password' not in http_params:
+                                    http_auth = _ga(existing_settings, 'http_auth_settings', 'HTTPAuthSettings')
+                                    if http_auth:
+                                        if 'http_username' not in http_params:
+                                            existing_user = getattr(http_auth, 'user', None)
+                                            if existing_user:
+                                                http_params['http_username'] = existing_user
+                                        if 'http_password' not in http_params:
+                                            existing_pass = getattr(http_auth, 'password', None)
+                                            if existing_pass:
+                                                http_params['http_password'] = existing_pass
                                 # Timeout settings
                                 if 'http_connect_timeout' not in http_params:
                                     existing_timeout = _ga(existing_settings, 'connect_timeout', 'connectTimeout')
