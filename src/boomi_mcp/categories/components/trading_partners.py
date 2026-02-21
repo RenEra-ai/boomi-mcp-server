@@ -623,11 +623,6 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         as2_info["duplicate_check_count"] = _ga(partner_info, 'duplicate_check_count', 'duplicateCheckCount')
                         as2_info["legacy_smime"] = _ga(partner_info, 'legacy_smime', 'legacySMIME')
 
-                    # Partner identifier options (our AS2 From ID)
-                    partner_id_opts = _ga(send_options, 'as2_partner_identifier_options', 'AS2PartnerIdentifierOptions')
-                    if partner_id_opts:
-                        as2_info["as2_identifier"] = _ga(partner_id_opts, 'as2_from', 'as2From')
-
                     # Message options
                     msg_opts = _ga(send_options, 'as2_message_options', 'AS2MessageOptions')
                     if msg_opts:
@@ -1143,10 +1138,6 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 # Partner info
                                 existing_partner_info = getattr(existing_send_opts, 'as2_partner_info', None)
                                 if existing_partner_info:
-                                    if 'as2_partner_identifier' not in as2_params:
-                                        existing_partner_id = _ga(existing_partner_info, 'as2_id', 'as2Id')
-                                        if existing_partner_id:
-                                            as2_params['as2_partner_identifier'] = existing_partner_id
                                     if 'as2_reject_duplicates' not in as2_params:
                                         existing_reject = _ga(existing_partner_info, 'reject_duplicates', 'rejectDuplicates')
                                         if existing_reject is not None:
@@ -1155,13 +1146,6 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_check = _ga(existing_partner_info, 'duplicate_check_count', 'duplicateCheckCount')
                                         if existing_check is not None:
                                             as2_params['as2_duplicate_check_count'] = existing_check
-                                # Partner identifier options (our AS2 From ID)
-                                if 'as2_identifier' not in as2_params:
-                                    partner_id_opts = _ga(existing_send_opts, 'as2_partner_identifier_options', 'AS2PartnerIdentifierOptions')
-                                    if partner_id_opts:
-                                        existing_as2_from = _ga(partner_id_opts, 'as2_from', 'as2From')
-                                        if existing_as2_from:
-                                            as2_params['as2_identifier'] = existing_as2_from
                                 # Navigate to sub-objects matching GET extraction paths
                                 existing_msg_opts = _ga(existing_send_opts, 'as2_message_options', 'AS2MessageOptions')
                                 existing_mdn_opts = _ga(existing_send_opts, 'as2_mdn_options', 'AS2MDNOptions')
