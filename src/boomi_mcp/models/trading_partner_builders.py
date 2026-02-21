@@ -920,6 +920,9 @@ def build_as2_communication_options(**kwargs):
         mdn_options['useExternalURL'] = str(mdn_use_external_url).lower() == 'true'
     if mdn_use_ssl is not None:
         mdn_options['useSSL'] = str(mdn_use_ssl).lower() == 'true'
+    fail_on_negative_mdn = kwargs.get('as2_fail_on_negative_mdn')
+    if fail_on_negative_mdn is not None:
+        mdn_options['failOnNegativeMDN'] = str(fail_on_negative_mdn).lower() == 'true'
     if mdn_client_ssl_cert:
         # Certificate alias format
         mdn_options['mdnClientSSLCert'] = {'@type': 'PrivateCertificate', 'componentId': mdn_client_ssl_cert}
@@ -1035,7 +1038,7 @@ def build_mllp_communication_options(**kwargs):
         mllp_settings['receiveTimeout'] = int(receive_timeout)
     if send_timeout:
         mllp_settings['sendTimeout'] = int(send_timeout)
-    if max_connections:
+    if max_connections is not None:
         mllp_settings['maxConnections'] = int(max_connections)
     if inactivity_timeout:
         mllp_settings['inactivityTimeout'] = int(inactivity_timeout)

@@ -387,13 +387,16 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     ftp_info["get_action"] = ftp_action_str
                     ftp_info["max_file_count"] = _ga(get_opts, 'max_file_count', 'maxFileCount')
                     ftp_info["file_to_move"] = file_to_move
+                    ftp_info["move_to_directory"] = _ga(get_opts, 'move_to_directory', 'moveToDirectory')
+                    ftp_info["move_force_override"] = _ga(get_opts, 'move_to_force_override', 'moveToForceOverride')
                 # Extract FTP send options
                 send_opts = getattr(ftp_opts, 'ftp_send_options', None)
                 if send_opts:
                     ftp_info["send_remote_directory"] = getattr(send_opts, 'remote_directory', None)
                     ftp_info["send_transfer_type"] = getattr(send_opts, 'transfer_type', None)
                     ftp_info["send_action"] = _ga(send_opts, 'ftp_action', 'ftpAction')
-                    ftp_info["move_to_directory"] = _ga(send_opts, 'move_to_directory', 'moveToDirectory')
+                    ftp_info["send_move_to_directory"] = _ga(send_opts, 'move_to_directory', 'moveToDirectory')
+                    ftp_info["send_move_force_override"] = _ga(send_opts, 'move_to_force_override', 'moveToForceOverride')
                 # Filter out None values
                 ftp_info = {k: v for k, v in ftp_info.items() if v is not None}
                 communication_protocols.append(ftp_info)
@@ -688,24 +691,37 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 oftp_info = {"protocol": "oftp"}
                 conn_settings = _ga(oftp_opts, 'oftp_connection_settings', 'OFTPConnectionSettings')
                 if conn_settings:
-                    # Check both direct attrs and default_oftp_connection_settings
+                    # Boomi stores actual values in defaultOFTPConnectionSettings;
+                    # conn_settings has SDK model defaults that mask real values
                     default_settings = _ga(conn_settings, 'default_oftp_connection_settings', 'defaultOFTPConnectionSettings')
-                    # Try direct attributes first, fall back to default settings
-                    oftp_info["host"] = getattr(conn_settings, 'host', None) or (getattr(default_settings, 'host', None) if default_settings else None)
-                    oftp_info["port"] = getattr(conn_settings, 'port', None) or (getattr(default_settings, 'port', None) if default_settings else None)
-                    oftp_info["tls"] = getattr(conn_settings, 'tls', None) if hasattr(conn_settings, 'tls') else (getattr(default_settings, 'tls', None) if default_settings else None)
-                    oftp_info["ssid_auth"] = getattr(conn_settings, 'ssidauth', None) if hasattr(conn_settings, 'ssidauth') else (getattr(default_settings, 'ssidauth', None) if default_settings else None)
-                    oftp_info["sfid_cipher"] = getattr(conn_settings, 'sfidciph', None) if hasattr(conn_settings, 'sfidciph') else (getattr(default_settings, 'sfidciph', None) if default_settings else None)
-                    oftp_info["use_gateway"] = _ga(conn_settings, 'use_gateway', 'useGateway') if hasattr(conn_settings, 'use_gateway') or hasattr(conn_settings, 'useGateway') else (_ga(default_settings, 'use_gateway', 'useGateway') if default_settings else None)
-                    oftp_info["use_client_ssl"] = _ga(conn_settings, 'use_client_ssl', 'useClientSSL') if hasattr(conn_settings, 'use_client_ssl') or hasattr(conn_settings, 'useClientSSL') else (_ga(default_settings, 'use_client_ssl', 'useClientSSL') if default_settings else None)
-                    oftp_info["client_ssl_alias"] = _ga(conn_settings, 'client_ssl_alias', 'clientSSLAlias') or (_ga(default_settings, 'client_ssl_alias', 'clientSSLAlias') if default_settings else None)
-                    # Extract partner info from both locations
-                    partner_info = _ga(conn_settings, 'my_partner_info', 'myPartnerInfo') or (_ga(default_settings, 'my_partner_info', 'myPartnerInfo') if default_settings else None)
-                    if partner_info:
-                        oftp_info["ssid_code"] = getattr(partner_info, 'ssidcode', None)
-                        oftp_info["compress"] = getattr(partner_info, 'ssidcmpr', None)
-                        oftp_info["sfid_sign"] = getattr(partner_info, 'sfidsign', None)
-                        oftp_info["sfid_encrypt"] = _ga(partner_info, 'sfidsec_encrypt', 'sfidsec-encrypt')
+
+                    def _oftp_val(*attrs):
+                        """Get OFTP value from default_settings first, then conn_settings."""
+                        if default_settings:
+                            val = _ga(default_settings, *attrs)
+                            if val is not None:
+                                return val
+                        return _ga(conn_settings, *attrs)
+
+                    oftp_info["host"] = _oftp_val('host')
+                    oftp_info["port"] = _oftp_val('port')
+                    oftp_info["tls"] = _oftp_val('tls')
+                    oftp_info["ssid_auth"] = _oftp_val('ssidauth')
+                    oftp_info["sfid_cipher"] = _oftp_val('sfidciph')
+                    oftp_info["use_gateway"] = _oftp_val('use_gateway', 'useGateway')
+                    oftp_info["use_client_ssl"] = _oftp_val('use_client_ssl', 'useClientSSL')
+                    oftp_info["client_ssl_alias"] = _oftp_val('client_ssl_alias', 'clientSSLAlias')
+                    # Extract partner info (default_settings first)
+                    partner_info_obj = None
+                    if default_settings:
+                        partner_info_obj = _ga(default_settings, 'my_partner_info', 'myPartnerInfo')
+                    if not partner_info_obj:
+                        partner_info_obj = _ga(conn_settings, 'my_partner_info', 'myPartnerInfo')
+                    if partner_info_obj:
+                        oftp_info["ssid_code"] = getattr(partner_info_obj, 'ssidcode', None)
+                        oftp_info["compress"] = getattr(partner_info_obj, 'ssidcmpr', None)
+                        oftp_info["sfid_sign"] = getattr(partner_info_obj, 'sfidsign', None)
+                        oftp_info["sfid_encrypt"] = _ga(partner_info_obj, 'sfidsec_encrypt', 'sfidsec-encrypt')
                 # Filter out None values
                 oftp_info = {k: v for k, v in oftp_info.items() if v is not None}
                 communication_protocols.append(oftp_info)
@@ -867,8 +883,8 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
         }
 
 
-# HTTP fields that cause 400 errors when sent in UPDATE payloads (create-only)
-HTTP_UPDATE_DENYLIST = {'http_return_responses', 'http_return_errors', 'http_request_headers'}
+# HTTP fields that cause 400 on UPDATE (create-only)
+HTTP_UPDATE_DENYLIST = {'http_request_headers'}
 
 
 def update_trading_partner(boomi_client, profile: str, component_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -1119,6 +1135,14 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_partner_id = _ga(existing_partner_info, 'as2_id', 'as2Id')
                                         if existing_partner_id:
                                             as2_params['as2_partner_identifier'] = existing_partner_id
+                                    if 'as2_reject_duplicates' not in as2_params:
+                                        existing_reject = _ga(existing_partner_info, 'reject_duplicates', 'rejectDuplicates')
+                                        if existing_reject is not None:
+                                            as2_params['as2_reject_duplicates'] = str(existing_reject).lower()
+                                    if 'as2_duplicate_check_count' not in as2_params:
+                                        existing_check = _ga(existing_partner_info, 'duplicate_check_count', 'duplicateCheckCount')
+                                        if existing_check is not None:
+                                            as2_params['as2_duplicate_check_count'] = existing_check
                                 # Partner identifier options (our AS2 From ID)
                                 if 'as2_identifier' not in as2_params:
                                     partner_id_opts = _ga(existing_send_opts, 'as2_partner_identifier_options', 'AS2PartnerIdentifierOptions')
@@ -1200,6 +1224,22 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         if existing_sync_mdn is not None:
                                             # API returns 'sync'/'async' but builder expects 'true'/'false'
                                             as2_params['as2_synchronous_mdn'] = 'true' if str(existing_sync_mdn).lower() == 'sync' else 'false'
+                                    if 'as2_mdn_external_url' not in as2_params:
+                                        existing_ext_url = _ga(existing_mdn_opts, 'external_url', 'externalURL')
+                                        if existing_ext_url:
+                                            as2_params['as2_mdn_external_url'] = existing_ext_url
+                                    if 'as2_mdn_use_external_url' not in as2_params:
+                                        existing_use_ext = _ga(existing_mdn_opts, 'use_external_url', 'useExternalURL')
+                                        if existing_use_ext is not None:
+                                            as2_params['as2_mdn_use_external_url'] = str(existing_use_ext).lower()
+                                    if 'as2_mdn_use_ssl' not in as2_params:
+                                        existing_use_ssl = _ga(existing_mdn_opts, 'use_ssl', 'useSSL')
+                                        if existing_use_ssl is not None:
+                                            as2_params['as2_mdn_use_ssl'] = str(existing_use_ssl).lower()
+                                    if 'as2_fail_on_negative_mdn' not in as2_params:
+                                        existing_fail = _ga(existing_mdn_opts, 'fail_on_negative_mdn', 'failOnNegativeMDN')
+                                        if existing_fail is not None:
+                                            as2_params['as2_fail_on_negative_mdn'] = str(existing_fail).lower()
 
                                 # Legacy S/MIME (under partner info, not send options)
                                 if existing_partner_info:
@@ -1217,14 +1257,6 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_alias = getattr(mdn_cert, 'alias', None)
                                         if existing_alias:
                                             as2_params['as2_mdn_alias'] = existing_alias
-                                if 'as2_reject_duplicates' not in as2_params:
-                                    existing_reject = _ga(existing_recv_opts, 'reject_duplicates', 'rejectDuplicates')
-                                    if existing_reject is not None:
-                                        as2_params['as2_reject_duplicates'] = str(existing_reject).lower()
-                                if 'as2_duplicate_check_count' not in as2_params:
-                                    existing_check = _ga(existing_recv_opts, 'duplicate_check_count', 'duplicateCheckCount')
-                                    if existing_check:
-                                        as2_params['as2_duplicate_check_count'] = existing_check
 
                     as2_opts = build_as2_communication_options(**as2_params)
                     if as2_opts:
@@ -1267,29 +1299,25 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_timeout = _ga(existing_settings, 'read_timeout', 'readTimeout')
                                     if existing_timeout:
                                         http_params['http_read_timeout'] = str(existing_timeout)
-                                # SSL settings
-                                if 'http_client_auth' not in http_params:
-                                    existing_client_auth = getattr(existing_settings, 'use_client_authentication', None)
-                                    if existing_client_auth is not None:
-                                        http_params['http_client_auth'] = str(existing_client_auth).lower()
-                                if 'http_trust_server_cert' not in http_params:
-                                    existing_trust = getattr(existing_settings, 'trust_ssl_server_certificate', None)
-                                    if existing_trust is not None:
-                                        http_params['http_trust_server_cert'] = str(existing_trust).lower()
-                                if 'http_client_ssl_alias' not in http_params:
-                                    client_ssl = getattr(existing_settings, 'client_ssl_certificate', None)
-                                    if client_ssl:
-                                        existing_alias = getattr(client_ssl, 'alias', None)
+                                # SSL settings (nested under HTTPSSLOptions)
+                                existing_ssl_opts = _ga(existing_settings, 'httpssl_options', 'HTTPSSLOptions')
+                                if existing_ssl_opts:
+                                    if 'http_client_auth' not in http_params:
+                                        existing_client_auth = getattr(existing_ssl_opts, 'clientauth', None)
+                                        if existing_client_auth is not None:
+                                            http_params['http_client_auth'] = str(existing_client_auth).lower()
+                                    if 'http_trust_server_cert' not in http_params:
+                                        existing_trust = _ga(existing_ssl_opts, 'trust_server_cert', 'trustServerCert')
+                                        if existing_trust is not None:
+                                            http_params['http_trust_server_cert'] = str(existing_trust).lower()
+                                    if 'http_client_ssl_alias' not in http_params:
+                                        existing_alias = getattr(existing_ssl_opts, 'clientsslalias', None)
                                         if existing_alias:
                                             http_params['http_client_ssl_alias'] = existing_alias
-                                if 'http_trusted_cert_alias' not in http_params:
-                                    trusted_ssl = getattr(existing_settings, 'trusted_ssl_certificate', None)
-                                    if trusted_ssl:
-                                        existing_alias = getattr(trusted_ssl, 'alias', None)
+                                    if 'http_trusted_cert_alias' not in http_params:
+                                        existing_alias = getattr(existing_ssl_opts, 'trustedcertalias', None)
                                         if existing_alias:
                                             http_params['http_trusted_cert_alias'] = existing_alias
-                                # NOTE: http_return_errors and http_return_responses are
-                                # deliberately NOT preserved here — they cause 400 on update
                                 if 'http_cookie_scope' not in http_params:
                                     existing_cookie = _ga(existing_settings, 'cookie_scope', 'cookieScope')
                                     if existing_cookie:
@@ -1471,6 +1499,14 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_follow = _ga(existing_send, 'follow_redirects', 'followRedirects')
                                     if existing_follow is not None:
                                         http_params['http_follow_redirects'] = str(existing_follow).lower()
+                                if 'http_return_errors' not in http_params:
+                                    existing_val = _ga(existing_send, 'return_errors', 'returnErrors')
+                                    if existing_val is not None:
+                                        http_params['http_return_errors'] = str(existing_val).lower()
+                                if 'http_return_responses' not in http_params:
+                                    existing_val = _ga(existing_send, 'return_responses', 'returnResponses')
+                                    if existing_val is not None:
+                                        http_params['http_return_responses'] = str(existing_val).lower()
                                 if 'http_request_profile_type' not in http_params:
                                     existing_req_type = _ga(existing_send, 'request_profile_type', 'requestProfileType')
                                     if existing_req_type:
@@ -1555,52 +1591,56 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_pass = getattr(existing_settings, 'password', None)
                                     if existing_pass:
                                         sftp_params['sftp_password'] = existing_pass
-                                if 'sftp_known_host_entry' not in sftp_params:
-                                    existing_known_host = getattr(existing_settings, 'known_host_entry', None)
-                                    if existing_known_host:
-                                        sftp_params['sftp_known_host_entry'] = existing_known_host
-                                if 'sftp_dh_key_max_1024' not in sftp_params:
-                                    existing_dh = _ga(existing_settings, 'dh_key_max1024', 'dhKeyMax1024')
-                                    if existing_dh is not None:
-                                        sftp_params['sftp_dh_key_max_1024'] = str(existing_dh).lower()
-                                # Preserve SSH key settings
-                                if 'sftp_ssh_key_auth' not in sftp_params:
-                                    existing_ssh_auth = getattr(existing_settings, 'use_ssh_key_authentication', None)
-                                    if existing_ssh_auth is not None:
-                                        sftp_params['sftp_ssh_key_auth'] = str(existing_ssh_auth).lower()
-                                if 'sftp_ssh_key_path' not in sftp_params:
-                                    existing_ssh_path = getattr(existing_settings, 'ssh_key_file_path', None)
-                                    if existing_ssh_path:
-                                        sftp_params['sftp_ssh_key_path'] = existing_ssh_path
-                                if 'sftp_ssh_key_password' not in sftp_params:
-                                    existing_ssh_pass = getattr(existing_settings, 'ssh_key_password', None)
-                                    if existing_ssh_pass:
-                                        sftp_params['sftp_ssh_key_password'] = existing_ssh_pass
-                                # Preserve proxy settings
-                                if 'sftp_proxy_enabled' not in sftp_params:
-                                    existing_proxy = getattr(existing_settings, 'proxy_enabled', None)
-                                    if existing_proxy is not None:
-                                        sftp_params['sftp_proxy_enabled'] = str(existing_proxy).lower()
-                                if 'sftp_proxy_type' not in sftp_params:
-                                    existing_proxy_type = getattr(existing_settings, 'proxy_type', None)
-                                    if existing_proxy_type:
-                                        sftp_params['sftp_proxy_type'] = existing_proxy_type
-                                if 'sftp_proxy_host' not in sftp_params:
-                                    existing_proxy_host = getattr(existing_settings, 'proxy_host', None)
-                                    if existing_proxy_host:
-                                        sftp_params['sftp_proxy_host'] = existing_proxy_host
-                                if 'sftp_proxy_port' not in sftp_params:
-                                    existing_proxy_port = getattr(existing_settings, 'proxy_port', None)
-                                    if existing_proxy_port:
-                                        sftp_params['sftp_proxy_port'] = str(existing_proxy_port)
-                                if 'sftp_proxy_user' not in sftp_params:
-                                    existing_proxy_user = getattr(existing_settings, 'proxy_user', None)
-                                    if existing_proxy_user:
-                                        sftp_params['sftp_proxy_user'] = existing_proxy_user
-                                if 'sftp_proxy_password' not in sftp_params:
-                                    existing_proxy_pass = getattr(existing_settings, 'proxy_password', None)
-                                    if existing_proxy_pass:
-                                        sftp_params['sftp_proxy_password'] = existing_proxy_pass
+                                # Preserve SSH settings (nested under SFTPSSHOptions)
+                                sftpssh = getattr(existing_settings, 'sftpssh_options', None)
+                                if sftpssh:
+                                    if 'sftp_known_host_entry' not in sftp_params:
+                                        existing_known_host = _ga(sftpssh, 'known_host_entry', 'knownHostEntry')
+                                        if existing_known_host:
+                                            sftp_params['sftp_known_host_entry'] = existing_known_host
+                                    if 'sftp_dh_key_max_1024' not in sftp_params:
+                                        existing_dh = _ga(sftpssh, 'dh_key_size_max1024', 'dhKeySizeMax1024')
+                                        if existing_dh is not None:
+                                            sftp_params['sftp_dh_key_max_1024'] = str(existing_dh).lower()
+                                    if 'sftp_ssh_key_auth' not in sftp_params:
+                                        existing_ssh_auth = getattr(sftpssh, 'sshkeyauth', None)
+                                        if existing_ssh_auth is not None:
+                                            sftp_params['sftp_ssh_key_auth'] = str(existing_ssh_auth).lower()
+                                    if 'sftp_ssh_key_path' not in sftp_params:
+                                        existing_ssh_path = getattr(sftpssh, 'sshkeypath', None)
+                                        if existing_ssh_path:
+                                            sftp_params['sftp_ssh_key_path'] = existing_ssh_path
+                                    if 'sftp_ssh_key_password' not in sftp_params:
+                                        existing_ssh_pass = getattr(sftpssh, 'sshkeypassword', None)
+                                        if existing_ssh_pass:
+                                            sftp_params['sftp_ssh_key_password'] = existing_ssh_pass
+                                # Preserve proxy settings (nested under SFTPProxySettings)
+                                existing_proxy = getattr(existing_settings, 'sftp_proxy_settings', None)
+                                if existing_proxy:
+                                    if 'sftp_proxy_enabled' not in sftp_params:
+                                        val = _ga(existing_proxy, 'proxy_enabled', 'proxyEnabled')
+                                        if val is not None:
+                                            sftp_params['sftp_proxy_enabled'] = str(val).lower()
+                                    if 'sftp_proxy_type' not in sftp_params:
+                                        val = _ga(existing_proxy, 'type_', 'type')
+                                        if val:
+                                            sftp_params['sftp_proxy_type'] = val
+                                    if 'sftp_proxy_host' not in sftp_params:
+                                        val = getattr(existing_proxy, 'host', None)
+                                        if val:
+                                            sftp_params['sftp_proxy_host'] = val
+                                    if 'sftp_proxy_port' not in sftp_params:
+                                        val = getattr(existing_proxy, 'port', None)
+                                        if val:
+                                            sftp_params['sftp_proxy_port'] = str(val)
+                                    if 'sftp_proxy_user' not in sftp_params:
+                                        val = getattr(existing_proxy, 'user', None)
+                                        if val:
+                                            sftp_params['sftp_proxy_user'] = val
+                                    if 'sftp_proxy_password' not in sftp_params:
+                                        val = getattr(existing_proxy, 'password', None)
+                                        if val:
+                                            sftp_params['sftp_proxy_password'] = val
 
                             # Preserve SFTP Get Options (download settings)
                             existing_get_opts = getattr(existing_sftp, 'sftp_get_options', None)
@@ -1626,7 +1666,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if existing_move_dir:
                                         sftp_params['sftp_move_to_directory'] = existing_move_dir
                                 if 'sftp_move_force_override' not in sftp_params:
-                                    existing_force = _ga(existing_get_opts, 'move_force_override', 'moveForceOverride')
+                                    existing_force = _ga(existing_get_opts, 'move_to_force_override', 'moveToForceOverride')
                                     if existing_force is not None:
                                         sftp_params['sftp_move_force_override'] = str(existing_force).lower()
 
@@ -1839,7 +1879,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 # Connection settings
                                 if 'mllp_max_connections' not in mllp_params:
                                     existing_max = _ga(existing_settings, 'max_connections', 'maxConnections')
-                                    if existing_max:
+                                    if existing_max is not None:
                                         mllp_params['mllp_max_connections'] = str(existing_max)
                                 if 'mllp_max_retry' not in mllp_params:
                                     existing_retry = _ga(existing_settings, 'max_retry', 'maxRetry')

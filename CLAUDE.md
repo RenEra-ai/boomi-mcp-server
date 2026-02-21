@@ -21,6 +21,7 @@ This MCP server provides secure Boomi API access for Claude Code with:
 - Never commit or push directly to main — only merge from dev
 - Test locally using `server_local.py` before any merge
 - Main branch is for production-ready, tested code only
+- **NEVER merge dev → main until operability is confirmed via dev branch tests**
 
 ### Rule 2: ALWAYS Update Both Server Files
 When modifying MCP tools, update in this order:
@@ -33,6 +34,13 @@ When modifying MCP tools, update in this order:
 python scripts/verify_sync.py
 ```
 This runs automatically via pre-commit hook.
+
+### Rule 4: Verify Full Sync After Every Merge to Main
+After cherry-picking or merging from dev to main, ALWAYS run:
+```bash
+git diff dev main -- src/boomi_mcp/
+```
+Cherry-picks and conflict resolutions can silently miss companion changes in other files. Only `local_secrets.py` should differ (dev-only). If any other shared source file differs, copy the dev version to main before pushing.
 
 ### What Gets Checked
 - Function signatures (all parameters)
