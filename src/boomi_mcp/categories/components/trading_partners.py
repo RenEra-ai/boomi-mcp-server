@@ -699,18 +699,24 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 if conn_settings:
                     # Old partners nest fields under defaultOFTPConnectionSettings;
                     # new partners put them directly in conn_settings.
+                    # Check default_settings first for each field, fall back to conn_settings.
                     default_settings = _ga(conn_settings, 'default_oftp_connection_settings', 'defaultOFTPConnectionSettings')
-                    source = default_settings if default_settings else conn_settings
-                    oftp_info["host"] = _ga(source, 'host')
-                    oftp_info["port"] = _ga(source, 'port')
-                    oftp_info["tls"] = _ga(source, 'tls')
-                    oftp_info["ssid_auth"] = _ga(source, 'ssidauth')
-                    oftp_info["sfid_cipher"] = _ga(source, 'sfidciph')
-                    oftp_info["use_gateway"] = _ga(source, 'use_gateway', 'useGateway')
-                    oftp_info["use_client_ssl"] = _ga(source, 'use_client_ssl', 'useClientSSL')
-                    oftp_info["client_ssl_alias"] = _ga(source, 'client_ssl_alias', 'clientSSLAlias')
-                    # Extract partner info
-                    partner_info_obj = _ga(source, 'my_partner_info', 'myPartnerInfo')
+                    def _oftp_val(*attrs):
+                        if default_settings:
+                            val = _ga(default_settings, *attrs)
+                            if val is not None:
+                                return val
+                        return _ga(conn_settings, *attrs)
+                    oftp_info["host"] = _oftp_val('host')
+                    oftp_info["port"] = _oftp_val('port')
+                    oftp_info["tls"] = _oftp_val('tls')
+                    oftp_info["ssid_auth"] = _oftp_val('ssidauth')
+                    oftp_info["sfid_cipher"] = _oftp_val('sfidciph')
+                    oftp_info["use_gateway"] = _oftp_val('use_gateway', 'useGateway')
+                    oftp_info["use_client_ssl"] = _oftp_val('use_client_ssl', 'useClientSSL')
+                    oftp_info["client_ssl_alias"] = _oftp_val('client_ssl_alias', 'clientSSLAlias')
+                    # Extract partner info - check default_settings first, then conn_settings
+                    partner_info_obj = _oftp_val('my_partner_info', 'myPartnerInfo')
                     if partner_info_obj:
                         oftp_info["ssid_code"] = getattr(partner_info_obj, 'ssidcode', None)
                         oftp_info["compress"] = getattr(partner_info_obj, 'ssidcmpr', None)
@@ -1908,43 +1914,51 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                             existing_settings = getattr(existing_oftp, 'oftp_connection_settings', None)
                             # Old partners nest under defaultOFTPConnectionSettings;
                             # new partners put fields directly in existing_settings.
+                            # Check default_settings first for each field, fall back to existing_settings.
                             default_settings = _ga(existing_settings, 'default_oftp_connection_settings', 'defaultOFTPConnectionSettings') if existing_settings else None
-                            settings_source = default_settings if default_settings else existing_settings
-                            if settings_source:
+                            def _existing_oftp_val(attr, alt_attr=None):
+                                if default_settings:
+                                    val = _ga(default_settings, attr, alt_attr) if alt_attr else getattr(default_settings, attr, None)
+                                    if val is not None:
+                                        return val
+                                if existing_settings:
+                                    return _ga(existing_settings, attr, alt_attr) if alt_attr else getattr(existing_settings, attr, None)
+                                return None
+                            if existing_settings:
                                 if 'oftp_host' not in oftp_params:
-                                    existing_host = getattr(settings_source, 'host', None)
+                                    existing_host = _existing_oftp_val('host')
                                     if existing_host:
                                         oftp_params['oftp_host'] = existing_host
                                 if 'oftp_port' not in oftp_params:
-                                    existing_port = getattr(settings_source, 'port', None)
+                                    existing_port = _existing_oftp_val('port')
                                     if existing_port:
                                         oftp_params['oftp_port'] = existing_port
                                 if 'oftp_tls' not in oftp_params:
-                                    existing_tls = getattr(settings_source, 'tls', None)
+                                    existing_tls = _existing_oftp_val('tls')
                                     if existing_tls is not None:
                                         oftp_params['oftp_tls'] = existing_tls
                                 if 'oftp_ssid_auth' not in oftp_params:
-                                    existing_auth = getattr(settings_source, 'ssidauth', None)
+                                    existing_auth = _existing_oftp_val('ssidauth')
                                     if existing_auth is not None:
                                         oftp_params['oftp_ssid_auth'] = existing_auth
                                 if 'oftp_sfid_cipher' not in oftp_params:
-                                    existing_cipher = getattr(settings_source, 'sfidciph', None)
+                                    existing_cipher = _existing_oftp_val('sfidciph')
                                     if existing_cipher is not None:
                                         oftp_params['oftp_sfid_cipher'] = existing_cipher
                                 if 'oftp_use_gateway' not in oftp_params:
-                                    existing_gateway = getattr(settings_source, 'use_gateway', None)
+                                    existing_gateway = _existing_oftp_val('use_gateway')
                                     if existing_gateway is not None:
                                         oftp_params['oftp_use_gateway'] = existing_gateway
                                 if 'oftp_use_client_ssl' not in oftp_params:
-                                    existing_client_ssl = getattr(settings_source, 'use_client_ssl', None)
+                                    existing_client_ssl = _existing_oftp_val('use_client_ssl')
                                     if existing_client_ssl is not None:
                                         oftp_params['oftp_use_client_ssl'] = existing_client_ssl
                                 if 'oftp_client_ssl_alias' not in oftp_params:
-                                    existing_alias = getattr(settings_source, 'client_ssl_alias', None)
+                                    existing_alias = _existing_oftp_val('client_ssl_alias')
                                     if existing_alias:
                                         oftp_params['oftp_client_ssl_alias'] = existing_alias
-                                # Get partner info from connection settings
-                                partner_info = getattr(settings_source, 'my_partner_info', None)
+                                # Get partner info - check default_settings first, then existing_settings
+                                partner_info = _existing_oftp_val('my_partner_info', 'myPartnerInfo')
                                 if partner_info:
                                     if 'oftp_ssid_code' not in oftp_params:
                                         existing_code = getattr(partner_info, 'ssidcode', None)
