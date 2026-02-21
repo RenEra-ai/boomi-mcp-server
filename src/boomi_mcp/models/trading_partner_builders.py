@@ -92,7 +92,7 @@ def build_disk_communication_options(**kwargs):
         disk_delete_after_read: Delete files after reading (true/false)
         disk_max_file_count: Maximum files to retrieve per poll
         disk_create_directory: Create directory if not exists (true/false)
-        disk_write_option: Write option - unique, over, append, abort (default: unique)
+        disk_write_option: Write option - unique, over/overwrite, append, abort (default: unique)
 
     Returns dict (not SDK model) - for consistency with other builders
     """
@@ -132,7 +132,11 @@ def build_disk_communication_options(**kwargs):
         if create_directory is not None:
             send_options['createDirectory'] = str(create_directory).lower() == 'true'
         if write_option:
-            send_options['writeOption'] = write_option
+            # Normalize: API accepts 'unique', 'over', 'append', 'abort' (lowercase)
+            wo = write_option.lower()
+            if wo == 'overwrite':
+                wo = 'over'
+            send_options['writeOption'] = wo
         result['DiskSendOptions'] = send_options
 
     return result
@@ -448,7 +452,8 @@ def build_http_communication_options(**kwargs):
         http_listen_password: Password for listen endpoint
         http_listen_use_default: Use default listen options (true/false)
         http_listen_username: Username for listen endpoint
-        http_request_headers: Request headers JSON - [{"headerFieldName": "...", "targetPropertyName": "..."}]
+        http_request_headers: Request headers JSON - [{"headerName": "...", "headerValue": "..."}]
+        http_get_request_headers: Request headers for GET operations JSON - [{"headerName": "...", "headerValue": "..."}]
         http_response_header_mapping: Response header mapping JSON - [{"headerFieldName": "...", "targetPropertyName": "..."}]
         http_reflect_headers: Reflect headers JSON - [{"name": "..."}]
         http_path_elements: Path elements JSON - [{"name": "..."}]
@@ -531,6 +536,7 @@ def build_http_communication_options(**kwargs):
 
     # Extract headers/path elements (JSON strings)
     raw_request_headers = kwargs.get('http_request_headers')
+    raw_get_request_headers = kwargs.get('http_get_request_headers')
     raw_response_header_mapping = kwargs.get('http_response_header_mapping')
     raw_reflect_headers = kwargs.get('http_reflect_headers')
     raw_path_elements = kwargs.get('http_path_elements')
@@ -545,6 +551,7 @@ def build_http_communication_options(**kwargs):
             return None
 
     parsed_request_headers = _parse_json(raw_request_headers)
+    parsed_get_request_headers = _parse_json(raw_get_request_headers)
     parsed_response_header_mapping = _parse_json(raw_response_header_mapping)
     parsed_reflect_headers = _parse_json(raw_reflect_headers)
     parsed_path_elements = _parse_json(raw_path_elements)
@@ -687,8 +694,9 @@ def build_http_communication_options(**kwargs):
 
     # Add headers/path elements to send options
     # Boomi API requires @type annotations on nested header/element objects
-    # NOTE: requestHeaders causes 400 on both create and update — Boomi API doesn't accept it
-    # at the trading partner level. The param is kept in the signature for GET extraction only.
+    if parsed_request_headers:
+        typed_headers = [dict(h, **{'@type': ''}) if '@type' not in h else h for h in parsed_request_headers]
+        send_options['requestHeaders'] = {'@type': 'HttpRequestHeaders', 'header': typed_headers}
     if parsed_response_header_mapping:
         typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
         send_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
@@ -706,7 +714,8 @@ def build_http_communication_options(**kwargs):
     # Build get options - separate if http_get_* provided, otherwise copy from send
     has_explicit_get = any([
         get_method_type, get_content_type, get_follow_redirects, get_return_errors,
-        get_request_profile, get_request_profile_type, get_response_profile, get_response_profile_type
+        get_request_profile, get_request_profile_type, get_response_profile, get_response_profile_type,
+        parsed_get_request_headers
     ])
 
     if has_explicit_get:
@@ -728,7 +737,10 @@ def build_http_communication_options(**kwargs):
         if get_response_profile_type:
             get_options['responseProfileType'] = get_response_profile_type.upper()
         # Copy headers/path elements to get options too (with @type annotations)
-        # NOTE: requestHeaders not included — Boomi API rejects it at trading partner level
+        get_rh = parsed_get_request_headers if parsed_get_request_headers else parsed_request_headers
+        if get_rh:
+            typed_headers = [dict(h, **{'@type': ''}) if '@type' not in h else h for h in get_rh]
+            get_options['requestHeaders'] = {'@type': 'HttpRequestHeaders', 'header': typed_headers}
         if parsed_response_header_mapping:
             typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
             get_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
@@ -773,8 +785,6 @@ def build_as2_communication_options(**kwargs):
 
     Args:
         as2_url: AS2 endpoint URL (required)
-        as2_identifier: Local AS2 identifier
-        as2_partner_identifier: Partner AS2 identifier
         as2_authentication_type: Authentication type - NONE, BASIC (default: NONE)
         as2_verify_hostname: Verify SSL hostname (true/false)
         as2_username: Username for BASIC authentication
@@ -846,8 +856,6 @@ def build_as2_communication_options(**kwargs):
     mdn_alias = kwargs.get('as2_mdn_alias')
 
     # Partner info
-    as2_identifier = kwargs.get('as2_identifier')
-    partner_identifier = kwargs.get('as2_partner_identifier')
     reject_duplicates = kwargs.get('as2_reject_duplicates')
     duplicate_check_count = kwargs.get('as2_duplicate_check_count')
     legacy_smime = kwargs.get('as2_legacy_smime')
@@ -920,6 +928,9 @@ def build_as2_communication_options(**kwargs):
         mdn_options['useExternalURL'] = str(mdn_use_external_url).lower() == 'true'
     if mdn_use_ssl is not None:
         mdn_options['useSSL'] = str(mdn_use_ssl).lower() == 'true'
+    fail_on_negative_mdn = kwargs.get('as2_fail_on_negative_mdn')
+    if fail_on_negative_mdn is not None:
+        mdn_options['failOnNegativeMDN'] = str(fail_on_negative_mdn).lower() == 'true'
     if mdn_client_ssl_cert:
         # Certificate alias format
         mdn_options['mdnClientSSLCert'] = {'@type': 'PrivateCertificate', 'componentId': mdn_client_ssl_cert}
@@ -929,8 +940,6 @@ def build_as2_communication_options(**kwargs):
 
     # Build AS2 partner info
     partner_info = {}
-    if partner_identifier:
-        partner_info['as2Id'] = partner_identifier
     if reject_duplicates is not None:
         partner_info['rejectDuplicateMessages'] = str(reject_duplicates).lower() == 'true'
     if duplicate_check_count:
@@ -1035,7 +1044,7 @@ def build_mllp_communication_options(**kwargs):
         mllp_settings['receiveTimeout'] = int(receive_timeout)
     if send_timeout:
         mllp_settings['sendTimeout'] = int(send_timeout)
-    if max_connections:
+    if max_connections is not None:
         mllp_settings['maxConnections'] = int(max_connections)
     if inactivity_timeout:
         mllp_settings['inactivityTimeout'] = int(inactivity_timeout)
@@ -1122,32 +1131,26 @@ def build_oftp_communication_options(**kwargs):
     if verifying_signature_cert:
         my_partner_info['verifying-signature-certificate'] = verifying_signature_cert
 
-    # Build defaultOFTPConnectionSettings - Boomi stores values here
-    default_settings = {
-        '@type': 'DefaultOFTPConnectionSettings',
+    # Build OFTPConnectionSettings - settings go directly here (not nested)
+    connection_settings = {
+        '@type': 'OFTPConnectionSettings',
         'host': host,
         'port': port,
         'myPartnerInfo': my_partner_info
     }
 
     if tls is not None:
-        default_settings['tls'] = str(tls).lower() == 'true'
+        connection_settings['tls'] = str(tls).lower() == 'true'
     if ssid_auth is not None:
-        default_settings['ssidauth'] = str(ssid_auth).lower() == 'true'
+        connection_settings['ssidauth'] = str(ssid_auth).lower() == 'true'
     if sfid_cipher is not None:
-        default_settings['sfidciph'] = int(sfid_cipher)
+        connection_settings['sfidciph'] = int(sfid_cipher)
     if use_gateway is not None:
-        default_settings['useGateway'] = str(use_gateway).lower() == 'true'
+        connection_settings['useGateway'] = str(use_gateway).lower() == 'true'
     if use_client_ssl is not None:
-        default_settings['useClientSSL'] = str(use_client_ssl).lower() == 'true'
+        connection_settings['useClientSSL'] = str(use_client_ssl).lower() == 'true'
     if client_ssl_alias:
-        default_settings['clientSSLAlias'] = client_ssl_alias
-
-    # Build OFTP connection settings with nested default settings
-    connection_settings = {
-        '@type': 'OFTPConnectionSettings',
-        'defaultOFTPConnectionSettings': default_settings
-    }
+        connection_settings['clientSSLAlias'] = client_ssl_alias
 
     return {'@type': 'OFTPCommunicationOptions', 'OFTPConnectionSettings': connection_settings}
 
@@ -1706,6 +1709,10 @@ def build_trading_partner_model(
     organization_id = kwargs.get('organization_id')
 
     # Build top-level model
+    # Note: partner_communication is set AFTER construction to preserve raw dict
+    # serialization via PartnerCommunicationDict._map(). Passing it to the constructor
+    # causes the SDK to convert it into a PartnerCommunication model that strips
+    # unknown fields like headerName/headerValue from request headers.
     tp_model = TradingPartnerComponent(
         component_name=component_name,
         standard=standard,
@@ -1714,8 +1721,9 @@ def build_trading_partner_model(
         description=description,
         partner_info=partner_info,
         contact_info=contact_info,
-        partner_communication=partner_communication,
         organization_id=organization_id
     )
+    if partner_communication:
+        tp_model.partner_communication = partner_communication
 
     return tp_model
