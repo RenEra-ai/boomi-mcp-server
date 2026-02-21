@@ -948,7 +948,7 @@ def build_as2_communication_options(**kwargs):
     # IMPORTANT: AS2MDNOptions and AS2MessageOptions are REQUIRED by the API
     # If we're sending AS2SendOptions at all (e.g., with partner_info), we must include them
 
-    has_send_options_content = bool(partner_info or mdn_options or message_options)
+    has_send_options_content = bool(partner_info or mdn_options or message_options or as2_identifier)
 
     if has_send_options_content:
         # When AS2SendOptions is present, AS2MDNOptions and AS2MessageOptions are required
@@ -958,6 +958,12 @@ def build_as2_communication_options(**kwargs):
         }
         if partner_info:
             send_options['AS2PartnerInfo'] = partner_info
+        # AS2 partner identifier options (our AS2 From ID)
+        if as2_identifier:
+            partner_id_opts = {'as2From': as2_identifier}
+            if partner_identifier:
+                partner_id_opts['as2To'] = partner_identifier
+            send_options['AS2PartnerIdentifierOptions'] = partner_id_opts
         result['AS2SendOptions'] = send_options
 
     return result
