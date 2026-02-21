@@ -531,8 +531,8 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     # SDK returns model objects; convert to dicts for clean output
                     def _header_to_dict(h):
                         return {
-                            "headerFieldName": _ga(h, 'header_field_name', 'headerFieldName'),
-                            "targetPropertyName": _ga(h, 'target_property_name', 'targetPropertyName')
+                            "headerName": _ga(h, 'header_name', 'headerName') or _ga(h, 'header_field_name', 'headerFieldName'),
+                            "headerValue": _ga(h, 'header_value', 'headerValue') or _ga(h, 'target_property_name', 'targetPropertyName')
                         }
                     def _element_to_dict(e):
                         return {"name": getattr(e, 'name', None)}
@@ -568,6 +568,11 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     http_info["get_request_profile_type"] = _ga(get_opts, 'request_profile_type', 'requestProfileType')
                     http_info["get_response_profile"] = _ga(get_opts, 'response_profile', 'responseProfile')
                     http_info["get_response_profile_type"] = _ga(get_opts, 'response_profile_type', 'responseProfileType')
+                    get_req_headers = _ga(get_opts, 'request_headers', 'requestHeaders')
+                    if get_req_headers:
+                        get_header_list = getattr(get_req_headers, 'header', None)
+                        if get_header_list:
+                            http_info["get_request_headers"] = [_header_to_dict(h) for h in get_header_list]
                 # Extract HTTP listen options
                 listen_opts = _ga(http_opts, 'http_listen_options', 'HTTPListenOptions')
                 if listen_opts:
@@ -883,8 +888,7 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
         }
 
 
-# HTTP fields that cause 400 on UPDATE (create-only)
-HTTP_UPDATE_DENYLIST = {'http_request_headers'}
+HTTP_UPDATE_DENYLIST = set()  # No fields currently denied
 
 
 def update_trading_partner(boomi_client, profile: str, component_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -1562,6 +1566,15 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_val = _ga(existing_get, 'response_profile_type', 'responseProfileType')
                                     if existing_val:
                                         http_params['http_get_response_profile_type'] = existing_val
+                                if 'http_get_request_headers' not in http_params:
+                                    req_hdrs = _ga(existing_get, 'request_headers', 'requestHeaders')
+                                    if req_hdrs:
+                                        hdr_list = getattr(req_hdrs, 'header', None)
+                                        if hdr_list:
+                                            try:
+                                                http_params['http_get_request_headers'] = _json.dumps(hdr_list)
+                                            except (TypeError, ValueError):
+                                                pass
                     http_opts = build_http_communication_options(**http_params)
                     if http_opts:
                         comm_dict["HTTPCommunicationOptions"] = http_opts

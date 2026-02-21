@@ -448,7 +448,8 @@ def build_http_communication_options(**kwargs):
         http_listen_password: Password for listen endpoint
         http_listen_use_default: Use default listen options (true/false)
         http_listen_username: Username for listen endpoint
-        http_request_headers: Request headers JSON - [{"headerFieldName": "...", "targetPropertyName": "..."}]
+        http_request_headers: Request headers JSON - [{"headerName": "...", "headerValue": "..."}]
+        http_get_request_headers: Request headers for GET operations JSON - [{"headerName": "...", "headerValue": "..."}]
         http_response_header_mapping: Response header mapping JSON - [{"headerFieldName": "...", "targetPropertyName": "..."}]
         http_reflect_headers: Reflect headers JSON - [{"name": "..."}]
         http_path_elements: Path elements JSON - [{"name": "..."}]
@@ -531,6 +532,7 @@ def build_http_communication_options(**kwargs):
 
     # Extract headers/path elements (JSON strings)
     raw_request_headers = kwargs.get('http_request_headers')
+    raw_get_request_headers = kwargs.get('http_get_request_headers')
     raw_response_header_mapping = kwargs.get('http_response_header_mapping')
     raw_reflect_headers = kwargs.get('http_reflect_headers')
     raw_path_elements = kwargs.get('http_path_elements')
@@ -545,6 +547,7 @@ def build_http_communication_options(**kwargs):
             return None
 
     parsed_request_headers = _parse_json(raw_request_headers)
+    parsed_get_request_headers = _parse_json(raw_get_request_headers)
     parsed_response_header_mapping = _parse_json(raw_response_header_mapping)
     parsed_reflect_headers = _parse_json(raw_reflect_headers)
     parsed_path_elements = _parse_json(raw_path_elements)
@@ -687,8 +690,9 @@ def build_http_communication_options(**kwargs):
 
     # Add headers/path elements to send options
     # Boomi API requires @type annotations on nested header/element objects
-    # NOTE: requestHeaders causes 400 on both create and update — Boomi API doesn't accept it
-    # at the trading partner level. The param is kept in the signature for GET extraction only.
+    if parsed_request_headers:
+        typed_headers = [dict(h, **{'@type': ''}) if '@type' not in h else h for h in parsed_request_headers]
+        send_options['requestHeaders'] = {'@type': 'HttpRequestHeaders', 'header': typed_headers}
     if parsed_response_header_mapping:
         typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
         send_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
@@ -706,7 +710,8 @@ def build_http_communication_options(**kwargs):
     # Build get options - separate if http_get_* provided, otherwise copy from send
     has_explicit_get = any([
         get_method_type, get_content_type, get_follow_redirects, get_return_errors,
-        get_request_profile, get_request_profile_type, get_response_profile, get_response_profile_type
+        get_request_profile, get_request_profile_type, get_response_profile, get_response_profile_type,
+        parsed_get_request_headers
     ])
 
     if has_explicit_get:
@@ -728,7 +733,10 @@ def build_http_communication_options(**kwargs):
         if get_response_profile_type:
             get_options['responseProfileType'] = get_response_profile_type.upper()
         # Copy headers/path elements to get options too (with @type annotations)
-        # NOTE: requestHeaders not included — Boomi API rejects it at trading partner level
+        get_rh = parsed_get_request_headers if parsed_get_request_headers else parsed_request_headers
+        if get_rh:
+            typed_headers = [dict(h, **{'@type': ''}) if '@type' not in h else h for h in get_rh]
+            get_options['requestHeaders'] = {'@type': 'HttpRequestHeaders', 'header': typed_headers}
         if parsed_response_header_mapping:
             typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
             get_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
