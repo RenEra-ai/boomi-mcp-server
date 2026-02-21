@@ -39,6 +39,20 @@ def _ga(obj, *attrs):
     return None
 
 
+def _header_to_dict(h):
+    """Convert SDK Header model object to dict with 4-level fallback."""
+    kw = getattr(h, '_kwargs', {})
+    return {
+        "headerName": _ga(h, 'header_name', 'headerName') or kw.get('headerName') or _ga(h, 'header_field_name', 'headerFieldName') or kw.get('headerFieldName'),
+        "headerValue": _ga(h, 'header_value', 'headerValue') or kw.get('headerValue') or _ga(h, 'target_property_name', 'targetPropertyName') or kw.get('targetPropertyName')
+    }
+
+
+def _element_to_dict(e):
+    """Convert SDK Element model object to dict."""
+    return {"name": getattr(e, 'name', None)}
+
+
 # ============================================================================
 # Trading Partner CRUD Operations
 # ============================================================================
@@ -528,16 +542,7 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     http_info["response_profile"] = _ga(send_opts, 'response_profile', 'responseProfile')
                     http_info["response_profile_type"] = _ga(send_opts, 'response_profile_type', 'responseProfileType')
                     # Extract headers/path elements from send options
-                    # SDK returns model objects; convert to dicts for clean output
-                    def _header_to_dict(h):
-                        kw = getattr(h, '_kwargs', {})
-                        return {
-                            "headerName": _ga(h, 'header_name', 'headerName') or kw.get('headerName') or _ga(h, 'header_field_name', 'headerFieldName') or kw.get('headerFieldName'),
-                            "headerValue": _ga(h, 'header_value', 'headerValue') or kw.get('headerValue') or _ga(h, 'target_property_name', 'targetPropertyName') or kw.get('targetPropertyName')
-                        }
-                    def _element_to_dict(e):
-                        return {"name": getattr(e, 'name', None)}
-
+                    # SDK returns model objects; convert to dicts via module-level helpers
                     req_headers = _ga(send_opts, 'request_headers', 'requestHeaders')
                     if req_headers:
                         header_list = getattr(req_headers, 'header', None)
@@ -692,17 +697,20 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 oftp_info = {"protocol": "oftp"}
                 conn_settings = _ga(oftp_opts, 'oftp_connection_settings', 'OFTPConnectionSettings')
                 if conn_settings:
-                    # OFTP values are directly in OFTPConnectionSettings
-                    oftp_info["host"] = _ga(conn_settings, 'host')
-                    oftp_info["port"] = _ga(conn_settings, 'port')
-                    oftp_info["tls"] = _ga(conn_settings, 'tls')
-                    oftp_info["ssid_auth"] = _ga(conn_settings, 'ssidauth')
-                    oftp_info["sfid_cipher"] = _ga(conn_settings, 'sfidciph')
-                    oftp_info["use_gateway"] = _ga(conn_settings, 'use_gateway', 'useGateway')
-                    oftp_info["use_client_ssl"] = _ga(conn_settings, 'use_client_ssl', 'useClientSSL')
-                    oftp_info["client_ssl_alias"] = _ga(conn_settings, 'client_ssl_alias', 'clientSSLAlias')
+                    # Old partners nest fields under defaultOFTPConnectionSettings;
+                    # new partners put them directly in conn_settings.
+                    default_settings = _ga(conn_settings, 'default_oftp_connection_settings', 'defaultOFTPConnectionSettings')
+                    source = default_settings if default_settings else conn_settings
+                    oftp_info["host"] = _ga(source, 'host')
+                    oftp_info["port"] = _ga(source, 'port')
+                    oftp_info["tls"] = _ga(source, 'tls')
+                    oftp_info["ssid_auth"] = _ga(source, 'ssidauth')
+                    oftp_info["sfid_cipher"] = _ga(source, 'sfidciph')
+                    oftp_info["use_gateway"] = _ga(source, 'use_gateway', 'useGateway')
+                    oftp_info["use_client_ssl"] = _ga(source, 'use_client_ssl', 'useClientSSL')
+                    oftp_info["client_ssl_alias"] = _ga(source, 'client_ssl_alias', 'clientSSLAlias')
                     # Extract partner info
-                    partner_info_obj = _ga(conn_settings, 'my_partner_info', 'myPartnerInfo')
+                    partner_info_obj = _ga(source, 'my_partner_info', 'myPartnerInfo')
                     if partner_info_obj:
                         oftp_info["ssid_code"] = getattr(partner_info_obj, 'ssidcode', None)
                         oftp_info["compress"] = getattr(partner_info_obj, 'ssidcmpr', None)
@@ -1420,52 +1428,41 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     existing_val = getattr(existing_listen, 'username', None)
                                     if existing_val:
                                         http_params['http_listen_username'] = existing_val
+                            # Helpers for serializing SDK header/element objects
+                            import json as _json
+                            def _serialize_headers(items):
+                                """Serialize SDK Header objects using _header_to_dict."""
+                                return _json.dumps([_header_to_dict(h) for h in items])
+                            def _serialize_elements(items):
+                                """Serialize SDK Element objects using _element_to_dict."""
+                                return _json.dumps([_element_to_dict(e) for e in items])
                             # Preserve Send options headers/path elements
                             existing_send = _ga(existing_http, 'http_send_options', 'HTTPSendOptions')
                             if existing_send:
-                                import json as _json
-                                def _serialize_sdk_list(items):
-                                    """Serialize SDK model objects to JSON via _kwargs fallback."""
-                                    try:
-                                        return _json.dumps(items)
-                                    except (TypeError, ValueError):
-                                        return _json.dumps([getattr(i, '_kwargs', {}) for i in items])
                                 if 'http_request_headers' not in http_params:
                                     req_hdrs = _ga(existing_send, 'request_headers', 'requestHeaders')
                                     if req_hdrs:
                                         hdr_list = getattr(req_hdrs, 'header', None)
                                         if hdr_list:
-                                            try:
-                                                http_params['http_request_headers'] = _serialize_sdk_list(hdr_list)
-                                            except (TypeError, ValueError):
-                                                pass
+                                            http_params['http_request_headers'] = _serialize_headers(hdr_list)
                                 if 'http_response_header_mapping' not in http_params:
                                     resp_hdrs = _ga(existing_send, 'response_header_mapping', 'responseHeaderMapping')
                                     if resp_hdrs:
                                         hdr_list = getattr(resp_hdrs, 'header', None)
                                         if hdr_list:
-                                            try:
-                                                http_params['http_response_header_mapping'] = _serialize_sdk_list(hdr_list)
-                                            except (TypeError, ValueError):
-                                                pass
+                                            http_params['http_response_header_mapping'] = _serialize_headers(hdr_list)
                                 if 'http_reflect_headers' not in http_params:
                                     reflect = _ga(existing_send, 'reflect_headers', 'reflectHeaders')
                                     if reflect:
-                                        hdr_list = getattr(reflect, 'element', None)
-                                        if hdr_list:
-                                            try:
-                                                http_params['http_reflect_headers'] = _serialize_sdk_list(hdr_list)
-                                            except (TypeError, ValueError):
-                                                pass
+                                        elem_list = getattr(reflect, 'element', None)
+                                        if elem_list:
+                                            http_params['http_reflect_headers'] = _serialize_elements(elem_list)
                                 if 'http_path_elements' not in http_params:
                                     path_elems = _ga(existing_send, 'path_elements', 'pathElements')
                                     if path_elems:
                                         elem_list = getattr(path_elems, 'element', None)
                                         if elem_list:
-                                            try:
-                                                http_params['http_path_elements'] = _serialize_sdk_list(elem_list)
-                                            except (TypeError, ValueError):
-                                                pass
+                                            http_params['http_path_elements'] = _serialize_elements(elem_list)
                                 # Preserve send-level fields (method, content, follow, profiles)
                                 if 'http_method_type' not in http_params:
                                     existing_method = _ga(existing_send, 'method_type', 'methodType')
@@ -1547,10 +1544,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                     if req_hdrs:
                                         hdr_list = getattr(req_hdrs, 'header', None)
                                         if hdr_list:
-                                            try:
-                                                http_params['http_get_request_headers'] = _serialize_sdk_list(hdr_list)
-                                            except (TypeError, ValueError):
-                                                pass
+                                            http_params['http_get_request_headers'] = _serialize_headers(hdr_list)
                     http_opts = build_http_communication_options(**http_params)
                     if http_opts:
                         comm_dict["HTTPCommunicationOptions"] = http_opts
@@ -1912,8 +1906,10 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                         existing_oftp = getattr(existing_comm, 'oftp_communication_options', None)
                         if existing_oftp:
                             existing_settings = getattr(existing_oftp, 'oftp_connection_settings', None)
-                            # OFTP values are directly in connection_settings (not nested)
-                            settings_source = existing_settings
+                            # Old partners nest under defaultOFTPConnectionSettings;
+                            # new partners put fields directly in existing_settings.
+                            default_settings = _ga(existing_settings, 'default_oftp_connection_settings', 'defaultOFTPConnectionSettings') if existing_settings else None
+                            settings_source = default_settings if default_settings else existing_settings
                             if settings_source:
                                 if 'oftp_host' not in oftp_params:
                                     existing_host = getattr(settings_source, 'host', None)
