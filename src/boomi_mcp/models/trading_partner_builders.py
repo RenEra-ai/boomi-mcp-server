@@ -1717,6 +1717,10 @@ def build_trading_partner_model(
     organization_id = kwargs.get('organization_id')
 
     # Build top-level model
+    # Note: partner_communication is set AFTER construction to preserve raw dict
+    # serialization via PartnerCommunicationDict._map(). Passing it to the constructor
+    # causes the SDK to convert it into a PartnerCommunication model that strips
+    # unknown fields like headerName/headerValue from request headers.
     tp_model = TradingPartnerComponent(
         component_name=component_name,
         standard=standard,
@@ -1725,8 +1729,9 @@ def build_trading_partner_model(
         description=description,
         partner_info=partner_info,
         contact_info=contact_info,
-        partner_communication=partner_communication,
         organization_id=organization_id
     )
+    if partner_communication:
+        tp_model.partner_communication = partner_communication
 
     return tp_model
