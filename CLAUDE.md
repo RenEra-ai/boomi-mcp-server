@@ -205,6 +205,13 @@ result = manage_process.fn(profile="dev", action="list")
 result = manage_organization.fn(profile="dev", action="list")
 ```
 
+**MCP Parameter Parity**: `.fn()` calls MUST use the exact same parameter types as MCP.
+`config`, `filters`, and `config_yaml` are **JSON strings**, not Python dicts — this ensures
+the same JSON parsing code path runs locally as in production.
+
+- `config='{"standard": "x12"}'`  (JSON string — matches MCP)
+- ~~`config={"standard": "x12"}`~~   (Python dict — skips JSON parsing)
+
 **One-time credential setup:**
 ```bash
 pip install -r requirements.txt
@@ -510,6 +517,8 @@ from server import manage_trading_partner
 result = manage_trading_partner.fn(profile="dev", action="list", config='{"standard":"x12"}')
 print(json.dumps(result, indent=2))
 ```
+
+**MCP Parameter Parity**: `config`, `filters`, and `config_yaml` must be **JSON strings**, not Python dicts — matches what MCP delivers in production.
 
 **The boomi-qa-tester agent** writes targeted test scripts using this pattern. Use it to validate changes before merging to main.
 
