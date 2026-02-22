@@ -1594,6 +1594,9 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                             as2_params['as2_mdn_alias'] = existing_alias
 
                     cls = updates.get('classification', None)
+                    # Normalize enum to string (e.g. TradingPartnerComponentClassification.MYCOMPANY -> 'mycompany')
+                    if cls and hasattr(cls, 'value'):
+                        cls = cls.value
                     if not cls:
                         raw_cls = getattr(existing_tp, 'classification', None)
                         cls = raw_cls.value if hasattr(raw_cls, 'value') else raw_cls
@@ -2369,6 +2372,9 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                         as2_params["as2_username"] = as2["username"]
                     if as2_params:
                         cls = updates.get('classification', None)
+                        # Normalize enum to string (e.g. TradingPartnerComponentClassification.MYCOMPANY -> 'mycompany')
+                        if cls and hasattr(cls, 'value'):
+                            cls = cls.value
                         if not cls:
                             raw_cls = getattr(existing_tp, 'classification', None)
                             cls = raw_cls.value if hasattr(raw_cls, 'value') else raw_cls
