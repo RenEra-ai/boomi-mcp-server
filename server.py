@@ -101,6 +101,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import organization tools: {e}")
     manage_organization_action = None
 
+# --- Monitoring Tools ---
+try:
+    from boomi_mcp.categories.monitoring import monitor_platform_action
+    print(f"[INFO] Monitoring tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import monitoring tools: {e}")
+    monitor_platform_action = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -868,6 +876,93 @@ if manage_organization_action:
     print("[INFO] Organization tool registered successfully (1 consolidated tool)")
 
 
+# --- Monitoring MCP Tools ---
+if monitor_platform_action:
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    def monitor_platform(
+        profile: str,
+        action: str,
+        config: str = None,
+    ):
+        """
+        Monitor Boomi platform: logs, artifacts, audit trail, and events.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: execution_logs, execution_artifacts, audit_logs, events
+            config: JSON string with action-specific configuration (see examples below)
+
+        Actions and config examples:
+
+            execution_logs - Request process log download URL:
+                config='{"execution_id": "abc-123-def", "log_level": "ALL"}'
+                log_level values: SEVERE, WARNING, INFO, CONFIG, FINE, FINER, FINEST, ALL (default: ALL)
+
+            execution_artifacts - Request execution artifact download URL:
+                config='{"execution_id": "abc-123-def"}'
+
+            audit_logs - Query audit trail with filters:
+                config='{
+                    "start_date": "2025-01-01T00:00:00Z",
+                    "end_date": "2025-01-31T23:59:59Z",
+                    "user": "user@example.com",
+                    "action": "Deploy",
+                    "type": "Process",
+                    "level": "INFO",
+                    "source": "API",
+                    "limit": 100
+                }'
+
+            events - Query platform events with filters:
+                config='{
+                    "start_date": "2025-01-01T00:00:00Z",
+                    "end_date": "2025-12-31T23:59:59Z",
+                    "event_level": "ERROR",
+                    "event_type": "process.error",
+                    "process_name": "My Process",
+                    "atom_name": "Production Atom",
+                    "execution_id": "abc-123-def",
+                    "limit": 100
+                }'
+
+        Returns:
+            Action result with success status and data/error
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except json.JSONDecodeError as e:
+                return {"_success": False, "error": f"Invalid JSON in config: {e}"}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] monitor_platform called by user: {subject}, profile: {profile}, action: {action}")
+
+            # Get credentials
+            creds = get_secret(subject, profile)
+
+            # Initialize Boomi SDK
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            return monitor_platform_action(sdk, profile, action, config_data=config_data)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} monitor_platform: {e}")
+            return {"_success": False, "error": str(e)}
+
+    print("[INFO] Monitoring tool registered successfully (1 consolidated tool)")
+
+
 # --- Credential Management Tools (local dev only) ---
 if LOCAL_MODE:
     @mcp.tool()
@@ -1299,6 +1394,10 @@ if __name__ == "__main__":
         if manage_organization_action:
             print("\n  Organization Management:")
             print("  manage_organization - Unified tool for all organization operations")
+        if monitor_platform_action:
+            print("\n  Platform Monitoring:")
+            print("  monitor_platform - Logs, artifacts, audit trail, and events")
+            print("    Actions: execution_logs, execution_artifacts, audit_logs, events")
         print("=" * 60 + "\n")
 
         mcp.run(transport="stdio")
