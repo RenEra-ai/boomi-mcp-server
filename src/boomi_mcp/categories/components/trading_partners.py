@@ -832,13 +832,26 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
         query_config = TradingPartnerComponentQueryConfig(query_filter=query_filter)
 
         # Query trading partners using typed config with pagination
-        from boomi_mcp.utils.result_formatting import handle_pagination
-
-        all_results = handle_pagination(
-            sdk_query_func=lambda cfg: boomi_client.trading_partner_component.query_trading_partner_component(request_body=cfg),
-            query_config=query_config,
-            max_results=1000
+        all_results = []
+        result = boomi_client.trading_partner_component.query_trading_partner_component(
+            request_body=query_config
         )
+        if hasattr(result, 'result') and result.result:
+            all_results.extend(result.result)
+        query_token = getattr(result, 'query_token', None)
+        while query_token and len(all_results) < 1000:
+            try:
+                result = boomi_client.trading_partner_component.query_more_trading_partner_component(
+                    request_body=query_token
+                )
+                if hasattr(result, 'result') and result.result:
+                    all_results.extend(result.result)
+                query_token = getattr(result, 'query_token', None)
+            except Exception:
+                break
+
+        # Fallback standard from filter (Boomi QUERY API omits standard for some types like odette)
+        filter_standard = filters.get("standard") if filters else None
 
         partners = []
         for partner in all_results:
@@ -853,10 +866,14 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
 
                 raw_std = getattr(partner, 'standard', None)
                 raw_cls = getattr(partner, 'classification', None)
+                std_val = raw_std.value if hasattr(raw_std, 'value') else raw_std
+                # Boomi QUERY API omits standard for some types (e.g., odette); use filter as fallback
+                if std_val is None and filter_standard:
+                    std_val = filter_standard.lower()
                 partners.append({
                     "component_id": partner_id,
                     "name": getattr(partner, 'name', getattr(partner, 'component_name', None)),
-                    "standard": raw_std.value if hasattr(raw_std, 'value') else raw_std,
+                    "standard": std_val,
                     "classification": raw_cls.value if hasattr(raw_cls, 'value') else raw_cls,
                     "folder_name": getattr(partner, 'folder_name', None),
                     "deleted": getattr(partner, 'deleted', False)
