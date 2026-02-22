@@ -527,11 +527,15 @@ if manage_trading_partner_action:
             creds = get_secret(subject, profile)
 
             # Initialize Boomi SDK
-            sdk = Boomi(
-                account_id=creds["account_id"],
-                username=creds["username"],
-                password=creds["password"]
-            )
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
 
             # Build parameters based on action
             params = {}
@@ -680,11 +684,15 @@ if manage_process_action:
             creds = get_secret(subject, profile)
 
             # Initialize Boomi SDK
-            sdk = Boomi(
-                account_id=creds["account_id"],
-                username=creds["username"],
-                password=creds["password"]
-            )
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
 
             # Build parameters based on action
             params = {}
@@ -793,11 +801,15 @@ if manage_organization_action:
             creds = get_secret(subject, profile)
 
             # Initialize Boomi SDK
-            sdk = Boomi(
-                account_id=creds["account_id"],
-                username=creds["username"],
-                password=creds["password"]
-            )
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
 
             # Build parameters based on action
             params = {}
