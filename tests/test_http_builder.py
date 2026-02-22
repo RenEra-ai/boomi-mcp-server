@@ -7,6 +7,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import pytest
 from boomi_mcp.models.trading_partner_builders import build_http_communication_options
+from boomi_mcp.categories.components.trading_partners import _header_to_dict
+from boomi_mcp.categories.components.trading_partners import get_trading_partner
 
 
 class TestAuthTypeValidation:
@@ -237,7 +239,19 @@ class TestHeadersAndPathElements:
         assert 'requestHeaders' in send
         assert send['requestHeaders']['@type'] == 'HttpRequestHeaders'
         assert send['requestHeaders']['header'] == [
-            {"headerFieldName": "Auth", "targetPropertyName": "Authorization", "@type": ""}
+            {"headerName": "Auth", "headerValue": "Authorization", "@type": "Header"}
+        ]
+
+    def test_request_headers_snake_case_serialized(self):
+        headers = json.dumps([{"header_field_name": "Auth", "target_property_name": "Authorization"}])
+        result = build_http_communication_options(
+            http_url='https://example.com',
+            http_method_type='POST',
+            http_request_headers=headers
+        )
+        send = result['HTTPSendOptions']
+        assert send['requestHeaders']['header'] == [
+            {"headerName": "Auth", "headerValue": "Authorization", "@type": "Header"}
         ]
 
     def test_valid_path_elements(self):
@@ -316,3 +330,75 @@ class TestNoUrl:
             http_username='user'
         )
         assert result is None
+
+
+class StubHeader:
+    """Simple stand-in for SDK Header model objects."""
+
+    def __init__(self, kwargs=None, **attrs):
+        self._kwargs = kwargs or {}
+        for key, value in attrs.items():
+            setattr(self, key, value)
+
+
+class TestGetHeaderExtraction:
+    """Verify GET-side header extraction handles SDK snake_case kwargs."""
+
+    def test_extracts_snake_case_from_kwargs(self):
+        header = StubHeader(
+            kwargs={
+                "header_field_name": "Auth",
+                "target_property_name": "Authorization",
+            }
+        )
+
+        assert _header_to_dict(header) == {
+            "headerName": "Auth",
+            "headerValue": "Authorization",
+        }
+
+
+class Obj:
+    """Tiny attribute container for stubbing SDK model objects."""
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class StubTradingPartnerComponent:
+    def __init__(self, result):
+        self._result = result
+
+    def get_trading_partner_component(self, id_):
+        return self._result
+
+
+class StubBoomiClient:
+    def __init__(self, result):
+        self.trading_partner_component = StubTradingPartnerComponent(result)
+
+
+class TestAS2LegacyFallback:
+    """Verify receive-side legacy_smime fallback still works when send-side is unset."""
+
+    def test_receive_side_legacy_smime_used_when_send_side_missing(self):
+        result = Obj(
+            id_="tp-1",
+            name="TP",
+            partner_communication=Obj(
+                as2_communication_options=Obj(
+                    as2_send_options=Obj(as2_partner_info=Obj()),
+                    as2_receive_options=Obj(
+                        as2_my_company_info=Obj(enabled_legacy_smime=True)
+                    ),
+                )
+            ),
+        )
+        client = StubBoomiClient(result)
+
+        response = get_trading_partner(client, "test-profile", "tp-1")
+        as2 = response["trading_partner"]["communication_protocols"][0]
+
+        assert as2["protocol"] == "as2"
+        assert as2["legacy_smime"] is True

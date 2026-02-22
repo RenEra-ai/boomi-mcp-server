@@ -42,9 +42,25 @@ def _ga(obj, *attrs):
 def _header_to_dict(h):
     """Convert SDK Header model object to dict with 4-level fallback."""
     kw = getattr(h, '_kwargs', {})
+    header_name = (
+        _ga(h, 'header_name', 'headerName')
+        or kw.get('headerName')
+        or kw.get('header_name')
+        or _ga(h, 'header_field_name', 'headerFieldName')
+        or kw.get('headerFieldName')
+        or kw.get('header_field_name')
+    )
+    header_value = (
+        _ga(h, 'header_value', 'headerValue')
+        or kw.get('headerValue')
+        or kw.get('header_value')
+        or _ga(h, 'target_property_name', 'targetPropertyName')
+        or kw.get('targetPropertyName')
+        or kw.get('target_property_name')
+    )
     return {
-        "headerName": _ga(h, 'header_name', 'headerName') or kw.get('headerName') or _ga(h, 'header_field_name', 'headerFieldName') or kw.get('headerFieldName'),
-        "headerValue": _ga(h, 'header_value', 'headerValue') or kw.get('headerValue') or _ga(h, 'target_property_name', 'targetPropertyName') or kw.get('targetPropertyName')
+        "headerName": header_name,
+        "headerValue": header_value
     }
 
 
@@ -656,7 +672,11 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         as2_info["as2_partner_id"] = _ga(as2_pi, 'as2_id', 'as2Id')
                         as2_info["reject_duplicates"] = _ga(as2_pi, 'reject_duplicates', 'rejectDuplicates')
                         as2_info["duplicate_check_count"] = _ga(as2_pi, 'duplicate_check_count', 'duplicateCheckCount')
-                        as2_info["legacy_smime"] = _ga(as2_pi, 'legacy_smime', 'legacySMIME')
+                        legacy = _ga(as2_pi, 'enabled_legacy_smime', 'enabledLegacySMIME')
+                        if legacy is None:
+                            legacy = _ga(as2_pi, 'legacy_smime', 'legacySMIME')
+                        if legacy is not None:
+                            as2_info["legacy_smime"] = legacy
                         # Certificates stored in PartnerInfo (CREATE stores them here)
                         enc_cert = _ga(as2_pi, 'encryption_public_certificate', 'encryptionPublicCertificate')
                         if enc_cert:
@@ -733,7 +753,11 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     my_info = _ga(recv_opts, 'as2_my_company_info', 'AS2MyCompanyInfo')
                     if my_info:
                         as2_info.setdefault("as2_partner_id", _ga(my_info, 'as2_id', 'as2Id'))
-                        as2_info.setdefault("legacy_smime", _ga(my_info, 'legacy_smime', 'legacySMIME'))
+                        legacy = _ga(my_info, 'enabled_legacy_smime', 'enabledLegacySMIME')
+                        if legacy is None:
+                            legacy = _ga(my_info, 'legacy_smime', 'legacySMIME')
+                        if legacy is not None and "legacy_smime" not in as2_info:
+                            as2_info["legacy_smime"] = legacy
                         enc_cert = _ga(my_info, 'encryption_private_certificate', 'encryptionPrivateCertificate')
                         if enc_cert:
                             as2_info.setdefault("encrypt_alias", _ga(enc_cert, 'component_id', 'componentId') or getattr(enc_cert, 'alias', None))
@@ -1071,6 +1095,14 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                 # Boomi QUERY API omits standard for some types (e.g., odette); use filter as fallback
                 if std_val is None and filter_standard:
                     std_val = filter_standard.lower()
+                # If still None, retrieve standard via GET (lightweight per-partner call)
+                if std_val is None and partner_id:
+                    try:
+                        full_tp = boomi_client.trading_partner_component.get_trading_partner_component(id_=partner_id)
+                        fetched_std = getattr(full_tp, 'standard', None)
+                        std_val = fetched_std.value if hasattr(fetched_std, 'value') else fetched_std
+                    except Exception:
+                        pass  # leave as None if GET fails
                 partners.append({
                     "component_id": partner_id,
                     "name": getattr(partner, 'name', getattr(partner, 'component_name', None)),
@@ -1477,6 +1509,10 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 # Partner info
                                 existing_partner_info = getattr(existing_send_opts, 'as2_partner_info', None)
                                 if existing_partner_info:
+                                    if 'as2_partner_id' not in as2_params:
+                                        existing_id = _ga(existing_partner_info, 'as2_id', 'as2Id')
+                                        if existing_id:
+                                            as2_params['as2_partner_id'] = existing_id
                                     if 'as2_reject_duplicates' not in as2_params:
                                         existing_reject = _ga(existing_partner_info, 'reject_duplicates', 'rejectDuplicates')
                                         if existing_reject is not None:
@@ -1579,11 +1615,13 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 # Legacy S/MIME (under partner info, not send options)
                                 if existing_partner_info:
                                     if 'as2_legacy_smime' not in as2_params:
-                                        existing_legacy = _ga(existing_partner_info, 'legacy_smime', 'legacySMIME')
+                                        existing_legacy = _ga(existing_partner_info, 'enabled_legacy_smime', 'enabledLegacySMIME')
+                                        if existing_legacy is None:
+                                            existing_legacy = _ga(existing_partner_info, 'legacy_smime', 'legacySMIME')
                                         if existing_legacy is not None:
                                             as2_params['as2_legacy_smime'] = str(existing_legacy).lower()
 
-                            # Preserve AS2 Receive Options (MDN delivery)
+                            # Preserve AS2 Receive Options (MDN delivery + mycompany identity)
                             existing_recv_opts = getattr(existing_as2, 'as2_receive_options', None)
                             if existing_recv_opts:
                                 if 'as2_mdn_alias' not in as2_params:
@@ -1592,6 +1630,135 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_alias = getattr(mdn_cert, 'alias', None)
                                         if existing_alias:
                                             as2_params['as2_mdn_alias'] = existing_alias
+
+                                # MyCompany: preserve AS2MyCompanyInfo (identity + private certs)
+                                my_info = _ga(existing_recv_opts, 'as2_my_company_info', 'AS2MyCompanyInfo')
+                                if my_info:
+                                    if 'as2_partner_id' not in as2_params:
+                                        existing_id = _ga(my_info, 'as2_id', 'as2Id')
+                                        if existing_id:
+                                            as2_params['as2_partner_id'] = existing_id
+                                    if 'as2_legacy_smime' not in as2_params:
+                                        existing_legacy = _ga(my_info, 'enabled_legacy_smime', 'enabledLegacySMIME')
+                                        if existing_legacy is None:
+                                            existing_legacy = _ga(my_info, 'legacy_smime', 'legacySMIME')
+                                        if existing_legacy is not None:
+                                            as2_params['as2_legacy_smime'] = str(existing_legacy).lower()
+                                    if 'as2_encrypt_alias' not in as2_params:
+                                        enc_cert = _ga(my_info, 'encryption_private_certificate', 'encryptionPrivateCertificate')
+                                        if enc_cert:
+                                            existing_alias = _ga(enc_cert, 'component_id', 'componentId') or getattr(enc_cert, 'alias', None)
+                                            if existing_alias:
+                                                as2_params['as2_encrypt_alias'] = existing_alias
+                                    if 'as2_sign_alias' not in as2_params:
+                                        sign_cert = _ga(my_info, 'signing_private_certificate', 'signingPrivateCertificate')
+                                        if sign_cert:
+                                            existing_alias = _ga(sign_cert, 'component_id', 'componentId') or getattr(sign_cert, 'alias', None)
+                                            if existing_alias:
+                                                as2_params['as2_sign_alias'] = existing_alias
+                                    if 'as2_mdn_alias' not in as2_params:
+                                        mdn_cert = _ga(my_info, 'mdn_signature_private_certificate', 'mdnSignaturePrivateCertificate')
+                                        if mdn_cert:
+                                            existing_alias = _ga(mdn_cert, 'component_id', 'componentId') or getattr(mdn_cert, 'alias', None)
+                                            if existing_alias:
+                                                as2_params['as2_mdn_alias'] = existing_alias
+                                    if 'as2_reject_duplicates' not in as2_params:
+                                        existing_reject = _ga(my_info, 'reject_duplicate_messages', 'rejectDuplicateMessages')
+                                        if existing_reject is not None:
+                                            as2_params['as2_reject_duplicates'] = str(existing_reject).lower()
+                                    if 'as2_duplicate_check_count' not in as2_params:
+                                        existing_check = _ga(my_info, 'messages_to_check_for_duplicates', 'messagesToCheckForDuplicates')
+                                        if existing_check is not None:
+                                            as2_params['as2_duplicate_check_count'] = existing_check
+
+                                # MyCompany: preserve AS2DefaultPartnerMDNOptions
+                                dp_mdn = _ga(existing_recv_opts, 'as2_default_partner_mdn_options', 'AS2DefaultPartnerMDNOptions')
+                                if not dp_mdn:
+                                    dp_mdn = _ga(existing_recv_opts, 'as2_mdn_options', 'AS2MDNOptions')
+                                if dp_mdn:
+                                    if 'as2_request_mdn' not in as2_params:
+                                        existing_req_mdn = _ga(dp_mdn, 'request_mdn', 'requestMDN')
+                                        if existing_req_mdn is not None:
+                                            as2_params['as2_request_mdn'] = str(existing_req_mdn).lower()
+                                    if 'as2_mdn_signed' not in as2_params:
+                                        existing_mdn_signed = getattr(dp_mdn, 'signed', None)
+                                        if existing_mdn_signed is not None:
+                                            as2_params['as2_mdn_signed'] = str(existing_mdn_signed).lower()
+                                    if 'as2_mdn_digest_alg' not in as2_params:
+                                        existing_mdn_digest = _ga(dp_mdn, 'mdn_digest_alg', 'mdnDigestAlg')
+                                        if existing_mdn_digest:
+                                            as2_params['as2_mdn_digest_alg'] = existing_mdn_digest
+                                    if 'as2_synchronous_mdn' not in as2_params:
+                                        existing_sync_mdn = getattr(dp_mdn, 'synchronous', None)
+                                        if existing_sync_mdn is not None:
+                                            as2_params['as2_synchronous_mdn'] = 'true' if str(existing_sync_mdn).lower() == 'sync' else 'false'
+                                    if 'as2_fail_on_negative_mdn' not in as2_params:
+                                        existing_fail = _ga(dp_mdn, 'fail_on_negative_mdn', 'failOnNegativeMDN')
+                                        if existing_fail is not None:
+                                            as2_params['as2_fail_on_negative_mdn'] = str(existing_fail).lower()
+
+                                # MyCompany: preserve AS2DefaultPartnerMessageOptions
+                                dp_msg = _ga(existing_recv_opts, 'as2_default_partner_message_options', 'AS2DefaultPartnerMessageOptions')
+                                if not dp_msg:
+                                    dp_msg = _ga(existing_recv_opts, 'as2_message_options', 'AS2MessageOptions')
+                                if dp_msg:
+                                    if 'as2_signed' not in as2_params:
+                                        existing_signed = getattr(dp_msg, 'signed', None)
+                                        if existing_signed is not None:
+                                            as2_params['as2_signed'] = str(existing_signed).lower()
+                                    if 'as2_encrypted' not in as2_params:
+                                        existing_encrypted = getattr(dp_msg, 'encrypted', None)
+                                        if existing_encrypted is not None:
+                                            as2_params['as2_encrypted'] = str(existing_encrypted).lower()
+                                    if 'as2_compressed' not in as2_params:
+                                        existing_compressed = getattr(dp_msg, 'compressed', None)
+                                        if existing_compressed is not None:
+                                            as2_params['as2_compressed'] = str(existing_compressed).lower()
+                                    if 'as2_encryption_algorithm' not in as2_params:
+                                        existing_algo = _ga(dp_msg, 'encryption_algorithm', 'encryptionAlgorithm')
+                                        if existing_algo:
+                                            as2_params['as2_encryption_algorithm'] = existing_algo
+                                    if 'as2_signing_digest_alg' not in as2_params:
+                                        existing_digest = _ga(dp_msg, 'signing_digest_alg', 'signingDigestAlg')
+                                        if existing_digest:
+                                            as2_params['as2_signing_digest_alg'] = existing_digest
+                                    if 'as2_data_content_type' not in as2_params:
+                                        existing_content = _ga(dp_msg, 'data_content_type', 'dataContentType')
+                                        if existing_content:
+                                            as2_params['as2_data_content_type'] = existing_content
+
+                            # MyCompany: preserve AS2DefaultPartnerSettings (connection defaults)
+                            default_partner = _ga(existing_as2, 'as2_default_partner_settings', 'AS2DefaultPartnerSettings')
+                            if default_partner:
+                                if 'as2_url' not in as2_params:
+                                    existing_url = getattr(default_partner, 'url', None)
+                                    if existing_url:
+                                        as2_params['as2_url'] = existing_url
+                                if 'as2_authentication_type' not in as2_params:
+                                    existing_auth = _ga(default_partner, 'authentication_type', 'authenticationType')
+                                    if existing_auth:
+                                        as2_params['as2_authentication_type'] = existing_auth
+                                if 'as2_verify_hostname' not in as2_params:
+                                    existing_verify = _ga(default_partner, 'verify_hostname', 'verifyHostname')
+                                    if existing_verify is not None:
+                                        as2_params['as2_verify_hostname'] = str(existing_verify).lower()
+                                if 'as2_username' not in as2_params or 'as2_password' not in as2_params:
+                                    dp_auth = _ga(default_partner, 'auth_settings', 'AuthSettings')
+                                    if dp_auth:
+                                        if 'as2_username' not in as2_params:
+                                            existing_user = _ga(dp_auth, 'username', 'user')
+                                            if existing_user:
+                                                as2_params['as2_username'] = existing_user
+                                        if 'as2_password' not in as2_params:
+                                            existing_pass = getattr(dp_auth, 'password', None)
+                                            if existing_pass:
+                                                as2_params['as2_password'] = existing_pass
+                                if 'as2_client_ssl_alias' not in as2_params:
+                                    client_ssl = _ga(default_partner, 'client_ssl_certificate', 'clientSSLCertificate')
+                                    if client_ssl:
+                                        existing_alias = _ga(client_ssl, 'component_id', 'componentId') or getattr(client_ssl, 'alias', None)
+                                        if existing_alias:
+                                            as2_params['as2_client_ssl_alias'] = existing_alias
 
                     cls = updates.get('classification', None)
                     # Normalize enum to string (e.g. TradingPartnerComponentClassification.MYCOMPANY -> 'mycompany')
