@@ -616,12 +616,12 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 send_options = _ga(as2_opts, 'as2_send_options', 'AS2SendOptions')
                 if send_options:
                     # Partner info (as2_id)
-                    partner_info = _ga(send_options, 'as2_partner_info', 'AS2PartnerInfo')
-                    if partner_info:
-                        as2_info["as2_partner_id"] = _ga(partner_info, 'as2_id', 'as2Id')
-                        as2_info["reject_duplicates"] = _ga(partner_info, 'reject_duplicates', 'rejectDuplicates')
-                        as2_info["duplicate_check_count"] = _ga(partner_info, 'duplicate_check_count', 'duplicateCheckCount')
-                        as2_info["legacy_smime"] = _ga(partner_info, 'legacy_smime', 'legacySMIME')
+                    as2_pi = _ga(send_options, 'as2_partner_info', 'AS2PartnerInfo')
+                    if as2_pi:
+                        as2_info["as2_partner_id"] = _ga(as2_pi, 'as2_id', 'as2Id')
+                        as2_info["reject_duplicates"] = _ga(as2_pi, 'reject_duplicates', 'rejectDuplicates')
+                        as2_info["duplicate_check_count"] = _ga(as2_pi, 'duplicate_check_count', 'duplicateCheckCount')
+                        as2_info["legacy_smime"] = _ga(as2_pi, 'legacy_smime', 'legacySMIME')
 
                     # Message options
                     msg_opts = _ga(send_options, 'as2_message_options', 'AS2MessageOptions')
@@ -831,14 +831,30 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
         query_filter = TradingPartnerComponentQueryConfigQueryFilter(expression=expression)
         query_config = TradingPartnerComponentQueryConfig(query_filter=query_filter)
 
-        # Query trading partners using typed config
+        # Query trading partners using typed config with pagination
+        all_results = []
         result = boomi_client.trading_partner_component.query_trading_partner_component(
             request_body=query_config
         )
+        if hasattr(result, 'result') and result.result:
+            all_results.extend(result.result)
+        query_token = getattr(result, 'query_token', None)
+        while query_token and len(all_results) < 1000:
+            try:
+                result = boomi_client.trading_partner_component.query_more_trading_partner_component(
+                    request_body=query_token
+                )
+                if hasattr(result, 'result') and result.result:
+                    all_results.extend(result.result)
+                query_token = getattr(result, 'query_token', None)
+            except Exception:
+                break
+
+        # Fallback standard from filter (Boomi QUERY API omits standard for some types like odette)
+        filter_standard = filters.get("standard") if filters else None
 
         partners = []
-        if hasattr(result, 'result') and result.result:
-            for partner in result.result:
+        for partner in all_results:
                 # Extract ID using SDK pattern (id_ attribute)
                 partner_id = None
                 if hasattr(partner, 'id_'):
@@ -848,11 +864,17 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                 elif hasattr(partner, 'component_id'):
                     partner_id = partner.component_id
 
+                raw_std = getattr(partner, 'standard', None)
+                raw_cls = getattr(partner, 'classification', None)
+                std_val = raw_std.value if hasattr(raw_std, 'value') else raw_std
+                # Boomi QUERY API omits standard for some types (e.g., odette); use filter as fallback
+                if std_val is None and filter_standard:
+                    std_val = filter_standard.lower()
                 partners.append({
                     "component_id": partner_id,
                     "name": getattr(partner, 'name', getattr(partner, 'component_name', None)),
-                    "standard": getattr(partner, 'standard', None),
-                    "classification": getattr(partner, 'classification', None),
+                    "standard": std_val,
+                    "classification": raw_cls.value if hasattr(raw_cls, 'value') else raw_cls,
                     "folder_name": getattr(partner, 'folder_name', None),
                     "deleted": getattr(partner, 'deleted', False)
                 })
@@ -891,7 +913,7 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
         }
 
 
-HTTP_UPDATE_DENYLIST = set()  # No fields currently denied
+HTTP_UPDATE_DENYLIST = {"http_cookie_scope"}
 
 
 def update_trading_partner(boomi_client, profile: str, component_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -1042,6 +1064,120 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
             contact_info = build_contact_info(**merged_contact)
             if contact_info:
                 existing_tp.contact_info = contact_info
+
+        # Standard-specific partner_info update
+        partner_info_fields = {
+            'x12': ['isa_id', 'isa_qualifier', 'gs_id'],
+            'edifact': ['edifact_interchange_id', 'edifact_interchange_id_qual', 'edifact_syntax_id',
+                        'edifact_syntax_version', 'edifact_test_indicator'],
+            'hl7': ['hl7_application', 'hl7_facility'],
+            'rosettanet': ['rosettanet_partner_id', 'rosettanet_partner_location',
+                           'rosettanet_global_usage_code', 'rosettanet_supply_chain_code',
+                           'rosettanet_classification_code'],
+            'tradacoms': ['tradacoms_interchange_id', 'tradacoms_interchange_id_qualifier'],
+            'odette': ['odette_interchange_id', 'odette_interchange_id_qual', 'odette_syntax_id',
+                       'odette_syntax_version', 'odette_test_indicator'],
+        }
+        all_pi_fields = [f for fields in partner_info_fields.values() for f in fields]
+        pi_updates = {k: v for k, v in updates.items() if k in all_pi_fields}
+
+        if pi_updates:
+            from boomi_mcp.models.trading_partner_builders import build_partner_info
+
+            existing_standard = getattr(existing_tp, 'standard', None)
+            std_val = existing_standard.value if hasattr(existing_standard, 'value') else str(existing_standard) if existing_standard else None
+
+            if std_val:
+                std_lower = std_val.lower()
+                # Extract existing partner_info values to merge with updates
+                existing_pi_values = {}
+                existing_pi = getattr(existing_tp, 'partner_info', None)
+                if existing_pi:
+                    if std_lower == 'x12':
+                        x12_info = getattr(existing_pi, 'x12_partner_info', None)
+                        if x12_info:
+                            x12_ctrl = getattr(x12_info, 'x12_control_info', None)
+                            if x12_ctrl:
+                                isa_ctrl = getattr(x12_ctrl, 'isa_control_info', None)
+                                gs_ctrl = getattr(x12_ctrl, 'gs_control_info', None)
+                                if isa_ctrl:
+                                    existing_pi_values['isa_id'] = getattr(isa_ctrl, 'interchange_id', None)
+                                    existing_pi_values['isa_qualifier'] = getattr(isa_ctrl, 'interchange_id_qualifier', None)
+                                if gs_ctrl:
+                                    existing_pi_values['gs_id'] = getattr(gs_ctrl, 'applicationcode', None)
+                    elif std_lower == 'edifact':
+                        edifact_info = getattr(existing_pi, 'edifact_partner_info', None)
+                        if edifact_info:
+                            edifact_ctrl = getattr(edifact_info, 'edifact_control_info', None)
+                            if edifact_ctrl:
+                                unb_ctrl = getattr(edifact_ctrl, 'unb_control_info', None)
+                                if unb_ctrl:
+                                    existing_pi_values['edifact_interchange_id'] = getattr(unb_ctrl, 'interchange_id', None)
+                                    raw = getattr(unb_ctrl, 'interchange_id_qual', None)
+                                    existing_pi_values['edifact_interchange_id_qual'] = raw.value if hasattr(raw, 'value') else raw
+                                    raw = getattr(unb_ctrl, 'syntax_id', None)
+                                    existing_pi_values['edifact_syntax_id'] = raw.value if hasattr(raw, 'value') else raw
+                                    raw = getattr(unb_ctrl, 'syntax_version', None)
+                                    existing_pi_values['edifact_syntax_version'] = raw.value if hasattr(raw, 'value') else raw
+                                    raw = getattr(unb_ctrl, 'test_indicator', None)
+                                    existing_pi_values['edifact_test_indicator'] = raw.value if hasattr(raw, 'value') else raw
+                    elif std_lower == 'hl7':
+                        hl7_info = getattr(existing_pi, 'hl7_partner_info', None)
+                        if hl7_info:
+                            hl7_ctrl = getattr(hl7_info, 'hl7_control_info', None)
+                            if hl7_ctrl:
+                                msh_ctrl = getattr(hl7_ctrl, 'msh_control_info', None)
+                                if msh_ctrl:
+                                    app = getattr(msh_ctrl, 'application', None)
+                                    if app:
+                                        existing_pi_values['hl7_application'] = getattr(app, 'namespace_id', None)
+                                    fac = getattr(msh_ctrl, 'facility', None)
+                                    if fac:
+                                        existing_pi_values['hl7_facility'] = getattr(fac, 'namespace_id', None)
+                    elif std_lower == 'rosettanet':
+                        rn_info = getattr(existing_pi, 'rosetta_net_partner_info', None)
+                        if rn_info:
+                            rn_ctrl = getattr(rn_info, 'rosetta_net_control_info', None)
+                            if rn_ctrl:
+                                existing_pi_values['rosettanet_partner_id'] = getattr(rn_ctrl, 'partner_id', None)
+                                existing_pi_values['rosettanet_partner_location'] = getattr(rn_ctrl, 'partner_location', None)
+                                raw = getattr(rn_ctrl, 'global_usage_code', None)
+                                existing_pi_values['rosettanet_global_usage_code'] = raw.value if hasattr(raw, 'value') else raw
+                                existing_pi_values['rosettanet_supply_chain_code'] = getattr(rn_ctrl, 'supply_chain_code', None)
+                                existing_pi_values['rosettanet_classification_code'] = getattr(rn_ctrl, 'global_partner_classification_code', None)
+                    elif std_lower == 'tradacoms':
+                        tc_info = getattr(existing_pi, 'tradacoms_partner_info', None)
+                        if tc_info:
+                            tc_ctrl = getattr(tc_info, 'tradacoms_control_info', None)
+                            if tc_ctrl:
+                                stx_ctrl = getattr(tc_ctrl, 'stx_control_info', None)
+                                if stx_ctrl:
+                                    existing_pi_values['tradacoms_interchange_id'] = getattr(stx_ctrl, 'interchange_id', None)
+                                    existing_pi_values['tradacoms_interchange_id_qualifier'] = getattr(stx_ctrl, 'interchange_id_qualifier', None)
+                    elif std_lower == 'odette':
+                        od_info = getattr(existing_pi, 'odette_partner_info', None)
+                        if od_info:
+                            od_ctrl = getattr(od_info, 'odette_control_info', None)
+                            if od_ctrl:
+                                od_unb = getattr(od_ctrl, 'odette_unb_control_info', None)
+                                if od_unb:
+                                    existing_pi_values['odette_interchange_id'] = getattr(od_unb, 'interchange_id', None)
+                                    raw = getattr(od_unb, 'interchange_id_qual', None)
+                                    existing_pi_values['odette_interchange_id_qual'] = raw.value if hasattr(raw, 'value') else raw
+                                    raw = getattr(od_unb, 'syntax_id', None)
+                                    existing_pi_values['odette_syntax_id'] = raw.value if hasattr(raw, 'value') else raw
+                                    raw = getattr(od_unb, 'syntax_version', None)
+                                    existing_pi_values['odette_syntax_version'] = raw.value if hasattr(raw, 'value') else raw
+                                    raw = getattr(od_unb, 'test_indicator', None)
+                                    existing_pi_values['odette_test_indicator'] = raw.value if hasattr(raw, 'value') else raw
+
+                # Remove None values from existing, merge with updates
+                existing_pi_values = {k: v for k, v in existing_pi_values.items() if v is not None}
+                merged_pi = {**existing_pi_values, **pi_updates}
+
+                new_partner_info = build_partner_info(std_lower, **merged_pi)
+                if new_partner_info:
+                    existing_tp.partner_info = new_partner_info
 
         # Protocol-specific updates - PRESERVE existing protocols and merge with updates
         if has_protocol_updates:
@@ -1683,6 +1819,16 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                         comm_dict["SFTPCommunicationOptions"] = sftp_opts
 
                 if ftp_params:
+                    # Map alternative parameter names to builder-expected names
+                    if 'ftp_passive_mode' in ftp_params and 'ftp_connection_mode' not in ftp_params:
+                        ftp_params['ftp_connection_mode'] = 'passive' if str(ftp_params.pop('ftp_passive_mode')).lower() == 'true' else 'active'
+                    elif 'ftp_passive_mode' in ftp_params:
+                        ftp_params.pop('ftp_passive_mode')
+                    if 'ftp_binary_transfer' in ftp_params and 'ftp_transfer_type' not in ftp_params:
+                        ftp_params['ftp_transfer_type'] = 'binary' if str(ftp_params.pop('ftp_binary_transfer')).lower() == 'true' else 'ascii'
+                    elif 'ftp_binary_transfer' in ftp_params:
+                        ftp_params.pop('ftp_binary_transfer')
+
                     # Merge with existing FTP values for partial updates
                     existing_comm = getattr(existing_tp, 'partner_communication', None)
                     if existing_comm:
@@ -1710,7 +1856,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 if 'ftp_connection_mode' not in ftp_params:
                                     existing_mode = getattr(existing_settings, 'connection_mode', None)
                                     if existing_mode:
-                                        ftp_params['ftp_connection_mode'] = existing_mode
+                                        ftp_params['ftp_connection_mode'] = existing_mode.value if hasattr(existing_mode, 'value') else existing_mode
                                 # Preserve SSL options
                                 existing_ssl = getattr(existing_settings, 'ftpssl_options', None)
                                 if existing_ssl:
@@ -1735,7 +1881,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 if 'ftp_transfer_type' not in ftp_params:
                                     existing_type = getattr(existing_get_opts, 'transfer_type', None)
                                     if existing_type:
-                                        ftp_params['ftp_transfer_type'] = existing_type
+                                        ftp_params['ftp_transfer_type'] = existing_type.value if hasattr(existing_type, 'value') else existing_type
                                 if 'ftp_get_action' not in ftp_params:
                                     existing_action = _ga(existing_get_opts, 'ftp_action', 'ftpAction')
                                     if existing_action:
@@ -1775,7 +1921,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 if 'ftp_transfer_type' not in ftp_params:
                                     existing_type = _ga(existing_send_opts, 'transfer_type', 'transferType')
                                     if existing_type:
-                                        ftp_params['ftp_transfer_type'] = existing_type
+                                        ftp_params['ftp_transfer_type'] = existing_type.value if hasattr(existing_type, 'value') else existing_type
                                 if 'ftp_send_remote_directory' not in ftp_params:
                                     existing_dir = _ga(existing_send_opts, 'remote_directory', 'remoteDirectory')
                                     if existing_dir:
@@ -1783,7 +1929,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 if 'ftp_send_transfer_type' not in ftp_params:
                                     existing_type = _ga(existing_send_opts, 'transfer_type', 'transferType')
                                     if existing_type:
-                                        ftp_params['ftp_send_transfer_type'] = existing_type
+                                        ftp_params['ftp_send_transfer_type'] = existing_type.value if hasattr(existing_type, 'value') else existing_type
                     ftp_opts = build_ftp_communication_options(**ftp_params)
                     if ftp_opts:
                         comm_dict["FTPCommunicationOptions"] = ftp_opts
