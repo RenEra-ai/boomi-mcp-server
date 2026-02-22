@@ -885,14 +885,19 @@ if monitor_platform_action:
         config: str = None,
     ):
         """
-        Monitor Boomi platform: logs, artifacts, audit trail, and events.
+        Monitor Boomi platform: execution history, logs, artifacts, audit trail, and events.
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: execution_logs, execution_artifacts, audit_logs, events
+            action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events
             config: JSON string with action-specific configuration (see examples below)
 
         Actions and config examples:
+
+            execution_records - Query execution history (like Process Reporting):
+                config='{"start_date": "2025-01-01T00:00:00Z", "end_date": "2025-01-31T23:59:59Z", "status": "ERROR", "process_name": "My Process", "atom_name": "Production Atom", "limit": 50}'
+                Filter fields (at least one required): start_date, end_date, status, process_name, process_id, atom_name, atom_id, execution_id
+                Status values: COMPLETE, ERROR, ABORTED, COMPLETE_WARN, INPROCESS
 
             execution_logs - Request process log download URL:
                 config='{"execution_id": "abc-123-def", "log_level": "ALL"}'

@@ -2,7 +2,8 @@
 """
 Monitoring MCP Tools for Boomi Platform.
 
-Provides 4 read-only monitoring actions:
+Provides 5 read-only monitoring actions:
+- execution_records: Query execution history (like Process Reporting)
 - execution_logs: Request process log download URL
 - execution_artifacts: Request execution artifact download URL
 - audit_logs: Query audit trail with filters
@@ -395,6 +396,166 @@ def _convert_events(entries) -> List[Dict[str, Any]]:
 
 
 # ============================================================================
+# Action: execution_records
+# ============================================================================
+
+def handle_execution_records(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Query execution records (Process Reporting equivalent)."""
+    from boomi.models import (
+        ExecutionRecordQueryConfig,
+        ExecutionRecordQueryConfigQueryFilter,
+        ExecutionRecordSimpleExpression,
+        ExecutionRecordSimpleExpressionOperator,
+        ExecutionRecordSimpleExpressionProperty,
+        ExecutionRecordGroupingExpression,
+    )
+
+    limit = config_data.get("limit", 100)
+    expressions = []
+
+    # Date range filter (BETWEEN on EXECUTIONTIME)
+    start_date = config_data.get("start_date")
+    end_date = config_data.get("end_date")
+    if start_date and end_date:
+        expressions.append(ExecutionRecordSimpleExpression(
+            operator=ExecutionRecordSimpleExpressionOperator.BETWEEN,
+            property=ExecutionRecordSimpleExpressionProperty.EXECUTIONTIME,
+            argument=[start_date, end_date]
+        ))
+    elif start_date:
+        expressions.append(ExecutionRecordSimpleExpression(
+            operator=ExecutionRecordSimpleExpressionOperator.GREATERTHANOREQUAL,
+            property=ExecutionRecordSimpleExpressionProperty.EXECUTIONTIME,
+            argument=[start_date]
+        ))
+
+    # Status filter (EQUALS on STATUS)
+    status = config_data.get("status")
+    if status:
+        expressions.append(ExecutionRecordSimpleExpression(
+            operator=ExecutionRecordSimpleExpressionOperator.EQUALS,
+            property=ExecutionRecordSimpleExpressionProperty.STATUS,
+            argument=[status.upper()]
+        ))
+
+    # Process name filter (LIKE on PROCESSNAME with % wildcards)
+    process_name = config_data.get("process_name")
+    if process_name:
+        if "%" not in process_name:
+            process_name = f"%{process_name}%"
+        expressions.append(ExecutionRecordSimpleExpression(
+            operator=ExecutionRecordSimpleExpressionOperator.LIKE,
+            property=ExecutionRecordSimpleExpressionProperty.PROCESSNAME,
+            argument=[process_name]
+        ))
+
+    # Process ID filter (EQUALS on PROCESSID)
+    process_id = config_data.get("process_id")
+    if process_id:
+        expressions.append(ExecutionRecordSimpleExpression(
+            operator=ExecutionRecordSimpleExpressionOperator.EQUALS,
+            property=ExecutionRecordSimpleExpressionProperty.PROCESSID,
+            argument=[process_id]
+        ))
+
+    # Atom name filter (EQUALS on ATOMNAME)
+    atom_name = config_data.get("atom_name")
+    if atom_name:
+        expressions.append(ExecutionRecordSimpleExpression(
+            operator=ExecutionRecordSimpleExpressionOperator.EQUALS,
+            property=ExecutionRecordSimpleExpressionProperty.ATOMNAME,
+            argument=[atom_name]
+        ))
+
+    # Atom ID filter (EQUALS on ATOMID)
+    atom_id = config_data.get("atom_id")
+    if atom_id:
+        expressions.append(ExecutionRecordSimpleExpression(
+            operator=ExecutionRecordSimpleExpressionOperator.EQUALS,
+            property=ExecutionRecordSimpleExpressionProperty.ATOMID,
+            argument=[atom_id]
+        ))
+
+    # Execution ID filter (EQUALS on EXECUTIONID)
+    execution_id = config_data.get("execution_id")
+    if execution_id:
+        expressions.append(ExecutionRecordSimpleExpression(
+            operator=ExecutionRecordSimpleExpressionOperator.EQUALS,
+            property=ExecutionRecordSimpleExpressionProperty.EXECUTIONID,
+            argument=[execution_id]
+        ))
+
+    if not expressions:
+        return {
+            "_success": False,
+            "error": "At least one filter is required",
+            "hint": "Provide start_date/end_date, status, process_name, process_id, atom_name, atom_id, or execution_id"
+        }
+
+    # Build query filter
+    if len(expressions) == 1:
+        query_filter = ExecutionRecordQueryConfigQueryFilter(expression=expressions[0])
+    else:
+        query_filter = ExecutionRecordQueryConfigQueryFilter(
+            expression=ExecutionRecordGroupingExpression(
+                operator="and",
+                nested_expression=expressions
+            )
+        )
+
+    query_config = ExecutionRecordQueryConfig(query_filter=query_filter)
+    result = boomi_client.execution_record.query_execution_record(request_body=query_config)
+
+    # Collect results with pagination
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_execution_records(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = boomi_client.execution_record.query_more_execution_record(
+            query_token=query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_execution_records(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    # Apply limit
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "total_count": len(all_records),
+        "execution_records": all_records
+    }
+
+
+def _convert_execution_records(entries) -> List[Dict[str, Any]]:
+    """Convert SDK execution record entries to flat dicts."""
+    records = []
+    for entry in entries:
+        record = {
+            "execution_id": getattr(entry, 'execution_id', None),
+            "process_name": getattr(entry, 'process_name', None),
+            "process_id": getattr(entry, 'process_id', None),
+            "status": getattr(entry, 'status', None),
+            "execution_time": getattr(entry, 'execution_time', None),
+            "recorded_date": getattr(entry, 'recorded_date', None),
+            "execution_duration": getattr(entry, 'execution_duration', None),
+            "execution_type": getattr(entry, 'execution_type', None),
+            "atom_name": getattr(entry, 'atom_name', None),
+            "atom_id": getattr(entry, 'atom_id', None),
+            "message": getattr(entry, 'message', None),
+            "inbound_document_count": getattr(entry, 'inbound_document_count', None),
+            "outbound_document_count": getattr(entry, 'outbound_document_count', None),
+            "inbound_error_document_count": getattr(entry, 'inbound_error_document_count', None),
+        }
+        records.append({k: v for k, v in record.items() if v is not None})
+    return records
+
+
+# ============================================================================
 # Consolidated Action Router
 # ============================================================================
 
@@ -410,7 +571,7 @@ def monitor_platform_action(
     Args:
         boomi_client: Authenticated Boomi SDK client
         profile: Profile name
-        action: One of: execution_logs, execution_artifacts, audit_logs, events
+        action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events
         config_data: Action-specific configuration dict
 
     Returns:
@@ -420,7 +581,9 @@ def monitor_platform_action(
         config_data = {}
 
     try:
-        if action == "execution_logs":
+        if action == "execution_records":
+            return handle_execution_records(boomi_client, config_data)
+        elif action == "execution_logs":
             return handle_execution_logs(boomi_client, config_data)
         elif action == "execution_artifacts":
             return handle_execution_artifacts(boomi_client, config_data)
@@ -432,7 +595,7 @@ def monitor_platform_action(
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "valid_actions": ["execution_logs", "execution_artifacts", "audit_logs", "events"]
+                "valid_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events"]
             }
 
     except Exception as e:

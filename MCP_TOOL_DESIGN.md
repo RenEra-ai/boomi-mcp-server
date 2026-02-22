@@ -376,7 +376,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
 | `execute_process.py` | `execute_process` | Direct mapping |
-| `execution_records.py` | `query_execution_records` | Historical queries |
+| `execution_records.py` | `monitor_platform` | action="execution_records" |
 
 **Coverage**: 100%
 
@@ -386,9 +386,9 @@ schedule_event()  # Internally: find_availability() + create_event()
 |------------|----------|--------|
 | `query_audit_logs.py` | `monitor_platform` | action="audit_logs" |
 | `query_events.py` | `monitor_platform` | action="events" |
-| `get_execution_summary.py` | `get_execution_status` | Status polling |
-| `poll_execution_status.py` | `get_execution_status` | Status polling |
-| `analyze_execution_metrics.py` | `query_execution_records` | With analysis |
+| `get_execution_summary.py` | `monitor_platform` | action="execution_records" |
+| `poll_execution_status.py` | `monitor_platform` | action="execution_records" |
+| `analyze_execution_metrics.py` | `monitor_platform` | action="execution_records" |
 | `download_execution_artifacts.py` | `monitor_platform` | action="execution_artifacts" |
 | `download_process_log.py` | `monitor_platform` | action="execution_logs" |
 | `monitor_throughput.py` | `invoke_boomi_api` | Generic invoker |
@@ -396,7 +396,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 | `manage_connector_documents.py` | `invoke_boomi_api` | Generic invoker |
 
 **Gaps**: Throughput monitoring, certificate monitoring, connector docs
-**Consolidated**: 4 monitoring tools → 1 `monitor_platform` tool (execution_logs, execution_artifacts, audit_logs, events)
+**Consolidated**: 7 monitoring tools → 1 `monitor_platform` tool (execution_records, execution_logs, execution_artifacts, audit_logs, events)
 
 #### ✅ Category 10: Version & Compare (3 files) → FULLY COVERED
 
@@ -412,7 +412,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
-| `get_error_details.py` | `get_execution_status` + `download_execution_logs` | Combined |
+| `get_error_details.py` | `monitor_platform` | action="execution_records" + action="execution_logs" |
 | `retry_failed_execution.py` | `execute_process` | Re-run same params |
 | `reprocess_documents.py` | `invoke_boomi_api` | Generic invoker |
 | `manage_queues.py` | `invoke_boomi_api` | Generic invoker |
@@ -815,47 +815,16 @@ def execute_process(
 **SDK Examples Covered:**
 - `execute_process.py`
 
-#### 12. get_execution_status
-```python
-@mcp.tool(readOnlyHint=True)
-def get_execution_status(
-    profile: str,
-    execution_id: str,
-    include_details: bool = True
-) -> dict:
-    """Get current status of a running or completed execution.
+#### 12-13. ~~get_execution_status~~ / ~~query_execution_records~~ → CONSOLIDATED into `monitor_platform` action="execution_records"
 
-    Optimized for polling active executions.
-    Returns: status (RUNNING/COMPLETE/ERROR), progress, error messages.
-    Lightweight query for real-time monitoring.
-    """
-```
+Both tools were consolidated into the existing `monitor_platform` tool as action="execution_records".
+This uses the same `ExecutionRecord` query API with different filters:
+- **Status polling**: `config='{"execution_id": "abc-123"}'`
+- **Historical query**: `config='{"start_date": "...", "end_date": "...", "status": "ERROR", "process_name": "...", "limit": 50}'`
 
 **SDK Examples Covered:**
 - `poll_execution_status.py`
 - `get_execution_summary.py`
-
-#### 13. query_execution_records
-```python
-@mcp.tool(readOnlyHint=True)
-def query_execution_records(
-    profile: str,
-    process_id: Optional[str] = None,
-    environment_id: Optional[str] = None,
-    status: Optional[Literal["running", "complete", "error", "aborted"]] = None,
-    date_range: Optional[dict] = None,  # {"start": "ISO8601", "end": "ISO8601"}
-    limit: int = 100,
-    filters: Optional[dict] = None
-) -> dict:
-    """Query historical execution records.
-
-    Optimized for analytics and historical analysis.
-    Supports complex filtering, date ranges, pagination.
-    Returns list of execution summaries.
-    """
-```
-
-**SDK Examples Covered:**
 - `execution_records.py`
 - `analyze_execution_metrics.py`
 - `retry_failed_execution.py` (get failed executions to retry)
@@ -1189,9 +1158,9 @@ def list_capabilities() -> dict:
    - `manage_runtimes`
    - `manage_environment_extensions`
 
-3. Implement basic execution (2 tools):
+3. Implement basic execution (1 tool):
    - `execute_process`
-   - `get_execution_status`
+   - ~~`get_execution_status`~~ → consolidated into `monitor_platform` action="execution_records"
 
 **Success Criteria:**
 - Can discover all components
@@ -1205,10 +1174,10 @@ def list_capabilities() -> dict:
 **Goal**: Complete the 21-tool set
 
 **Tasks:**
-1. Add remaining execution/monitoring (3 tools):
-   - `query_execution_records`
-   - `download_execution_logs`
-   - `download_execution_artifacts`
+1. Add remaining execution/monitoring (1 tool + 2 actions):
+   - ~~`query_execution_records`~~ → consolidated into `monitor_platform` action="execution_records"
+   - `download_execution_logs` → `monitor_platform` action="execution_logs" ✅
+   - `download_execution_artifacts` → `monitor_platform` action="execution_artifacts" ✅
 
 2. Add audit/events (2 tools):
    - `query_audit_logs`
@@ -1276,22 +1245,16 @@ def list_capabilities() -> dict:
 
 **Research Support**: PostgreSQL, GitHub, Kubernetes all use consolidated patterns
 
-### 2. Why Separate Execution Status vs Records?
+### 2. ~~Why Separate Execution Status vs Records?~~ → CONSOLIDATED
 
-**Decision**: Keep `get_execution_status` separate from `query_execution_records`
+**Updated Decision**: Both `get_execution_status` and `query_execution_records` were consolidated into `monitor_platform` action="execution_records".
 
-**Rationale:**
-- **Different use cases**:
-  - Status: Real-time polling of active executions (lightweight, frequent)
-  - Records: Historical analysis with complex filters (heavy, infrequent)
-- **Different parameters**:
-  - Status: Just execution_id
-  - Records: Date ranges, process filters, status filters, pagination
-- **Different UX patterns**:
-  - Status: Poll every 5s until complete
-  - Records: One-time query for analysis
-
-**Your insight was correct here** - separation is more practical
+**Rationale for consolidation:**
+- Both use the same SDK API (`ExecutionRecord` query) with different filters
+- Status polling is just `config='{"execution_id": "abc-123"}'`
+- Historical query adds date ranges, process filters, status filters
+- One action covers both use cases without additional tool overhead
+- Keeps the monitoring workflow in one place: find executions → get status → pull logs/artifacts
 
 ### 3. Why Separate Logs vs Artifacts?
 
@@ -1419,7 +1382,7 @@ Only `POST /Component` and `POST /Component/{componentId}` require XML (2 of 100
 |---------|-------|
 | `config` (JSON) | `manage_trading_partner`, `manage_organization`, future `manage_environment`, `manage_runtime`, `manage_atom` |
 | `config_yaml` (YAML) | `manage_process`, future `manage_component` for XML-based types (maps, connectors) |
-| Neither (few params) | `set_boomi_credentials`, `list_boomi_profiles`, `execute_process`, `get_execution_status`, meta tools |
+| Neither (few params) | `set_boomi_credentials`, `list_boomi_profiles`, `execute_process`, meta tools |
 
 ### Token Impact
 
@@ -2838,7 +2801,7 @@ Start: Need to create/update/query Boomi resource
 │
 │           **Execution & Monitoring (JSON models):**
 │           - Execute Process: sdk.execute_process.create_execute_process(ExecuteProcess(...))
-│           - Execution Records: sdk.execution_record.query_execution_records(QueryConfig(...))
+│           - Execution Records: sdk.execution_record.query_execution_record(ExecutionRecordQueryConfig(...))
 │           - Audit Logs: sdk.audit_log.query_audit_logs(AuditLogQueryConfig(...))
 │           - Events: sdk.event.query_events(EventQueryConfig(...))
 │
@@ -3806,16 +3769,16 @@ This 21-tool hybrid architecture represents the optimal balance between:
 8. deploy_package
 9. manage_trading_partner
 
-**Execution** (3):
+**Execution** (1):
 10. execute_process
-11. get_execution_status
-12. query_execution_records
+~~11. get_execution_status~~ → consolidated into `monitor_platform` action="execution_records"
+~~12. query_execution_records~~ → consolidated into `monitor_platform` action="execution_records"
 
-**Monitoring** (4):
-13. download_execution_logs
-14. download_execution_artifacts
-15. query_audit_logs
-16. query_events
+**Monitoring** (4 → 1 consolidated `monitor_platform` with 5 actions):
+~~13. download_execution_logs~~ → `monitor_platform` action="execution_logs" ✅
+~~14. download_execution_artifacts~~ → `monitor_platform` action="execution_artifacts" ✅
+~~15. query_audit_logs~~ → `monitor_platform` action="audit_logs" ✅
+~~16. query_events~~ → `monitor_platform` action="events" ✅
 
 **Organization** (2):
 17. manage_folders
