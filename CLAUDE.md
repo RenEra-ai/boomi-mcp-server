@@ -25,6 +25,7 @@ This MCP server provides secure Boomi API access for Claude Code with:
 
 ### Rule 2: Dev Has Only server_local.py — Merge Manual for Main
 - `server.py` does NOT exist on dev — `server_local.py` is the single source of truth
+- `CLAUDE.md` exists ONLY on dev — never add it to main
 - `src/boomi_mcp/` changes merge automatically with `git merge dev`
 - When MCP tool code changes in `server_local.py`, apply substitutions to `server.py` on main after merging (see "Merge Manual" section below)
 
@@ -157,6 +158,11 @@ This brings all changes automatically. If MCP tool code changed in `server_local
 Main branch contains production-critical features (OAuth, GCP Secret Manager, Web UI). Always preserve these when merging. The `server.py` on main has sections that do NOT exist on dev — never delete them.
 
 ### Conflict Resolution Guidelines
+
+When merge conflicts say "deleted in HEAD and modified in dev":
+- `server_local.py` → resolve by removing from main: `git rm --cached server_local.py`
+- `CLAUDE.md` → resolve by removing from main: `git rm --cached CLAUDE.md`
+- `server.py` → resolve by keeping main's version: `git checkout HEAD -- server.py`
 
 When conflicts occur in `server.py`:
 
