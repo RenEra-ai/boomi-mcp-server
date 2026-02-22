@@ -1071,6 +1071,14 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                 # Boomi QUERY API omits standard for some types (e.g., odette); use filter as fallback
                 if std_val is None and filter_standard:
                     std_val = filter_standard.lower()
+                # If still None, retrieve standard via GET (lightweight per-partner call)
+                if std_val is None and partner_id:
+                    try:
+                        full_tp = boomi_client.trading_partner_component.get_trading_partner_component(id_=partner_id)
+                        fetched_std = getattr(full_tp, 'standard', None)
+                        std_val = fetched_std.value if hasattr(fetched_std, 'value') else fetched_std
+                    except Exception:
+                        pass  # leave as None if GET fails
                 partners.append({
                     "component_id": partner_id,
                     "name": getattr(partner, 'name', getattr(partner, 'component_name', None)),
