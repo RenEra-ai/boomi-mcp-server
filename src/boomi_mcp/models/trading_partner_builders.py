@@ -498,15 +498,15 @@ def _normalize_request_header(h):
     """Normalize a request header dict to Boomi API format.
 
     Accepts multiple input formats and normalizes to:
-        {"@type": "Header", "headerFieldName": "...", "targetPropertyName": "..."}
+        {"@type": "Header", "headerName": "...", "headerValue": "..."}
 
-    Users may pass headerName/headerValue (friendly aliases) or
-    headerFieldName/targetPropertyName (the SDK field names). This function
+    Users may pass headerFieldName/targetPropertyName (the SDK model names)
+    or headerName/headerValue (the API field names). This function
     accepts both and produces the correct API output.
     """
     name = h.get('headerName') or h.get('headerFieldName') or h.get('header_name') or h.get('header_field_name') or ''
     value = h.get('headerValue') or h.get('targetPropertyName') or h.get('header_value') or h.get('target_property_name') or ''
-    return {'@type': 'Header', 'headerFieldName': name, 'targetPropertyName': value}
+    return {'@type': 'Header', 'headerName': name, 'headerValue': value}
 
 
 def _normalize_response_header(h):
