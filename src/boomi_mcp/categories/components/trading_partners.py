@@ -1591,7 +1591,9 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 # Legacy S/MIME (under partner info, not send options)
                                 if existing_partner_info:
                                     if 'as2_legacy_smime' not in as2_params:
-                                        existing_legacy = _ga(existing_partner_info, 'legacy_smime', 'legacySMIME')
+                                        existing_legacy = _ga(existing_partner_info, 'enabled_legacy_smime', 'enabledLegacySMIME')
+                                        if existing_legacy is None:
+                                            existing_legacy = _ga(existing_partner_info, 'legacy_smime', 'legacySMIME')
                                         if existing_legacy is not None:
                                             as2_params['as2_legacy_smime'] = str(existing_legacy).lower()
 
@@ -1613,7 +1615,9 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         if existing_id:
                                             as2_params['as2_partner_id'] = existing_id
                                     if 'as2_legacy_smime' not in as2_params:
-                                        existing_legacy = _ga(my_info, 'legacy_smime', 'legacySMIME')
+                                        existing_legacy = _ga(my_info, 'enabled_legacy_smime', 'enabledLegacySMIME')
+                                        if existing_legacy is None:
+                                            existing_legacy = _ga(my_info, 'legacy_smime', 'legacySMIME')
                                         if existing_legacy is not None:
                                             as2_params['as2_legacy_smime'] = str(existing_legacy).lower()
                                     if 'as2_encrypt_alias' not in as2_params:
@@ -1726,9 +1730,9 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                             if existing_pass:
                                                 as2_params['as2_password'] = existing_pass
                                 if 'as2_client_ssl_alias' not in as2_params:
-                                    dp_ssl = _ga(default_partner, 'as2ssl_options', 'AS2SSLOptions')
-                                    if dp_ssl:
-                                        existing_alias = _ga(dp_ssl, 'clientsslalias', 'clientSSLAlias')
+                                    client_ssl = _ga(default_partner, 'client_ssl_certificate', 'clientSSLCertificate')
+                                    if client_ssl:
+                                        existing_alias = _ga(client_ssl, 'component_id', 'componentId') or getattr(client_ssl, 'alias', None)
                                         if existing_alias:
                                             as2_params['as2_client_ssl_alias'] = existing_alias
 
