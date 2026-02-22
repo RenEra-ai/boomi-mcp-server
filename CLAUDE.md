@@ -122,7 +122,17 @@ This tool has additional differences. Only copy the parts you actually changed (
 - Web UI routes (`/web/login`, `/web/callback`, `/`, `/api/credentials`, etc.)
 - `__main__` block (HTTP transport, OAuth endpoint printing)
 
-#### Step 7: Commit and push
+#### Step 7: Verify docstring sync
+If tool docstrings changed, compare the updated sections between `server_local.py` and `server.py`:
+```bash
+# Extract and diff the manage_trading_partner docstring from both files
+grep -A 30 "Protocol-specific keys" server_local.py > /tmp/doc_local.txt
+git show main:server.py | grep -A 30 "Protocol-specific keys" > /tmp/doc_main.txt
+diff /tmp/doc_local.txt /tmp/doc_main.txt
+```
+The docstrings must be identical (no substitutions needed for docstrings).
+
+#### Step 8: Commit and push
 ```bash
 git add server.py
 git commit -m "sync server.py MCP tools with dev"
@@ -137,6 +147,7 @@ git push origin main
 | New files added (tests, modules) | Just `git merge dev` — done |
 | New MCP tool added to server_local.py | Copy tool into server.py, apply substitutions |
 | Tool signature/logic changed | Copy changed parts into server.py, apply substitutions |
+| Tool docstring changed | Copy docstring into server.py (no substitutions needed for docstrings), verify identical |
 | boomi_account_info changed | Copy only changed parts, keep web portal messages |
 | server_local.py NOT changed | Just `git merge dev` — done |
 
