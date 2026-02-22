@@ -959,22 +959,47 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 oftp_info = {k: v for k, v in oftp_info.items() if v is not None}
                 communication_protocols.append(oftp_info)
 
-        return {
-            "_success": True,
-            "trading_partner": {
-                "component_id": retrieved_id,
-                "name": getattr(result, 'name', getattr(result, 'component_name', None)),
-                "standard": getattr(result, 'standard', None),
-                "classification": getattr(result, 'classification', None),
-                "folder_id": getattr(result, 'folder_id', None),
-                "folder_name": getattr(result, 'folder_name', None),
-                "organization_id": getattr(result, 'organization_id', None),
-                "deleted": getattr(result, 'deleted', False),
-                "partner_info": partner_info if partner_info else None,
-                "contact_info": contact_info if contact_info else None,
-                "communication_protocols": communication_protocols if communication_protocols else []
+        # Flatten contact_info with contact_ prefix to match create/update input schema
+        flat_contact = {}
+        if contact_info:
+            contact_key_map = {
+                "name": "contact_name",
+                "email": "contact_email",
+                "phone": "contact_phone",
+                "fax": "contact_fax",
+                "address1": "contact_address",
+                "address2": "contact_address2",
+                "city": "contact_city",
+                "state": "contact_state",
+                "country": "contact_country",
+                "postalcode": "contact_postalcode",
             }
+            flat_contact = {contact_key_map.get(k, f"contact_{k}"): v for k, v in contact_info.items()}
+
+        # Prefix protocol fields to match create/update input schema
+        def _prefix_protocol_fields(proto_dict):
+            prefix = proto_dict.get("protocol", "")
+            return {(f"{prefix}_{k}" if k != "protocol" else k): v for k, v in proto_dict.items()}
+
+        prefixed_protocols = [_prefix_protocol_fields(p) for p in communication_protocols]
+
+        tp = {
+            "component_id": retrieved_id,
+            "name": getattr(result, 'name', getattr(result, 'component_name', None)),
+            "standard": getattr(result, 'standard', None),
+            "classification": getattr(result, 'classification', None),
+            "folder_id": getattr(result, 'folder_id', None),
+            "folder_name": getattr(result, 'folder_name', None),
+            "organization_id": getattr(result, 'organization_id', None),
+            "deleted": getattr(result, 'deleted', False),
+            **(partner_info if partner_info else {}),
+            **flat_contact,
+            "communication_protocols": prefixed_protocols if prefixed_protocols else []
         }
+        # Remove None values for cleaner output
+        tp = {k: v for k, v in tp.items() if v is not None}
+
+        return {"_success": True, "trading_partner": tp}
 
     except Exception as e:
         return {
