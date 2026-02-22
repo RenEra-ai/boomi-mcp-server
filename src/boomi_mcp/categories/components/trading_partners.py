@@ -42,9 +42,25 @@ def _ga(obj, *attrs):
 def _header_to_dict(h):
     """Convert SDK Header model object to dict with 4-level fallback."""
     kw = getattr(h, '_kwargs', {})
+    header_name = (
+        _ga(h, 'header_name', 'headerName')
+        or kw.get('headerName')
+        or kw.get('header_name')
+        or _ga(h, 'header_field_name', 'headerFieldName')
+        or kw.get('headerFieldName')
+        or kw.get('header_field_name')
+    )
+    header_value = (
+        _ga(h, 'header_value', 'headerValue')
+        or kw.get('headerValue')
+        or kw.get('header_value')
+        or _ga(h, 'target_property_name', 'targetPropertyName')
+        or kw.get('targetPropertyName')
+        or kw.get('target_property_name')
+    )
     return {
-        "headerName": _ga(h, 'header_name', 'headerName') or kw.get('headerName') or _ga(h, 'header_field_name', 'headerFieldName') or kw.get('headerFieldName'),
-        "headerValue": _ga(h, 'header_value', 'headerValue') or kw.get('headerValue') or _ga(h, 'target_property_name', 'targetPropertyName') or kw.get('targetPropertyName')
+        "headerName": header_name,
+        "headerValue": header_value
     }
 
 
@@ -659,7 +675,8 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         legacy = _ga(as2_pi, 'enabled_legacy_smime', 'enabledLegacySMIME')
                         if legacy is None:
                             legacy = _ga(as2_pi, 'legacy_smime', 'legacySMIME')
-                        as2_info["legacy_smime"] = legacy
+                        if legacy is not None:
+                            as2_info["legacy_smime"] = legacy
                         # Certificates stored in PartnerInfo (CREATE stores them here)
                         enc_cert = _ga(as2_pi, 'encryption_public_certificate', 'encryptionPublicCertificate')
                         if enc_cert:
@@ -739,7 +756,8 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         legacy = _ga(my_info, 'enabled_legacy_smime', 'enabledLegacySMIME')
                         if legacy is None:
                             legacy = _ga(my_info, 'legacy_smime', 'legacySMIME')
-                        as2_info.setdefault("legacy_smime", legacy)
+                        if legacy is not None and "legacy_smime" not in as2_info:
+                            as2_info["legacy_smime"] = legacy
                         enc_cert = _ga(my_info, 'encryption_private_certificate', 'encryptionPrivateCertificate')
                         if enc_cert:
                             as2_info.setdefault("encrypt_alias", _ga(enc_cert, 'component_id', 'componentId') or getattr(enc_cert, 'alias', None))
