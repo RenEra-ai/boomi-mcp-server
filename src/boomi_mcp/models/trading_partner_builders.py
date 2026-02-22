@@ -498,15 +498,15 @@ def _normalize_request_header(h):
     """Normalize a request header dict to Boomi API format.
 
     Accepts multiple input formats and normalizes to:
-        {"@type": "Header", "headerName": "...", "headerValue": "..."}
+        {"@type": "Header", "headerFieldName": "...", "targetPropertyName": "..."}
 
-    Users may pass headerFieldName/targetPropertyName (the response header format)
-    or headerName/headerValue (the correct request header format). This function
-    accepts both and produces the correct output.
+    Users may pass headerName/headerValue (friendly aliases) or
+    headerFieldName/targetPropertyName (the SDK field names). This function
+    accepts both and produces the correct API output.
     """
     name = h.get('headerName') or h.get('headerFieldName') or h.get('header_name') or h.get('header_field_name') or ''
     value = h.get('headerValue') or h.get('targetPropertyName') or h.get('header_value') or h.get('target_property_name') or ''
-    return {'@type': 'Header', 'headerName': name, 'headerValue': value}
+    return {'@type': 'Header', 'headerFieldName': name, 'targetPropertyName': value}
 
 
 def _normalize_response_header(h):
@@ -1101,7 +1101,7 @@ def build_as2_communication_options(**kwargs):
         if as2_partner_id:
             my_company_info['as2Id'] = as2_partner_id
         if legacy_smime is not None:
-            my_company_info['legacySMIME'] = str(legacy_smime).lower() == 'true'
+            my_company_info['enabledLegacySMIME'] = str(legacy_smime).lower() == 'true'
         # MyCompany uses PrivateCertificate (not Public)
         if encrypt_alias:
             my_company_info['encryptionPrivateCertificate'] = {'@type': 'PrivateCertificate', 'componentId': encrypt_alias}
