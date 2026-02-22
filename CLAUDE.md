@@ -19,9 +19,9 @@ This MCP server provides secure Boomi API access for Claude Code with:
 ### Rule 1: NEVER Modify Main Directly
 - All changes MUST be made in dev branch first, then merged to main
 - Never commit or push directly to main — only merge from dev
-- Test locally using `server_local.py` before any merge
+- Test locally using `test_mcp_calls.py` before any merge
 - Main branch is for production-ready, tested code only
-- **NEVER merge dev → main until operability is confirmed via dev branch tests**
+- **NEVER merge dev → main until operability is confirmed via `python test_mcp_calls.py`**
 
 ### Rule 2: Dev Has Only server_local.py — Merge Manual for Main
 - `server.py` does NOT exist on dev — `server_local.py` is the single source of truth
@@ -48,19 +48,22 @@ Cherry-picks and conflict resolutions can silently miss companion changes in oth
 ### Dev Branch
 - **Purpose**: Development and testing of new features
 - **Deployment**: NOT deployed to Cloud Run
-- **Testing**: ⚠️ **LOCAL MCP SERVER ONLY** - use `server_local.py` for testing
+- **Testing**: ⚠️ **USE `test_mcp_calls.py`** — no MCP server restart needed
 - **Workflow**:
   ```bash
   # Switch to dev branch
   git checkout dev
 
-  # Test changes using local MCP server
-  ./run_local.sh
-  # OR
-  claude mcp add boomi-local stdio -- python3 /path/to/server_local.py
+  # Test changes — calls real Boomi API, same code path as MCP tools
+  python test_mcp_calls.py                     # run ALL tests (create/update/delete included)
+  python test_mcp_calls.py --skip-destructive  # read-only tests only (safe, fast)
+  python test_mcp_calls.py --tool tp           # trading partners only
+  python test_mcp_calls.py --tool process      # processes only
+  python test_mcp_calls.py --tool org          # organizations only
+  python test_mcp_calls.py --tool account      # account info only
   ```
 
-**IMPORTANT**: Never push dev branch changes directly to production. Always test locally first on dev branch.
+**IMPORTANT**: Never push dev branch changes directly to production. Always run `python test_mcp_calls.py` on dev branch first.
 
 ---
 
@@ -289,36 +292,44 @@ GCP_PROJECT_ID=boomimcp
 
 ## Local Development
 
-### Fast Local Development (Recommended for Testing New Tools)
+### Fast Local Testing (Recommended — No MCP Server Needed)
 
 **⚠️ USE THIS FOR DEV BRANCH TESTING**
 
-**For rapid iteration without Docker or OAuth:**
+**Test harness calls real Boomi API through the exact same code path the LLM uses, without starting the MCP server:**
 
 ```bash
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Run the local development server (stdio mode, no auth)
+# 2. Store credentials (one-time setup via local MCP server)
 ./run_local.sh
+# Then use set_boomi_credentials tool to add your Boomi credentials
+# Credentials are stored in ~/.boomi_mcp_local_secrets.json
 
-# OR use directly with Claude Code:
-claude mcp add boomi-local stdio -- python3 /path/to/boomi-mcp-server/server_local.py
-
-# 3. Store credentials using MCP tool
-# Use the set_boomi_credentials tool to add your Boomi credentials
+# 3. Run tests (no server needed after credentials are stored)
+python test_mcp_calls.py                     # full suite (all tools, all actions)
+python test_mcp_calls.py --skip-destructive  # read-only (safe for quick checks)
+python test_mcp_calls.py --tool tp           # trading partners only
+python test_mcp_calls.py --tool process      # processes only
+python test_mcp_calls.py --tool org          # organizations only
+python test_mcp_calls.py --tool account      # account info only
+python test_mcp_calls.py --tool parse        # JSON/YAML parsing only (no API)
 ```
 
 **Features:**
-- ✅ No OAuth authentication (local testing only)
-- ✅ No Docker build required
-- ✅ Fast startup (instant reload)
-- ✅ Local file-based credential storage (~/.boomi_mcp_local_secrets.json)
-- ✅ All MCP tools available: list_boomi_profiles, set_boomi_credentials, delete_boomi_profile, boomi_account_info
-- ⚠️ **NOT FOR PRODUCTION** - Use server.py with OAuth for production
+- ✅ No MCP server restart needed — just run the script
+- ✅ Real Boomi API calls — validates actual behavior
+- ✅ Same code path as LLM — imports action functions directly
+- ✅ All tools covered: account_info, trading_partner, process, organization
+- ✅ All actions covered: list, get, create, update, delete, analyze_usage
+- ✅ Validation error tests: missing params, bad IDs, invalid JSON
+- ✅ Auto-cleanup: test resources created with `_TEST_` prefix are deleted
+- ✅ Colored PASS/FAIL summary with per-tool breakdown
 
 **File Structure:**
-- `server_local.py` - Simplified server without OAuth
+- `test_mcp_calls.py` - Test harness (gitignored, dev-only)
+- `server_local.py` - Simplified server without OAuth (for credential setup)
 - `src/boomi_mcp/local_secrets.py` - Local file-based credential storage
 - `run_local.sh` - Convenience script to run local server
 
@@ -590,9 +601,35 @@ gcloud run services describe boomi-mcp-server --region us-central1 --project boo
 
 ---
 
-## Testing the MCP Server
+## Testing
 
-### From Claude Code
+### Dev Branch: Test Harness (No MCP Server)
+
+**Always run before merging to main:**
+
+```bash
+# Full test suite — creates test resources, validates, cleans up
+python test_mcp_calls.py
+
+# Read-only mode — safe, fast, no side effects
+python test_mcp_calls.py --skip-destructive
+
+# Filter by tool
+python test_mcp_calls.py --tool tp           # trading partners
+python test_mcp_calls.py --tool process      # processes
+python test_mcp_calls.py --tool org          # organizations
+```
+
+The harness calls the same action functions (`manage_trading_partner_action`, `manage_process_action`, `manage_organization_action`) with the same parameter shapes that `server_local.py` passes when the LLM calls a tool. It reads credentials from `~/.boomi_mcp_local_secrets.json`.
+
+**When adding a new MCP tool or action**, add matching test cases to `test_mcp_calls.py`:
+1. Add a `test_<tool_name>()` function that calls the action function for every action
+2. Cover: happy path, every optional parameter combo, all validation errors (missing required params), invalid action
+3. For destructive actions (create/update/delete): create with `_TEST_` prefix, validate, then clean up
+4. Gate destructive tests behind `skip_destructive` flag
+5. Register the new test function in `main()` with a `--tool` filter key
+
+### Main Branch: Production MCP Server
 
 ```bash
 # Add MCP server
@@ -646,7 +683,7 @@ claude mcp add --transport http boomi https://boomi.renera.ai/mcp
   - Migrated to typed query models for list operations
   - All functions now use `id_` attribute pattern from SDK
 - ✅ Established dev/main branch workflow for testing
-  - Dev branch: Local testing only with server_local.py
+  - Dev branch: `python test_mcp_calls.py` (no MCP server restart needed)
   - Main branch: Automatic deployment to production
 - ✅ Enabled OAuth refresh tokens for long-lived sessions (no auto-disconnect)
 - ✅ Switched to BoomiOAuthProvider for better OAuth control
@@ -666,7 +703,7 @@ claude mcp add --transport http boomi https://boomi.renera.ai/mcp
 
 ## Last Updated
 
-- **Date**: 2025-10-28
+- **Date**: 2026-02-22
 - **Status**: ✅ Production (stable)
 - **CI/CD**: ✅ Fully automated via GitHub
 - **Deployment**: Automatic on push to main

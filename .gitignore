@@ -88,5 +88,8 @@ TRADING_PARTNER_VERIFICATION.md
 test_*.py
 analyze_*.py
 
+# Plans (local only)
+docs/plans/
+
 # Agents (local only)
 agents/
