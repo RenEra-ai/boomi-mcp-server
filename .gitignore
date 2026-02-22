@@ -87,3 +87,6 @@ TRADING_PARTNER_VERIFICATION.md
 # Test files (local only)
 test_*.py
 analyze_*.py
+
+# Agents (local only)
+agents/

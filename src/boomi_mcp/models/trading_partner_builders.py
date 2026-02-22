@@ -934,6 +934,9 @@ def build_as2_communication_options(**kwargs):
     Returns dict (not SDK model) - API accepts minimal structure
     """
     classification = kwargs.get('classification', 'tradingpartner')
+    # Normalize enum to string (e.g. TradingPartnerComponentClassification.MYCOMPANY -> 'mycompany')
+    if hasattr(classification, 'value'):
+        classification = classification.value
     is_mycompany = isinstance(classification, str) and classification.lower() == 'mycompany'
 
     url = kwargs.get('as2_url')
