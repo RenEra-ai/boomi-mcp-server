@@ -1593,6 +1593,12 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         if existing_alias:
                                             as2_params['as2_mdn_alias'] = existing_alias
 
+                    cls = updates.get('classification', None)
+                    if not cls:
+                        raw_cls = getattr(existing_tp, 'classification', None)
+                        cls = raw_cls.value if hasattr(raw_cls, 'value') else raw_cls
+                    if cls:
+                        as2_params['classification'] = cls
                     as2_opts = build_as2_communication_options(**as2_params)
                     if as2_opts:
                         comm_dict["AS2CommunicationOptions"] = as2_opts
@@ -1653,7 +1659,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                         existing_alias = getattr(existing_ssl_opts, 'trustedcertalias', None)
                                         if existing_alias:
                                             http_params['http_trusted_cert_alias'] = existing_alias
-                                if 'http_cookie_scope' not in http_params:
+                                if 'http_cookie_scope' not in http_params and 'http_cookie_scope' not in HTTP_UPDATE_DENYLIST:
                                     existing_cookie = _ga(existing_settings, 'cookie_scope', 'cookieScope')
                                     if existing_cookie:
                                         http_params['http_cookie_scope'] = existing_cookie
@@ -2362,6 +2368,12 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     if "username" in as2:
                         as2_params["as2_username"] = as2["username"]
                     if as2_params:
+                        cls = updates.get('classification', None)
+                        if not cls:
+                            raw_cls = getattr(existing_tp, 'classification', None)
+                            cls = raw_cls.value if hasattr(raw_cls, 'value') else raw_cls
+                        if cls:
+                            as2_params['classification'] = cls
                         as2_opts = build_as2_communication_options(**as2_params)
                         if as2_opts:
                             comm_dict["AS2CommunicationOptions"] = as2_opts
