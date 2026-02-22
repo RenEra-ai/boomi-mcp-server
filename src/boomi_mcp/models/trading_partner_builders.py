@@ -494,6 +494,32 @@ def build_sftp_communication_options(**kwargs):
     return result
 
 
+def _normalize_request_header(h):
+    """Normalize a request header dict to Boomi API format.
+
+    Accepts multiple input formats and normalizes to:
+        {"@type": "Header", "headerName": "...", "headerValue": "..."}
+
+    Users may pass headerFieldName/targetPropertyName (the response header format)
+    or headerName/headerValue (the correct request header format). This function
+    accepts both and produces the correct output.
+    """
+    name = h.get('headerName') or h.get('headerFieldName') or h.get('header_name') or ''
+    value = h.get('headerValue') or h.get('targetPropertyName') or h.get('header_value') or ''
+    return {'@type': 'Header', 'headerName': name, 'headerValue': value}
+
+
+def _normalize_response_header(h):
+    """Normalize a response header mapping dict to Boomi API format.
+
+    Accepts multiple input formats and normalizes to:
+        {"@type": "Header", "headerFieldName": "...", "targetPropertyName": "..."}
+    """
+    field = h.get('headerFieldName') or h.get('headerName') or h.get('header_field_name') or ''
+    target = h.get('targetPropertyName') or h.get('headerValue') or h.get('target_property_name') or ''
+    return {'@type': 'Header', 'headerFieldName': field, 'targetPropertyName': target}
+
+
 def build_http_communication_options(**kwargs):
     """Build HTTP protocol communication options.
 
@@ -800,10 +826,10 @@ def build_http_communication_options(**kwargs):
     # Add headers/path elements to send options
     # Boomi API requires @type annotations on nested header/element objects
     if parsed_request_headers:
-        typed_headers = [dict(h, **{'@type': ''}) if '@type' not in h else h for h in parsed_request_headers]
+        typed_headers = [_normalize_request_header(h) for h in parsed_request_headers]
         send_options['requestHeaders'] = {'@type': 'HttpRequestHeaders', 'header': typed_headers}
     if parsed_response_header_mapping:
-        typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
+        typed_headers = [_normalize_response_header(h) for h in parsed_response_header_mapping]
         send_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
     if parsed_reflect_headers:
         typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_reflect_headers]
@@ -844,10 +870,10 @@ def build_http_communication_options(**kwargs):
         # Copy headers/path elements to get options too (with @type annotations)
         get_rh = parsed_get_request_headers if parsed_get_request_headers else parsed_request_headers
         if get_rh:
-            typed_headers = [dict(h, **{'@type': ''}) if '@type' not in h else h for h in get_rh]
+            typed_headers = [_normalize_request_header(h) for h in get_rh]
             get_options['requestHeaders'] = {'@type': 'HttpRequestHeaders', 'header': typed_headers}
         if parsed_response_header_mapping:
-            typed_headers = [dict(h, **{'@type': 'Header'}) if '@type' not in h else h for h in parsed_response_header_mapping]
+            typed_headers = [_normalize_response_header(h) for h in parsed_response_header_mapping]
             get_options['responseHeaderMapping'] = {'@type': 'HttpResponseHeaderMapping', 'header': typed_headers}
         if parsed_reflect_headers:
             typed_elements = [dict(e, **{'@type': 'Element'}) if '@type' not in e else e for e in parsed_reflect_headers]
