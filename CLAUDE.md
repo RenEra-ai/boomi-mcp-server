@@ -19,22 +19,22 @@ This MCP server provides secure Boomi API access for Claude Code with:
 ### Rule 1: NEVER Modify Main Directly
 - All changes MUST be made in dev branch first, then merged to main
 - Never commit or push directly to main — only merge from dev
-- Test locally using `test_mcp_calls.py` before any merge
+- Test locally before any merge (see Testing section below)
 - Main branch is for production-ready, tested code only
-- **NEVER merge dev → main until operability is confirmed via `python test_mcp_calls.py`**
 
-### Rule 2: Dev Has Only server_local.py — Merge Manual for Main
-- `server.py` does NOT exist on dev — `server_local.py` is the single source of truth
+### Rule 2: One server.py, Both Branches
+- `server.py` is the **single source of truth** on both dev and main
+- `BOOMI_LOCAL=true` env var switches to local mode (no OAuth, local secrets, stdio)
+- Production mode (default): OAuth, GCP Secret Manager, HTTP transport
+- `git merge dev` to main just works — no manual edits needed
 - `CLAUDE.md` exists ONLY on dev — never add it to main
-- `src/boomi_mcp/` changes merge automatically with `git merge dev`
-- When MCP tool code changes in `server_local.py`, apply substitutions to `server.py` on main after merging (see "Merge Manual" section below)
 
 ### Rule 3: Verify Full Sync After Every Merge to Main
-After cherry-picking or merging from dev to main, ALWAYS run:
+After merging from dev to main, verify shared source files are in sync:
 ```bash
 git diff dev main -- src/boomi_mcp/
 ```
-Cherry-picks and conflict resolutions can silently miss companion changes in other files. Only `local_secrets.py` should differ (dev-only). If any other shared source file differs, copy the dev version to main before pushing.
+Only `local_secrets.py` should differ (dev-only). If any other shared source file differs, copy the dev version to main before pushing.
 
 ---
 
@@ -48,111 +48,20 @@ Cherry-picks and conflict resolutions can silently miss companion changes in oth
 ### Dev Branch
 - **Purpose**: Development and testing of new features
 - **Deployment**: NOT deployed to Cloud Run
-- **Testing**: ⚠️ **USE `test_mcp_calls.py`** — no MCP server restart needed
+- **Testing**: Import `server.py` with `BOOMI_LOCAL=true` and call tool functions via `.fn()`
 - **Workflow**:
-  ```bash
-  # Switch to dev branch
-  git checkout dev
+  ```python
+  # Quick test — no MCP server, no restart needed
+  import os; os.environ["BOOMI_LOCAL"] = "true"
+  from server import list_boomi_profiles, manage_trading_partner
 
-  # Test changes — calls real Boomi API, same code path as MCP tools
-  python test_mcp_calls.py                     # run ALL tests (create/update/delete included)
-  python test_mcp_calls.py --skip-destructive  # read-only tests only (safe, fast)
-  python test_mcp_calls.py --tool tp           # trading partners only
-  python test_mcp_calls.py --tool process      # processes only
-  python test_mcp_calls.py --tool org          # organizations only
-  python test_mcp_calls.py --tool account      # account info only
+  result = list_boomi_profiles.fn()
+  result = manage_trading_partner.fn(profile="dev", action="list")
   ```
 
-**IMPORTANT**: Never push dev branch changes directly to production. Always run `python test_mcp_calls.py` on dev branch first.
+**IMPORTANT**: Never push dev branch changes directly to production. Test via `.fn()` calls on dev branch first.
 
 ---
-
-## Merge Manual: server_local.py (dev) → server.py (main)
-
-### When is this needed?
-
-- **Shared modules only** (`src/boomi_mcp/` changes): Just `git merge dev` — NO server.py edits needed
-- **MCP tool changes** (new tools, changed signatures, changed docstrings): Follow the steps below
-
-### Step-by-step: applying tool changes from server_local.py to server.py
-
-#### Step 1: Merge dev → main
-```bash
-git checkout main
-git merge dev
-```
-
-This automatically brings all `src/boomi_mcp/` changes, new files, deleted files.
-
-**If no MCP tool code changed in server_local.py**: you're done. Push and stop.
-
-**If MCP tool code changed**: continue to Step 2.
-
-#### Step 2: Identify what changed
-```bash
-git diff main~1..main -- server_local.py
-```
-
-Look for changes in tool sections: `manage_trading_partner`, `manage_process`, `manage_organization`, `boomi_account_info`, `list_boomi_profiles`, or any NEW tool functions.
-
-#### Step 3: Copy changed tool sections and apply substitutions
-
-For each changed tool, copy the function body from `server_local.py` into `server.py`, then apply:
-
-| Find (server_local.py) | Replace with (server.py) |
-|---|---|
-| `TEST_USER` | `get_user_subject()` |
-| `"for local user:"` | `"by user:"` |
-| `"called for local user:"` | `"called by user:"` |
-| `"(1 consolidated tool, local)"` | `"(1 consolidated tool)"` |
-| `"# --- Trading Partner MCP Tools (Local) ---"` | `"# --- Trading Partner MCP Tools ---"` |
-| `"# --- Process MCP Tools (Local) ---"` | `"# --- Process MCP Tools ---"` |
-| `"# --- Organization MCP Tools (Local) ---"` | `"# --- Organization MCP Tools ---"` |
-
-#### Step 4: boomi_account_info special handling
-
-This tool has additional differences. Only copy the parts you actually changed (new parameters, new logic), don't replace the entire function. Keep server.py's web portal messages, error messages, and `{subject}` log references.
-
-#### Step 5: Credential tools
-
-- `list_boomi_profiles`: apply `TEST_USER` → `get_user_subject()` substitution only
-- `set_boomi_credentials` / `delete_boomi_profile`: **commented out** on main — keep them commented
-
-#### Step 6: Do NOT touch these server.py-only sections
-
-- OAuth setup (GoogleProvider, MongoDBStore, FernetEncryptionWrapper)
-- `get_user_subject()` function
-- Web UI routes (`/web/login`, `/web/callback`, `/`, `/api/credentials`, etc.)
-- `__main__` block (HTTP transport, OAuth endpoint printing)
-
-#### Step 7: Verify docstring sync
-If tool docstrings changed, compare the updated sections between `server_local.py` and `server.py`:
-```bash
-# Extract and diff the manage_trading_partner docstring from both files
-grep -A 30 "Protocol-specific keys" server_local.py > /tmp/doc_local.txt
-git show main:server.py | grep -A 30 "Protocol-specific keys" > /tmp/doc_main.txt
-diff /tmp/doc_local.txt /tmp/doc_main.txt
-```
-The docstrings must be identical (no substitutions needed for docstrings).
-
-#### Step 8: Commit and push
-```bash
-git add server.py
-git commit -m "sync server.py MCP tools with dev"
-git push origin main
-```
-
-### Quick reference: what to do per change type
-
-| Change type | Action |
-|---|---|
-| New/changed code in `src/boomi_mcp/` | Just `git merge dev` — done |
-| New files added (tests, modules) | Just `git merge dev` — done |
-| New MCP tool added to server_local.py | Copy tool into server.py, apply substitutions |
-| Tool signature/logic changed | Copy changed parts into server.py, apply substitutions |
-| Tool docstring changed | Copy docstring into server.py (no substitutions needed for docstrings), verify identical |
-| boomi_account_info changed | Copy only changed parts, keep web portal messages |
-| server_local.py NOT changed | Just `git merge dev` — done |
 
 ---
 
@@ -165,28 +74,12 @@ git checkout main
 git merge dev
 ```
 
-This brings all changes automatically. If MCP tool code changed in `server_local.py`, follow the "Merge Manual" section above to apply substitutions to `server.py`.
-
-### Key Principle
-
-Main branch contains production-critical features (OAuth, GCP Secret Manager, Web UI). Always preserve these when merging. The `server.py` on main has sections that do NOT exist on dev — never delete them.
+This brings all changes automatically. No manual edits to `server.py` needed — both branches use the same unified file. `BOOMI_LOCAL` is never set on Cloud Run, so production behavior is unchanged.
 
 ### Conflict Resolution Guidelines
 
 When merge conflicts say "deleted in HEAD and modified in dev":
-- `server_local.py` → resolve by removing from main: `git rm --cached server_local.py`
 - `CLAUDE.md` → resolve by removing from main: `git rm --cached CLAUDE.md`
-- `server.py` → resolve by keeping main's version: `git checkout HEAD -- server.py`
-
-When conflicts occur in `server.py`:
-
-**OAuth Section**:
-- KEEP main's: `GoogleProvider`, `MongoDBStore`, `FernetEncryptionWrapper`
-- Never overwrite with dev code
-
-**Tool Registrations**:
-- ADD: New tool registrations from dev (with substitutions applied)
-- KEEP: Existing annotations (`readOnlyHint`, `openWorldHint`)
 
 ### Rollback Plan
 
@@ -292,46 +185,45 @@ GCP_PROJECT_ID=boomimcp
 
 ## Local Development
 
-### Fast Local Testing (Recommended — No MCP Server Needed)
+### Direct Testing (Recommended — No MCP Server Needed)
 
 **⚠️ USE THIS FOR DEV BRANCH TESTING**
 
-**Test harness calls real Boomi API through the exact same code path the LLM uses, without starting the MCP server:**
+**Import `server.py` with `BOOMI_LOCAL=true` and call tool functions via `.fn()` — same code path as production, no MCP server or restart needed:**
 
+```python
+import os, json
+os.environ["BOOMI_LOCAL"] = "true"
+from server import list_boomi_profiles, boomi_account_info
+from server import manage_trading_partner, manage_process, manage_organization
+
+# Call any tool function directly
+result = list_boomi_profiles.fn()
+result = boomi_account_info.fn(profile="dev")
+result = manage_trading_partner.fn(profile="dev", action="list", config='{"standard":"x12"}')
+result = manage_process.fn(profile="dev", action="list")
+result = manage_organization.fn(profile="dev", action="list")
+```
+
+**One-time credential setup:**
 ```bash
-# 1. Install dependencies
 pip install -r requirements.txt
-
-# 2. Store credentials (one-time setup via local MCP server)
 ./run_local.sh
 # Then use set_boomi_credentials tool to add your Boomi credentials
 # Credentials are stored in ~/.boomi_mcp_local_secrets.json
-
-# 3. Run tests (no server needed after credentials are stored)
-python test_mcp_calls.py                     # full suite (all tools, all actions)
-python test_mcp_calls.py --skip-destructive  # read-only (safe for quick checks)
-python test_mcp_calls.py --tool tp           # trading partners only
-python test_mcp_calls.py --tool process      # processes only
-python test_mcp_calls.py --tool org          # organizations only
-python test_mcp_calls.py --tool account      # account info only
-python test_mcp_calls.py --tool parse        # JSON/YAML parsing only (no API)
 ```
 
-**Features:**
-- ✅ No MCP server restart needed — just run the script
-- ✅ Real Boomi API calls — validates actual behavior
-- ✅ Same code path as LLM — imports action functions directly
-- ✅ All tools covered: account_info, trading_partner, process, organization
-- ✅ All actions covered: list, get, create, update, delete, analyze_usage
-- ✅ Validation error tests: missing params, bad IDs, invalid JSON
-- ✅ Auto-cleanup: test resources created with `_TEST_` prefix are deleted
-- ✅ Colored PASS/FAIL summary with per-tool breakdown
+**How it works:**
+- `@mcp.tool()` wraps functions in `FunctionTool` objects — `.fn` gives the original function
+- `BOOMI_LOCAL=true` → uses `LocalSecretsBackend`, skips cloud imports, no OAuth
+- Importing `server.py` creates the FastMCP instance and registers tools (lightweight)
+- Does NOT start server (no `mcp.run()`) — only happens in `__main__`
+- Changes to `server.py` take effect immediately on next script run
 
 **File Structure:**
-- `test_mcp_calls.py` - Test harness (gitignored, dev-only)
-- `server_local.py` - Simplified server without OAuth (for credential setup)
+- `server.py` - Unified server (local + production, controlled by `BOOMI_LOCAL` env var)
 - `src/boomi_mcp/local_secrets.py` - Local file-based credential storage
-- `run_local.sh` - Convenience script to run local server
+- `run_local.sh` - Convenience script to run local MCP server (stdio)
 
 ### Full Local Development (With OAuth)
 
@@ -377,11 +269,13 @@ docker run -p 8080:8080 \
 ### File Structure
 ```
 boomi-mcp-server/
-├── server.py              # Core MCP server logic with OAuth
-├── server_http.py         # HTTP wrapper with SessionMiddleware
+├── server.py              # Unified MCP server (BOOMI_LOCAL=true for local, default for production)
+├── server_http.py         # HTTP wrapper with SessionMiddleware (production only)
+├── run_local.sh           # Convenience script for local MCP server (stdio)
 ├── src/boomi_mcp/
-│   ├── cloud_auth.py      # OAuth providers
-│   └── cloud_secrets.py   # Storage backends (GCP/AWS/Azure)
+│   ├── local_secrets.py   # Local file-based credential storage (dev only)
+│   ├── cloud_secrets.py   # Storage backends (GCP/AWS/Azure)
+│   └── categories/        # MCP tool action functions
 ├── templates/
 │   ├── credentials.html   # Web UI for credential management
 │   └── login.html         # OAuth login page
@@ -603,31 +497,21 @@ gcloud run services describe boomi-mcp-server --region us-central1 --project boo
 
 ## Testing
 
-### Dev Branch: Test Harness (No MCP Server)
+### Dev Branch: Direct .fn() Testing (No MCP Server)
 
-**Always run before merging to main:**
+**Test by importing tool functions from `server.py` and calling `.fn()`:**
 
-```bash
-# Full test suite — creates test resources, validates, cleans up
-python test_mcp_calls.py
+```python
+import os, json
+os.environ["BOOMI_LOCAL"] = "true"
+from server import manage_trading_partner
 
-# Read-only mode — safe, fast, no side effects
-python test_mcp_calls.py --skip-destructive
-
-# Filter by tool
-python test_mcp_calls.py --tool tp           # trading partners
-python test_mcp_calls.py --tool process      # processes
-python test_mcp_calls.py --tool org          # organizations
+# Same parameters as MCP tool calls
+result = manage_trading_partner.fn(profile="dev", action="list", config='{"standard":"x12"}')
+print(json.dumps(result, indent=2))
 ```
 
-The harness calls the same action functions (`manage_trading_partner_action`, `manage_process_action`, `manage_organization_action`) with the same parameter shapes that `server_local.py` passes when the LLM calls a tool. It reads credentials from `~/.boomi_mcp_local_secrets.json`.
-
-**When adding a new MCP tool or action**, add matching test cases to `test_mcp_calls.py`:
-1. Add a `test_<tool_name>()` function that calls the action function for every action
-2. Cover: happy path, every optional parameter combo, all validation errors (missing required params), invalid action
-3. For destructive actions (create/update/delete): create with `_TEST_` prefix, validate, then clean up
-4. Gate destructive tests behind `skip_destructive` flag
-5. Register the new test function in `main()` with a `--tool` filter key
+**The boomi-qa-tester agent** writes targeted test scripts using this pattern. Use it to validate changes before merging to main.
 
 ### Main Branch: Production MCP Server
 
@@ -677,14 +561,16 @@ claude mcp add --transport http boomi https://boomi.renera.ai/mcp
 - **URL**: https://boomi.renera.ai
 
 ### Recent Changes
+- ✅ Unified server.py — one file on both branches, `BOOMI_LOCAL=true` for local mode
+  - Eliminated server_local.py and the Merge Manual process
+  - `git merge dev` to main just works, no manual edits
+  - Testing via direct `.fn()` calls — no MCP server restart needed
+  - Same code path for local and production (SDK init, JSON parsing, action calls)
 - ✅ Refactored trading partner tools to align with boomi-python SDK examples (dev branch)
   - Uses XML-based Component API instead of trading_partner_component API
   - Added comprehensive XML builders for all standards (X12, EDIFACT, HL7, RosettaNet, Custom)
   - Migrated to typed query models for list operations
   - All functions now use `id_` attribute pattern from SDK
-- ✅ Established dev/main branch workflow for testing
-  - Dev branch: `python test_mcp_calls.py` (no MCP server restart needed)
-  - Main branch: Automatic deployment to production
 - ✅ Enabled OAuth refresh tokens for long-lived sessions (no auto-disconnect)
 - ✅ Switched to BoomiOAuthProvider for better OAuth control
 - ✅ Migrated to GitHub-based CI/CD

@@ -5,7 +5,7 @@
 cd "$(dirname "$0")"
 
 echo "=========================================="
-echo "🚀 Starting Boomi MCP Server (Local Dev)"
+echo "Starting Boomi MCP Server (Local Dev)"
 echo "=========================================="
 echo ""
 echo "This is the LOCAL DEVELOPMENT version"
@@ -23,5 +23,5 @@ if [ ! -d ".venv" ]; then
     exit 1
 fi
 
-# Use virtual environment's Python
-.venv/bin/python server_local.py
+# Use virtual environment's Python with BOOMI_LOCAL flag
+BOOMI_LOCAL=true .venv/bin/python server.py
