@@ -439,13 +439,28 @@ if manage_trading_partner_action:
             Organization: organization_id
 
             Protocol-specific keys (use action="get" to see all fields for a protocol):
-                Disk: disk_directory, disk_get_directory, disk_send_directory, ... (9 fields)
-                FTP: ftp_host, ftp_port, ftp_username, ftp_password, ... (17 fields)
-                SFTP: sftp_host, sftp_port, sftp_username, sftp_password, ... (22 fields)
-                HTTP: http_url, http_username, http_authentication_type, ... (40+ fields incl. OAuth)
-                AS2: as2_url, as2_signed, as2_encrypted, ... (30 fields)
+                Disk: disk_directory (alias: sets both get+send), disk_get_directory, disk_send_directory, ... (9 fields)
+                FTP: ftp_host, ftp_port, ftp_username, ftp_password, ftp_remote_directory (alias: ftp_directory),
+                     ftp_ssl_mode (NONE|EXPLICIT|IMPLICIT; alias: ftp_use_ssl true→EXPLICIT), ... (17 fields)
+                SFTP: sftp_host, sftp_port, sftp_username, sftp_password, sftp_remote_directory (alias: sftp_directory),
+                      sftp_ssh_key_auth (alias: sftp_use_key_auth), sftp_known_host_entry (alias: sftp_known_hosts_file), ... (22 fields)
+                HTTP: http_url, http_username, http_authentication_type (NONE|BASIC|PASSWORD_DIGEST|CUSTOM|OAUTH|OAUTH2),
+                      http_data_content_type (alias: http_content_type), http_connect_timeout (alias: http_connection_timeout),
+                      http_method_type (alias: http_send_method), http_client_ssl_alias (alias: http_ssl_cert_id), ... (40+ fields incl. OAuth)
+                AS2: as2_url, as2_signed, as2_encrypted, as2_signing_digest_alg (alias: as2_sign_algorithm; SHA1|SHA256|SHA384|SHA512),
+                     as2_request_mdn (alias: as2_mdn_required), as2_sign_alias (alias: as2_signing_cert_id),
+                     as2_encrypt_alias (alias: as2_encryption_cert_id), as2_data_content_type (alias: as2_content_type), ... (30 fields)
                 MLLP: mllp_host, mllp_port, mllp_use_ssl, ... (13 fields)
                 OFTP: oftp_host, oftp_port, oftp_tls, ... (14 fields)
+
+            Enum values:
+                edifact_test_indicator / odette_test_indicator: "1" (test), "NA" (production). "0" is auto-mapped to "NA".
+                ftp_ssl_mode: "NONE", "EXPLICIT", "IMPLICIT"
+                as2_signing_digest_alg: "SHA1", "SHA256", "SHA384", "SHA512"
+                as2_encryption_algorithm: "tripledes", "rc2", "aes128", "aes192", "aes256"
+
+            Dropped fields (no Boomi API equivalent):
+                as2_from, as2_to (use as2_partner_id instead), http_max_redirects, http_response_content_type
 
         Returns:
             Action result with success status and data/error

@@ -22,6 +22,7 @@ Usage:
     )
 """
 
+import logging
 from typing import Dict, Any, List, Optional
 from boomi.models import (
     TradingPartnerComponent,
@@ -31,6 +32,108 @@ from boomi.models import (
     PartnerCommunication,
     PartnerInfo,
 )
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Config Alias Normalization
+# ============================================================================
+
+# Maps user-friendly aliases → internal field names used by builders
+_SIMPLE_ALIASES = {
+    # AS2 aliases
+    "as2_sign_algorithm": "as2_signing_digest_alg",
+    "as2_mdn_required": "as2_request_mdn",
+    "as2_signing_cert_id": "as2_sign_alias",
+    "as2_encryption_cert_id": "as2_encrypt_alias",
+    "as2_content_type": "as2_data_content_type",
+    # FTP aliases
+    "ftp_directory": None,  # special handling: sets both get and send dirs
+    "ftp_remote_dir": None,  # same special handling
+    # SFTP aliases
+    "sftp_directory": "sftp_remote_directory",
+    "sftp_use_key_auth": "sftp_ssh_key_auth",
+    "sftp_known_hosts_file": "sftp_known_host_entry",
+    # HTTP aliases
+    "http_content_type": "http_data_content_type",
+    "http_connection_timeout": "http_connect_timeout",
+    "http_send_method": "http_method_type",
+    "http_ssl_cert_id": "http_client_ssl_alias",
+    # Disk aliases
+    "disk_directory": None,  # special handling: sets both get and send dirs
+}
+
+# Fields that have no Boomi API equivalent — drop silently
+_DROP_SILENTLY = {"http_max_redirects", "http_response_content_type"}
+
+# Fields that need a warning when dropped (AS2 identity fields)
+_DROP_WITH_WARNING = {
+    "as2_from": "as2_from has no API equivalent — use as2_partner_id for AS2 identity",
+    "as2_to": "as2_to has no API equivalent — AS2-To is set on the MyCompany partner, not the trading partner",
+}
+
+
+def normalize_config_aliases(config: dict) -> dict:
+    """Remap user-friendly field aliases to internal builder names.
+
+    This function enables users to use intuitive names like 'as2_sign_algorithm'
+    instead of the internal 'as2_signing_digest_alg'. It also handles value
+    conversions (e.g., ftp_use_ssl: true → ftp_ssl_mode: "EXPLICIT").
+
+    Args:
+        config: Raw config dict from user input
+
+    Returns:
+        New dict with aliases resolved to internal names
+    """
+    result = {}
+    warnings = config.pop("_alias_warnings", None)  # don't propagate internal key
+    alias_warnings = []
+
+    for key, value in config.items():
+        # Drop silently
+        if key in _DROP_SILENTLY:
+            continue
+
+        # Drop with warning
+        if key in _DROP_WITH_WARNING:
+            alias_warnings.append(_DROP_WITH_WARNING[key])
+            logger.info(f"Dropped config field '{key}': {_DROP_WITH_WARNING[key]}")
+            continue
+
+        # ftp_use_ssl → ftp_ssl_mode conversion
+        if key == "ftp_use_ssl":
+            if str(value).lower() == "true":
+                result.setdefault("ftp_ssl_mode", "EXPLICIT")
+            else:
+                result.setdefault("ftp_ssl_mode", "NONE")
+            continue
+
+        # Special handling for directory aliases that set both get+send
+        if key in ("ftp_directory", "ftp_remote_dir"):
+            result.setdefault("ftp_remote_directory", value)
+            continue
+
+        if key == "disk_directory":
+            result.setdefault("disk_get_directory", value)
+            result.setdefault("disk_send_directory", value)
+            continue
+
+        # Simple alias lookup
+        if key in _SIMPLE_ALIASES:
+            target = _SIMPLE_ALIASES[key]
+            if target is not None:
+                result.setdefault(target, value)
+            continue
+
+        # Not an alias — pass through
+        result[key] = value
+
+    if alias_warnings:
+        result["_alias_warnings"] = alias_warnings
+
+    return result
 
 
 # ============================================================================
@@ -1345,6 +1448,9 @@ def build_edifact_partner_info(**kwargs):
             syntax_version = f'EDIFACTSYNTAXVERSION_{syntax_version}'
         unb_kwargs['syntax_version'] = syntax_version
     if test_indicator:
+        # Map "0" to "NA" (0 is not a valid enum value; NA means production/no test)
+        if str(test_indicator) == '0':
+            test_indicator = 'NA'
         # Auto-format (e.g., '1' -> 'EDIFACTTEST_1', 'NA' -> 'EDIFACTTEST_NA')
         if not str(test_indicator).startswith('EDIFACTTEST_'):
             test_indicator = f'EDIFACTTEST_{test_indicator}'
@@ -1523,6 +1629,9 @@ def build_odette_partner_info(**kwargs):
             syntax_version = f'ODETTESYNTAXVERSION_{syntax_version}'
         unb_kwargs['syntax_version'] = syntax_version
     if test_indicator:
+        # Map "0" to "NA" (0 is not a valid enum value; NA means production/no test)
+        if str(test_indicator) == '0':
+            test_indicator = 'NA'
         # Auto-format (e.g., '1' -> 'ODETTETEST_1', 'NA' -> 'ODETTETEST_NA')
         if not str(test_indicator).startswith('ODETTETEST_'):
             test_indicator = f'ODETTETEST_{test_indicator}'

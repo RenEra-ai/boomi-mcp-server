@@ -114,7 +114,10 @@ def create_trading_partner(boomi_client, profile: str, request_data: Dict[str, A
         import sys
         import os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../'))
-        from boomi_mcp.models.trading_partner_builders import build_trading_partner_model
+        from boomi_mcp.models.trading_partner_builders import build_trading_partner_model, normalize_config_aliases
+
+        # Normalize user-friendly aliases to internal field names
+        request_data = normalize_config_aliases(request_data)
 
         # Validate required fields
         if not request_data.get("component_name"):
@@ -126,6 +129,11 @@ def create_trading_partner(boomi_client, profile: str, request_data: Dict[str, A
 
         # Collect warnings for potentially problematic values
         warnings = []
+        # Collect alias normalization warnings
+        alias_warnings = request_data.pop("_alias_warnings", None)
+        if alias_warnings:
+            warnings.extend(alias_warnings)
+
         ftp_get_action = request_data.get('ftp_get_action', '')
         if ftp_get_action and ftp_get_action.lower() == 'actiongetmove':
             if not request_data.get('ftp_file_to_move'):
@@ -615,13 +623,23 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 # Extract AS2SendOptions
                 send_options = _ga(as2_opts, 'as2_send_options', 'AS2SendOptions')
                 if send_options:
-                    # Partner info (as2_id)
+                    # Partner info (as2_id + certificates stored here on create)
                     as2_pi = _ga(send_options, 'as2_partner_info', 'AS2PartnerInfo')
                     if as2_pi:
                         as2_info["as2_partner_id"] = _ga(as2_pi, 'as2_id', 'as2Id')
                         as2_info["reject_duplicates"] = _ga(as2_pi, 'reject_duplicates', 'rejectDuplicates')
                         as2_info["duplicate_check_count"] = _ga(as2_pi, 'duplicate_check_count', 'duplicateCheckCount')
                         as2_info["legacy_smime"] = _ga(as2_pi, 'legacy_smime', 'legacySMIME')
+                        # Certificates stored in PartnerInfo (CREATE stores them here)
+                        enc_cert = _ga(as2_pi, 'encryption_public_certificate', 'encryptionPublicCertificate')
+                        if enc_cert:
+                            as2_info.setdefault("encrypt_alias", _ga(enc_cert, 'component_id', 'componentId') or getattr(enc_cert, 'alias', None))
+                        sign_cert = _ga(as2_pi, 'signing_public_certificate', 'signingPublicCertificate')
+                        if sign_cert:
+                            as2_info.setdefault("sign_alias", _ga(sign_cert, 'component_id', 'componentId') or getattr(sign_cert, 'alias', None))
+                        mdn_cert = _ga(as2_pi, 'mdn_signature_public_certificate', 'mdnSignaturePublicCertificate')
+                        if mdn_cert:
+                            as2_info.setdefault("mdn_alias", _ga(mdn_cert, 'component_id', 'componentId') or getattr(mdn_cert, 'alias', None))
 
                     # Message options
                     msg_opts = _ga(send_options, 'as2_message_options', 'AS2MessageOptions')
@@ -961,11 +979,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
         import sys
         import os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../'))
-        from boomi_mcp.models.trading_partner_builders import build_contact_info
+        from boomi_mcp.models.trading_partner_builders import build_contact_info, normalize_config_aliases
         from boomi.models import ContactInfo
+
+        # Normalize user-friendly aliases to internal field names
+        updates = normalize_config_aliases(updates)
 
         # Collect warnings for potentially problematic values
         warnings = []
+        # Collect alias normalization warnings
+        alias_warnings = updates.pop("_alias_warnings", None)
+        if alias_warnings:
+            warnings.extend(alias_warnings)
+
         ftp_get_action = updates.get('ftp_get_action', '')
         if ftp_get_action and ftp_get_action.lower() == 'actiongetmove':
             if not updates.get('ftp_file_to_move'):
