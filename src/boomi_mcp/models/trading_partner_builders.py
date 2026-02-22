@@ -329,7 +329,7 @@ def build_ftp_communication_options(**kwargs):
         get_options['maxFileCount'] = int(max_file_count)
     if file_to_move:
         get_options['fileToMove'] = file_to_move
-    if move_force_override is not None:
+    if move_force_override is not None and file_to_move:
         get_options['moveToForceOverride'] = str(move_force_override).lower() == 'true'
 
     if get_options:
@@ -348,6 +348,8 @@ def build_ftp_communication_options(**kwargs):
         send_options['ftpAction'] = send_action.lower()  # 'actionputrename', 'actionputappend', etc.
     if move_to_directory:
         send_options['moveToDirectory'] = move_to_directory
+    if move_force_override is not None and move_to_directory:
+        send_options['moveToForceOverride'] = str(move_force_override).lower() == 'true'
 
     if send_options:
         send_options['useDefaultSendOptions'] = False
@@ -438,7 +440,8 @@ def build_sftp_communication_options(**kwargs):
         sftp_settings['SFTPSSHOptions'] = ssh_options
 
     # Add proxy settings if specified
-    if proxy_enabled is not None or proxy_host:
+    is_proxy_enabled = proxy_enabled is not None and str(proxy_enabled).lower() == 'true'
+    if is_proxy_enabled or proxy_host:
         proxy_settings = {}
         if proxy_enabled is not None:
             proxy_settings['proxyEnabled'] = str(proxy_enabled).lower() == 'true'
@@ -1065,7 +1068,7 @@ def build_as2_communication_options(**kwargs):
     if mdn_use_ssl is not None:
         mdn_options['useSSL'] = str(mdn_use_ssl).lower() == 'true'
     fail_on_negative_mdn = kwargs.get('as2_fail_on_negative_mdn')
-    if fail_on_negative_mdn is not None:
+    if fail_on_negative_mdn is not None and is_mycompany:
         mdn_options['failOnNegativeMDN'] = str(fail_on_negative_mdn).lower() == 'true'
     if mdn_client_ssl_cert:
         mdn_options['mdnClientSSLCert'] = {'@type': 'PrivateCertificate', 'componentId': mdn_client_ssl_cert}
@@ -1109,10 +1112,6 @@ def build_as2_communication_options(**kwargs):
             my_company_info['signingPrivateCertificate'] = {'@type': 'PrivateCertificate', 'componentId': sign_alias}
         if mdn_alias:
             my_company_info['mdnSignaturePrivateCertificate'] = {'@type': 'PrivateCertificate', 'componentId': mdn_alias}
-        if reject_duplicates is not None:
-            my_company_info['rejectDuplicateMessages'] = str(reject_duplicates).lower() == 'true'
-        if duplicate_check_count:
-            my_company_info['messagesToCheckForDuplicates'] = int(duplicate_check_count)
         if my_company_info:
             recv_options['AS2MyCompanyInfo'] = my_company_info
 
