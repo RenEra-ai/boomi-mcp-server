@@ -6,7 +6,6 @@ FROM python:3.11-slim AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
-    git \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -15,16 +14,12 @@ WORKDIR /app
 
 # Copy dependency files and local FastMCP
 COPY requirements.txt requirements-cloud.txt ./
-COPY pyproject.toml ./
 COPY fastmcp ./fastmcp
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r requirements-cloud.txt
-
-# Install Boomi Python SDK
-RUN pip install --no-cache-dir git+https://github.com/RenEra-ai/boomi-python.git
 
 # Stage 2: Runtime
 FROM python:3.11-slim
