@@ -301,12 +301,12 @@ def build_ftp_communication_options(**kwargs):
     }
 
     # Add SSL options - always include sslmode when any SSL config is needed
-    # SDK expects lowercase: 'none', 'explicit', 'implicit'
-    has_ssl_config = (ssl_mode and ssl_mode.lower() != 'none') or client_ssl_alias
+    # Boomi API expects UPPERCASE: 'NONE', 'EXPLICIT', 'IMPLICIT'
+    has_ssl_config = (ssl_mode and ssl_mode.upper() != 'NONE') or client_ssl_alias
     ssl_options = {}
     if has_ssl_config:
-        # Default to 'explicit' if client SSL is requested but mode not specified
-        effective_ssl_mode = ssl_mode.lower() if ssl_mode and ssl_mode.lower() != 'none' else 'explicit'
+        # Default to 'EXPLICIT' if client SSL is requested but mode not specified
+        effective_ssl_mode = ssl_mode.upper() if ssl_mode and ssl_mode.upper() != 'NONE' else 'EXPLICIT'
         ssl_options['sslmode'] = effective_ssl_mode
     if client_ssl_alias:
         ssl_options['clientSSLCertificate'] = {'@type': 'PrivateCertificate', 'componentId': client_ssl_alias}
@@ -766,6 +766,8 @@ def build_http_communication_options(**kwargs):
         ssl_options['trustServerCert'] = str(trust_server_cert).lower() == 'true'
     if client_ssl_alias:
         ssl_options['clientsslalias'] = client_ssl_alias
+        # Auto-enable client auth when SSL cert is provided
+        ssl_options.setdefault('clientauth', True)
     if trusted_cert_alias:
         ssl_options['trustedcertalias'] = trusted_cert_alias
 
@@ -883,11 +885,22 @@ def build_http_communication_options(**kwargs):
     return result
 
 
+# AS2 content type: human-readable → API enum string (reverse of _AS2_CONTENT_TYPE_DISPLAY)
+_AS2_CONTENT_TYPE_API = {
+    "text/plain": "textplain",
+    "text/xml": "textxml",
+    "application/xml": "applicationxml",
+    "application/edi-x12": "edix12",
+    "application/edifact": "edifact",
+    "application/octet-stream": "applicationoctetstream",
+}
+
+
 def build_as2_communication_options(**kwargs):
     """Build AS2 protocol communication options.
 
     Args:
-        as2_url: AS2 endpoint URL (required)
+        as2_url: AS2 endpoint URL (required for tradingpartner; optional for mycompany)
         as2_authentication_type: Authentication type - NONE, BASIC (default: NONE)
         as2_verify_hostname: Verify SSL hostname (true/false)
         as2_username: Username for BASIC authentication
@@ -912,14 +925,19 @@ def build_as2_communication_options(**kwargs):
         as2_mdn_use_ssl: Use SSL for MDN delivery (true/false)
         as2_mdn_client_ssl_cert: Client SSL certificate alias for MDN
         as2_mdn_ssl_cert: Server SSL certificate alias for MDN
+        as2_partner_id: AS2 identity (AS2-From for tradingpartner, AS2-To for mycompany)
         as2_reject_duplicates: Reject duplicate messages (true/false)
         as2_duplicate_check_count: Number of messages to check for duplicates
         as2_legacy_smime: Enable legacy S/MIME compatibility (true/false)
+        classification: Partner classification (tradingpartner or mycompany) - affects structure
 
     Returns dict (not SDK model) - API accepts minimal structure
     """
+    classification = kwargs.get('classification', 'tradingpartner')
+    is_mycompany = isinstance(classification, str) and classification.lower() == 'mycompany'
+
     url = kwargs.get('as2_url')
-    if not url:
+    if not url and not is_mycompany:
         return None
 
     # Basic settings
@@ -958,30 +976,15 @@ def build_as2_communication_options(**kwargs):
     sign_alias = kwargs.get('as2_sign_alias')
     mdn_alias = kwargs.get('as2_mdn_alias')
 
+    # Partner identity
+    as2_partner_id = kwargs.get('as2_partner_id')
+
     # Partner info
     reject_duplicates = kwargs.get('as2_reject_duplicates')
     duplicate_check_count = kwargs.get('as2_duplicate_check_count')
     legacy_smime = kwargs.get('as2_legacy_smime')
 
-    # Build AS2 send settings
-    send_settings = {
-        'url': url,
-        'authenticationType': auth_type.upper() if auth_type else 'NONE'
-    }
-
-    if verify_hostname is not None:
-        send_settings['verifyHostname'] = str(verify_hostname).lower() == 'true'
-    if client_ssl_alias:
-        send_settings['clientSSLCertificate'] = {'@type': 'PrivateCertificate', 'componentId': client_ssl_alias}
-
-    # Add BASIC auth if specified (SDK maps auth_settings to AuthSettings)
-    if auth_type and auth_type.upper() == 'BASIC' and (username or password):
-        send_settings['AuthSettings'] = {
-            'user': username or '',
-            'password': password or ''
-        }
-
-    result = {'AS2SendSettings': send_settings}
+    # --- Build shared sub-structures (used by both tradingpartner and mycompany) ---
 
     # Build AS2 message options
     message_options = {}
@@ -1003,7 +1006,8 @@ def build_as2_communication_options(**kwargs):
     if signing_alg:
         message_options['signingDigestAlg'] = signing_alg.upper()
     if content_type:
-        message_options['dataContentType'] = content_type
+        # Normalize human-readable content types to API enum strings
+        message_options['dataContentType'] = _AS2_CONTENT_TYPE_API.get(content_type, content_type)
     if subject:
         message_options['subject'] = subject
     if multiple_attachments is not None:
@@ -1035,14 +1039,93 @@ def build_as2_communication_options(**kwargs):
     if fail_on_negative_mdn is not None:
         mdn_options['failOnNegativeMDN'] = str(fail_on_negative_mdn).lower() == 'true'
     if mdn_client_ssl_cert:
-        # Certificate alias format
         mdn_options['mdnClientSSLCert'] = {'@type': 'PrivateCertificate', 'componentId': mdn_client_ssl_cert}
     if mdn_ssl_cert:
-        # Certificate alias format
         mdn_options['mdnSSLCert'] = {'@type': 'PublicCertificate', 'componentId': mdn_ssl_cert}
+
+    # --- MyCompany CREATE: build receive-side structure ---
+    if is_mycompany:
+        result = {}
+
+        # AS2DefaultPartnerSettings (outbound defaults for partners sending TO this mycompany)
+        if url:
+            default_settings = {
+                'url': url,
+                'authenticationType': auth_type.upper() if auth_type else 'NONE'
+            }
+            if verify_hostname is not None:
+                default_settings['verifyHostname'] = str(verify_hostname).lower() == 'true'
+            if client_ssl_alias:
+                default_settings['AS2SSLOptions'] = {'clientsslalias': client_ssl_alias}
+            if auth_type and auth_type.upper() == 'BASIC' and (username or password):
+                default_settings['AuthSettings'] = {
+                    'user': username or '',
+                    'password': password or ''
+                }
+            result['AS2DefaultPartnerSettings'] = default_settings
+
+        # AS2ReceiveOptions — mycompany info + default partner MDN/message options
+        recv_options = {}
+
+        # AS2MyCompanyInfo — AS2 identity + private certificates
+        my_company_info = {}
+        if as2_partner_id:
+            my_company_info['as2Id'] = as2_partner_id
+        if legacy_smime is not None:
+            my_company_info['legacySMIME'] = str(legacy_smime).lower() == 'true'
+        # MyCompany uses PrivateCertificate (not Public)
+        if encrypt_alias:
+            my_company_info['encryptionPrivateCertificate'] = {'@type': 'PrivateCertificate', 'componentId': encrypt_alias}
+        if sign_alias:
+            my_company_info['signingPrivateCertificate'] = {'@type': 'PrivateCertificate', 'componentId': sign_alias}
+        if mdn_alias:
+            my_company_info['mdnSignaturePrivateCertificate'] = {'@type': 'PrivateCertificate', 'componentId': mdn_alias}
+        if reject_duplicates is not None:
+            my_company_info['rejectDuplicateMessages'] = str(reject_duplicates).lower() == 'true'
+        if duplicate_check_count:
+            my_company_info['messagesToCheckForDuplicates'] = int(duplicate_check_count)
+        if my_company_info:
+            recv_options['AS2MyCompanyInfo'] = my_company_info
+
+        # Default partner MDN options (what we expect from partners)
+        if mdn_options:
+            recv_options['AS2DefaultPartnerMDNOptions'] = mdn_options
+
+        # Default partner message options (what we expect from partners)
+        if message_options:
+            recv_options['AS2DefaultPartnerMessageOptions'] = message_options
+
+        if recv_options:
+            result['AS2ReceiveOptions'] = recv_options
+
+        return result if result else None
+
+    # --- TradingPartner CREATE: build send-side structure ---
+
+    # Build AS2 send settings
+    send_settings = {
+        'url': url,
+        'authenticationType': auth_type.upper() if auth_type else 'NONE'
+    }
+
+    if verify_hostname is not None:
+        send_settings['verifyHostname'] = str(verify_hostname).lower() == 'true'
+    if client_ssl_alias:
+        send_settings['clientSSLCertificate'] = {'@type': 'PrivateCertificate', 'componentId': client_ssl_alias}
+
+    # Add BASIC auth if specified (SDK maps auth_settings to AuthSettings)
+    if auth_type and auth_type.upper() == 'BASIC' and (username or password):
+        send_settings['AuthSettings'] = {
+            'user': username or '',
+            'password': password or ''
+        }
+
+    result = {'AS2SendSettings': send_settings}
 
     # Build AS2 partner info
     partner_info = {}
+    if as2_partner_id:
+        partner_info['as2Id'] = as2_partner_id
     if reject_duplicates is not None:
         partner_info['rejectDuplicateMessages'] = str(reject_duplicates).lower() == 'true'
     if duplicate_check_count:
@@ -1783,9 +1866,9 @@ def build_trading_partner_model(
             as2_url="https://acme.com/as2"
         )
     """
-    # Build nested models
+    # Build nested models — inject classification so protocol builders can branch
     contact_info = build_contact_info(**kwargs)
-    partner_communication = build_partner_communication(**kwargs)
+    partner_communication = build_partner_communication(classification=classification, **kwargs)
     partner_info = build_partner_info(standard, **kwargs)
 
     # Parse classification enum

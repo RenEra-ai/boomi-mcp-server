@@ -53,6 +53,39 @@ def _element_to_dict(e):
     return {"name": getattr(e, 'name', None)}
 
 
+def _enum_val(v):
+    """Extract .value from SDK enum objects; pass through plain strings/ints."""
+    if v is None:
+        return None
+    return getattr(v, 'value', v)
+
+
+def _strip_enum_prefix(val):
+    """Strip SDK enum prefixes like X12IDQUAL_, EDIFACTIDQUAL_, etc. from values."""
+    if val is None:
+        return None
+    s = getattr(val, 'value', val)  # extract .value from enum if needed
+    if isinstance(s, str) and '_' in s:
+        # Known prefixes: X12IDQUAL_, EDIFACTIDQUAL_, EDIFACTSYNTAXVERSION_, EDIFACTTEST_,
+        # ODETTEIDQUAL_, ODETTESYNTAXVERSION_, ODETTETEST_
+        for prefix in ('X12IDQUAL_', 'EDIFACTIDQUAL_', 'EDIFACTSYNTAXVERSION_', 'EDIFACTTEST_',
+                       'ODETTEIDQUAL_', 'ODETTESYNTAXVERSION_', 'ODETTETEST_'):
+            if s.startswith(prefix):
+                return s[len(prefix):]
+    return s
+
+
+# AS2 content type: SDK enum string → human-readable display
+_AS2_CONTENT_TYPE_DISPLAY = {
+    "textplain": "text/plain",
+    "textxml": "text/xml",
+    "applicationxml": "application/xml",
+    "edix12": "application/edi-x12",
+    "edifact": "application/edifact",
+    "applicationoctetstream": "application/octet-stream",
+}
+
+
 # ============================================================================
 # Trading Partner CRUD Operations
 # ============================================================================
@@ -256,7 +289,7 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     gs_ctrl = getattr(x12_ctrl, 'gs_control_info', None)
                     if isa_ctrl:
                         partner_info["isa_id"] = getattr(isa_ctrl, 'interchange_id', None)
-                        partner_info["isa_qualifier"] = getattr(isa_ctrl, 'interchange_id_qualifier', None)
+                        partner_info["isa_qualifier"] = _strip_enum_prefix(getattr(isa_ctrl, 'interchange_id_qualifier', None))
                     if gs_ctrl:
                         partner_info["gs_id"] = getattr(gs_ctrl, 'applicationcode', None)
 
@@ -268,14 +301,11 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     unb_ctrl = getattr(edifact_ctrl, 'unb_control_info', None)
                     if unb_ctrl:
                         partner_info["edifact_interchange_id"] = getattr(unb_ctrl, 'interchange_id', None)
-                        raw_qual = getattr(unb_ctrl, 'interchange_id_qual', None)
-                        partner_info["edifact_interchange_id_qual"] = raw_qual.value if hasattr(raw_qual, 'value') else raw_qual
+                        partner_info["edifact_interchange_id_qual"] = _strip_enum_prefix(getattr(unb_ctrl, 'interchange_id_qual', None))
                         raw_syntax = getattr(unb_ctrl, 'syntax_id', None)
                         partner_info["edifact_syntax_id"] = raw_syntax.value if hasattr(raw_syntax, 'value') else raw_syntax
-                        raw_version = getattr(unb_ctrl, 'syntax_version', None)
-                        partner_info["edifact_syntax_version"] = raw_version.value if hasattr(raw_version, 'value') else raw_version
-                        raw_test = getattr(unb_ctrl, 'test_indicator', None)
-                        partner_info["edifact_test_indicator"] = raw_test.value if hasattr(raw_test, 'value') else raw_test
+                        partner_info["edifact_syntax_version"] = _strip_enum_prefix(getattr(unb_ctrl, 'syntax_version', None))
+                        partner_info["edifact_test_indicator"] = _strip_enum_prefix(getattr(unb_ctrl, 'test_indicator', None))
 
             # HL7 partner info
             hl7_info = getattr(info, 'hl7_partner_info', None)
@@ -321,14 +351,11 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     odette_unb = getattr(odette_ctrl, 'odette_unb_control_info', None)
                     if odette_unb:
                         partner_info["odette_interchange_id"] = getattr(odette_unb, 'interchange_id', None)
-                        raw_qual = getattr(odette_unb, 'interchange_id_qual', None)
-                        partner_info["odette_interchange_id_qual"] = raw_qual.value if hasattr(raw_qual, 'value') else raw_qual
+                        partner_info["odette_interchange_id_qual"] = _strip_enum_prefix(getattr(odette_unb, 'interchange_id_qual', None))
                         raw_syntax = getattr(odette_unb, 'syntax_id', None)
                         partner_info["odette_syntax_id"] = raw_syntax.value if hasattr(raw_syntax, 'value') else raw_syntax
-                        raw_version = getattr(odette_unb, 'syntax_version', None)
-                        partner_info["odette_syntax_version"] = raw_version.value if hasattr(raw_version, 'value') else raw_version
-                        raw_test = getattr(odette_unb, 'test_indicator', None)
-                        partner_info["odette_test_indicator"] = raw_test.value if hasattr(raw_test, 'value') else raw_test
+                        partner_info["odette_syntax_version"] = _strip_enum_prefix(getattr(odette_unb, 'syntax_version', None))
+                        partner_info["odette_test_indicator"] = _strip_enum_prefix(getattr(odette_unb, 'test_indicator', None))
 
         # Clean up None values from partner_info
         partner_info = {k: v for k, v in partner_info.items() if v is not None}
@@ -609,7 +636,7 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                 settings = getattr(as2_opts, 'as2_send_settings', None)
                 if settings:
                     as2_info["url"] = getattr(settings, 'url', None)
-                    as2_info["authentication_type"] = _ga(settings, 'authentication_type', 'authenticationType')
+                    as2_info["authentication_type"] = _enum_val(_ga(settings, 'authentication_type', 'authenticationType'))
                     as2_info["verify_hostname"] = _ga(settings, 'verify_hostname', 'verifyHostname')
                     # Extract basic auth info
                     auth_settings = _ga(settings, 'auth_settings', 'AuthSettings')
@@ -647,9 +674,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         as2_info["signed"] = getattr(msg_opts, 'signed', None)
                         as2_info["encrypted"] = getattr(msg_opts, 'encrypted', None)
                         as2_info["compressed"] = getattr(msg_opts, 'compressed', None)
-                        as2_info["encryption_algorithm"] = _ga(msg_opts, 'encryption_algorithm', 'encryptionAlgorithm')
-                        as2_info["signing_digest_alg"] = _ga(msg_opts, 'signing_digest_alg', 'signingDigestAlg')
-                        as2_info["data_content_type"] = _ga(msg_opts, 'data_content_type', 'dataContentType')
+                        as2_info["encryption_algorithm"] = _enum_val(_ga(msg_opts, 'encryption_algorithm', 'encryptionAlgorithm'))
+                        as2_info["signing_digest_alg"] = _enum_val(_ga(msg_opts, 'signing_digest_alg', 'signingDigestAlg'))
+                        raw_ct = _enum_val(_ga(msg_opts, 'data_content_type', 'dataContentType'))
+                        as2_info["data_content_type"] = _AS2_CONTENT_TYPE_DISPLAY.get(raw_ct, raw_ct) if raw_ct else None
                         as2_info["subject"] = getattr(msg_opts, 'subject', None)
                         as2_info["multiple_attachments"] = _ga(msg_opts, 'multiple_attachments', 'multipleAttachments')
                         as2_info["max_document_count"] = _ga(msg_opts, 'max_document_count', 'maxDocumentCount')
@@ -668,8 +696,8 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     if mdn_opts:
                         as2_info["request_mdn"] = _ga(mdn_opts, 'request_mdn', 'requestMDN')
                         as2_info["mdn_signed"] = getattr(mdn_opts, 'signed', None)
-                        as2_info["mdn_digest_alg"] = _ga(mdn_opts, 'mdn_digest_alg', 'mdnDigestAlg')
-                        as2_info["synchronous_mdn"] = getattr(mdn_opts, 'synchronous', None)
+                        as2_info["mdn_digest_alg"] = _enum_val(_ga(mdn_opts, 'mdn_digest_alg', 'mdnDigestAlg'))
+                        as2_info["synchronous_mdn"] = _enum_val(getattr(mdn_opts, 'synchronous', None))
                         as2_info["fail_on_negative_mdn"] = _ga(mdn_opts, 'fail_on_negative_mdn', 'failOnNegativeMDN')
                         as2_info["mdn_external_url"] = _ga(mdn_opts, 'external_url', 'externalURL')
                         as2_info["mdn_use_external_url"] = _ga(mdn_opts, 'use_external_url', 'useExternalURL')
@@ -678,6 +706,77 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         mdn_cert = _ga(mdn_opts, 'mdn_cert', 'mdnCert')
                         if mdn_cert:
                             as2_info["mdn_alias"] = _ga(mdn_cert, 'component_id', 'componentId') or getattr(mdn_cert, 'alias', None)
+
+                # --- MyCompany fallback: receive-side attributes ---
+                # For mycompany classification, Boomi populates receive-side attributes
+                # instead of send-side. Use setdefault() so send-side always takes priority.
+
+                # AS2DefaultPartnerSettings (like AS2SendSettings for mycompany)
+                default_partner = _ga(as2_opts, 'as2_default_partner_settings', 'AS2DefaultPartnerSettings')
+                if default_partner:
+                    as2_info.setdefault("url", getattr(default_partner, 'url', None))
+                    dp_auth = _enum_val(_ga(default_partner, 'authentication_type', 'authenticationType'))
+                    if dp_auth is not None:
+                        as2_info.setdefault("authentication_type", dp_auth)
+                    as2_info.setdefault("verify_hostname", _ga(default_partner, 'verify_hostname', 'verifyHostname'))
+                    dp_auth_settings = _ga(default_partner, 'auth_settings', 'AuthSettings')
+                    if dp_auth_settings:
+                        as2_info.setdefault("username", _ga(dp_auth_settings, 'username', 'user'))
+                    dp_ssl = _ga(default_partner, 'as2ssl_options', 'AS2SSLOptions')
+                    if dp_ssl:
+                        as2_info.setdefault("client_ssl_alias", _ga(dp_ssl, 'clientsslalias', 'clientSSLAlias'))
+
+                # AS2ReceiveOptions (mycompany info, default partner MDN/message options)
+                recv_opts = _ga(as2_opts, 'as2_receive_options', 'AS2ReceiveOptions')
+                if recv_opts:
+                    # AS2MyCompanyInfo — as2_id, legacy_smime, private certificates
+                    my_info = _ga(recv_opts, 'as2_my_company_info', 'AS2MyCompanyInfo')
+                    if my_info:
+                        as2_info.setdefault("as2_partner_id", _ga(my_info, 'as2_id', 'as2Id'))
+                        as2_info.setdefault("legacy_smime", _ga(my_info, 'legacy_smime', 'legacySMIME'))
+                        enc_cert = _ga(my_info, 'encryption_private_certificate', 'encryptionPrivateCertificate')
+                        if enc_cert:
+                            as2_info.setdefault("encrypt_alias", _ga(enc_cert, 'component_id', 'componentId') or getattr(enc_cert, 'alias', None))
+                        sign_cert = _ga(my_info, 'signing_private_certificate', 'signingPrivateCertificate')
+                        if sign_cert:
+                            as2_info.setdefault("sign_alias", _ga(sign_cert, 'component_id', 'componentId') or getattr(sign_cert, 'alias', None))
+                        mdn_cert = _ga(my_info, 'mdn_signature_private_certificate', 'mdnSignaturePrivateCertificate')
+                        if mdn_cert:
+                            as2_info.setdefault("mdn_alias", _ga(mdn_cert, 'component_id', 'componentId') or getattr(mdn_cert, 'alias', None))
+
+                    # Default partner MDN options
+                    dp_mdn = _ga(recv_opts, 'as2_default_partner_mdn_options', 'AS2DefaultPartnerMDNOptions')
+                    if not dp_mdn:
+                        dp_mdn = _ga(recv_opts, 'as2_mdn_options', 'AS2MDNOptions')
+                    if dp_mdn:
+                        as2_info.setdefault("request_mdn", _ga(dp_mdn, 'request_mdn', 'requestMDN'))
+                        as2_info.setdefault("mdn_signed", getattr(dp_mdn, 'signed', None))
+                        mdn_dig = _enum_val(_ga(dp_mdn, 'mdn_digest_alg', 'mdnDigestAlg'))
+                        if mdn_dig is not None:
+                            as2_info.setdefault("mdn_digest_alg", mdn_dig)
+                        sync_val = _enum_val(getattr(dp_mdn, 'synchronous', None))
+                        if sync_val is not None:
+                            as2_info.setdefault("synchronous_mdn", sync_val)
+                        as2_info.setdefault("fail_on_negative_mdn", _ga(dp_mdn, 'fail_on_negative_mdn', 'failOnNegativeMDN'))
+
+                    # Default partner message options
+                    dp_msg = _ga(recv_opts, 'as2_default_partner_message_options', 'AS2DefaultPartnerMessageOptions')
+                    if not dp_msg:
+                        dp_msg = _ga(recv_opts, 'as2_message_options', 'AS2MessageOptions')
+                    if dp_msg:
+                        as2_info.setdefault("signed", getattr(dp_msg, 'signed', None))
+                        as2_info.setdefault("encrypted", getattr(dp_msg, 'encrypted', None))
+                        as2_info.setdefault("compressed", getattr(dp_msg, 'compressed', None))
+                        enc_alg = _enum_val(_ga(dp_msg, 'encryption_algorithm', 'encryptionAlgorithm'))
+                        if enc_alg is not None:
+                            as2_info.setdefault("encryption_algorithm", enc_alg)
+                        sign_dig = _enum_val(_ga(dp_msg, 'signing_digest_alg', 'signingDigestAlg'))
+                        if sign_dig is not None:
+                            as2_info.setdefault("signing_digest_alg", sign_dig)
+                        raw_ct = _enum_val(_ga(dp_msg, 'data_content_type', 'dataContentType'))
+                        if raw_ct is not None:
+                            as2_info.setdefault("data_content_type", _AS2_CONTENT_TYPE_DISPLAY.get(raw_ct, raw_ct))
+                        as2_info.setdefault("subject", getattr(dp_msg, 'subject', None))
 
                 # Filter out None values
                 as2_info = {k: v for k, v in as2_info.items() if v is not None}
@@ -705,6 +804,69 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         mllp_info["use_client_ssl"] = _ga(mllpssl_opts, 'use_client_ssl', 'useClientSSL')
                         mllp_info["client_ssl_alias"] = _ga(mllpssl_opts, 'client_ssl_alias', 'clientSSLAlias')
                         mllp_info["ssl_alias"] = _ga(mllpssl_opts, 'ssl_alias', 'sslAlias')
+                # --- Fallback: check _kwargs for raw dict data if SDK didn't deserialize ---
+                if not settings:
+                    kw = getattr(mllp_opts, '_kwargs', {})
+                    raw_send = kw.get('MLLPSendSettings') or kw.get('mllpSendSettings')
+                    if raw_send and isinstance(raw_send, dict):
+                        mllp_info["host"] = raw_send.get('host')
+                        mllp_info["port"] = raw_send.get('port')
+                        mllp_info["persistent"] = raw_send.get('persistent')
+                        mllp_info["receive_timeout"] = raw_send.get('receiveTimeout')
+                        mllp_info["send_timeout"] = raw_send.get('sendTimeout')
+                        mllp_info["max_connections"] = raw_send.get('maxConnections')
+                        mllp_info["inactivity_timeout"] = raw_send.get('inactivityTimeout')
+                        mllp_info["max_retry"] = raw_send.get('maxRetry')
+                        mllp_info["halt_timeout"] = raw_send.get('haltTimeout')
+                        ssl_data = raw_send.get('MLLPSSLOptions') or raw_send.get('mllpsslOptions')
+                        if ssl_data and isinstance(ssl_data, dict):
+                            mllp_info["use_ssl"] = ssl_data.get('useSSL')
+                            mllp_info["use_client_ssl"] = ssl_data.get('useClientSSL')
+                            mllp_info["client_ssl_alias"] = ssl_data.get('clientSSLAlias')
+                            mllp_info["ssl_alias"] = ssl_data.get('sslAlias')
+                        settings = True  # Mark as found to skip listen fallback
+                # --- MyCompany fallback: listen-side attributes ---
+                # For mycompany, MLLP data may be in _kwargs under MLLPListenSettings
+                # when mllp_send_settings yields no data.
+                if not settings:
+                    kw = getattr(mllp_opts, '_kwargs', {})
+                    listen = kw.get('MLLPListenSettings') or kw.get('mllpListenSettings')
+                    if listen and isinstance(listen, dict):
+                        mllp_info["host"] = listen.get('host')
+                        mllp_info["port"] = listen.get('port')
+                        mllp_info["persistent"] = listen.get('persistent')
+                        mllp_info["receive_timeout"] = listen.get('receiveTimeout')
+                        mllp_info["send_timeout"] = listen.get('sendTimeout')
+                        mllp_info["max_connections"] = listen.get('maxConnections')
+                        mllp_info["inactivity_timeout"] = listen.get('inactivityTimeout')
+                        mllp_info["max_retry"] = listen.get('maxRetry')
+                        mllp_info["halt_timeout"] = listen.get('haltTimeout')
+                        ssl_data = listen.get('MLLPSSLOptions') or listen.get('mllpsslOptions')
+                        if ssl_data and isinstance(ssl_data, dict):
+                            mllp_info["use_ssl"] = ssl_data.get('useSSL')
+                            mllp_info["use_client_ssl"] = ssl_data.get('useClientSSL')
+                            mllp_info["client_ssl_alias"] = ssl_data.get('clientSSLAlias')
+                            mllp_info["ssl_alias"] = ssl_data.get('sslAlias')
+                    elif hasattr(mllp_opts, '__dict__'):
+                        # Try attribute-based access for SDK model fallback
+                        listen_obj = _ga(mllp_opts, 'mllp_listen_settings', 'MLLPListenSettings')
+                        if listen_obj:
+                            mllp_info["host"] = getattr(listen_obj, 'host', None)
+                            mllp_info["port"] = getattr(listen_obj, 'port', None)
+                            mllp_info["persistent"] = getattr(listen_obj, 'persistent', None)
+                            mllp_info["receive_timeout"] = _ga(listen_obj, 'receive_timeout', 'receiveTimeout')
+                            mllp_info["send_timeout"] = _ga(listen_obj, 'send_timeout', 'sendTimeout')
+                            mllp_info["max_connections"] = _ga(listen_obj, 'max_connections', 'maxConnections')
+                            mllp_info["inactivity_timeout"] = _ga(listen_obj, 'inactivity_timeout', 'inactivityTimeout')
+                            mllp_info["max_retry"] = _ga(listen_obj, 'max_retry', 'maxRetry')
+                            mllp_info["halt_timeout"] = _ga(listen_obj, 'halt_timeout', 'haltTimeout')
+                            mllpssl = _ga(listen_obj, 'mllpssl_options', 'MLLPSSLOptions')
+                            if mllpssl:
+                                mllp_info["use_ssl"] = _ga(mllpssl, 'use_ssl', 'useSSL')
+                                mllp_info["use_client_ssl"] = _ga(mllpssl, 'use_client_ssl', 'useClientSSL')
+                                mllp_info["client_ssl_alias"] = _ga(mllpssl, 'client_ssl_alias', 'clientSSLAlias')
+                                mllp_info["ssl_alias"] = _ga(mllpssl, 'ssl_alias', 'sslAlias')
+
                 # Filter out None values
                 mllp_info = {k: v for k, v in mllp_info.items() if v is not None}
                 communication_protocols.append(mllp_info)
@@ -748,6 +910,27 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         oftp_info["compress"] = _partner_val('ssidcmpr')
                         oftp_info["sfid_sign"] = _partner_val('sfidsign')
                         oftp_info["sfid_encrypt"] = _partner_val('sfidsec_encrypt', 'sfidsec-encrypt')
+                # --- MyCompany fallback: server listen-side attributes ---
+                # For mycompany, OFTP data may be in server listen options instead of connection settings.
+                listen_opts = _ga(oftp_opts, 'oftp_server_listen_options', 'OFTPServerListenOptions')
+                if listen_opts:
+                    oftp_info.setdefault("listen_operation", _ga(listen_opts, 'listen_operation', 'listenOperation'))
+                    partner_group = _ga(listen_opts, 'partner_group', 'partnerGroup')
+                    if partner_group is not None:
+                        oftp_info.setdefault("partner_group", partner_group)
+                    # Local certificates for mycompany listener
+                    local_certs = _ga(listen_opts, 'local_certificates', 'localCertificates')
+                    if local_certs:
+                        oftp_info.setdefault("local_certificates", local_certs)
+
+                # Parse oftp_get_options and oftp_send_options if present
+                get_opts = _ga(oftp_opts, 'oftp_get_options', 'OFTPGetOptions')
+                if get_opts:
+                    oftp_info.setdefault("get_use_default", _ga(get_opts, 'use_default_get_options', 'useDefaultGetOptions'))
+                send_opts = _ga(oftp_opts, 'oftp_send_options', 'OFTPSendOptions')
+                if send_opts:
+                    oftp_info.setdefault("send_use_default", _ga(send_opts, 'use_default_send_options', 'useDefaultSendOptions'))
+
                 # Filter out None values
                 oftp_info = {k: v for k, v in oftp_info.items() if v is not None}
                 communication_protocols.append(oftp_info)
@@ -1128,7 +1311,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 gs_ctrl = getattr(x12_ctrl, 'gs_control_info', None)
                                 if isa_ctrl:
                                     existing_pi_values['isa_id'] = getattr(isa_ctrl, 'interchange_id', None)
-                                    existing_pi_values['isa_qualifier'] = getattr(isa_ctrl, 'interchange_id_qualifier', None)
+                                    existing_pi_values['isa_qualifier'] = _strip_enum_prefix(getattr(isa_ctrl, 'interchange_id_qualifier', None))
                                 if gs_ctrl:
                                     existing_pi_values['gs_id'] = getattr(gs_ctrl, 'applicationcode', None)
                     elif std_lower == 'edifact':
@@ -1139,14 +1322,11 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 unb_ctrl = getattr(edifact_ctrl, 'unb_control_info', None)
                                 if unb_ctrl:
                                     existing_pi_values['edifact_interchange_id'] = getattr(unb_ctrl, 'interchange_id', None)
-                                    raw = getattr(unb_ctrl, 'interchange_id_qual', None)
-                                    existing_pi_values['edifact_interchange_id_qual'] = raw.value if hasattr(raw, 'value') else raw
+                                    existing_pi_values['edifact_interchange_id_qual'] = _strip_enum_prefix(getattr(unb_ctrl, 'interchange_id_qual', None))
                                     raw = getattr(unb_ctrl, 'syntax_id', None)
                                     existing_pi_values['edifact_syntax_id'] = raw.value if hasattr(raw, 'value') else raw
-                                    raw = getattr(unb_ctrl, 'syntax_version', None)
-                                    existing_pi_values['edifact_syntax_version'] = raw.value if hasattr(raw, 'value') else raw
-                                    raw = getattr(unb_ctrl, 'test_indicator', None)
-                                    existing_pi_values['edifact_test_indicator'] = raw.value if hasattr(raw, 'value') else raw
+                                    existing_pi_values['edifact_syntax_version'] = _strip_enum_prefix(getattr(unb_ctrl, 'syntax_version', None))
+                                    existing_pi_values['edifact_test_indicator'] = _strip_enum_prefix(getattr(unb_ctrl, 'test_indicator', None))
                     elif std_lower == 'hl7':
                         hl7_info = getattr(existing_pi, 'hl7_partner_info', None)
                         if hl7_info:
@@ -1188,14 +1368,11 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 od_unb = getattr(od_ctrl, 'odette_unb_control_info', None)
                                 if od_unb:
                                     existing_pi_values['odette_interchange_id'] = getattr(od_unb, 'interchange_id', None)
-                                    raw = getattr(od_unb, 'interchange_id_qual', None)
-                                    existing_pi_values['odette_interchange_id_qual'] = raw.value if hasattr(raw, 'value') else raw
+                                    existing_pi_values['odette_interchange_id_qual'] = _strip_enum_prefix(getattr(od_unb, 'interchange_id_qual', None))
                                     raw = getattr(od_unb, 'syntax_id', None)
                                     existing_pi_values['odette_syntax_id'] = raw.value if hasattr(raw, 'value') else raw
-                                    raw = getattr(od_unb, 'syntax_version', None)
-                                    existing_pi_values['odette_syntax_version'] = raw.value if hasattr(raw, 'value') else raw
-                                    raw = getattr(od_unb, 'test_indicator', None)
-                                    existing_pi_values['odette_test_indicator'] = raw.value if hasattr(raw, 'value') else raw
+                                    existing_pi_values['odette_syntax_version'] = _strip_enum_prefix(getattr(od_unb, 'syntax_version', None))
+                                    existing_pi_values['odette_test_indicator'] = _strip_enum_prefix(getattr(od_unb, 'test_indicator', None))
 
                 # Remove None values from existing, merge with updates
                 existing_pi_values = {k: v for k, v in existing_pi_values.items() if v is not None}
