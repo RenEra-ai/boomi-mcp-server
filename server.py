@@ -1,34 +1,45 @@
 #!/usr/bin/env python3
 """
-Boomi MCP Server - FastMCP server with OAuth for Boomi API integration.
+Boomi MCP Server - Unified server for local dev and production.
 
-Security features:
+When BOOMI_LOCAL=true (local development):
+- Uses local file-based credential storage (~/.boomi_mcp_local_secrets.json)
+- No OAuth authentication
+- Credential management tools (set/delete) are active
+- Runs in stdio mode
+
+When BOOMI_LOCAL is not set (production):
+- Uses GCP Secret Manager for credentials
 - OAuth 2.0 authentication (Google) with refresh token support
-- Per-user Boomi credential storage (GCP Secret Manager)
-- OAuth token storage (Redis with Fernet encryption)
-- Explicit JWT signing keys (production-ready)
-- Scope-based authorization
-- Secure logging (no password leaks)
+- Web UI for credential management
+- Runs in HTTP mode via server_http.py
 """
 
 import json
 import os
 import sys
-import secrets
-import hashlib
-import base64
-from typing import Optional, Dict
+from typing import Dict
 from pathlib import Path
 
 from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_access_token
+
+# --- Mode Detection ---
+LOCAL_MODE = os.getenv("BOOMI_LOCAL", "").lower() in ("true", "1", "yes")
+
+# Additional imports for production mode
+if not LOCAL_MODE:
+    import secrets
+    import hashlib
+    import base64
+    from typing import Optional
+    from fastmcp.server.dependencies import get_access_token
 
 # --- Add boomi-python to path ---
-boomi_python_path = Path(__file__).parent.parent / "boomi-python"
+boomi_python_path = Path(__file__).parent.parent / "boomi-python" / "src"
 if boomi_python_path.exists():
     sys.path.insert(0, str(boomi_python_path))
 
-# --- Add src to path for cloud_secrets ---
+# --- Add src to path ---
 src_path = Path(__file__).parent / "src"
 if src_path.exists():
     sys.path.insert(0, str(src_path))
@@ -41,19 +52,30 @@ except ImportError as e:
     print(f"       Run: pip install git+https://github.com/RenEra-ai/boomi-python.git")
     sys.exit(1)
 
-# --- Cloud Secrets Manager (GCP/AWS/Azure) ---
-try:
-    from boomi_mcp.cloud_secrets import get_secrets_backend
-    secrets_backend = get_secrets_backend()
-    backend_type = os.getenv("SECRETS_BACKEND", "gcp")
-    print(f"[INFO] Using secrets backend: {backend_type}")
-    if backend_type == "gcp":
-        project_id = os.getenv("GCP_PROJECT_ID", "boomimcp")
-        print(f"[INFO] GCP Project: {project_id}")
-except ImportError as e:
-    print(f"ERROR: Failed to import cloud_secrets: {e}")
-    print(f"       Make sure src/boomi_mcp/cloud_secrets.py exists")
-    sys.exit(1)
+# --- Secrets Backend (conditional) ---
+if LOCAL_MODE:
+    try:
+        from boomi_mcp.local_secrets import LocalSecretsBackend
+        secrets_backend = LocalSecretsBackend()
+        print(f"[INFO] Using local file-based secrets storage")
+        print(f"[INFO] Storage file: {secrets_backend.storage_file}")
+    except ImportError as e:
+        print(f"ERROR: Failed to import local_secrets: {e}")
+        print(f"       Make sure src/boomi_mcp/local_secrets.py exists")
+        sys.exit(1)
+else:
+    try:
+        from boomi_mcp.cloud_secrets import get_secrets_backend
+        secrets_backend = get_secrets_backend()
+        backend_type = os.getenv("SECRETS_BACKEND", "gcp")
+        print(f"[INFO] Using secrets backend: {backend_type}")
+        if backend_type == "gcp":
+            project_id = os.getenv("GCP_PROJECT_ID", "boomimcp")
+            print(f"[INFO] GCP Project: {project_id}")
+    except ImportError as e:
+        print(f"ERROR: Failed to import cloud_secrets: {e}")
+        print(f"       Make sure src/boomi_mcp/cloud_secrets.py exists")
+        sys.exit(1)
 
 # --- Trading Partner Tools ---
 try:
@@ -83,7 +105,6 @@ except ImportError as e:
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
     secrets_backend.put_secret(sub, profile, payload)
-    # Log without password
     print(f"[INFO] Stored credentials for {sub}:{profile} (username: {payload.get('username', '')[:10]}***)")
 
 
@@ -102,146 +123,151 @@ def delete_profile(sub: str, profile: str):
     secrets_backend.delete_profile(sub, profile)
 
 
-# --- Auth: OAuth 2.0 with Google (Required) ---
-from fastmcp.server.auth.providers.google import GoogleProvider
-from key_value.aio.stores.mongodb import MongoDBStore
-from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-from cryptography.fernet import Fernet
+# --- OAuth Setup (production only) ---
+if not LOCAL_MODE:
+    from fastmcp.server.auth.providers.google import GoogleProvider
+    from key_value.aio.stores.mongodb import MongoDBStore
+    from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+    from cryptography.fernet import Fernet
 
-# Create Google OAuth provider
-try:
-    client_id = os.getenv("OIDC_CLIENT_ID")
-    client_secret = os.getenv("OIDC_CLIENT_SECRET")
-    base_url = os.getenv("OIDC_BASE_URL", "http://localhost:8000")
+    # Create Google OAuth provider
+    try:
+        client_id = os.getenv("OIDC_CLIENT_ID")
+        client_secret = os.getenv("OIDC_CLIENT_SECRET")
+        base_url = os.getenv("OIDC_BASE_URL", "http://localhost:8000")
 
-    if not client_id or not client_secret:
-        raise ValueError("OIDC_CLIENT_ID and OIDC_CLIENT_SECRET must be set")
+        if not client_id or not client_secret:
+            raise ValueError("OIDC_CLIENT_ID and OIDC_CLIENT_SECRET must be set")
 
-    # Get MongoDB connection and encryption keys
-    mongodb_uri = os.getenv("MONGODB_URI")
-    jwt_signing_key = os.getenv("JWT_SIGNING_KEY")
-    storage_encryption_key = os.getenv("STORAGE_ENCRYPTION_KEY")
+        # Get MongoDB connection and encryption keys
+        mongodb_uri = os.getenv("MONGODB_URI")
+        jwt_signing_key = os.getenv("JWT_SIGNING_KEY")
+        storage_encryption_key = os.getenv("STORAGE_ENCRYPTION_KEY")
 
-    if not mongodb_uri:
-        raise ValueError("MONGODB_URI must be set for production deployment")
-    if not jwt_signing_key:
-        raise ValueError("JWT_SIGNING_KEY must be set for production deployment")
-    if not storage_encryption_key:
-        raise ValueError("STORAGE_ENCRYPTION_KEY must be set for production deployment")
+        if not mongodb_uri:
+            raise ValueError("MONGODB_URI must be set for production deployment")
+        if not jwt_signing_key:
+            raise ValueError("JWT_SIGNING_KEY must be set for production deployment")
+        if not storage_encryption_key:
+            raise ValueError("STORAGE_ENCRYPTION_KEY must be set for production deployment")
 
-    # Create MongoDB storage with Fernet encryption (production-ready)
-    # Using MongoDB Atlas free tier (512MB, persistent)
-    mongodb_storage = MongoDBStore(
-        url=mongodb_uri,
-        db_name="boomi_mcp",
-        coll_name="oauth_tokens"
+        # Create MongoDB storage with Fernet encryption (production-ready)
+        # Using MongoDB Atlas free tier (512MB, persistent)
+        mongodb_storage = MongoDBStore(
+            url=mongodb_uri,
+            db_name="boomi_mcp",
+            coll_name="oauth_tokens"
+        )
+
+        encrypted_storage = FernetEncryptionWrapper(
+            key_value=mongodb_storage,
+            fernet=Fernet(storage_encryption_key.encode())
+        )
+
+        print(f"[INFO] OAuth tokens will be stored in MongoDB Atlas")
+        print(f"[INFO] Token storage encrypted with Fernet")
+
+        # Create GoogleProvider with encrypted MongoDB storage
+        auth = GoogleProvider(
+            client_id=client_id,
+            client_secret=client_secret,
+            base_url=base_url,
+            jwt_signing_key=jwt_signing_key,  # Explicit JWT signing key (production requirement)
+            client_storage=encrypted_storage,  # Encrypted MongoDB storage
+            extra_authorize_params={
+                "access_type": "offline",  # Request refresh tokens from Google
+                "prompt": "consent",       # Force consent to ensure refresh token is issued
+            },
+        )
+
+        # FIX: Patch register_client to clear client_secret when token_endpoint_auth_method="none"
+        # This fixes a bug where MCP clients send a secret during registration but don't send it
+        # during token exchange when using auth_method="none". The MCP SDK's ClientAuthenticator
+        # incorrectly requires the secret if it's stored, regardless of auth_method.
+        original_register_client = auth.register_client
+        async def patched_register_client(client_info):
+            if hasattr(client_info, 'client_secret') and client_info.client_secret:
+                client_info = client_info.model_copy(update={"client_secret": None})
+            return await original_register_client(client_info)
+        auth.register_client = patched_register_client
+
+        print(f"[INFO] Google OAuth 2.0 configured")
+        print(f"[INFO] Base URL: {base_url}")
+        print(f"[INFO] All authenticated Google users have full access to all tools")
+        print(f"[INFO] OAuth endpoints:")
+        print(f"       - Authorize: {base_url}/authorize")
+        print(f"       - Callback: {base_url}/auth/callback")
+        print(f"       - Token: {base_url}/token")
+    except Exception as e:
+        print(f"[ERROR] Failed to configure OAuth: {e}")
+        print(f"[ERROR] Please ensure these environment variables are set:")
+        print(f"       - OIDC_CLIENT_ID")
+        print(f"       - OIDC_CLIENT_SECRET")
+        print(f"       - OIDC_BASE_URL")
+        sys.exit(1)
+
+    # Create FastMCP server with auth
+    mcp = FastMCP(
+        name="Boomi MCP Server",
+        auth=auth
     )
 
-    encrypted_storage = FernetEncryptionWrapper(
-        key_value=mongodb_storage,
-        fernet=Fernet(storage_encryption_key.encode())
+    # Add SessionMiddleware for web UI OAuth flow
+    session_secret = os.getenv("SESSION_SECRET")
+    if not session_secret:
+        print("[ERROR] SESSION_SECRET environment variable must be set for web UI")
+        sys.exit(1)
+
+    if hasattr(mcp, '_app'):
+        mcp._app.add_middleware(SessionMiddleware, secret_key=session_secret, max_age=3600)
+        print(f"[INFO] SessionMiddleware configured for web UI")
+    elif hasattr(mcp, 'app'):
+        mcp.app.add_middleware(SessionMiddleware, secret_key=session_secret, max_age=3600)
+        print(f"[INFO] SessionMiddleware configured for web UI")
+
+    # --- Helper: get authenticated user info ---
+    def get_user_subject() -> str:
+        """Get authenticated user subject from access token."""
+        token = get_access_token()
+        if not token:
+            raise PermissionError("Authentication required")
+
+        # Get subject from JWT claims (Google email)
+        subject = token.claims.get("sub") if hasattr(token, "claims") else token.client_id
+        if not subject:
+            # Try email as fallback
+            subject = token.claims.get("email") if hasattr(token, "claims") else None
+        if not subject:
+            raise PermissionError("Token missing 'sub' or 'email' claim")
+
+        return subject
+
+else:
+    # Local dev mode - no auth
+    mcp = FastMCP(
+        name="Boomi MCP Server (Local Dev)"
     )
 
-    print(f"[INFO] OAuth tokens will be stored in MongoDB Atlas")
-    print(f"[INFO] Token storage encrypted with Fernet")
 
-    # Create GoogleProvider with encrypted MongoDB storage
-    auth = GoogleProvider(
-        client_id=client_id,
-        client_secret=client_secret,
-        base_url=base_url,
-        jwt_signing_key=jwt_signing_key,  # Explicit JWT signing key (production requirement)
-        client_storage=encrypted_storage,  # Encrypted MongoDB storage
-        extra_authorize_params={
-            "access_type": "offline",  # Request refresh tokens from Google
-            "prompt": "consent",       # Force consent to ensure refresh token is issued
-        },
-    )
-
-    # FIX: Patch register_client to clear client_secret when token_endpoint_auth_method="none"
-    # This fixes a bug where MCP clients send a secret during registration but don't send it
-    # during token exchange when using auth_method="none". The MCP SDK's ClientAuthenticator
-    # incorrectly requires the secret if it's stored, regardless of auth_method.
-    original_register_client = auth.register_client
-    async def patched_register_client(client_info):
-        if hasattr(client_info, 'client_secret') and client_info.client_secret:
-            client_info = client_info.model_copy(update={"client_secret": None})
-        return await original_register_client(client_info)
-    auth.register_client = patched_register_client
-
-    print(f"[INFO] Google OAuth 2.0 configured")
-    print(f"[INFO] Base URL: {base_url}")
-    print(f"[INFO] All authenticated Google users have full access to all tools")
-    print(f"[INFO] OAuth endpoints:")
-    print(f"       - Authorize: {base_url}/authorize")
-    print(f"       - Callback: {base_url}/auth/callback")
-    print(f"       - Token: {base_url}/token")
-except Exception as e:
-    print(f"[ERROR] Failed to configure OAuth: {e}")
-    print(f"[ERROR] Please ensure these environment variables are set:")
-    print(f"       - OIDC_CLIENT_ID")
-    print(f"       - OIDC_CLIENT_SECRET")
-    print(f"       - OIDC_BASE_URL")
-    sys.exit(1)
-
-# Create FastMCP server with auth
-mcp = FastMCP(
-    name="Boomi MCP Server",
-    auth=auth
-)
-
-# Add SessionMiddleware for web UI OAuth flow
-# This is required for storing OAuth state and code_verifier between requests
-session_secret = os.getenv("SESSION_SECRET")
-if not session_secret:
-    print("[ERROR] SESSION_SECRET environment variable must be set for web UI")
-    sys.exit(1)
-
-# Access the underlying Starlette app and add SessionMiddleware
-if hasattr(mcp, '_app'):
-    mcp._app.add_middleware(SessionMiddleware, secret_key=session_secret, max_age=3600)
-    print(f"[INFO] SessionMiddleware configured for web UI")
-elif hasattr(mcp, 'app'):
-    mcp.app.add_middleware(SessionMiddleware, secret_key=session_secret, max_age=3600)
-    print(f"[INFO] SessionMiddleware configured for web UI")
+# --- User Identity ---
+def get_current_user() -> str:
+    """Get current user identity (local dev user or OAuth subject)."""
+    if LOCAL_MODE:
+        return "local-dev-user"
+    return get_user_subject()
 
 
-# --- Helper: get authenticated user info ---
-def get_user_subject() -> str:
-    """Get authenticated user subject from access token."""
-    token = get_access_token()
-    if not token:
-        raise PermissionError("Authentication required")
-
-    # Get subject from JWT claims (Google email)
-    subject = token.claims.get("sub") if hasattr(token, "claims") else token.client_id
-    if not subject:
-        # Try email as fallback
-        subject = token.claims.get("email") if hasattr(token, "claims") else None
-    if not subject:
-        raise PermissionError("Token missing 'sub' or 'email' claim")
-
-    return subject
-
-
-# --- Tools ---
-# Note: Credential management is done via web UI at /
-# The following tools are commented out to avoid confusion
-
-# @mcp.tool()
-# def set_boomi_credentials(...):
-#     """Use the web UI to manage credentials"""
-#     pass
+# --- MCP Tools ---
 
 @mcp.tool(
     annotations={
-        "readOnlyHint": True,   # Tool only reads data, does not modify environment
-        "openWorldHint": True   # Tool accesses external Boomi API
+        "readOnlyHint": True,
+        "openWorldHint": True
     }
 )
 def list_boomi_profiles():
     """
-    List all saved Boomi credential profiles for the authenticated user.
+    List all saved Boomi credential profiles for the current user.
 
     Returns a list of profile names that can be used with boomi_account_info().
     Use this tool first to see which profiles are available before requesting account info.
@@ -250,44 +276,42 @@ def list_boomi_profiles():
         List of profile objects with 'profile' name and metadata
     """
     try:
-        subject = get_user_subject()
+        subject = get_current_user()
         print(f"[INFO] list_boomi_profiles called by user: {subject}")
 
         profiles = list_profiles(subject)
         print(f"[INFO] Found {len(profiles)} profiles for {subject}")
 
         if not profiles:
-            return {
+            result = {
                 "_success": True,
                 "profiles": [],
-                "message": "No profiles found. Add credentials at https://boomi.renera.ai/",
-                "web_portal": "https://boomi.renera.ai/"
+                "message": "No profiles found. Use set_boomi_credentials tool to add credentials." if LOCAL_MODE else "No profiles found. Add credentials at https://boomi.renera.ai/",
             }
+            if not LOCAL_MODE:
+                result["web_portal"] = "https://boomi.renera.ai/"
+            return result
 
-        return {
+        result = {
             "_success": True,
             "profiles": [p["profile"] for p in profiles],
             "count": len(profiles),
-            "web_portal": "https://boomi.renera.ai/"
         }
+        if not LOCAL_MODE:
+            result["web_portal"] = "https://boomi.renera.ai/"
+        return result
     except Exception as e:
         print(f"[ERROR] Failed to list profiles: {e}")
         return {
             "_success": False,
-            "error": f"Failed to list profiles: {str(e)}",
-            "_note": "Make sure you're authenticated with OAuth"
+            "error": f"Failed to list profiles: {str(e)}"
         }
-
-# @mcp.tool()
-# def delete_boomi_profile(...):
-#     """Use the web UI to delete profiles"""
-#     pass
 
 
 @mcp.tool(
     annotations={
-        "readOnlyHint": True,   # Tool only reads data, does not modify environment
-        "openWorldHint": True   # Tool accesses external Boomi API
+        "readOnlyHint": True,
+        "openWorldHint": True
     }
 )
 def boomi_account_info(profile: str):
@@ -315,6 +339,11 @@ def boomi_account_info(profile: str):
     - Profile name is required when adding credentials
     - Users can add, delete, and switch between profiles
 
+    LOCAL DEV VERSION:
+    - Store credentials using set_boomi_credentials tool
+    - No web UI available in local dev mode
+    - Credentials stored in ~/.boomi_mcp_local_secrets.json
+
     Args:
         profile: Profile name to use (REQUIRED - no default)
 
@@ -322,14 +351,13 @@ def boomi_account_info(profile: str):
         Account information including name, status, licensing details, or error details
     """
     try:
-        subject = get_user_subject()
+        subject = get_current_user()
         print(f"[INFO] boomi_account_info called by user: {subject}, profile: {profile}")
     except Exception as e:
         print(f"[ERROR] Failed to get user subject: {e}")
         return {
             "_success": False,
-            "error": f"Authentication failed: {str(e)}",
-            "_note": "Make sure you're authenticated with OAuth"
+            "error": f"Authentication failed: {str(e)}"
         }
 
     # Try to get stored credentials
@@ -344,24 +372,24 @@ def boomi_account_info(profile: str):
         available_profiles = list_profiles(subject)
         print(f"[INFO] Available profiles for {subject}: {[p['profile'] for p in available_profiles]}")
 
-        return {
+        result = {
             "_success": False,
-            "error": f"Profile '{profile}' not found. Please store credentials at the web portal first.",
+            "error": f"Profile '{profile}' not found. {'Use set_boomi_credentials to add credentials.' if LOCAL_MODE else 'Please store credentials at the web portal first.'}",
             "available_profiles": [p["profile"] for p in available_profiles],
-            "web_portal": "https://boomi-mcp-server-126964451821.us-central1.run.app/",
-            "_note": "Use the web UI to create a profile with your Boomi credentials"
         }
+        if not LOCAL_MODE:
+            result["web_portal"] = "https://boomi-mcp-server-126964451821.us-central1.run.app/"
+        return result
     except Exception as e:
         print(f"[ERROR] Unexpected error retrieving credentials: {e}")
         return {
             "_success": False,
-            "error": f"Failed to retrieve credentials: {str(e)}",
-            "_note": "Check server logs for details"
+            "error": f"Failed to retrieve credentials: {str(e)}"
         }
 
     print(f"[INFO] Calling Boomi API for {subject}:{profile} (account: {creds['account_id']})")
 
-    # Initialize Boomi SDK (matches sample.py - no base_url unless explicitly provided)
+    # Initialize Boomi SDK
     try:
         sdk_params = {
             "account_id": creds["account_id"],
@@ -520,7 +548,7 @@ if manage_trading_partner_action:
                 return {"_success": False, "error": f"Invalid JSON in config: {e}"}
 
         try:
-            subject = get_user_subject()
+            subject = get_current_user()
             print(f"[INFO] manage_trading_partner called by user: {subject}, profile: {profile}, action: {action}")
 
             # Get credentials
@@ -677,7 +705,7 @@ if manage_process_action:
             )
         """
         try:
-            subject = get_user_subject()
+            subject = get_current_user()
             print(f"[INFO] manage_process called by user: {subject}, profile: {profile}, action: {action}")
 
             # Get credentials
@@ -794,7 +822,7 @@ if manage_organization_action:
                 return {"_success": False, "error": f"Invalid JSON in config: {e}"}
 
         try:
-            subject = get_user_subject()
+            subject = get_current_user()
             print(f"[INFO] manage_organization called by user: {subject}, profile: {profile}, action: {action}")
 
             # Get credentials
@@ -840,371 +868,463 @@ if manage_organization_action:
     print("[INFO] Organization tool registered successfully (1 consolidated tool)")
 
 
-# --- Web UI Routes ---
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
-from starlette.requests import Request
-from starlette.middleware.sessions import SessionMiddleware
-import urllib.parse
-import httpx
+# --- Credential Management Tools (local dev only) ---
+if LOCAL_MODE:
+    @mcp.tool()
+    def set_boomi_credentials(
+        profile: str,
+        account_id: str,
+        username: str,
+        password: str
+    ):
+        """
+        Store Boomi API credentials for local testing.
+
+        This tool is only available in the local development version.
+        In production, credentials are managed via the web UI.
+
+        Args:
+            profile: Profile name (e.g., 'production', 'sandbox', 'dev')
+            account_id: Boomi account ID
+            username: Boomi API username (should start with BOOMI_TOKEN.)
+            password: Boomi API password/token
+
+        Returns:
+            Success confirmation or error details
+        """
+        try:
+            subject = get_current_user()
+            print(f"[INFO] set_boomi_credentials called for profile: {profile}")
+
+            # Validate credentials by making a test API call
+            try:
+                test_sdk = Boomi(
+                    account_id=account_id,
+                    username=username,
+                    password=password,
+                    timeout=10000,
+                )
+                test_sdk.account.get_account(id_=account_id)
+                print(f"[INFO] Credentials validated successfully for {account_id}")
+            except Exception as e:
+                print(f"[ERROR] Credential validation failed: {e}")
+                return {
+                    "_success": False,
+                    "error": f"Credential validation failed: {str(e)}",
+                    "_note": "Please check your account_id, username, and password"
+                }
+
+            # Store credentials
+            put_secret(subject, profile, {
+                "username": username,
+                "password": password,
+                "account_id": account_id,
+            })
+
+            return {
+                "_success": True,
+                "message": f"Credentials saved for profile '{profile}'",
+                "profile": profile,
+                "_note": "Credentials stored locally in ~/.boomi_mcp_local_secrets.json"
+            }
+        except Exception as e:
+            print(f"[ERROR] Failed to set credentials: {e}")
+            return {
+                "_success": False,
+                "error": str(e)
+            }
+
+    @mcp.tool()
+    def delete_boomi_profile(profile: str):
+        """
+        Delete a stored Boomi credential profile.
+
+        This tool is only available in the local development version.
+        In production, profiles are managed via the web UI.
+
+        Args:
+            profile: Profile name to delete
+
+        Returns:
+            Success confirmation or error details
+        """
+        try:
+            subject = get_current_user()
+            print(f"[INFO] delete_boomi_profile called for profile: {profile}")
+
+            delete_profile(subject, profile)
+
+            return {
+                "_success": True,
+                "message": f"Profile '{profile}' deleted successfully",
+            }
+        except Exception as e:
+            print(f"[ERROR] Failed to delete profile: {e}")
+            return {
+                "_success": False,
+                "error": str(e)
+            }
 
 
-def generate_pkce_pair():
-    """Generate PKCE code_verifier and code_challenge."""
-    code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
-    code_challenge = base64.urlsafe_b64encode(
-        hashlib.sha256(code_verifier.encode('utf-8')).digest()
-    ).decode('utf-8').rstrip('=')
-    return code_verifier, code_challenge
+# --- Web UI Routes (production only) ---
+if not LOCAL_MODE:
+    from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+    from starlette.requests import Request
+    from starlette.middleware.sessions import SessionMiddleware
+    import urllib.parse
+    import httpx
 
+    def generate_pkce_pair():
+        """Generate PKCE code_verifier and code_challenge."""
+        code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode('utf-8')).digest()
+        ).decode('utf-8').rstrip('=')
+        return code_verifier, code_challenge
 
-def get_authenticated_user(request: Request) -> Optional[str]:
-    """Extract authenticated user from request (works with OAuth middleware and sessions)."""
-    # Try session first (web portal authentication)
-    # Use 'sub' (Google user ID) for consistency with MCP OAuth
-    if hasattr(request, "session") and request.session.get("user_sub"):
-        return request.session.get("user_sub")
+    def get_authenticated_user(request: Request) -> Optional[str]:
+        """Extract authenticated user from request (works with OAuth middleware and sessions)."""
+        # Try session first (web portal authentication)
+        # Use 'sub' (Google user ID) for consistency with MCP OAuth
+        if hasattr(request, "session") and request.session.get("user_sub"):
+            return request.session.get("user_sub")
 
-    # Try request.state (FastMCP/Starlette OAuth pattern for MCP clients)
-    if hasattr(request.state, "user"):
-        user = request.state.user
-        if isinstance(user, dict):
-            return user.get("sub") or user.get("email")
-        if hasattr(user, "sub"):
-            return user.sub
-        if hasattr(user, "email"):
-            return user.email
-        return str(user)
+        # Try request.state (FastMCP/Starlette OAuth pattern for MCP clients)
+        if hasattr(request.state, "user"):
+            user = request.state.user
+            if isinstance(user, dict):
+                return user.get("sub") or user.get("email")
+            if hasattr(user, "sub"):
+                return user.sub
+            if hasattr(user, "email"):
+                return user.email
+            return str(user)
 
-    # No authenticated user found
-    return None
+        # No authenticated user found
+        return None
 
+    @mcp.custom_route("/web/login", methods=["GET"])
+    async def web_login(request: Request):
+        """Initiate OAuth login with PKCE for web portal."""
+        # Get Google OAuth configuration
+        client_id = os.getenv("OIDC_CLIENT_ID")
+        base_url = os.getenv("OIDC_BASE_URL", str(request.base_url).rstrip('/'))
 
-@mcp.custom_route("/web/login", methods=["GET"])
-async def web_login(request: Request):
-    """Initiate OAuth login with PKCE for web portal."""
-    # Get Google OAuth configuration
-    client_id = os.getenv("OIDC_CLIENT_ID")
-    base_url = os.getenv("OIDC_BASE_URL", str(request.base_url).rstrip('/'))
+        if not client_id:
+            return JSONResponse({"error": "OAuth not configured"}, status_code=500)
 
-    if not client_id:
-        return JSONResponse({"error": "OAuth not configured"}, status_code=500)
+        # Generate PKCE parameters
+        code_verifier, code_challenge = generate_pkce_pair()
+        state = secrets.token_urlsafe(32)
 
-    # Generate PKCE parameters
-    code_verifier, code_challenge = generate_pkce_pair()
-    state = secrets.token_urlsafe(32)
+        # Store code_verifier and state in session
+        request.session["oauth_state"] = state
+        request.session["code_verifier"] = code_verifier
 
-    # Store code_verifier and state in session
-    request.session["oauth_state"] = state
-    request.session["code_verifier"] = code_verifier
+        print(f"[DEBUG] Stored in session: oauth_state={state[:20]}..., code_verifier={code_verifier[:20]}...")
+        print(f"[DEBUG] Session after store: {dict(request.session)}")
 
-    print(f"[DEBUG] Stored in session: oauth_state={state[:20]}..., code_verifier={code_verifier[:20]}...")
-    print(f"[DEBUG] Session after store: {dict(request.session)}")
+        # Build Google OAuth authorization URL with PKCE
+        redirect_uri = f"{base_url}/web/callback"
+        auth_params = {
+            "client_id": client_id,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+        }
 
-    # Build Google OAuth authorization URL with PKCE
-    redirect_uri = f"{base_url}/web/callback"
-    auth_params = {
-        "client_id": client_id,
-        "response_type": "code",
-        "scope": "openid email profile",
-        "redirect_uri": redirect_uri,
-        "state": state,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
-    }
+        auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(auth_params)
 
-    auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(auth_params)
+        print(f"[INFO] Initiating OAuth login for web portal")
+        print(f"[INFO] Redirect URI: {redirect_uri}")
 
-    print(f"[INFO] Initiating OAuth login for web portal")
-    print(f"[INFO] Redirect URI: {redirect_uri}")
+        return RedirectResponse(auth_url)
 
-    return RedirectResponse(auth_url)
+    @mcp.custom_route("/web/callback", methods=["GET"])
+    async def web_callback(request: Request):
+        """Handle OAuth callback for web portal."""
+        # Get parameters from callback
+        code = request.query_params.get("code")
+        state = request.query_params.get("state")
+        error = request.query_params.get("error")
 
+        print(f"[DEBUG] Callback received - state from URL: {state[:20] if state else 'None'}...")
+        print(f"[DEBUG] Session contents: {dict(request.session)}")
+        print(f"[DEBUG] Session ID: {id(request.session)}")
+        print(f"[DEBUG] Has session attr: {hasattr(request, 'session')}")
 
-@mcp.custom_route("/web/callback", methods=["GET"])
-async def web_callback(request: Request):
-    """Handle OAuth callback for web portal."""
-    # Get parameters from callback
-    code = request.query_params.get("code")
-    state = request.query_params.get("state")
-    error = request.query_params.get("error")
+        if error:
+            return HTMLResponse(f"<html><body><h1>OAuth Error</h1><p>{error}</p></body></html>", status_code=400)
 
-    print(f"[DEBUG] Callback received - state from URL: {state[:20] if state else 'None'}...")
-    print(f"[DEBUG] Session contents: {dict(request.session)}")
-    print(f"[DEBUG] Session ID: {id(request.session)}")
-    print(f"[DEBUG] Has session attr: {hasattr(request, 'session')}")
+        if not code or not state:
+            return HTMLResponse("<html><body><h1>OAuth Error</h1><p>Missing code or state</p></body></html>", status_code=400)
 
-    if error:
-        return HTMLResponse(f"<html><body><h1>OAuth Error</h1><p>{error}</p></body></html>", status_code=400)
+        # Verify state
+        stored_state = request.session.get("oauth_state")
+        print(f"[DEBUG] Stored state from session: {stored_state[:20] if stored_state else 'None'}...")
+        print(f"[DEBUG] State match: {state == stored_state}")
 
-    if not code or not state:
-        return HTMLResponse("<html><body><h1>OAuth Error</h1><p>Missing code or state</p></body></html>", status_code=400)
+        if not stored_state or state != stored_state:
+            return HTMLResponse(
+                f"<html><body><h1>OAuth Error</h1>"
+                f"<p>Invalid state</p>"
+                f"<p>Debug: Expected state in session but got empty session</p>"
+                f"<p>Session keys: {list(request.session.keys())}</p>"
+                f"</body></html>",
+                status_code=400
+            )
 
-    # Verify state
-    stored_state = request.session.get("oauth_state")
-    print(f"[DEBUG] Stored state from session: {stored_state[:20] if stored_state else 'None'}...")
-    print(f"[DEBUG] State match: {state == stored_state}")
+        # Get stored code_verifier
+        code_verifier = request.session.get("code_verifier")
+        if not code_verifier:
+            return HTMLResponse("<html><body><h1>OAuth Error</h1><p>Missing code_verifier</p></body></html>", status_code=400)
 
-    if not stored_state or state != stored_state:
-        return HTMLResponse(
-            f"<html><body><h1>OAuth Error</h1>"
-            f"<p>Invalid state</p>"
-            f"<p>Debug: Expected state in session but got empty session</p>"
-            f"<p>Session keys: {list(request.session.keys())}</p>"
-            f"</body></html>",
-            status_code=400
-        )
+        # Exchange code for tokens
+        client_id = os.getenv("OIDC_CLIENT_ID")
+        client_secret = os.getenv("OIDC_CLIENT_SECRET")
+        base_url = os.getenv("OIDC_BASE_URL", str(request.base_url).rstrip('/'))
+        redirect_uri = f"{base_url}/web/callback"
 
-    # Get stored code_verifier
-    code_verifier = request.session.get("code_verifier")
-    if not code_verifier:
-        return HTMLResponse("<html><body><h1>OAuth Error</h1><p>Missing code_verifier</p></body></html>", status_code=400)
+        token_url = "https://oauth2.googleapis.com/token"
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "code_verifier": code_verifier,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        }
 
-    # Exchange code for tokens
-    client_id = os.getenv("OIDC_CLIENT_ID")
-    client_secret = os.getenv("OIDC_CLIENT_SECRET")
-    base_url = os.getenv("OIDC_BASE_URL", str(request.base_url).rstrip('/'))
-    redirect_uri = f"{base_url}/web/callback"
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(token_url, data=token_data)
+                response.raise_for_status()
+                tokens = response.json()
 
-    token_url = "https://oauth2.googleapis.com/token"
-    token_data = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "code": code,
-        "code_verifier": code_verifier,
-        "grant_type": "authorization_code",
-        "redirect_uri": redirect_uri,
-    }
+            # Decode ID token to get user info (we don't verify signature here since we got it directly from Google)
+            import jwt
+            id_token = tokens.get("id_token")
+            user_info = jwt.decode(id_token, options={"verify_signature": False})
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(token_url, data=token_data)
-            response.raise_for_status()
-            tokens = response.json()
+            # Store user info in session
+            request.session["user_email"] = user_info.get("email")
+            request.session["user_sub"] = user_info.get("sub")
 
-        # Decode ID token to get user info (we don't verify signature here since we got it directly from Google)
-        import jwt
-        id_token = tokens.get("id_token")
-        user_info = jwt.decode(id_token, options={"verify_signature": False})
+            # Clear OAuth state
+            request.session.pop("oauth_state", None)
+            request.session.pop("code_verifier", None)
 
-        # Store user info in session
-        request.session["user_email"] = user_info.get("email")
-        request.session["user_sub"] = user_info.get("sub")
+            print(f"[INFO] Web portal login successful for {user_info.get('email')}")
 
-        # Clear OAuth state
-        request.session.pop("oauth_state", None)
-        request.session.pop("code_verifier", None)
+            # Redirect to main page
+            return RedirectResponse("/")
 
-        print(f"[INFO] Web portal login successful for {user_info.get('email')}")
+        except Exception as e:
+            print(f"[ERROR] OAuth token exchange failed: {e}")
+            return HTMLResponse(f"<html><body><h1>OAuth Error</h1><p>Token exchange failed: {str(e)}</p></body></html>", status_code=500)
 
-        # Redirect to main page
-        return RedirectResponse("/")
+    @mcp.custom_route("/", methods=["GET"])
+    async def web_ui(request: Request):
+        """Serve the credential management web UI (requires authentication)."""
+        # Get authenticated user
+        subject = get_authenticated_user(request)
+        if not subject:
+            # Show login page (no template variables needed - uses /web/login endpoint)
+            template_path = Path(__file__).parent / "templates" / "login.html"
+            html = template_path.read_text()
+            return HTMLResponse(html)
 
-    except Exception as e:
-        print(f"[ERROR] OAuth token exchange failed: {e}")
-        return HTMLResponse(f"<html><body><h1>OAuth Error</h1><p>Token exchange failed: {str(e)}</p></body></html>", status_code=500)
-
-
-@mcp.custom_route("/", methods=["GET"])
-async def web_ui(request: Request):
-    """Serve the credential management web UI (requires authentication)."""
-    # Get authenticated user
-    subject = get_authenticated_user(request)
-    if not subject:
-        # Show login page (no template variables needed - uses /web/login endpoint)
-        template_path = Path(__file__).parent / "templates" / "login.html"
+        # Read and render template
+        template_path = Path(__file__).parent / "templates" / "credentials.html"
         html = template_path.read_text()
+
+        # Get server URL from environment or request
+        base_url = os.getenv("OIDC_BASE_URL")
+        if not base_url:
+            # Fallback to request base URL
+            base_url = str(request.base_url).rstrip('/')
+
+        server_url = f"{base_url}/mcp"
+
+        # Replace template variables
+        html = html.replace("{{ user_email }}", subject)
+        html = html.replace("{{ server_url }}", server_url)
+
         return HTMLResponse(html)
 
-    # Read and render template
-    template_path = Path(__file__).parent / "templates" / "credentials.html"
-    html = template_path.read_text()
+    @mcp.custom_route("/api/credentials/validate", methods=["POST"])
+    async def api_validate_credentials(request: Request):
+        """API endpoint to validate Boomi credentials before saving."""
+        subject = get_authenticated_user(request)
+        if not subject:
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
 
-    # Get server URL from environment or request
-    base_url = os.getenv("OIDC_BASE_URL")
-    if not base_url:
-        # Fallback to request base URL
-        base_url = str(request.base_url).rstrip('/')
+        try:
+            data = await request.json()
 
-    server_url = f"{base_url}/mcp"
+            print(f"[DEBUG] Validating credentials for account_id: {data['account_id']}, username: {data['username'][:30]}...")
 
-    # Replace template variables
-    html = html.replace("{{ user_email }}", subject)
-    html = html.replace("{{ server_url }}", server_url)
+            # Test credentials by attempting to initialize Boomi SDK and make a simple API call
+            test_sdk = Boomi(
+                account_id=data["account_id"],
+                username=data["username"],
+                password=data["password"],
+                timeout=10000,
+            )
 
-    return HTMLResponse(html)
+            # Try to get account info - this will fail if credentials are invalid
+            print(f"[DEBUG] Calling Boomi API: account.get_account(id_={data['account_id']})")
+            result = test_sdk.account.get_account(id_=data["account_id"])
 
+            if result:
+                print(f"[DEBUG] Validation successful for {data['account_id']}")
+                return JSONResponse({
+                    "success": True,
+                    "message": "Credentials validated successfully"
+                })
+            else:
+                print(f"[ERROR] Validation returned no result for {data['account_id']}")
+                return JSONResponse({"error": "Failed to validate credentials"}, status_code=400)
 
-@mcp.custom_route("/api/credentials/validate", methods=["POST"])
-async def api_validate_credentials(request: Request):
-    """API endpoint to validate Boomi credentials before saving."""
-    subject = get_authenticated_user(request)
-    if not subject:
-        return JSONResponse({"error": "Authentication required"}, status_code=401)
+        except Exception as e:
+            error_msg = str(e)
+            print(f"[ERROR] Validation exception: {error_msg}")
+            print(f"[ERROR] Exception type: {type(e).__name__}")
 
-    try:
-        data = await request.json()
+            # Provide user-friendly error messages
+            if "401" in error_msg or "Unauthorized" in error_msg:
+                error_msg = "Invalid username or password"
+            elif "403" in error_msg or "Forbidden" in error_msg:
+                error_msg = "Access denied - check your account permissions"
+            elif "404" in error_msg or "Not Found" in error_msg:
+                error_msg = "Account ID not found"
+            elif "timeout" in error_msg.lower():
+                error_msg = "Connection timeout - please try again"
 
-        print(f"[DEBUG] Validating credentials for account_id: {data['account_id']}, username: {data['username'][:30]}...")
+            return JSONResponse({"error": f"Validation failed: {error_msg}"}, status_code=400)
 
-        # Test credentials by attempting to initialize Boomi SDK and make a simple API call
-        # Don't pass base_url - let SDK use default which auto-formats {accountId}
-        test_sdk = Boomi(
-            account_id=data["account_id"],
-            username=data["username"],
-            password=data["password"],
-            timeout=10000,
-        )
+    @mcp.custom_route("/api/credentials", methods=["POST"])
+    async def api_set_credentials(request: Request):
+        """API endpoint to save credentials."""
+        subject = get_authenticated_user(request)
+        if not subject:
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
 
-        # Try to get account info - this will fail if credentials are invalid
-        print(f"[DEBUG] Calling Boomi API: account.get_account(id_={data['account_id']})")
-        result = test_sdk.account.get_account(id_=data["account_id"])
+        try:
+            data = await request.json()
 
-        if result:
-            print(f"[DEBUG] Validation successful for {data['account_id']}")
+            # Check profile limit (10 profiles per user)
+            existing_profiles = list_profiles(subject)
+            profile_name = data["profile"]
+
+            # Allow updating existing profile, but limit new profiles to 10
+            is_new_profile = profile_name not in [p["profile"] for p in existing_profiles]
+            if is_new_profile and len(existing_profiles) >= 10:
+                return JSONResponse({
+                    "error": "Profile limit reached. You can store up to 10 Boomi account profiles. Please delete an existing profile before adding a new one."
+                }, status_code=400)
+
+            put_secret(subject, profile_name, {
+                "username": data["username"],
+                "password": data["password"],
+                "account_id": data["account_id"],
+            })
+
             return JSONResponse({
                 "success": True,
-                "message": "Credentials validated successfully"
+                "message": f"Credentials saved for profile '{profile_name}'"
             })
-        else:
-            print(f"[ERROR] Validation returned no result for {data['account_id']}")
-            return JSONResponse({"error": "Failed to validate credentials"}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[ERROR] Validation exception: {error_msg}")
-        print(f"[ERROR] Exception type: {type(e).__name__}")
+    @mcp.custom_route("/api/profiles", methods=["GET"])
+    async def api_list_profiles(request: Request):
+        """API endpoint to list profiles."""
+        subject = get_authenticated_user(request)
+        if not subject:
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
 
-        # Provide user-friendly error messages
-        if "401" in error_msg or "Unauthorized" in error_msg:
-            error_msg = "Invalid username or password"
-        elif "403" in error_msg or "Forbidden" in error_msg:
-            error_msg = "Access denied - check your account permissions"
-        elif "404" in error_msg or "Not Found" in error_msg:
-            error_msg = "Account ID not found"
-        elif "timeout" in error_msg.lower():
-            error_msg = "Connection timeout - please try again"
+        profiles_data = list_profiles(subject)
+        profile_names = [p["profile"] for p in profiles_data]
 
-        return JSONResponse({"error": f"Validation failed: {error_msg}"}, status_code=400)
+        return JSONResponse({"profiles": profile_names})
 
+    @mcp.custom_route("/api/profiles/{profile}", methods=["DELETE"])
+    async def api_delete_profile(request: Request):
+        """API endpoint to delete a profile."""
+        subject = get_authenticated_user(request)
+        if not subject:
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
 
-@mcp.custom_route("/api/credentials", methods=["POST"])
-async def api_set_credentials(request: Request):
-    """API endpoint to save credentials."""
-    subject = get_authenticated_user(request)
-    if not subject:
-        return JSONResponse({"error": "Authentication required"}, status_code=401)
+        profile = request.path_params["profile"]
 
-    try:
-        data = await request.json()
-
-        # Check profile limit (10 profiles per user)
-        existing_profiles = list_profiles(subject)
-        profile_name = data["profile"]
-
-        # Allow updating existing profile, but limit new profiles to 10
-        is_new_profile = profile_name not in [p["profile"] for p in existing_profiles]
-        if is_new_profile and len(existing_profiles) >= 10:
+        try:
+            delete_profile(subject, profile)
             return JSONResponse({
-                "error": "Profile limit reached. You can store up to 10 Boomi account profiles. Please delete an existing profile before adding a new one."
-            }, status_code=400)
-
-        # Don't store base_url - let SDK use default which auto-formats {accountId}
-        put_secret(subject, profile_name, {
-            "username": data["username"],
-            "password": data["password"],
-            "account_id": data["account_id"],
-        })
-
-        return JSONResponse({
-            "success": True,
-            "message": f"Credentials saved for profile '{profile_name}'"
-        })
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-
-
-@mcp.custom_route("/api/profiles", methods=["GET"])
-async def api_list_profiles(request: Request):
-    """API endpoint to list profiles."""
-    subject = get_authenticated_user(request)
-    if not subject:
-        return JSONResponse({"error": "Authentication required"}, status_code=401)
-
-    profiles_data = list_profiles(subject)
-    profile_names = [p["profile"] for p in profiles_data]
-
-    return JSONResponse({"profiles": profile_names})
-
-
-@mcp.custom_route("/api/profiles/{profile}", methods=["DELETE"])
-async def api_delete_profile(request: Request):
-    """API endpoint to delete a profile."""
-    subject = get_authenticated_user(request)
-    if not subject:
-        return JSONResponse({"error": "Authentication required"}, status_code=401)
-
-    profile = request.path_params["profile"]
-
-    try:
-        delete_profile(subject, profile)
-        return JSONResponse({
-            "success": True,
-            "message": f"Profile '{profile}' deleted"
-        })
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+                "success": True,
+                "message": f"Profile '{profile}' deleted"
+            })
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
 
 if __name__ == "__main__":
-    # Print startup info
-    print("\n" + "=" * 60)
-    print("🚀 Boomi MCP Server")
-    print("=" * 60)
+    if LOCAL_MODE:
+        print("\n" + "=" * 60)
+        print("Boomi MCP Server - LOCAL DEVELOPMENT MODE")
+        print("=" * 60)
+        print("  WARNING: This is for LOCAL TESTING ONLY")
+        print("  No OAuth authentication - DO NOT use in production")
+        print("=" * 60)
+        print(f"Auth Mode:     None (local dev)")
+        print(f"Storage:       Local file (~/.boomi_mcp_local_secrets.json)")
+        print(f"Test User:     local-dev-user")
+        print("=" * 60)
+        print("\nMCP Tools available:")
+        print("  list_boomi_profiles - List saved credential profiles")
+        print("  set_boomi_credentials - Store Boomi credentials")
+        print("  delete_boomi_profile - Delete a credential profile")
+        print("  boomi_account_info - Get account information from Boomi API")
+        if manage_trading_partner_action:
+            print("\n  Trading Partner Management:")
+            print("  manage_trading_partner - Unified tool for all trading partner operations")
+            print("    Actions: list, get, create, update, delete, analyze_usage")
+            print("    Standards: X12, EDIFACT, HL7, RosettaNet, Custom, Tradacoms, Odette")
+        if manage_process_action:
+            print("\n  Process Management:")
+            print("  manage_process - Unified tool for all process operations")
+        if manage_organization_action:
+            print("\n  Organization Management:")
+            print("  manage_organization - Unified tool for all organization operations")
+        print("=" * 60 + "\n")
 
-    provider_type = os.getenv("OIDC_PROVIDER", "google")
-    base_url = os.getenv("OIDC_BASE_URL", "http://localhost:8000")
-    backend_type = os.getenv("SECRETS_BACKEND", "gcp")
-    print(f"Auth Mode:     OAuth 2.0 ({provider_type})")
-    print(f"Base URL:      {base_url}")
-    print(f"Login URL:     {base_url}/auth/login")
-    print(f"Secrets:       {backend_type.upper()}")
-    if backend_type == "gcp":
-        print(f"GCP Project:   {os.getenv('GCP_PROJECT_ID', 'boomimcp')}")
-    print("=" * 60)
+        mcp.run(transport="stdio")
+    else:
+        # Print startup info
+        print("\n" + "=" * 60)
+        print("Boomi MCP Server")
+        print("=" * 60)
 
-    print("=" * 60)
-    print("\n🌐 Web Interface:")
-    print(f"  Credential Management: {base_url}/")
-    print("  (Login with Google to store your Boomi credentials)")
-    print("\n🔧 MCP Tools available:")
-    print("  • boomi_account_info - Get account information from Boomi API")
-    if trading_partner_tools:
-        print("\n  🤝 Trading Partner Management:")
-        print("  • list_trading_partners - List all trading partners with filtering")
-        print("  • get_trading_partner - Get specific trading partner details")
-        print("  • create_trading_partner - Create new trading partners (X12, EDIFACT, HL7, etc.)")
-        print("  • update_trading_partner - Update trading partner information")
-        print("  • delete_trading_partner - Delete a trading partner")
-        print("  • analyze_trading_partner_usage - Analyze partner usage in processes")
-    print("\n📝 Note:")
-    print("  Credentials are managed via the web UI (not MCP tools)")
-    print("  After storing credentials in the web portal, they're automatically")
-    print("  available to the boomi_account_info tool when you authenticate via MCP")
-    print("=" * 60 + "\n")
+        provider_type = os.getenv("OIDC_PROVIDER", "google")
+        base_url = os.getenv("OIDC_BASE_URL", "http://localhost:8000")
+        backend_type = os.getenv("SECRETS_BACKEND", "gcp")
+        print(f"Auth Mode:     OAuth 2.0 ({provider_type})")
+        print(f"Base URL:      {base_url}")
+        print(f"Login URL:     {base_url}/auth/login")
+        print(f"Secrets:       {backend_type.upper()}")
+        if backend_type == "gcp":
+            print(f"GCP Project:   {os.getenv('GCP_PROJECT_ID', 'boomimcp')}")
+        print("=" * 60)
 
-    # Streamable HTTP transport
-    host = os.getenv("MCP_HOST", "127.0.0.1")
-    port = int(os.getenv("MCP_PORT", "8000"))
-    # Don't specify path - let OAuth routes register at root level
-    # MCP endpoint will be at /mcp by default when using GoogleProvider
+        host = os.getenv("MCP_HOST", "127.0.0.1")
+        port = int(os.getenv("MCP_PORT", "8000"))
 
-    print(f"Starting server on http://{host}:{port}")
-    print(f"MCP endpoint: /mcp")
-    print(f"OAuth endpoints: /authorize, /auth/callback, /token")
-    print(f"\n💡 To set up credentials:")
-    print(f"   1. Open {base_url}/ in your browser")
-    print(f"   2. Login with Google")
-    print(f"   3. Enter your Boomi credentials in the web form")
-    print("\nPress Ctrl+C to stop\n")
+        print(f"Starting server on http://{host}:{port}")
+        print(f"MCP endpoint: /mcp")
+        print(f"OAuth endpoints: /authorize, /auth/callback, /token")
+        print("\nPress Ctrl+C to stop\n")
 
-    mcp.run(transport="http", host=host, port=port)
+        mcp.run(transport="http", host=host, port=port)
