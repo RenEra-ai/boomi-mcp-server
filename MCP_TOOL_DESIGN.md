@@ -2,8 +2,8 @@
 
 **Version**: 1.2
 **Date**: 2025-01-17
-**Last Updated**: 2025-12-14 (Organizations tool added, SDK-only implementation)
-**Status**: Phase 1 Complete ✅ (Trading Partners, Organizations, Process Components)
+**Last Updated**: 2026-02-22 (monitor_platform tool added — 4 monitoring actions consolidated)
+**Status**: Phase 1 Complete ✅ (Trading Partners, Organizations, Process Components, Platform Monitoring)
 
 ---
 
@@ -132,6 +132,19 @@ Boomi Component API
 **Testing Status**:
 - ⏳ Pending: End-to-end testing with real Boomi account
 - ⏳ Pending: Validation against real process examples
+
+#### Platform Monitoring Tool ✅
+**Status**: Production Ready (Dev Branch)
+**Implementation**: `src/boomi_mcp/categories/monitoring.py`
+**Tool**: `monitor_platform` (1 consolidated tool replacing 4 individual tools)
+
+**Features**:
+- `execution_logs` — Request process log download URL (with log level filter)
+- `execution_artifacts` — Request execution artifact download URL
+- `audit_logs` — Query audit trail with date range, user, action, type, level, source filters; pagination support
+- `events` — Query platform events with date range, level, type, process name, atom, execution ID filters; pagination support
+- All 4 actions are read-only
+- SDK-only implementation (ProcessLog, ExecutionArtifacts, AuditLog query, Event query)
 
 ### Next Steps
 
@@ -367,22 +380,23 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 **Coverage**: 100%
 
-#### ⚠️ Category 9: Monitor & Validate (10 files) → 70% COVERED
+#### ✅ Category 9: Monitor & Validate (10 files) → 70% COVERED
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
-| `query_audit_logs.py` | `query_audit_logs` | Direct mapping |
-| `query_events.py` | `query_events` | Direct mapping |
+| `query_audit_logs.py` | `monitor_platform` | action="audit_logs" |
+| `query_events.py` | `monitor_platform` | action="events" |
 | `get_execution_summary.py` | `get_execution_status` | Status polling |
 | `poll_execution_status.py` | `get_execution_status` | Status polling |
 | `analyze_execution_metrics.py` | `query_execution_records` | With analysis |
-| `download_execution_artifacts.py` | `download_execution_artifacts` | Documents/data |
-| `download_process_log.py` | `download_execution_logs` | Log files |
+| `download_execution_artifacts.py` | `monitor_platform` | action="execution_artifacts" |
+| `download_process_log.py` | `monitor_platform` | action="execution_logs" |
 | `monitor_throughput.py` | `invoke_boomi_api` | Generic invoker |
 | `monitor_certificates.py` | `invoke_boomi_api` | Generic invoker |
 | `manage_connector_documents.py` | `invoke_boomi_api` | Generic invoker |
 
 **Gaps**: Throughput monitoring, certificate monitoring, connector docs
+**Consolidated**: 4 monitoring tools → 1 `monitor_platform` tool (execution_logs, execution_artifacts, audit_logs, events)
 
 #### ✅ Category 10: Version & Compare (3 files) → FULLY COVERED
 
