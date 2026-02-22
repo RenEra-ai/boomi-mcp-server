@@ -504,8 +504,8 @@ def _normalize_request_header(h):
     or headerName/headerValue (the correct request header format). This function
     accepts both and produces the correct output.
     """
-    name = h.get('headerName') or h.get('headerFieldName') or h.get('header_name') or ''
-    value = h.get('headerValue') or h.get('targetPropertyName') or h.get('header_value') or ''
+    name = h.get('headerName') or h.get('headerFieldName') or h.get('header_name') or h.get('header_field_name') or ''
+    value = h.get('headerValue') or h.get('targetPropertyName') or h.get('header_value') or h.get('target_property_name') or ''
     return {'@type': 'Header', 'headerName': name, 'headerValue': value}
 
 

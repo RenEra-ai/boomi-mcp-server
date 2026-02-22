@@ -656,7 +656,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                         as2_info["as2_partner_id"] = _ga(as2_pi, 'as2_id', 'as2Id')
                         as2_info["reject_duplicates"] = _ga(as2_pi, 'reject_duplicates', 'rejectDuplicates')
                         as2_info["duplicate_check_count"] = _ga(as2_pi, 'duplicate_check_count', 'duplicateCheckCount')
-                        as2_info["legacy_smime"] = _ga(as2_pi, 'legacy_smime', 'legacySMIME')
+                        legacy = _ga(as2_pi, 'enabled_legacy_smime', 'enabledLegacySMIME')
+                        if legacy is None:
+                            legacy = _ga(as2_pi, 'legacy_smime', 'legacySMIME')
+                        as2_info["legacy_smime"] = legacy
                         # Certificates stored in PartnerInfo (CREATE stores them here)
                         enc_cert = _ga(as2_pi, 'encryption_public_certificate', 'encryptionPublicCertificate')
                         if enc_cert:
@@ -733,7 +736,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     my_info = _ga(recv_opts, 'as2_my_company_info', 'AS2MyCompanyInfo')
                     if my_info:
                         as2_info.setdefault("as2_partner_id", _ga(my_info, 'as2_id', 'as2Id'))
-                        as2_info.setdefault("legacy_smime", _ga(my_info, 'legacy_smime', 'legacySMIME'))
+                        legacy = _ga(my_info, 'enabled_legacy_smime', 'enabledLegacySMIME')
+                        if legacy is None:
+                            legacy = _ga(my_info, 'legacy_smime', 'legacySMIME')
+                        as2_info.setdefault("legacy_smime", legacy)
                         enc_cert = _ga(my_info, 'encryption_private_certificate', 'encryptionPrivateCertificate')
                         if enc_cert:
                             as2_info.setdefault("encrypt_alias", _ga(enc_cert, 'component_id', 'componentId') or getattr(enc_cert, 'alias', None))
