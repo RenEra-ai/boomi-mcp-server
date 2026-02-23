@@ -12,12 +12,86 @@ Provides 5 read-only monitoring actions:
 
 from typing import Dict, Any, Optional, List
 
+import httpx
+import zipfile
+import io
+
+MAX_ZIP_BYTES = 10 * 1024 * 1024       # 10 MB
+MAX_FILE_CHARS = 50_000                 # per file
+MAX_TOTAL_CHARS = 200_000              # across all files in ZIP
+
+
+def _download_and_extract_zip(download_url: str, creds: Dict[str, str]) -> Dict[str, Any]:
+    """Download ZIP from Boomi and extract text content inline.
+
+    Boomi returns 202 while the ZIP is being prepared, then 200 when ready.
+    We poll up to 5 times with 2-second delays.
+    """
+    import time
+    auth = (creds["username"], creds["password"])
+    try:
+        resp = None
+        with httpx.Client(timeout=30) as client:
+            for attempt in range(5):
+                resp = client.get(download_url, auth=auth)
+                if resp.status_code == 200:
+                    break
+                if resp.status_code == 202:
+                    time.sleep(2)
+                    continue
+                # Any other status is a real error, stop immediately
+                break
+        if resp.status_code != 200:
+            return {"_downloaded": False, "http_status": resp.status_code,
+                    "error": f"Download failed with HTTP {resp.status_code} after polling"}
+
+        if len(resp.content) > MAX_ZIP_BYTES:
+            return {
+                "_downloaded": False,
+                "error": f"ZIP too large ({len(resp.content)} bytes, limit {MAX_ZIP_BYTES})",
+                "download_url": download_url
+            }
+
+        zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        files = {}
+        total_chars = 0
+        for name in zf.namelist():
+            if total_chars >= MAX_TOTAL_CHARS:
+                files[name] = f"[skipped — total content limit reached ({MAX_TOTAL_CHARS} chars)]"
+                continue
+            try:
+                raw = zf.read(name)
+                content = raw.decode("utf-8", errors="replace")
+                original_len = len(content)
+                remaining = MAX_TOTAL_CHARS - total_chars
+                if len(content) > min(MAX_FILE_CHARS, remaining):
+                    limit = min(MAX_FILE_CHARS, remaining)
+                    content = content[:limit] + f"\n\n... [truncated at {limit} of {original_len} chars]"
+                total_chars += min(original_len, MAX_FILE_CHARS)
+                files[name] = content
+            except Exception:
+                files[name] = "[binary file, not displayed]"
+
+        result = {"_downloaded": True, "files": files}
+        if total_chars >= MAX_TOTAL_CHARS:
+            result["_truncation_note"] = (
+                f"Total content limit reached ({MAX_TOTAL_CHARS} chars). "
+                "Some files may be truncated or skipped. Use download_url with Basic auth for full content."
+            )
+        return result
+    except httpx.TimeoutException:
+        return {"_downloaded": False, "error": "Download timed out (30s)"}
+    except zipfile.BadZipFile:
+        return {"_downloaded": False, "error": "Response is not a valid ZIP file"}
+    except Exception as e:
+        return {"_downloaded": False, "error": str(e)}
+
 
 # ============================================================================
 # Action: execution_logs
 # ============================================================================
 
-def handle_execution_logs(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+def handle_execution_logs(boomi_client, config_data: Dict[str, Any], creds=None) -> Dict[str, Any]:
     """Request process log download for an execution."""
     from boomi.models import ProcessLog, LogLevel
 
@@ -61,13 +135,21 @@ def handle_execution_logs(boomi_client, config_data: Dict[str, Any]) -> Dict[str
     download_url = getattr(result, 'url', None)
 
     if status_code == 202:
-        return {
+        result = {
             "_success": True,
             "status_code": status_code,
             "message": message,
             "download_url": download_url,
-            "note": "Download URL requires Basic auth (username:password). Content is a ZIP archive."
         }
+        fetch_content = config_data.get("fetch_content", True)
+        if isinstance(fetch_content, str):
+            fetch_content = fetch_content.lower() not in ("false", "0", "no")
+        if fetch_content and creds and download_url:
+            extracted = _download_and_extract_zip(download_url, creds)
+            result.update(extracted)
+        elif not fetch_content:
+            result["note"] = "Content fetch skipped (fetch_content=false). Use download_url with Basic auth."
+        return result
     elif status_code == 504:
         return {
             "_success": False,
@@ -88,7 +170,7 @@ def handle_execution_logs(boomi_client, config_data: Dict[str, Any]) -> Dict[str
 # Action: execution_artifacts
 # ============================================================================
 
-def handle_execution_artifacts(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+def handle_execution_artifacts(boomi_client, config_data: Dict[str, Any], creds=None) -> Dict[str, Any]:
     """Request execution artifact download URL."""
     from boomi.models import ExecutionArtifacts
 
@@ -113,13 +195,21 @@ def handle_execution_artifacts(boomi_client, config_data: Dict[str, Any]) -> Dic
         status_code = int(status_code)
 
     if download_url:
-        return {
+        result = {
             "_success": True,
             "status_code": status_code,
             "message": message,
             "download_url": download_url,
-            "note": "Download URL requires Basic auth (username:password). Content is a ZIP archive."
         }
+        fetch_content = config_data.get("fetch_content", True)
+        if isinstance(fetch_content, str):
+            fetch_content = fetch_content.lower() not in ("false", "0", "no")
+        if fetch_content and creds and download_url:
+            extracted = _download_and_extract_zip(download_url, creds)
+            result.update(extracted)
+        elif not fetch_content:
+            result["note"] = "Content fetch skipped (fetch_content=false). Use download_url with Basic auth."
+        return result
     else:
         return {
             "_success": False,
@@ -564,6 +654,7 @@ def monitor_platform_action(
     profile: str,
     action: str,
     config_data: Optional[Dict[str, Any]] = None,
+    creds: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Consolidated monitoring function. Routes to handler based on action.
@@ -573,6 +664,7 @@ def monitor_platform_action(
         profile: Profile name
         action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events
         config_data: Action-specific configuration dict
+        creds: Boomi credentials dict (username, password) for downloading log/artifact content
 
     Returns:
         Action result dict with _success status
@@ -584,9 +676,9 @@ def monitor_platform_action(
         if action == "execution_records":
             return handle_execution_records(boomi_client, config_data)
         elif action == "execution_logs":
-            return handle_execution_logs(boomi_client, config_data)
+            return handle_execution_logs(boomi_client, config_data, creds=creds)
         elif action == "execution_artifacts":
-            return handle_execution_artifacts(boomi_client, config_data)
+            return handle_execution_artifacts(boomi_client, config_data, creds=creds)
         elif action == "audit_logs":
             return handle_audit_logs(boomi_client, config_data)
         elif action == "events":
