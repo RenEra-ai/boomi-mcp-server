@@ -456,14 +456,22 @@ if manage_trading_partner_action:
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: list, get, create, update, delete, analyze_usage, org_list, org_get, org_create, org_update, org_delete
+            action: One of: list, get, create, update, delete, analyze_usage, list_options, org_list, org_get, org_create, org_update, org_delete
             resource_id: Trading partner component ID (required for get, update, delete, analyze_usage) or organization ID (required for org_get, org_update, org_delete)
             config: JSON string with action-specific configuration (see examples below)
+
+        RECOMMENDED WORKFLOW for create/update:
+          1. Call action="list_options" first to get all valid enum values
+          2. Present the full set of options to the user
+          3. Then call action="create" or action="update" with user selections
 
         Tip: Use action="get" with a known resource_id to retrieve the full structure,
         then use that output as a template for create/update config.
 
         Actions and config examples:
+
+            list_options - Get all valid enum values (no config needed, no API call):
+                Returns standards, classifications, protocols, and protocol-specific enums
 
             list - List trading partners, optional filters:
                 config='{"standard": "x12", "classification": "tradingpartner", "folder_name": "Partners"}'
@@ -580,6 +588,10 @@ if manage_trading_partner_action:
         Returns:
             Action result with success status and data/error
         """
+        # Static actions (no API call needed)
+        if action == "list_options":
+            return manage_trading_partner_action(None, profile, action)
+
         # Parse config JSON
         config_data = {}
         if config:

@@ -2925,6 +2925,67 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
 # Consolidated Action Router (for MCP tool consolidation)
 # ============================================================================
 
+def list_options() -> Dict[str, Any]:
+    """Return all valid enum values for trading partner configuration."""
+    return {
+        "_success": True,
+        "options": {
+            "standards": ["x12", "edifact", "hl7", "rosettanet", "tradacoms", "odette", "custom"],
+            "classifications": ["tradingpartner", "mycompany"],
+            "communication_protocols": ["http", "as2", "ftp", "sftp", "disk", "mllp", "oftp"],
+            "disk": {
+                "disk_filter_match_type": ["wildcard", "regex"],
+                "disk_write_option": ["unique", "overwrite", "append", "abort"],
+            },
+            "ftp": {
+                "ftp_ssl_mode": ["NONE", "EXPLICIT", "IMPLICIT"],
+                "ftp_connection_mode": ["active", "passive"],
+                "ftp_transfer_type": ["ascii", "binary"],
+                "ftp_get_action": ["actionget", "actiongetdelete", "actiongetmove"],
+                "ftp_send_action": ["actionputrename", "actionputappend", "actionputerror", "actionputoverwrite"],
+            },
+            "sftp": {
+                "sftp_get_action": ["actionget", "actiongetdelete", "actiongetmove"],
+                "sftp_send_action": ["actionputrename", "actionputappend", "actionputerror", "actionputoverwrite"],
+                "sftp_proxy_type": ["ATOM", "HTTP", "SOCKS4", "SOCKS5"],
+            },
+            "http": {
+                "http_authentication_type": ["NONE", "BASIC", "PASSWORD_DIGEST", "CUSTOM", "OAUTH", "OAUTH2"],
+                "http_cookie_scope": ["IGNORED", "GLOBAL", "CONNECTOR_SHAPE"],
+                "http_method_type": ["GET", "POST", "PUT", "DELETE"],
+                "http_request_profile_type": ["NONE", "XML", "JSON"],
+                "http_response_profile_type": ["NONE", "XML", "JSON"],
+                "http_oauth_grant_type": ["client_credentials", "password", "code"],
+                "http_oauth1_signature_method": ["SHA1", "SHA256"],
+            },
+            "as2": {
+                "as2_authentication_type": ["NONE", "BASIC"],
+                "as2_signing_digest_alg": ["SHA1", "SHA256", "SHA384", "SHA512"],
+                "as2_encryption_algorithm": ["tripledes", "rc2-40", "rc2-64", "rc2-128", "aes128", "aes192", "aes256"],
+                "as2_data_content_type": ["text/plain", "text/xml", "application/xml", "application/edi-x12", "application/edifact", "application/octet-stream"],
+                "as2_attachment_option": ["BATCH", "DOCUMENT_CACHE"],
+                "as2_mdn_digest_alg": ["SHA1", "SHA256", "SHA384", "SHA512"],
+            },
+            "oftp": {
+                "oftp_sfid_cipher": ["0", "1", "2", "3", "4"],
+            },
+            "edifact": {
+                "edifact_syntax_id": ["UNOA", "UNOB", "UNOC", "UNOD", "UNOE", "UNOF"],
+                "edifact_syntax_version": ["1", "2", "3"],
+                "edifact_test_indicator": ["1", "NA"],
+            },
+            "odette": {
+                "odette_syntax_id": ["UNOA", "UNOB", "UNOC", "UNOD", "UNOE", "UNOF"],
+                "odette_syntax_version": ["1", "2", "3"],
+                "odette_test_indicator": ["1", "NA"],
+            },
+            "rosettanet": {
+                "rosettanet_global_usage_code": ["production", "test"],
+            },
+        },
+    }
+
+
 def manage_trading_partner_action(
     boomi_client,
     profile: str,
@@ -3027,11 +3088,14 @@ def manage_trading_partner_action(
                 }
             return analyze_trading_partner_usage(boomi_client, profile, partner_id)
 
+        elif action == "list_options":
+            return list_options()
+
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, org_list, org_get, org_create, org_update, org_delete"
+                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, list_options, org_list, org_get, org_create, org_update, org_delete"
             }
 
     except Exception as e:
