@@ -211,59 +211,71 @@ class ComponentOrchestrator:
     def _resolve_folder_id(self, folder_name: str) -> str:
         """Resolve folder_name to folder_id via Folder API. Returns '' if not found.
 
-        Tries multiple strategies:
-        1. Exact match on fullPath (e.g. "Ren Era/Renera/Tests")
-        2. LIKE match on fullPath ending with the given name (e.g. "%/Renera/Tests")
-        3. Exact match on folder name (last segment, e.g. "Tests")
+        Queries by NAME (the Boomi API rejects fullPath as a query property)
+        then filters results client-side by full_path when a path is given.
 
         Adds a warning to self.warnings if resolution fails.
         """
         if not folder_name or folder_name == "Home":
             return ''
 
-        def _query_folder(prop, op, arg):
+        def _get_folder_id(f):
+            return getattr(f, 'id_', '') or getattr(f, 'id', '') or ''
+
+        def _get_full_path(f):
+            return getattr(f, 'full_path', '') or ''
+
+        def _query_by_name(name):
+            """Query folders by NAME, return list of (id, full_path) tuples."""
             try:
-                expr = FolderSimpleExpression(operator=op, property=prop, argument=[arg])
+                expr = FolderSimpleExpression(
+                    operator=FolderSimpleExpressionOperator.EQUALS,
+                    property=FolderSimpleExpressionProperty.NAME,
+                    argument=[name],
+                )
                 filt = FolderQueryConfigQueryFilter(expression=expr)
-                res = self.client.folder.query_folder(request_body=FolderQueryConfig(query_filter=filt))
+                res = self.client.folder.query_folder(
+                    request_body=FolderQueryConfig(query_filter=filt)
+                )
                 if hasattr(res, 'result') and res.result:
-                    if len(res.result) == 1:
-                        f = res.result[0]
-                        return getattr(f, 'id_', '') or getattr(f, 'id', '') or ''
-                    else:
-                        ids = [getattr(f, 'id_', '') or getattr(f, 'id', '') for f in res.result]
-                        self.warnings.append(
-                            f"Folder query '{arg}' matched {len(res.result)} folders "
-                            f"(IDs: {ids}). Skipping — specify a unique folder path or use folderId directly."
-                        )
-                        return ''
+                    return [(_get_folder_id(f), _get_full_path(f)) for f in res.result]
             except Exception as e:
-                self.warnings.append(f"Folder query error ({arg}): {e}")
+                self.warnings.append(f"Folder query error ({name}): {e}")
+            return []
+
+        leaf = folder_name.rsplit('/', 1)[-1]
+        results = _query_by_name(leaf)
+
+        if not results:
+            self.warnings.append(
+                f"Could not resolve folder '{folder_name}' to a folderId. "
+                f"Process will be created in the account's root folder. "
+                f"Use 'manage_process list' after creation to verify the folder."
+            )
             return ''
 
-        # Strategy 1: exact fullPath
-        fid = _query_folder(FolderSimpleExpressionProperty.FULLPATH,
-                            FolderSimpleExpressionOperator.EQUALS, folder_name)
-        if fid:
-            return fid
+        # If only one result, use it directly
+        if len(results) == 1:
+            return results[0][0]
 
-        # Strategy 2: fullPath ending with the given name (user may omit account root)
-        fid = _query_folder(FolderSimpleExpressionProperty.FULLPATH,
-                            FolderSimpleExpressionOperator.LIKE, f"%/{folder_name}")
-        if fid:
-            return fid
+        # Multiple results — try to narrow by full_path
+        # Try exact full_path match (e.g. "Ren Era/Home/Tests")
+        exact = [(fid, fp) for fid, fp in results if fp == folder_name]
+        if len(exact) == 1:
+            return exact[0][0]
 
-        # Strategy 3: match last segment as folder name
-        leaf = folder_name.rsplit('/', 1)[-1]
-        fid = _query_folder(FolderSimpleExpressionProperty.NAME,
-                            FolderSimpleExpressionOperator.EQUALS, leaf)
-        if fid:
-            return fid
+        # Try full_path ending with folder_name (user may omit account root)
+        suffix = '/' + folder_name
+        ending = [(fid, fp) for fid, fp in results if fp.endswith(suffix)]
+        if len(ending) == 1:
+            return ending[0][0]
 
+        # Couldn't narrow to one — pick the best candidate set for the warning
+        best = exact or ending or results
+        ids = [m[0] for m in best]
         self.warnings.append(
-            f"Could not resolve folder '{folder_name}' to a folderId. "
-            f"Process will be created in the account's root folder. "
-            f"Use 'manage_process list' after creation to verify the folder."
+            f"Folder query '{folder_name}' matched {len(best)} folders "
+            f"(IDs: {ids}). Skipping — specify a unique folder path or use folderId directly."
         )
         return ''
 
