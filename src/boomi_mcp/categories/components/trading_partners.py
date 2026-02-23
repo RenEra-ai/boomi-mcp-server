@@ -2925,6 +2925,26 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
 # Consolidated Action Router (for MCP tool consolidation)
 # ============================================================================
 
+def list_options() -> Dict[str, Any]:
+    """Return all valid enum values for trading partner configuration."""
+    return {
+        "_success": True,
+        "options": {
+            "standards": ["x12", "edifact", "hl7", "rosettanet", "tradacoms", "odette", "custom"],
+            "classifications": ["tradingpartner", "mycompany"],
+            "communication_protocols": ["http", "as2", "ftp", "sftp", "disk", "mllp", "oftp"],
+            "protocol_specific": {
+                "ftp_ssl_mode": ["NONE", "EXPLICIT", "IMPLICIT"],
+                "as2_signing_digest_alg": ["SHA1", "SHA256", "SHA384", "SHA512"],
+                "as2_encryption_algorithm": ["tripledes", "rc2", "aes128", "aes192", "aes256"],
+                "http_authentication_type": ["NONE", "BASIC", "PASSWORD_DIGEST", "CUSTOM", "OAUTH", "OAUTH2"],
+                "edifact_test_indicator": ["1", "NA"],
+                "odette_test_indicator": ["1", "NA"],
+            },
+        },
+    }
+
+
 def manage_trading_partner_action(
     boomi_client,
     profile: str,
@@ -3027,11 +3047,14 @@ def manage_trading_partner_action(
                 }
             return analyze_trading_partner_usage(boomi_client, profile, partner_id)
 
+        elif action == "list_options":
+            return list_options()
+
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, org_list, org_get, org_create, org_update, org_delete"
+                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, list_options, org_list, org_get, org_create, org_update, org_delete"
             }
 
     except Exception as e:
