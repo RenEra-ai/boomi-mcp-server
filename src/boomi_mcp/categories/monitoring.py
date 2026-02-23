@@ -71,9 +71,12 @@ def _download_and_extract_zip(download_url: str, creds: Dict[str, str]) -> Dict[
                 with zf.open(name) as f:
                     raw = f.read(read_bytes)
                 content = raw.decode("utf-8", errors="replace")
-                if len(content) > read_limit:
-                    content = content[:read_limit] + f"\n\n... [truncated at {read_limit} of ~{info.file_size} bytes]"
-                    total_chars += read_limit
+                byte_capped = len(raw) >= read_bytes
+                if len(content) > read_limit or byte_capped:
+                    content = content[:read_limit]
+                    chars_emitted = len(content)
+                    content += f"\n\n... [truncated at {chars_emitted} chars of ~{info.file_size} bytes]"
+                    total_chars += chars_emitted
                 else:
                     total_chars += len(content)
                 files[name] = content
