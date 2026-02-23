@@ -19,6 +19,7 @@ import io
 MAX_ZIP_BYTES = 10 * 1024 * 1024       # 10 MB
 MAX_FILE_CHARS = 50_000                 # per file
 MAX_TOTAL_CHARS = 200_000              # across all files in ZIP
+MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50 MB per entry (zip bomb guard)
 
 
 def _download_and_extract_zip(download_url: str, creds: Dict[str, str]) -> Dict[str, Any]:
@@ -55,19 +56,26 @@ def _download_and_extract_zip(download_url: str, creds: Dict[str, str]) -> Dict[
         zf = zipfile.ZipFile(io.BytesIO(resp.content))
         files = {}
         total_chars = 0
-        for name in zf.namelist():
+        for info in zf.infolist():
+            name = info.filename
             if total_chars >= MAX_TOTAL_CHARS:
                 files[name] = f"[skipped — total content limit reached ({MAX_TOTAL_CHARS} chars)]"
                 continue
+            if info.file_size > MAX_UNCOMPRESSED_BYTES:
+                files[name] = f"[skipped — uncompressed size {info.file_size} bytes exceeds {MAX_UNCOMPRESSED_BYTES} limit]"
+                continue
             try:
-                raw = zf.read(name)
+                read_limit = min(MAX_FILE_CHARS, MAX_TOTAL_CHARS - total_chars)
+                # Read slightly more than char limit to detect truncation
+                read_bytes = read_limit + 1024
+                with zf.open(name) as f:
+                    raw = f.read(read_bytes)
                 content = raw.decode("utf-8", errors="replace")
-                original_len = len(content)
-                remaining = MAX_TOTAL_CHARS - total_chars
-                if len(content) > min(MAX_FILE_CHARS, remaining):
-                    limit = min(MAX_FILE_CHARS, remaining)
-                    content = content[:limit] + f"\n\n... [truncated at {limit} of {original_len} chars]"
-                total_chars += min(original_len, MAX_FILE_CHARS)
+                if len(content) > read_limit:
+                    content = content[:read_limit] + f"\n\n... [truncated at {read_limit} of ~{info.file_size} bytes]"
+                    total_chars += read_limit
+                else:
+                    total_chars += len(content)
                 files[name] = content
             except Exception:
                 files[name] = "[binary file, not displayed]"
