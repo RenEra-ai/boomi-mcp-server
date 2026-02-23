@@ -11,7 +11,8 @@ PROCESS_COMPONENT_WRAPPER = """<?xml version="1.0" encoding="UTF-8"?>
                xmlns:bns="http://api.platform.boomi.com/"
                name="{name}"
                type="process"
-               folderName="{folder_name}">
+               folderName="{folder_name}"
+               {folder_id_attr}>
   <bns:encryptedValues/>
   <bns:description>{description}</bns:description>
   <bns:object>

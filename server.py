@@ -452,12 +452,12 @@ if manage_trading_partner_action:
         config: str = None,
     ):
         """
-        Manage B2B/EDI trading partners (all 7 standards) via JSON config.
+        Manage B2B/EDI trading partners (all 7 standards) and organizations via JSON config.
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: list, get, create, update, delete, analyze_usage
-            resource_id: Trading partner component ID (required for get, update, delete, analyze_usage)
+            action: One of: list, get, create, update, delete, analyze_usage, org_list, org_get, org_create, org_update, org_delete
+            resource_id: Trading partner component ID (required for get, update, delete, analyze_usage) or organization ID (required for org_get, org_update, org_delete)
             config: JSON string with action-specific configuration (see examples below)
 
         Tip: Use action="get" with a known resource_id to retrieve the full structure,
@@ -497,6 +497,33 @@ if manage_trading_partner_action:
             analyze_usage - Analyze partner usage (no config needed):
                 resource_id="abc-123-def"
 
+            org_list - List organizations, optional filters:
+                config='{"folder_name": "Home/Organizations"}'
+
+            org_get - Get organization by ID (no config needed):
+                resource_id="abc-123-def"
+
+            org_create - Create new organization (config required):
+                config='{
+                    "component_name": "Acme Corp",
+                    "folder_name": "Home/Organizations",
+                    "contact_name": "John Doe",
+                    "contact_email": "john@acme.com",
+                    "contact_phone": "555-1234",
+                    "contact_address": "123 Main St",
+                    "contact_city": "New York",
+                    "contact_state": "NY",
+                    "contact_country": "USA",
+                    "contact_postalcode": "10001"
+                }'
+
+            org_update - Update existing organization (config required):
+                resource_id="abc-123-def"
+                config='{"contact_email": "new@acme.com", "contact_phone": "555-5678"}'
+
+            org_delete - Delete organization (no config needed):
+                resource_id="abc-123-def"
+
         Config field reference (all optional, grouped by category):
 
             Basic: component_name, standard (x12|edifact|hl7|rosettanet|custom|tradacoms|odette),
@@ -518,7 +545,13 @@ if manage_trading_partner_action:
                      contact_country, contact_postalcode
 
             Protocols: communication_protocols (JSON array: ["http", "as2", "ftp", "sftp", "disk", "mllp", "oftp"])
-            Organization: organization_id
+            Organization: organization_id (use org_list to find IDs)
+
+            Organization fields (for org_* actions):
+                component_name, folder_name,
+                contact_name, contact_email, contact_phone, contact_fax, contact_url,
+                contact_address, contact_address2, contact_city, contact_state,
+                contact_country, contact_postalcode
 
             Protocol-specific keys (use action="get" to see all fields for a protocol):
                 Disk: disk_directory (alias: sets both get+send), disk_get_directory, disk_send_directory, ... (9 fields)
@@ -572,6 +605,26 @@ if manage_trading_partner_action:
             if creds.get("base_url"):
                 sdk_params["base_url"] = creds["base_url"]
             sdk = Boomi(**sdk_params)
+
+            # Organization sub-actions
+            if action.startswith("org_"):
+                if not manage_organization_action:
+                    return {"_success": False, "error": "Organization module not available"}
+                org_action = action[4:]  # "org_list" -> "list"
+                org_params = {}
+                if org_action == "list":
+                    if config_data:
+                        org_params["filters"] = config_data
+                elif org_action == "get":
+                    org_params["organization_id"] = resource_id
+                elif org_action == "create":
+                    org_params["request_data"] = config_data
+                elif org_action == "update":
+                    org_params["organization_id"] = resource_id
+                    org_params["updates"] = config_data
+                elif org_action == "delete":
+                    org_params["organization_id"] = resource_id
+                return manage_organization_action(sdk, profile, org_action, **org_params)
 
             # Build parameters based on action
             params = {}
@@ -761,119 +814,6 @@ if manage_process_action:
 
     print("[INFO] Process tool registered successfully (1 consolidated tool)")
 
-
-# --- Organization MCP Tools ---
-if manage_organization_action:
-    @mcp.tool()
-    def manage_organization(
-        profile: str,
-        action: str,
-        resource_id: str = None,
-        config: str = None,
-    ):
-        """
-        Manage Boomi organizations (shared contact info for trading partners) via JSON config.
-
-        Args:
-            profile: Boomi profile name (required)
-            action: One of: list, get, create, update, delete
-            resource_id: Organization component ID (required for get, update, delete)
-            config: JSON string with action-specific configuration (see examples below)
-
-        Tip: Use action="get" with a known resource_id to retrieve the full structure,
-        then use that output as a template for create/update config.
-
-        Actions and config examples:
-
-            list - List organizations, optional filters:
-                config='{"folder_name": "Home/Organizations"}'
-
-            get - Get organization by ID (no config needed):
-                resource_id="abc-123-def"
-
-            create - Create new organization (config required):
-                config='{
-                    "component_name": "Acme Corp",
-                    "folder_name": "Home/Organizations",
-                    "contact_name": "John Doe",
-                    "contact_email": "john@acme.com",
-                    "contact_phone": "555-1234",
-                    "contact_address": "123 Main St",
-                    "contact_city": "New York",
-                    "contact_state": "NY",
-                    "contact_country": "USA",
-                    "contact_postalcode": "10001"
-                }'
-
-            update - Update existing organization (config required):
-                resource_id="abc-123-def"
-                config='{"contact_email": "new@acme.com", "contact_phone": "555-5678"}'
-
-            delete - Delete organization (no config needed):
-                resource_id="abc-123-def"
-
-        Config field reference:
-            component_name, folder_name,
-            contact_name, contact_email, contact_phone, contact_fax, contact_url,
-            contact_address, contact_address2, contact_city, contact_state,
-            contact_country, contact_postalcode
-
-        Returns:
-            Action result with success status and data/error
-        """
-        # Parse config JSON
-        config_data = {}
-        if config:
-            try:
-                config_data = json.loads(config)
-            except json.JSONDecodeError as e:
-                return {"_success": False, "error": f"Invalid JSON in config: {e}"}
-
-        try:
-            subject = get_current_user()
-            print(f"[INFO] manage_organization called by user: {subject}, profile: {profile}, action: {action}")
-
-            # Get credentials
-            creds = get_secret(subject, profile)
-
-            # Initialize Boomi SDK
-            sdk_params = {
-                "account_id": creds["account_id"],
-                "username": creds["username"],
-                "password": creds["password"],
-                "timeout": 30000,
-            }
-            if creds.get("base_url"):
-                sdk_params["base_url"] = creds["base_url"]
-            sdk = Boomi(**sdk_params)
-
-            # Build parameters based on action
-            params = {}
-
-            if action == "list":
-                if config_data:
-                    params["filters"] = config_data
-
-            elif action == "get":
-                params["organization_id"] = resource_id
-
-            elif action == "create":
-                params["request_data"] = config_data
-
-            elif action == "update":
-                params["organization_id"] = resource_id
-                params["updates"] = config_data
-
-            elif action == "delete":
-                params["organization_id"] = resource_id
-
-            return manage_organization_action(sdk, profile, action, **params)
-
-        except Exception as e:
-            print(f"[ERROR] Failed to {action} organization: {e}")
-            return {"_success": False, "error": str(e)}
-
-    print("[INFO] Organization tool registered successfully (1 consolidated tool)")
 
 
 # --- Monitoring MCP Tools ---
@@ -1393,16 +1333,16 @@ if __name__ == "__main__":
         print("  delete_boomi_profile - Delete a credential profile")
         print("  boomi_account_info - Get account information from Boomi API")
         if manage_trading_partner_action:
-            print("\n  Trading Partner Management:")
-            print("  manage_trading_partner - Unified tool for all trading partner operations")
+            print("\n  Trading Partner & Organization Management:")
+            tp_desc = "trading partners and organizations" if manage_organization_action else "trading partners"
+            print(f"  manage_trading_partner - Unified tool for {tp_desc}")
             print("    Actions: list, get, create, update, delete, analyze_usage")
+            if manage_organization_action:
+                print("    Org actions: org_list, org_get, org_create, org_update, org_delete")
             print("    Standards: X12, EDIFACT, HL7, RosettaNet, Custom, Tradacoms, Odette")
         if manage_process_action:
             print("\n  Process Management:")
             print("  manage_process - Unified tool for all process operations")
-        if manage_organization_action:
-            print("\n  Organization Management:")
-            print("  manage_organization - Unified tool for all organization operations")
         if monitor_platform_action:
             print("\n  Platform Monitoring:")
             print("  monitor_platform - Logs, artifacts, audit trail, and events")

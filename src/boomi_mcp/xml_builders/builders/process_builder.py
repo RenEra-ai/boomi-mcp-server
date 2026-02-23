@@ -123,10 +123,15 @@ class ProcessBuilder:
         # Render final process using template
         shapes_block = '\n'.join(shapes_xml)
 
+        # Include folderId attribute if provided (Boomi requires folderId for folder placement)
+        folder_id = process_attrs.get('folder_id', '')
+        folder_id_attr = f'folderId="{folder_id}"' if folder_id else ''
+
         return PROCESS_COMPONENT_WRAPPER.format(
             name=name,
             folder_name=folder_name,
             description=description,
+            folder_id_attr=folder_id_attr,
             allow_simultaneous=process_attrs.get('allow_simultaneous', 'false'),
             enable_user_log=process_attrs.get('enable_user_log', 'false'),
             process_log_on_error_only=process_attrs.get('process_log_on_error_only', 'false'),

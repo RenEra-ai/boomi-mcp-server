@@ -19,7 +19,12 @@ from boomi.models import (
     ComponentMetadataQueryConfigQueryFilter,
     ComponentMetadataSimpleExpression,
     ComponentMetadataSimpleExpressionOperator,
-    ComponentMetadataSimpleExpressionProperty
+    ComponentMetadataSimpleExpressionProperty,
+    FolderQueryConfig,
+    FolderQueryConfigQueryFilter,
+    FolderSimpleExpression,
+    FolderSimpleExpressionOperator,
+    FolderSimpleExpressionProperty,
 )
 
 from ...models.process_models import ComponentSpec, ProcessConfig
@@ -66,6 +71,7 @@ class ComponentOrchestrator:
         """
         self.client = boomi_client
         self.registry: Dict[str, Dict[str, Any]] = {}  # name → {id, type, xml}
+        self.warnings: List[str] = []
         self.process_builder = ProcessBuilder()
 
     def build_with_dependencies(
@@ -125,16 +131,22 @@ class ComponentOrchestrator:
                 raise ValueError(f"Unknown component type: {spec.type}")
 
             # Step 5: Create in Boomi API
+            component_id = None
             try:
                 result = self.client.component.create_component(request_body=xml)
+                # Component API returns component_id (not id_)
+                component_id = result.component_id if hasattr(result, 'component_id') else getattr(result, 'id_', None)
             except Exception as e:
-                raise Exception(
-                    f"Failed to create component '{spec.name}': {str(e)}"
-                ) from e
+                # Component may have been created but SDK response parsing failed
+                # (e.g. 'bytes' object has no attribute 'items').
+                # Query back by name to verify and retrieve the component_id.
+                component_id = self._recover_created_component(spec.name, spec.type)
+                if component_id is None:
+                    raise Exception(
+                        f"Failed to create component '{spec.name}': {str(e)}"
+                    ) from e
 
             # Step 6: Register in session registry
-            # Component API returns component_id (not id_)
-            component_id = result.component_id if hasattr(result, 'component_id') else getattr(result, 'id_', None)
             self.registry[spec.name] = {
                 'id': component_id,  # For backward compatibility
                 'type': spec.type,
@@ -176,12 +188,16 @@ class ComponentOrchestrator:
             }
             shapes_config.append(shape_dict)
 
+        # Resolve folder_name to folder_id (Boomi needs folderId for placement)
+        folder_id = self._resolve_folder_id(process_config.folder_name)
+
         # Build using ProcessBuilder (convert Python bools to XML-compatible lowercase strings)
         xml = self.process_builder.build_linear_process(
             name=process_config.name,
             shapes_config=shapes_config,
             folder_name=process_config.folder_name,
             description=process_config.description,
+            folder_id=folder_id,
             allow_simultaneous=str(process_config.allow_simultaneous).lower(),
             enable_user_log=str(process_config.enable_user_log).lower(),
             process_log_on_error_only=str(process_config.process_log_on_error_only).lower(),
@@ -191,6 +207,122 @@ class ComponentOrchestrator:
         )
 
         return xml
+
+    def _resolve_folder_id(self, folder_name: str) -> str:
+        """Resolve folder_name to folder_id via Folder API. Returns '' if not found.
+
+        Queries by NAME (the Boomi API rejects fullPath as a query property)
+        then filters results client-side by full_path when a path is given.
+
+        Adds a warning to self.warnings if resolution fails.
+        """
+        if not folder_name or folder_name == "Home":
+            return ''
+
+        def _get_folder_id(f):
+            return getattr(f, 'id_', '') or getattr(f, 'id', '') or ''
+
+        def _get_full_path(f):
+            return getattr(f, 'full_path', '') or ''
+
+        def _query_by_name(name):
+            """Query folders by NAME, return list of (id, full_path) tuples."""
+            try:
+                expr = FolderSimpleExpression(
+                    operator=FolderSimpleExpressionOperator.EQUALS,
+                    property=FolderSimpleExpressionProperty.NAME,
+                    argument=[name],
+                )
+                filt = FolderQueryConfigQueryFilter(expression=expr)
+                res = self.client.folder.query_folder(
+                    request_body=FolderQueryConfig(query_filter=filt)
+                )
+                if hasattr(res, 'result') and res.result:
+                    return [(_get_folder_id(f), _get_full_path(f)) for f in res.result]
+            except Exception as e:
+                self.warnings.append(f"Folder query error ({name}): {e}")
+            return []
+
+        leaf = folder_name.rsplit('/', 1)[-1]
+        results = _query_by_name(leaf)
+
+        if not results:
+            self.warnings.append(
+                f"Could not resolve folder '{folder_name}' to a folderId. "
+                f"Process will be created in the account's root folder. "
+                f"Use 'manage_process list' after creation to verify the folder."
+            )
+            return ''
+
+        # If only one result, use it directly
+        if len(results) == 1:
+            return results[0][0]
+
+        # Multiple results — try to narrow by full_path
+        # Try exact full_path match (e.g. "Ren Era/Home/Tests")
+        exact = [(fid, fp) for fid, fp in results if fp == folder_name]
+        if len(exact) == 1:
+            return exact[0][0]
+
+        # Try full_path ending with folder_name (user may omit account root)
+        suffix = '/' + folder_name
+        ending = [(fid, fp) for fid, fp in results if fp.endswith(suffix)]
+        if len(ending) == 1:
+            return ending[0][0]
+
+        # Couldn't narrow to one — pick the best candidate set for the warning
+        best = exact or ending or results
+        ids = [m[0] for m in best]
+        self.warnings.append(
+            f"Folder query '{folder_name}' matched {len(best)} folders "
+            f"(IDs: {ids}). Skipping — specify a unique folder path or use folderId directly."
+        )
+        return ''
+
+    def _recover_created_component(self, name: str, component_type: str) -> Optional[str]:
+        """Query API for a just-created component when response parsing failed.
+
+        Only returns a component_id if exactly one matching component was
+        modified within the last 60 seconds — avoids false-positives from
+        pre-existing components with the same name.
+        """
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        try:
+            expression = ComponentMetadataSimpleExpression(
+                operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
+                property=ComponentMetadataSimpleExpressionProperty.TYPE,
+                argument=[component_type]
+            )
+            query_filter = ComponentMetadataQueryConfigQueryFilter(expression=expression)
+            query_config = ComponentMetadataQueryConfig(query_filter=query_filter)
+            result = self.client.component_metadata.query_component_metadata(
+                request_body=query_config
+            )
+            if hasattr(result, 'result') and result.result:
+                matches = [
+                    comp for comp in result.result
+                    if (getattr(comp, 'name', '') == name
+                        and str(getattr(comp, 'current_version', 'false')).lower() == 'true'
+                        and str(getattr(comp, 'deleted', 'true')).lower() == 'false')
+                ]
+                recent = []
+                for comp in matches:
+                    mod_str = getattr(comp, 'modified_date', '')
+                    if mod_str:
+                        try:
+                            mod_dt = datetime.fromisoformat(str(mod_str).replace('Z', '+00:00'))
+                            if mod_dt >= cutoff:
+                                cid = getattr(comp, 'component_id', None)
+                                if cid:
+                                    recent.append(cid)
+                        except (ValueError, TypeError):
+                            pass
+                if len(recent) == 1:
+                    return recent[0]
+        except Exception:
+            pass
+        return None
 
     def _resolve_process_references(self, spec: ComponentSpec) -> None:
         """
