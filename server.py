@@ -1334,7 +1334,8 @@ if __name__ == "__main__":
         print("  boomi_account_info - Get account information from Boomi API")
         if manage_trading_partner_action:
             print("\n  Trading Partner & Organization Management:")
-            print("  manage_trading_partner - Unified tool for trading partners and organizations")
+            tp_desc = "trading partners and organizations" if manage_organization_action else "trading partners"
+            print(f"  manage_trading_partner - Unified tool for {tp_desc}")
             print("    Actions: list, get, create, update, delete, analyze_usage")
             if manage_organization_action:
                 print("    Org actions: org_list, org_get, org_create, org_update, org_delete")
