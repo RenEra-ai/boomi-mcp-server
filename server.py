@@ -608,6 +608,8 @@ if manage_trading_partner_action:
 
             # Organization sub-actions
             if action.startswith("org_"):
+                if not manage_organization_action:
+                    return {"_success": False, "error": "Organization module not available"}
                 org_action = action[4:]  # "org_list" -> "list"
                 org_params = {}
                 if org_action == "list":
@@ -1334,7 +1336,8 @@ if __name__ == "__main__":
             print("\n  Trading Partner & Organization Management:")
             print("  manage_trading_partner - Unified tool for trading partners and organizations")
             print("    Actions: list, get, create, update, delete, analyze_usage")
-            print("    Org actions: org_list, org_get, org_create, org_update, org_delete")
+            if manage_organization_action:
+                print("    Org actions: org_list, org_get, org_create, org_update, org_delete")
             print("    Standards: X12, EDIFACT, HL7, RosettaNet, Custom, Tradacoms, Odette")
         if manage_process_action:
             print("\n  Process Management:")
