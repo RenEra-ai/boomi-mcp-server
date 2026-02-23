@@ -585,8 +585,10 @@ if manage_trading_partner_action:
         if config:
             try:
                 config_data = json.loads(config)
-            except json.JSONDecodeError as e:
-                return {"_success": False, "error": f"Invalid JSON in config: {e}"}
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
 
         try:
             subject = get_current_user()
@@ -788,7 +790,12 @@ if manage_process_action:
 
             if action == "list":
                 if filters:
-                    params["filters"] = json.loads(filters)
+                    try:
+                        params["filters"] = json.loads(filters)
+                    except (json.JSONDecodeError, TypeError) as e:
+                        return {"_success": False, "error": f"Invalid filters (must be a JSON string): {e}"}
+                    if not isinstance(params["filters"], dict):
+                        return {"_success": False, "error": "filters must be a JSON object, not " + type(params["filters"]).__name__}
 
             elif action == "get":
                 params["process_id"] = process_id
@@ -882,8 +889,10 @@ if monitor_platform_action:
         if config:
             try:
                 config_data = json.loads(config)
-            except json.JSONDecodeError as e:
-                return {"_success": False, "error": f"Invalid JSON in config: {e}"}
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
 
         try:
             subject = get_current_user()
