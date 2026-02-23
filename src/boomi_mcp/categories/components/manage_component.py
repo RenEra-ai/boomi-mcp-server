@@ -166,8 +166,8 @@ def clone_component(
         root.set('name', new_name)
 
         # Remove identity attributes
-        for attr in ['componentId', 'version', 'currentVersion', 'createdDate',
-                     'createdBy', 'modifiedDate', 'modifiedBy']:
+        for attr in ['componentId', 'version', 'currentVersion', 'deleted',
+                     'createdDate', 'createdBy', 'modifiedDate', 'modifiedBy']:
             if attr in root.attrib:
                 del root.attrib[attr]
 
@@ -204,37 +204,41 @@ def delete_component(
     profile: str,
     component_id: str
 ) -> Dict[str, Any]:
-    """Soft-delete a component (mark deleted=true via metadata API)."""
+    """Soft-delete a component (mark deleted=true via XML update).
+
+    Primary: soft-delete via XML (safe, reversible) per SDK examples.
+    Fallback: metadata API delete if soft-delete fails.
+    """
     try:
-        # Use ComponentMetadata delete which is the official deletion method
-        boomi_client.component_metadata.delete_component_metadata(id_=component_id)
+        # Primary: soft-delete via XML (safe, reversible)
+        current = component_get_xml(boomi_client, component_id)
+        raw_xml = current['xml']
+        root = ET.fromstring(raw_xml)
+        root.set('deleted', 'true')
+        modified_xml = ET.tostring(root, encoding='unicode')
+        boomi_client.component.update_component_raw(component_id, modified_xml)
 
         return {
             "_success": True,
-            "message": f"Deleted component '{component_id}'",
+            "message": f"Deleted component '{current['name']}'",
             "component_id": component_id,
             "profile": profile,
+            "method": "soft_delete",
             "warning": "Dependent components are NOT automatically deleted. Check references first.",
         }
 
     except Exception as e:
         error_msg = str(e)
-        # Fallback: try soft-delete via XML if metadata delete fails
+        # Fallback: metadata API delete
         try:
-            current = component_get_xml(boomi_client, component_id)
-            raw_xml = current['xml']
-            root = ET.fromstring(raw_xml)
-            root.set('deleted', 'true')
-            modified_xml = ET.tostring(root, encoding='unicode')
-            boomi_client.component.update_component_raw(component_id, modified_xml)
-
+            boomi_client.component_metadata.delete_component_metadata(id_=component_id)
             return {
                 "_success": True,
-                "message": f"Soft-deleted component '{current['name']}'",
+                "message": f"Deleted component '{component_id}'",
                 "component_id": component_id,
                 "profile": profile,
-                "method": "soft_delete",
-                "warning": "Marked as deleted=true. Some component types may silently ignore this flag.",
+                "method": "metadata_delete",
+                "warning": "Used metadata API delete (not soft-delete). This may be irreversible.",
             }
         except Exception as e2:
             return {

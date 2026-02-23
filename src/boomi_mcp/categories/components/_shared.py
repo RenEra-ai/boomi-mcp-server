@@ -13,6 +13,19 @@ from boomi.net.transport.serializer import Serializer
 from boomi.net.environment.environment import Environment
 
 
+def _extract_description(root) -> str:
+    """Extract description from component XML child element."""
+    ns = {'bns': 'http://api.platform.boomi.com/'}
+    desc_elem = root.find('bns:description', ns)
+    if desc_elem is not None and desc_elem.text:
+        return desc_elem.text
+    # Also check without namespace
+    desc_elem = root.find('description')
+    if desc_elem is not None and desc_elem.text:
+        return desc_elem.text
+    return ''
+
+
 def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
     """GET component as raw XML + parsed metadata dict.
 
@@ -43,8 +56,10 @@ def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
         'name': root.attrib.get('name', ''),
         'folder_name': root.attrib.get('folderName', ''),
         'folder_id': root.attrib.get('folderId', ''),
+        'folder_full_path': root.attrib.get('folderFullPath', ''),
         'type': root.attrib.get('type', ''),
         'version': root.attrib.get('version', ''),
+        'description': _extract_description(root),
         'xml': raw_xml,
     }
 
@@ -58,8 +73,10 @@ def parse_component_xml(raw_xml: str, fallback_id: str = '') -> Dict[str, Any]:
         'name': root.attrib.get('name', ''),
         'folder_name': root.attrib.get('folderName', ''),
         'folder_id': root.attrib.get('folderId', ''),
+        'folder_full_path': root.attrib.get('folderFullPath', ''),
         'type': root.attrib.get('type', ''),
         'version': root.attrib.get('version', ''),
+        'description': _extract_description(root),
         'current_version': root.attrib.get('currentVersion', 'false'),
         'deleted': root.attrib.get('deleted', 'false'),
         'created_date': root.attrib.get('createdDate', ''),

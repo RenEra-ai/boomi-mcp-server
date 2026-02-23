@@ -990,6 +990,10 @@ if query_components_action:
             search - Multi-field search with AND logic:
                 config='{"name": "%Test%", "type": "process"}'
                 config='{"name": "%Map%", "folder_name": "Production"}'
+                config='{"sub_type": "some_value"}'
+                config='{"created_by": "user@example.com"}'
+                config='{"modified_by": "user@example.com"}'
+                config='{"component_id": "abc-123"}'
 
             bulk_get - Retrieve up to 5 components in one call:
                 component_ids='["id1", "id2", "id3"]'

@@ -75,6 +75,7 @@ def _metadata_to_dict(comp) -> Dict[str, Any]:
         'modified_date': getattr(comp, 'modified_date', ''),
         'created_by': getattr(comp, 'created_by', ''),
         'modified_by': getattr(comp, 'modified_by', ''),
+        'folder_full_path': getattr(comp, 'folder_full_path', ''),
     }
 
 
@@ -177,6 +178,21 @@ def search_components(
                 property=ComponentMetadataSimpleExpressionProperty.TYPE,
                 argument=[filters['type']]
             ))
+
+        # Additional filter fields (EQUALS operator)
+        filter_map = {
+            'sub_type':     ComponentMetadataSimpleExpressionProperty.SUBTYPE,
+            'component_id': ComponentMetadataSimpleExpressionProperty.COMPONENTID,
+            'created_by':   ComponentMetadataSimpleExpressionProperty.CREATEDBY,
+            'modified_by':  ComponentMetadataSimpleExpressionProperty.MODIFIEDBY,
+        }
+        for key, prop in filter_map.items():
+            if filters.get(key):
+                expressions.append(ComponentMetadataSimpleExpression(
+                    operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
+                    property=prop,
+                    argument=[filters[key]]
+                ))
 
         if not expressions:
             # Fallback: match all
