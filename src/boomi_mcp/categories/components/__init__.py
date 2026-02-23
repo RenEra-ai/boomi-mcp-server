@@ -4,9 +4,9 @@ Component management category for Boomi MCP Server.
 This category contains tools for managing Boomi components:
 - Trading Partners (B2B/EDI)
 - Processes
-- Connections (future)
-- Maps (future)
-- etc.
+- Component Query (list, get, search, bulk_get)
+- Component Management (create, update, clone, delete)
+- Component Analysis (where_used, dependencies, compare_versions)
 """
 
 from .trading_partners import (
@@ -28,6 +28,10 @@ from .processes import (
     manage_process_action
 )
 
+from .query_components import query_components_action
+from .manage_component import manage_component_action
+from .analyze_component import analyze_component_action
+
 __all__ = [
     # Trading Partners
     'create_trading_partner',
@@ -43,5 +47,9 @@ __all__ = [
     'create_process',
     'update_process',
     'delete_process',
-    'manage_process_action'
+    'manage_process_action',
+    # Component Tools
+    'query_components_action',
+    'manage_component_action',
+    'analyze_component_action',
 ]

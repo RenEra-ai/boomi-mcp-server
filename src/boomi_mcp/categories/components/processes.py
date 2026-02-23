@@ -17,8 +17,6 @@ from typing import Dict, Any, List, Optional
 import xml.etree.ElementTree as ET
 
 from boomi import Boomi
-from boomi.net.transport.serializer import Serializer
-from boomi.net.environment.environment import Environment
 
 # Import our modules
 from ...xml_builders.builders.orchestrator import ComponentOrchestrator
@@ -34,45 +32,8 @@ from boomi.models import (
     ComponentMetadataSimpleExpressionProperty
 )
 
-
-# ============================================================================
-# SDK workaround helpers (Component API lacks delete; GET returns XML only)
-# ============================================================================
-
-def _component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
-    """GET component as parsed XML dict — bypasses SDK 406 bug on get_component().
-
-    The SDK's HttpHandler auto-sets Accept: application/json, but Boomi's
-    Component GET endpoint only supports application/xml (returns 406 otherwise).
-    We use the Serializer directly with an explicit Accept header.
-    """
-    svc = boomi_client.component
-    serialized_request = (
-        Serializer(
-            f"{svc.base_url or Environment.DEFAULT.url}/Component/{component_id}",
-            [svc.get_access_token(), svc.get_basic_auth()],
-        )
-        .add_header("Accept", "application/xml")
-        .serialize()
-        .set_method("GET")
-    )
-    response, status, content = svc.send_request(serialized_request)
-    if status >= 400:
-        raise Exception(f"GET failed: HTTP {status} — {response}")
-
-    raw_xml = response if isinstance(response, str) else response.decode('utf-8')
-    root = ET.fromstring(raw_xml)
-
-    return {
-        'component_id': root.attrib.get('componentId', component_id),
-        'id': root.attrib.get('componentId', ''),
-        'name': root.attrib.get('name', ''),
-        'folder_name': root.attrib.get('folderName', ''),
-        'folder_id': root.attrib.get('folderId', ''),
-        'type': root.attrib.get('type', ''),
-        'version': root.attrib.get('version', ''),
-        'xml': raw_xml,
-    }
+# Import shared helper
+from ._shared import component_get_xml as _component_get_xml
 
 
 def _component_delete(boomi_client: Boomi, component_id: str) -> None:
@@ -152,7 +113,7 @@ def list_processes(
 
         return {
             "_success": True,
-            "count": len(processes),
+            "total_count": len(processes),
             "processes": processes,
             "profile": profile
         }
