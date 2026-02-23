@@ -227,8 +227,16 @@ class ComponentOrchestrator:
                 filt = FolderQueryConfigQueryFilter(expression=expr)
                 res = self.client.folder.query_folder(request_body=FolderQueryConfig(query_filter=filt))
                 if hasattr(res, 'result') and res.result:
-                    f = res.result[0]
-                    return getattr(f, 'id_', '') or getattr(f, 'id', '') or ''
+                    if len(res.result) == 1:
+                        f = res.result[0]
+                        return getattr(f, 'id_', '') or getattr(f, 'id', '') or ''
+                    else:
+                        ids = [getattr(f, 'id_', '') or getattr(f, 'id', '') for f in res.result]
+                        self.warnings.append(
+                            f"Folder query '{arg}' matched {len(res.result)} folders "
+                            f"(IDs: {ids}). Skipping — specify a unique folder path or use folderId directly."
+                        )
+                        return ''
             except Exception as e:
                 self.warnings.append(f"Folder query error ({arg}): {e}")
             return ''
@@ -260,7 +268,14 @@ class ComponentOrchestrator:
         return ''
 
     def _recover_created_component(self, name: str, component_type: str) -> Optional[str]:
-        """Query API for a just-created component when response parsing failed."""
+        """Query API for a just-created component when response parsing failed.
+
+        Only returns a component_id if exactly one matching component was
+        modified within the last 60 seconds — avoids false-positives from
+        pre-existing components with the same name.
+        """
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
         try:
             expression = ComponentMetadataSimpleExpression(
                 operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
@@ -273,11 +288,26 @@ class ComponentOrchestrator:
                 request_body=query_config
             )
             if hasattr(result, 'result') and result.result:
-                for comp in result.result:
+                matches = [
+                    comp for comp in result.result
                     if (getattr(comp, 'name', '') == name
-                            and str(getattr(comp, 'current_version', 'false')).lower() == 'true'
-                            and str(getattr(comp, 'deleted', 'true')).lower() == 'false'):
-                        return getattr(comp, 'component_id', None)
+                        and str(getattr(comp, 'current_version', 'false')).lower() == 'true'
+                        and str(getattr(comp, 'deleted', 'true')).lower() == 'false')
+                ]
+                recent = []
+                for comp in matches:
+                    mod_str = getattr(comp, 'modified_date', '')
+                    if mod_str:
+                        try:
+                            mod_dt = datetime.fromisoformat(str(mod_str).replace('Z', '+00:00'))
+                            if mod_dt >= cutoff:
+                                cid = getattr(comp, 'component_id', None)
+                                if cid:
+                                    recent.append(cid)
+                        except (ValueError, TypeError):
+                            pass
+                if len(recent) == 1:
+                    return recent[0]
         except Exception:
             pass
         return None
