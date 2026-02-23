@@ -26,6 +26,24 @@ def _extract_description(root) -> str:
     return ''
 
 
+def set_description_element(root, text: str) -> None:
+    """Set description as a child element (Boomi ignores description attributes)."""
+    ns_uri = 'http://api.platform.boomi.com/'
+    desc_elem = root.find(f'{{{ns_uri}}}description')
+    if desc_elem is None:
+        desc_elem = root.find('description')
+    if desc_elem is None:
+        # Insert after <bns:encryptedValues> if present, otherwise append
+        ev = root.find(f'{{{ns_uri}}}encryptedValues')
+        if ev is not None:
+            idx = list(root).index(ev) + 1
+            desc_elem = ET.Element(f'{{{ns_uri}}}description')
+            root.insert(idx, desc_elem)
+        else:
+            desc_elem = ET.SubElement(root, f'{{{ns_uri}}}description')
+    desc_elem.text = text
+
+
 def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
     """GET component as raw XML + parsed metadata dict.
 

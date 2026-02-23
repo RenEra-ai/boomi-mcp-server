@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 
 from boomi import Boomi
 
-from ._shared import component_get_xml
+from ._shared import component_get_xml, set_description_element
 
 
 # ============================================================================
@@ -111,7 +111,7 @@ def update_component(
             root.set('folderName', config['folder_name'])
             changed = True
         if 'description' in config:
-            root.set('description', config['description'])
+            set_description_element(root, config['description'])
             changed = True
 
         if not changed:
@@ -179,7 +179,7 @@ def clone_component(
 
         # Optionally set description
         if config.get('description'):
-            root.set('description', config['description'])
+            set_description_element(root, config['description'])
 
         new_xml = ET.tostring(root, encoding='unicode')
         result = boomi_client.component.create_component(request_body=new_xml)
