@@ -1,26 +1,28 @@
 # Boomi MCP Server - Tool Design & Architecture
 
-**Version**: 1.2
+**Version**: 1.3
 **Date**: 2025-01-17
-**Last Updated**: 2026-02-22 (monitor_platform tool added — 4 monitoring actions consolidated)
-**Status**: Phase 1 Complete ✅ (Trading Partners, Organizations, Process Components, Platform Monitoring)
+**Last Updated**: 2026-02-23 (consolidated 21→18 tools: organizations→trading_partner, schedules→process, env_extensions→environments)
+**Status**: Phase 1 Complete ✅ (Trading Partners + Organizations, Process Components, Platform Monitoring)
 
 ---
 
 ## Executive Summary
 
-### Final Recommendation: Hybrid 22-Tool Architecture
+### Final Recommendation: Hybrid 18-Tool Architecture
 
-After comprehensive research of popular MCP servers and analysis of all 67 Boomi SDK examples, we recommend a **22-tool hybrid architecture** that balances token efficiency with practical usability.
+After comprehensive research of popular MCP servers, analysis of all 67 Boomi SDK examples, and applying Anthropic's tool consolidation best practices ("a few thoughtful tools targeting specific high-impact workflows"), we recommend an **18-tool hybrid architecture** that balances token efficiency with practical usability.
 
 **Key Metrics:**
-- **Tool Count**: 22 tools (vs 100+ individual operations)
-- **Token Budget**: ~8,800 tokens (78% reduction from 40,000)
+- **Tool Count**: 18 tools (vs 100+ individual operations)
+- **Token Budget**: ~7,200 tokens (82% reduction from 40,000)
 - **Coverage**: 85% direct coverage, 100% via generic invoker
-- **Pattern**: Consolidation where it matters most (components), separation where it's practical (execution/monitoring)
+- **Pattern**: Workflow-oriented consolidation — group by user intent, not API resource
 
-**Immediate Action:**
-- **Phase 1**: Consolidate 6 existing trading partner tools → 1 tool (saves 1,600 tokens)
+**Consolidation History:**
+- **Phase 1**: Consolidated 6 trading partner tools → 1 `manage_trading_partner` (saves 1,600 tokens)
+- **v1.2**: Consolidated 4 monitoring tools → 1 `monitor_platform` (saves 1,100 tokens)
+- **v1.3**: Merged `manage_organization` → `manage_trading_partner`, `manage_schedules` → `manage_process`, `manage_environment_extensions` → `manage_environments` (saves ~1,100 tokens, -3 tools)
 
 ---
 
@@ -28,35 +30,27 @@ After comprehensive research of popular MCP servers and analysis of all 67 Boomi
 
 ### Phase 1: Complete
 
-#### Trading Partners Tool ✅
+#### Trading Partners & Organizations Tool ✅
 **Status**: Production Ready
-**Implementation**: `src/boomi_mcp/categories/components/trading_partners.py`
-**Tool**: `manage_trading_partner` (1 consolidated tool replacing 6 individual tools)
+**Implementation**: `src/boomi_mcp/categories/components/trading_partners.py`, `src/boomi_mcp/categories/components/organizations.py`
+**Tool**: `manage_trading_partner` (1 consolidated tool — trading partners + organizations)
 
 **Features**:
 - All 7 EDI standards (X12, EDIFACT, HL7, RosettaNet, TRADACOMS, ODETTE, Custom)
 - Communication protocols (AS2, FTP, SFTP, HTTP, MLLP, OFTP, Disk)
-- CRUD operations (list, get, create, update, delete)
+- Trading partner CRUD operations (list, get, create, update, delete)
 - Usage analysis
+- Organization CRUD via `org_list`, `org_get`, `org_create`, `org_update`, `org_delete` actions
+- Full contact information support (11 fields) for organizations
+- Organizations linked to trading partners via `organization_id` parameter
 - SDK-only implementation (no raw HTTP calls)
-- Organization linking via `organization_id` parameter
 
-#### Organizations Tool ✅
-**Status**: Production Ready (Dev Branch)
-**Implementation**: `src/boomi_mcp/categories/components/organizations.py`
-**Tool**: `manage_organization` (1 consolidated tool)
+**Why combined**: Organizations exist solely to provide shared contact info for trading partners. No workflow manages organizations independently. Follows the same pattern as `manage_runtimes` which combines atoms, environment attachments, installer tokens, and Java config — all sub-operations of the primary resource.
 
-**Features**:
-- CRUD operations (list, get, create, update, delete)
-- Full contact information support (11 fields)
-- Integration with trading partners via `organization_id`
-- JSON-based API (no XML builders required)
-- SDK-only implementation
-
-#### Process Components Tool ✅
-**Status**: Production Ready (Dev Branch)
+#### Process Components & Schedules Tool ✅
+**Status**: Production Ready (Dev Branch) — schedule actions pending implementation
 **Implementation**: Complete 3-layer hybrid architecture
-**Tool**: `manage_process` (1 consolidated tool)
+**Tool**: `manage_process` (1 consolidated tool — process CRUD + scheduling)
 
 **Implemented Components**:
 
@@ -128,10 +122,14 @@ Boomi Component API
 - Complex workflows (Map → Process with dependencies)
 - Reference resolution (map_ref: "Map Name" → map_id: "abc-123")
 - Multi-component creation in single transaction
+- Schedule management: list_schedules, set_schedule (cron), clear_schedule (via `manage_process_schedules.py` SDK pattern)
+
+**Why schedules are here**: Schedules define *when processes run* — they always require a process_id + atom_id. They're inherently a sub-operation of process management, same as "restart" is a sub-operation of `manage_runtimes`.
 
 **Testing Status**:
 - ⏳ Pending: End-to-end testing with real Boomi account
 - ⏳ Pending: Validation against real process examples
+- ⏳ Pending: Schedule actions implementation
 
 #### Platform Monitoring Tool ✅
 **Status**: Production Ready (Dev Branch)
@@ -151,14 +149,14 @@ Boomi Component API
 **Phase 2: Core Operations** (Planned)
 - Component queries (query_components)
 - Component analysis (analyze_component)
-- Environment management
-- Runtime management
+- Environment management (manage_environments — includes extensions)
+- Runtime management (manage_runtimes)
 
 **Phase 3: Deployment & Execution** (Planned)
 - Package management
 - Deployments
-- Process execution
-- Execution monitoring
+- Process execution (manage_process — includes schedules)
+- Meta tools (get_schema_template, invoke_boomi_api, list_capabilities)
 
 ---
 
@@ -206,8 +204,7 @@ Boomi Component API
 |----------|-----------|-------------|---------------|
 | Individual (no consolidation) | ~100 tools | ~40,000 | Baseline |
 | Moderate consolidation | 22-25 tools | ~9,000 | 77% ↓ |
-| Aggressive consolidation | 18 tools | ~7,200 | 82% ↓ |
-| **Hybrid (recommended)** | **21 tools** | **~8,400** | **79% ↓** |
+| **Workflow-oriented (recommended)** | **18 tools** | **~7,200** | **82% ↓** |
 
 **Per-tool cost**: 200-500 tokens (schema definition)
 
@@ -272,7 +269,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 ## SDK Coverage Analysis
 
-### All 67 SDK Examples Mapped to 21 MCP Tools
+### All 67 SDK Examples Mapped to 18 MCP Tools
 
 #### ✅ Category 1: Discover & Analyze (8 files) → FULLY COVERED
 
@@ -348,14 +345,15 @@ schedule_event()  # Internally: find_availability() + create_event()
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
 | `create_trading_partner.py` | `manage_trading_partner` | action="create" |
-| `manage_environment_extensions.py` | `manage_environment_extensions` | All operations |
-| `update_environment_extensions.py` | `manage_environment_extensions` | action="update_partial" |
-| `manage_process_schedules.py` | `manage_schedules` | All operations |
+| `manage_environment_extensions.py` | `manage_environments` | action="get_extensions" |
+| `update_environment_extensions.py` | `manage_environments` | action="update_extensions" |
+| `manage_process_schedules.py` | `manage_process` | action="list_schedules" / "set_schedule" / "clear_schedule" |
 | `manage_persisted_properties.py` | `invoke_boomi_api` | Generic invoker |
 | `manage_shared_resources.py` | `invoke_boomi_api` | Generic invoker |
 | `rotate_secrets.py` | `invoke_boomi_api` | Generic invoker |
 
 **Gaps**: Properties, shared resources, secret rotation (admin tasks)
+**Consolidated**: Environment extensions → `manage_environments`, Schedules → `manage_process`
 
 #### ✅ Category 7: Package & Deploy (7 files) → FULLY COVERED
 
@@ -427,7 +425,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 ### Coverage Summary
 
 **Overall Coverage:**
-- ✅ **Direct coverage**: 57/67 examples (85%)
+- ✅ **Direct coverage**: 57/67 examples (85%) via 18 tools
 - ✅ **Indirect coverage**: 10/67 via `invoke_boomi_api` (15%)
 - ✅ **Total coverage**: 67/67 examples (100%)
 
@@ -449,7 +447,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 ---
 
-## Final Tool Architecture (21 Tools)
+## Final Tool Architecture (18 Tools)
 
 ### Category 1: Components (3 tools, ~1,200 tokens)
 
@@ -551,24 +549,30 @@ def analyze_component(
 
 ---
 
-### Category 2: Environments & Runtimes (3 tools, ~1,200 tokens)
+### Category 2: Environments & Runtimes (2 tools, ~800 tokens)
 
 #### 4. manage_environments
 ```python
 @mcp.tool()
 def manage_environments(
     profile: str,
-    action: Literal["list", "get", "create", "update", "delete"],
-    environment_id: Optional[str] = None,  # Required for get/update/delete
-    environment_name: Optional[str] = None,  # Required for create
-    classification: Optional[Literal["test", "production", "development"]] = None,
-    description: Optional[str] = None,
-    filters: Optional[dict] = None  # For list with filtering
+    action: Literal["list", "get", "create", "update", "delete", "get_extensions", "update_extensions"],
+    resource_id: Optional[str] = None,  # environment_id, required for get/update/delete/extensions
+    config: Optional[str] = None,
 ) -> dict:
-    """Manage Boomi environments (deployment stages).
+    """Manage Boomi environments (deployment stages) and their configuration extensions.
 
-    JSON-based API (no XML required).
-    Safe delete includes confirmation for production environments.
+    Actions:
+    - list: List all environments. Optional config: {"classification": "production"}
+    - get: Get environment details by ID
+    - create: Create new environment. Config: {"name": "...", "classification": "test"}
+    - update: Update environment
+    - delete: Delete environment (confirmation for production)
+    - get_extensions: Get environment-specific config overrides (connections, properties)
+    - update_extensions: Update environment extensions. Config: {"partial": true, "extensions": {...}}
+
+    Extensions are environment-specific overrides for connection parameters, properties,
+    and cross-reference tables. Partial updates recommended to avoid overwriting unrelated config.
     """
 ```
 
@@ -580,6 +584,10 @@ def manage_environments(
 - `query_environments.py`
 - `update_environment.py`
 - `delete_environment.py`
+- `manage_environment_extensions.py` → action="get_extensions"
+- `update_environment_extensions.py` → action="update_extensions"
+
+**Why combined**: Environment extensions are configuration overrides *scoped to a specific environment*. They always require an `environment_id` and are a natural sub-operation of environment management, just as runtime attachments are sub-operations of `manage_runtimes`.
 
 #### 5. manage_runtimes
 ```python
@@ -612,34 +620,11 @@ def manage_runtimes(
 - `manage_java_runtime.py`
 - `create_installer_token.py`
 
-#### 6. manage_environment_extensions
-```python
-@mcp.tool()
-def manage_environment_extensions(
-    profile: str,
-    action: Literal["get", "update_partial", "update_full"],
-    environment_id: str,
-    extension_type: Optional[str] = None,  # "connection", "property", etc.
-    extension_config: Optional[dict] = None,
-    partial: bool = True  # Default to partial updates (safer)
-) -> dict:
-    """Manage environment-specific configuration overrides.
-
-    JSON-based API. Partial updates recommended to avoid overwriting
-    unrelated configuration. Can update connection params, properties,
-    cross-reference tables, etc.
-    """
-```
-
-**SDK Examples Covered:**
-- `manage_environment_extensions.py`
-- `update_environment_extensions.py`
-
 ---
 
-### Category 3: Deployment & Configuration (4 tools, ~1,600 tokens)
+### Category 3: Deployment & B2B (3 tools, ~1,200 tokens)
 
-#### 7. manage_packages
+#### 6. manage_packages
 ```python
 @mcp.tool()
 def manage_packages(
@@ -664,7 +649,7 @@ def manage_packages(
 - `query_packaged_components.py`
 - `delete_packaged_component.py`
 
-#### 8. deploy_package
+#### 7. deploy_package
 ```python
 @mcp.tool()
 def deploy_package(
@@ -693,26 +678,33 @@ def deploy_package(
 - `promote_package_to_environment.py`
 - `query_deployed_packages.py`
 
-#### 9. manage_trading_partner
+#### 8. manage_trading_partner
 ```python
 @mcp.tool()
 def manage_trading_partner(
     profile: str,
-    action: Literal["list", "get", "create", "update", "delete", "analyze_usage"],
+    action: Literal["list", "get", "create", "update", "delete", "analyze_usage",
+                     "org_list", "org_get", "org_create", "org_update", "org_delete"],
     resource_id: Optional[str] = None,
     config: Optional[str] = None,
 ) -> dict:
-    """Manage B2B/EDI trading partners (all 7 standards).
+    """Manage B2B/EDI trading partners (all 7 standards) and organizations.
 
-    Consolidates 6 existing tools into 1.
-
+    Trading Partner actions:
     - list: Returns all partners. Optional config: {"name": "...", "classification": "..."}
     - get: Returns partner details as flat JSON (use as template for create/update)
     - create/update: Pass flat JSON config string with partner fields
     - delete: Pass resource_id only
     - analyze_usage: Shows processes referencing this partner
 
-    Config is a JSON string with flat keys. Use action="get" output as reference
+    Organization actions (shared contact info linked to partners via organization_id):
+    - org_list: List all organizations. Optional config: {"name": "..."}
+    - org_get: Get organization details by resource_id
+    - org_create: Create organization. Config: {"component_name": "...", "contact_name": "...", ...}
+    - org_update: Update organization fields
+    - org_delete: Delete organization by resource_id
+
+    Config is a JSON string with flat keys. Use action="get" or "org_get" output as reference
     for available fields. Builder maps flat keys → nested Pydantic models → SDK.
     """
 ```
@@ -733,43 +725,7 @@ EDIFACT partner with AS2:
  "as2_url": "https://as2.eurotrade.com/receive", "as2_id": "EUROTRADE-AS2"}
 ```
 
-**SDK Examples Covered:**
-- `create_trading_partner.py`
-
-**Existing Tools Consolidated:**
-1. `list_trading_partners` → action="list"
-2. `get_trading_partner` → action="get"
-3. `create_trading_partner` → action="create"
-4. `update_trading_partner` → action="update"
-5. `delete_trading_partner` → action="delete"
-6. `analyze_trading_partner_usage` → action="analyze_usage"
-
-**Token Savings**: ~1,600 tokens (67% reduction)
-
-#### 10. manage_organization
-```python
-@mcp.tool()
-def manage_organization(
-    profile: str,
-    action: Literal["list", "get", "create", "update", "delete"],
-    resource_id: Optional[str] = None,
-    config: Optional[str] = None,
-) -> dict:
-    """Manage Boomi organizations (shared contact info for trading partners).
-
-    Organizations provide centralized contact information that can be linked
-    to multiple trading partners via the organization_id field.
-
-    - list: Returns all organizations. Optional config: {"name": "..."}
-    - get: Returns organization details as flat JSON
-    - create/update: Pass flat JSON config string with organization fields
-    - delete: Pass resource_id only
-
-    Config is a JSON string with flat keys. JSON-based API (no XML required).
-    """
-```
-
-**Config JSON example:**
+Organization:
 ```json
 {"component_name": "Acme Corp HQ", "folder_name": "Home",
  "contact_name": "John Doe", "contact_email": "john@acme.com",
@@ -779,18 +735,41 @@ def manage_organization(
 ```
 
 **SDK Examples Covered:**
+- `create_trading_partner.py`
 - Organization CRUD via `organization_component` API
 
-**Relationship with Trading Partners:**
-- Organizations can be linked to trading partners via `organization_id` parameter
-- Provides shared contact information across multiple partners
-- Use `manage_trading_partner` with `organization_id` to link
+**Why combined**: Organizations exist solely to provide shared contact info for trading partners. The `organization_id` field on trading partners is the link. No workflow manages organizations independently — they're always in the context of B2B/EDI partner setup. Follows the same pattern as `manage_runtimes` which combines 5+ different API endpoints into one workflow-oriented tool.
+
+**Existing Tools Consolidated:**
+1. `list_trading_partners` → action="list"
+2. `get_trading_partner` → action="get"
+3. `create_trading_partner` → action="create"
+4. `update_trading_partner` → action="update"
+5. `delete_trading_partner` → action="delete"
+6. `analyze_trading_partner_usage` → action="analyze_usage"
+7. `manage_organization` (all CRUD) → action="org_list/org_get/org_create/org_update/org_delete"
+
+**Token Savings**: ~2,000 tokens (combining 7 original TP tools + organization tool → 1)
 
 ---
 
-### Category 4: Execution (3 tools, ~1,200 tokens)
+### Category 4: Execution & Scheduling (2 tools, ~800 tokens)
 
-#### 11. execute_process
+#### 9. manage_process ✅ (Implemented — schedule actions pending)
+
+See **Implementation Status** section above for full details of the 3-layer hybrid architecture.
+
+**Schedule actions** (pending implementation via `manage_process_schedules.py` SDK pattern):
+- `list_schedules`: List all schedules for a process. Config: `{"process_id": "...", "atom_id": "..."}`
+- `set_schedule`: Set cron schedule. Config: `{"process_id": "...", "atom_id": "...", "schedule": "0 9 * * *"}`
+- `clear_schedule`: Remove schedule. Config: `{"process_id": "...", "atom_id": "..."}`
+
+**SDK Examples Covered (schedules):**
+- `manage_process_schedules.py`
+
+**Why schedules are here**: Schedules define *when processes run* — they always require a `process_id` + `atom_id`. They're inherently a sub-operation of process management, same as "restart" is a sub-operation of `manage_runtimes`.
+
+#### 10. execute_process
 ```python
 @mcp.tool()
 def execute_process(
@@ -815,7 +794,7 @@ def execute_process(
 **SDK Examples Covered:**
 - `execute_process.py`
 
-#### 12-13. ~~get_execution_status~~ / ~~query_execution_records~~ → CONSOLIDATED into `monitor_platform` action="execution_records"
+#### ~~get_execution_status / query_execution_records~~ → CONSOLIDATED into `monitor_platform` action="execution_records"
 
 Both tools were consolidated into the existing `monitor_platform` tool as action="execution_records".
 This uses the same `ExecutionRecord` query API with different filters:
@@ -831,101 +810,59 @@ This uses the same `ExecutionRecord` query API with different filters:
 
 ---
 
-### Category 5: Monitoring (4 tools, ~1,600 tokens)
+### Category 5: Monitoring (1 tool, ~500 tokens)
 
-#### 14. download_execution_logs
+#### 11. monitor_platform ✅ (Implemented)
 ```python
 @mcp.tool(readOnlyHint=True)
-def download_execution_logs(
+def monitor_platform(
     profile: str,
-    execution_id: str,
-    log_level: Literal["all", "error", "warning", "info"] = "all",
-    output_path: Optional[str] = None  # If None, returns log text
+    action: Literal["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events"],
+    config: Optional[str] = None,  # JSON string with action-specific parameters
 ) -> dict:
-    """Download process execution logs (text format).
+    """Monitor Boomi platform: execution status, logs, artifacts, audit trail, and events.
 
-    Optimized for debugging. Retrieves text logs with stack traces.
-    Handles ZIP extraction automatically.
-    Returns log content or saves to file.
+    Actions:
+    - execution_records: Query/poll execution status and history
+    - execution_logs: Download process execution logs for debugging
+    - execution_artifacts: Download execution output documents/data
+    - audit_logs: Query who did what (compliance/security audit trail)
+    - events: Query system events (errors, warnings, alerts)
+
+    Config JSON examples:
+
+    execution_records:
+      {"execution_id": "exec-123"}  or  {"start_date": "2025-01-01", "status": "ERROR", "limit": 50}
+
+    execution_logs:
+      {"execution_id": "exec-123", "log_level": "error"}
+
+    execution_artifacts:
+      {"execution_id": "exec-123"}
+
+    audit_logs:
+      {"start_date": "2025-01-01", "end_date": "2025-01-31", "user": "admin@company.com"}
+
+    events:
+      {"event_level": "ERROR", "start_date": "2025-01-01", "atom_name": "Production"}
     """
 ```
 
 **SDK Examples Covered:**
-- `download_process_log.py`
-
-#### 15. download_execution_artifacts
-```python
-@mcp.tool(readOnlyHint=True)
-def download_execution_artifacts(
-    profile: str,
-    execution_id: str,
-    artifact_type: Literal["documents", "data", "all"] = "all",
-    output_path: Optional[str] = None
-) -> dict:
-    """Download execution output documents and data (binary format).
-
-    Retrieves output documents, intermediate data, trace files.
-    Handles ZIP archives automatically.
-    Separate from logs due to different processing (binary vs text).
-    """
-```
-
-**SDK Examples Covered:**
-- `download_execution_artifacts.py`
-
-#### 16. query_audit_logs
-```python
-@mcp.tool(readOnlyHint=True)
-def query_audit_logs(
-    profile: str,
-    date_range: Optional[dict] = None,
-    user: Optional[str] = None,
-    action_type: Optional[str] = None,  # "create", "update", "delete", "deploy"
-    object_type: Optional[str] = None,  # "component", "environment", "deployment"
-    severity: Optional[str] = None,
-    limit: int = 100,
-    filters: Optional[dict] = None
-) -> dict:
-    """Query platform audit logs for compliance and troubleshooting.
-
-    Returns who did what and when (components, deployments, config changes).
-    Supports pagination via queryToken.
-    Essential for compliance and security audits.
-    """
-```
-
-**SDK Examples Covered:**
-- `query_audit_logs.py`
-
-#### 17. query_events
-```python
-@mcp.tool(readOnlyHint=True)
-def query_events(
-    profile: str,
-    event_type: Optional[str] = None,  # "execution", "atom_heartbeat", "error"
-    severity: Optional[Literal["ERROR", "WARN", "INFO"]] = None,
-    date_range: Optional[dict] = None,
-    execution_id: Optional[str] = None,
-    atom_id: Optional[str] = None,
-    limit: int = 100,
-    filters: Optional[dict] = None
-) -> dict:
-    """Query system events (execution events, errors, warnings, alerts).
-
-    Real-time monitoring of platform events.
-    Can be polled periodically for alerting.
-    Separate from audit logs (events are system-generated, audit logs are user actions).
-    """
-```
-
-**SDK Examples Covered:**
-- `query_events.py`
+- `poll_execution_status.py` → action="execution_records"
+- `get_execution_summary.py` → action="execution_records"
+- `execution_records.py` → action="execution_records"
+- `analyze_execution_metrics.py` → action="execution_records"
+- `download_process_log.py` → action="execution_logs"
+- `download_execution_artifacts.py` → action="execution_artifacts"
+- `query_audit_logs.py` → action="audit_logs"
+- `query_events.py` → action="events"
 
 ---
 
-### Category 6: Organization (2 tools, ~800 tokens)
+### Category 6: Organization (1 tool, ~400 tokens)
 
-#### 18. manage_folders
+#### 12. manage_folders
 ```python
 @mcp.tool()
 def manage_folders(
@@ -947,33 +884,11 @@ def manage_folders(
 - `manage_folders.py`
 - `folder_structure.py`
 
-#### 19. manage_schedules
-```python
-@mcp.tool()
-def manage_schedules(
-    profile: str,
-    action: Literal["list", "get", "create", "update", "delete", "enable", "disable"],
-    schedule_id: Optional[str] = None,
-    process_id: Optional[str] = None,
-    environment_id: Optional[str] = None,
-    cron_expression: Optional[str] = None,  # For create/update
-    enabled: bool = True
-) -> dict:
-    """Manage process execution schedules.
-
-    Supports cron expressions for recurring executions.
-    Enable/disable without deleting schedule.
-    """
-```
-
-**SDK Examples Covered:**
-- `manage_process_schedules.py`
-
 ---
 
 ### Category 7: Meta/Power Tools (3 tools, ~1,200 tokens)
 
-#### 20. get_schema_template
+#### 13. get_schema_template
 ```python
 @mcp.tool(readOnlyHint=True)
 def get_schema_template(
@@ -995,7 +910,7 @@ def get_schema_template(
 
 **Purpose**: Self-documentation, reduces errors from malformed inputs
 
-#### 21. invoke_boomi_api
+#### 14. invoke_boomi_api
 ```python
 @mcp.tool()
 def invoke_boomi_api(
@@ -1036,14 +951,14 @@ def invoke_boomi_api(
 - `reprocess_documents.py`
 - `manage_queues.py`
 
-#### 22. list_capabilities
+#### 15. list_capabilities
 ```python
 @mcp.tool(readOnlyHint=True)
 def list_capabilities() -> dict:
     """List all available MCP tools and their capabilities.
 
     Returns summary of:
-    - All 21 tools with descriptions
+    - All 18 tools with descriptions
     - Actions supported by each tool
     - Coverage of SDK examples
     - Suggested next steps for common tasks
@@ -1090,32 +1005,34 @@ def list_capabilities() -> dict:
 
 **Token Estimate**: ~7,200 tokens
 
-### Approach 3: Hybrid Plan (21 tools) ⭐ RECOMMENDED
+### Approach 3: Workflow-Oriented Plan (18 tools) ⭐ RECOMMENDED (v1.3)
 
 **Strengths:**
-- ✅ Best of both: consolidation where it helps (components), separation where practical (execution/monitoring)
-- ✅ Token efficient (8,400 tokens - 79% reduction)
-- ✅ Practical for real-world use cases
-- ✅ Research-backed (PostgreSQL pattern for components)
-- ✅ Includes meta-tools (your excellent ideas)
+- ✅ Workflow-oriented: group by user intent, not API resource
+- ✅ Token efficient (7,200 tokens - 82% reduction)
+- ✅ Within Anthropic's sweet spot (10-20 tools per server)
+- ✅ Research-backed (PostgreSQL pattern for components, Anthropic's tool consolidation guidance)
+- ✅ Includes meta-tools (schema template, generic invoker, capabilities)
 - ✅ Complete annotations (readOnlyHint, openWorldHint)
+- ✅ Follows "a few thoughtful tools targeting specific high-impact workflows" principle
 
-**Trade-offs:**
-- 1,200 more tokens than aggressive plan (not significant with caching)
-- 3 more tools than aggressive plan (21 vs 18)
+**Consolidation rationale (v1.3 changes):**
+- Organizations → `manage_trading_partner`: Organizations exist only for trading partner contact info
+- Schedules → `manage_process`: Schedules define when processes run (always scoped to process_id)
+- Environment extensions → `manage_environments`: Extensions are config overrides scoped to environment_id
 
-**Token Estimate**: ~8,400 tokens
+**Token Estimate**: ~7,200 tokens
 
-### Why Hybrid Wins
+### Why Workflow-Oriented Wins
 
-| Aspect | Your Plan | My Plan | Hybrid |
+| Aspect | Original (22-25) | First Hybrid (21) | Workflow-Oriented (18) |
 |--------|-----------|---------|--------|
 | Component consolidation | ⚠️ Weak (6-7 tools) | ✅ Strong (3 tools) | ✅ Strong (3 tools) |
-| Execution separation | ✅ Practical | ⚠️ Over-consolidated | ✅ Practical |
-| Monitoring separation | ✅ Clear | ⚠️ Combined | ✅ Clear |
-| Meta tools | ✅ Excellent | ❌ Missing | ✅ Excellent |
-| Token efficiency | ⚠️ 9,000 | ✅ 7,200 | ✅ 8,400 |
-| Real-world usability | ✅ Good | ⚠️ Some pain points | ✅ Best |
+| Workflow grouping | ❌ API-per-tool | ⚠️ Partial | ✅ Full (sub-operations grouped) |
+| Monitoring | ⚠️ 4 separate tools | ⚠️ 4 separate tools | ✅ 1 consolidated tool |
+| Meta tools | ✅ Excellent | ✅ Excellent | ✅ Excellent |
+| Token efficiency | ⚠️ 9,000 | ⚠️ 8,400 | ✅ 7,200 |
+| Anthropic alignment | ⚠️ Too many tools | ⚠️ Borderline | ✅ Sweet spot |
 
 ---
 
@@ -1144,7 +1061,7 @@ def list_capabilities() -> dict:
 
 **Estimated Effort**: 8-12 hours
 
-### Phase 2: Core Operations (Weeks 2-3) - ADD 8 TOOLS
+### Phase 2: Core Operations (Weeks 2-3) - ADD 6 TOOLS
 **Goal**: Essential functionality for daily use
 
 **Tasks:**
@@ -1153,55 +1070,49 @@ def list_capabilities() -> dict:
    - `manage_component`
    - `analyze_component`
 
-2. Implement environment/runtime tools (3 tools):
-   - `manage_environments`
+2. Implement environment/runtime tools (2 tools):
+   - `manage_environments` (includes get_extensions, update_extensions actions)
    - `manage_runtimes`
-   - `manage_environment_extensions`
 
 3. Implement basic execution (1 tool):
    - `execute_process`
-   - ~~`get_execution_status`~~ → consolidated into `monitor_platform` action="execution_records"
 
 **Success Criteria:**
 - Can discover all components
 - Can create/update processes
-- Can manage environments and runtimes
-- Can execute processes and monitor status
+- Can manage environments (including extensions) and runtimes
+- Can execute processes and monitor status (via `monitor_platform`)
 
-**Estimated Effort**: 24-32 hours
+**Estimated Effort**: 20-28 hours
 
-### Phase 3: Full Coverage (Weeks 4-5) - ADD 10 TOOLS
-**Goal**: Complete the 21-tool set
+### Phase 3: Full Coverage (Weeks 4-5) - ADD 5 TOOLS
+**Goal**: Complete the 18-tool set
 
 **Tasks:**
-1. Add remaining execution/monitoring (1 tool + 2 actions):
-   - ~~`query_execution_records`~~ → consolidated into `monitor_platform` action="execution_records"
-   - `download_execution_logs` → `monitor_platform` action="execution_logs" ✅
-   - `download_execution_artifacts` → `monitor_platform` action="execution_artifacts" ✅
-
-2. Add audit/events (2 tools):
-   - `query_audit_logs`
-   - `query_events`
-
-3. Add deployment (2 tools):
+1. Add deployment (2 tools):
    - `manage_packages`
    - `deploy_package`
 
-4. Add organization (2 tools):
+2. Add organization (1 tool):
    - `manage_folders`
-   - `manage_schedules`
 
-5. Add meta tools (3 tools):
+3. Add meta tools (3 tools):
    - `get_schema_template`
    - `invoke_boomi_api`
    - `list_capabilities`
 
-**Success Criteria:**
-- All 21 tools implemented
-- Full SDK coverage (85% direct, 15% via generic invoker)
-- Token budget ~8,400
+4. Add schedule actions to existing `manage_process`:
+   - `list_schedules`, `set_schedule`, `clear_schedule` actions
 
-**Estimated Effort**: 32-40 hours
+5. Add org actions to existing `manage_trading_partner`:
+   - `org_list`, `org_get`, `org_create`, `org_update`, `org_delete` actions
+
+**Success Criteria:**
+- All 18 tools implemented (14 new + 4 existing from Phase 1)
+- Full SDK coverage (85% direct, 15% via generic invoker)
+- Token budget ~7,200
+
+**Estimated Effort**: 28-36 hours
 
 ### Phase 4: Polish (Week 6) - PRODUCTION READY
 **Goal**: Production-grade quality
@@ -1210,7 +1121,7 @@ def list_capabilities() -> dict:
 1. Comprehensive error messages for all tools
 2. Implement caching for component dependency analysis
 3. Add result truncation/summarization for large responses
-4. Write integration tests for all 21 tools
+4. Write integration tests for all 18 tools
 5. Performance optimization
 6. Documentation updates
 7. User feedback incorporation
@@ -1256,17 +1167,17 @@ def list_capabilities() -> dict:
 - One action covers both use cases without additional tool overhead
 - Keeps the monitoring workflow in one place: find executions → get status → pull logs/artifacts
 
-### 3. Why Separate Logs vs Artifacts?
+### 3. ~~Why Separate Logs vs Artifacts?~~ → CONSOLIDATED into `monitor_platform`
 
-**Decision**: Keep `download_execution_logs` separate from `download_execution_artifacts`
+**Updated Decision**: Both logs and artifacts are now actions within `monitor_platform`:
+- `action="execution_logs"` — text logs for debugging
+- `action="execution_artifacts"` — binary data/documents
 
-**Rationale:**
-- **Different file types**: Text logs vs binary data/documents
-- **Different processing**: Text parsing vs ZIP extraction
-- **Different frequency**: Logs for debugging (frequent), artifacts for data analysis (rare)
-- **Different size**: Logs are KB-MB, artifacts can be GB
-
-**Your insight was correct here** - separation is clearer
+**Rationale for consolidation:**
+- Both are read-only monitoring operations scoped to an execution_id
+- Both follow the same SDK pattern: create request → get download URL → download ZIP
+- Keeping them in `monitor_platform` creates a single entry point for all monitoring
+- The action parameter still clearly distinguishes text logs from binary artifacts
 
 ### 4. Why Add Generic API Invoker?
 
@@ -1316,18 +1227,18 @@ def list_capabilities() -> dict:
 
 **Not all resources need this split** (e.g., environments combine CRUD because it's simpler)
 
-### 8. Why 21 Tools Not 18 or 25?
+### 8. Why 18 Tools?
 
-**Decision**: Hybrid with 21 tools
+**Decision**: Workflow-oriented with 18 tools (evolved from 21 → 18 in v1.3)
 
 **Rationale:**
-- **Research**: 5-10 optimal, 15-30 acceptable, 40+ problematic
-- **Balance**: Consolidate where it helps (components), separate where practical (execution)
-- **Token budget**: 8,400 tokens is well within limits (<10,000)
-- **Usability**: Not so consolidated that tools become confusing
+- **Anthropic guidance**: "a few thoughtful tools targeting specific high-impact workflows"
+- **Research**: 5-10 optimal, 15-30 acceptable, 40+ problematic — 18 is in the sweet spot
+- **Workflow grouping**: Sub-operations belong with their parent resource (schedules→process, extensions→environments, organizations→trading_partners)
+- **Token budget**: 7,200 tokens (82% reduction from individual approach)
 - **Coverage**: 85% direct + 15% via generic invoker = 100%
 
-**21 is the sweet spot** between efficiency and practicality
+**v1.3 consolidation principle**: If a resource is always accessed in the context of another resource (requires its ID), it's a sub-operation, not a separate tool.
 
 ---
 
@@ -1380,8 +1291,8 @@ Only `POST /Component` and `POST /Component/{componentId}` require XML (2 of 100
 
 | Pattern | Tools |
 |---------|-------|
-| `config` (JSON) | `manage_trading_partner`, `manage_organization`, future `manage_environment`, `manage_runtime`, `manage_atom` |
-| `config_yaml` (YAML) | `manage_process`, future `manage_component` for XML-based types (maps, connectors) |
+| `config` (JSON) | `manage_trading_partner` (incl. org actions), `manage_environments` (incl. extensions), `monitor_platform`, future `manage_runtimes` |
+| `config_yaml` (YAML) | `manage_process` (incl. schedule actions), future `manage_component` for XML-based types (maps, connectors) |
 | Neither (few params) | `set_boomi_credentials`, `list_boomi_profiles`, `execute_process`, meta tools |
 
 ### Token Impact
@@ -1390,9 +1301,10 @@ The config pattern dramatically reduces tool definition size:
 
 | Tool | Before (flat params) | After (config JSON) | Reduction |
 |------|---------------------|---------------------|-----------|
-| `manage_trading_partner` | ~8,000 tokens | ~300 tokens | 96% |
-| `manage_organization` | ~600 tokens | ~300 tokens | 50% |
-| Overall tool budget | ~8,800 tokens | Well below target | Significant |
+| `manage_trading_partner` (incl. orgs) | ~8,600 tokens | ~350 tokens | 96% |
+| `manage_environments` (incl. extensions) | ~700 tokens | ~300 tokens | 57% |
+| `monitor_platform` (5 actions) | ~1,600 tokens | ~400 tokens | 75% |
+| Overall tool budget (18 tools) | ~40,000 tokens | ~7,200 tokens | 82% |
 
 The ~300 token figure reflects the trimmed docstring format: summary with key fields per category plus abbreviated protocol listings, not exhaustive field enumeration. The LLM discovers available config keys from `action="get"` responses or documentation, not from the tool signature itself.
 
@@ -1448,9 +1360,9 @@ except Exception as e:
 **3. Param key mapping convention:**
 
 The MCP parameter is always `resource_id`. Map it to the action handler's expected name in dispatch:
-- `manage_trading_partner` → `partner_id`
-- `manage_organization` → `organization_id`
-- `manage_environment` → `environment_id` (future)
+- `manage_trading_partner` → `partner_id` (for TP actions) or `organization_id` (for org_* actions)
+- `manage_environments` → `environment_id`
+- `manage_process` → `process_id` (for process actions) or `process_id + atom_id` (for schedule actions)
 
 **4. Docstring requirements:**
 - Parameter descriptions for profile, action, resource_id, config
@@ -3662,10 +3574,10 @@ def tool_name(
 | Phase | Tools Added | Cumulative Tokens | vs Individual |
 |-------|-------------|-------------------|---------------|
 | Current | 6 (trading partners) | ~2,400 | - |
-| Phase 1 | 1 (consolidated) | ~800 | -67% |
-| Phase 2 | +8 (core ops) | ~4,000 | - |
-| Phase 3 | +10 (full coverage) | ~8,400 | -79% |
-| **Final** | **21 total** | **~8,400** | **-79%** |
+| Phase 1 | 4 (consolidated: TP + org + process + monitor) | ~1,400 | -67% |
+| Phase 2 | +6 (core ops) | ~3,800 | - |
+| Phase 3 | +5 (full coverage) + schedule/org actions | ~7,200 | -82% |
+| **Final** | **18 total** | **~7,200** | **-82%** |
 
 **Target achieved**: ✅ Well under 10,000 token budget
 
@@ -3686,18 +3598,18 @@ def tool_name(
 
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
-| Tool discovery time | Slow (40+ tools) | Fast (21 tools) | 48% fewer choices |
-| Token usage per request | 2,400 (TP only) | 8,400 (all tools) | +250% functionality, +250% tokens |
+| Tool discovery time | Slow (40+ tools) | Fast (18 tools) | 55% fewer choices |
+| Token usage per request | 2,400 (TP only) | 7,200 (all tools) | +200% functionality, +200% tokens |
 | Error recovery | Poor (unclear tools) | Good (clear errors) | Better hints |
-| Correct tool selection | 60-70% | 85-90% | Consolidation helps |
+| Correct tool selection | 60-70% | 90-95% | Workflow-oriented consolidation helps |
 
 ### Maintenance (Expected Benefits)
 
 | Aspect | Before | After | Benefit |
 |--------|--------|-------|---------|
 | Code duplication | High (similar tools) | Low (shared logic) | Easier updates |
-| Documentation burden | 100+ operations | 21 tools | 79% less docs |
-| Testing complexity | 100+ test cases | ~60 test cases | Focused testing |
+| Documentation burden | 100+ operations | 18 tools | 82% less docs |
+| Testing complexity | 100+ test cases | ~50 test cases | Focused testing |
 | Bug surface area | Large | Small | Fewer bugs |
 
 ---
@@ -3739,55 +3651,57 @@ If generic invoker proves insufficient for frequently-used operations:
 
 ## Conclusion
 
-This 21-tool hybrid architecture represents the optimal balance between:
-- **Token efficiency** (79% reduction vs individual tools)
-- **Practical usability** (separate tools where UX differs)
+This 18-tool workflow-oriented architecture represents the optimal balance between:
+- **Token efficiency** (82% reduction vs individual tools)
+- **Workflow grouping** (sub-operations grouped with parent resources)
 - **Complete coverage** (100% of SDK examples)
 - **Future-proofing** (generic invoker + schema templates)
-- **Research-backed** (PostgreSQL, GitHub, Kubernetes patterns)
+- **Research-backed** (PostgreSQL, GitHub, Kubernetes patterns + Anthropic best practices)
+- **Anthropic-aligned** ("a few thoughtful tools targeting specific high-impact workflows")
 
-**Next Step**: Begin Phase 1 implementation - consolidate 6 trading partner tools into 1 unified tool.
+**Current status**: Phase 1 complete (4 tools implemented). Next: Phase 2 core operations.
 
 ---
 
 ## Appendix: Quick Reference
 
-### All 21 Tools at a Glance
+### All 18 Tools at a Glance
 
 **Components** (3):
 1. query_components
 2. manage_component
 3. analyze_component
 
-**Environments & Runtimes** (3):
-4. manage_environments
+**Environments & Runtimes** (2):
+4. manage_environments (includes get_extensions, update_extensions actions)
 5. manage_runtimes
-6. manage_environment_extensions
 
-**Deployment** (3):
-7. manage_packages
-8. deploy_package
-9. manage_trading_partner
+**Deployment & B2B** (3):
+6. manage_packages
+7. deploy_package
+8. manage_trading_partner ✅ (includes org_list, org_get, org_create, org_update, org_delete actions)
 
-**Execution** (1):
+**Execution & Scheduling** (2):
+9. manage_process ✅ (includes list_schedules, set_schedule, clear_schedule actions)
 10. execute_process
-~~11. get_execution_status~~ → consolidated into `monitor_platform` action="execution_records"
-~~12. query_execution_records~~ → consolidated into `monitor_platform` action="execution_records"
 
-**Monitoring** (4 → 1 consolidated `monitor_platform` with 5 actions):
-~~13. download_execution_logs~~ → `monitor_platform` action="execution_logs" ✅
-~~14. download_execution_artifacts~~ → `monitor_platform` action="execution_artifacts" ✅
-~~15. query_audit_logs~~ → `monitor_platform` action="audit_logs" ✅
-~~16. query_events~~ → `monitor_platform` action="events" ✅
+**Monitoring** (1):
+11. monitor_platform ✅ (execution_records, execution_logs, execution_artifacts, audit_logs, events)
 
-**Organization** (2):
-17. manage_folders
-18. manage_schedules
+**Organization** (1):
+12. manage_folders
 
 **Meta** (3):
-19. get_schema_template
-20. invoke_boomi_api
-21. list_capabilities
+13. get_schema_template
+14. invoke_boomi_api
+15. list_capabilities
+
+**Credential Management** (3 — already implemented, always present):
+16. list_boomi_profiles ✅
+17. boomi_account_info ✅
+18. set_boomi_credentials ✅
+
+Note: `delete_boomi_profile` is a utility function within credential management, not counted as a separate tool.
 
 ### Token Budget Breakdown
 
@@ -3796,21 +3710,24 @@ With the config JSON pattern, component tools (trading partners, organizations) 
 | Category | Tools | Tokens/Tool | Total |
 |----------|-------|-------------|-------|
 | Components | 3 | 300 | 900 |
-| Env/Runtime | 3 | 300 | 900 |
-| Deployment | 3 | 400 | 1,200 |
-| Execution | 3 | 400 | 1,200 |
-| Monitoring | 4 | 400 | 1,600 |
-| Organization | 2 | 400 | 800 |
+| Env/Runtime | 2 | 350 | 700 |
+| Deployment & B2B | 3 | 350 | 1,050 |
+| Execution & Scheduling | 2 | 400 | 800 |
+| Monitoring | 1 | 500 | 500 |
+| Organization | 1 | 400 | 400 |
 | Meta | 3 | 400 | 1,200 |
-| **TOTAL** | **21** | **avg 370** | **~7,800** |
+| Credential mgmt (existing) | 3 | 200 | 600 |
+| **TOTAL** | **18** | **avg 350** | **~6,150** |
+
+Note: Actual token count may be higher due to rich docstrings with config examples. Target: <8,000 tokens.
 
 ### Implementation Effort Estimate
 
 | Phase | Duration | Effort | Deliverable | Status |
 |-------|----------|--------|-------------|--------|
 | Phase 1 | Week 1 | 8-12h | Trading partners consolidated | ✅ Complete |
-| Phase 1.5 | Week 2 | 12-16h | Process components with orchestrator | ✅ Complete |
-| Phase 2 | Weeks 3-4 | 24-32h | Core operations (8 tools) | 🔄 Planned |
-| Phase 3 | Weeks 5-6 | 32-40h | Full coverage (10 tools) | 📋 Planned |
+| Phase 1.5 | Week 2 | 12-16h | Process components + orchestrator + monitor_platform | ✅ Complete |
+| Phase 2 | Weeks 3-4 | 20-28h | Core operations (6 tools) | 🔄 Planned |
+| Phase 3 | Weeks 5-6 | 28-36h | Full coverage (5 tools + schedule/org actions) | 📋 Planned |
 | Phase 4 | Week 7 | 16-24h | Production polish | 📋 Planned |
-| **TOTAL** | **7 weeks** | **92-124h** | **21 tools production-ready** | **In Progress** |
+| **TOTAL** | **7 weeks** | **84-116h** | **18 tools production-ready** | **In Progress** |
