@@ -10,7 +10,8 @@ This module implements the top layer (Layer 3) of the hybrid architecture:
 Based on MCP_TOOL_DESIGN.md lines 2700-2925.
 """
 
-from typing import List, Dict, Any, Optional
+import re
+from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict, deque
 
 from boomi import Boomi
@@ -140,11 +141,16 @@ class ComponentOrchestrator:
                 # Component may have been created but SDK response parsing failed
                 # (e.g. 'bytes' object has no attribute 'items').
                 # Query back by name to verify and retrieve the component_id.
-                component_id = self._recover_created_component(spec.name, spec.type)
-                if component_id is None:
+                recovered = self._recover_created_component(spec.name, spec.type)
+                if recovered is None:
                     raise Exception(
                         f"Failed to create component '{spec.name}': {str(e)}"
                     ) from e
+                actual_name, component_id = recovered
+                if actual_name != spec.name:
+                    self.warnings.append(
+                        f"Component '{spec.name}' was auto-renamed to '{actual_name}' by Boomi"
+                    )
 
             # Step 6: Register in session registry
             self.registry[spec.name] = {
@@ -279,15 +285,19 @@ class ComponentOrchestrator:
         )
         return ''
 
-    def _recover_created_component(self, name: str, component_type: str) -> Optional[str]:
+    def _recover_created_component(self, name: str, component_type: str) -> Optional[Tuple[str, str]]:
         """Query API for a just-created component when response parsing failed.
 
-        Only returns a component_id if exactly one matching component was
-        modified within the last 60 seconds — avoids false-positives from
-        pre-existing components with the same name.
+        Returns (actual_name, component_id) if exactly one matching component
+        was modified within the last 60 seconds. The name match covers both
+        the exact requested name and Boomi's auto-rename pattern ("{name} N")
+        to handle duplicate-name scenarios.
+
+        Returns None if no match or ambiguous (multiple recent matches).
         """
         from datetime import datetime, timedelta, timezone
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        pattern = re.compile(r'^' + re.escape(name) + r'( \d+)?$')
         try:
             expression = ComponentMetadataSimpleExpression(
                 operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
@@ -302,7 +312,7 @@ class ComponentOrchestrator:
             if hasattr(result, 'result') and result.result:
                 matches = [
                     comp for comp in result.result
-                    if (getattr(comp, 'name', '') == name
+                    if (pattern.match(getattr(comp, 'name', ''))
                         and str(getattr(comp, 'current_version', 'false')).lower() == 'true'
                         and str(getattr(comp, 'deleted', 'true')).lower() == 'false')
                 ]
@@ -315,7 +325,8 @@ class ComponentOrchestrator:
                             if mod_dt >= cutoff:
                                 cid = getattr(comp, 'component_id', None)
                                 if cid:
-                                    recent.append(cid)
+                                    actual_name = getattr(comp, 'name', name)
+                                    recent.append((actual_name, cid))
                         except (ValueError, TypeError):
                             pass
                 if len(recent) == 1:
