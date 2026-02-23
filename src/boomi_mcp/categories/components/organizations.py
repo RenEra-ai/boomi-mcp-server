@@ -141,35 +141,38 @@ def get_organization(boomi_client, profile: str, organization_id: str) -> Dict[s
             id_=organization_id
         )
 
-        # Extract contact info
-        contact_info = {}
+        # Extract contact info with normalized contact_* field names (matches input config format)
+        org_data = {
+            "component_id": getattr(result, 'component_id', None) or organization_id,
+            "name": getattr(result, 'component_name', None),
+            "folder_id": getattr(result, 'folder_id', None),
+            "folder_name": getattr(result, 'folder_name', None),
+            "deleted": getattr(result, 'deleted', False),
+        }
+
         contact = getattr(result, 'organization_contact_info', None)
         if contact:
-            raw_contact = {
+            contact_fields = {
                 "contact_name": getattr(contact, 'contact_name', None),
-                "email": getattr(contact, 'email', None),
-                "phone": getattr(contact, 'phone', None),
-                "fax": getattr(contact, 'fax', None),
+                "contact_email": getattr(contact, 'email', None),
+                "contact_phone": getattr(contact, 'phone', None),
+                "contact_fax": getattr(contact, 'fax', None),
                 "contact_url": getattr(contact, 'contact_url', None),
-                "address1": getattr(contact, 'address1', None),
-                "address2": getattr(contact, 'address2', None),
-                "city": getattr(contact, 'city', None),
-                "state": getattr(contact, 'state', None),
-                "country": getattr(contact, 'country', None),
-                "postalcode": getattr(contact, 'postalcode', None)
+                "contact_address": getattr(contact, 'address1', None),
+                "contact_address2": getattr(contact, 'address2', None),
+                "contact_city": getattr(contact, 'city', None),
+                "contact_state": getattr(contact, 'state', None),
+                "contact_country": getattr(contact, 'country', None),
+                "contact_postalcode": getattr(contact, 'postalcode', None),
             }
-            contact_info = {k: v for k, v in raw_contact.items() if v}
+            # Flatten into org_data, skip empty values
+            for k, v in contact_fields.items():
+                if v:
+                    org_data[k] = v
 
         return {
             "_success": True,
-            "organization": {
-                "component_id": getattr(result, 'component_id', None) or organization_id,
-                "name": getattr(result, 'component_name', None),
-                "folder_id": getattr(result, 'folder_id', None),
-                "folder_name": getattr(result, 'folder_name', None),
-                "deleted": getattr(result, 'deleted', False),
-                "contact_info": contact_info if contact_info else None
-            }
+            "organization": org_data
         }
 
     except Exception as e:

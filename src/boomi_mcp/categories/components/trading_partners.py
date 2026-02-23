@@ -2817,9 +2817,12 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
         Usage analysis including processes, connections, and dependencies
     """
     try:
-        # Get the trading partner details first using Component API (avoids ContactInfo parsing issues)
-        partner = boomi_client.component.get_component(component_id=component_id)
-        partner_name = getattr(partner, 'name', 'Unknown')
+        # Get the trading partner details using TradingPartnerComponent API
+        # (Component API's get_component returns 406 due to JSON-only Accept header)
+        partner = boomi_client.trading_partner_component.get_trading_partner_component(
+            id_=component_id
+        )
+        partner_name = getattr(partner, 'name', None) or getattr(partner, 'component_name', 'Unknown')
 
         # Query for component references using the QUERY endpoint (returns 200 with empty results, not 400)
         from boomi.models import (
@@ -2858,11 +2861,26 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
                     parent_version = getattr(ref, 'parent_version', None)
 
                     if parent_id:
-                        # Try to get component metadata
+                        # Try to get component metadata via Serializer with Accept: application/xml
                         try:
-                            parent_comp = boomi_client.component.get_component(component_id=parent_id)
-                            comp_type = getattr(parent_comp, 'type', 'unknown')
-                            comp_name = getattr(parent_comp, 'name', 'Unknown')
+                            import xml.etree.ElementTree as _ET
+                            from boomi.net.transport.serializer import Serializer as _Ser
+                            from boomi.net.environment.environment import Environment as _Env
+                            _svc = boomi_client.component
+                            _req = (
+                                _Ser(
+                                    f"{_svc.base_url or _Env.DEFAULT.url}/Component/{parent_id}",
+                                    [_svc.get_access_token(), _svc.get_basic_auth()],
+                                )
+                                .add_header("Accept", "application/xml")
+                                .serialize()
+                                .set_method("GET")
+                            )
+                            _resp, _st, _ = _svc.send_request(_req)
+                            _raw = _resp if isinstance(_resp, str) else _resp.decode('utf-8')
+                            _root = _ET.fromstring(_raw)
+                            comp_type = _root.attrib.get('type', 'unknown')
+                            comp_name = _root.attrib.get('name', 'Unknown')
 
                             referenced_by.append({
                                 "component_id": parent_id,
@@ -3013,7 +3031,7 @@ def manage_trading_partner_action(
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage"
+                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, org_list, org_get, org_create, org_update, org_delete"
             }
 
     except Exception as e:

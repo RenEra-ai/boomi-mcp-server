@@ -14,7 +14,11 @@ Features:
 """
 
 from typing import Dict, Any, List, Optional
+import xml.etree.ElementTree as ET
+
 from boomi import Boomi
+from boomi.net.transport.serializer import Serializer
+from boomi.net.environment.environment import Environment
 
 # Import our modules
 from ...xml_builders.builders.orchestrator import ComponentOrchestrator
@@ -29,6 +33,59 @@ from boomi.models import (
     ComponentMetadataSimpleExpressionOperator,
     ComponentMetadataSimpleExpressionProperty
 )
+
+
+# ============================================================================
+# SDK workaround helpers (Component API lacks delete; GET returns XML only)
+# ============================================================================
+
+def _component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
+    """GET component as parsed XML dict — bypasses SDK 406 bug on get_component().
+
+    The SDK's HttpHandler auto-sets Accept: application/json, but Boomi's
+    Component GET endpoint only supports application/xml (returns 406 otherwise).
+    We use the Serializer directly with an explicit Accept header.
+    """
+    svc = boomi_client.component
+    serialized_request = (
+        Serializer(
+            f"{svc.base_url or Environment.DEFAULT.url}/Component/{component_id}",
+            [svc.get_access_token(), svc.get_basic_auth()],
+        )
+        .add_header("Accept", "application/xml")
+        .serialize()
+        .set_method("GET")
+    )
+    response, status, content = svc.send_request(serialized_request)
+    if status >= 400:
+        raise Exception(f"GET failed: HTTP {status} — {response}")
+
+    raw_xml = response if isinstance(response, str) else response.decode('utf-8')
+    root = ET.fromstring(raw_xml)
+
+    return {
+        'component_id': root.attrib.get('componentId', component_id),
+        'id': root.attrib.get('componentId', ''),
+        'name': root.attrib.get('name', ''),
+        'folder_name': root.attrib.get('folderName', ''),
+        'folder_id': root.attrib.get('folderId', ''),
+        'type': root.attrib.get('type', ''),
+        'version': root.attrib.get('version', ''),
+        'xml': raw_xml,
+    }
+
+
+def _component_delete(boomi_client: Boomi, component_id: str) -> None:
+    """Delete component — NOT supported by Boomi's Component REST API.
+
+    The Component API (used for processes) does not support HTTP DELETE,
+    nor does updating with deleted='true' work (the flag is silently ignored).
+    Components can only be deleted through the Boomi Platform UI.
+    """
+    raise NotImplementedError(
+        "Boomi's Component REST API does not support deletion. "
+        "Process components can only be deleted through the Boomi Platform UI (Build page)."
+    )
 
 
 def list_processes(
@@ -129,18 +186,8 @@ def get_process(
         print(result["process"]["name"])
     """
     try:
-        # Get component
-        result = boomi_client.component.get_component(component_id=process_id)
-
-        # Extract details
-        process_data = {
-            'component_id': getattr(result, 'component_id', process_id),
-            'id': getattr(result, 'id_', ''),
-            'name': getattr(result, 'name', ''),
-            'folder_name': getattr(result, 'folder_name', ''),
-            'type': getattr(result, 'type', ''),
-            'xml': getattr(result, 'object', '')  # Full component XML
-        }
+        # Use raw XML helper — SDK's get_component() returns 406 (JSON-only Accept header)
+        process_data = _component_get_xml(boomi_client, process_id)
 
         return {
             "_success": True,
@@ -232,12 +279,15 @@ def create_process(
                 'type': info['type']
             }
 
-        return {
+        result = {
             "_success": True,
             "message": f"Created {len(created_components)} component(s)",
             "components": created_components,
             "profile": profile
         }
+        if orchestrator.warnings:
+            result["warnings"] = orchestrator.warnings
+        return result
 
     except ValueError as e:
         # Validation or parsing errors
@@ -358,8 +408,8 @@ def delete_process(
         result = delete_process(sdk, "production", "abc-123-def")
     """
     try:
-        # Delete via API
-        boomi_client.component.delete_component(component_id=process_id)
+        # Use direct HTTP DELETE — ComponentService lacks delete_component method
+        _component_delete(boomi_client, process_id)
 
         return {
             "_success": True,
@@ -368,12 +418,19 @@ def delete_process(
             "profile": profile
         }
 
+    except NotImplementedError as e:
+        return {
+            "_success": False,
+            "error": str(e),
+            "exception_type": "NotSupported",
+            "hint": "Delete process components from the Boomi Platform Build page instead."
+        }
+
     except Exception as e:
         return {
             "_success": False,
             "error": f"Failed to delete process '{process_id}': {str(e)}",
-            "exception_type": type(e).__name__,
-            "hint": "Process may be in use by deployed packages or scheduled processes"
+            "exception_type": type(e).__name__
         }
 
 
