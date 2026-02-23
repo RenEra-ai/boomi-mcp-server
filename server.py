@@ -899,12 +899,16 @@ if monitor_platform_action:
                 Filter fields (at least one required): start_date, end_date, status, process_name, process_id, atom_name, atom_id, execution_id
                 Status values: COMPLETE, ERROR, ABORTED, COMPLETE_WARN, INPROCESS
 
-            execution_logs - Request process log download URL:
+            execution_logs - Download and return process logs inline:
                 config='{"execution_id": "abc-123-def", "log_level": "ALL"}'
                 log_level values: SEVERE, WARNING, INFO, CONFIG, FINE, FINER, FINEST, ALL (default: ALL)
+                Log content is automatically downloaded and returned inline (ZIP extracted).
+                Set "fetch_content": false to get only the download URL instead.
 
-            execution_artifacts - Request execution artifact download URL:
+            execution_artifacts - Download and return execution artifacts inline:
                 config='{"execution_id": "abc-123-def"}'
+                Artifact content is automatically downloaded and returned inline (ZIP extracted).
+                Set "fetch_content": false to get only the download URL instead.
 
             audit_logs - Query audit trail with filters:
                 config='{
@@ -959,7 +963,7 @@ if monitor_platform_action:
                 sdk_params["base_url"] = creds["base_url"]
             sdk = Boomi(**sdk_params)
 
-            return monitor_platform_action(sdk, profile, action, config_data=config_data)
+            return monitor_platform_action(sdk, profile, action, config_data=config_data, creds=creds)
 
         except Exception as e:
             print(f"[ERROR] Failed to {action} monitor_platform: {e}")
