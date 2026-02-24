@@ -1332,7 +1332,7 @@ def list_capabilities_action() -> Dict[str, Any]:
     """
 
     tools = {
-        # === Category 1: Components (3 tools) ===
+        # === Category 1: Components (4 tools) ===
         "query_components": {
             "category": "Components",
             "description": "Query Boomi components — all read operations",
@@ -1401,6 +1401,29 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "analyze_dependencies.py",
                 "compare_component_versions.py",
                 "component_diff.py",
+            ],
+        },
+
+        "manage_connector": {
+            "category": "Components",
+            "description": "Manage connector components (connections and operations) with catalog discovery",
+            "actions": ["list_types", "get_type", "list", "get"],
+            "read_only": True,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — list_types | get_type | list | get",
+                "component_id": "str (optional) — for get",
+                "config": "JSON str (optional) — action-specific filters",
+            },
+            "examples": [
+                'manage_connector(profile="prod", action="list_types")',
+                'manage_connector(profile="prod", action="get_type", config=\'{"connector_type": "http"}\')',
+                'manage_connector(profile="prod", action="list", config=\'{"component_type": "connection", "connector_type": "http"}\')',
+                'manage_connector(profile="prod", action="get", component_id="abc-123")',
+            ],
+            "sdk_examples_covered": [
+                "query_connectors.py",
+                "get_connector.py",
             ],
         },
 
