@@ -101,6 +101,30 @@ except ImportError as e:
     print(f"[WARNING] Failed to import organization tools: {e}")
     manage_organization_action = None
 
+# --- Component Query Tools ---
+try:
+    from boomi_mcp.categories.components.query_components import query_components_action
+    print(f"[INFO] Component query tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import component query tools: {e}")
+    query_components_action = None
+
+# --- Component Management Tools ---
+try:
+    from boomi_mcp.categories.components.manage_component import manage_component_action
+    print(f"[INFO] Component management tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import component management tools: {e}")
+    manage_component_action = None
+
+# --- Component Analysis Tools ---
+try:
+    from boomi_mcp.categories.components.analyze_component import analyze_component_action
+    print(f"[INFO] Component analysis tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import component analysis tools: {e}")
+    analyze_component_action = None
+
 # --- Monitoring Tools ---
 try:
     from boomi_mcp.categories.monitoring import monitor_platform_action
@@ -933,6 +957,292 @@ if monitor_platform_action:
     print("[INFO] Monitoring tool registered successfully (1 consolidated tool)")
 
 
+# --- Component Query MCP Tools ---
+if query_components_action:
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    def query_components(
+        profile: str,
+        action: str,
+        component_id: str = None,
+        component_ids: str = None,
+        config: str = None,
+    ):
+        """
+        Discover and retrieve Boomi components across all types.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: list, get, search, bulk_get
+            component_id: Component ID (required for get)
+            component_ids: JSON array of component IDs (required for bulk_get, max 5)
+            config: JSON string with action-specific configuration
+
+        Actions and config examples:
+
+            list - List all components, optionally filtered:
+                config='{"type": "process"}'
+                config='{"folder_name": "Integrations"}'
+                config='{"type": "map", "show_all": true}'
+
+            get - Get a single component with full XML:
+                component_id="abc-123-def"
+
+            search - Multi-field search with AND logic:
+                config='{"name": "%Test%", "type": "process"}'
+                config='{"name": "%Map%", "folder_name": "Production"}'
+                config='{"sub_type": "some_value"}'
+                config='{"created_by": "user@example.com"}'
+                config='{"modified_by": "user@example.com"}'
+                config='{"component_id": "abc-123"}'
+
+            bulk_get - Retrieve up to 5 components by ID (metadata only, no XML):
+                component_ids='["id1", "id2", "id3"]'
+
+        Component types: process, map, connector, profile, certificate, tradingpartner,
+            tpgroup, tporganization, xslt, scriptprocessing, scriptmapping, crossref,
+            documentcache, customlibrary, flowservice, webservice, webserviceexternal,
+            connectoraction, connectorsettings, profiledb, profileedi, profileflatfile,
+            profilexml, profilejson, processproperty, processroute, queue
+
+        Returns:
+            Action result with success status and component data
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        # Parse component_ids JSON
+        ids_list = None
+        if component_ids:
+            try:
+                ids_list = json.loads(component_ids)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid component_ids (must be a JSON array): {e}"}
+            if not isinstance(ids_list, list):
+                return {"_success": False, "error": "component_ids must be a JSON array"}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] query_components called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if action == "list":
+                if config_data:
+                    params["filters"] = config_data
+            elif action == "get":
+                params["component_id"] = component_id
+            elif action == "search":
+                params["filters"] = config_data
+            elif action == "bulk_get":
+                params["component_ids"] = ids_list
+
+            return query_components_action(sdk, profile, action, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} query_components: {e}")
+            return {"_success": False, "error": str(e)}
+
+    print("[INFO] Component query tool registered successfully (1 consolidated tool)")
+
+
+# --- Component Management MCP Tools ---
+if manage_component_action:
+    @mcp.tool()
+    def manage_component(
+        profile: str,
+        action: str,
+        component_id: str = None,
+        config: str = None,
+        config_yaml: str = None,
+    ):
+        """
+        Create, update, clone, and delete Boomi components.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: create, update, clone, delete
+            component_id: Component ID (required for update, clone, delete)
+            config: JSON string with action-specific configuration
+            config_yaml: YAML string (for creating process components via manage_process)
+
+        Actions and config examples:
+
+            create - Create a component from XML template:
+                config='{"xml": "<full-component-xml>...</full-component-xml>"}'
+                For processes, use manage_process with config_yaml instead.
+                Tip: Use query_components get on a similar component to obtain an XML template.
+
+            update - Update an existing component:
+                component_id="abc-123-def"
+                config='{"name": "Renamed Component"}'
+                config='{"description": "Updated description"}'
+                config='{"xml": "<full-component-xml>...</full-component-xml>"}'
+
+            clone - Clone a component with a new name:
+                component_id="abc-123-def"
+                config='{"name": "Cloned Component"}'
+                config='{"name": "Cloned", "folder_name": "Test Folder"}'
+
+            delete - Delete a component:
+                component_id="abc-123-def"
+
+        Returns:
+            Action result with success status and component data
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] manage_component called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if action == "create":
+                params["config"] = config_data
+                if config_yaml:
+                    params["config_yaml"] = config_yaml
+            elif action == "update":
+                params["component_id"] = component_id
+                params["config"] = config_data
+            elif action == "clone":
+                params["component_id"] = component_id
+                params["config"] = config_data
+            elif action == "delete":
+                params["component_id"] = component_id
+
+            return manage_component_action(sdk, profile, action, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} manage_component: {e}")
+            return {"_success": False, "error": str(e)}
+
+    print("[INFO] Component management tool registered successfully (1 consolidated tool)")
+
+
+# --- Component Analysis MCP Tools ---
+if analyze_component_action:
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    def analyze_component(
+        profile: str,
+        action: str,
+        component_id: str = None,
+        config: str = None,
+    ):
+        """
+        Analyze component dependencies and compare versions.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: where_used, dependencies, compare_versions
+            component_id: Component ID (required for all actions)
+            config: JSON string with action-specific configuration
+
+        Actions and config examples:
+
+            where_used - Find all components that reference this component (inbound):
+                component_id="abc-123-def"
+                config='{"type": "process"}'  (optional: filter by reference type)
+
+            dependencies - Find all components this component references (outbound):
+                component_id="abc-123-def"
+
+            compare_versions - Compare two versions of a component:
+                component_id="abc-123-def"
+                config='{"source_version": 1, "target_version": 2}'
+
+        Notes:
+            - where_used and dependencies show immediate references only (one level)
+            - compare_versions requires both version numbers to exist for the component
+            - Use query_components action="get" to find a component's current version
+
+        Returns:
+            Action result with success status and analysis data
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] analyze_component called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if action == "where_used":
+                params["component_id"] = component_id
+                if config_data:
+                    params["filters"] = config_data
+            elif action == "dependencies":
+                params["component_id"] = component_id
+                if config_data:
+                    params["filters"] = config_data
+            elif action == "compare_versions":
+                params["component_id"] = component_id
+                params["config"] = config_data
+
+            return analyze_component_action(sdk, profile, action, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} analyze_component: {e}")
+            return {"_success": False, "error": str(e)}
+
+    print("[INFO] Component analysis tool registered successfully (1 consolidated tool)")
+
+
 # --- Credential Management Tools (local dev only) ---
 if LOCAL_MODE:
     @mcp.tool()
@@ -1364,6 +1674,18 @@ if __name__ == "__main__":
         if manage_process_action:
             print("\n  Process Management:")
             print("  manage_process - Unified tool for all process operations")
+        if query_components_action:
+            print("\n  Component Discovery:")
+            print("  query_components - List, get, search, bulk_get components")
+            print("    Actions: list, get, search, bulk_get")
+        if manage_component_action:
+            print("\n  Component Management:")
+            print("  manage_component - Create, update, clone, delete components")
+            print("    Actions: create, update, clone, delete")
+        if analyze_component_action:
+            print("\n  Component Analysis:")
+            print("  analyze_component - Dependencies and version comparison")
+            print("    Actions: where_used, dependencies, compare_versions")
         if monitor_platform_action:
             print("\n  Platform Monitoring:")
             print("  monitor_platform - Logs, artifacts, audit trail, and events")
