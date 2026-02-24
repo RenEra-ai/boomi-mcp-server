@@ -1291,7 +1291,7 @@ if get_schema_template_action:
             resource_type: One of: trading_partner, process, component, environment, package, execution_request, organization, monitoring
             operation: Optional action context: create, update, list, execute, search, clone, compare_versions, execution_records, execution_logs, execution_artifacts, audit_logs, events
             standard: For trading_partner create: x12, edifact, hl7, rosettanet, tradacoms, odette, custom
-            component_type: For component: process, connection, map, etc.
+            component_type: For component: process, connector-settings, transform.map, etc.
             protocol: For trading_partner protocols: http, as2, ftp, sftp, disk, mllp, oftp
 
         Examples:
