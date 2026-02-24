@@ -1341,15 +1341,14 @@ def list_capabilities_action() -> Dict[str, Any]:
             "parameters": {
                 "profile": "str (required) — Boomi profile name",
                 "action": "str (required) — list | get | search | bulk_get",
-                "component_type": "str (optional) — process, connection, connector, map, etc.",
-                "component_ids": "str (optional) — comma-separated IDs for bulk_get",
-                "filters": "JSON str (optional) — search filters",
-                "limit": "int (optional, default=100) — max results",
+                "component_id": "str (optional) — component ID (required for get)",
+                "component_ids": "str (optional) — JSON array of IDs for bulk_get (max 5)",
+                "config": "JSON str (optional) — action-specific config",
             },
             "examples": [
-                'query_components(profile="prod", action="list", component_type="process")',
-                'query_components(profile="prod", action="get", filters=\'{"component_id": "abc-123"}\')',
-                'query_components(profile="prod", action="search", filters=\'{"name": "*Order*", "type": "process"}\')',
+                'query_components(profile="prod", action="list", config=\'{"type": "process"}\')',
+                'query_components(profile="prod", action="get", component_id="abc-123")',
+                'query_components(profile="prod", action="search", config=\'{"name": "%Order%", "type": "process"}\')',
             ],
             "sdk_examples_covered": [
                 "list_all_components.py",
@@ -1366,14 +1365,13 @@ def list_capabilities_action() -> Dict[str, Any]:
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required) — create | update | clone | delete",
-                "component_type": "str (optional) — required for create",
                 "component_id": "str (optional) — required for update/clone/delete",
-                "config": "JSON str (optional) — action-specific config",
+                "config": "JSON str (optional) — action-specific config (XML for create, fields for update)",
                 "config_yaml": "YAML str (optional) — for process creation with shapes",
             },
             "examples": [
                 'manage_component(profile="prod", action="clone", component_id="abc-123", config=\'{"name": "My Clone"}\')',
-                'manage_component(profile="prod", action="create", component_type="process", config_yaml="name: Hello\\nshapes:\\n  - type: start...")',
+                'manage_component(profile="prod", action="create", config=\'{"xml": "<Component>...</Component>"}\')',
             ],
             "sdk_examples_covered": [
                 "create_process_component.py",
@@ -1642,6 +1640,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "payload": "JSON str (optional) — request body for POST/PUT",
                 "content_type": "str (optional, default=json) — json | xml",
                 "accept": "str (optional, default=json) — json | xml",
+                "confirm_delete": "bool (optional, default=false) — must be true to allow DELETE operations",
             },
             "examples": [
                 'invoke_boomi_api(profile="prod", endpoint="Role/query", method="POST", payload=\'{"QueryFilter":...}\')',
@@ -1706,8 +1705,8 @@ def list_capabilities_action() -> Dict[str, Any]:
             "description": "Find and understand components in your account",
             "steps": [
                 "1. list_boomi_profiles() → find your profile",
-                "2. query_components(action='list', component_type='process') → list processes",
-                "3. query_components(action='get', filters='{\"component_id\": \"...\"}') → get details",
+                "2. query_components(action='list', config='{\"type\": \"process\"}') → list processes",
+                "3. query_components(action='get', component_id='...') → get details",
                 "4. analyze_component(action='where_used', component_id='...') → find dependencies",
             ],
         },
@@ -1716,9 +1715,9 @@ def list_capabilities_action() -> Dict[str, Any]:
             "steps": [
                 "1. get_schema_template(resource_type='process', operation='create') → get YAML template",
                 "2. manage_process(action='create', config_yaml='...') → create process",
-                "3. manage_packages(action='create', component_ids=['...']) → package it",
-                "4. deploy_package(action='deploy', package_id='...', environment_id='...') → deploy",
-                "5. execute_process(process_id='...', environment_id='...') → run it",
+                "3. invoke_boomi_api(endpoint='PackagedComponent', method='POST', ...) → package it (manage_packages not yet implemented)",
+                "4. invoke_boomi_api(endpoint='Deployment', method='POST', ...) → deploy (deploy_package not yet implemented)",
+                "5. invoke_boomi_api(endpoint='ExecutionRequest', method='POST', ...) → run it (execute_process not yet implemented)",
                 "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
             ],
         },
