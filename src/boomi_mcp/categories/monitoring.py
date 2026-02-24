@@ -533,6 +533,9 @@ def handle_execution_records(boomi_client, config_data: Dict[str, Any]) -> Dict[
     # Status filter (EQUALS on STATUS)
     status = config_data.get("status")
     if status:
+        valid_statuses = {"COMPLETE", "ERROR", "ABORTED", "COMPLETE_WARN", "INPROCESS"}
+        if status.upper() not in valid_statuses:
+            return {"_success": False, "error": f"Invalid status '{status}'. Valid: {', '.join(sorted(valid_statuses))}"}
         expressions.append(ExecutionRecordSimpleExpression(
             operator=ExecutionRecordSimpleExpressionOperator.EQUALS,
             property=ExecutionRecordSimpleExpressionProperty.STATUS,
