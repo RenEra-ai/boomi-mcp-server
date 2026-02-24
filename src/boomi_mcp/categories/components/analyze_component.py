@@ -180,6 +180,14 @@ def find_dependencies(
                 argument=[str(version)]
             ))
 
+        # Optional type filter (same pattern as where_used)
+        if filters and filters.get('type'):
+            expressions.append(ComponentReferenceSimpleExpression(
+                operator=ComponentReferenceSimpleExpressionOperator.EQUALS,
+                property=ComponentReferenceSimpleExpressionProperty.TYPE,
+                argument=[filters['type']]
+            ))
+
         if len(expressions) == 1:
             root_expr = expressions[0]
         else:

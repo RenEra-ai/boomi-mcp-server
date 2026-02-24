@@ -995,7 +995,7 @@ if query_components_action:
                 config='{"modified_by": "user@example.com"}'
                 config='{"component_id": "abc-123"}'
 
-            bulk_get - Retrieve up to 5 components in one call:
+            bulk_get - Retrieve up to 5 components by ID (metadata only, no XML):
                 component_ids='["id1", "id2", "id3"]'
 
         Component types: process, map, connector, profile, certificate, tradingpartner,
@@ -1085,10 +1085,10 @@ if manage_component_action:
 
         Actions and config examples:
 
-            create - Create a new component:
-                config='{"name": "My Map", "type": "map"}'
-                config='{"name": "My Process", "type": "process", "folder_name": "Integrations"}'
-                config='{"xml": "<Component name=\\"Test\\" type=\\"process\\">...</Component>"}'
+            create - Create a component from XML template:
+                config='{"xml": "<full-component-xml>...</full-component-xml>"}'
+                For processes, use manage_process with config_yaml instead.
+                Tip: Use query_components get on a similar component to obtain an XML template.
 
             update - Update an existing component:
                 component_id="abc-123-def"
