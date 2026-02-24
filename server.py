@@ -133,6 +133,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import monitoring tools: {e}")
     monitor_platform_action = None
 
+# --- Schema Template Tools ---
+try:
+    from boomi_mcp.categories.meta_tools import get_schema_template_action
+    print(f"[INFO] Schema template tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import schema template tools: {e}")
+    get_schema_template_action = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -1241,6 +1249,48 @@ if analyze_component_action:
             return {"_success": False, "error": str(e)}
 
     print("[INFO] Component analysis tool registered successfully (1 consolidated tool)")
+
+
+# --- Schema Template MCP Tool ---
+if get_schema_template_action:
+    @mcp.tool(annotations={"readOnlyHint": True})
+    def get_schema_template(
+        resource_type: str,
+        operation: str = None,
+        standard: str = None,
+        component_type: str = None,
+        protocol: str = None,
+    ):
+        """Get JSON/YAML template and enum values for constructing tool requests.
+
+        Returns example payloads, required/optional fields, and valid enum values.
+        No API calls — pure reference data. Use before create/update operations.
+
+        Args:
+            resource_type: One of: trading_partner, process, component, environment, package, execution_request, organization, monitoring
+            operation: Optional action context: create, update, list, execute, search, clone, compare_versions, execution_records, execution_logs, execution_artifacts, audit_logs, events
+            standard: For trading_partner create: x12, edifact, hl7, rosettanet, tradacoms, odette, custom
+            component_type: For component: process, connection, map, etc.
+            protocol: For trading_partner protocols: http, as2, ftp, sftp, disk, mllp, oftp
+
+        Examples:
+            get_schema_template("trading_partner") → overview of all actions/standards
+            get_schema_template("trading_partner", "create", standard="x12") → X12 create template
+            get_schema_template("trading_partner", protocol="as2") → AS2 protocol fields
+            get_schema_template("process", "create") → YAML process template
+            get_schema_template("component") → overview of component tools
+            get_schema_template("monitoring", "execution_records") → execution query template
+            get_schema_template("organization", "create") → organization create template
+        """
+        return get_schema_template_action(
+            resource_type=resource_type,
+            operation=operation,
+            standard=standard,
+            component_type=component_type,
+            protocol=protocol,
+        )
+
+    print("[INFO] Schema template tool registered successfully")
 
 
 # --- Credential Management Tools (local dev only) ---
