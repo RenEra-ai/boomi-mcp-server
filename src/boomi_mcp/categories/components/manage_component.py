@@ -61,7 +61,8 @@ def create_component(
                 "a valid XML template, then modify and pass as config.xml. "
                 "For processes, use manage_process with config_yaml instead. "
                 "For connectors (connector-settings, connector-action), use "
-                "manage_connector which generates correct XML from simple config."
+                "manage_connector action='get' on a similar connector to obtain XML, "
+                "then modify and pass as config.xml."
             ),
         }
 
