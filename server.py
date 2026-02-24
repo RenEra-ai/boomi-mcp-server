@@ -1006,7 +1006,7 @@ if query_components_action:
             list - List all components, optionally filtered:
                 config='{"type": "process"}'
                 config='{"folder_name": "Integrations"}'
-                config='{"type": "map", "show_all": true}'
+                config='{"type": "transform.map", "show_all": true}'
 
             get - Get a single component with full XML:
                 component_id="abc-123-def"
@@ -1022,11 +1022,15 @@ if query_components_action:
             bulk_get - Retrieve up to 5 components by ID (metadata only, no XML):
                 component_ids='["id1", "id2", "id3"]'
 
-        Component types: process, map, connector, profile, certificate, tradingpartner,
-            tpgroup, tporganization, xslt, scriptprocessing, scriptmapping, crossref,
-            documentcache, customlibrary, flowservice, webservice, webserviceexternal,
-            connectoraction, connectorsettings, profiledb, profileedi, profileflatfile,
-            profilexml, profilejson, processproperty, processroute, queue
+        Component types:
+            Processes: process, processproperty, processroute
+            Connectors: connector-settings, connector-action
+            Profiles: profile.db, profile.edi, profile.flatfile, profile.json, profile.xml
+            Trading Partners: tradingpartner, tpgroup, tporganization, tpcommoptions
+            Transforms: transform.map, transform.function, xslt, script.processing, script.mapping
+            Services: flowservice, webservice, webservice.external
+            Other: certificate, certificate.pgp, crossref, customlibrary, documentcache,
+                edistandard, queue
 
         Returns:
             Action result with success status and component data

@@ -607,14 +607,14 @@ _COMPONENT_OVERVIEW = {
         "analyze_component": ["where_used", "dependencies", "compare_versions"],
     },
     "component_types": [
-        "process", "map", "connector", "profile", "certificate",
-        "tradingpartner", "tpgroup", "tporganization",
-        "xslt", "scriptprocessing", "scriptmapping", "crossref",
-        "documentcache", "customlibrary", "flowservice",
-        "webservice", "webserviceexternal",
-        "connectoraction", "connectorsettings",
-        "profiledb", "profileedi", "profileflatfile", "profilexml", "profilejson",
-        "processproperty", "processroute", "queue",
+        "process", "processproperty", "processroute",
+        "connector-settings", "connector-action",
+        "profile.db", "profile.edi", "profile.flatfile", "profile.json", "profile.xml",
+        "tradingpartner", "tpgroup", "tporganization", "tpcommoptions",
+        "transform.map", "transform.function", "xslt", "script.processing", "script.mapping",
+        "flowservice", "webservice", "webservice.external",
+        "certificate", "certificate.pgp", "crossref", "customlibrary", "documentcache",
+        "edistandard", "queue",
     ],
 }
 
