@@ -645,7 +645,7 @@ _COMPONENT_SEARCH = {
     "tool": "query_components (action='search')",
     "template": {
         "name": "%partial_name% (LIKE pattern, use % wildcard)",
-        "type": "process | connection | map | ...",
+        "type": "process | connector | map | ...",
         "sub_type": "(optional sub-type filter)",
         "component_id": "(optional specific ID)",
         "created_by": "user@example.com",
@@ -686,7 +686,8 @@ _COMPONENT_COMPARE = {
 _ORGANIZATION_OVERVIEW = {
     "resource_type": "organization",
     "tool": "manage_trading_partner (org_* actions)",
-    "available_actions": ["org_list", "org_get", "org_create", "org_update", "org_delete"],
+    "available_actions": ["list", "get", "create", "update", "delete"],
+    "note": "These map to manage_trading_partner actions: org_list, org_get, org_create, org_update, org_delete",
     "hint": "Use operation='create' for the full create template",
 }
 
@@ -792,7 +793,7 @@ _MONITORING_EVENTS = {
     "template": {
         "start_date": "2025-01-01T00:00:00Z",
         "end_date": "2025-12-31T23:59:59Z",
-        "event_level": "(optional) ERROR | WARNING | INFO",
+        "event_level": "(optional) ERROR | WARN | INFO",
         "event_type": "(optional) process.error",
         "process_name": "(optional filter)",
         "atom_name": "(optional filter)",
@@ -1013,10 +1014,25 @@ def _get_process_template(operation=None, **_):
 
 def _get_component_template(operation=None, component_type=None, **_):
     if not operation:
-        return {"_success": True, **_COMPONENT_OVERVIEW}
+        result = {"_success": True, **_COMPONENT_OVERVIEW}
+        if component_type:
+            valid = _COMPONENT_OVERVIEW["component_types"]
+            if component_type in valid:
+                result["filtered_type"] = component_type
+                result["hint"] = f"Use operation='create' or 'search' for {component_type}-specific templates"
+            else:
+                return {
+                    "_success": False,
+                    "error": f"Unknown component_type: {component_type}",
+                    "valid_types": valid,
+                }
+        return result
 
     if operation == "create":
-        return {"_success": True, **_COMPONENT_CREATE}
+        result = {"_success": True, **_COMPONENT_CREATE}
+        if component_type == "process":
+            result["recommendation"] = "For processes, use manage_process with config_yaml instead of raw XML."
+        return result
 
     if operation == "search":
         return {"_success": True, **_COMPONENT_SEARCH}
@@ -1084,6 +1100,10 @@ def _get_execution_request_template(operation=None, **_):
 
 
 def _get_organization_template(operation=None, **_):
+    # Strip org_ prefix if caller passes the manage_trading_partner action name
+    if operation and operation.startswith("org_"):
+        operation = operation[4:]
+
     if not operation:
         return {"_success": True, **_ORGANIZATION_OVERVIEW}
 
@@ -1099,21 +1119,22 @@ def _get_organization_template(operation=None, **_):
             "template": {"folder_name": "Home/Organizations"},
         }
 
-    if operation == "update":
-        return {
+    if operation in ("get", "update", "delete"):
+        result = {
             "_success": True,
             "resource_type": "organization",
-            "operation": "update",
-            "tool": "manage_trading_partner (action='org_update')",
-            "note": "Pass only the fields you want to change.",
-            "example": '{"contact_email": "new@acme.com", "contact_phone": "555-5678"}',
+            "operation": operation,
+            "tool": f"manage_trading_partner (action='org_{operation}')",
         }
+        if operation == "update":
+            result["note"] = "Pass only the fields you want to change."
+            result["example"] = '{"contact_email": "new@acme.com", "contact_phone": "555-5678"}'
+        return result
 
     return {
-        "_success": True,
-        "resource_type": "organization",
-        "operation": operation,
-        "hint": f"See manage_trading_partner tool docstring for 'org_{operation}' action details",
+        "_success": False,
+        "error": f"Unknown organization operation: {operation}",
+        "valid_operations": ["list", "get", "create", "update", "delete"],
     }
 
 
