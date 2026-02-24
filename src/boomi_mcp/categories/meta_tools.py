@@ -1389,11 +1389,11 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "profile": "str (required)",
                 "action": "str (required) — where_used | dependencies | compare_versions",
                 "component_id": "str (required)",
-                "version": "str (optional) — for compare_versions",
+                "config": "JSON str (optional) — action-specific config",
             },
             "examples": [
                 'analyze_component(profile="prod", action="where_used", component_id="abc-123")',
-                'analyze_component(profile="prod", action="compare_versions", component_id="abc-123")',
+                'analyze_component(profile="prod", action="compare_versions", component_id="abc-123", config=\'{"source_version": 1, "target_version": 2}\')',
             ],
             "sdk_examples_covered": [
                 "find_where_used.py",
