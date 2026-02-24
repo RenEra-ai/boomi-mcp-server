@@ -9,7 +9,6 @@ Provides component discovery and retrieval capabilities:
 """
 
 from typing import Dict, Any, List, Optional
-import xml.etree.ElementTree as ET
 
 from boomi import Boomi
 from boomi.models import (
@@ -22,61 +21,7 @@ from boomi.models import (
     ComponentMetadataGroupingExpressionOperator,
 )
 
-from ._shared import component_get_xml
-
-
-# ============================================================================
-# Helper: paginate component metadata queries
-# ============================================================================
-
-def _paginate_metadata(boomi_client: Boomi, query_config, show_all: bool = False) -> List[Dict[str, Any]]:
-    """Execute a metadata query with pagination. Returns list of component dicts."""
-    result = boomi_client.component_metadata.query_component_metadata(
-        request_body=query_config
-    )
-
-    components = []
-    if hasattr(result, 'result') and result.result:
-        for comp in result.result:
-            components.append(_metadata_to_dict(comp))
-
-    # Paginate
-    while hasattr(result, 'query_token') and result.query_token:
-        result = boomi_client.component_metadata.query_more_component_metadata(
-            request_body=result.query_token
-        )
-        if hasattr(result, 'result') and result.result:
-            for comp in result.result:
-                components.append(_metadata_to_dict(comp))
-
-    # Client-side filter: current version, not deleted (unless show_all)
-    if not show_all:
-        components = [
-            c for c in components
-            if str(c.get('current_version', 'false')).lower() == 'true'
-            and str(c.get('deleted', 'true')).lower() == 'false'
-        ]
-
-    return components
-
-
-def _metadata_to_dict(comp) -> Dict[str, Any]:
-    """Convert a ComponentMetadata SDK object to a plain dict."""
-    return {
-        'component_id': getattr(comp, 'component_id', ''),
-        'id': getattr(comp, 'id_', ''),
-        'name': getattr(comp, 'name', ''),
-        'folder_name': getattr(comp, 'folder_name', ''),
-        'type': getattr(comp, 'type_', ''),
-        'version': getattr(comp, 'version', ''),
-        'current_version': str(getattr(comp, 'current_version', 'false')),
-        'deleted': str(getattr(comp, 'deleted', 'false')),
-        'created_date': getattr(comp, 'created_date', ''),
-        'modified_date': getattr(comp, 'modified_date', ''),
-        'created_by': getattr(comp, 'created_by', ''),
-        'modified_by': getattr(comp, 'modified_by', ''),
-        'folder_full_path': getattr(comp, 'folder_full_path', ''),
-    }
+from ._shared import component_get_xml, paginate_metadata
 
 
 # ============================================================================
@@ -112,7 +57,7 @@ def list_components(
         query_filter = ComponentMetadataQueryConfigQueryFilter(expression=expression)
         query_config = ComponentMetadataQueryConfig(query_filter=query_filter)
 
-        components = _paginate_metadata(boomi_client, query_config, show_all=show_all)
+        components = paginate_metadata(boomi_client, query_config, show_all=show_all)
 
         # Client-side folder filter
         if filters and filters.get('folder_name'):
@@ -214,7 +159,7 @@ def search_components(
         query_config = ComponentMetadataQueryConfig(query_filter=query_filter)
 
         show_all = filters.get('show_all', False)
-        components = _paginate_metadata(boomi_client, query_config, show_all=show_all)
+        components = paginate_metadata(boomi_client, query_config, show_all=show_all)
 
         # Client-side folder filter
         if filters.get('folder_name'):

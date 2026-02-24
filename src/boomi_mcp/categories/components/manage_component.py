@@ -12,9 +12,8 @@ from typing import Dict, Any, Optional
 import xml.etree.ElementTree as ET
 
 from boomi import Boomi
-from boomi.net.transport.api_error import ApiError
 
-from ._shared import component_get_xml, set_description_element
+from ._shared import component_get_xml, set_description_element, soft_delete_component
 
 
 # ============================================================================
@@ -60,7 +59,9 @@ def create_component(
                 "Boomi requires type-specific XML with proper namespaces. "
                 "Use query_components get action on an existing component to obtain "
                 "a valid XML template, then modify and pass as config.xml. "
-                "For processes, use manage_process with config_yaml instead."
+                "For processes, use manage_process with config_yaml instead. "
+                "For connectors (connector-settings, connector-action), use "
+                "manage_connector which generates correct XML from simple config."
             ),
         }
 
@@ -211,62 +212,21 @@ def delete_component(
     Fallback: metadata API delete if soft-delete fails.
     """
     try:
-        # Primary: soft-delete via XML (safe, reversible)
-        current = component_get_xml(boomi_client, component_id)
-        raw_xml = current['xml']
-        root = ET.fromstring(raw_xml)
-        root.set('deleted', 'true')
-        modified_xml = ET.tostring(root, encoding='unicode')
-        boomi_client.component.update_component_raw(component_id, modified_xml)
-
-        # Verify deletion took effect (some component types silently ignore the flag)
-        result = {
+        result = soft_delete_component(boomi_client, component_id)
+        warning = "Dependent components are NOT automatically deleted. Check references first."
+        if result.get("verify_warning"):
+            warning += f" {result['verify_warning']}. Verify in Boomi Platform UI."
+        resp = {
             "_success": True,
-            "message": f"Deleted component '{current['name']}'",
+            "message": f"Deleted component '{result['component_name']}'",
             "component_id": component_id,
             "profile": profile,
-            "method": "soft_delete",
-            "warning": "Dependent components are NOT automatically deleted. Check references first.",
+            "method": result["method"],
+            "warning": warning,
         }
-        try:
-            verify = component_get_xml(boomi_client, component_id)
-            verify_root = ET.fromstring(verify['xml'])
-            if verify_root.attrib.get('deleted', 'false').lower() != 'true':
-                result["warning"] += " Component updated but deleted flag may not have been applied. Verify in Boomi Platform UI."
-        except Exception:
-            pass  # Verification failed, but the update itself succeeded
-
-        return result
-
-    except ApiError as e:
-        error_msg = str(e)
-        status = getattr(e, 'status', None)
-        # Only fall back to irreversible metadata delete for real API rejections,
-        # not transient failures (408 timeout, connection errors)
-        if status and 400 <= status < 600 and status != 408:
-            try:
-                boomi_client.component_metadata.delete_component_metadata(id_=component_id)
-                return {
-                    "_success": True,
-                    "message": f"Deleted component '{component_id}'",
-                    "component_id": component_id,
-                    "profile": profile,
-                    "method": "metadata_delete",
-                    "warning": "Used metadata API delete (not soft-delete). This may be irreversible.",
-                }
-            except Exception as e2:
-                return {
-                    "_success": False,
-                    "error": f"Soft-delete failed: {error_msg}. Metadata delete also failed: {str(e2)}",
-                    "exception_type": type(e).__name__,
-                    "hint": "Some component types can only be deleted from the Boomi Platform UI.",
-                }
-        return {
-            "_success": False,
-            "error": f"Soft-delete failed: {error_msg}",
-            "exception_type": type(e).__name__,
-            "hint": "Retry or use Boomi Platform UI to delete this component.",
-        }
+        if result["method"] == "metadata_delete":
+            resp["warning"] = "Used metadata API delete (not soft-delete). This may be irreversible."
+        return resp
 
     except Exception as e:
         return {

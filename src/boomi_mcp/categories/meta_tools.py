@@ -607,14 +607,14 @@ _COMPONENT_OVERVIEW = {
         "analyze_component": ["where_used", "dependencies", "compare_versions"],
     },
     "component_types": [
-        "process", "map", "connector", "profile", "certificate",
-        "tradingpartner", "tpgroup", "tporganization",
-        "xslt", "scriptprocessing", "scriptmapping", "crossref",
-        "documentcache", "customlibrary", "flowservice",
-        "webservice", "webserviceexternal",
-        "connectoraction", "connectorsettings",
-        "profiledb", "profileedi", "profileflatfile", "profilexml", "profilejson",
-        "processproperty", "processroute", "queue",
+        "process", "processproperty", "processroute",
+        "connector-settings", "connector-action",
+        "profile.db", "profile.edi", "profile.flatfile", "profile.json", "profile.xml",
+        "tradingpartner", "tpgroup", "tporganization", "tpcommoptions",
+        "transform.map", "transform.function", "xslt", "script.processing", "script.mapping",
+        "flowservice", "webservice", "webservice.external",
+        "certificate", "certificate.pgp", "crossref", "customlibrary", "documentcache",
+        "edistandard", "queue",
     ],
 }
 
@@ -649,7 +649,7 @@ _COMPONENT_SEARCH = {
     "tool": "query_components (action='search')",
     "template": {
         "name": "%partial_name% (LIKE pattern, use % wildcard)",
-        "type": "process | connector | map | ...",
+        "type": "process | connector-settings | connector-action | transform.map | profile.xml | ... (see component_types list)",
         "sub_type": "(optional sub-type filter)",
         "component_id": "(optional specific ID)",
         "created_by": "user@example.com",
@@ -1619,7 +1619,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "resource_type": "str (required) — trading_partner | process | component | environment | etc.",
                 "operation": "str (optional) — create | update | list | etc.",
                 "standard": "str (optional) — for trading_partner: x12, edifact, hl7, etc.",
-                "component_type": "str (optional) — for component: process, connection, map, etc.",
+                "component_type": "str (optional) — for component: process, connector-settings, transform.map, etc.",
                 "protocol": "str (optional) — for trading_partner: http, as2, ftp, sftp, etc.",
             },
             "examples": [

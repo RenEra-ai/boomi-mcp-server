@@ -9,6 +9,14 @@ from typing import Dict, Any, List
 import xml.etree.ElementTree as ET
 
 from boomi import Boomi
+from boomi.models import (
+    ComponentMetadataQueryConfig,
+    ComponentMetadataQueryConfigQueryFilter,
+    ComponentMetadataSimpleExpression,
+    ComponentMetadataSimpleExpressionOperator,
+    ComponentMetadataSimpleExpressionProperty,
+)
+from boomi.net.transport.api_error import ApiError
 from boomi.net.transport.serializer import Serializer
 from boomi.net.environment.environment import Environment
 
@@ -145,3 +153,112 @@ def parse_bulk_response(raw_xml: str) -> List[Dict[str, Any]]:
             })
 
     return components
+
+
+# ============================================================================
+# Pagination helpers for component metadata queries
+# ============================================================================
+
+def paginate_metadata(boomi_client: Boomi, query_config, show_all: bool = False) -> List[Dict[str, Any]]:
+    """Execute a metadata query with pagination. Returns list of component dicts."""
+    result = boomi_client.component_metadata.query_component_metadata(
+        request_body=query_config
+    )
+
+    components = []
+    if hasattr(result, 'result') and result.result:
+        for comp in result.result:
+            components.append(metadata_to_dict(comp))
+
+    # Paginate
+    while hasattr(result, 'query_token') and result.query_token:
+        result = boomi_client.component_metadata.query_more_component_metadata(
+            request_body=result.query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            for comp in result.result:
+                components.append(metadata_to_dict(comp))
+
+    # Client-side filter: current version, not deleted (unless show_all)
+    if not show_all:
+        components = [
+            c for c in components
+            if str(c.get('current_version', 'false')).lower() == 'true'
+            and str(c.get('deleted', 'true')).lower() == 'false'
+        ]
+
+    return components
+
+
+def metadata_to_dict(comp) -> Dict[str, Any]:
+    """Convert a ComponentMetadata SDK object to a plain dict."""
+    return {
+        'component_id': getattr(comp, 'component_id', ''),
+        'id': getattr(comp, 'id_', ''),
+        'name': getattr(comp, 'name', ''),
+        'folder_name': getattr(comp, 'folder_name', ''),
+        'type': getattr(comp, 'type_', ''),
+        'version': getattr(comp, 'version', ''),
+        'current_version': str(getattr(comp, 'current_version', 'false')),
+        'deleted': str(getattr(comp, 'deleted', 'false')),
+        'created_date': getattr(comp, 'created_date', ''),
+        'modified_date': getattr(comp, 'modified_date', ''),
+        'created_by': getattr(comp, 'created_by', ''),
+        'modified_by': getattr(comp, 'modified_by', ''),
+        'folder_full_path': getattr(comp, 'folder_full_path', ''),
+    }
+
+
+# ============================================================================
+# Soft-delete helper
+# ============================================================================
+
+def soft_delete_component(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
+    """Soft-delete a component (mark deleted=true via XML update, with metadata fallback).
+
+    Primary: soft-delete via XML (safe, reversible) per SDK examples.
+    Fallback: metadata API delete if soft-delete fails.
+    """
+    try:
+        current = component_get_xml(boomi_client, component_id)
+        raw_xml = current['xml']
+        root = ET.fromstring(raw_xml)
+        root.set('deleted', 'true')
+        modified_xml = ET.tostring(root, encoding='unicode')
+        boomi_client.component.update_component_raw(component_id, modified_xml)
+
+        result = {
+            "component_name": current['name'],
+            "component_id": component_id,
+            "method": "soft_delete",
+        }
+        # Verify deletion took effect
+        try:
+            verify = component_get_xml(boomi_client, component_id)
+            verify_root = ET.fromstring(verify['xml'])
+            if verify_root.attrib.get('deleted', 'false').lower() != 'true':
+                result["verify_warning"] = "deleted flag may not have been applied"
+        except Exception:
+            pass
+
+        return result
+
+    except ApiError as e:
+        error_msg = str(e)
+        status = getattr(e, 'status', None)
+        if status and 400 <= status < 600 and status != 408:
+            try:
+                boomi_client.component_metadata.delete_component_metadata(id_=component_id)
+                return {
+                    "component_name": component_id,
+                    "component_id": component_id,
+                    "method": "metadata_delete",
+                }
+            except Exception as e2:
+                raise Exception(
+                    f"Soft-delete failed: {error_msg}. Metadata delete also failed: {str(e2)}"
+                ) from e
+        raise
+
+    except Exception:
+        raise
