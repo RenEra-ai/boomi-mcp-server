@@ -793,7 +793,7 @@ _MONITORING_EVENTS = {
     "template": {
         "start_date": "2025-01-01T00:00:00Z",
         "end_date": "2025-12-31T23:59:59Z",
-        "event_level": "(optional) ERROR | WARN | INFO",
+        "event_level": "(optional) ERROR | WARNING | INFO",
         "event_type": "(optional) process.error",
         "process_name": "(optional filter)",
         "atom_name": "(optional filter)",

@@ -382,7 +382,7 @@ def handle_events(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
             argument=[start_date]
         ))
 
-    # Event level (EQUALS on EVENTLEVEL): ERROR, WARN, INFO
+    # Event level (EQUALS on EVENTLEVEL): ERROR, WARNING, INFO
     event_level = config_data.get("event_level")
     if event_level:
         expressions.append(EventSimpleExpression(
