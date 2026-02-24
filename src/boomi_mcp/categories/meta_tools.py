@@ -938,13 +938,21 @@ def invoke_api(
     base = svc.base_url or Environment.DEFAULT.url
     url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}"
 
-    # --- Content types ---
+    # --- Normalize + validate content types ---
+    accept = accept.lower().strip()
+    content_type = content_type.lower().strip()
     ct_map = {
         "json": "application/json",
         "xml":  "application/xml",
     }
-    accept_header = ct_map.get(accept, "application/json")
-    content_type_header = ct_map.get(content_type, "application/json")
+    accept_header = ct_map.get(accept)
+    content_type_header = ct_map.get(content_type)
+    if not accept_header or not content_type_header:
+        return {
+            "_success": False,
+            "error": f"Invalid content type: accept={accept!r}, content_type={content_type!r}",
+            "hint": "Valid values: 'json' or 'xml'",
+        }
 
     # --- Parse payload ---
     # The SDK's send_request() JSON-encodes the body, so for JSON payloads
@@ -1002,21 +1010,12 @@ def invoke_api(
         return result
 
     # --- Parse response ---
-    if isinstance(response, bytes):
-        raw = response.decode("utf-8")
+    if isinstance(response, dict):
+        raw = json_mod.dumps(response)
+    elif isinstance(response, bytes):
+        raw = response.decode("utf-8", errors="replace")
     elif isinstance(response, str):
         raw = response
-    elif isinstance(response, dict):
-        # SDK may return parsed dict directly for JSON responses
-        return {
-            "_success": 200 <= status < 300,
-            "status_code": status,
-            "method": method,
-            "endpoint": endpoint,
-            "url": url,
-            "profile": profile,
-            "data": response,
-        }
     else:
         raw = str(response)
 
