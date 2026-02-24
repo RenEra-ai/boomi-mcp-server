@@ -1619,6 +1619,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "resource_type": "str (required) — trading_partner | process | component | environment | etc.",
                 "operation": "str (optional) — create | update | list | etc.",
                 "standard": "str (optional) — for trading_partner: x12, edifact, hl7, etc.",
+                "component_type": "str (optional) — for component: process, connection, map, etc.",
                 "protocol": "str (optional) — for trading_partner: http, as2, ftp, sftp, etc.",
             },
             "examples": [
