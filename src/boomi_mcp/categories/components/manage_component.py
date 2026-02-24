@@ -59,7 +59,9 @@ def create_component(
                 "Boomi requires type-specific XML with proper namespaces. "
                 "Use query_components get action on an existing component to obtain "
                 "a valid XML template, then modify and pass as config.xml. "
-                "For processes, use manage_process with config_yaml instead."
+                "For processes, use manage_process with config_yaml instead. "
+                "For connectors (connector-settings, connector-action), use "
+                "manage_connector which generates correct XML from simple config."
             ),
         }
 

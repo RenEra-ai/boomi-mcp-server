@@ -1116,6 +1116,7 @@ if manage_component_action:
             create - Create a component from XML template:
                 config='{"xml": "<full-component-xml>...</full-component-xml>"}'
                 For processes, use manage_process with config_yaml instead.
+                For connectors (connector-settings, connector-action), use manage_connector.
                 Tip: Use query_components get on a similar component to obtain an XML template.
 
             update - Update an existing component:
