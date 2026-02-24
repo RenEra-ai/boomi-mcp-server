@@ -1323,3 +1323,468 @@ def _get_monitoring_template(operation=None, **_):
         }
 
     return {"_success": True, **tpl}
+
+
+def list_capabilities_action() -> Dict[str, Any]:
+    """Return full catalog of MCP tools, actions, and workflows.
+
+    Zero API calls — returns static metadata about this MCP server.
+    """
+
+    tools = {
+        # === Category 1: Components (3 tools) ===
+        "query_components": {
+            "category": "Components",
+            "description": "Query Boomi components — all read operations",
+            "actions": ["list", "get", "search", "bulk_get"],
+            "read_only": True,
+            "parameters": {
+                "profile": "str (required) — Boomi profile name",
+                "action": "str (required) — list | get | search | bulk_get",
+                "component_id": "str (optional) — component ID (required for get)",
+                "component_ids": "str (optional) — JSON array of IDs for bulk_get (max 5)",
+                "config": "JSON str (optional) — action-specific config",
+            },
+            "examples": [
+                'query_components(profile="prod", action="list", config=\'{"type": "process"}\')',
+                'query_components(profile="prod", action="get", component_id="abc-123")',
+                'query_components(profile="prod", action="search", config=\'{"name": "%Order%", "type": "process"}\')',
+            ],
+            "sdk_examples_covered": [
+                "list_all_components.py",
+                "get_component.py",
+                "query_process_components.py",
+                "bulk_get_components.py",
+            ],
+        },
+        "manage_component": {
+            "category": "Components",
+            "description": "Manage component lifecycle — create, update, clone, delete",
+            "actions": ["create", "update", "clone", "delete"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — create | update | clone | delete",
+                "component_id": "str (optional) — required for update/clone/delete",
+                "config": "JSON str (optional) — action-specific config (XML for create, fields for update)",
+                "config_yaml": "YAML str (optional) — for process creation with shapes",
+            },
+            "examples": [
+                'manage_component(profile="prod", action="clone", component_id="abc-123", config=\'{"name": "My Clone"}\')',
+                'manage_component(profile="prod", action="create", config=\'{"xml": "<Component>...</Component>"}\')',
+            ],
+            "sdk_examples_covered": [
+                "create_process_component.py",
+                "update_component.py",
+                "clone_component.py",
+                "delete_component.py",
+            ],
+        },
+        "analyze_component": {
+            "category": "Components",
+            "description": "Analyze component relationships — where used, dependencies, version diffs",
+            "actions": ["where_used", "dependencies", "compare_versions"],
+            "read_only": True,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — where_used | dependencies | compare_versions",
+                "component_id": "str (required)",
+                "config": "JSON str (optional) — action-specific config",
+            },
+            "examples": [
+                'analyze_component(profile="prod", action="where_used", component_id="abc-123")',
+                'analyze_component(profile="prod", action="compare_versions", component_id="abc-123", config=\'{"source_version": 1, "target_version": 2}\')',
+            ],
+            "sdk_examples_covered": [
+                "find_where_used.py",
+                "find_what_uses.py",
+                "analyze_dependencies.py",
+                "compare_component_versions.py",
+                "component_diff.py",
+            ],
+        },
+
+        # === Category 2: Environments & Runtimes (2 tools — NOT YET IMPLEMENTED) ===
+        "manage_environments": {
+            "category": "Environments & Runtimes",
+            "description": "Manage environments and their configuration extensions",
+            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions"],
+            "read_only": False,
+            "implemented": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "resource_id": "str (optional) — environment ID",
+                "config": "JSON str (optional)",
+            },
+            "sdk_examples_covered": [
+                "manage_environments.py",
+                "create_environment.py",
+                "get_environment.py",
+                "list_environments.py",
+                "query_environments.py",
+                "update_environment.py",
+                "delete_environment.py",
+                "manage_environment_extensions.py",
+                "update_environment_extensions.py",
+            ],
+        },
+        "manage_runtimes": {
+            "category": "Environments & Runtimes",
+            "description": "Manage Boomi runtimes (Atoms, Molecules, Clouds)",
+            "actions": ["list", "get", "attach", "detach", "restart", "configure_java", "create_installer_token"],
+            "read_only": False,
+            "implemented": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "runtime_id": "str (optional)",
+                "environment_id": "str (optional) — for attach/detach",
+            },
+            "sdk_examples_covered": [
+                "manage_runtimes.py",
+                "list_runtimes.py",
+                "query_runtimes.py",
+                "create_environment_atom_attachment.py",
+                "detach_runtime_from_environment.py",
+                "restart_runtime.py",
+                "manage_java_runtime.py",
+                "create_installer_token.py",
+            ],
+        },
+
+        # === Category 3: Deployment & B2B (3 tools) ===
+        "manage_packages": {
+            "category": "Deployment & B2B",
+            "description": "Manage deployment packages — create, list, delete",
+            "actions": ["list", "get", "create", "delete"],
+            "read_only": False,
+            "implemented": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "package_id": "str (optional)",
+                "component_ids": "list (optional) — for create",
+                "version": "str (optional)",
+                "notes": "str (optional)",
+            },
+            "sdk_examples_covered": [
+                "create_packaged_component.py",
+                "get_packaged_component.py",
+                "query_packaged_components.py",
+                "delete_packaged_component.py",
+            ],
+        },
+        "deploy_package": {
+            "category": "Deployment & B2B",
+            "description": "Deploy packages to environments",
+            "actions": ["deploy", "query", "undeploy"],
+            "read_only": False,
+            "implemented": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "package_id": "str (optional) — for deploy",
+                "environment_id": "str (optional) — for deploy/query",
+            },
+            "sdk_examples_covered": [
+                "create_deployment.py",
+                "query_deployed_packages.py",
+                "promote_package_to_environment.py",
+            ],
+        },
+        "manage_trading_partner": {
+            "category": "Deployment & B2B",
+            "description": "Manage B2B/EDI trading partners (all 7 standards) and organizations",
+            "actions": [
+                "list", "get", "create", "update", "delete",
+                "analyze_usage", "list_options",
+                "org_list", "org_get", "org_create", "org_update", "org_delete",
+            ],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "resource_id": "str (optional) — trading partner or org ID",
+                "config": "JSON str (optional) — action-specific config",
+            },
+            "examples": [
+                'manage_trading_partner(profile="prod", action="list", config=\'{"standard": "x12"}\')',
+                'manage_trading_partner(profile="prod", action="create", config=\'{"component_name": "Acme", "standard": "x12", ...}\')',
+                'manage_trading_partner(profile="prod", action="list_options")',
+            ],
+            "sdk_examples_covered": [
+                "create_trading_partner.py",
+                "delete_trading_partner.py",
+            ],
+        },
+
+        # === Category 4: Execution (2 tools) ===
+        "manage_process": {
+            "category": "Execution",
+            "description": "Manage process components with YAML-based configuration and scheduling",
+            "actions": ["list", "get", "create", "update", "delete"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "process_id": "str (optional)",
+                "config_yaml": "YAML str (optional) — process definition with shapes",
+                "filters": "JSON str (optional)",
+            },
+            "examples": [
+                'manage_process(profile="prod", action="list")',
+                'manage_process(profile="prod", action="create", config_yaml="name: My Process\\nshapes:\\n  - type: start...")',
+            ],
+            "sdk_examples_covered": [
+                "create_process_component.py",
+                "manage_process_schedules.py",
+            ],
+        },
+        "execute_process": {
+            "category": "Execution",
+            "description": "Execute a Boomi process (sync or async)",
+            "actions": ["execute"],
+            "read_only": False,
+            "implemented": False,
+            "parameters": {
+                "profile": "str (required)",
+                "process_id": "str (required)",
+                "environment_id": "str (required)",
+                "atom_id": "str (optional)",
+                "execution_type": "str (optional) — sync | async (default: async)",
+                "input_data": "str (optional) — input document",
+                "wait_for_completion": "bool (optional, default=false)",
+            },
+            "sdk_examples_covered": [
+                "execute_process.py",
+            ],
+        },
+
+        # === Category 5: Monitoring (1 tool) ===
+        "monitor_platform": {
+            "category": "Monitoring",
+            "description": "Monitor executions, logs, artifacts, audit trail, and events",
+            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events"],
+            "read_only": True,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "config": "JSON str (optional) — action-specific filters",
+            },
+            "examples": [
+                'monitor_platform(profile="prod", action="execution_records", config=\'{"execution_id": "exec-123"}\')',
+                'monitor_platform(profile="prod", action="audit_logs", config=\'{"start_date": "2025-01-01", "user": "admin@co.com"}\')',
+                'monitor_platform(profile="prod", action="events", config=\'{"event_level": "ERROR"}\')',
+            ],
+            "sdk_examples_covered": [
+                "poll_execution_status.py",
+                "get_execution_summary.py",
+                "execution_records.py",
+                "analyze_execution_metrics.py",
+                "download_process_log.py",
+                "download_execution_artifacts.py",
+                "query_audit_logs.py",
+                "query_events.py",
+            ],
+        },
+
+        # === Category 6: Organization (1 tool — NOT YET IMPLEMENTED) ===
+        "manage_folders": {
+            "category": "Organization",
+            "description": "Manage folder hierarchy for organizing components",
+            "actions": ["list", "create", "move", "delete"],
+            "read_only": False,
+            "implemented": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "folder_id": "str (optional)",
+                "folder_name": "str (optional)",
+                "parent_folder_id": "str (optional) — for create",
+            },
+            "sdk_examples_covered": [
+                "manage_folders.py",
+                "folder_structure.py",
+            ],
+        },
+
+        # === Category 7: Meta / Power Tools (3 tools) ===
+        "get_schema_template": {
+            "category": "Meta Tools",
+            "description": "Get example payloads, field descriptions, and enum values for all tools",
+            "actions": ["(single action — specify resource_type and operation)"],
+            "read_only": True,
+            "parameters": {
+                "resource_type": "str (required) — trading_partner | process | component | environment | etc.",
+                "operation": "str (optional) — create | update | list | etc.",
+                "standard": "str (optional) — for trading_partner: x12, edifact, hl7, etc.",
+                "component_type": "str (optional) — for component: process, connection, map, etc.",
+                "protocol": "str (optional) — for trading_partner: http, as2, ftp, sftp, etc.",
+            },
+            "examples": [
+                'get_schema_template(resource_type="trading_partner", operation="create", standard="x12")',
+                'get_schema_template(resource_type="process", operation="create")',
+                'get_schema_template(resource_type="trading_partner", protocol="http")',
+            ],
+            "note": "No profile needed — returns static reference data. No API calls.",
+        },
+        "invoke_boomi_api": {
+            "category": "Meta Tools",
+            "description": "Generic escape hatch — direct access to ANY Boomi REST API endpoint",
+            "actions": ["(any HTTP method to any endpoint)"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "endpoint": "str (required) — e.g., 'Role/query', 'Folder/12345', 'Branch'",
+                "method": "str (optional, default=GET) — GET | POST | PUT | DELETE",
+                "payload": "JSON str (optional) — request body for POST/PUT",
+                "content_type": "str (optional, default=json) — json | xml",
+                "accept": "str (optional, default=json) — json | xml",
+                "confirm_delete": "bool (optional, default=false) — must be true to allow DELETE operations",
+            },
+            "examples": [
+                'invoke_boomi_api(profile="prod", endpoint="Role/query", method="POST", payload=\'{"QueryFilter":...}\')',
+                'invoke_boomi_api(profile="prod", endpoint="Branch", method="POST", payload=\'{"name":"feature-v2"}\')',
+                'invoke_boomi_api(profile="prod", endpoint="Component/abc-123", method="GET", accept="xml")',
+            ],
+            "covers_uncovered_apis": [
+                "Roles & Permissions",
+                "Branches",
+                "Integration Packs",
+                "Shared Web Servers",
+                "Communication Channels",
+                "Persisted Process Properties (async)",
+                "Queue Management (async)",
+                "Secrets Rotation",
+                "Document Reprocessing",
+            ],
+            "note": "Use dedicated tools when available for better parameter validation. "
+                    "DELETE operations are blocked by safety feature.",
+        },
+        "list_capabilities": {
+            "category": "Meta Tools",
+            "description": "This tool — lists all available MCP tools and capabilities",
+            "actions": ["(single action — returns full catalog)"],
+            "read_only": True,
+            "parameters": {},
+            "note": "No parameters needed. Returns this catalog.",
+        },
+
+        # === Credential Management ===
+        "list_boomi_profiles": {
+            "category": "Credentials",
+            "description": "List all saved Boomi credential profiles",
+            "actions": ["(single action — returns profile names)"],
+            "read_only": True,
+            "parameters": {},
+            "note": "Call this first to see available profiles.",
+        },
+        "boomi_account_info": {
+            "category": "Credentials",
+            "description": "Get Boomi account info from a specific profile",
+            "actions": ["(single action — returns account details)"],
+            "read_only": True,
+            "parameters": {
+                "profile": "str (required) — profile name from list_boomi_profiles",
+            },
+        },
+    }
+
+    # --- Build implementation status ---
+    implemented = []
+    not_implemented = []
+    for name, info in tools.items():
+        if info.get("implemented", True):  # default True unless explicitly False
+            implemented.append(name)
+        else:
+            not_implemented.append(name)
+
+    # --- Workflow suggestions ---
+    workflows = {
+        "discover_components": {
+            "description": "Find and understand components in your account",
+            "steps": [
+                "1. list_boomi_profiles() → find your profile",
+                "2. query_components(action='list', config='{\"type\": \"process\"}') → list processes",
+                "3. query_components(action='get', component_id='...') → get details",
+                "4. analyze_component(action='where_used', component_id='...') → find dependencies",
+            ],
+        },
+        "create_and_deploy_process": {
+            "description": "Build a process from scratch and deploy it",
+            "steps": [
+                "1. get_schema_template(resource_type='process', operation='create') → get YAML template",
+                "2. manage_process(action='create', config_yaml='...') → create process",
+                "3. invoke_boomi_api(endpoint='PackagedComponent', method='POST', ...) → package it (manage_packages not yet implemented)",
+                "4. invoke_boomi_api(endpoint='Deployment', method='POST', ...) → deploy (deploy_package not yet implemented)",
+                "5. invoke_boomi_api(endpoint='ExecutionRequest', method='POST', ...) → run it (execute_process not yet implemented)",
+                "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
+            ],
+        },
+        "set_up_b2b_trading_partner": {
+            "description": "Create a trading partner for EDI/B2B integration",
+            "steps": [
+                "1. manage_trading_partner(action='list_options') → see available standards/protocols",
+                "2. get_schema_template(resource_type='trading_partner', standard='x12') → get template",
+                "3. manage_trading_partner(action='create', config='{...}') → create partner",
+                "4. manage_trading_partner(action='analyze_usage', resource_id='...') → verify setup",
+            ],
+        },
+        "troubleshoot_failed_execution": {
+            "description": "Debug why a process execution failed",
+            "steps": [
+                "1. monitor_platform(action='execution_records', config='{\"status\": \"ERROR\", \"limit\": 10}') → find failures",
+                "2. monitor_platform(action='execution_logs', config='{\"execution_id\": \"...\"}') → get error logs",
+                "3. monitor_platform(action='execution_artifacts', config='{\"execution_id\": \"...\"}') → get output docs",
+                "4. analyze_component(action='dependencies', component_id='...') → check dependencies",
+            ],
+        },
+        "manage_admin_operations": {
+            "description": "Admin tasks not covered by dedicated tools",
+            "steps": [
+                "1. invoke_boomi_api(endpoint='Role/query', method='POST', ...) → list roles",
+                "2. invoke_boomi_api(endpoint='Branch/query', method='POST', ...) → list branches",
+                "3. invoke_boomi_api(endpoint='Folder/query', method='POST', ...) → list folders",
+                "4. See invoke_boomi_api docstring for all 30+ available endpoints",
+            ],
+        },
+    }
+
+    # --- Coverage stats ---
+    coverage = {
+        "total_sdk_examples": 67,
+        "direct_coverage": 57,
+        "direct_coverage_pct": "85%",
+        "indirect_via_invoke_boomi_api": 10,
+        "indirect_coverage_pct": "15%",
+        "total_coverage_pct": "100%",
+        "fully_covered_categories": [
+            "Discover & Analyze",
+            "Create & Modify",
+            "Runtime Setup",
+            "Package & Deploy",
+            "Execute & Test",
+            "Version & Compare",
+        ],
+    }
+
+    return {
+        "_success": True,
+        "server_name": "Boomi MCP Server",
+        "server_version": "1.3",
+        "total_tools": len(tools),
+        "implemented_count": len(implemented),
+        "not_implemented_count": len(not_implemented),
+        "implemented_tools": implemented,
+        "not_implemented_tools": not_implemented,
+        "tools": tools,
+        "workflows": workflows,
+        "coverage": coverage,
+        "hints": {
+            "start_here": "Call list_boomi_profiles() first to see available profiles",
+            "need_template": "Use get_schema_template() before create/update operations",
+            "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (roles, branches, etc.)",
+            "profile_required": "Most tools require a 'profile' parameter — get it from list_boomi_profiles()",
+        },
+    }

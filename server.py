@@ -149,6 +149,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import generic API invoker: {e}")
     invoke_api = None
 
+# --- List Capabilities ---
+try:
+    from boomi_mcp.categories.meta_tools import list_capabilities_action
+    print(f"[INFO] List capabilities loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import list capabilities: {e}")
+    list_capabilities_action = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -1405,6 +1413,35 @@ if invoke_api:
             return {"_success": False, "error": str(e)}
 
     print("[INFO] Generic API invoker tool registered successfully")
+
+
+# --- List Capabilities ---
+if list_capabilities_action:
+    @mcp.tool(annotations={"readOnlyHint": True})
+    def list_capabilities():
+        """List all available MCP tools and their capabilities.
+
+        Returns summary of:
+        - All 17 tools with descriptions and actions
+        - Implementation status (which tools are ready)
+        - Workflow suggestions for common multi-step tasks
+        - Coverage statistics (SDK example coverage)
+        - Quick-start hints
+
+        No parameters needed. Call this to understand what operations are possible.
+
+        Helps AI agent:
+        - Select the right tool for any user request
+        - Understand multi-step workflows (e.g., create → package → deploy → monitor)
+        - Know when to use invoke_boomi_api for uncovered APIs
+        - Find the right get_schema_template call before creating resources
+        """
+        try:
+            return list_capabilities_action()
+        except Exception as e:
+            return {"_success": False, "error": str(e)}
+
+    print("[INFO] List capabilities tool registered successfully")
 
 
 # --- Credential Management Tools (local dev only) ---
