@@ -1,11 +1,15 @@
 """
-Schema Template MCP Tool — self-documenting reference data.
+Meta tools — schema templates and generic API invoker.
 
-Returns example payloads, field descriptions, and enum values
-for all other MCP tools. No API calls made.
+- get_schema_template_action: self-documenting reference data (no API calls)
+- invoke_api: generic escape-hatch for any Boomi REST API endpoint
 """
 
 from typing import Dict, Any, Optional
+
+from boomi import Boomi
+from boomi.net.transport.serializer import Serializer
+from boomi.net.environment.environment import Environment
 
 
 # ============================================================================
@@ -887,6 +891,166 @@ _EXECUTION_REQUEST_EXECUTE = {
     "sdk_pattern": "sdk.execution_request.create_execution_request(ExecutionRequest(atom_id=..., process_id=...))",
     "hint": "Use query_components list with type='process' to find process_id.",
 }
+
+
+# ============================================================================
+# Generic API Invoker
+# ============================================================================
+
+def invoke_api(
+    boomi_client: Boomi,
+    profile: str,
+    endpoint: str,
+    method: str = "GET",
+    payload: str = None,
+    content_type: str = "json",
+    accept: str = "json",
+    confirm_delete: bool = False,
+) -> Dict[str, Any]:
+    """Execute arbitrary Boomi API call using SDK's Serializer.
+
+    Uses the same proven Serializer + send_request() pattern from _shared.py.
+    """
+    import json as json_mod
+
+    # --- Validate method ---
+    method = method.upper()
+    if method not in ("GET", "POST", "PUT", "DELETE"):
+        return {
+            "_success": False,
+            "error": f"Invalid method: {method}",
+            "hint": "Valid methods: GET, POST, PUT, DELETE",
+        }
+
+    # --- Safety: DELETE confirmation ---
+    if method == "DELETE" and not confirm_delete:
+        return {
+            "_success": False,
+            "error": "DELETE operations require explicit confirmation",
+            "hint": "Re-call with confirm_delete=true after user confirms the deletion.",
+            "endpoint": endpoint,
+            "warning": "This operation may be irreversible",
+        }
+
+    # --- Build URL ---
+    # All SDK services share the same base URL (includes accountId) + auth
+    svc = boomi_client.account
+    base = svc.base_url or Environment.DEFAULT.url
+    url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}"
+
+    # --- Normalize + validate content types ---
+    accept = accept.lower().strip()
+    content_type = content_type.lower().strip()
+    ct_map = {
+        "json": "application/json",
+        "xml":  "application/xml",
+    }
+    accept_header = ct_map.get(accept)
+    content_type_header = ct_map.get(content_type)
+    if not accept_header or not content_type_header:
+        return {
+            "_success": False,
+            "error": f"Invalid content type: accept={accept!r}, content_type={content_type!r}",
+            "hint": "Valid values: 'json' or 'xml'",
+        }
+
+    # --- Parse payload ---
+    # The SDK's send_request() JSON-encodes the body, so for JSON payloads
+    # we parse the string to a dict to avoid double-encoding.
+    # For XML payloads, we pass the raw string.
+    body = None
+    if method in ("POST", "PUT") and payload:
+        if content_type == "json":
+            try:
+                body = json_mod.loads(payload)
+            except (json_mod.JSONDecodeError, TypeError):
+                return {
+                    "_success": False,
+                    "error": "Invalid JSON payload",
+                    "hint": "The payload parameter must be a valid JSON string",
+                }
+        else:
+            body = payload
+
+    # --- Build request via Serializer ---
+    ser = Serializer(
+        url,
+        [svc.get_access_token(), svc.get_basic_auth()],
+    )
+    ser = ser.add_header("Accept", accept_header)
+
+    # serialize() returns a Request object; set_method/set_body are on Request
+    serialized = ser.serialize().set_method(method)
+
+    if body is not None:
+        serialized = serialized.set_body(body, content_type_header)
+
+    # --- Execute ---
+    # The SDK raises ApiError for non-2xx responses, so we catch it
+    # and extract the response details.
+    try:
+        response, status, _ = svc.send_request(serialized)
+    except Exception as api_err:
+        # Extract status and response body from ApiError
+        status = getattr(api_err, "status", 0)
+        err_response = getattr(api_err, "response", None)
+        err_body = getattr(err_response, "body", None) if err_response else None
+
+        result = {
+            "_success": False,
+            "status_code": status,
+            "method": method,
+            "endpoint": endpoint,
+            "url": url,
+            "profile": profile,
+            "error": f"HTTP {status}" if status else str(api_err),
+        }
+        if err_body:
+            result["data"] = err_body if isinstance(err_body, dict) else str(err_body)
+        return result
+
+    # --- Parse response ---
+    if isinstance(response, dict):
+        raw = json_mod.dumps(response)
+    elif isinstance(response, bytes):
+        raw = response.decode("utf-8", errors="replace")
+    elif isinstance(response, str):
+        raw = response
+    else:
+        raw = str(response)
+
+    # --- Response truncation (safety) ---
+    MAX_RESPONSE_SIZE = 50000  # characters
+    truncated = len(raw) > MAX_RESPONSE_SIZE
+
+    result = {
+        "_success": 200 <= status < 300,
+        "status_code": status,
+        "method": method,
+        "endpoint": endpoint,
+        "url": url,
+        "profile": profile,
+    }
+
+    if truncated:
+        result["truncated"] = True
+        result["total_size"] = len(raw)
+
+    if accept == "json":
+        try:
+            parsed = json_mod.loads(raw[:MAX_RESPONSE_SIZE] if truncated else raw)
+            result["data"] = parsed
+        except (json_mod.JSONDecodeError, TypeError):
+            result["raw_response"] = raw[:MAX_RESPONSE_SIZE]
+    else:
+        result["raw_response"] = raw[:MAX_RESPONSE_SIZE]
+
+    if status >= 400:
+        result["error"] = f"HTTP {status}"
+        if "raw_response" not in result:
+            result["raw_response"] = raw[:5000]
+
+    return result
 
 
 # ============================================================================

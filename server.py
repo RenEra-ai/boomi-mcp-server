@@ -141,6 +141,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import schema template tools: {e}")
     get_schema_template_action = None
 
+# --- Generic API Invoker ---
+try:
+    from boomi_mcp.categories.meta_tools import invoke_api
+    print(f"[INFO] Generic API invoker loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import generic API invoker: {e}")
+    invoke_api = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -1293,6 +1301,112 @@ if get_schema_template_action:
     print("[INFO] Schema template tool registered successfully")
 
 
+# --- Generic API Invoker MCP Tool ---
+if invoke_api:
+    @mcp.tool()
+    def invoke_boomi_api(
+        profile: str,
+        endpoint: str,
+        method: str = "GET",
+        payload: str = None,
+        content_type: str = "json",
+        accept: str = "json",
+        confirm_delete: bool = False,
+    ):
+        """Direct Boomi API access for operations not covered by other tools.
+
+        Generic escape hatch for any Boomi REST API endpoint.
+
+        Args:
+            profile: Boomi profile name (required for authentication)
+            endpoint: API endpoint path (appended to base URL).
+                      Format: "Resource" or "Resource/id" or "Resource/query"
+            method: HTTP method - GET, POST, PUT, DELETE
+            payload: JSON string request body for POST/PUT (parsed and sent as-is)
+            content_type: Request body format - "json" (default) or "xml"
+            accept: Response format - "json" (default) or "xml"
+            confirm_delete: Set to true to confirm DELETE operations (safety gate)
+
+        Common endpoints:
+            # Roles — see /mnt/examples/04_environment_setup/manage_roles.py
+            - "Role/query" POST with filter body → list roles
+            - "Role" POST with role body → create role
+            - "Role/{id}" GET → get role
+            - "Role/{id}" DELETE → delete role
+
+            # Branches — see /mnt/examples/02_organize_structure/manage_branches.py
+            - "Branch/query" POST with filter body → list branches
+            - "Branch" POST → create branch
+            - "Branch/{id}" DELETE → delete branch
+
+            # Folders — see /mnt/examples/02_organize_structure/manage_folders.py
+            - "Folder/query" POST with filter body → list folders
+            - "Folder" POST → create folder
+            - "Folder/{id}" GET → get folder
+
+            # Shared Web Server
+            - "SharedWebServer/{id}" GET → get web server config
+
+            # Persisted Properties (async — returns token, poll for result)
+            - "PersistedProcessProperties/{atomId}" GET → initiate async get
+
+            # Queues (async)
+            - "ListQueues/{atomId}" GET → initiate async queue list
+            - "ClearQueue" POST → clear queue messages
+            - "MoveQueue" POST → move messages between queues
+
+            # Secrets
+            - "SecretsManagerRefreshRequest" POST → refresh secrets
+
+            # Packages & Deployments
+            - "PackagedComponent/query" POST → list packages
+            - "DeployedPackage/query" POST → list deployments
+            - "DeployedPackage" POST → deploy package
+
+        Examples:
+            # List all roles
+            invoke_boomi_api(profile="prod", endpoint="Role/query",
+                method="POST", payload='{"QueryFilter":{"expression":{"operator":"EQUALS","property":"name","argument":["Administrator"]}}}')
+
+            # Get a specific folder
+            invoke_boomi_api(profile="prod", endpoint="Folder/12345", method="GET")
+
+            # Get component as XML
+            invoke_boomi_api(profile="prod", endpoint="Component/abc-123",
+                method="GET", accept="xml")
+        """
+        try:
+            subject = get_current_user()
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+
+            sdk = Boomi(**sdk_params)
+
+            return invoke_api(
+                boomi_client=sdk,
+                profile=profile,
+                endpoint=endpoint,
+                method=method,
+                payload=payload,
+                content_type=content_type,
+                accept=accept,
+                confirm_delete=confirm_delete,
+            )
+
+        except Exception as e:
+            return {"_success": False, "error": str(e)}
+
+    print("[INFO] Generic API invoker tool registered successfully")
+
+
 # --- Credential Management Tools (local dev only) ---
 if LOCAL_MODE:
     @mcp.tool()
@@ -1740,6 +1854,10 @@ if __name__ == "__main__":
             print("\n  Platform Monitoring:")
             print("  monitor_platform - Logs, artifacts, audit trail, and events")
             print("    Actions: execution_logs, execution_artifacts, audit_logs, events")
+        if invoke_api:
+            print("\n  Generic API Access:")
+            print("  invoke_boomi_api - Direct access to any Boomi REST API endpoint")
+            print("    Covers: Roles, Branches, Folders, Packages, Deployments, etc.")
         print("=" * 60 + "\n")
 
         mcp.run(transport="stdio")
