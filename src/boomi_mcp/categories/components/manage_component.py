@@ -240,24 +240,33 @@ def delete_component(
 
     except ApiError as e:
         error_msg = str(e)
-        # API error (HTTP 4xx/5xx) — safe to try metadata delete fallback
-        try:
-            boomi_client.component_metadata.delete_component_metadata(id_=component_id)
-            return {
-                "_success": True,
-                "message": f"Deleted component '{component_id}'",
-                "component_id": component_id,
-                "profile": profile,
-                "method": "metadata_delete",
-                "warning": "Used metadata API delete (not soft-delete). This may be irreversible.",
-            }
-        except Exception as e2:
-            return {
-                "_success": False,
-                "error": f"Soft-delete failed: {error_msg}. Metadata delete also failed: {str(e2)}",
-                "exception_type": type(e).__name__,
-                "hint": "Some component types can only be deleted from the Boomi Platform UI.",
-            }
+        status = getattr(e, 'status', None)
+        # Only fall back to irreversible metadata delete for real API rejections,
+        # not transient failures (408 timeout, connection errors)
+        if status and 400 <= status < 600 and status != 408:
+            try:
+                boomi_client.component_metadata.delete_component_metadata(id_=component_id)
+                return {
+                    "_success": True,
+                    "message": f"Deleted component '{component_id}'",
+                    "component_id": component_id,
+                    "profile": profile,
+                    "method": "metadata_delete",
+                    "warning": "Used metadata API delete (not soft-delete). This may be irreversible.",
+                }
+            except Exception as e2:
+                return {
+                    "_success": False,
+                    "error": f"Soft-delete failed: {error_msg}. Metadata delete also failed: {str(e2)}",
+                    "exception_type": type(e).__name__,
+                    "hint": "Some component types can only be deleted from the Boomi Platform UI.",
+                }
+        return {
+            "_success": False,
+            "error": f"Soft-delete failed: {error_msg}",
+            "exception_type": type(e).__name__,
+            "hint": "Retry or use Boomi Platform UI to delete this component.",
+        }
 
     except Exception as e:
         return {
