@@ -125,6 +125,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import component analysis tools: {e}")
     analyze_component_action = None
 
+# --- Connector Tools ---
+try:
+    from boomi_mcp.categories.components.connectors import manage_connector_action
+    print(f"[INFO] Connector tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import connector tools: {e}")
+    manage_connector_action = None
+
 # --- Monitoring Tools ---
 try:
     from boomi_mcp.categories.monitoring import monitor_platform_action
@@ -1270,6 +1278,89 @@ if analyze_component_action:
             return {"_success": False, "error": str(e)}
 
     print("[INFO] Component analysis tool registered successfully (1 consolidated tool)")
+
+
+# --- Connector MCP Tools ---
+if manage_connector_action:
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    def manage_connector(
+        profile: str,
+        action: str,
+        component_id: str = None,
+        config: str = None,
+    ):
+        """
+        Manage connector components (connections and operations) with catalog discovery.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: list_types, get_type, list, get
+            component_id: Component ID (required for get)
+            config: JSON string with action-specific filters
+
+        Actions and config examples:
+
+            list_types - List available connector types in the Boomi account:
+                (no config needed)
+
+            get_type - Get field definitions for a connector type:
+                config='{"connector_type": "http"}'
+
+            list - List connector components (connections and/or operations):
+                config='{"component_type": "connection"}'
+                config='{"component_type": "operation", "connector_type": "http"}'
+                config='{"connector_type": "database"}'
+                component_type values: "connection" (connector-settings) or "operation" (connector-action)
+
+            get - Get a connector component with full XML:
+                component_id="abc-123-def"
+
+        Returns:
+            Action result with success status and connector data
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] manage_connector called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if action == "list_types":
+                pass  # no extra params
+            elif action == "get_type":
+                params["connector_type"] = config_data.get("connector_type")
+            elif action == "list":
+                params["filters"] = config_data if config_data else None
+            elif action == "get":
+                params["component_id"] = component_id
+
+            return manage_connector_action(sdk, profile, action, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} manage_connector: {e}")
+            return {"_success": False, "error": str(e)}
+
+    print("[INFO] Connector tool registered successfully (1 consolidated tool)")
 
 
 # --- Schema Template MCP Tool ---

@@ -31,6 +31,7 @@ from .processes import (
 from .query_components import query_components_action
 from .manage_component import manage_component_action
 from .analyze_component import analyze_component_action
+from .connectors import manage_connector_action
 
 __all__ = [
     # Trading Partners
@@ -52,4 +53,5 @@ __all__ = [
     'query_components_action',
     'manage_component_action',
     'analyze_component_action',
+    'manage_connector_action',
 ]

@@ -370,17 +370,17 @@ class ComponentOrchestrator:
                 shape.config['map_id'] = map_id
                 del shape.config['map_ref']  # Remove reference, keep only ID
 
-            # Connector reference
+            # Connector reference (Boomi metadata type: connector-action)
             if 'connector_ref' in shape.config:
                 connector_name = shape.config['connector_ref']
-                connector_id = self._resolve_component_id(connector_name, 'connector')
+                connector_id = self._resolve_component_id(connector_name, 'connector-action')
                 shape.config['connector_id'] = connector_id
                 del shape.config['connector_ref']
 
-            # Connection reference
+            # Connection reference (Boomi metadata type: connector-settings)
             if 'connection_ref' in shape.config:
                 connection_name = shape.config['connection_ref']
-                connection_id = self._resolve_component_id(connection_name, 'connection')
+                connection_id = self._resolve_component_id(connection_name, 'connector-settings')
                 shape.config['connection_id'] = connection_id
                 del shape.config['connection_ref']
 
@@ -405,7 +405,7 @@ class ComponentOrchestrator:
 
         Args:
             name: Component name to resolve
-            component_type: Component type (map, connector, connection, process)
+            component_type: Boomi metadata type (map, connector-action, connector-settings, process)
 
         Returns:
             Component ID
@@ -418,7 +418,7 @@ class ComponentOrchestrator:
             id = resolver._resolve_component_id("Transform Map", "map")
 
             # From API
-            id = resolver._resolve_component_id("Salesforce Connector", "connector")
+            id = resolver._resolve_component_id("Salesforce Connector", "connector-action")
         """
         # Step 1: Check session registry
         if name in self.registry:
