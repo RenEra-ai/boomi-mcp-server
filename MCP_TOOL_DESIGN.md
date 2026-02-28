@@ -1,21 +1,21 @@
 # Boomi MCP Server - Tool Design & Architecture
 
-**Version**: 1.3
+**Version**: 1.4
 **Date**: 2025-01-17
-**Last Updated**: 2026-02-23 (consolidated 21→18 tools: organizations→trading_partner, schedules→process, env_extensions→environments)
-**Status**: Phase 1 Complete ✅ (Trading Partners + Organizations, Process Components, Platform Monitoring)
+**Last Updated**: 2026-02-28 (added manage_connector tool: 18→19 tools)
+**Status**: Phase 1 Complete ✅ (Trading Partners + Organizations, Process Components, Platform Monitoring, Connectors)
 
 ---
 
 ## Executive Summary
 
-### Final Recommendation: Hybrid 18-Tool Architecture
+### Final Recommendation: Hybrid 19-Tool Architecture
 
-After comprehensive research of popular MCP servers, analysis of all 67 Boomi SDK examples, and applying Anthropic's tool consolidation best practices ("a few thoughtful tools targeting specific high-impact workflows"), we recommend an **18-tool hybrid architecture** that balances token efficiency with practical usability.
+After comprehensive research of popular MCP servers, analysis of all 67 Boomi SDK examples, and applying Anthropic's tool consolidation best practices ("a few thoughtful tools targeting specific high-impact workflows"), we recommend a **19-tool hybrid architecture** that balances token efficiency with practical usability.
 
 **Key Metrics:**
-- **Tool Count**: 18 tools (vs 100+ individual operations)
-- **Token Budget**: ~7,200 tokens (82% reduction from 40,000)
+- **Tool Count**: 19 tools (vs 100+ individual operations)
+- **Token Budget**: ~7,500 tokens (81% reduction from 40,000)
 - **Coverage**: 85% direct coverage, 100% via generic invoker
 - **Pattern**: Workflow-oriented consolidation — group by user intent, not API resource
 
@@ -23,6 +23,7 @@ After comprehensive research of popular MCP servers, analysis of all 67 Boomi SD
 - **Phase 1**: Consolidated 6 trading partner tools → 1 `manage_trading_partner` (saves 1,600 tokens)
 - **v1.2**: Consolidated 4 monitoring tools → 1 `monitor_platform` (saves 1,100 tokens)
 - **v1.3**: Merged `manage_organization` → `manage_trading_partner`, `manage_schedules` → `manage_process`, `manage_environment_extensions` → `manage_environments` (saves ~1,100 tokens, -3 tools)
+- **v1.4**: Added `manage_connector` tool for connector catalog discovery and connection CRUD with HTTP builder
 
 ---
 
@@ -143,6 +144,23 @@ Boomi Component API
 - `events` — Query platform events with date range, level, type, process name, atom, execution ID filters; pagination support
 - All 4 actions are read-only
 - SDK-only implementation (ProcessLog, ExecutionArtifacts, AuditLog query, Event query)
+
+#### Connector Components Tool ✅
+**Status**: Production Ready (Dev Branch)
+**Implementation**: `src/boomi_mcp/categories/components/connectors.py`, `src/boomi_mcp/categories/components/builders/connector_builder.py`
+**Tool**: `manage_connector` (1 tool — connector catalog, connection/operation CRUD)
+
+**Features**:
+- Connector catalog discovery (`list_types`, `get_type` — field definitions, operation types, allowed values)
+- Connection and operation component listing with type/subtype filters
+- Full component XML retrieval via `get`
+- Create connectors via HTTP builder or raw XML (`create`)
+- Smart-merge update of connector fields without full XML replacement (`update`)
+- Soft-delete with dependency warnings (`delete`)
+- HTTP connector builder: NONE, BASIC, OAUTH2 authentication types
+- SDK-only implementation (Connector query API + Component metadata API)
+
+**Why separate from `manage_component`**: Connectors have a unique catalog API (`sdk.connector`) for discovering available connector types and their field definitions. The builder pattern (config keys → XML) is connector-specific and doesn't apply to generic components. Keeping this separate avoids overloading `manage_component` with connector-specific logic while providing a focused, discoverable tool for the common workflow of setting up integrations.
 
 ### Next Steps
 
@@ -449,7 +467,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 ## Final Tool Architecture (18 Tools)
 
-### Category 1: Components (3 tools, ~1,200 tokens)
+### Category 1: Components (4 tools, ~1,500 tokens)
 
 #### 1. query_components
 ```python
@@ -547,11 +565,45 @@ def analyze_component(
 - `component_diff.py`
 - `analyze_integration_pack.py`
 
+#### 4. manage_connector ✅ (Implemented)
+```python
+@mcp.tool()
+def manage_connector(
+    profile: str,
+    action: Literal["list_types", "get_type", "list", "get", "create", "update", "delete"],
+    component_id: Optional[str] = None,  # Required for get, update, delete
+    config: Optional[str] = None,  # JSON string with action-specific configuration
+) -> dict:
+    """Manage connector components (connections and operations) with catalog discovery.
+
+    Actions:
+    - list_types: List available connector types in the Boomi account
+    - get_type: Get field definitions for a connector type. Config: {"connector_type": "http"}
+    - list: List connector components. Config: {"component_type": "connection", "connector_type": "http"}
+    - get: Get connector component with full XML
+    - create: Create new connector via builder or raw XML
+    - update: Smart-merge update of connector fields
+    - delete: Soft-delete connector component
+
+    Create via builder (HTTP):
+      config='{"connector_type": "http", "component_name": "My API", "url": "https://...", "auth_type": "BASIC"}'
+
+    Create via raw XML (any type):
+      config='{"xml": "<bns:Component ...>...</bns:Component>"}'
+    """
+```
+
+**SDK Examples Covered:**
+- Connector catalog discovery (`sdk.connector.query_connector`, `sdk.connector.get_connector`)
+- Connection CRUD via Component metadata + XML API
+
+**Why separate from `manage_component`**: Connectors have a unique catalog API for discovering available types and their field definitions, plus a builder pattern that maps friendly config keys to connector-specific XML (e.g., `<HttpSettings>`). This doesn't fit the generic component lifecycle and would overload `manage_component` with connector-specific logic.
+
 ---
 
 ### Category 2: Environments & Runtimes (2 tools, ~800 tokens)
 
-#### 4. manage_environments
+#### 5. manage_environments
 ```python
 @mcp.tool()
 def manage_environments(
@@ -589,7 +641,7 @@ def manage_environments(
 
 **Why combined**: Environment extensions are configuration overrides *scoped to a specific environment*. They always require an `environment_id` and are a natural sub-operation of environment management, just as runtime attachments are sub-operations of `manage_runtimes`.
 
-#### 5. manage_runtimes
+#### 6. manage_runtimes
 ```python
 @mcp.tool()
 def manage_runtimes(
@@ -624,7 +676,7 @@ def manage_runtimes(
 
 ### Category 3: Deployment & B2B (3 tools, ~1,200 tokens)
 
-#### 6. manage_packages
+#### 7. manage_packages
 ```python
 @mcp.tool()
 def manage_packages(
@@ -649,7 +701,7 @@ def manage_packages(
 - `query_packaged_components.py`
 - `delete_packaged_component.py`
 
-#### 7. deploy_package
+#### 8. deploy_package
 ```python
 @mcp.tool()
 def deploy_package(
@@ -678,7 +730,7 @@ def deploy_package(
 - `promote_package_to_environment.py`
 - `query_deployed_packages.py`
 
-#### 8. manage_trading_partner
+#### 9. manage_trading_partner
 ```python
 @mcp.tool()
 def manage_trading_partner(
@@ -755,7 +807,7 @@ Organization:
 
 ### Category 4: Execution & Scheduling (2 tools, ~800 tokens)
 
-#### 9. manage_process ✅ (Implemented — schedule actions pending)
+#### 10. manage_process ✅ (Implemented — schedule actions pending)
 
 See **Implementation Status** section above for full details of the 3-layer hybrid architecture.
 
@@ -769,7 +821,7 @@ See **Implementation Status** section above for full details of the 3-layer hybr
 
 **Why schedules are here**: Schedules define *when processes run* — they always require a `process_id` + `atom_id`. They're inherently a sub-operation of process management, same as "restart" is a sub-operation of `manage_runtimes`.
 
-#### 10. execute_process
+#### 11. execute_process
 ```python
 @mcp.tool()
 def execute_process(
@@ -812,7 +864,7 @@ This uses the same `ExecutionRecord` query API with different filters:
 
 ### Category 5: Monitoring (1 tool, ~500 tokens)
 
-#### 11. monitor_platform ✅ (Implemented)
+#### 12. monitor_platform ✅ (Implemented)
 ```python
 @mcp.tool(readOnlyHint=True)
 def monitor_platform(
@@ -862,7 +914,7 @@ def monitor_platform(
 
 ### Category 6: Organization (1 tool, ~400 tokens)
 
-#### 12. manage_folders
+#### 13. manage_folders
 ```python
 @mcp.tool()
 def manage_folders(
@@ -888,7 +940,7 @@ def manage_folders(
 
 ### Category 7: Meta/Power Tools (3 tools, ~1,200 tokens)
 
-#### 13. get_schema_template
+#### 14. get_schema_template
 ```python
 @mcp.tool(readOnlyHint=True)
 def get_schema_template(
@@ -910,7 +962,7 @@ def get_schema_template(
 
 **Purpose**: Self-documentation, reduces errors from malformed inputs
 
-#### 14. invoke_boomi_api
+#### 15. invoke_boomi_api
 ```python
 @mcp.tool()
 def invoke_boomi_api(
@@ -951,7 +1003,7 @@ def invoke_boomi_api(
 - `reprocess_documents.py`
 - `manage_queues.py`
 
-#### 15. list_capabilities
+#### 16. list_capabilities
 ```python
 @mcp.tool(readOnlyHint=True)
 def list_capabilities() -> dict:
@@ -1005,11 +1057,11 @@ def list_capabilities() -> dict:
 
 **Token Estimate**: ~7,200 tokens
 
-### Approach 3: Workflow-Oriented Plan (18 tools) ⭐ RECOMMENDED (v1.3)
+### Approach 3: Workflow-Oriented Plan (19 tools) ⭐ RECOMMENDED (v1.4)
 
 **Strengths:**
 - ✅ Workflow-oriented: group by user intent, not API resource
-- ✅ Token efficient (7,200 tokens - 82% reduction)
+- ✅ Token efficient (~7,500 tokens - 81% reduction)
 - ✅ Within Anthropic's sweet spot (10-20 tools per server)
 - ✅ Research-backed (PostgreSQL pattern for components, Anthropic's tool consolidation guidance)
 - ✅ Includes meta-tools (schema template, generic invoker, capabilities)
@@ -1021,17 +1073,20 @@ def list_capabilities() -> dict:
 - Schedules → `manage_process`: Schedules define when processes run (always scoped to process_id)
 - Environment extensions → `manage_environments`: Extensions are config overrides scoped to environment_id
 
-**Token Estimate**: ~7,200 tokens
+**Expansion rationale (v1.4):**
+- `manage_connector` added as separate tool: Connectors have a unique catalog API for type/field discovery and a builder pattern for XML generation. Keeping this separate from `manage_component` avoids overloading the generic tool with connector-specific logic.
+
+**Token Estimate**: ~7,500 tokens
 
 ### Why Workflow-Oriented Wins
 
-| Aspect | Original (22-25) | First Hybrid (21) | Workflow-Oriented (18) |
+| Aspect | Original (22-25) | First Hybrid (21) | Workflow-Oriented (19) |
 |--------|-----------|---------|--------|
-| Component consolidation | ⚠️ Weak (6-7 tools) | ✅ Strong (3 tools) | ✅ Strong (3 tools) |
+| Component consolidation | ⚠️ Weak (6-7 tools) | ✅ Strong (3 tools) | ✅ Strong (4 tools) |
 | Workflow grouping | ❌ API-per-tool | ⚠️ Partial | ✅ Full (sub-operations grouped) |
 | Monitoring | ⚠️ 4 separate tools | ⚠️ 4 separate tools | ✅ 1 consolidated tool |
 | Meta tools | ✅ Excellent | ✅ Excellent | ✅ Excellent |
-| Token efficiency | ⚠️ 9,000 | ⚠️ 8,400 | ✅ 7,200 |
+| Token efficiency | ⚠️ 9,000 | ⚠️ 8,400 | ✅ 7,500 |
 | Anthropic alignment | ⚠️ Too many tools | ⚠️ Borderline | ✅ Sweet spot |
 
 ---
@@ -1227,18 +1282,21 @@ def list_capabilities() -> dict:
 
 **Not all resources need this split** (e.g., environments combine CRUD because it's simpler)
 
-### 8. Why 18 Tools?
+### 8. Why 19 Tools?
 
-**Decision**: Workflow-oriented with 18 tools (evolved from 21 → 18 in v1.3)
+**Decision**: Workflow-oriented with 19 tools (evolved from 21 → 18 in v1.3, then 18 → 19 in v1.4)
 
 **Rationale:**
 - **Anthropic guidance**: "a few thoughtful tools targeting specific high-impact workflows"
-- **Research**: 5-10 optimal, 15-30 acceptable, 40+ problematic — 18 is in the sweet spot
+- **Research**: 5-10 optimal, 15-30 acceptable, 40+ problematic — 19 is in the sweet spot
 - **Workflow grouping**: Sub-operations belong with their parent resource (schedules→process, extensions→environments, organizations→trading_partners)
-- **Token budget**: 7,200 tokens (82% reduction from individual approach)
+- **Specialized APIs**: Resources with unique discovery APIs (connectors have a catalog API) warrant separate tools
+- **Token budget**: ~7,500 tokens (81% reduction from individual approach)
 - **Coverage**: 85% direct + 15% via generic invoker = 100%
 
 **v1.3 consolidation principle**: If a resource is always accessed in the context of another resource (requires its ID), it's a sub-operation, not a separate tool.
+
+**v1.4 expansion principle**: If a resource has a unique API surface (e.g., connector catalog) and a specialized builder pattern, it warrants its own tool rather than overloading a generic tool.
 
 ---
 
@@ -3561,9 +3619,10 @@ def tool_name(
 |-------|-------------|-------------------|---------------|
 | Current | 6 (trading partners) | ~2,400 | - |
 | Phase 1 | 4 (consolidated: TP + org + process + monitor) | ~1,400 | -67% |
-| Phase 2 | +6 (core ops) | ~3,800 | - |
-| Phase 3 | +5 (full coverage) + schedule/org actions | ~7,200 | -82% |
-| **Final** | **18 total** | **~7,200** | **-82%** |
+| Phase 1.6 | +1 (connectors) | ~1,700 | - |
+| Phase 2 | +6 (core ops) | ~4,100 | - |
+| Phase 3 | +5 (full coverage) + schedule/org actions | ~7,500 | -81% |
+| **Final** | **19 total** | **~7,500** | **-81%** |
 
 **Target achieved**: ✅ Well under 10,000 token budget
 
@@ -3637,55 +3696,56 @@ If generic invoker proves insufficient for frequently-used operations:
 
 ## Conclusion
 
-This 18-tool workflow-oriented architecture represents the optimal balance between:
-- **Token efficiency** (82% reduction vs individual tools)
+This 19-tool workflow-oriented architecture represents the optimal balance between:
+- **Token efficiency** (81% reduction vs individual tools)
 - **Workflow grouping** (sub-operations grouped with parent resources)
 - **Complete coverage** (100% of SDK examples)
 - **Future-proofing** (generic invoker + schema templates)
 - **Research-backed** (PostgreSQL, GitHub, Kubernetes patterns + Anthropic best practices)
 - **Anthropic-aligned** ("a few thoughtful tools targeting specific high-impact workflows")
 
-**Current status**: Phase 1 complete (4 tools implemented). Next: Phase 2 core operations.
+**Current status**: Phase 1 complete (5 tools implemented: manage_trading_partner, manage_process, monitor_platform, manage_connector, + credential tools). Next: Phase 2 core operations.
 
 ---
 
 ## Appendix: Quick Reference
 
-### All 18 Tools at a Glance
+### All 19 Tools at a Glance
 
-**Components** (3):
+**Components** (4):
 1. query_components
 2. manage_component
 3. analyze_component
+4. manage_connector ✅ (list_types, get_type, list, get, create, update, delete)
 
 **Environments & Runtimes** (2):
-4. manage_environments (includes get_extensions, update_extensions actions)
-5. manage_runtimes
+5. manage_environments (includes get_extensions, update_extensions actions)
+6. manage_runtimes
 
 **Deployment & B2B** (3):
-6. manage_packages
-7. deploy_package
-8. manage_trading_partner ✅ (includes org_list, org_get, org_create, org_update, org_delete actions)
+7. manage_packages
+8. deploy_package
+9. manage_trading_partner ✅ (includes org_list, org_get, org_create, org_update, org_delete actions)
 
 **Execution & Scheduling** (2):
-9. manage_process ✅ (includes list_schedules, set_schedule, clear_schedule actions)
-10. execute_process
+10. manage_process ✅ (includes list_schedules, set_schedule, clear_schedule actions)
+11. execute_process
 
 **Monitoring** (1):
-11. monitor_platform ✅ (execution_records, execution_logs, execution_artifacts, audit_logs, events)
+12. monitor_platform ✅ (execution_records, execution_logs, execution_artifacts, audit_logs, events)
 
 **Organization** (1):
-12. manage_folders
+13. manage_folders
 
 **Meta** (3):
-13. get_schema_template
-14. invoke_boomi_api
-15. list_capabilities
+14. get_schema_template
+15. invoke_boomi_api
+16. list_capabilities
 
 **Credential Management** (3 — already implemented, always present):
-16. list_boomi_profiles ✅
-17. boomi_account_info ✅
-18. set_boomi_credentials ✅
+17. list_boomi_profiles ✅
+18. boomi_account_info ✅
+19. set_boomi_credentials ✅
 
 Note: `delete_boomi_profile` is a utility function within credential management, not counted as a separate tool.
 
@@ -3695,7 +3755,7 @@ With the config JSON pattern, component tools (trading partners, organizations) 
 
 | Category | Tools | Tokens/Tool | Total |
 |----------|-------|-------------|-------|
-| Components | 3 | 300 | 900 |
+| Components | 4 | 300 | 1,200 |
 | Env/Runtime | 2 | 350 | 700 |
 | Deployment & B2B | 3 | 350 | 1,050 |
 | Execution & Scheduling | 2 | 400 | 800 |
@@ -3703,7 +3763,7 @@ With the config JSON pattern, component tools (trading partners, organizations) 
 | Organization | 1 | 400 | 400 |
 | Meta | 3 | 400 | 1,200 |
 | Credential mgmt (existing) | 3 | 200 | 600 |
-| **TOTAL** | **18** | **avg 350** | **~6,150** |
+| **TOTAL** | **19** | **avg 340** | **~6,450** |
 
 Note: Actual token count may be higher due to rich docstrings with config examples. Target: <8,000 tokens.
 
@@ -3713,7 +3773,8 @@ Note: Actual token count may be higher due to rich docstrings with config exampl
 |-------|----------|--------|-------------|--------|
 | Phase 1 | Week 1 | 8-12h | Trading partners consolidated | ✅ Complete |
 | Phase 1.5 | Week 2 | 12-16h | Process components + orchestrator + monitor_platform | ✅ Complete |
-| Phase 2 | Weeks 3-4 | 20-28h | Core operations (6 tools) | 🔄 Planned |
-| Phase 3 | Weeks 5-6 | 28-36h | Full coverage (5 tools + schedule/org actions) | 📋 Planned |
-| Phase 4 | Week 7 | 16-24h | Production polish | 📋 Planned |
-| **TOTAL** | **7 weeks** | **84-116h** | **18 tools production-ready** | **In Progress** |
+| Phase 1.6 | Week 3 | 6-8h | Connector components + HTTP builder | ✅ Complete |
+| Phase 2 | Weeks 4-5 | 20-28h | Core operations (6 tools) | 🔄 Planned |
+| Phase 3 | Weeks 6-7 | 28-36h | Full coverage (5 tools + schedule/org actions) | 📋 Planned |
+| Phase 4 | Week 8 | 16-24h | Production polish | 📋 Planned |
+| **TOTAL** | **8 weeks** | **90-124h** | **19 tools production-ready** | **In Progress** |
