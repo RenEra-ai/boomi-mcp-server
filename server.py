@@ -133,6 +133,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import connector tools: {e}")
     manage_connector_action = None
 
+# --- Folder Tools ---
+try:
+    from boomi_mcp.categories.folders import manage_folders_action
+    print(f"[INFO] Folder tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import folder tools: {e}")
+    manage_folders_action = None
+
 # --- Monitoring Tools ---
 try:
     from boomi_mcp.categories.monitoring import monitor_platform_action
@@ -1382,6 +1390,95 @@ if manage_connector_action:
     print("[INFO] Connector tool registered successfully (1 consolidated tool)")
 
 
+# --- Folder Management MCP Tools ---
+if manage_folders_action:
+    @mcp.tool()
+    def manage_folders(
+        profile: str,
+        action: str,
+        folder_id: str = None,
+        config: str = None,
+    ):
+        """
+        Manage folder hierarchy for organizing Boomi components.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: list, get, create, move, delete, restore, contents
+            folder_id: Folder ID (required for get, delete, restore, contents)
+            config: JSON string with action-specific configuration (see examples below)
+
+        Actions and config examples:
+
+            list - List all folders with tree view:
+                config='{"include_deleted": true}'
+                config='{"folder_name": "Production"}'
+                config='{"folder_path": "Production/APIs"}'
+
+            get - Get folder by ID (no config needed):
+                folder_id="abc-123-def"
+
+            create - Create folder or hierarchy:
+                config='{"folder_name": "Production/APIs/v2"}'
+                config='{"folder_name": "NewFolder", "parent_folder_id": "abc-123"}'
+
+            move - Move a component to a folder:
+                config='{"component_id": "comp-123", "target_folder_id": "folder-456"}'
+
+            delete - Delete an empty folder:
+                folder_id="abc-123-def"
+
+            restore - Restore a deleted folder:
+                folder_id="abc-123-def"
+
+            contents - List components and sub-folders in a folder:
+                folder_id="abc-123-def"
+                config='{"folder_name": "Production"}'
+
+        Returns:
+            Action result with success status and data/error
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] manage_folders called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if folder_id:
+                params["folder_id"] = folder_id
+
+            return manage_folders_action(sdk, profile, action, config_data=config_data, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} manage_folders: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Folder management tool registered successfully (1 consolidated tool)")
+
+
 # --- Schema Template MCP Tool ---
 if get_schema_template_action:
     @mcp.tool(annotations={"readOnlyHint": True})
@@ -1398,7 +1495,7 @@ if get_schema_template_action:
         No API calls — pure reference data. Use before create/update operations.
 
         Args:
-            resource_type: One of: trading_partner, process, component, environment, package, execution_request, organization, monitoring
+            resource_type: One of: trading_partner, process, component, environment, package, execution_request, organization, folder, monitoring
             operation: Optional action context: create, update, list, execute, search, clone, compare_versions, execution_records, execution_logs, execution_artifacts, audit_logs, events
             standard: For trading_partner create: x12, edifact, hl7, rosettanet, tradacoms, odette, custom
             component_type: For component: process, connector-settings, transform.map, etc.
