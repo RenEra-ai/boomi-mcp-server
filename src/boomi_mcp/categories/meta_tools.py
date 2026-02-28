@@ -1406,20 +1406,23 @@ def list_capabilities_action() -> Dict[str, Any]:
 
         "manage_connector": {
             "category": "Components",
-            "description": "Manage connector components (connections and operations) with catalog discovery",
-            "actions": ["list_types", "get_type", "list", "get"],
-            "read_only": True,
+            "description": "Manage connector components (connections and operations) with catalog discovery and CRUD",
+            "actions": ["list_types", "get_type", "list", "get", "create", "update", "delete"],
+            "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — list_types | get_type | list | get",
-                "component_id": "str (optional) — for get",
-                "config": "JSON str (optional) — action-specific filters",
+                "action": "str (required) — list_types | get_type | list | get | create | update | delete",
+                "component_id": "str (optional) — for get, update, delete",
+                "config": "JSON str (optional) — action-specific config/filters",
             },
             "examples": [
                 'manage_connector(profile="prod", action="list_types")',
                 'manage_connector(profile="prod", action="get_type", config=\'{"connector_type": "http"}\')',
                 'manage_connector(profile="prod", action="list", config=\'{"component_type": "connection", "connector_type": "http"}\')',
                 'manage_connector(profile="prod", action="get", component_id="abc-123")',
+                'manage_connector(profile="prod", action="create", config=\'{"connector_type": "http", "component_name": "My HTTP", "url": "https://api.example.com", "auth_type": "NONE"}\')',
+                'manage_connector(profile="prod", action="update", component_id="abc-123", config=\'{"url": "https://new-url.com"}\')',
+                'manage_connector(profile="prod", action="delete", component_id="abc-123")',
             ],
             "sdk_examples_covered": [
                 "query_connectors.py",

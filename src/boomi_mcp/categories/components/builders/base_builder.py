@@ -92,17 +92,19 @@ class ComponentXMLWrapper:
         component_type: str,
         folder_name: str,
         inner_xml: str,
-        description: str = ""
+        description: str = "",
+        sub_type: str = ""
     ) -> str:
         """
         Wrap component-specific XML in standard Component envelope.
 
         Args:
             name: Component name
-            component_type: Type (e.g., "process", "tradingpartner", "connection")
+            component_type: Type (e.g., "process", "tradingpartner", "connector-settings")
             folder_name: Folder path (e.g., "Home", "Integrations/Production")
             inner_xml: Component-specific XML content
             description: Optional description
+            sub_type: Optional subType (e.g., "http" for connectors)
 
         Returns:
             Complete component XML wrapped in bns:Component element
@@ -118,10 +120,14 @@ class ComponentXMLWrapper:
         safe_desc = ComponentXMLWrapper._escape_text(description)
         safe_folder = ComponentXMLWrapper._escape_text(folder_name)
 
+        sub_type_attr = ""
+        if sub_type:
+            sub_type_attr = f' subType="{ComponentXMLWrapper._escape_text(sub_type)}"'
+
         return f'''<?xml version="1.0" encoding="UTF-8"?>
 <bns:Component xmlns:bns="http://api.platform.boomi.com/"
                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-               type="{component_type}"
+               type="{component_type}"{sub_type_attr}
                name="{safe_name}"
                folderName="{safe_folder}">
     <bns:description>{safe_desc}</bns:description>
