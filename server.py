@@ -1282,21 +1282,20 @@ if analyze_component_action:
 
 # --- Connector MCP Tools ---
 if manage_connector_action:
-    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    @mcp.tool(annotations={"openWorldHint": True})
     def manage_connector(
         profile: str,
         action: str,
         component_id: str = None,
         config: str = None,
     ):
-        """
-        Manage connector components (connections and operations) with catalog discovery.
+        """Manage connector components (connections and operations) with catalog discovery.
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: list_types, get_type, list, get
-            component_id: Component ID (required for get)
-            config: JSON string with action-specific filters
+            action: One of: list_types, get_type, list, get, create, update, delete
+            component_id: Component ID (required for get, update, delete)
+            config: JSON string with action-specific configuration
 
         Actions and config examples:
 
@@ -1313,6 +1312,19 @@ if manage_connector_action:
                 component_type values: "connection" (connector-settings) or "operation" (connector-action)
 
             get - Get a connector component with full XML:
+                component_id="abc-123-def"
+
+            create - Create new connector (builder or raw XML):
+                config='{"connector_type": "http", "component_name": "My HTTP", "url": "https://api.example.com", "auth_type": "NONE"}'
+                config='{"connector_type": "http", "component_name": "OAuth API", "url": "https://api.example.com", "auth_type": "OAUTH2", "oauth2_token_url": "https://auth.example.com/token", "oauth2_client_id": "my-client"}'
+                config='{"xml": "<bns:Component ...>...</bns:Component>"}'
+
+            update - Update existing connector:
+                component_id="abc-123-def", config='{"url": "https://new-url.com"}'
+                component_id="abc-123-def", config='{"name": "Renamed Connection", "auth_type": "BASIC"}'
+                component_id="abc-123-def", config='{"xml": "<full-component-xml>...</full-component-xml>"}'
+
+            delete - Delete connector:
                 component_id="abc-123-def"
 
         Returns:
@@ -1352,6 +1364,13 @@ if manage_connector_action:
             elif action == "list":
                 params["filters"] = config_data if config_data else None
             elif action == "get":
+                params["component_id"] = component_id
+            elif action == "create":
+                params["config"] = config_data if config_data else None
+            elif action == "update":
+                params["component_id"] = component_id
+                params["config"] = config_data if config_data else None
+            elif action == "delete":
                 params["component_id"] = component_id
 
             return manage_connector_action(sdk, profile, action, **params)

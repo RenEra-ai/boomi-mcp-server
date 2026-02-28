@@ -50,6 +50,12 @@ from .communication import (
 
 from .x12_builder import X12TradingPartnerBuilder
 
+from .connector_builder import (
+    HttpConnectorBuilder,
+    CONNECTOR_BUILDERS,
+    get_connector_builder,
+)
+
 # Registry of standard-specific builders
 # Maps standard name -> builder class
 STANDARD_BUILDERS = {
@@ -110,4 +116,9 @@ __all__ = [
     "X12TradingPartnerBuilder",
     "STANDARD_BUILDERS",
     "get_builder_for_standard",
+
+    # Connector builders
+    "HttpConnectorBuilder",
+    "CONNECTOR_BUILDERS",
+    "get_connector_builder",
 ]
