@@ -1768,11 +1768,7 @@ src/boomi_mcp/
 └── docs/agent_knowledge/            # LLM training material
     ├── README.md
     ├── process_patterns.md         # Pattern library
-    ├── shape_reference.md          # Shape type catalog
-    └── examples/                    # 50+ working examples
-        ├── etl_salesforce_netsuite.md
-        ├── api_integration_http.md
-        └── ...
+    └── shape_reference.md          # Shape type catalog
 ```
 
 #### **Template Layer: XML Constants**
@@ -2417,13 +2413,7 @@ docs/agent_knowledge/
 ├── process_patterns.md             # Pattern library (10+ patterns)
 ├── shape_reference.md              # Complete shape catalog
 ├── template_reference.md           # All available templates
-├── builder_api.md                  # Builder class documentation
-└── examples/                        # 50+ working examples
-    ├── 01_simple_etl.md
-    ├── 02_api_integration.md
-    ├── 03_batch_processing.md
-    ├── 04_error_handling.md
-    └── ...
+└── builder_api.md                  # Builder class documentation
 ```
 
 #### **Example Training Document**
@@ -2859,7 +2849,6 @@ class ProcessBuilder:
 
 **Real-world usage example:**
 ```python
-# File: examples/hybrid_process_example.py
 from boomi_mcp.xml_builders.builders import ProcessBuilder
 
 builder = ProcessBuilder()
@@ -3299,9 +3288,7 @@ sdk.execute_process.create_execute_process(execution)
 #### **Example 2: Simple Process (Template + Builder with Known IDs)**
 
 ```python
-# File: examples/hybrid_process_example.py
 # Uses: Templates + ProcessBuilder
-
 from boomi_mcp.xml_builders.builders import ProcessBuilder
 
 builder = ProcessBuilder()
@@ -3531,7 +3518,6 @@ Source: `/Users/gleb/Documents/Projects/Boomi/boomi-python/openapi/openapi.json`
    - Estimated effort: 4-6 hours
 
 3. **Integration examples** - Real-world multi-component workflows
-   - Location: `examples/orchestrator_examples.py`
    - Examples: ETL with Map, API integration with Connection, Subprocess composition
    - Estimated effort: 4-6 hours
 

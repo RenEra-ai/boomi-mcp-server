@@ -299,25 +299,6 @@ This real process validates our coordinate calculator constants.
 
 ---
 
-## Running the Example
-
-```bash
-# From project root
-.venv/bin/python examples/hybrid_process_example.py
-```
-
-**Output**:
-- Example 1: Simple 3-shape process
-- Example 2: ETL 5-shape process
-- Example 3: Documentation (conceptual)
-- Summary of hybrid approach benefits
-
-**Generated Files**:
-- `examples/output/example1_simple.xml`
-- `examples/output/example2_etl.xml`
-
----
-
 ## Next Steps
 
 ### Immediate (Complete)
@@ -350,5 +331,4 @@ This real process validates our coordinate calculator constants.
 
 - **Real Process**: `/tmp/process_formatted.xml` (Aggregate Prompt Messages)
 - **Implementation**: `src/boomi_mcp/xml_builders/`
-- **Examples**: `examples/hybrid_process_example.py`
-- **Design Doc**: `MCP_TOOL_DESIGN.md` (lines 1355-2433)
+- **Design Doc**: `MCP_TOOL_DESIGN.md`

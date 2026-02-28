@@ -80,17 +80,6 @@ xml_builders/
 
 ---
 
-## Examples
-
-See: `examples/hybrid_process_example.py`
-
-Run:
-```bash
-.venv/bin/python examples/hybrid_process_example.py
-```
-
----
-
 ## Based On
 
 Real Boomi process: **"Aggregate Prompt Messages"**
