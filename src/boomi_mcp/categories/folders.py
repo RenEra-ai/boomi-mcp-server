@@ -383,7 +383,20 @@ def _action_restore(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         return {"_success": False, "error": "folder_id is required for 'restore' action"}
 
     restored_folder = Folder(id_=folder_id)
-    restored = sdk.folder.create_folder(request_body=restored_folder)
+    try:
+        restored = sdk.folder.create_folder(request_body=restored_folder)
+    except Exception:
+        # Boomi API race condition: restore completes but API returns 400
+        # ("folder is not deleted") because it checks state after restoring.
+        # Verify the restore by fetching the folder.
+        try:
+            verify = sdk.folder.get_folder(id_=folder_id)
+            if not getattr(verify, 'deleted', True):
+                restored = verify
+            else:
+                raise
+        except Exception:
+            raise
 
     return {
         "_success": True,
