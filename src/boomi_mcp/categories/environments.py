@@ -87,19 +87,22 @@ def _query_all_environments(sdk: Boomi, expression) -> List[Dict[str, Any]]:
     return environments
 
 
+def _extract_raw_extensions(result) -> Dict[str, Any]:
+    """Extract raw extensions dict from SDK response (handles _kwargs wrapping)."""
+    if hasattr(result, '_kwargs') and 'EnvironmentExtensions' in result._kwargs:
+        return result._kwargs['EnvironmentExtensions']
+    elif hasattr(result, '_kwargs') and result._kwargs:
+        return result._kwargs
+    elif hasattr(result, 'to_dict'):
+        return result.to_dict()
+    elif isinstance(result, dict):
+        return result
+    return {}
+
+
 def _parse_extensions_response(result) -> Dict[str, Any]:
     """Parse the nested extensions response from the SDK."""
-    # The SDK may wrap data in _kwargs
-    if hasattr(result, '_kwargs') and 'EnvironmentExtensions' in result._kwargs:
-        data = result._kwargs['EnvironmentExtensions']
-    elif hasattr(result, '_kwargs') and result._kwargs:
-        data = result._kwargs
-    elif hasattr(result, 'to_dict'):
-        data = result.to_dict()
-    elif isinstance(result, dict):
-        data = result
-    else:
-        data = {}
+    data = _extract_raw_extensions(result)
 
     summary = {
         "environment_id": data.get('environmentId', getattr(result, 'environment_id', '')),
@@ -305,16 +308,7 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
         # GET current extensions first, then merge
         try:
             current_result = sdk.environment_extensions.get_environment_extensions(id_=resource_id)
-            if hasattr(current_result, '_kwargs') and 'EnvironmentExtensions' in current_result._kwargs:
-                current_data = current_result._kwargs['EnvironmentExtensions']
-            elif hasattr(current_result, '_kwargs') and current_result._kwargs:
-                current_data = current_result._kwargs
-            elif hasattr(current_result, 'to_dict'):
-                current_data = current_result.to_dict()
-            elif isinstance(current_result, dict):
-                current_data = current_result
-            else:
-                current_data = {}
+            current_data = _extract_raw_extensions(current_result)
             merged = _deep_merge(current_data, extensions_data)
         except Exception:
             # If GET fails (e.g., no extensions yet), use provided data as-is
