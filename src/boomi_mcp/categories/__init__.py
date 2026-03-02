@@ -3,7 +3,8 @@ Boomi MCP Tools - Category Modules
 
 Organized by functional categories following SDK structure:
 - deployment: Deployment & Configuration tools (trading partners, packages, etc.)
-- components: Component management (future)
-- environments: Environment & runtime management (future)
-- execution: Process execution & monitoring (future)
+- components: Component management (query, manage, analyze, connectors)
+- monitoring: Platform monitoring (execution records, logs, audit)
+- folders: Folder hierarchy management (CRUD, move, contents)
+- meta_tools: Schema templates, API invoker, capabilities listing
 """

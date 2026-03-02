@@ -1060,7 +1060,7 @@ def invoke_api(
 _VALID_RESOURCE_TYPES = [
     "trading_partner", "process", "component",
     "environment", "package", "execution_request",
-    "organization", "monitoring",
+    "organization", "folder", "monitoring",
 ]
 
 
@@ -1081,6 +1081,7 @@ def get_schema_template_action(
         "package": _get_package_template,
         "execution_request": _get_execution_request_template,
         "organization": _get_organization_template,
+        "folder": _get_folder_template,
         "monitoring": _get_monitoring_template,
     }
 
@@ -1299,6 +1300,105 @@ def _get_organization_template(operation=None, **_):
         "_success": False,
         "error": f"Unknown organization operation: {operation}",
         "valid_operations": ["list", "get", "create", "update", "delete"],
+    }
+
+
+def _get_folder_template(operation=None, **_):
+    _FOLDER_OVERVIEW = {
+        "resource_type": "folder",
+        "tool": "manage_folders",
+        "description": "Manage folder hierarchy for organizing Boomi components",
+        "actions": {
+            "list": "List all folders with tree view, optional filters (include_deleted, folder_name, folder_path)",
+            "get": "Get single folder by ID (requires folder_id)",
+            "create": "Create folder or hierarchy from path like 'Parent/Child/Grand' (requires folder_name in config)",
+            "move": "Move a component to a different folder (requires component_id, target_folder_id in config)",
+            "delete": "Delete an empty folder (requires folder_id)",
+            "restore": "Restore a deleted folder by ID (requires folder_id)",
+            "contents": "List components and sub-folders in a folder (requires folder_id or folder_name in config)",
+        },
+        "examples": {
+            "list": 'manage_folders(profile="prod", action="list")',
+            "list_filtered": 'manage_folders(profile="prod", action="list", config=\'{"folder_name": "Production"}\')',
+            "get": 'manage_folders(profile="prod", action="get", folder_id="abc-123")',
+            "create_hierarchy": 'manage_folders(profile="prod", action="create", config=\'{"folder_name": "Production/APIs/v2"}\')',
+            "move": 'manage_folders(profile="prod", action="move", config=\'{"component_id": "comp-123", "target_folder_id": "folder-456"}\')',
+            "delete": 'manage_folders(profile="prod", action="delete", folder_id="abc-123")',
+            "restore": 'manage_folders(profile="prod", action="restore", folder_id="abc-123")',
+            "contents": 'manage_folders(profile="prod", action="contents", folder_id="abc-123")',
+        },
+    }
+
+    if not operation:
+        return {"_success": True, **_FOLDER_OVERVIEW}
+
+    if operation == "create":
+        return {
+            "_success": True,
+            "resource_type": "folder",
+            "operation": "create",
+            "tool": "manage_folders (action='create')",
+            "template": {
+                "folder_name": "(required) single name or path like 'A/B/C'",
+                "parent_folder_id": "(optional) parent folder ID for the top-level folder",
+            },
+            "notes": [
+                "Paths like 'A/B/C' create all missing levels automatically",
+                "Existing folders in the path are reused (not duplicated)",
+            ],
+        }
+
+    if operation == "list":
+        return {
+            "_success": True,
+            "resource_type": "folder",
+            "operation": "list",
+            "tool": "manage_folders (action='list')",
+            "template": {
+                "include_deleted": "(optional, default false) include deleted folders",
+                "folder_name": "(optional) filter by folder name (case-insensitive contains)",
+                "folder_path": "(optional) filter by full path (case-insensitive contains)",
+                "tree_view": "(optional, default true) include ASCII tree in response",
+            },
+        }
+
+    if operation == "contents":
+        return {
+            "_success": True,
+            "resource_type": "folder",
+            "operation": "contents",
+            "tool": "manage_folders (action='contents')",
+            "template": {
+                "folder_id": "(required, or use folder_name) folder ID",
+                "folder_name": "(alternative to folder_id) folder name to look up",
+            },
+        }
+
+    if operation == "move":
+        return {
+            "_success": True,
+            "resource_type": "folder",
+            "operation": "move",
+            "tool": "manage_folders (action='move')",
+            "template": {
+                "component_id": "(required) ID of the component to move",
+                "target_folder_id": "(required) destination folder ID",
+            },
+        }
+
+    if operation in ("get", "delete", "restore"):
+        return {
+            "_success": True,
+            "resource_type": "folder",
+            "operation": operation,
+            "tool": f"manage_folders (action='{operation}')",
+            "note": "Requires folder_id parameter",
+        }
+
+    return {
+        "_success": False,
+        "error": f"Unknown folder operation: {operation}",
+        "valid_operations": ["list", "get", "create", "move", "delete", "restore", "contents"],
     }
 
 
@@ -1615,20 +1715,25 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 6: Organization (1 tool — NOT YET IMPLEMENTED) ===
+        # === Category 6: Organization (1 tool) ===
         "manage_folders": {
             "category": "Organization",
-            "description": "Manage folder hierarchy for organizing components",
-            "actions": ["list", "create", "move", "delete"],
+            "description": "Manage folder hierarchy for organizing components — CRUD, move, tree view, contents",
+            "actions": ["list", "get", "create", "move", "delete", "restore", "contents"],
             "read_only": False,
-            "implemented": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required)",
-                "folder_id": "str (optional)",
-                "folder_name": "str (optional)",
-                "parent_folder_id": "str (optional) — for create",
+                "action": "str (required) — list | get | create | move | delete | restore | contents",
+                "folder_id": "str (optional) — folder ID (required for get, delete, restore, contents)",
+                "config": "JSON str (optional) — action-specific config",
             },
+            "examples": [
+                'manage_folders(profile="prod", action="list")',
+                'manage_folders(profile="prod", action="list", config=\'{"include_deleted": true}\')',
+                'manage_folders(profile="prod", action="create", config=\'{"folder_name": "Production/APIs/v2"}\')',
+                'manage_folders(profile="prod", action="contents", folder_id="abc-123")',
+                'manage_folders(profile="prod", action="move", config=\'{"component_id": "comp-123", "target_folder_id": "folder-456"}\')',
+            ],
             "sdk_examples_covered": [
                 "manage_folders.py",
                 "folder_structure.py",
