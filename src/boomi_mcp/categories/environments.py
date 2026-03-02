@@ -357,7 +357,7 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
 
     if not resource_id:
         return {"_success": False, "error": "resource_id is required for 'update_extensions' action"}
-    if not extensions_data:
+    if extensions_data is None:
         return {"_success": False, "error": "extensions dict is required for 'update_extensions' action"}
 
     if partial:
