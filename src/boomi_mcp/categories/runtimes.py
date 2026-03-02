@@ -85,6 +85,23 @@ def _enum_str(val) -> str:
     return str(val) if val else ''
 
 
+def _parse_bool(val) -> bool:
+    """Parse a boolean value, handling string inputs correctly."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes")
+    return bool(val)
+
+
+def _parse_int(val, field_name: str) -> tuple:
+    """Parse an integer value with validation. Returns (value, error_string)."""
+    try:
+        return int(val), None
+    except (TypeError, ValueError):
+        return None, f"config.{field_name} must be a number, got: {val!r}"
+
+
 def _runtime_to_dict(runtime) -> Dict[str, Any]:
     """Convert SDK Atom object to plain dict."""
     result = {
@@ -606,10 +623,13 @@ def _action_create(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     if cloud_id:
         atom_kwargs["cloud_id"] = cloud_id
 
-    for key, default in [("purge_history_days", None), ("force_restart_time", None)]:
+    for key in ("purge_history_days", "force_restart_time"):
         val = kwargs.get(key)
         if val is not None:
-            atom_kwargs[key] = int(val)
+            parsed, err = _parse_int(val, key)
+            if err:
+                return {"_success": False, "error": err}
+            atom_kwargs[key] = parsed
 
     atom_request = Atom(**atom_kwargs)
     try:
@@ -809,10 +829,13 @@ def _action_cloud_create(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     for key in ("allow_deployments", "allow_browsing", "allow_test_executions"):
         val = kwargs.get(key)
         if val is not None:
-            cloud_kwargs[key] = bool(val)
+            cloud_kwargs[key] = _parse_bool(val)
     max_attach = kwargs.get("max_attachments_per_account")
     if max_attach is not None:
-        cloud_kwargs["max_attachments_per_account"] = int(max_attach)
+        parsed, err = _parse_int(max_attach, "max_attachments_per_account")
+        if err:
+            return {"_success": False, "error": err}
+        cloud_kwargs["max_attachments_per_account"] = parsed
 
     cloud_request = RuntimeCloud(**cloud_kwargs)
     result = sdk.runtime_cloud.create_runtime_cloud(request_body=cloud_request)
@@ -839,14 +862,17 @@ def _action_cloud_update(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     for key in ("allow_deployments", "allow_browsing", "allow_test_executions"):
         val = kwargs.get(key)
         if val is not None:
-            update_kwargs[key] = bool(val)
+            update_kwargs[key] = _parse_bool(val)
         else:
             existing = getattr(current, key, None)
             if existing is not None:
                 update_kwargs[key] = existing
     max_attach = kwargs.get("max_attachments_per_account")
     if max_attach is not None:
-        update_kwargs["max_attachments_per_account"] = int(max_attach)
+        parsed, err = _parse_int(max_attach, "max_attachments_per_account")
+        if err:
+            return {"_success": False, "error": err}
+        update_kwargs["max_attachments_per_account"] = parsed
     else:
         existing = getattr(current, 'max_attachments_per_account', None)
         if existing is not None:
