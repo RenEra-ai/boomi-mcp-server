@@ -1716,6 +1716,23 @@ if manage_environments_action:
         Classification values: TEST, PROD
         Note: Classification is immutable after creation. Only name can be updated.
 
+        Extension types (8 total):
+            connections, operations, properties, cross_references,
+            trading_partners, pgp_certificates, process_properties, data_maps
+
+        Extension lifecycle:
+            - Extensions are auto-generated when processes are deployed to an environment.
+            - You cannot create extensions via API; use get_extensions to read what exists.
+            - update_extensions modifies field values (e.g., connection URLs, credentials).
+
+        update_extensions caveats:
+            - partial=true (default): merges only the extension types you send; others are untouched.
+            - partial=false: replaces ALL extensions — any type omitted is reset to defaults.
+            - Encrypted fields (passwords, tokens) are returned as empty strings on read.
+              To preserve them, omit them from the update payload or resend the actual value.
+            - Each extension item supports a "useDefault" attribute (true/false) to control
+              whether it uses the component default or the environment-level override.
+
         Returns:
             Action result with success status and data/error
         """

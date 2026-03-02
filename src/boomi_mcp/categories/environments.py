@@ -108,11 +108,13 @@ def _parse_extensions_response(result) -> Dict[str, Any]:
     # Parse each extension type
     ext_types = {
         "connections": ("connections", "connection"),
+        "operations": ("operations", "operation"),
         "properties": ("properties", "property"),
         "cross_references": ("crossReferences", "crossReference"),
         "trading_partners": ("tradingPartners", "tradingPartner"),
         "pgp_certificates": ("PGPCertificates", "PGPCertificate"),
         "process_properties": ("processProperties", "ProcessProperty"),
+        "data_maps": ("dataMaps", "dataMap"),
     }
 
     for key, (outer, inner) in ext_types.items():

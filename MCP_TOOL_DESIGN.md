@@ -167,7 +167,7 @@ Boomi Component API
 **Phase 2: Core Operations** (Planned)
 - Component queries (query_components)
 - Component analysis (analyze_component)
-- Environment management (manage_environments — includes extensions)
+- Environment management (manage_environments — includes extension config overrides: get/update/query)
 - Runtime management (manage_runtimes)
 
 **Phase 3: Deployment & Execution** (Planned)
@@ -363,7 +363,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
 | `create_trading_partner.py` | `manage_trading_partner` | action="create" |
-| `manage_environment_extensions.py` | `manage_environments` | action="get_extensions" |
+| `manage_environment_extensions.py` | `manage_environments` | action="get_extensions" / "query_extensions" |
 | `update_environment_extensions.py` | `manage_environments` | action="update_extensions" |
 | `manage_process_schedules.py` | `manage_process` | action="list_schedules" / "set_schedule" / "clear_schedule" |
 | `manage_persisted_properties.py` | `invoke_boomi_api` | Generic invoker |
@@ -608,23 +608,41 @@ def manage_connector(
 @mcp.tool()
 def manage_environments(
     profile: str,
-    action: Literal["list", "get", "create", "update", "delete", "get_extensions", "update_extensions"],
+    action: Literal["list", "get", "create", "update", "delete",
+                     "get_extensions", "update_extensions", "query_extensions", "stats"],
     resource_id: Optional[str] = None,  # environment_id, required for get/update/delete/extensions
     config: Optional[str] = None,
 ) -> dict:
     """Manage Boomi environments (deployment stages) and their configuration extensions.
 
     Actions:
-    - list: List all environments. Optional config: {"classification": "production"}
+    - list: List all environments. Optional config: {"classification": "PROD"}
     - get: Get environment details by ID
-    - create: Create new environment. Config: {"name": "...", "classification": "test"}
-    - update: Update environment
-    - delete: Delete environment (confirmation for production)
-    - get_extensions: Get environment-specific config overrides (connections, properties)
+    - create: Create new environment. Config: {"name": "...", "classification": "TEST"}
+    - update: Update environment name (classification is immutable after creation)
+    - delete: Delete environment (fails if runtimes attached or components deployed)
+    - get_extensions: Get environment-specific config overrides (connections, properties, cross-refs,
+      trading partners, PGP certs, process properties, operations, data maps)
     - update_extensions: Update environment extensions. Config: {"partial": true, "extensions": {...}}
+      Partial updates recommended — complete updates revert ALL omitted fields to defaults.
+    - query_extensions: Query which environments have extensions configured
+    - stats: Environment summary counts by classification (TEST/PROD)
 
-    Extensions are environment-specific overrides for connection parameters, properties,
-    and cross-reference tables. Partial updates recommended to avoid overwriting unrelated config.
+    Classification values: TEST, PROD
+
+    Extension lifecycle:
+    1. DEFINE: Mark components as extensible in process canvas (Extensions dialog checkboxes).
+       This is stored in process component XML — handled by manage_process / manage_component.
+    2. DEPLOY: Package and deploy process to an environment.
+       Extension structure auto-generated from deployed process XML.
+    3. CONFIGURE: Use get_extensions/update_extensions to read/override field values per environment.
+       The EnvironmentExtensions API has only 3 operations (GET, UPDATE, QUERY) — no CREATE/DELETE.
+       Extension entries cannot be created or deleted through the API; they exist automatically
+       for any process deployed with extensible components.
+
+    Extension types: connections (with encrypted fields), operations, trading partners,
+    dynamic process properties, process properties, cross-references, PGP certificates, data maps.
+    Each type follows: component (id + name) → fields (id + value + useDefault + usesEncryption).
     """
 ```
 
@@ -636,10 +654,18 @@ def manage_environments(
 - `query_environments.py`
 - `update_environment.py`
 - `delete_environment.py`
-- `manage_environment_extensions.py` → action="get_extensions"
+- `manage_environment_extensions.py` → action="get_extensions", action="query_extensions"
 - `update_environment_extensions.py` → action="update_extensions"
 
-**Why combined**: Environment extensions are configuration overrides *scoped to a specific environment*. They always require an `environment_id` and are a natural sub-operation of environment management, just as runtime attachments are sub-operations of `manage_runtimes`.
+**Why combined**: Environment extensions are configuration overrides *scoped to a specific environment*. They always require an `environment_id` and are a natural sub-operation of environment management, just as runtime attachments are sub-operations of `manage_runtimes`. The EnvironmentExtensions API has only 3 operations (GET, UPDATE, QUERY) — too thin for a separate tool. Extensions cannot be created or deleted through the API; they are auto-generated when processes with extensible components are deployed to an environment.
+
+**Extension update caveats:**
+- **Partial updates** (default): Include only fields to modify; omitted fields keep current values.
+- **Complete updates**: Provide ALL fields; omitted fields revert to component defaults (destructive!).
+- **Encrypted fields**: GET never returns actual values (`encryptedValueSet=true`); UPDATE requires actual value.
+- **Cross-reference rows**: Must resend all rows in a cross-reference even for partial updates.
+- **Custom properties**: Must resend all key-value pairs even for partial updates.
+- **useDefault attribute**: Set `true` to revert field to component default; `false` + `value` to override.
 
 #### 6. manage_runtimes
 ```python
@@ -820,6 +846,8 @@ See **Implementation Status** section above for full details of the 3-layer hybr
 - `manage_process_schedules.py`
 
 **Why schedules are here**: Schedules define *when processes run* — they always require a `process_id` + `atom_id`. They're inherently a sub-operation of process management, same as "restart" is a sub-operation of `manage_runtimes`.
+
+**Note on process extensions (define phase)**: The Extensions dialog in the Boomi UI allows marking components as extensible (connections, operations, trading partners, dynamic process properties, process properties, cross-references, PGP certs, data maps). These extension definitions are stored in the **process component XML** — they are part of the process itself, not a separate API. When a process with extensible components is deployed to an environment, the platform auto-generates the `EnvironmentExtensions` entries. The *configure* phase (setting override values per environment) is handled by `manage_environments` actions `get_extensions` / `update_extensions` / `query_extensions`.
 
 #### 11. execute_process
 ```python
@@ -1071,7 +1099,7 @@ def list_capabilities() -> dict:
 **Consolidation rationale (v1.3 changes):**
 - Organizations → `manage_trading_partner`: Organizations exist only for trading partner contact info
 - Schedules → `manage_process`: Schedules define when processes run (always scoped to process_id)
-- Environment extensions → `manage_environments`: Extensions are config overrides scoped to environment_id
+- Environment extensions → `manage_environments`: Extensions are config overrides scoped to environment_id. Only 3 API operations (GET/UPDATE/QUERY) — too thin for separate tool. Extension entries are auto-generated from deployed process XML, not created/deleted via API.
 
 **Expansion rationale (v1.4):**
 - `manage_connector` added as separate tool: Connectors have a unique catalog API for type/field discovery and a builder pattern for XML generation. Keeping this separate from `manage_component` avoids overloading the generic tool with connector-specific logic.
@@ -1126,7 +1154,7 @@ def list_capabilities() -> dict:
    - `analyze_component`
 
 2. Implement environment/runtime tools (2 tools):
-   - `manage_environments` (includes get_extensions, update_extensions actions)
+   - `manage_environments` (includes get_extensions, update_extensions, query_extensions actions)
    - `manage_runtimes`
 
 3. Implement basic execution (1 tool):
@@ -1289,7 +1317,7 @@ def list_capabilities() -> dict:
 **Rationale:**
 - **Anthropic guidance**: "a few thoughtful tools targeting specific high-impact workflows"
 - **Research**: 5-10 optimal, 15-30 acceptable, 40+ problematic — 19 is in the sweet spot
-- **Workflow grouping**: Sub-operations belong with their parent resource (schedules→process, extensions→environments, organizations→trading_partners)
+- **Workflow grouping**: Sub-operations belong with their parent resource (schedules→process, extensions→environments, organizations→trading_partners). Extensions are particularly strong: only 3 API ops (GET/UPDATE/QUERY), no CREATE/DELETE, auto-generated from deployed process XML.
 - **Specialized APIs**: Resources with unique discovery APIs (connectors have a catalog API) warrant separate tools
 - **Token budget**: ~7,500 tokens (81% reduction from individual approach)
 - **Coverage**: 85% direct + 15% via generic invoker = 100%
@@ -1349,7 +1377,7 @@ Only `POST /Component` and `POST /Component/{componentId}` require XML (2 of 100
 
 | Pattern | Tools |
 |---------|-------|
-| `config` (JSON) | `manage_trading_partner` (incl. org actions), `manage_environments` (incl. extensions), `monitor_platform`, future `manage_runtimes` |
+| `config` (JSON) | `manage_trading_partner` (incl. org actions), `manage_environments` (incl. extensions: get/update/query), `monitor_platform`, future `manage_runtimes` |
 | `config_yaml` (YAML) | `manage_process` (incl. schedule actions), future `manage_component` for XML-based types (maps, connectors) |
 | Neither (few params) | `set_boomi_credentials`, `list_boomi_profiles`, `execute_process`, meta tools |
 
@@ -3719,7 +3747,7 @@ This 19-tool workflow-oriented architecture represents the optimal balance betwe
 4. manage_connector ✅ (list_types, get_type, list, get, create, update, delete)
 
 **Environments & Runtimes** (2):
-5. manage_environments (includes get_extensions, update_extensions actions)
+5. manage_environments (includes get_extensions, update_extensions, query_extensions, stats actions)
 6. manage_runtimes
 
 **Deployment & B2B** (3):
