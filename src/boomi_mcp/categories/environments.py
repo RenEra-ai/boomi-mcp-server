@@ -13,6 +13,7 @@ Provides 9 environment management actions:
 - stats: Environment summary by classification
 """
 
+import logging
 from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
@@ -368,8 +369,17 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
             merged = _deep_merge(current_data, extensions_data)
         except ApiError as e:
             status = getattr(e, 'status', None)
-            if status in (404, 400):
-                # No extensions exist yet — safe to use provided data as-is
+            if status == 404:
+                # Environment not found or no extensions resource — safe fallback
+                merged = extensions_data
+            elif status == 400:
+                # Boomi returns 400 when no processes with extensible components
+                # are deployed to this environment. Log the detail for diagnostics.
+                logging.getLogger(__name__).info(
+                    "GET extensions returned 400 for env %s (likely no deployed "
+                    "extensible components), proceeding with provided data. Detail: %s",
+                    resource_id, e,
+                )
                 merged = extensions_data
             else:
                 # Transient failure — abort to avoid destructive update
