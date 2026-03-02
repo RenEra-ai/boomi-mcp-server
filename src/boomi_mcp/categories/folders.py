@@ -93,20 +93,24 @@ def _find_folder_by_name_and_parent(sdk: Boomi, name: str, parent_id: Optional[s
     query_config = FolderQueryConfig(query_filter=query_filter)
     result = sdk.folder.query_folder(request_body=query_config)
 
-    if hasattr(result, 'result') and result.result:
-        for f in result.result:
-            if getattr(f, 'deleted', False):
-                continue
-            if parent_id:
-                # Explicit parent: match by parent_id
-                if getattr(f, 'parent_id', '') == parent_id:
-                    return _folder_to_dict(f)
-            else:
-                # No parent specified: match top-level folders
-                # Top-level folders have full_path like "AccountRoot/FolderName" (one slash)
-                full_path = getattr(f, 'full_path', '')
-                if full_path.count('/') == 1 and full_path.endswith('/' + name):
-                    return _folder_to_dict(f)
+    while True:
+        if hasattr(result, 'result') and result.result:
+            for f in result.result:
+                if getattr(f, 'deleted', False):
+                    continue
+                if parent_id:
+                    # Explicit parent: match by parent_id
+                    if getattr(f, 'parent_id', '') == parent_id:
+                        return _folder_to_dict(f)
+                else:
+                    # No parent specified: match top-level folders
+                    # Top-level folders have full_path like "AccountRoot/FolderName" (one slash)
+                    full_path = getattr(f, 'full_path', '')
+                    if full_path.count('/') == 1 and full_path.endswith('/' + name):
+                        return _folder_to_dict(f)
+        if not (hasattr(result, 'query_token') and result.query_token):
+            break
+        result = sdk.folder.query_more_folder(request_body=result.query_token)
     return None
 
 
@@ -334,6 +338,9 @@ def _action_delete(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         comp_config = ComponentMetadataQueryConfig(query_filter=comp_filter)
         comp_result = sdk.component_metadata.query_component_metadata(request_body=comp_config)
         has_components = hasattr(comp_result, 'result') and comp_result.result and len(comp_result.result) > 0
+        while not has_components and hasattr(comp_result, 'query_token') and comp_result.query_token:
+            comp_result = sdk.component_metadata.query_more_component_metadata(request_body=comp_result.query_token)
+            has_components = hasattr(comp_result, 'result') and comp_result.result and len(comp_result.result) > 0
 
         # Check for sub-folders
         sub_expression = FolderSimpleExpression(
@@ -350,6 +357,13 @@ def _action_delete(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                 if not getattr(sf, 'deleted', False) and getattr(sf, 'parent_id', '') == folder_id:
                     has_subfolders = True
                     break
+        while not has_subfolders and hasattr(sub_result, 'query_token') and sub_result.query_token:
+            sub_result = sdk.folder.query_more_folder(request_body=sub_result.query_token)
+            if hasattr(sub_result, 'result') and sub_result.result:
+                for sf in sub_result.result:
+                    if not getattr(sf, 'deleted', False) and getattr(sf, 'parent_id', '') == folder_id:
+                        has_subfolders = True
+                        break
 
         if has_components or has_subfolders:
             contents = []
@@ -485,6 +499,19 @@ def _action_contents(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                         "id": getattr(sf, 'id_', ''),
                         "name": getattr(sf, 'name', ''),
                     })
+
+    # Paginate sub-folders
+    while hasattr(sub_result, 'query_token') and sub_result.query_token:
+        sub_result = sdk.folder.query_more_folder(request_body=sub_result.query_token)
+        if hasattr(sub_result, 'result') and sub_result.result:
+            for sf in sub_result.result:
+                if not getattr(sf, 'deleted', False):
+                    sf_parent_id = getattr(sf, 'parent_id', '')
+                    if sf_parent_id == folder_id:
+                        sub_folders.append({
+                            "id": getattr(sf, 'id_', ''),
+                            "name": getattr(sf, 'name', ''),
+                        })
 
     return {
         "_success": True,
