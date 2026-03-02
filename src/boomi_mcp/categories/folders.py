@@ -125,10 +125,14 @@ def _find_folder_by_name(sdk: Boomi, name: str) -> Optional[Dict[str, Any]]:
     query_config = FolderQueryConfig(query_filter=query_filter)
     result = sdk.folder.query_folder(request_body=query_config)
 
-    if hasattr(result, 'result') and result.result:
-        for f in result.result:
-            if not getattr(f, 'deleted', False):
-                return _folder_to_dict(f)
+    while True:
+        if hasattr(result, 'result') and result.result:
+            for f in result.result:
+                if not getattr(f, 'deleted', False):
+                    return _folder_to_dict(f)
+        if not (hasattr(result, 'query_token') and result.query_token):
+            break
+        result = sdk.folder.query_more_folder(request_body=result.query_token)
     return None
 
 
