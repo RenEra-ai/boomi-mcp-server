@@ -173,6 +173,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import list capabilities: {e}")
     list_capabilities_action = None
 
+# --- Environment Tools ---
+try:
+    from boomi_mcp.categories.environments import manage_environments_action
+    print(f"[INFO] Environment tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import environment tools: {e}")
+    manage_environments_action = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -1654,6 +1662,102 @@ if list_capabilities_action:
             return {"_success": False, "error": str(e)}
 
     print("[INFO] List capabilities tool registered successfully")
+
+
+# --- Environment Management MCP Tools ---
+if manage_environments_action:
+    @mcp.tool()
+    def manage_environments(
+        profile: str,
+        action: str,
+        resource_id: str = None,
+        config: str = None,
+    ):
+        """
+        Manage Boomi environments and their configuration extensions.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: list, get, create, update, delete, get_extensions, update_extensions, query_extensions, stats
+            resource_id: Environment ID (required for get, update, delete, get_extensions, update_extensions, query_extensions)
+            config: JSON string with action-specific configuration (see examples below)
+
+        Actions and config examples:
+
+            list - List all environments, optional filters:
+                config='{"classification": "PROD"}'
+                config='{"name_pattern": "%test%"}'
+
+            get - Get environment by ID (no config needed):
+                resource_id="abc-123-def"
+
+            create - Create new environment:
+                config='{"name": "My Test Env", "classification": "TEST"}'
+
+            update - Update environment name:
+                resource_id="abc-123-def"
+                config='{"name": "Renamed Environment"}'
+
+            delete - Delete environment (permanent!):
+                resource_id="abc-123-def"
+
+            get_extensions - Get environment config overrides:
+                resource_id="abc-123-def"
+
+            update_extensions - Update environment extensions:
+                resource_id="abc-123-def"
+                config='{"partial": true, "extensions": {"connections": {...}}}'
+
+            query_extensions - Check if environment has extensions:
+                resource_id="abc-123-def"
+
+            stats - Environment summary by classification (no params needed)
+
+        Classification values: TEST, PROD
+        Note: Classification is immutable after creation. Only name can be updated.
+
+        Returns:
+            Action result with success status and data/error
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] manage_environments called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if resource_id:
+                params["resource_id"] = resource_id
+
+            return manage_environments_action(sdk, profile, action, config_data=config_data, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} manage_environments: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Environment management tool registered successfully (1 consolidated tool)")
 
 
 # --- Credential Management Tools (local dev only) ---

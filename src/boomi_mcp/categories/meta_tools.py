@@ -823,10 +823,10 @@ _ENVIRONMENT_CREATE = {
     "operation": "create",
     "template": {
         "name": "Production (REQUIRED)",
-        "classification": "TEST | PRODUCTION",
+        "classification": "TEST | PROD",
     },
     "enums": {
-        "classification": ["TEST", "PRODUCTION"],
+        "classification": ["TEST", "PROD"],
     },
     "sdk_pattern": "sdk.environment.create_environment(EnvironmentModel(name=..., classification=...))",
 }
