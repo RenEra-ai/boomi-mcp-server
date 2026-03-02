@@ -16,6 +16,7 @@ Provides 9 environment management actions:
 from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
+from boomi.net.transport.api_error import ApiError
 from boomi.models import (
     Environment as EnvironmentModel,
     EnvironmentClassification,
@@ -134,14 +135,69 @@ def _parse_extensions_response(result) -> Dict[str, Any]:
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge override into base dict. Override values take precedence."""
+    """Deep merge override into base dict. Override values take precedence.
+
+    For lists of dicts, items are matched by '@id' or 'id' key and merged
+    individually so that sibling items in the base are preserved.
+    """
     merged = base.copy()
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
             merged[key] = _deep_merge(merged[key], value)
+        elif key in merged and isinstance(merged[key], list) and isinstance(value, list):
+            merged[key] = _merge_lists(merged[key], value)
         else:
             merged[key] = value
     return merged
+
+
+def _merge_lists(base_list: list, override_list: list) -> list:
+    """Merge two lists of dicts by matching on '@id' or 'id' fields.
+
+    Override items with a matching ID are merged into the base item.
+    Override items without a match are appended.
+    Base items without a match are preserved.
+    Falls back to replacement if items aren't dicts or have no ID key.
+    """
+    if not base_list or not override_list:
+        return override_list if override_list else base_list
+
+    # Check if items are dicts with an ID key
+    id_key = None
+    sample = base_list[0] if base_list else override_list[0]
+    if isinstance(sample, dict):
+        if '@id' in sample:
+            id_key = '@id'
+        elif 'id' in sample:
+            id_key = 'id'
+
+    if not id_key:
+        # No ID field to match on — replace wholesale
+        return override_list
+
+    base_by_id = {item[id_key]: item for item in base_list if isinstance(item, dict) and id_key in item}
+    seen_ids = set()
+
+    result = []
+    # Merge overrides into base items (preserve base order)
+    override_by_id = {item[id_key]: item for item in override_list if isinstance(item, dict) and id_key in item}
+    for item in base_list:
+        if not isinstance(item, dict) or id_key not in item:
+            result.append(item)
+            continue
+        item_id = item[id_key]
+        if item_id in override_by_id:
+            result.append(_deep_merge(item, override_by_id[item_id]))
+            seen_ids.add(item_id)
+        else:
+            result.append(item)
+
+    # Append new items from override that weren't in base
+    for item in override_list:
+        if isinstance(item, dict) and id_key in item and item[id_key] not in seen_ids:
+            result.append(item)
+
+    return result
 
 
 # ============================================================================
@@ -310,9 +366,19 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
             current_result = sdk.environment_extensions.get_environment_extensions(id_=resource_id)
             current_data = _extract_raw_extensions(current_result)
             merged = _deep_merge(current_data, extensions_data)
-        except Exception:
-            # If GET fails (e.g., no extensions yet), use provided data as-is
-            merged = extensions_data
+        except ApiError as e:
+            status = getattr(e, 'status', None)
+            if status in (404, 400):
+                # No extensions exist yet — safe to use provided data as-is
+                merged = extensions_data
+            else:
+                # Transient failure — abort to avoid destructive update
+                return {
+                    "_success": False,
+                    "error": f"Failed to read current extensions for partial merge (HTTP {status}). "
+                             f"Aborting to avoid data loss. Use partial=false to force a complete update, "
+                             f"or retry later. Detail: {e}",
+                }
     else:
         merged = extensions_data
 

@@ -1720,10 +1720,13 @@ if manage_environments_action:
             connections, operations, properties, cross_references,
             trading_partners, pgp_certificates, process_properties, data_maps
 
-        Extension lifecycle:
-            - Extensions are auto-generated when processes are deployed to an environment.
-            - You cannot create extensions via API; use get_extensions to read what exists.
-            - update_extensions modifies field values (e.g., connection URLs, credentials).
+        Extension lifecycle (3 phases):
+            1. DEFINE: Mark components as extensible in process canvas (Extensions dialog).
+               Stored in process component XML — handled by manage_process / manage_component.
+            2. DEPLOY: Package and deploy process to an environment. Extension entries are
+               auto-generated from deployed process XML (no API to create/delete them).
+            3. CONFIGURE (this tool): Use get_extensions to read current values, update_extensions
+               to override field values per environment (e.g., connection URLs, credentials).
 
         update_extensions caveats:
             - partial=true (default): merges only the extension types you send; others are untouched.

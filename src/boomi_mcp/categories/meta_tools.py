@@ -1530,13 +1530,13 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 2: Environments & Runtimes (2 tools — NOT YET IMPLEMENTED) ===
+        # === Category 2: Environments & Runtimes (2 tools) ===
         "manage_environments": {
             "category": "Environments & Runtimes",
             "description": "Manage environments and their configuration extensions",
-            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions"],
+            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions", "query_extensions", "stats"],
             "read_only": False,
-            "implemented": False,
+            "implemented": True,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
