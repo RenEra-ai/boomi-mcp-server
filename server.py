@@ -1798,7 +1798,7 @@ if manage_runtimes_action:
         environment_id: str = None,
         config: str = None,
     ):
-        """Manage Boomi runtimes (Atoms, Molecules, Clouds, Gateways), attachments, and provisioning.
+        """Manage Boomi runtimes (Atoms, Molecules, Clouds), attachments, and provisioning.
 
         Args:
             profile: Boomi profile name (required)
