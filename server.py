@@ -1802,8 +1802,8 @@ if manage_runtimes_action:
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: list, get, update, delete, attach, detach, list_attachments, restart, configure_java, create_installer_token
-            resource_id: Runtime ID (most actions) or attachment ID (detach)
+            action: One of: list, get, update, delete, attach, detach, list_attachments, restart, configure_java, create_installer_token, cloud_list, cloud_get, cloud_create, cloud_update, cloud_delete
+            resource_id: Runtime ID (most actions) or attachment ID (detach) or cloud ID (cloud_get, cloud_update, cloud_delete)
             environment_id: Environment ID (for attach, detach, list_attachments)
             config: JSON string with action-specific parameters
 
@@ -1847,11 +1847,29 @@ if manage_runtimes_action:
                 config='{"java_action": "upgrade", "target_version": "17"}'
                 config='{"java_action": "rollback"}'
 
-            create_installer_token - Create installer token:
+            create_installer_token - Create installer token for local runtime:
                 config='{"install_type": "ATOM", "duration_minutes": 120}'
+
+            cloud_list - List private runtime clouds:
+                config='{"classification": "PROD"}'
+
+            cloud_get - Get private runtime cloud by ID:
+                resource_id="abc-123-def"
+
+            cloud_create - Create private runtime cloud:
+                config='{"name": "My Cloud", "classification": "PROD"}'
+                config='{"name": "Test Cloud", "classification": "TEST", "allow_deployments": true, "allow_browsing": true, "allow_test_executions": true}'
+
+            cloud_update - Update private runtime cloud:
+                resource_id="abc-123-def"
+                config='{"name": "Renamed Cloud", "allow_deployments": false}'
+
+            cloud_delete - Delete private runtime cloud (permanent!):
+                resource_id="abc-123-def"
 
         Runtime types: ATOM, MOLECULE, CLOUD
         Install types: ATOM, MOLECULE, CLOUD, BROKER, GATEWAY
+        Cloud classifications: PROD, TEST (immutable after creation)
         Java versions: 8, 11, 17, 21
 
         Returns:
