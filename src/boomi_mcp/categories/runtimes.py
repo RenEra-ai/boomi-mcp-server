@@ -43,7 +43,7 @@ from boomi.models import (
 # Constants
 # ============================================================================
 
-VALID_RUNTIME_TYPES = {"ATOM", "MOLECULE", "CLOUD", "GATEWAY"}
+VALID_RUNTIME_TYPES = {"ATOM", "MOLECULE", "CLOUD"}
 VALID_STATUSES = {"ONLINE", "OFFLINE"}
 VALID_INSTALL_TYPES = {"ATOM", "MOLECULE", "CLOUD", "BROKER", "GATEWAY"}
 
@@ -202,10 +202,12 @@ def _action_list(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
             argument=[upper],
         )
     elif name_pattern:
+        # CONTAINS does substring matching; strip any SQL-style % wildcards
+        clean_pattern = name_pattern.strip("%")
         expression = AtomSimpleExpression(
-            operator=AtomSimpleExpressionOperator.LIKE,
+            operator=AtomSimpleExpressionOperator.CONTAINS,
             property=AtomSimpleExpressionProperty.NAME,
-            argument=[name_pattern],
+            argument=[clean_pattern],
         )
     else:
         expression = None
@@ -500,12 +502,20 @@ def _action_create_installer_token(sdk: Boomi, profile: str, **kwargs) -> Dict[s
     """Create installer token for new runtime installation."""
     install_type = kwargs.get("install_type", "ATOM").upper()
     duration_minutes = kwargs.get("duration_minutes", 60)
+    cloud_id = kwargs.get("cloud_id")
 
     if install_type not in VALID_INSTALL_TYPES:
         return {
             "_success": False,
             "error": f"Invalid install_type: '{install_type}'. "
                      f"Valid values: {', '.join(sorted(VALID_INSTALL_TYPES))}",
+        }
+
+    if install_type == "CLOUD" and not cloud_id:
+        return {
+            "_success": False,
+            "error": "cloud_id is required when install_type is CLOUD. "
+                     "Use action='list' with runtime_type='CLOUD' to find cloud IDs.",
         }
 
     try:
@@ -520,10 +530,13 @@ def _action_create_installer_token(sdk: Boomi, profile: str, **kwargs) -> Dict[s
         }
 
     install_type_enum = getattr(InstallType, install_type)
-    token_request = InstallerToken(
-        install_type=install_type_enum,
-        duration_minutes=duration_minutes,
-    )
+    token_kwargs = {
+        "install_type": install_type_enum,
+        "duration_minutes": duration_minutes,
+    }
+    if install_type == "CLOUD" and cloud_id:
+        token_kwargs["cloud_id"] = cloud_id
+    token_request = InstallerToken(**token_kwargs)
     result = sdk.installer_token.create_installer_token(token_request)
 
     # Parse response — may be object, wrapped in _kwargs, or dict
