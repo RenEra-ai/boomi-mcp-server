@@ -110,18 +110,34 @@ def _runtime_to_dict(runtime) -> Dict[str, Any]:
         "type": _enum_str(getattr(runtime, 'type_', '')),
         "status": _enum_str(getattr(runtime, 'status', '')),
     }
-    # Include optional fields only when present
+    # Include optional string fields only when present
     for sdk_attr, dict_key in [
         ('host_name', 'hostname'),
         ('current_version', 'version'),
         ('date_installed', 'date_installed'),
-        ('date_created', 'date_created'),
         ('created_by', 'created_by'),
-        ('description', 'description'),
+        ('cloud_id', 'cloud_id'),
+        ('cloud_name', 'cloud_name'),
+        ('cloud_molecule_id', 'cloud_molecule_id'),
+        ('cloud_molecule_name', 'cloud_molecule_name'),
+        ('cloud_owner_name', 'cloud_owner_name'),
+        ('instance_id', 'instance_id'),
+        ('status_detail', 'status_detail'),
     ]:
         val = getattr(runtime, sdk_attr, None)
         if val and str(val) != 'N/A':
             result[dict_key] = str(val)
+
+    # Bool/int fields need explicit None check (0/False are valid values)
+    for sdk_attr, dict_key in [
+        ('is_cloud_attachment', 'is_cloud_attachment'),
+        ('purge_history_days', 'purge_history_days'),
+        ('purge_immediate', 'purge_immediate'),
+        ('force_restart_time', 'force_restart_time'),
+    ]:
+        val = getattr(runtime, sdk_attr, None)
+        if val is not None:
+            result[dict_key] = val
 
     capabilities = getattr(runtime, 'capabilities', None)
     if capabilities:
@@ -646,14 +662,7 @@ def _action_create(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     try:
         result = sdk.atom.create_atom(request_body=atom_request)
     except ApiError as e:
-        msg = ""
-        resp = getattr(e, 'response', None)
-        if resp:
-            body = getattr(resp, 'body', None)
-            if isinstance(body, dict):
-                msg = body.get("message", "")
-        if not msg:
-            msg = str(e)
+        msg = _extract_api_error_msg(e)
         return {
             "_success": False,
             "error": f"{msg} Use action='available_clouds' to find Boomi-managed cloud IDs, "
@@ -711,6 +720,17 @@ def _action_available_clouds(sdk: Boomi, profile: str, **kwargs) -> Dict[str, An
     while hasattr(result, 'query_token') and result.query_token:
         result = sdk.cloud.query_more_cloud(request_body=result.query_token)
         _parse_clouds(result)
+
+    if not clouds:
+        return {
+            "_success": True,
+            "clouds": [],
+            "total_count": 0,
+            "hint": "No Boomi-managed public clouds found. "
+                    "If your account uses partner or test clouds, "
+                    "use action='get' on an existing runtime to find its cloud_id, "
+                    "or action='cloud_list' for private runtime clouds.",
+        }
 
     return {
         "_success": True,
@@ -923,6 +943,28 @@ def _action_cloud_delete(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
 
 # ============================================================================
+# Error Helpers
+# ============================================================================
+
+def _extract_api_error_msg(e: ApiError) -> str:
+    """Extract user-friendly error message from ApiError."""
+    # 1. SDK's pre-parsed XML error detail
+    detail = getattr(e, 'error_detail', None)
+    if detail:
+        return detail
+    # 2. JSON response body with "message" key
+    resp = getattr(e, 'response', None)
+    if resp:
+        body = getattr(resp, 'body', None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    # 3. Fallback to ApiError.message (contains URL + status)
+    return getattr(e, 'message', '') or str(e)
+
+
+# ============================================================================
 # Action Router
 # ============================================================================
 
@@ -970,6 +1012,12 @@ def manage_runtimes_action(
 
     try:
         return handler(sdk, profile, **merged)
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
