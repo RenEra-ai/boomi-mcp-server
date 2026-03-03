@@ -460,14 +460,11 @@ def _action_restart(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
             request_body=restart_request
         )
     except ApiError as e:
-        status = getattr(e, 'status', None)
-        if status == 400:
-            return {
-                "_success": False,
-                "error": "Cannot restart this runtime via API. "
-                         "Cloud runtimes are managed by Boomi and restart automatically.",
-            }
-        raise
+        msg = _extract_api_error_msg(e)
+        return {
+            "_success": False,
+            "error": msg,
+        }
 
     # Handle response — may be string, object with message, or dict
     message = "Restart command sent successfully"
@@ -681,17 +678,17 @@ def _action_available_clouds(sdk: Boomi, profile: str, **kwargs) -> Dict[str, An
     name_pattern = kwargs.get("name_pattern")
 
     if name_pattern:
-        clean = name_pattern.strip("%")
+        like_pattern = name_pattern if "%" in name_pattern else f"%{name_pattern}%"
         expression = CloudSimpleExpression(
-            operator=CloudSimpleExpressionOperator.CONTAINS,
+            operator=CloudSimpleExpressionOperator.LIKE,
             property=CloudSimpleExpressionProperty.NAME,
-            argument=[clean],
+            argument=[like_pattern],
         )
     else:
         expression = CloudSimpleExpression(
-            operator=CloudSimpleExpressionOperator.CONTAINS,
+            operator=CloudSimpleExpressionOperator.LIKE,
             property=CloudSimpleExpressionProperty.NAME,
-            argument=[""],
+            argument=["%"],
         )
 
     query_filter = CloudQueryConfigQueryFilter(expression=expression)
