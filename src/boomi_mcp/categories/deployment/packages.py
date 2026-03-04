@@ -174,18 +174,26 @@ def _action_get_package(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
 def _action_create_package(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     component_id = kwargs.get("component_id")
+    component_type = kwargs.get("component_type")
     package_version = kwargs.get("package_version")
 
     if not component_id:
         return {"_success": False, "error": "config.component_id is required for 'create_package'"}
+    if not component_type:
+        return {
+            "_success": False,
+            "error": "config.component_type is required for 'create_package'",
+            "hint": "Valid types: process, certificate, customlibrary, flowservice, processroute, tpgroup, webservice",
+        }
     if not package_version:
         return {"_success": False, "error": "config.package_version is required for 'create_package'"}
 
     pkg_kwargs = {
         "component_id": component_id,
+        "component_type": component_type,
         "package_version": package_version,
     }
-    for key in ("notes", "branch_name", "component_type"):
+    for key in ("notes", "branch_name"):
         val = kwargs.get(key)
         if val:
             pkg_kwargs[key] = val

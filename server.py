@@ -1959,7 +1959,7 @@ if manage_deployment_action:
             config: JSON string with action-specific parameters
 
         RECOMMENDED WORKFLOW:
-          1. Create a package: action="create_package", config='{"component_id":"...", "package_version":"1.0"}'
+          1. Create a package: action="create_package", config='{"component_id":"...", "component_type":"process", "package_version":"1.0"}'
           2. Deploy to env: action="deploy", package_id="<from step 1>", environment_id="..."
           3. Promote to prod: action="deploy", package_id="<same>", environment_id="<prod-env-id>"
 
@@ -1972,8 +1972,9 @@ if manage_deployment_action:
                 package_id="pkg-123"
 
             create_package - Create versioned package from component:
-                config='{"component_id": "abc-123", "package_version": "1.0.0"}'
-                config='{"component_id": "abc-123", "package_version": "2.0", "notes": "Release", "branch_name": "main"}'
+                config='{"component_id": "abc-123", "component_type": "process", "package_version": "1.0.0"}'
+                config='{"component_id": "abc-123", "component_type": "process", "package_version": "2.0", "notes": "Release", "branch_name": "main"}'
+                component_type: process, certificate, customlibrary, flowservice, processroute, tpgroup, webservice
 
             delete_package - Delete package (fails if deployed):
                 package_id="pkg-123"

@@ -848,11 +848,13 @@ _PACKAGE_CREATE = {
     "operation": "create",
     "template": {
         "component_id": "REQUIRED — ID of component to package",
-        "version": "1.0.0 (optional, auto-generated if omitted)",
-        "notes": "Release notes for this package",
-        "branch": "main (optional, defaults to main branch)",
+        "component_type": "REQUIRED — process, certificate, customlibrary, flowservice, processroute, tpgroup, webservice",
+        "package_version": "REQUIRED — user-defined version string (e.g. '1.0.0')",
+        "notes": "Release notes for this package (optional)",
+        "branch_name": "main (optional, defaults to main branch)",
     },
     "sdk_pattern": "sdk.packaged_component.create_packaged_component(...)",
+    "tool": "manage_deployment(action='create_package', config='{...}')",
 }
 
 _PACKAGE_DEPLOY = {
@@ -861,9 +863,11 @@ _PACKAGE_DEPLOY = {
     "template": {
         "package_id": "REQUIRED — ID of packaged component",
         "environment_id": "REQUIRED — target environment ID",
-        "notes": "Deployment notes",
+        "listener_status": "RUNNING or PAUSED (optional)",
+        "notes": "Deployment notes (optional)",
     },
-    "sdk_pattern": "sdk.deployment.create_deployment(...)",
+    "sdk_pattern": "sdk.deployed_package.create_deployed_package(...)",
+    "tool": "manage_deployment(action='deploy', package_id='...', environment_id='...')",
 }
 
 
@@ -1581,40 +1585,27 @@ def list_capabilities_action() -> Dict[str, Any]:
         },
 
         # === Category 3: Deployment & B2B (3 tools) ===
-        "manage_packages": {
+        "manage_deployment": {
             "category": "Deployment & B2B",
-            "description": "Manage deployment packages — create, list, delete",
-            "actions": ["list", "get", "create", "delete"],
+            "description": "Manage deployment packages and deploy to environments",
+            "actions": [
+                "list_packages", "get_package", "create_package", "delete_package",
+                "deploy", "undeploy", "list_deployments", "get_deployment",
+            ],
             "read_only": False,
-            "implemented": False,
+            "implemented": True,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
-                "package_id": "str (optional)",
-                "component_ids": "list (optional) — for create",
-                "version": "str (optional)",
-                "notes": "str (optional)",
+                "package_id": "str (optional) — package ID or deployment ID depending on action",
+                "environment_id": "str (optional) — target env for deploy, filter for list_deployments",
+                "config": "str (optional) — JSON string with action-specific parameters",
             },
             "sdk_examples_covered": [
                 "create_packaged_component.py",
                 "get_packaged_component.py",
                 "query_packaged_components.py",
                 "delete_packaged_component.py",
-            ],
-        },
-        "deploy_package": {
-            "category": "Deployment & B2B",
-            "description": "Deploy packages to environments",
-            "actions": ["deploy", "query", "undeploy"],
-            "read_only": False,
-            "implemented": False,
-            "parameters": {
-                "profile": "str (required)",
-                "action": "str (required)",
-                "package_id": "str (optional) — for deploy",
-                "environment_id": "str (optional) — for deploy/query",
-            },
-            "sdk_examples_covered": [
                 "create_deployment.py",
                 "query_deployed_packages.py",
                 "promote_package_to_environment.py",
@@ -1848,8 +1839,8 @@ def list_capabilities_action() -> Dict[str, Any]:
             "steps": [
                 "1. get_schema_template(resource_type='process', operation='create') → get YAML template",
                 "2. manage_process(action='create', config_yaml='...') → create process",
-                "3. invoke_boomi_api(endpoint='PackagedComponent', method='POST', ...) → package it (manage_packages not yet implemented)",
-                "4. invoke_boomi_api(endpoint='Deployment', method='POST', ...) → deploy (deploy_package not yet implemented)",
+                "3. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
+                "4. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
                 "5. invoke_boomi_api(endpoint='ExecutionRequest', method='POST', ...) → run it (execute_process not yet implemented)",
                 "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
             ],
