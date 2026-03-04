@@ -2087,8 +2087,8 @@ if execute_process_action:
 
         Config fields:
             dynamic_properties: Dict of key-value pairs (e.g. {"key": "value"})
-            process_properties: Dict of component property overrides
-            notes: Execution notes/description
+            process_properties: Dict of component overrides
+                Format: {"componentId": {"key": "value", ...}}
 
         Returns:
             request_id for polling via monitor_platform(action="execution_records")

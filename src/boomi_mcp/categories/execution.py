@@ -20,6 +20,8 @@ from boomi.models import (
     ExecutionRequestDynamicProcessProperties,
     ExecutionRequestProcessProperties,
     DynamicProcessProperty,
+    ProcessProperty,
+    ProcessPropertyValue,
     EnvironmentAtomAttachmentQueryConfig,
     EnvironmentAtomAttachmentQueryConfigQueryFilter,
     EnvironmentAtomAttachmentSimpleExpression,
@@ -63,9 +65,20 @@ def _resolve_atom_id(sdk: Boomi, environment_id: str) -> tuple:
     )
 
     attachments = []
-    if hasattr(result, "result") and result.result:
-        items = result.result if isinstance(result.result, list) else [result.result]
-        attachments = [getattr(a, "atom_id", "") for a in items if getattr(a, "atom_id", "")]
+
+    def _collect(res):
+        if hasattr(res, "result") and res.result:
+            items = res.result if isinstance(res.result, list) else [res.result]
+            attachments.extend(
+                [getattr(a, "atom_id", "") for a in items if getattr(a, "atom_id", "")]
+            )
+
+    _collect(result)
+    while hasattr(result, "query_token") and result.query_token:
+        result = sdk.environment_atom_attachment.query_more_environment_atom_attachment(
+            request_body=result.query_token
+        )
+        _collect(result)
 
     if len(attachments) == 0:
         return None, (
@@ -94,6 +107,27 @@ def _build_dynamic_properties(props_dict: Optional[Dict[str, str]]):
     )
 
 
+def _build_process_properties(props_dict: Optional[Dict[str, Dict[str, str]]]):
+    """Build ExecutionRequestProcessProperties from nested dict.
+
+    Format: {"component_id": {"key": "value", ...}, ...}
+    Maps to ProcessProperty(component_id=..., process_property_value=[ProcessPropertyValue(key=..., value=...)])
+    """
+    if not props_dict:
+        return ExecutionRequestProcessProperties()
+
+    prop_list = []
+    for component_id, values in props_dict.items():
+        ppv_list = [
+            ProcessPropertyValue(key=str(k), value=str(v))
+            for k, v in values.items()
+        ]
+        prop_list.append(
+            ProcessProperty(component_id=str(component_id), process_property_value=ppv_list)
+        )
+    return ExecutionRequestProcessProperties(process_property=prop_list)
+
+
 def execute_process_action(
     sdk: Boomi,
     profile: str,
@@ -120,7 +154,7 @@ def execute_process_action(
 
     # Build properties
     dynamic_props = _build_dynamic_properties(config_data.get("dynamic_properties"))
-    process_props = ExecutionRequestProcessProperties()
+    process_props = _build_process_properties(config_data.get("process_properties"))
 
     # Create execution request
     execution_request = ExecutionRequest(
