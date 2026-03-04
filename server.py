@@ -197,6 +197,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import deployment tools: {e}")
     manage_deployment_action = None
 
+# --- Execution Tools ---
+try:
+    from boomi_mcp.categories.execution import execute_process_action
+    print(f"[INFO] Execution tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import execution tools: {e}")
+    execute_process_action = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -2042,6 +2050,87 @@ if manage_deployment_action:
     print("[INFO] Deployment management tool registered successfully")
 
 
+# ============================================================
+# execute_process — Execute a Boomi process on a runtime
+# ============================================================
+if execute_process_action:
+    @mcp.tool(annotations={"destructiveHint": True, "openWorldHint": True})
+    def execute_process(
+        profile: str,
+        process_id: str,
+        environment_id: str,
+        atom_id: str = None,
+        config: str = None,
+    ):
+        """Execute a Boomi process on a runtime.
+
+        Args:
+            profile: Boomi profile name (required)
+            process_id: Process component ID to execute (required)
+            environment_id: Environment to execute in (required)
+            atom_id: Runtime ID (auto-detected if only one attached to environment)
+            config: JSON string with optional parameters
+
+        RECOMMENDED WORKFLOW:
+          1. execute_process(...) → returns request_id
+          2. monitor_platform(action="execution_records", config='{"execution_id":"<request_id>"}')
+          3. If ERROR: monitor_platform(action="execution_logs", config='{"execution_id":"<request_id>"}')
+
+        Examples:
+
+            Basic:
+                process_id="abc-123", environment_id="env-456"
+
+            With dynamic properties:
+                process_id="abc-123", environment_id="env-456",
+                config='{"dynamic_properties": {"inputFile": "/data/orders.csv"}}'
+
+        Config fields:
+            dynamic_properties: Dict of key-value pairs (e.g. {"key": "value"})
+            process_properties: Dict of component overrides
+                Format: {"componentId": {"key": "value", ...}}
+
+        Returns:
+            request_id for polling via monitor_platform(action="execution_records")
+        """
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config JSON: {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object"}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] execute_process called by user: {subject}, profile: {profile}")
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            return execute_process_action(
+                sdk, profile, process_id, environment_id,
+                atom_id=atom_id, config_data=config_data,
+            )
+
+        except Exception as e:
+            print(f"[ERROR] execute_process failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Execute process tool registered successfully")
+
+
 # --- Credential Management Tools (local dev only) ---
 if LOCAL_MODE:
     @mcp.tool()
@@ -2499,6 +2588,10 @@ if __name__ == "__main__":
             print("  manage_deployment - Packages and deployment lifecycle")
             print("    Actions: list_packages, get_package, create_package, delete_package,")
             print("             deploy, undeploy, list_deployments, get_deployment")
+        if execute_process_action:
+            print("\n  Process Execution:")
+            print("  execute_process - Execute a process on a runtime")
+            print("    Returns request_id for polling via monitor_platform(action='execution_records')")
         if invoke_api:
             print("\n  Generic API Access:")
             print("  invoke_boomi_api - Direct access to any Boomi REST API endpoint")
