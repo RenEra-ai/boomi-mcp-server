@@ -824,27 +824,25 @@ See **Implementation Status** section above for full details of the 3-layer hybr
 
 **Note on process extensions (define phase)**: The Extensions dialog in the Boomi UI allows marking components as extensible (connections, operations, trading partners, dynamic process properties, process properties, cross-references, PGP certs, data maps). These extension definitions are stored in the **process component XML** — they are part of the process itself, not a separate API. When a process with extensible components is deployed to an environment, the platform auto-generates the `EnvironmentExtensions` entries. The *configure* phase (setting override values per environment) is handled by `manage_environments` actions `get_extensions` / `update_extensions` / `query_extensions`.
 
-#### 10. execute_process
+#### 10. execute_process ✅ Implemented
 ```python
-@mcp.tool()
+@mcp.tool(annotations={"destructiveHint": True, "openWorldHint": True})
 def execute_process(
     profile: str,
     process_id: str,
     environment_id: str,
-    atom_id: Optional[str] = None,  # Auto-selected if not specified
-    execution_type: Literal["sync", "async"] = "async",
-    input_data: Optional[str] = None,  # Input document
-    dynamic_properties: Optional[dict] = None,
-    wait_for_completion: bool = False,
-    timeout_seconds: int = 300
+    atom_id: str = None,       # Auto-detected if only one attached to environment
+    config: str = None,        # JSON: dynamic_properties, process_properties, notes
 ) -> dict:
-    """Execute a Boomi process.
+    """Execute a Boomi process on a runtime.
 
-    Returns execution_id immediately for async.
-    Optionally waits and polls for completion if wait_for_completion=True.
-    Supports both sync and async execution modes.
+    Returns request_id for status polling via monitor_platform.
+    Auto-resolves atom_id from environment attachments if omitted.
+    Supports dynamic process properties via config JSON.
     """
 ```
+**File**: `src/boomi_mcp/categories/execution.py`
+**SDK service**: `sdk.execution_request.create_execution_request(ExecutionRequest(...))`
 
 **SDK Examples Covered:**
 - `execute_process.py`
@@ -1132,8 +1130,8 @@ def list_capabilities() -> dict:
    - `manage_environments` (includes get_extensions, update_extensions, query_extensions actions)
    - `manage_runtimes`
 
-3. Implement basic execution (1 tool):
-   - `execute_process`
+3. Implement basic execution (1 tool): ✅
+   - `execute_process` ✅
 
 **Success Criteria:**
 - Can discover all components
@@ -3730,7 +3728,7 @@ This 18-tool workflow-oriented architecture represents the optimal balance betwe
 
 **Execution & Scheduling** (2):
 9. manage_process ✅ (includes list_schedules, set_schedule, clear_schedule actions)
-10. execute_process
+10. execute_process ✅ (dedicated tool — uses sdk.execution_request, auto-resolves atom_id)
 
 **Monitoring** (1):
 11. monitor_platform ✅ (execution_records, execution_logs, execution_artifacts, audit_logs, events)
