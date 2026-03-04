@@ -189,6 +189,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import runtime tools: {e}")
     manage_runtimes_action = None
 
+# --- Deployment Tools ---
+try:
+    from boomi_mcp.categories.deployment.packages import manage_deployment_action
+    print(f"[INFO] Deployment tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import deployment tools: {e}")
+    manage_deployment_action = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -1930,6 +1938,110 @@ if manage_runtimes_action:
     print("[INFO] Runtime management tool registered successfully (1 consolidated tool)")
 
 
+# --- Deployment Management MCP Tools ---
+if manage_deployment_action:
+    @mcp.tool()
+    def manage_deployment(
+        profile: str,
+        action: str,
+        package_id: str = None,
+        environment_id: str = None,
+        config: str = None,
+    ):
+        """Manage deployment packages and deploy to environments.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: list_packages, get_package, create_package, delete_package,
+                    deploy, undeploy, list_deployments, get_deployment
+            package_id: Package ID (get/delete/deploy) or deployment ID (undeploy/get_deployment)
+            environment_id: Target environment (deploy) or filter (list_deployments)
+            config: JSON string with action-specific parameters
+
+        RECOMMENDED WORKFLOW:
+          1. Create a package: action="create_package", config='{"component_id":"...", "component_type":"process", "package_version":"1.0"}'
+          2. Deploy to env: action="deploy", package_id="<from step 1>", environment_id="..."
+          3. Promote to prod: action="deploy", package_id="<same>", environment_id="<prod-env-id>"
+
+        Actions and config examples:
+
+            list_packages - List all packages, optional component filter:
+                config='{"component_id": "abc-123"}'
+
+            get_package - Get package details:
+                package_id="pkg-123"
+
+            create_package - Create versioned package from component:
+                config='{"component_id": "abc-123", "component_type": "process", "package_version": "1.0.0"}'
+                config='{"component_id": "abc-123", "component_type": "process", "package_version": "2.0", "notes": "Release", "branch_name": "main"}'
+                component_type: process, certificate, customlibrary, flowservice, processroute, tpgroup, webservice
+
+            delete_package - Delete package (fails if deployed):
+                package_id="pkg-123"
+
+            deploy - Deploy package to environment:
+                package_id="pkg-123"
+                environment_id="env-456"
+                config='{"listener_status": "RUNNING", "notes": "Production deploy"}'
+
+            undeploy - Remove deployment from environment:
+                package_id="deployment-789"   (this is the deployment_id)
+
+            list_deployments - List deployments with optional filters:
+                environment_id="env-456"
+                config='{"package_id": "pkg-123", "active_only": true}'
+
+            get_deployment - Get deployment details:
+                package_id="deployment-789"   (this is the deployment_id)
+
+        Listener statuses: RUNNING, PAUSED
+
+        Returns:
+            Action result with success status and data/error
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] manage_deployment called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if package_id:
+                params["package_id"] = package_id
+            if environment_id:
+                params["environment_id"] = environment_id
+
+            return manage_deployment_action(sdk, profile, action, config_data=config_data, **params)
+
+        except Exception as e:
+            print(f"[ERROR] manage_deployment {action} failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Deployment management tool registered successfully")
+
+
 # --- Credential Management Tools (local dev only) ---
 if LOCAL_MODE:
     @mcp.tool()
@@ -2382,6 +2494,11 @@ if __name__ == "__main__":
             print("  manage_runtimes - Manage runtimes, attachments, restart, Java, tokens")
             print("    Actions: list, get, update, delete, attach, detach, list_attachments,")
             print("             restart, configure_java, create_installer_token")
+        if manage_deployment_action:
+            print("\n  Deployment Management:")
+            print("  manage_deployment - Packages and deployment lifecycle")
+            print("    Actions: list_packages, get_package, create_package, delete_package,")
+            print("             deploy, undeploy, list_deployments, get_deployment")
         if invoke_api:
             print("\n  Generic API Access:")
             print("  invoke_boomi_api - Direct access to any Boomi REST API endpoint")
