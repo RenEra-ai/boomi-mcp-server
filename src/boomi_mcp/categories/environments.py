@@ -522,8 +522,16 @@ def _action_update_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
     if not properties:
         return {
             "_success": False,
-            "error": "config must include 'properties' — a list of process property objects. "
+            "error": "config must include 'properties' — a dict of process property fields. "
                      "Example: {\"ProcessProperty\": [{\"Name\": \"prop1\", \"Value\": \"val1\"}], "
+                     "\"processId\": \"<process-id>\"}",
+        }
+
+    if not isinstance(properties, dict):
+        return {
+            "_success": False,
+            "error": f"'properties' must be a dict, got {type(properties).__name__}. "
+                     "Expected format: {\"ProcessProperty\": [{\"Name\": \"prop1\", \"Value\": \"val1\"}], "
                      "\"processId\": \"<process-id>\"}",
         }
 
@@ -531,7 +539,7 @@ def _action_update_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
 
     properties_obj = PersistedProcessProperties(
         atom_id=resource_id,
-        **({k: v for k, v in (properties if isinstance(properties, dict) else {}).items()}),
+        **{k: v for k, v in properties.items()},
     )
 
     result = sdk.persisted_process_properties.update_persisted_process_properties(

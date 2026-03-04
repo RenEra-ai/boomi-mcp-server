@@ -2225,7 +2225,7 @@ if troubleshoot_execution_action:
     ):
         """Troubleshoot failed executions: get error details, retry, reprocess documents, manage queues.
 
-        Actions: error_details, retry, reprocess, list_queues, clear_queue
+        Actions: error_details, retry, reprocess, list_queues, clear_queue, move_queue
 
         Args:
             profile: Boomi profile name (required)
@@ -2256,6 +2256,10 @@ if troubleshoot_execution_action:
 
             clear_queue — Clear messages from a stuck queue
                 config: {"atom_id": "required", "queue_name": "required", "dlq": false, "subscriber_name": "..."}
+
+            move_queue — Move messages between queues
+                config: {"atom_id": "required", "source_queue": "required", "dest_queue": "required",
+                         "source_dlq": false, "dest_dlq": false, "source_subscriber": "...", "dest_subscriber": "..."}
         """
         cfg = {}
         if config:

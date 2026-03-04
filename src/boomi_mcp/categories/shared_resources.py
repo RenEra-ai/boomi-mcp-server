@@ -20,6 +20,8 @@ from boomi.models import (
     SharedCommunicationChannelComponentSimpleExpression,
     SharedCommunicationChannelComponentSimpleExpressionOperator,
     SharedCommunicationChannelComponentQueryConfigQueryFilter,
+    PartnerArchiving,
+    PartnerCommunication,
 )
 
 
@@ -232,7 +234,11 @@ def _action_create_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
         if val is not None:
             channel_kwargs[key] = val
 
-    channel = SharedCommunicationChannelComponent(**channel_kwargs)
+    channel = SharedCommunicationChannelComponent(
+        partner_archiving=PartnerArchiving(),
+        partner_communication=PartnerCommunication(),
+        **channel_kwargs,
+    )
     created = sdk.shared_communication_channel_component.create_shared_communication_channel_component(
         request_body=channel
     )

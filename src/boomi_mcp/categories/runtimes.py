@@ -964,7 +964,7 @@ def _poll_async_token(poll_fn, token: str, poll_interval: int = 2,
         try:
             result = poll_fn(token=token)
             if result:
-                if hasattr(result, 'status') and result.status == 'PROCESSING':
+                if hasattr(result, 'response_status_code') and result.response_status_code == 202:
                     continue
                 return result
         except Exception as e:

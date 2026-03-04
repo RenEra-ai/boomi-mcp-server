@@ -315,7 +315,7 @@ def handle_audit_logs(boomi_client, config_data: Dict[str, Any]) -> Dict[str, An
     query_token = getattr(result, 'query_token', None)
     while query_token and len(all_logs) < limit:
         result = boomi_client.audit_log.query_more_audit_log(
-            query_token=query_token
+            request_body=query_token
         )
         if hasattr(result, 'result') and result.result:
             all_logs.extend(_convert_audit_logs(result.result))
@@ -459,7 +459,7 @@ def handle_events(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
     query_token = getattr(result, 'query_token', None)
     while query_token and len(all_events) < limit:
         result = boomi_client.event.query_more_event(
-            query_token=query_token
+            request_body=query_token
         )
         if hasattr(result, 'result') and result.result:
             all_events.extend(_convert_events(result.result))
@@ -622,7 +622,7 @@ def handle_execution_records(boomi_client, config_data: Dict[str, Any]) -> Dict[
     query_token = getattr(result, 'query_token', None)
     while query_token and len(all_records) < limit:
         result = boomi_client.execution_record.query_more_execution_record(
-            query_token=query_token
+            request_body=query_token
         )
         if hasattr(result, 'result') and result.result:
             all_records.extend(_convert_execution_records(result.result))
@@ -709,7 +709,7 @@ def handle_certificates(boomi_client, config_data: Dict[str, Any]) -> Dict[str, 
     query_token = getattr(result, 'query_token', None)
     while query_token and len(all_certs) < limit:
         result = boomi_client.deployed_expired_certificate.query_more_deployed_expired_certificate(
-            query_token=query_token
+            request_body=query_token
         )
         if hasattr(result, 'result') and result.result:
             all_certs.extend(_convert_certificates(result.result))
@@ -814,7 +814,7 @@ def handle_throughput(boomi_client, config_data: Dict[str, Any]) -> Dict[str, An
     query_token = getattr(result, 'query_token', None)
     while query_token and len(all_records) < limit:
         result = boomi_client.throughput_account.query_more_throughput_account(
-            query_token=query_token
+            request_body=query_token
         )
         if hasattr(result, 'result') and result.result:
             all_records.extend(_convert_throughput(result.result))
@@ -1000,7 +1000,7 @@ def handle_connector_documents(boomi_client, config_data: Dict[str, Any]) -> Dic
     query_token = getattr(result, 'query_token', None)
     while query_token and len(all_records) < limit:
         result = boomi_client.generic_connector_record.query_more_generic_connector_record(
-            query_token=query_token
+            request_body=query_token
         )
         if hasattr(result, 'result') and result.result:
             all_records.extend(_convert_connector_records(result.result))

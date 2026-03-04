@@ -1,12 +1,13 @@
 """
 Troubleshooting MCP Tools for Boomi Platform.
 
-Provides 5 troubleshooting actions for failed executions:
+Provides 6 troubleshooting actions for failed executions:
 - error_details: Get error details from failed execution records + process logs
 - retry: Retry a failed execution with same or modified properties
 - reprocess: Re-execute a failed process with new execution request
 - list_queues: List all queues for a runtime (async operation)
 - clear_queue: Clear messages from a stuck queue
+- move_queue: Move messages between queues
 
 SDK example references:
 - boomi-python/examples/11_troubleshoot_fix/get_error_details.py
@@ -603,6 +604,74 @@ def handle_clear_queue(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, A
 
 
 # ============================================================================
+# Action: move_queue
+# ============================================================================
+
+def handle_move_queue(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Move messages from one queue to another."""
+    if config is None:
+        config = {}
+
+    atom_id = config.get("atom_id")
+    source_queue = config.get("source_queue")
+    dest_queue = config.get("dest_queue")
+
+    if not atom_id:
+        return {"_success": False, "error": "atom_id is required in config for move_queue action"}
+    if not source_queue:
+        return {"_success": False, "error": "source_queue is required in config for move_queue action"}
+    if not dest_queue:
+        return {"_success": False, "error": "dest_queue is required in config for move_queue action"}
+
+    source_dlq = config.get("source_dlq", False)
+    dest_dlq = config.get("dest_dlq", False)
+    source_subscriber = config.get("source_subscriber")
+    dest_subscriber = config.get("dest_subscriber")
+
+    try:
+        from boomi.models import MoveQueueRequest, QueueAttributes
+
+        source_attrs = QueueAttributes(
+            dlq=source_dlq,
+            queue_name=source_queue,
+        )
+        if source_subscriber:
+            source_attrs.subscriber_name = source_subscriber
+
+        dest_attrs = QueueAttributes(
+            dlq=dest_dlq,
+            queue_name=dest_queue,
+        )
+        if dest_subscriber:
+            dest_attrs.subscriber_name = dest_subscriber
+
+        move_request = MoveQueueRequest(
+            atom_id=atom_id,
+            source_queue=source_attrs,
+            destination_queue=dest_attrs,
+        )
+
+        sdk.move_queue_request.create_move_queue_request(request_body=move_request)
+
+        return {
+            "_success": True,
+            "atom_id": atom_id,
+            "source_queue": source_queue,
+            "dest_queue": dest_queue,
+            "source_dlq": source_dlq,
+            "dest_dlq": dest_dlq,
+            "message": f"Move queue operation submitted: '{source_queue}' -> '{dest_queue}'",
+            "next_step": "Use list_queues action to verify message counts",
+        }
+
+    except ApiError as e:
+        msg = _extract_api_error_msg(e)
+        return {"_success": False, "error": f"Failed to move queue: {msg}"}
+    except Exception as e:
+        return {"_success": False, "error": f"Failed to move queue: {e}"}
+
+
+# ============================================================================
 # Consolidated Action Router
 # ============================================================================
 
@@ -645,11 +714,13 @@ def troubleshoot_execution_action(
             return handle_list_queues(sdk, config=config)
         elif action == "clear_queue":
             return handle_clear_queue(sdk, config=config)
+        elif action == "move_queue":
+            return handle_move_queue(sdk, config=config)
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "valid_actions": ["error_details", "retry", "reprocess", "list_queues", "clear_queue"],
+                "valid_actions": ["error_details", "retry", "reprocess", "list_queues", "clear_queue", "move_queue"],
             }
 
     except Exception as e:
