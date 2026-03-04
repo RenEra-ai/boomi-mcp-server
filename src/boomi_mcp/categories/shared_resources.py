@@ -49,10 +49,18 @@ def _channel_to_dict(channel) -> Dict[str, Any]:
     """Convert SDK SharedCommunicationChannelComponent to plain dict."""
     result = {
         "id": getattr(channel, 'id_', ''),
-        "name": getattr(channel, 'name', ''),
+        "name": getattr(channel, 'component_name', '') or getattr(channel, 'name', ''),
+        "type": getattr(channel, 'communication_type', None) or getattr(channel, 'type', None),
     }
+    # Remove type if still None
+    if result["type"] is None:
+        del result["type"]
+    elif hasattr(result["type"], 'value'):
+        result["type"] = str(result["type"].value)
+    else:
+        result["type"] = str(result["type"])
     for attr in (
-        'type', 'folder_id', 'folder_full_path',
+        'folder_id', 'folder_full_path',
         'created_date', 'modified_date', 'created_by', 'modified_by',
         'component_id', 'version', 'current_version', 'deleted',
     ):
