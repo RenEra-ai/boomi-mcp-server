@@ -1312,14 +1312,15 @@ if analyze_component_action:
                 component_id="abc-123-def"
                 config='{"source_version": 1, "target_version": 2}'
 
-            merge - Merge component versions across branches:
-                component_id="abc-123-def"
-                config='{"source_version": 1, "target_version": 2}'
+            merge - Merge component content across branches or versions:
+                Branch merge: config='{"source_branch": "branch-id", "target_branch": "branch-id"}'
+                Version merge: config='{"source_version": 1, "target_version": 2}'
 
         Notes:
             - where_used and dependencies show immediate references only (one level)
             - compare_versions requires both version numbers to exist for the component
-            - merge applies source version content onto target, preserving version metadata
+            - merge supports branch-aware merging (componentId~branchId) or version-based merging
+            - Use manage_account action="list_branches" to find branch IDs
             - Use query_components action="get" to find a component's current version
 
         Returns:
