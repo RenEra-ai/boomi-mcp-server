@@ -9,9 +9,11 @@ This is a dedicated tool (not merged into manage_process) because:
 - MCP atomic principle: single focused operation
 
 SDK example reference: boomi-python/examples/08_execute_test/execute_process.py
+Poll example reference: boomi-python/examples/09_monitor_validate/poll_execution_status.py
 """
 
-from typing import Dict, Any, Optional
+import time
+from typing import Dict, Any, Optional, Tuple
 
 from boomi import Boomi
 from boomi.net.transport.api_error import ApiError
@@ -27,6 +29,11 @@ from boomi.models import (
     EnvironmentAtomAttachmentSimpleExpression,
     EnvironmentAtomAttachmentSimpleExpressionOperator,
     EnvironmentAtomAttachmentSimpleExpressionProperty,
+    ExecutionRecordQueryConfig,
+    ExecutionRecordQueryConfigQueryFilter,
+    ExecutionRecordSimpleExpression,
+    ExecutionRecordSimpleExpressionOperator,
+    ExecutionRecordSimpleExpressionProperty,
 )
 
 
@@ -128,6 +135,88 @@ def _build_process_properties(props_dict: Optional[Dict[str, Dict[str, str]]]):
     return ExecutionRequestProcessProperties(process_property=prop_list)
 
 
+_TERMINAL_STATUSES = {"COMPLETE", "ERROR", "ABORTED", "COMPLETE_WARN"}
+
+
+def _poll_execution_status(
+    sdk: Boomi,
+    execution_id: str,
+    timeout: int = 300,
+) -> Dict[str, Any]:
+    """Poll execution_record.query() until status is terminal or timeout.
+
+    Poll interval: 2s initially, backs off to 5s after 30s elapsed.
+    Returns dict with execution details and polling metadata.
+    """
+    start = time.monotonic()
+    poll_count = 0
+
+    while True:
+        elapsed = time.monotonic() - start
+        if elapsed >= timeout:
+            return {
+                "poll_status": "TIMEOUT",
+                "elapsed_seconds": round(elapsed, 1),
+                "poll_count": poll_count,
+                "message": f"Timed out after {timeout}s waiting for execution to complete",
+            }
+
+        poll_count += 1
+
+        try:
+            query_expression = ExecutionRecordSimpleExpression(
+                operator=ExecutionRecordSimpleExpressionOperator.EQUALS,
+                property=ExecutionRecordSimpleExpressionProperty.EXECUTIONID,
+                argument=[execution_id],
+            )
+            query_filter = ExecutionRecordQueryConfigQueryFilter(
+                expression=query_expression
+            )
+            query_config = ExecutionRecordQueryConfig(query_filter=query_filter)
+
+            result = sdk.execution_record.query_execution_record(
+                request_body=query_config
+            )
+
+            if result and hasattr(result, "result") and result.result:
+                record = result.result[0]
+                status = getattr(record, "status", "UNKNOWN")
+
+                if status.upper() in _TERMINAL_STATUSES:
+                    def _safe_int(val, default=0):
+                        try:
+                            return int(val)
+                        except (ValueError, TypeError):
+                            return default
+
+                    return {
+                        "poll_status": "COMPLETED",
+                        "elapsed_seconds": round(time.monotonic() - start, 1),
+                        "poll_count": poll_count,
+                        "execution_id": getattr(record, "execution_id", execution_id),
+                        "status": status,
+                        "process_name": getattr(record, "process_name", None),
+                        "atom_name": getattr(record, "atom_name", None),
+                        "execution_time": getattr(record, "execution_time", None),
+                        "execution_duration": getattr(record, "execution_duration", None),
+                        "inbound_document_count": _safe_int(getattr(record, "inbound_document_count", 0)),
+                        "outbound_document_count": _safe_int(getattr(record, "outbound_document_count", 0)),
+                        "inbound_error_document_count": _safe_int(getattr(record, "inbound_error_document_count", 0)),
+                        "error": getattr(record, "error", None),
+                    }
+        except Exception:
+            # Transient errors — keep polling
+            pass
+
+        # Back off: 2s for first 30s, then 5s
+        interval = 2 if elapsed < 30 else 5
+        # Don't sleep past the timeout
+        remaining = timeout - (time.monotonic() - start)
+        if remaining <= 0:
+            continue
+        time.sleep(min(interval, remaining))
+
+
 def execute_process_action(
     sdk: Boomi,
     profile: str,
@@ -202,9 +291,25 @@ def execute_process_action(
     if config_data.get("dynamic_properties"):
         response["dynamic_properties"] = config_data["dynamic_properties"]
 
-    response["next_step"] = (
-        f"Poll status: monitor_platform(action='execution_records', "
-        f"config='{{\"execution_id\": \"{request_id}\"}}')"
-    )
+    # If wait=True, poll for completion before returning
+    if config_data.get("wait") and request_id:
+        poll_timeout = int(config_data.get("timeout", 300))
+        poll_result = _poll_execution_status(sdk, request_id, timeout=poll_timeout)
+        response["execution_result"] = poll_result
+
+        # Reflect terminal status in top-level success flag
+        if poll_result.get("poll_status") == "COMPLETED":
+            final_status = poll_result.get("status", "").upper()
+            if final_status in ("ERROR", "ABORTED"):
+                response["_success"] = False
+                response["error"] = poll_result.get("error") or f"Execution ended with status: {final_status}"
+        elif poll_result.get("poll_status") == "TIMEOUT":
+            response["_success"] = False
+            response["error"] = poll_result["message"]
+    else:
+        response["next_step"] = (
+            f"Poll status: monitor_platform(action='execution_records', "
+            f"config='{{\"execution_id\": \"{request_id}\"}}')"
+        )
 
     return response

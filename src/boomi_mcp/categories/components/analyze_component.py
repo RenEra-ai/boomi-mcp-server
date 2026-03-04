@@ -1,13 +1,16 @@
 """
 Component Analysis MCP Tools for Boomi API Integration.
 
-Provides component dependency analysis and version comparison:
+Provides component dependency analysis, version comparison, and merge:
 - where_used: Find all components that reference a given component (inbound)
 - dependencies: Find all components that a given component references (outbound)
 - compare_versions: Compare two versions of a component to see changes
+- merge: Merge component versions across branches
 """
 
 from typing import Dict, Any, List, Optional
+import xml.etree.ElementTree as ET
+import difflib
 
 from boomi import Boomi
 from boomi.models import (
@@ -279,6 +282,89 @@ def compare_versions(
         }
 
 
+def merge_versions(
+    boomi_client: Boomi,
+    profile: str,
+    component_id: str,
+    config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Merge component versions by applying source version content onto the current component."""
+    try:
+        source_version = config.get('source_version')
+        target_version = config.get('target_version')
+
+        if source_version is None:
+            return {
+                "_success": False,
+                "error": "source_version is required in config",
+                "hint": 'Provide config: {"source_version": 1, "target_version": 2}',
+            }
+
+        # Get source version XML
+        source_meta = component_get_xml(boomi_client, f"{component_id}/{source_version}")
+        source_xml = source_meta['xml']
+        source_root = ET.fromstring(source_xml)
+
+        # Get target (current or specific version) XML
+        if target_version is not None:
+            target_meta = component_get_xml(boomi_client, f"{component_id}/{target_version}")
+        else:
+            target_meta = component_get_xml(boomi_client, component_id)
+        target_xml = target_meta['xml']
+        target_root = ET.fromstring(target_xml)
+
+        # Compare source and target
+        source_lines = source_xml.splitlines(keepends=True)
+        target_lines = target_xml.splitlines(keepends=True)
+        diff = list(difflib.unified_diff(
+            target_lines, source_lines,
+            fromfile=f"version {target_version or 'current'}",
+            tofile=f"version {source_version}",
+            lineterm=""
+        ))
+
+        # Apply source version content to the target: preserve target's version attribute
+        # but take the source's content (this is the merge)
+        target_version_attr = target_root.attrib.get('version', '')
+        target_current_version = target_root.attrib.get('currentVersion', '')
+
+        # Use source XML as the merged result, but keep target version metadata
+        merged_root = ET.fromstring(source_xml)
+        if target_version_attr:
+            merged_root.set('version', target_version_attr)
+        if target_current_version:
+            merged_root.set('currentVersion', target_current_version)
+
+        merged_xml = ET.tostring(merged_root, encoding='unicode')
+
+        # Perform the update
+        boomi_client.component.update_component_raw(component_id, merged_xml)
+
+        # Verify the update
+        verify = component_get_xml(boomi_client, component_id)
+
+        return {
+            "_success": True,
+            "component_id": component_id,
+            "component_name": target_meta.get('name', ''),
+            "source_version": int(source_version),
+            "target_version": int(target_version) if target_version is not None else "current",
+            "new_version": verify.get('version', ''),
+            "diff_lines": len(diff),
+            "diff_preview": ''.join(diff[:50]) if diff else "No differences found",
+            "profile": profile,
+            "note": "Source version content merged onto target. Component version incremented.",
+        }
+
+    except Exception as e:
+        return {
+            "_success": False,
+            "error": f"Failed to merge versions for '{component_id}': {str(e)}",
+            "exception_type": type(e).__name__,
+            "hint": "Ensure both version numbers exist for this component",
+        }
+
+
 # ============================================================================
 # Helpers
 # ============================================================================
@@ -391,11 +477,27 @@ def analyze_component_action(
                 }
             return compare_versions(boomi_client, profile, component_id, config)
 
+        elif action == "merge":
+            component_id = params.get("component_id")
+            if not component_id:
+                return {
+                    "_success": False,
+                    "error": "component_id is required for 'merge' action",
+                }
+            config = params.get("config", {})
+            if not config:
+                return {
+                    "_success": False,
+                    "error": "config with source_version is required",
+                    "hint": 'Provide config: {"source_version": 1, "target_version": 2}',
+                }
+            return merge_versions(boomi_client, profile, component_id, config)
+
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: where_used, dependencies, compare_versions",
+                "hint": "Valid actions are: where_used, dependencies, compare_versions, merge",
             }
 
     except Exception as e:

@@ -1,7 +1,7 @@
 """
 Environment Management MCP Tools for Boomi Platform.
 
-Provides 9 environment management actions:
+Provides 11 environment management actions:
 - list: List all environments with optional classification/name filters
 - get: Get single environment by ID
 - create: Create new environment with name + classification
@@ -11,8 +11,11 @@ Provides 9 environment management actions:
 - update_extensions: Update environment extensions (partial merge by default)
 - query_extensions: Query which environments have extensions configured
 - stats: Environment summary by classification
+- get_properties: Get persisted process properties for a runtime (async)
+- update_properties: Update persisted process properties for a runtime
 """
 
+import time
 from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
@@ -459,6 +462,90 @@ def _action_stats(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     }
 
 
+def _action_get_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get persisted process properties for a runtime/atom (async operation)."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (atom_id) is required for 'get_properties' action"}
+
+    timeout = kwargs.get("timeout", 30)
+
+    # Initiate async request
+    token_result = sdk.persisted_process_properties.async_get_persisted_process_properties(
+        id_=resource_id
+    )
+
+    if not hasattr(token_result, 'async_token') or not token_result.async_token:
+        return {"_success": False, "error": "Failed to get async token for persisted properties request"}
+
+    token = token_result.async_token.token
+
+    # Poll for results
+    start_time = time.time()
+    poll_interval = 2
+
+    while time.time() - start_time < timeout:
+        time.sleep(poll_interval)
+        try:
+            response = sdk.persisted_process_properties.async_token_persisted_process_properties(
+                token=token
+            )
+            if response:
+                # Parse response
+                if hasattr(response, '__dict__'):
+                    raw = response.__dict__
+                elif isinstance(response, dict):
+                    raw = response
+                else:
+                    raw = {"response": str(response)}
+
+                return {
+                    "_success": True,
+                    "atom_id": resource_id,
+                    "properties": raw,
+                }
+        except Exception as e:
+            if "202" in str(e) or "not ready" in str(e).lower():
+                continue
+            return {"_success": False, "error": f"Error polling for properties: {e}"}
+
+    return {"_success": False, "error": f"Timeout after {timeout}s waiting for persisted properties"}
+
+
+def _action_update_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update persisted process properties for a runtime/atom."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (atom_id) is required for 'update_properties' action"}
+
+    properties = kwargs.get("properties")
+    if not properties:
+        return {
+            "_success": False,
+            "error": "config must include 'properties' — a list of process property objects. "
+                     "Example: {\"ProcessProperty\": [{\"Name\": \"prop1\", \"Value\": \"val1\"}], "
+                     "\"processId\": \"<process-id>\"}",
+        }
+
+    from boomi.models import PersistedProcessProperties
+
+    properties_obj = PersistedProcessProperties(
+        atom_id=resource_id,
+        **({k: v for k, v in (properties if isinstance(properties, dict) else {}).items()}),
+    )
+
+    result = sdk.persisted_process_properties.update_persisted_process_properties(
+        id_=resource_id,
+        request_body=properties_obj,
+    )
+
+    return {
+        "_success": True,
+        "atom_id": resource_id,
+        "message": "Persisted process properties updated successfully",
+    }
+
+
 # ============================================================================
 # Action Router
 # ============================================================================
@@ -476,7 +563,7 @@ def manage_environments_action(
     Args:
         sdk: Authenticated Boomi SDK client
         profile: Profile name
-        action: One of: list, get, create, update, delete, get_extensions, update_extensions, query_extensions, stats
+        action: One of: list, get, create, update, delete, get_extensions, update_extensions, query_extensions, stats, get_properties, update_properties
         config_data: Action-specific configuration dict
         **kwargs: Additional parameters (resource_id, etc.)
     """
@@ -496,6 +583,8 @@ def manage_environments_action(
         "update_extensions": _action_update_extensions,
         "query_extensions": _action_query_extensions,
         "stats": _action_stats,
+        "get_properties": _action_get_properties,
+        "update_properties": _action_update_properties,
     }
 
     handler = actions.get(action)

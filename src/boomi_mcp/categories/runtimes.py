@@ -1,7 +1,7 @@
 """
 Runtime Management MCP Tools for Boomi Platform.
 
-Provides 17 runtime management actions:
+Provides 18 runtime management actions:
 - list: List runtimes with optional type/status/name filters
 - get: Get single runtime details
 - create: Create a cloud attachment (requires cloud_id from available_clouds or cloud_list)
@@ -19,8 +19,10 @@ Provides 17 runtime management actions:
 - cloud_create: Create private runtime cloud (PROD or TEST)
 - cloud_update: Update private runtime cloud settings
 - cloud_delete: Delete private runtime cloud
+- diagnostics: Get combined runtime diagnostics (counters, disk space, listener status)
 """
 
+import time
 from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
@@ -940,6 +942,147 @@ def _action_cloud_delete(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
 
 # ============================================================================
+# Async Polling Helper
+# ============================================================================
+
+def _poll_async_token(poll_fn, token: str, poll_interval: int = 2,
+                      max_attempts: int = 15) -> Any:
+    """Poll an async token until result is ready or timeout.
+
+    Args:
+        poll_fn: Callable that takes token= and returns the result.
+        token: The async token string.
+        poll_interval: Seconds between polls.
+        max_attempts: Maximum number of poll attempts.
+
+    Returns:
+        The result object, or None on timeout.
+    """
+    for attempt in range(max_attempts):
+        if attempt > 0:
+            time.sleep(poll_interval)
+        try:
+            result = poll_fn(token=token)
+            if result:
+                if hasattr(result, 'status') and result.status == 'PROCESSING':
+                    continue
+                return result
+        except Exception as e:
+            if '202' in str(e) or 'still processing' in str(e).lower():
+                continue
+            raise
+    return None
+
+
+def _run_single_async(sdk, start_fn, poll_fn, atom_id: str) -> Any:
+    """Start an async operation and poll until complete.
+
+    Args:
+        sdk: Boomi SDK instance.
+        start_fn: Callable that takes id_= and returns an object with async_token.
+        poll_fn: Callable that takes token= and returns the result.
+        atom_id: The atom/runtime ID.
+
+    Returns:
+        The final result object, or a dict with error info.
+    """
+    try:
+        initial = start_fn(id_=atom_id)
+        if not hasattr(initial, 'async_token') or not initial.async_token:
+            return {"error": "No async token returned"}
+        token = initial.async_token.token
+    except Exception as e:
+        return {"error": f"Failed to start async operation: {e}"}
+
+    try:
+        result = _poll_async_token(poll_fn, token)
+        if result is None:
+            return {"error": "Operation timed out waiting for results"}
+        return result
+    except Exception as e:
+        return {"error": f"Failed polling async result: {e}"}
+
+
+# ============================================================================
+# Diagnostics Action
+# ============================================================================
+
+def _action_diagnostics(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get combined runtime diagnostics: counters, disk space, listener status."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (atom_id) is required for 'diagnostics' action"}
+
+    report = {"_success": True, "atom_id": resource_id}
+
+    # 1. Atom counters
+    counters_result = _run_single_async(
+        sdk,
+        sdk.atom.async_get_atom_counters,
+        sdk.atom.async_token_atom_counters,
+        resource_id,
+    )
+    if isinstance(counters_result, dict) and "error" in counters_result:
+        report["counters"] = counters_result
+    else:
+        counters_data = {}
+        if hasattr(counters_result, 'result') and counters_result.result:
+            raw = counters_result.result[0] if isinstance(counters_result.result, list) else counters_result.result
+            if hasattr(raw, 'counter_group') and raw.counter_group:
+                for group in raw.counter_group:
+                    group_name = getattr(group, 'name', 'Unknown')
+                    counters_data[group_name] = {}
+                    if hasattr(group, 'counter') and group.counter:
+                        for counter in group.counter:
+                            c_name = getattr(counter, 'name', 'Unknown')
+                            c_value = getattr(counter, 'value', None)
+                            counters_data[group_name][c_name] = c_value
+        report["counters"] = counters_data
+
+    # 2. Disk space
+    disk_result = _run_single_async(
+        sdk,
+        sdk.atom_disk_space.async_get_atom_disk_space,
+        sdk.atom_disk_space.async_token_atom_disk_space,
+        resource_id,
+    )
+    if isinstance(disk_result, dict) and "error" in disk_result:
+        report["disk_space"] = disk_result
+    else:
+        disk_data = {}
+        if hasattr(disk_result, 'disk_partition') and disk_result.disk_partition:
+            for partition in disk_result.disk_partition:
+                name = getattr(partition, 'name', 'Unknown')
+                disk_data[name] = {
+                    "total_space": getattr(partition, 'total_space', 0),
+                    "used_space": getattr(partition, 'used_space', 0),
+                    "free_space": getattr(partition, 'free_space', 0),
+                }
+        report["disk_space"] = disk_data
+
+    # 3. Listener status
+    listener_result = _run_single_async(
+        sdk,
+        sdk.listener_status.async_get_listener_status,
+        sdk.listener_status.async_token_listener_status,
+        resource_id,
+    )
+    if isinstance(listener_result, dict) and "error" in listener_result:
+        report["listener_status"] = listener_result
+    else:
+        listener_data = {}
+        if hasattr(listener_result, 'result') and listener_result.result:
+            items = listener_result.result if isinstance(listener_result.result, list) else [listener_result.result]
+            for listener in items:
+                name = getattr(listener, 'listener_name', 'Unknown')
+                status = getattr(listener, 'status', 'Unknown')
+                listener_data[name] = _enum_str(status)
+        report["listener_status"] = listener_data
+
+    return report
+
+
+# ============================================================================
 # Error Helpers
 # ============================================================================
 
@@ -997,6 +1140,7 @@ def manage_runtimes_action(
         "cloud_create": _action_cloud_create,
         "cloud_update": _action_cloud_update,
         "cloud_delete": _action_cloud_delete,
+        "diagnostics": _action_diagnostics,
     }
 
     handler = actions.get(action)
