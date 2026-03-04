@@ -1,22 +1,22 @@
 # Boomi MCP Server - Tool Design & Architecture
 
-**Version**: 1.4
+**Version**: 1.5
 **Date**: 2025-01-17
-**Last Updated**: 2026-03-04 (merged manage_packages+deploy_package → manage_deployment: 19→18 tools)
-**Status**: Phase 1 Complete ✅ (Trading Partners + Organizations, Process Components, Platform Monitoring, Connectors)
+**Last Updated**: 2026-03-04
+**Status**: Phase 1 Complete ✅ | Phase 2 Complete ✅ (All 19 user-facing tools implemented, 97% direct SDK coverage)
 
 ---
 
 ## Executive Summary
 
-### Final Recommendation: Hybrid 18-Tool Architecture
+### Final Recommendation: Hybrid 19-Tool Architecture
 
-After comprehensive research of popular MCP servers, analysis of all 67 Boomi SDK examples, and applying Anthropic's tool consolidation best practices ("a few thoughtful tools targeting specific high-impact workflows"), we recommend an **18-tool hybrid architecture** that balances token efficiency with practical usability.
+After comprehensive research of popular MCP servers, analysis of all 67 Boomi SDK examples, and applying Anthropic's tool consolidation best practices ("a few thoughtful tools targeting specific high-impact workflows"), we recommend a **19-tool hybrid architecture** that balances token efficiency with practical usability.
 
 **Key Metrics:**
-- **Tool Count**: 18 tools (vs 100+ individual operations)
-- **Token Budget**: ~7,500 tokens (81% reduction from 40,000)
-- **Coverage**: 85% direct coverage, 100% via generic invoker
+- **Tool Count**: 19 user-facing tools (excluding auth) with ~104 actions
+- **Token Budget**: ~8,000 tokens (80% reduction from 40,000)
+- **Coverage**: 97% direct coverage, 100% via generic invoker
 - **Pattern**: Workflow-oriented consolidation — group by user intent, not API resource
 
 **Consolidation History:**
@@ -24,6 +24,7 @@ After comprehensive research of popular MCP servers, analysis of all 67 Boomi SD
 - **v1.2**: Consolidated 4 monitoring tools → 1 `monitor_platform` (saves 1,100 tokens)
 - **v1.3**: Merged `manage_organization` → `manage_trading_partner`, `manage_schedules` → `manage_process`, `manage_environment_extensions` → `manage_environments` (saves ~1,100 tokens, -3 tools)
 - **v1.4**: Added `manage_connector` tool for connector catalog discovery and connection CRUD with HTTP builder
+- **v1.5**: Implemented remaining tools — 4 new tools (`manage_schedules`, `troubleshoot_execution`, `manage_shared_resources`, `manage_account`) + 5 extensions (`monitor_platform` +4, `manage_environments` +2, `execute_process` +wait, `analyze_component` +merge, `manage_runtimes` +diagnostics). Coverage 85% → 97%.
 
 ---
 
@@ -162,19 +163,60 @@ Boomi Component API
 
 **Why separate from `manage_component`**: Connectors have a unique catalog API (`sdk.connector`) for discovering available connector types and their field definitions. The builder pattern (config keys → XML) is connector-specific and doesn't apply to generic components. Keeping this separate avoids overloading `manage_component` with connector-specific logic while providing a focused, discoverable tool for the common workflow of setting up integrations.
 
-### Next Steps
+### Phase 2: Complete (Remaining Tools — v1.5)
 
-**Phase 2: Core Operations** (Planned)
-- Component queries (query_components)
-- Component analysis (analyze_component)
-- Environment management (manage_environments — includes extension config overrides: get/update/query)
-- Runtime management (manage_runtimes)
+#### manage_schedules ✅ (NEW)
+**Status**: Production Ready
+**Implementation**: `src/boomi_mcp/categories/schedules.py`
+**Actions**: list, get, update, delete (4 actions)
+**Parameters**: `profile, action, process_id, environment_id, config`
+**SDK Coverage**: `manage_process_schedules.py` — 100%
 
-**Phase 3: Deployment & Execution** (Planned)
-- Package management
-- Deployments
-- Process execution (manage_process — includes schedules)
-- Meta tools (get_schema_template, invoke_boomi_api, list_capabilities)
+#### troubleshoot_execution ✅ (NEW)
+**Status**: Production Ready
+**Implementation**: `src/boomi_mcp/categories/troubleshooting.py`
+**Actions**: error_details, retry, reprocess, list_queues, clear_queue, move_queue (6 actions)
+**Parameters**: `profile, action, execution_id, process_id, environment_id, config`
+**SDK Coverage**: `get_error_details.py`, `retry_failed_execution.py`, `reprocess_documents.py`, `manage_queues.py` — 100%
+**Note**: `move_queue` was originally deferred but implemented.
+
+#### manage_shared_resources ✅ (NEW)
+**Status**: Production Ready
+**Implementation**: `src/boomi_mcp/categories/shared_resources.py`
+**Actions**: list_web_servers, update_web_server, list_channels, get_channel, create_channel (5 actions)
+**Parameters**: `profile, action, resource_id, config`
+**SDK Coverage**: `manage_shared_resources.py` — 100%
+
+#### manage_account ✅ (NEW)
+**Status**: Production Ready
+**Implementation**: `src/boomi_mcp/categories/account.py`
+**Actions**: list_roles, manage_role, list_branches, manage_branch (4 actions)
+**Parameters**: `profile, action, resource_id, config`
+**SDK Coverage**: `manage_roles.py`, `manage_branches.py` — 100%
+
+#### monitor_platform ✅ (EXTENDED: 5 → 9 actions)
+**New actions**: certificates, throughput, execution_metrics, connector_documents
+**SDK Coverage**: `monitor_certificates.py`, `monitor_throughput.py`, `analyze_execution_metrics.py`, `manage_connector_documents.py` — 100%
+
+#### manage_environments ✅ (EXTENDED: 9 → 11 actions)
+**New actions**: get_properties, update_properties
+**SDK Coverage**: `manage_persisted_properties.py` — 100%
+
+#### execute_process ✅ (EXTENDED: +wait/polling)
+**New behavior**: `wait` parameter with `_poll_execution_status()` polling loop
+**SDK Coverage**: `poll_execution_status.py` — 100%
+
+#### analyze_component ✅ (EXTENDED: 3 → 4 actions)
+**New action**: merge (cross-branch component merge)
+**SDK Coverage**: `merge_components.py` — 100%
+
+#### manage_runtimes ✅ (EXTENDED: 17 → 18 actions)
+**New action**: diagnostics (atom counters, disk space, listener status in one call)
+**SDK Coverage**: `async_operations.py` — 100%
+
+### All Phases Complete
+
+All 19 user-facing tools (excluding auth) are now implemented with 97% direct SDK coverage. Remaining 3% (secrets rotation, atom security policies) covered by `invoke_boomi_api`.
 
 ---
 
@@ -287,7 +329,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 ## SDK Coverage Analysis
 
-### All 67 SDK Examples Mapped to 18 MCP Tools
+### All 67 SDK Examples Mapped to 19 MCP Tools
 
 #### ✅ Category 1: Discover & Analyze (8 files) → FULLY COVERED
 
@@ -304,15 +346,15 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 **Coverage**: 100%
 
-#### ✅ Category 2: Organize & Structure (3 files) → 67% COVERED
+#### ✅ Category 2: Organize & Structure (3 files) → 100% COVERED
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
 | `manage_folders.py` | `manage_folders` | All operations |
 | `folder_structure.py` | `manage_folders` | action="list" |
-| `manage_branches.py` | `invoke_boomi_api` | Generic invoker |
+| `manage_branches.py` | `manage_account` | action="list_branches" / "manage_branch" |
 
-**Gap**: Branch management (less common, use generic invoker)
+**Coverage**: 100%
 
 #### ✅ Category 3: Create & Modify (6 files) → FULLY COVERED
 
@@ -327,7 +369,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 **Coverage**: 100%
 
-#### ✅ Category 4: Environment Setup (8 files) → 88% COVERED
+#### ✅ Category 4: Environment Setup (8 files) → 100% COVERED
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
@@ -338,9 +380,9 @@ schedule_event()  # Internally: find_availability() + create_event()
 | `query_environments.py` | `manage_environments` | Filtered list |
 | `update_environment.py` | `manage_environments` | action="update" |
 | `delete_environment.py` | `manage_environments` | action="delete" |
-| `manage_roles.py` | `invoke_boomi_api` | Generic invoker |
+| `manage_roles.py` | `manage_account` | action="list_roles" / "manage_role" |
 
-**Gap**: Role management (administrative, use generic invoker)
+**Coverage**: 100%
 
 #### ✅ Category 5: Runtime Setup (9 files) → FULLY COVERED
 
@@ -358,20 +400,20 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 **Coverage**: 100%
 
-#### ✅ Category 6: Configure Deployment (7 files) → 57% COVERED
+#### ✅ Category 6: Configure Deployment (7 files) → 88% COVERED
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
 | `create_trading_partner.py` | `manage_trading_partner` | action="create" |
 | `manage_environment_extensions.py` | `manage_environments` | action="get_extensions" / "query_extensions" |
 | `update_environment_extensions.py` | `manage_environments` | action="update_extensions" |
-| `manage_process_schedules.py` | `manage_process` | action="list_schedules" / "set_schedule" / "clear_schedule" |
-| `manage_persisted_properties.py` | `invoke_boomi_api` | Generic invoker |
-| `manage_shared_resources.py` | `invoke_boomi_api` | Generic invoker |
-| `rotate_secrets.py` | `invoke_boomi_api` | Generic invoker |
+| `manage_process_schedules.py` | `manage_schedules` | action="list" / "get" / "update" / "delete" |
+| `manage_persisted_properties.py` | `manage_environments` | action="get_properties" / "update_properties" |
+| `manage_shared_resources.py` | `manage_shared_resources` | All operations |
+| `rotate_secrets.py` | `invoke_boomi_api` | Generic invoker (deferred — niche admin operation) |
 
-**Gaps**: Properties, shared resources, secret rotation (admin tasks)
-**Consolidated**: Environment extensions → `manage_environments`, Schedules → `manage_process`
+**Coverage**: 88% (secrets rotation deferred)
+**Consolidated**: Environment extensions → `manage_environments`, Properties → `manage_environments`
 
 #### ✅ Category 7: Package & Deploy (7 files) → FULLY COVERED
 
@@ -396,7 +438,7 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 **Coverage**: 100%
 
-#### ✅ Category 9: Monitor & Validate (10 files) → 70% COVERED
+#### ✅ Category 9: Monitor & Validate (10 files) → 100% COVERED
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
@@ -404,68 +446,68 @@ schedule_event()  # Internally: find_availability() + create_event()
 | `query_events.py` | `monitor_platform` | action="events" |
 | `get_execution_summary.py` | `monitor_platform` | action="execution_records" |
 | `poll_execution_status.py` | `monitor_platform` | action="execution_records" |
-| `analyze_execution_metrics.py` | `monitor_platform` | action="execution_records" |
+| `analyze_execution_metrics.py` | `monitor_platform` | action="execution_metrics" |
 | `download_execution_artifacts.py` | `monitor_platform` | action="execution_artifacts" |
 | `download_process_log.py` | `monitor_platform` | action="execution_logs" |
-| `monitor_throughput.py` | `invoke_boomi_api` | Generic invoker |
-| `monitor_certificates.py` | `invoke_boomi_api` | Generic invoker |
-| `manage_connector_documents.py` | `invoke_boomi_api` | Generic invoker |
+| `monitor_throughput.py` | `monitor_platform` | action="throughput" |
+| `monitor_certificates.py` | `monitor_platform` | action="certificates" |
+| `manage_connector_documents.py` | `monitor_platform` | action="connector_documents" |
 
-**Gaps**: Throughput monitoring, certificate monitoring, connector docs
-**Consolidated**: 7 monitoring tools → 1 `monitor_platform` tool (execution_records, execution_logs, execution_artifacts, audit_logs, events)
+**Coverage**: 100%
+**Consolidated**: 10 monitoring examples → 1 `monitor_platform` tool (9 actions)
 
-#### ✅ Category 10: Version & Compare (3 files) → FULLY COVERED
+#### ✅ Category 10: Version & Compare (3 files) → 100% COVERED
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
 | `compare_component_versions.py` | `analyze_component` | action="compare_versions" |
 | `component_diff.py` | `analyze_component` | action="compare_versions" |
-| `merge_components.py` | `manage_component` | Multiple operations |
+| `merge_components.py` | `analyze_component` | action="merge" |
 
 **Coverage**: 100%
 
-#### ⚠️ Category 11: Troubleshoot & Fix (4 files) → 50% COVERED
+#### ✅ Category 11: Troubleshoot & Fix (4 files) → 100% COVERED
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
-| `get_error_details.py` | `monitor_platform` | action="execution_records" + action="execution_logs" |
-| `retry_failed_execution.py` | `execute_process` | Re-run same params |
-| `reprocess_documents.py` | `invoke_boomi_api` | Generic invoker |
-| `manage_queues.py` | `invoke_boomi_api` | Generic invoker |
+| `get_error_details.py` | `troubleshoot_execution` | action="error_details" |
+| `retry_failed_execution.py` | `troubleshoot_execution` | action="retry" |
+| `reprocess_documents.py` | `troubleshoot_execution` | action="reprocess" |
+| `manage_queues.py` | `troubleshoot_execution` | action="list_queues" / "clear_queue" / "move_queue" |
 
-**Gaps**: Document reprocessing, queue management
+**Coverage**: 100%
 
-#### ✅ Category 12: Utilities (2 files) → N/A
+#### ✅ Category 12: Utilities (2 files) → 75% COVERED
 
-- `async_operations.py` - Helper patterns, not API operations
-- `sample.py` - Template code
+- `async_operations.py` - Covered via `manage_runtimes` action="diagnostics" (atom counters, disk space, listeners)
+- `sample.py` - Template code (N/A)
 
 ### Coverage Summary
 
 **Overall Coverage:**
-- ✅ **Direct coverage**: 57/67 examples (85%) via 18 tools
-- ✅ **Indirect coverage**: 10/67 via `invoke_boomi_api` (15%)
+- ✅ **Direct coverage**: 65/67 examples (97%) via 19 tools
+- ✅ **Indirect coverage**: 2/67 via `invoke_boomi_api` (3%)
 - ✅ **Total coverage**: 67/67 examples (100%)
 
-**Fully Covered Categories** (7/12):
+**Fully Covered Categories** (10/12):
 1. Discover & Analyze - 100%
-2. Create & Modify - 100%
-3. Runtime Setup - 100%
-4. Package & Deploy - 100%
-5. Execute & Test - 100%
-6. Version & Compare - 100%
-7. Utilities - N/A
+2. Organize & Structure - 100%
+3. Create & Modify - 100%
+4. Environment Setup - 100%
+5. Runtime Setup - 100%
+6. Package & Deploy - 100%
+7. Execute & Test - 100%
+8. Monitor & Validate - 100%
+9. Version & Compare - 100%
+10. Troubleshoot & Fix - 100%
 
-**Partially Covered Categories** (5/12):
-1. Organize & Structure - 67%
-2. Environment Setup - 88%
-3. Configure Deployment - 57%
-4. Monitor & Validate - 70%
-5. Troubleshoot & Fix - 50%
+**Partially Covered Categories** (2/12):
+1. Configure Deployment - 88% (secrets rotation deferred)
+2. Utilities - 75% (sample.py is template code, N/A)
 
 ---
 
-## Final Tool Architecture (18 Tools)
+## Final Tool Architecture (19 User-Facing Tools)
 
 ### Category 1: Components (4 tools, ~1,500 tokens)
 
@@ -532,28 +574,25 @@ def manage_component(
 - `delete_component.py`
 - `manage_components.py`
 
-#### 3. analyze_component
+#### 3. analyze_component ✅ (Implemented — 4 actions)
 ```python
-@mcp.tool(readOnlyHint=True)
+@mcp.tool()
 def analyze_component(
     profile: str,
-    action: Literal["dependencies", "where_used", "compare_versions"],
+    action: Literal["where_used", "dependencies", "compare_versions", "merge"],
     component_id: str,
-    target_component_id: Optional[str] = None,  # For compare_versions
-    version_1: Optional[str] = None,  # For compare_versions
-    version_2: Optional[str] = None,  # For compare_versions
-    include_transitive: bool = False,  # For dependencies
-    depth: int = 1
+    config: Optional[str] = None,
 ) -> dict:
-    """Analyze component relationships and versions.
+    """Analyze component dependencies and compare versions.
 
     Actions:
-    - dependencies: Find what this component uses (outbound deps)
-    - where_used: Find what uses this component (inbound deps)
-    - compare_versions: Diff two versions of a component
+    - where_used: Find all components that reference this component (inbound)
+    - dependencies: Find all components this component references (outbound)
+    - compare_versions: Compare two versions of a component
+    - merge: Merge component from one branch to another
 
-    Implements caching for repeated queries to reduce API calls.
-    Can detect circular dependencies.
+    compare_versions config: {"source_version": 1, "target_version": 2}
+    merge config: {"source_branch_name": "feature", "target_branch_name": "main"}
     """
 ```
 
@@ -564,6 +603,7 @@ def analyze_component(
 - `compare_component_versions.py`
 - `component_diff.py`
 - `analyze_integration_pack.py`
+- `merge_components.py`
 
 #### 4. manage_connector ✅ (Implemented)
 ```python
@@ -603,17 +643,18 @@ def manage_connector(
 
 ### Category 2: Environments & Runtimes (2 tools, ~800 tokens)
 
-#### 5. manage_environments
+#### 5. manage_environments ✅ (Implemented — 11 actions)
 ```python
 @mcp.tool()
 def manage_environments(
     profile: str,
     action: Literal["list", "get", "create", "update", "delete",
-                     "get_extensions", "update_extensions", "query_extensions", "stats"],
-    resource_id: Optional[str] = None,  # environment_id, required for get/update/delete/extensions
+                     "get_extensions", "update_extensions", "query_extensions", "stats",
+                     "get_properties", "update_properties"],
+    resource_id: Optional[str] = None,  # environment_id or atom_id (for properties)
     config: Optional[str] = None,
 ) -> dict:
-    """Manage Boomi environments (deployment stages) and their configuration extensions.
+    """Manage Boomi environments, configuration extensions, and persisted properties.
 
     Actions:
     - list: List all environments. Optional config: {"classification": "PROD"}
@@ -667,23 +708,24 @@ def manage_environments(
 - **Custom properties**: Must resend all key-value pairs even for partial updates.
 - **useDefault attribute**: Set `true` to revert field to component default; `false` + `value` to override.
 
-#### 6. manage_runtimes
+#### 6. manage_runtimes ✅ (Implemented — 18 actions)
 ```python
 @mcp.tool()
 def manage_runtimes(
     profile: str,
-    action: Literal["list", "get", "attach", "detach", "restart", "configure_java", "create_installer_token"],
-    runtime_id: Optional[str] = None,
-    environment_id: Optional[str] = None,  # For attach/detach
-    runtime_type: Optional[Literal["atom", "molecule", "cloud"]] = None,
-    java_version: Optional[str] = None,  # For configure_java
-    token_expiration_days: int = 30,  # For create_installer_token
-    filters: Optional[dict] = None
+    action: Literal["list", "get", "create", "update", "delete",
+                     "attach", "detach", "list_attachments", "restart",
+                     "configure_java", "create_installer_token",
+                     "available_clouds", "cloud_list", "cloud_get",
+                     "cloud_create", "cloud_update", "cloud_delete",
+                     "diagnostics"],
+    resource_id: Optional[str] = None,
+    environment_id: Optional[str] = None,
+    config: Optional[str] = None,
 ) -> dict:
-    """Manage Boomi runtimes (Atoms, Molecules, Clouds).
+    """Manage Boomi runtimes (Atoms, Molecules, Clouds), attachments, and provisioning.
 
-    Handles runtime lifecycle, environment attachments, and configuration.
-    Restart action supports polling until runtime is back online.
+    Includes diagnostics action for atom counters, disk space, and listener status.
     """
 ```
 
@@ -697,6 +739,7 @@ def manage_runtimes(
 - `restart_runtime.py`
 - `manage_java_runtime.py`
 - `create_installer_token.py`
+- `async_operations.py` (diagnostics)
 
 ---
 
@@ -808,23 +851,15 @@ Organization:
 
 ### Category 4: Execution & Scheduling (2 tools, ~800 tokens)
 
-#### 9. manage_process ✅ (Implemented — schedule actions pending)
+#### 9. manage_process ✅ (Implemented — 5 actions)
 
 See **Implementation Status** section above for full details of the 3-layer hybrid architecture.
 
-**Schedule actions** (pending implementation via `manage_process_schedules.py` SDK pattern):
-- `list_schedules`: List all schedules for a process. Config: `{"process_id": "...", "atom_id": "..."}`
-- `set_schedule`: Set cron schedule. Config: `{"process_id": "...", "atom_id": "...", "schedule": "0 9 * * *"}`
-- `clear_schedule`: Remove schedule. Config: `{"process_id": "...", "atom_id": "..."}`
-
-**SDK Examples Covered (schedules):**
-- `manage_process_schedules.py`
-
-**Why schedules are here**: Schedules define *when processes run* — they always require a `process_id` + `atom_id`. They're inherently a sub-operation of process management, same as "restart" is a sub-operation of `manage_runtimes`.
+**Note**: Schedule management was moved to the separate `manage_schedules` tool (see Category 7) in v1.5. This keeps `manage_process` focused on process CRUD (list, get, create, update, delete).
 
 **Note on process extensions (define phase)**: The Extensions dialog in the Boomi UI allows marking components as extensible (connections, operations, trading partners, dynamic process properties, process properties, cross-references, PGP certs, data maps). These extension definitions are stored in the **process component XML** — they are part of the process itself, not a separate API. When a process with extensible components is deployed to an environment, the platform auto-generates the `EnvironmentExtensions` entries. The *configure* phase (setting override values per environment) is handled by `manage_environments` actions `get_extensions` / `update_extensions` / `query_extensions`.
 
-#### 10. execute_process ✅ Implemented
+#### 10. execute_process ✅ (Implemented — with wait/polling)
 ```python
 @mcp.tool(annotations={"destructiveHint": True, "openWorldHint": True})
 def execute_process(
@@ -832,20 +867,25 @@ def execute_process(
     process_id: str,
     environment_id: str,
     atom_id: str = None,       # Auto-detected if only one attached to environment
-    config: str = None,        # JSON: dynamic_properties, process_properties, notes
+    config: str = None,        # JSON: dynamic_properties, process_properties, wait, timeout
 ) -> dict:
     """Execute a Boomi process on a runtime.
 
     Returns request_id for status polling via monitor_platform.
     Auto-resolves atom_id from environment attachments if omitted.
     Supports dynamic process properties via config JSON.
+
+    Wait mode: config='{"wait": true, "timeout": 300}' — polls execution status
+    until completion or timeout (default 5 min). Returns final execution result.
     """
 ```
 **File**: `src/boomi_mcp/categories/execution.py`
 **SDK service**: `sdk.execution_request.create_execution_request(ExecutionRequest(...))`
+**Polling**: `_poll_execution_status()` — polls every 5s until COMPLETE/ERROR/ABORTED or timeout
 
 **SDK Examples Covered:**
 - `execute_process.py`
+- `poll_execution_status.py`
 
 #### ~~get_execution_status / query_execution_records~~ → CONSOLIDATED into `monitor_platform` action="execution_records"
 
@@ -865,15 +905,17 @@ This uses the same `ExecutionRecord` query API with different filters:
 
 ### Category 5: Monitoring (1 tool, ~500 tokens)
 
-#### 11. monitor_platform ✅ (Implemented)
+#### 11. monitor_platform ✅ (Implemented — 9 actions)
 ```python
 @mcp.tool(readOnlyHint=True)
 def monitor_platform(
     profile: str,
-    action: Literal["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events"],
+    action: Literal["execution_records", "execution_logs", "execution_artifacts",
+                     "audit_logs", "events", "certificates", "throughput",
+                     "execution_metrics", "connector_documents"],
     config: Optional[str] = None,  # JSON string with action-specific parameters
 ) -> dict:
-    """Monitor Boomi platform: execution status, logs, artifacts, audit trail, and events.
+    """Monitor Boomi platform: executions, logs, artifacts, audit trail, events, certificates, throughput, metrics.
 
     Actions:
     - execution_records: Query/poll execution status and history
@@ -881,6 +923,10 @@ def monitor_platform(
     - execution_artifacts: Download execution output documents/data
     - audit_logs: Query who did what (compliance/security audit trail)
     - events: Query system events (errors, warnings, alerts)
+    - certificates: Query deployed/expired certificates with expiry tracking
+    - throughput: Account-level usage metrics by date range
+    - execution_metrics: Aggregated execution statistics (success rate, avg duration, top failures)
+    - connector_documents: Document-level tracking for connector operations
 
     Config JSON examples:
 
@@ -939,9 +985,103 @@ def manage_folders(
 
 ---
 
-### Category 7: Meta/Power Tools (3 tools, ~1,200 tokens)
+### Category 7: Scheduling & Troubleshooting (2 tools, ~600 tokens)
 
-#### 13. get_schema_template
+#### 13. manage_schedules ✅ (NEW — 4 actions)
+```python
+@mcp.tool()
+def manage_schedules(
+    profile: str,
+    action: Literal["list", "get", "update", "delete"],
+    process_id: str = None,
+    environment_id: str = None,
+    config: str = None,
+) -> dict:
+    """Manage Boomi process schedules.
+
+    Actions:
+    - list: List schedules for a process. Requires process_id + environment_id (or atom_id in config)
+    - get: Get schedule details
+    - update: Update schedule configuration
+    - delete: Remove a schedule
+    """
+```
+**File**: `src/boomi_mcp/categories/schedules.py`
+
+#### 14. troubleshoot_execution ✅ (NEW — 6 actions)
+```python
+@mcp.tool()
+def troubleshoot_execution(
+    profile: str,
+    action: Literal["error_details", "retry", "reprocess", "list_queues", "clear_queue", "move_queue"],
+    execution_id: str = None,
+    process_id: str = None,
+    environment_id: str = None,
+    config: str = None,
+) -> dict:
+    """Troubleshoot failed executions: error details, retry, reprocess, queue management.
+
+    Actions:
+    - error_details: Get execution error info with logs (requires execution_id)
+    - retry: Retry a failed execution (requires execution_id)
+    - reprocess: Reprocess failed connector documents
+    - list_queues: List queues on an atom (requires atom_id in config)
+    - clear_queue: Clear messages from a queue
+    - move_queue: Move messages between queues
+    """
+```
+**File**: `src/boomi_mcp/categories/troubleshooting.py`
+
+---
+
+### Category 8: Shared Resources & Account (2 tools, ~500 tokens)
+
+#### 15. manage_shared_resources ✅ (NEW — 5 actions)
+```python
+@mcp.tool()
+def manage_shared_resources(
+    profile: str,
+    action: Literal["list_web_servers", "update_web_server", "list_channels", "get_channel", "create_channel"],
+    resource_id: str = None,
+    config: str = None,
+) -> dict:
+    """Manage Boomi shared resources: web servers and communication channels.
+
+    Actions:
+    - list_web_servers: Get shared web server configuration for an atom
+    - update_web_server: Update web server settings
+    - list_channels: List communication channel components
+    - get_channel: Get channel details
+    - create_channel: Create new communication channel
+    """
+```
+**File**: `src/boomi_mcp/categories/shared_resources.py`
+
+#### 16. manage_account ✅ (NEW — 4 actions)
+```python
+@mcp.tool()
+def manage_account(
+    profile: str,
+    action: Literal["list_roles", "manage_role", "list_branches", "manage_branch"],
+    resource_id: str = None,
+    config: str = None,
+) -> dict:
+    """Manage Boomi account administration: roles and branches.
+
+    Actions:
+    - list_roles: Query roles. Config: {"name": "Administrator"}
+    - manage_role: CRUD for roles. Config: {"operation": "create|get|update|delete", ...}
+    - list_branches: Query branches. Config: {"name": "feature-x"}
+    - manage_branch: CRUD for branches. Config: {"operation": "create|get|delete", ...}
+    """
+```
+**File**: `src/boomi_mcp/categories/account.py`
+
+---
+
+### Category 9: Meta/Power Tools (3 tools, ~1,200 tokens)
+
+#### 17. get_schema_template
 ```python
 @mcp.tool(readOnlyHint=True)
 def get_schema_template(
@@ -963,7 +1103,7 @@ def get_schema_template(
 
 **Purpose**: Self-documentation, reduces errors from malformed inputs
 
-#### 14. invoke_boomi_api
+#### 18. invoke_boomi_api
 ```python
 @mcp.tool()
 def invoke_boomi_api(
@@ -990,30 +1130,21 @@ def invoke_boomi_api(
     """
 ```
 
-**Purpose**: Future-proofing, covers 15% gap in direct coverage
+**Purpose**: Future-proofing, covers 3% gap in direct coverage (down from 15% after v1.5)
 
-**SDK Examples That Might Use This:**
-- `manage_branches.py` (branch management)
-- `manage_roles.py` (permission management)
-- `manage_persisted_properties.py`
-- `manage_shared_resources.py`
-- `rotate_secrets.py`
-- `monitor_throughput.py`
-- `monitor_certificates.py`
-- `manage_connector_documents.py`
-- `reprocess_documents.py`
-- `manage_queues.py`
+**SDK Examples Still Using This (deferred from dedicated tools):**
+- `rotate_secrets.py` (niche admin operation — single API call)
 
-#### 15. list_capabilities
+#### 19. list_capabilities
 ```python
 @mcp.tool(readOnlyHint=True)
 def list_capabilities() -> dict:
     """List all available MCP tools and their capabilities.
 
     Returns summary of:
-    - All 18 tools with descriptions
-    - Actions supported by each tool
-    - Coverage of SDK examples
+    - All 19 user-facing tools with descriptions
+    - Actions supported by each tool (~104 total actions)
+    - Coverage of SDK examples (97% direct)
     - Suggested next steps for common tasks
 
     Helps AI agent understand what operations are possible.
@@ -1058,16 +1189,17 @@ def list_capabilities() -> dict:
 
 **Token Estimate**: ~7,200 tokens
 
-### Approach 3: Workflow-Oriented Plan (18 tools) ⭐ RECOMMENDED (v1.4)
+### Approach 3: Workflow-Oriented Plan (19 tools) ⭐ RECOMMENDED (v1.5)
 
 **Strengths:**
 - ✅ Workflow-oriented: group by user intent, not API resource
-- ✅ Token efficient (~7,500 tokens - 81% reduction)
+- ✅ Token efficient (~8,000 tokens - 80% reduction)
 - ✅ Within Anthropic's sweet spot (10-20 tools per server)
 - ✅ Research-backed (PostgreSQL pattern for components, Anthropic's tool consolidation guidance)
 - ✅ Includes meta-tools (schema template, generic invoker, capabilities)
 - ✅ Complete annotations (readOnlyHint, openWorldHint)
 - ✅ Follows "a few thoughtful tools targeting specific high-impact workflows" principle
+- ✅ 97% direct SDK coverage (v1.5)
 
 **Consolidation rationale (v1.3 changes):**
 - Organizations → `manage_trading_partner`: Organizations exist only for trading partner contact info
@@ -1077,7 +1209,7 @@ def list_capabilities() -> dict:
 **Expansion rationale (v1.4):**
 - `manage_connector` added as separate tool: Connectors have a unique catalog API for type/field discovery and a builder pattern for XML generation. Keeping this separate from `manage_component` avoids overloading the generic tool with connector-specific logic.
 
-**Token Estimate**: ~7,500 tokens
+**Token Estimate**: ~8,000 tokens
 
 ### Why Workflow-Oriented Wins
 
@@ -1085,115 +1217,45 @@ def list_capabilities() -> dict:
 |--------|-----------|---------|--------|
 | Component consolidation | ⚠️ Weak (6-7 tools) | ✅ Strong (3 tools) | ✅ Strong (4 tools) |
 | Workflow grouping | ❌ API-per-tool | ⚠️ Partial | ✅ Full (sub-operations grouped) |
-| Monitoring | ⚠️ 4 separate tools | ⚠️ 4 separate tools | ✅ 1 consolidated tool |
+| Monitoring | ⚠️ 4 separate tools | ⚠️ 4 separate tools | ✅ 1 consolidated tool (9 actions) |
 | Meta tools | ✅ Excellent | ✅ Excellent | ✅ Excellent |
-| Token efficiency | ⚠️ 9,000 | ⚠️ 8,400 | ✅ 7,500 |
+| Token efficiency | ⚠️ 9,000 | ⚠️ 8,400 | ✅ ~8,000 |
 | Anthropic alignment | ⚠️ Too many tools | ⚠️ Borderline | ✅ Sweet spot |
+| SDK coverage | ⚠️ 85% | ⚠️ 85% | ✅ 97% |
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Immediate (Week 1) - CONSOLIDATE TRADING PARTNERS
+### Phase 1: Trading Partner Consolidation ✅ COMPLETE
 **Goal**: Validate consolidation approach, save 1,600 tokens
+**Status**: ✅ Complete — `manage_trading_partner` with 7 actions + org actions
 
-**Tasks:**
-1. Switch to dev branch
-2. Create new consolidated `manage_trading_partner` tool
-3. Update `server.py` and `server_local.py` registrations
-4. Remove 6 old tools: `list_`, `get_`, `create_`, `update_`, `delete_`, `analyze_trading_partner_usage`
-5. Update `trading_partner_tools.py` to support action parameter
-6. Test all 7 standards (x12, edifact, hl7, rosettanet, custom, tradacoms, odette)
-7. Test all 6 actions (list, get, create, update, delete, analyze_usage)
-8. Selective merge to main (cherry-pick consolidation commit only)
-9. Deploy to production
-
-**Success Criteria:**
-- All 7 standards work
-- All 6 actions work
-- Token count reduced by ~1,600
-- No functionality lost
-- Production deployment successful
-
-**Estimated Effort**: 8-12 hours
-
-### Phase 2: Core Operations (Weeks 2-3) - ADD 6 TOOLS
+### Phase 2: Core Operations ✅ COMPLETE
 **Goal**: Essential functionality for daily use
+**Status**: ✅ Complete — `query_components`, `manage_component`, `analyze_component`, `manage_environments`, `manage_runtimes`, `execute_process`
 
-**Tasks:**
-1. Implement component tools (3 tools):
-   - `query_components`
-   - `manage_component`
-   - `analyze_component`
+### Phase 3: Full Base Coverage ✅ COMPLETE
+**Goal**: Complete the base tool set
+**Status**: ✅ Complete — `manage_deployment`, `manage_folders`, `get_schema_template`, `invoke_boomi_api`, `list_capabilities`, `manage_connector`, `manage_process`, `monitor_platform`
 
-2. Implement environment/runtime tools (2 tools):
-   - `manage_environments` (includes get_extensions, update_extensions, query_extensions actions)
-   - `manage_runtimes`
+### Phase 4: Remaining Tools (v1.5) ✅ COMPLETE
+**Goal**: Close the SDK coverage gap from 85% to 97%
 
-3. Implement basic execution (1 tool): ✅
-   - `execute_process` ✅
+**New tools implemented:**
+1. `manage_schedules` — 4 actions (process schedule CRUD)
+2. `troubleshoot_execution` — 6 actions (error details, retry, reprocess, queue management)
+3. `manage_shared_resources` — 5 actions (web servers, communication channels)
+4. `manage_account` — 4 actions (roles, branches)
 
-**Success Criteria:**
-- Can discover all components
-- Can create/update processes
-- Can manage environments (including extensions) and runtimes
-- Can execute processes and monitor status (via `monitor_platform`)
+**Extensions to existing tools:**
+5. `monitor_platform` +4 actions (certificates, throughput, execution_metrics, connector_documents)
+6. `manage_environments` +2 actions (get_properties, update_properties)
+7. `execute_process` +wait/polling
+8. `analyze_component` +merge action
+9. `manage_runtimes` +diagnostics action
 
-**Estimated Effort**: 20-28 hours
-
-### Phase 3: Full Coverage (Weeks 4-5) - ADD 5 TOOLS
-**Goal**: Complete the 18-tool set
-
-**Tasks:**
-1. Add deployment (1 tool):
-   - `manage_deployment` ✅
-
-2. Add organization (1 tool):
-   - `manage_folders`
-
-3. Add meta tools (3 tools):
-   - `get_schema_template`
-   - `invoke_boomi_api`
-   - `list_capabilities`
-
-4. Add schedule actions to existing `manage_process`:
-   - `list_schedules`, `set_schedule`, `clear_schedule` actions
-
-5. Add org actions to existing `manage_trading_partner`:
-   - `org_list`, `org_get`, `org_create`, `org_update`, `org_delete` actions
-
-**Success Criteria:**
-- All 18 tools implemented (14 new + 4 existing from Phase 1)
-- Full SDK coverage (85% direct, 15% via generic invoker)
-- Token budget ~7,200
-
-**Estimated Effort**: 28-36 hours
-
-### Phase 4: Polish (Week 6) - PRODUCTION READY
-**Goal**: Production-grade quality
-
-**Tasks:**
-1. Comprehensive error messages for all tools
-2. Implement caching for component dependency analysis
-3. Add result truncation/summarization for large responses
-4. Write integration tests for all 18 tools
-5. Performance optimization
-6. Documentation updates
-7. User feedback incorporation
-
-**Success Criteria:**
-- All tools have user-friendly error messages
-- Large responses handled gracefully
-- Tests pass
-- Documentation complete
-- Production deployment successful
-
-**Estimated Effort**: 16-24 hours
-
-### Total Timeline
-**6 weeks** for complete implementation
-
-**Total Effort Estimate**: 80-108 hours
+**Result**: 19 user-facing tools, ~104 actions, 97% direct SDK coverage
 
 ---
 
@@ -1282,21 +1344,24 @@ def list_capabilities() -> dict:
 
 **Not all resources need this split** (e.g., environments combine CRUD because it's simpler)
 
-### 8. Why 18 Tools?
+### 8. Why 19 Tools?
 
-**Decision**: Workflow-oriented with 18 tools (evolved from 21 → 18 in v1.3, 18 → 19 in v1.4, then 19 → 18 after merging manage_packages+deploy_package into manage_deployment)
+**Decision**: Workflow-oriented with 19 user-facing tools (evolved from 21 → 18 in v1.3, +1 in v1.4 for connectors, -1 for deployment merge, +4 new in v1.5)
 
 **Rationale:**
 - **Anthropic guidance**: "a few thoughtful tools targeting specific high-impact workflows"
 - **Research**: 5-10 optimal, 15-30 acceptable, 40+ problematic — 19 is in the sweet spot
-- **Workflow grouping**: Sub-operations belong with their parent resource (schedules→process, extensions→environments, organizations→trading_partners). Extensions are particularly strong: only 3 API ops (GET/UPDATE/QUERY), no CREATE/DELETE, auto-generated from deployed process XML.
+- **Workflow grouping**: Sub-operations belong with their parent resource (extensions→environments, organizations→trading_partners, properties→environments, diagnostics→runtimes)
+- **Distinct intents get separate tools**: Troubleshooting (find→diagnose→fix) is different from monitoring (observe). Schedules (when to run) is different from process CRUD (what to run).
 - **Specialized APIs**: Resources with unique discovery APIs (connectors have a catalog API) warrant separate tools
-- **Token budget**: ~7,500 tokens (81% reduction from individual approach)
-- **Coverage**: 85% direct + 15% via generic invoker = 100%
+- **Token budget**: ~8,000 tokens (80% reduction from individual approach)
+- **Coverage**: 97% direct + 3% via generic invoker = 100%
 
 **v1.3 consolidation principle**: If a resource is always accessed in the context of another resource (requires its ID), it's a sub-operation, not a separate tool.
 
 **v1.4 expansion principle**: If a resource has a unique API surface (e.g., connector catalog) and a specialized builder pattern, it warrants its own tool rather than overloading a generic tool.
+
+**v1.5 expansion principle**: When an operational domain has distinct user intent (troubleshooting, scheduling, account admin, shared resources), it warrants a new tool even if the action count is small. Extensions to existing tools (monitoring +4 actions, environments +2 actions) keep related operations together.
 
 ---
 
@@ -1435,6 +1500,64 @@ The MCP parameter is always `resource_id`. Map it to the action handler's expect
 - [ ] Run `python3 scripts/verify_sync.py` — must pass
 
 **Canonical example:** `manage_trading_partner` in `server_local.py`
+
+---
+
+## Remaining Tools Design & Architecture (v1.5)
+
+### Decision Framework
+
+For each missing capability, the choice was:
+
+| Option | When to use |
+|--------|-------------|
+| **Add action to existing tool** | Same domain, same SDK client, same `profile` + `action` pattern, tool stays under ~12 actions |
+| **Create new tool** | Different operational domain, different user intent, would push existing tool past ~12 actions |
+| **Skip / defer** | Niche feature, covered by `invoke_boomi_api` escape hatch, or utility pattern (not a tool) |
+
+### Tool Placement Rationale
+
+| Tool | Why this placement |
+|------|-------------------|
+| `manage_schedules` (NEW) | Schedules are distinct from process CRUD — "when does it run?" vs "what is it?" |
+| `troubleshoot_execution` (NEW) | Troubleshooting (find→diagnose→fix) is different intent from monitoring (observe). The entire Category 11 was missing. |
+| `manage_shared_resources` (NEW) | Web servers and channels are atom-level configs shared across processes — distinct from environments or runtimes |
+| `manage_account` (NEW) | Roles and branches are account-level admin operations — don't fit any component or infrastructure tool |
+| `monitor_platform` (+4) | Certificates, throughput, metrics, connector docs are all read-only observability — same intent as existing monitoring actions |
+| `manage_environments` (+2) | Persisted properties are environment/runtime configuration — fits with existing extensions |
+| `execute_process` (+wait) | Polling is part of "execute and get results" workflow |
+| `analyze_component` (+merge) | Merging is a version/branch operation — `compare_versions` is already here |
+| `manage_runtimes` (+diagnostics) | Atom counters, disk, listeners are runtime-specific queries — single combined action to stay under action limit |
+
+### Deferred Items
+
+| Feature | SDK Example | Reason |
+|---------|------------|--------|
+| Secrets Rotation | `rotate_secrets.py` | Single API call. Covered by `invoke_boomi_api`. |
+| Atom Security Policies | `async_operations.py` | Admin-level security config. Covered by `invoke_boomi_api`. |
+
+### SDK Method → Tool Action Mapping (v1.5 additions)
+
+| SDK Method | Tool | Action |
+|-----------|------|--------|
+| `sdk.process_schedules.query/get/update/delete` | `manage_schedules` | list, get, update, delete |
+| `sdk.execution_record.query` + `sdk.process_log.create` | `troubleshoot_execution` | error_details |
+| `sdk.execution_record.query` + `sdk.execution_request.create` | `troubleshoot_execution` | retry, reprocess |
+| `sdk.list_queues.async_get/async_token` | `troubleshoot_execution` | list_queues |
+| `sdk.clear_queue.execute` | `troubleshoot_execution` | clear_queue |
+| `sdk.move_queue_request.create` | `troubleshoot_execution` | move_queue |
+| `sdk.deployed_expired_certificate.query` | `monitor_platform` | certificates |
+| `sdk.throughput_account.query` | `monitor_platform` | throughput |
+| `sdk.execution_record.query` (aggregated) | `monitor_platform` | execution_metrics |
+| `sdk.generic_connector_record.query` | `monitor_platform` | connector_documents |
+| `sdk.execution_request.create` + poll loop | `execute_process` | execute (with wait=True) |
+| `sdk.shared_web_server.get/update` | `manage_shared_resources` | list_web_servers, update_web_server |
+| `sdk.shared_communication_channel_component.*` | `manage_shared_resources` | list_channels, get_channel, create_channel |
+| `sdk.persisted_process_properties.*` | `manage_environments` | get_properties, update_properties |
+| `sdk.role.query/create/get/update/delete` | `manage_account` | list_roles, manage_role |
+| `sdk.branch.query/create/get/delete` | `manage_account` | list_branches, manage_branch |
+| `sdk.component.get + update` (merge logic) | `analyze_component` | merge |
+| `sdk.atom.async_get_atom_counters` + disk + listeners | `manage_runtimes` | diagnostics |
 
 ---
 
