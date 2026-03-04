@@ -2,19 +2,19 @@
 
 **Version**: 1.4
 **Date**: 2025-01-17
-**Last Updated**: 2026-02-28 (added manage_connector tool: 18→19 tools)
+**Last Updated**: 2026-03-04 (merged manage_packages+deploy_package → manage_deployment: 19→18 tools)
 **Status**: Phase 1 Complete ✅ (Trading Partners + Organizations, Process Components, Platform Monitoring, Connectors)
 
 ---
 
 ## Executive Summary
 
-### Final Recommendation: Hybrid 19-Tool Architecture
+### Final Recommendation: Hybrid 18-Tool Architecture
 
-After comprehensive research of popular MCP servers, analysis of all 67 Boomi SDK examples, and applying Anthropic's tool consolidation best practices ("a few thoughtful tools targeting specific high-impact workflows"), we recommend a **19-tool hybrid architecture** that balances token efficiency with practical usability.
+After comprehensive research of popular MCP servers, analysis of all 67 Boomi SDK examples, and applying Anthropic's tool consolidation best practices ("a few thoughtful tools targeting specific high-impact workflows"), we recommend an **18-tool hybrid architecture** that balances token efficiency with practical usability.
 
 **Key Metrics:**
-- **Tool Count**: 19 tools (vs 100+ individual operations)
+- **Tool Count**: 18 tools (vs 100+ individual operations)
 - **Token Budget**: ~7,500 tokens (81% reduction from 40,000)
 - **Coverage**: 85% direct coverage, 100% via generic invoker
 - **Pattern**: Workflow-oriented consolidation — group by user intent, not API resource
@@ -700,7 +700,7 @@ def manage_runtimes(
 
 ---
 
-### Category 3: Deployment & B2B (2 tools, ~1,200 tokens)
+### Category 3: Deployment & B2B (2 tools, ~700 tokens)
 
 #### 7. manage_deployment
 ```python
@@ -1060,7 +1060,7 @@ def list_capabilities() -> dict:
 
 **Token Estimate**: ~7,200 tokens
 
-### Approach 3: Workflow-Oriented Plan (19 tools) ⭐ RECOMMENDED (v1.4)
+### Approach 3: Workflow-Oriented Plan (18 tools) ⭐ RECOMMENDED (v1.4)
 
 **Strengths:**
 - ✅ Workflow-oriented: group by user intent, not API resource
@@ -1284,9 +1284,9 @@ def list_capabilities() -> dict:
 
 **Not all resources need this split** (e.g., environments combine CRUD because it's simpler)
 
-### 8. Why 19 Tools?
+### 8. Why 18 Tools?
 
-**Decision**: Workflow-oriented with 19 tools (evolved from 21 → 18 in v1.3, then 18 → 19 in v1.4)
+**Decision**: Workflow-oriented with 18 tools (evolved from 21 → 18 in v1.3, 18 → 19 in v1.4, then 19 → 18 after merging manage_packages+deploy_package into manage_deployment)
 
 **Rationale:**
 - **Anthropic guidance**: "a few thoughtful tools targeting specific high-impact workflows"
@@ -3698,7 +3698,7 @@ If generic invoker proves insufficient for frequently-used operations:
 
 ## Conclusion
 
-This 19-tool workflow-oriented architecture represents the optimal balance between:
+This 18-tool workflow-oriented architecture represents the optimal balance between:
 - **Token efficiency** (81% reduction vs individual tools)
 - **Workflow grouping** (sub-operations grouped with parent resources)
 - **Complete coverage** (100% of SDK examples)
@@ -3712,7 +3712,7 @@ This 19-tool workflow-oriented architecture represents the optimal balance betwe
 
 ## Appendix: Quick Reference
 
-### All 19 Tools at a Glance
+### All 18 Tools at a Glance
 
 **Components** (4):
 1. query_components
@@ -3778,4 +3778,4 @@ Note: Actual token count may be higher due to rich docstrings with config exampl
 | Phase 2 | Weeks 4-5 | 20-28h | Core operations (6 tools) | 🔄 Planned |
 | Phase 3 | Weeks 6-7 | 28-36h | Full coverage (5 tools + schedule/org actions) | 📋 Planned |
 | Phase 4 | Week 8 | 16-24h | Production polish | 📋 Planned |
-| **TOTAL** | **8 weeks** | **90-124h** | **19 tools production-ready** | **In Progress** |
+| **TOTAL** | **8 weeks** | **90-124h** | **18 tools production-ready** | **In Progress** |
