@@ -367,8 +367,9 @@ def merge_versions(
         # Perform the update (target branch context)
         boomi_client.component.update_component_raw(component_id, merged_xml)
 
-        # Verify the update
-        verify = component_get_xml(boomi_client, target_get_id)
+        # Verify the update (always read the updated head, not an immutable version snapshot)
+        verify_id = f"{component_id}~{target_branch}" if target_branch else component_id
+        verify = component_get_xml(boomi_client, verify_id)
 
         result = {
             "_success": True,
