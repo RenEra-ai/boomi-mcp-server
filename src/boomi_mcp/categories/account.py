@@ -26,6 +26,9 @@ from boomi.models import (
     BranchSimpleExpression,
     BranchSimpleExpressionOperator,
 )
+from boomi.net.transport.api_error import ApiError
+from boomi.net.transport.serializer import Serializer
+from boomi.net.environment.environment import Environment
 
 
 # ============================================================================
@@ -78,6 +81,84 @@ def _branch_to_dict(branch) -> Dict[str, Any]:
     return result
 
 
+def _extract_api_error_msg(e) -> str:
+    """Extract user-friendly error message from ApiError."""
+    detail = getattr(e, "error_detail", None)
+    if detail:
+        return detail
+    resp = getattr(e, "response", None)
+    if resp:
+        body = getattr(resp, "body", None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, "message", "") or str(e)
+
+
+def _query_all_roles_raw(sdk: Boomi) -> List[Dict[str, Any]]:
+    """List all roles using raw API call (empty QueryFilter).
+
+    The Role API rejects IS_NOT_NULL and LIKE operators, so we bypass
+    the SDK query builder and POST an empty QueryFilter directly.
+    """
+    import json as json_mod
+    svc = sdk.role
+    base = svc.base_url or Environment.DEFAULT.url
+    url = f"{base.rstrip('/')}/Role/query"
+
+    ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])
+    ser = ser.add_header("Accept", "application/json")
+    serialized = ser.serialize().set_method("POST")
+    serialized = serialized.set_body({"QueryFilter": {}}, "application/json")
+
+    response, status, _ = svc.send_request(serialized)
+    if isinstance(response, (bytes, bytearray)):
+        response = response.decode("utf-8")
+    data = json_mod.loads(response) if isinstance(response, str) else response
+
+    roles = []
+    if "result" in data:
+        roles.extend([_role_to_dict_raw(r) for r in data["result"]])
+
+    # Handle pagination via queryToken
+    while data.get("queryToken"):
+        token = data["queryToken"]
+        url_more = f"{base.rstrip('/')}/Role/queryMore"
+        ser2 = Serializer(url_more, [svc.get_access_token(), svc.get_basic_auth()])
+        ser2 = ser2.add_header("Accept", "application/json")
+        serialized2 = ser2.serialize().set_method("POST")
+        serialized2 = serialized2.set_body(token, "application/json")
+        response2, _, _ = svc.send_request(serialized2)
+        if isinstance(response2, (bytes, bytearray)):
+            response2 = response2.decode("utf-8")
+        data = json_mod.loads(response2) if isinstance(response2, str) else response2
+        if "result" in data:
+            roles.extend([_role_to_dict_raw(r) for r in data["result"]])
+
+    return roles
+
+
+def _role_to_dict_raw(role_data: dict) -> Dict[str, Any]:
+    """Convert raw JSON role dict to our standard output format."""
+    result = {
+        "id": role_data.get("@id", ""),
+        "name": role_data.get("name", ""),
+        "description": role_data.get("description", ""),
+        "account_id": role_data.get("accountId", ""),
+    }
+    parent_id = role_data.get("parentId")
+    if parent_id:
+        result["parent_id"] = parent_id
+    privileges = role_data.get("Privileges", {})
+    if privileges:
+        privs = privileges.get("Privilege", [])
+        if isinstance(privs, dict):
+            privs = [privs]
+        result["privileges"] = [p.get("name", str(p)) for p in privs]
+    return result
+
+
 def _query_all_roles(sdk: Boomi, expression) -> List[Dict[str, Any]]:
     """Execute a role query with pagination, return list of dicts."""
     query_filter = RoleQueryConfigQueryFilter(expression=expression)
@@ -119,23 +200,20 @@ def _query_all_branches(sdk: Boomi, expression) -> List[Dict[str, Any]]:
 # ============================================================================
 
 def _action_list_roles(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """List all roles with optional name filter."""
-    name_pattern = kwargs.get("name_pattern")
+    """List all roles with optional exact name filter."""
+    name = kwargs.get("name") or kwargs.get("name_pattern")
 
-    if name_pattern:
+    if name:
+        # Role API only supports EQUALS on name
         expression = RoleSimpleExpression(
-            operator=RoleSimpleExpressionOperator.LIKE,
+            operator=RoleSimpleExpressionOperator.EQUALS,
             property=RoleSimpleExpressionProperty.NAME,
-            argument=[name_pattern],
+            argument=[name],
         )
+        roles = _query_all_roles(sdk, expression)
     else:
-        expression = RoleSimpleExpression(
-            operator=RoleSimpleExpressionOperator.ISNOTNULL,
-            property=RoleSimpleExpressionProperty.NAME,
-            argument=[],
-        )
-
-    roles = _query_all_roles(sdk, expression)
+        # Empty QueryFilter via raw API (SDK operators not supported)
+        roles = _query_all_roles_raw(sdk)
 
     return {
         "_success": True,
@@ -395,6 +473,12 @@ def manage_account_action(
 
     try:
         return handler(sdk, profile, **merged)
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,

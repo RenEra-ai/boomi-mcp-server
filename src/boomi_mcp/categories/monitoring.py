@@ -866,7 +866,12 @@ def handle_execution_metrics(boomi_client, config_data: Dict[str, Any]) -> Dict[
         return {
             "_success": True,
             "total_executions": 0,
-            "message": "No execution records found for the given filters"
+            "success_rate_pct": None,
+            "status_counts": {},
+            "duration_ms": None,
+            "error_count": 0,
+            "top_failures": [],
+            "message": "No execution records found for the given filters",
         }
 
     # Aggregate

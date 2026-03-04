@@ -14,6 +14,7 @@ import base64
 from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
+from boomi.net.transport.api_error import ApiError
 from boomi.models import (
     ProcessSchedules,
     ProcessSchedulesQueryConfig,
@@ -29,6 +30,21 @@ from boomi.models import (
 # ============================================================================
 # Helpers
 # ============================================================================
+
+def _extract_api_error_msg(e) -> str:
+    """Extract user-friendly error message from ApiError."""
+    detail = getattr(e, "error_detail", None)
+    if detail:
+        return detail
+    resp = getattr(e, "response", None)
+    if resp:
+        body = getattr(resp, "body", None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, "message", "") or str(e)
+
 
 def _schedule_id_from_ids(atom_id: str, process_id: str) -> str:
     """Build the base64-encoded schedule ID from atom and process IDs."""
@@ -311,6 +327,12 @@ def manage_schedules_action(
 
     try:
         return handler(sdk, profile, **merged)
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
