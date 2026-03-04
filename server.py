@@ -2404,9 +2404,9 @@ if manage_account_action:
 
         Actions and config examples:
 
-            list_roles - List all roles, optional name filter:
+            list_roles - List all roles, optional exact name filter:
                 (no config needed — lists all)
-                config='{"name_pattern": "%Admin%"}'
+                config='{"name": "Administrator"}'
 
             manage_role - Create, get, update, or delete a role:
                 Create: config='{"operation": "create", "name": "API Developer", "description": "API access role", "privileges": ["API", "BUILD", "EXECUTE"]}'

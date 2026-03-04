@@ -128,7 +128,7 @@ def _query_all_roles_raw(sdk: Boomi) -> List[Dict[str, Any]]:
         ser2 = Serializer(url_more, [svc.get_access_token(), svc.get_basic_auth()])
         ser2 = ser2.add_header("Accept", "application/json")
         serialized2 = ser2.serialize().set_method("POST")
-        serialized2 = serialized2.set_body(token, "application/json")
+        serialized2 = serialized2.set_body(token, "text/plain")
         response2, _, _ = svc.send_request(serialized2)
         if isinstance(response2, (bytes, bytearray)):
             response2 = response2.decode("utf-8")
@@ -142,9 +142,9 @@ def _query_all_roles_raw(sdk: Boomi) -> List[Dict[str, Any]]:
 def _role_to_dict_raw(role_data: dict) -> Dict[str, Any]:
     """Convert raw JSON role dict to our standard output format."""
     result = {
-        "id": role_data.get("@id", ""),
+        "id": role_data.get("id", ""),
         "name": role_data.get("name", ""),
-        "description": role_data.get("description", ""),
+        "description": role_data.get("Description", ""),
         "account_id": role_data.get("accountId", ""),
     }
     parent_id = role_data.get("parentId")
@@ -201,7 +201,7 @@ def _query_all_branches(sdk: Boomi, expression) -> List[Dict[str, Any]]:
 
 def _action_list_roles(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     """List all roles with optional exact name filter."""
-    name = kwargs.get("name") or kwargs.get("name_pattern")
+    name = kwargs.get("name")
 
     if name:
         # Role API only supports EQUALS on name
