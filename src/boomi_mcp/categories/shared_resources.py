@@ -223,13 +223,13 @@ def _action_create_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     if not name:
         return {"_success": False, "error": "config.name is required for 'create_channel' action"}
 
-    # Build channel kwargs from config
-    channel_kwargs = {"name": name}
+    # Map user-facing names to SDK constructor params
+    channel_kwargs = {"component_name": name}
     if channel_type:
-        channel_kwargs["type"] = channel_type
+        channel_kwargs["communication_type"] = channel_type
 
-    # Pass through any additional config fields
-    for key in ("folder_id",):
+    # Pass through additional SDK-recognized fields
+    for key in ("folder_id", "folder_name", "description"):
         val = kwargs.get(key)
         if val is not None:
             channel_kwargs[key] = val
