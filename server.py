@@ -1283,7 +1283,7 @@ if manage_component_action:
 
 # --- Component Analysis MCP Tools ---
 if analyze_component_action:
-    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    @mcp.tool(annotations={"readOnlyHint": False, "openWorldHint": True})
     def analyze_component(
         profile: str,
         action: str,

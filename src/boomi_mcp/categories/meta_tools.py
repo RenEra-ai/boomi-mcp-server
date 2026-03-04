@@ -604,7 +604,7 @@ _COMPONENT_OVERVIEW = {
     "tools": {
         "query_components": ["list", "get", "search", "bulk_get"],
         "manage_component": ["create", "update", "clone", "delete"],
-        "analyze_component": ["where_used", "dependencies", "compare_versions"],
+        "analyze_component": ["where_used", "dependencies", "compare_versions", "merge"],
     },
     "component_types": [
         "process", "processproperty", "processroute",
@@ -1486,18 +1486,19 @@ def list_capabilities_action() -> Dict[str, Any]:
         },
         "analyze_component": {
             "category": "Components",
-            "description": "Analyze component relationships — where used, dependencies, version diffs",
-            "actions": ["where_used", "dependencies", "compare_versions"],
-            "read_only": True,
+            "description": "Analyze component relationships, version diffs, and merge across branches",
+            "actions": ["where_used", "dependencies", "compare_versions", "merge"],
+            "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — where_used | dependencies | compare_versions",
+                "action": "str (required) — where_used | dependencies | compare_versions | merge",
                 "component_id": "str (required)",
                 "config": "JSON str (optional) — action-specific config",
             },
             "examples": [
                 'analyze_component(profile="prod", action="where_used", component_id="abc-123")',
                 'analyze_component(profile="prod", action="compare_versions", component_id="abc-123", config=\'{"source_version": 1, "target_version": 2}\')',
+                'analyze_component(profile="prod", action="merge", component_id="abc-123", config=\'{"source_branch": "dev-id", "target_branch": "main-id"}\')',
             ],
             "sdk_examples_covered": [
                 "find_where_used.py",
@@ -1505,6 +1506,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "analyze_dependencies.py",
                 "compare_component_versions.py",
                 "component_diff.py",
+                "merge_components.py",
             ],
         },
 

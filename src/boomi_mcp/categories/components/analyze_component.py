@@ -319,9 +319,9 @@ def merge_versions(
             source_label = f"branch {source_branch}"
             target_label = f"branch {target_branch}" if target_branch else "main branch"
         else:
-            # Version merge mode: componentId/version
-            source_get_id = f"{component_id}/{source_version}"
-            target_get_id = f"{component_id}/{target_version}" if target_version is not None else component_id
+            # Version merge mode: componentId~version
+            source_get_id = f"{component_id}~{source_version}"
+            target_get_id = f"{component_id}~{target_version}" if target_version is not None else component_id
             source_label = f"version {source_version}"
             target_label = f"version {target_version}" if target_version is not None else "current"
 
@@ -355,7 +355,10 @@ def merge_versions(
         if target_current_version:
             merged_root.set('currentVersion', target_current_version)
 
-        # For branch merge, set branchId in XML so update targets the correct branch
+        # Always strip branchId from source XML to prevent writing to wrong branch,
+        # then explicitly set it only if targeting a specific branch
+        if 'branchId' in merged_root.attrib:
+            del merged_root.attrib['branchId']
         if target_branch:
             merged_root.set('branchId', target_branch)
 
