@@ -7,5 +7,6 @@ Organized by functional categories following SDK structure:
 - monitoring: Platform monitoring (execution records, logs, audit)
 - folders: Folder hierarchy management (CRUD, move, contents)
 - environments: Environment management (CRUD, extensions, stats)
+- execution: Process execution (execute_process)
 - meta_tools: Schema templates, API invoker, capabilities listing
 """
