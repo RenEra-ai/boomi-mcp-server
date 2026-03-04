@@ -377,13 +377,13 @@ schedule_event()  # Internally: find_availability() + create_event()
 
 | SDK Example | MCP Tool | Action |
 |------------|----------|--------|
-| `create_packaged_component.py` | `manage_packages` | action="create" |
-| `get_packaged_component.py` | `manage_packages` | action="get" |
-| `query_packaged_components.py` | `manage_packages` | action="list" |
-| `delete_packaged_component.py` | `manage_packages` | action="delete" |
-| `query_deployed_packages.py` | `deploy_package` | action="list_deployments" |
-| `create_deployment.py` | `deploy_package` | action="deploy" |
-| `promote_package_to_environment.py` | `deploy_package` | action="promote" |
+| `create_packaged_component.py` | `manage_deployment` | action="create_package" |
+| `get_packaged_component.py` | `manage_deployment` | action="get_package" |
+| `query_packaged_components.py` | `manage_deployment` | action="list_packages" |
+| `delete_packaged_component.py` | `manage_deployment` | action="delete_package" |
+| `query_deployed_packages.py` | `manage_deployment` | action="list_deployments" |
+| `create_deployment.py` | `manage_deployment` | action="deploy" |
+| `promote_package_to_environment.py` | `manage_deployment` | action="deploy" (to target env) |
 
 **Coverage**: 100%
 
@@ -700,24 +700,25 @@ def manage_runtimes(
 
 ---
 
-### Category 3: Deployment & B2B (3 tools, ~1,200 tokens)
+### Category 3: Deployment & B2B (2 tools, ~1,200 tokens)
 
-#### 7. manage_packages
+#### 7. manage_deployment
 ```python
 @mcp.tool()
-def manage_packages(
+def manage_deployment(
     profile: str,
-    action: Literal["list", "get", "create", "delete"],
-    package_id: Optional[str] = None,
-    component_ids: Optional[List[str]] = None,  # For create
-    version: Optional[str] = None,
-    notes: Optional[str] = None,
-    filters: Optional[dict] = None
+    action: str,
+    package_id: str = None,
+    environment_id: str = None,
+    config: str = None,
 ) -> dict:
-    """Manage deployment packages.
+    """Manage deployment packages and deploy to environments.
 
-    JSON-based API. Packages group components for deployment.
-    List action supports filtering by component, date, creator.
+    Actions: list_packages, get_package, create_package, delete_package,
+             deploy, undeploy, list_deployments, get_deployment
+
+    Merges package CRUD and deployment lifecycle into one tool.
+    Promote = deploy to a different environment (no separate action).
     """
 ```
 
@@ -726,37 +727,11 @@ def manage_packages(
 - `get_packaged_component.py`
 - `query_packaged_components.py`
 - `delete_packaged_component.py`
-
-#### 8. deploy_package
-```python
-@mcp.tool()
-def deploy_package(
-    profile: str,
-    action: Literal["deploy", "promote", "rollback", "list_deployments"],
-    package_id: str,
-    environment_id: str,
-    target_environment_id: Optional[str] = None,  # For promote
-    notes: Optional[str] = None,
-    filters: Optional[dict] = None  # For list_deployments
-) -> dict:
-    """Deploy packages to environments.
-
-    Actions:
-    - deploy: Deploy package to environment
-    - promote: Promote from one env to another
-    - rollback: Revert to previous package version
-    - list_deployments: Query deployment history
-
-    Optionally polls deployment status until complete.
-    """
-```
-
-**SDK Examples Covered:**
 - `create_deployment.py`
 - `promote_package_to_environment.py`
 - `query_deployed_packages.py`
 
-#### 9. manage_trading_partner
+#### 8. manage_trading_partner
 ```python
 @mcp.tool()
 def manage_trading_partner(
@@ -833,7 +808,7 @@ Organization:
 
 ### Category 4: Execution & Scheduling (2 tools, ~800 tokens)
 
-#### 10. manage_process ✅ (Implemented — schedule actions pending)
+#### 9. manage_process ✅ (Implemented — schedule actions pending)
 
 See **Implementation Status** section above for full details of the 3-layer hybrid architecture.
 
@@ -849,7 +824,7 @@ See **Implementation Status** section above for full details of the 3-layer hybr
 
 **Note on process extensions (define phase)**: The Extensions dialog in the Boomi UI allows marking components as extensible (connections, operations, trading partners, dynamic process properties, process properties, cross-references, PGP certs, data maps). These extension definitions are stored in the **process component XML** — they are part of the process itself, not a separate API. When a process with extensible components is deployed to an environment, the platform auto-generates the `EnvironmentExtensions` entries. The *configure* phase (setting override values per environment) is handled by `manage_environments` actions `get_extensions` / `update_extensions` / `query_extensions`.
 
-#### 11. execute_process
+#### 10. execute_process
 ```python
 @mcp.tool()
 def execute_process(
@@ -892,7 +867,7 @@ This uses the same `ExecutionRecord` query API with different filters:
 
 ### Category 5: Monitoring (1 tool, ~500 tokens)
 
-#### 12. monitor_platform ✅ (Implemented)
+#### 11. monitor_platform ✅ (Implemented)
 ```python
 @mcp.tool(readOnlyHint=True)
 def monitor_platform(
@@ -942,7 +917,7 @@ def monitor_platform(
 
 ### Category 6: Organization (1 tool, ~400 tokens)
 
-#### 13. manage_folders
+#### 12. manage_folders
 ```python
 @mcp.tool()
 def manage_folders(
@@ -968,7 +943,7 @@ def manage_folders(
 
 ### Category 7: Meta/Power Tools (3 tools, ~1,200 tokens)
 
-#### 14. get_schema_template
+#### 13. get_schema_template
 ```python
 @mcp.tool(readOnlyHint=True)
 def get_schema_template(
@@ -990,7 +965,7 @@ def get_schema_template(
 
 **Purpose**: Self-documentation, reduces errors from malformed inputs
 
-#### 15. invoke_boomi_api
+#### 14. invoke_boomi_api
 ```python
 @mcp.tool()
 def invoke_boomi_api(
@@ -1031,7 +1006,7 @@ def invoke_boomi_api(
 - `reprocess_documents.py`
 - `manage_queues.py`
 
-#### 16. list_capabilities
+#### 15. list_capabilities
 ```python
 @mcp.tool(readOnlyHint=True)
 def list_capabilities() -> dict:
@@ -1172,9 +1147,8 @@ def list_capabilities() -> dict:
 **Goal**: Complete the 18-tool set
 
 **Tasks:**
-1. Add deployment (2 tools):
-   - `manage_packages`
-   - `deploy_package`
+1. Add deployment (1 tool):
+   - `manage_deployment` ✅
 
 2. Add organization (1 tool):
    - `manage_folders`
@@ -3750,30 +3724,29 @@ This 19-tool workflow-oriented architecture represents the optimal balance betwe
 5. manage_environments (includes get_extensions, update_extensions, query_extensions, stats actions)
 6. manage_runtimes
 
-**Deployment & B2B** (3):
-7. manage_packages
-8. deploy_package
-9. manage_trading_partner ✅ (includes org_list, org_get, org_create, org_update, org_delete actions)
+**Deployment & B2B** (2):
+7. manage_deployment ✅ (includes list_packages, get_package, create_package, delete_package, deploy, undeploy, list_deployments, get_deployment)
+8. manage_trading_partner ✅ (includes org_list, org_get, org_create, org_update, org_delete actions)
 
 **Execution & Scheduling** (2):
-10. manage_process ✅ (includes list_schedules, set_schedule, clear_schedule actions)
-11. execute_process
+9. manage_process ✅ (includes list_schedules, set_schedule, clear_schedule actions)
+10. execute_process
 
 **Monitoring** (1):
-12. monitor_platform ✅ (execution_records, execution_logs, execution_artifacts, audit_logs, events)
+11. monitor_platform ✅ (execution_records, execution_logs, execution_artifacts, audit_logs, events)
 
 **Organization** (1):
-13. manage_folders
+12. manage_folders
 
 **Meta** (3):
-14. get_schema_template
-15. invoke_boomi_api
-16. list_capabilities
+13. get_schema_template
+14. invoke_boomi_api
+15. list_capabilities
 
 **Credential Management** (3 — already implemented, always present):
-17. list_boomi_profiles ✅
-18. boomi_account_info ✅
-19. set_boomi_credentials ✅
+16. list_boomi_profiles ✅
+17. boomi_account_info ✅
+18. set_boomi_credentials ✅
 
 Note: `delete_boomi_profile` is a utility function within credential management, not counted as a separate tool.
 
@@ -3785,13 +3758,13 @@ With the config JSON pattern, component tools (trading partners, organizations) 
 |----------|-------|-------------|-------|
 | Components | 4 | 300 | 1,200 |
 | Env/Runtime | 2 | 350 | 700 |
-| Deployment & B2B | 3 | 350 | 1,050 |
+| Deployment & B2B | 2 | 350 | 700 |
 | Execution & Scheduling | 2 | 400 | 800 |
 | Monitoring | 1 | 500 | 500 |
 | Organization | 1 | 400 | 400 |
 | Meta | 3 | 400 | 1,200 |
 | Credential mgmt (existing) | 3 | 200 | 600 |
-| **TOTAL** | **19** | **avg 340** | **~6,450** |
+| **TOTAL** | **18** | **avg 340** | **~6,100** |
 
 Note: Actual token count may be higher due to rich docstrings with config examples. Target: <8,000 tokens.
 

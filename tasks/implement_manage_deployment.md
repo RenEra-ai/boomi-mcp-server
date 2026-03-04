@@ -137,7 +137,7 @@ def manage_deployment(
 |--------|-----------|---------------|--------|
 | list_packages | — | — | `{"component_id": "..."}` |
 | get_package | package_id | — | — |
-| create_package | — | — | `{"component_id": "...", "package_version": "...", "notes": "..."}` |
+| create_package | — | — | `{"component_id": "...", "component_type": "process", "package_version": "...", "notes": "..."}` |
 | delete_package | package_id | — | — |
 | deploy | package_id | environment_id (required) | `{"listener_status": "RUNNING", "notes": "..."}` |
 | undeploy | deployment_id | — | — |
@@ -206,19 +206,24 @@ def _action_get_package(sdk, profile, **kwargs):
 ```python
 def _action_create_package(sdk, profile, **kwargs):
     component_id = kwargs.get("component_id")
+    component_type = kwargs.get("component_type")
     package_version = kwargs.get("package_version")
 
     if not component_id:
         return {"_success": False, "error": "config.component_id is required for 'create_package'"}
+    if not component_type:
+        return {"_success": False, "error": "config.component_type is required for 'create_package'",
+                "hint": "Valid types: process, certificate, customlibrary, flowservice, processroute, tpgroup, webservice"}
     if not package_version:
         return {"_success": False, "error": "config.package_version is required for 'create_package'"}
 
     pkg_kwargs = {
         "component_id": component_id,
+        "component_type": component_type,
         "package_version": package_version,
     }
     # Optional fields
-    for key in ("notes", "branch_name", "component_type"):
+    for key in ("notes", "branch_name"):
         val = kwargs.get(key)
         if val:
             pkg_kwargs[key] = val
@@ -543,7 +548,7 @@ if manage_deployment_action:
             config: JSON string with action-specific parameters
 
         RECOMMENDED WORKFLOW:
-          1. Create a package: action="create_package", config='{"component_id":"...", "package_version":"1.0"}'
+          1. Create a package: action="create_package", config='{"component_id":"...", "component_type":"process", "package_version":"1.0"}'
           2. Deploy to env: action="deploy", package_id="<from step 1>", environment_id="..."
           3. Promote to prod: action="deploy", package_id="<same>", environment_id="<prod-env-id>"
 
@@ -556,8 +561,8 @@ if manage_deployment_action:
                 package_id="pkg-123"
 
             create_package - Create versioned package from component:
-                config='{"component_id": "abc-123", "package_version": "1.0.0"}'
-                config='{"component_id": "abc-123", "package_version": "2.0", "notes": "Release", "branch_name": "main"}'
+                config='{"component_id": "abc-123", "component_type": "process", "package_version": "1.0.0"}'
+                config='{"component_id": "abc-123", "component_type": "process", "package_version": "2.0", "notes": "Release", "branch_name": "main"}'
 
             delete_package - Delete package (fails if deployed):
                 package_id="pkg-123"
@@ -774,7 +779,7 @@ assert result.get("_success") is False
 # Test D1: Create package (requires real component ID)
 # result = manage_deployment.fn(
 #     profile="dev", action="create_package",
-#     config='{"component_id": "YOUR_COMPONENT_ID", "package_version": "test-1.0", "notes": "MCP test"}'
+#     config='{"component_id": "YOUR_COMPONENT_ID", "component_type": "process", "package_version": "test-1.0", "notes": "MCP test"}'
 # )
 # assert result.get("_success") is True
 # new_pkg_id = result.get("package", {}).get("package_id")
@@ -807,7 +812,7 @@ print("ALL SAFE TESTS PASSED ✅")
 ## Acceptance Criteria
 
 1. **All 8 actions work**: list_packages, get_package, create_package, delete_package, deploy, undeploy, list_deployments, get_deployment
-2. **Package CRUD**: Create with component_id + version, get, list with filters, delete with 409 handling
+2. **Package CRUD**: Create with component_id + component_type + version, get, list with filters, delete with 409 handling
 3. **Deploy/undeploy**: Deploy with package_id + environment_id, optional listener_status and notes
 4. **List deployments**: Filter by environment, package, active_only; handle pagination
 5. **Promote workflow**: Agent can promote by calling `deploy` with a different environment_id (no separate action)
