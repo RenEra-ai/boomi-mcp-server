@@ -169,8 +169,6 @@ def handle_error_details(sdk: Boomi, execution_id: str = None,
         limit = int(config.get("limit", 10))
     except (ValueError, TypeError):
         return {"_success": False, "error": "config.days and config.limit must be numeric values"}
-    if days < 0 or limit < 1:
-        return {"_success": False, "error": "config.days must be >= 0 and config.limit must be >= 1"}
     fetch_logs = config.get("fetch_logs", False)
     log_level = config.get("log_level", "ALL")
 
@@ -195,7 +193,10 @@ def handle_error_details(sdk: Boomi, execution_id: str = None,
 
         return result
 
-    elif process_id:
+    if days < 0 or limit < 1:
+        return {"_success": False, "error": "config.days must be >= 0 and config.limit must be >= 1"}
+
+    if process_id:
         # Query recent errors for a process
         records = _query_error_executions(sdk, process_id=process_id, days=days, limit=limit)
         return {
