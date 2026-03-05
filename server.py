@@ -1799,7 +1799,7 @@ if manage_environments_action:
 
             update_properties - Update persisted process properties:
                 resource_id="<atom_id>"
-                config='{"properties": {"processId": "<proc_id>", "ProcessProperty": [{"Name": "prop1", "Value": "val1"}]}}'
+                config='{"properties": {"Process": [{"processId": "<proc_id>", "ProcessProperties": {"ProcessProperty": [{"ProcessPropertyValue": [{"key": "prop1", "value": "val1"}]}]}}]}}'
 
         Classification values: TEST, PROD
         Note: Classification is immutable after creation. Only name can be updated.

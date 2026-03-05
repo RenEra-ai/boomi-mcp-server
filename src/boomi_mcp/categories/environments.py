@@ -543,17 +543,19 @@ def _action_update_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
     if not properties:
         return {
             "_success": False,
-            "error": "config must include 'properties' — a dict of process property fields. "
-                     "Example: {\"ProcessProperty\": [{\"Name\": \"prop1\", \"Value\": \"val1\"}], "
-                     "\"processId\": \"<process-id>\"}",
+            "error": "config must include 'properties' — a dict matching the SDK model hierarchy. "
+                     "Example: {\"Process\": [{\"processId\": \"<process-id>\", "
+                     "\"ProcessProperties\": {\"ProcessProperty\": [{\"ProcessPropertyValue\": "
+                     "[{\"key\": \"prop1\", \"value\": \"val1\"}]}]}}]}",
         }
 
     if not isinstance(properties, dict):
         return {
             "_success": False,
             "error": f"'properties' must be a dict, got {type(properties).__name__}. "
-                     "Expected format: {\"ProcessProperty\": [{\"Name\": \"prop1\", \"Value\": \"val1\"}], "
-                     "\"processId\": \"<process-id>\"}",
+                     "Expected format: {\"Process\": [{\"processId\": \"<process-id>\", "
+                     "\"ProcessProperties\": {\"ProcessProperty\": [{\"ProcessPropertyValue\": "
+                     "[{\"key\": \"prop1\", \"value\": \"val1\"}]}]}}]}",
         }
 
     from boomi.models import PersistedProcessProperties
