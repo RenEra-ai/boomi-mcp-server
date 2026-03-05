@@ -58,8 +58,9 @@ def _ids_from_schedule_id(schedule_id: str) -> tuple:
     """
     try:
         # Pad to multiple of 4 — Boomi API returns unpadded base64
+        schedule_id = schedule_id.strip()
         padded = schedule_id + "=" * (-len(schedule_id) % 4)
-        decoded = base64.b64decode(padded).decode()
+        decoded = base64.b64decode(padded, validate=True).decode()
     except Exception as e:
         raise ValueError(f"Invalid schedule ID (not valid base64): {schedule_id}") from e
     if not decoded.startswith("CPS"):
