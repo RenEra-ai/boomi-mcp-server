@@ -504,6 +504,20 @@ gcloud run services describe boomi-mcp-server --region us-central1 --project boo
 
 ## Testing
 
+### Review Sessions: Mandatory QA Gate
+
+For every code review or fix verification session, run targeted QA before concluding.
+
+- Use direct `.fn()` tool calls from `server.py` with `BOOMI_LOCAL=true`.
+- Keep MCP parity: pass `config`/`filters`/`config_yaml` as JSON strings.
+- Include at least:
+  - one real wrapper-path call (`tool.fn(...)`) for the changed action
+  - one negative-path validation test (bad input / schema mismatch)
+  - one payload-shape check when request serialization is involved
+- Record QA evidence (command + key output) in the review summary.
+
+Full playbook: `docs/QA_REVIEW_MANUAL.md`
+
 ### Dev Branch: Direct .fn() Testing (No MCP Server)
 
 **Test by importing tool functions from `server.py` and calling `.fn()`:**
