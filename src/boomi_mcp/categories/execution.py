@@ -105,6 +105,9 @@ def _build_dynamic_properties(props_dict: Optional[Dict[str, str]]):
     if not props_dict:
         return ExecutionRequestDynamicProcessProperties()
 
+    if not isinstance(props_dict, dict):
+        raise ValueError("dynamic_properties must be a dict of {key: value}")
+
     prop_list = [
         DynamicProcessProperty(name=str(k), value=str(v))
         for k, v in props_dict.items()
@@ -252,7 +255,7 @@ def execute_process_action(
     try:
         dynamic_props = _build_dynamic_properties(config_data.get("dynamic_properties"))
         process_props = _build_process_properties(config_data.get("process_properties"))
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError, AttributeError) as e:
         return {"_success": False, "error": str(e)}
 
     # Create execution request

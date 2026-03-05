@@ -164,8 +164,11 @@ def handle_error_details(sdk: Boomi, execution_id: str = None,
     if config is None:
         config = {}
 
-    days = config.get("days", 7)
-    limit = config.get("limit", 10)
+    try:
+        days = int(config.get("days", 7))
+        limit = int(config.get("limit", 10))
+    except (ValueError, TypeError):
+        return {"_success": False, "error": "config.days and config.limit must be numeric values"}
     fetch_logs = config.get("fetch_logs", False)
     log_level = config.get("log_level", "ALL")
 
@@ -424,6 +427,8 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
     # Build dynamic properties
     prop_list = []
     if dynamic_properties:
+        if not isinstance(dynamic_properties, dict):
+            return {"_success": False, "error": "dynamic_properties must be a dict of {key: value}"}
         for key, value in dynamic_properties.items():
             prop_list.append(DynamicProcessProperty(name=str(key), value=str(value)))
 
