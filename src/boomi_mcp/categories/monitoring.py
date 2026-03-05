@@ -910,7 +910,11 @@ def handle_execution_metrics(boomi_client, config_data: Dict[str, Any]) -> Dict[
     max_duration = max(durations) if durations else None
 
     # Top N failures
-    top_n = int(config_data.get("top_failures", 5))
+    raw_top = config_data.get("top_failures", 5)
+    try:
+        top_n = max(0, int(raw_top))
+    except (TypeError, ValueError):
+        top_n = 5
     top_failures = sorted(process_errors.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
     return {
