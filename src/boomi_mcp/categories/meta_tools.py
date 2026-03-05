@@ -725,7 +725,7 @@ _ORGANIZATION_CREATE = {
 _MONITORING_OVERVIEW = {
     "resource_type": "monitoring",
     "tool": "monitor_platform",
-    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events"],
+    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"],
     "hint": "Use operation='execution_records' or 'audit_logs' etc. for action-specific templates",
 }
 
@@ -803,6 +803,55 @@ _MONITORING_EVENTS = {
         "atom_name": "(optional filter)",
         "execution_id": "(optional filter)",
         "limit": 100,
+    },
+}
+
+_MONITORING_CERTIFICATES = {
+    "resource_type": "monitoring",
+    "operation": "certificates",
+    "tool": "monitor_platform",
+    "template": {
+        "days_ahead": 30,
+        "limit": 50,
+    },
+}
+
+_MONITORING_THROUGHPUT = {
+    "resource_type": "monitoring",
+    "operation": "throughput",
+    "tool": "monitor_platform",
+    "template": {
+        "start_date": "2025-01-01",
+        "end_date": "2025-01-31",
+        "atom_id": "(optional filter)",
+        "limit": 100,
+    },
+    "required": "At least one filter: start_date, end_date, atom_id",
+}
+
+_MONITORING_EXECUTION_METRICS = {
+    "resource_type": "monitoring",
+    "operation": "execution_metrics",
+    "tool": "monitor_platform",
+    "template": {
+        "start_date": "2025-01-01T00:00:00Z",
+        "end_date": "2025-01-31T23:59:59Z",
+        "top_failures": 5,
+        "limit": 200,
+    },
+    "required": "Same filters as execution_records",
+}
+
+_MONITORING_CONNECTOR_DOCUMENTS = {
+    "resource_type": "monitoring",
+    "operation": "connector_documents",
+    "tool": "monitor_platform",
+    "template": {
+        "execution_id": "REQUIRED - from execution_records result",
+        "connector_type": "(optional filter)",
+        "status": "SUCCESS | ERROR",
+        "action_type": "(optional filter)",
+        "limit": 50,
     },
 }
 
@@ -1416,6 +1465,10 @@ def _get_monitoring_template(operation=None, **_):
         "execution_artifacts": _MONITORING_EXECUTION_ARTIFACTS,
         "audit_logs": _MONITORING_AUDIT_LOGS,
         "events": _MONITORING_EVENTS,
+        "certificates": _MONITORING_CERTIFICATES,
+        "throughput": _MONITORING_THROUGHPUT,
+        "execution_metrics": _MONITORING_EXECUTION_METRICS,
+        "connector_documents": _MONITORING_CONNECTOR_DOCUMENTS,
     }
 
     tpl = templates.get(operation)
@@ -1684,8 +1737,8 @@ def list_capabilities_action() -> Dict[str, Any]:
         # === Category 5: Monitoring (1 tool) ===
         "monitor_platform": {
             "category": "Monitoring",
-            "description": "Monitor executions, logs, artifacts, audit trail, and events",
-            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events"],
+            "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, and connector documents",
+            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"],
             "read_only": True,
             "parameters": {
                 "profile": "str (required)",
@@ -1696,6 +1749,10 @@ def list_capabilities_action() -> Dict[str, Any]:
                 'monitor_platform(profile="prod", action="execution_records", config=\'{"execution_id": "exec-123"}\')',
                 'monitor_platform(profile="prod", action="audit_logs", config=\'{"start_date": "2025-01-01", "user": "admin@co.com"}\')',
                 'monitor_platform(profile="prod", action="events", config=\'{"event_level": "ERROR"}\')',
+                'monitor_platform(profile="prod", action="certificates", config=\'{"days_ahead": 30}\')',
+                'monitor_platform(profile="prod", action="throughput", config=\'{"start_date": "2025-01-01", "end_date": "2025-01-31"}\')',
+                'monitor_platform(profile="prod", action="execution_metrics", config=\'{"start_date": "2025-01-01T00:00:00Z", "top_failures": 5}\')',
+                'monitor_platform(profile="prod", action="connector_documents", config=\'{"execution_id": "exec-123"}\')',
             ],
             "sdk_examples_covered": [
                 "poll_execution_status.py",

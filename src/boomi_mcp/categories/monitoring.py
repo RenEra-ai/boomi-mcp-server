@@ -776,6 +776,12 @@ def handle_throughput(boomi_client, config_data: Dict[str, Any]) -> Dict[str, An
             property=ThroughputAccountSimpleExpressionProperty.PROCESSDATE,
             argument=[start_date]
         ))
+    elif end_date:
+        expressions.append(ThroughputAccountSimpleExpression(
+            operator=ThroughputAccountSimpleExpressionOperator.LESSTHANOREQUAL,
+            property=ThroughputAccountSimpleExpressionProperty.PROCESSDATE,
+            argument=[end_date]
+        ))
 
     atom_id = config_data.get("atom_id")
     if atom_id:
@@ -904,7 +910,7 @@ def handle_execution_metrics(boomi_client, config_data: Dict[str, Any]) -> Dict[
     max_duration = max(durations) if durations else None
 
     # Top N failures
-    top_n = config_data.get("top_failures", 5)
+    top_n = int(config_data.get("top_failures", 5))
     top_failures = sorted(process_errors.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
     return {
