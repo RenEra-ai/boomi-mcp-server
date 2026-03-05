@@ -91,6 +91,32 @@ def _query_all_environments(sdk: Boomi, expression) -> List[Dict[str, Any]]:
     return environments
 
 
+def _sdk_to_dict(obj):
+    """Recursively convert SDK model objects to JSON-serializable dicts."""
+    if isinstance(obj, list):
+        return [_sdk_to_dict(item) for item in obj]
+    if isinstance(obj, dict):
+        return {k: _sdk_to_dict(v) for k, v in obj.items()}
+    if hasattr(obj, '__dict__') and not isinstance(obj, (str, int, float, bool)):
+        return {k: _sdk_to_dict(v) for k, v in obj.__dict__.items() if not k.startswith('_')}
+    return obj
+
+
+def _extract_api_error_msg(e: ApiError) -> str:
+    """Extract user-friendly error message from ApiError."""
+    detail = getattr(e, 'error_detail', None)
+    if detail:
+        return detail
+    resp = getattr(e, 'response', None)
+    if resp:
+        body = getattr(resp, 'body', None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, 'message', '') or str(e)
+
+
 def _extract_raw_extensions(result) -> Dict[str, Any]:
     """Extract raw extensions dict from SDK response (handles _kwargs wrapping)."""
     if hasattr(result, '_kwargs') and 'EnvironmentExtensions' in result._kwargs:
@@ -491,18 +517,10 @@ def _action_get_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
                 token=token
             )
             if response:
-                # Parse response
-                if hasattr(response, '__dict__'):
-                    raw = response.__dict__
-                elif isinstance(response, dict):
-                    raw = response
-                else:
-                    raw = {"response": str(response)}
-
                 return {
                     "_success": True,
                     "atom_id": resource_id,
-                    "properties": raw,
+                    "properties": _sdk_to_dict(response),
                 }
         except Exception as e:
             if "202" in str(e) or "not ready" in str(e).lower():
@@ -605,6 +623,12 @@ def manage_environments_action(
 
     try:
         return handler(sdk, profile, **merged)
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
