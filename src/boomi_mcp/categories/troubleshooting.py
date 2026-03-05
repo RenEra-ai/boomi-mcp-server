@@ -463,6 +463,8 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
             request_id = raw.get("@requestId", raw.get("requestId", raw.get("request_id")))
     elif isinstance(result, dict):
         request_id = result.get("requestId", result.get("request_id"))
+    elif isinstance(result, str):
+        request_id = result
 
     if not request_id:
         return {
@@ -570,7 +572,7 @@ def _parse_queue_response(queue_results) -> List[Dict[str, Any]]:
                     for subscriber in queue_record.topic_subscribers:
                         subscribers.append({
                             "name": getattr(subscriber, "subscriber_name", "Unknown"),
-                            "message_count": getattr(subscriber, "messages_count", 0),
+                            "message_count": getattr(subscriber, "message_count", 0),
                         })
                 if subscribers:
                     queue_info["subscribers"] = subscribers
