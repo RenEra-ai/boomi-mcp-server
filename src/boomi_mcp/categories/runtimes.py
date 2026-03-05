@@ -533,7 +533,8 @@ def _action_configure_java(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
         }
 
     elif java_action == "rollback":
-        sdk.java_rollback.execute_java_rollback(id_=resource_id)
+        rollback_request = JavaRollback(atom_id=resource_id)
+        sdk.java_rollback.execute_java_rollback(id_=resource_id, request_body=rollback_request)
 
         return {
             "_success": True,
@@ -994,7 +995,8 @@ def _run_single_async(sdk, start_fn, poll_fn, atom_id: str) -> Any:
             return {"error": "No async token returned"}
         token = initial.async_token.token
     except Exception as e:
-        return {"error": f"Failed to start async operation: {e}"}
+        msg = _extract_api_error_msg(e) if isinstance(e, ApiError) else str(e)
+        return {"error": f"Failed to start async operation: {msg}"}
 
     try:
         result = _poll_async_token(poll_fn, token)
@@ -1002,7 +1004,8 @@ def _run_single_async(sdk, start_fn, poll_fn, atom_id: str) -> Any:
             return {"error": "Operation timed out waiting for results"}
         return result
     except Exception as e:
-        return {"error": f"Failed polling async result: {e}"}
+        msg = _extract_api_error_msg(e) if isinstance(e, ApiError) else str(e)
+        return {"error": f"Failed polling async result: {msg}"}
 
 
 # ============================================================================
@@ -1080,6 +1083,15 @@ def _action_diagnostics(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                 status = getattr(listener, 'status', 'Unknown')
                 listener_data[name] = _enum_str(status)
         report["listener_status"] = listener_data
+
+    # Check sub-operation failures
+    sub_ops = ["counters", "disk_space", "listener_status"]
+    failed = [op for op in sub_ops if isinstance(report.get(op), dict) and "error" in report[op]]
+    if len(failed) == len(sub_ops):
+        report["_success"] = False
+        report["error"] = "All diagnostics sub-operations failed"
+    elif failed:
+        report["warnings"] = [f"{op} failed: {report[op]['error']}" for op in failed]
 
     return report
 
