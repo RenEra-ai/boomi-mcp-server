@@ -517,6 +517,9 @@ def _action_get_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
                 token=token
             )
             if response:
+                status = getattr(response, 'response_status_code', None)
+                if status and status != 200:
+                    continue
                 return {
                     "_success": True,
                     "atom_id": resource_id,
@@ -555,10 +558,8 @@ def _action_update_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
 
     from boomi.models import PersistedProcessProperties
 
-    properties_obj = PersistedProcessProperties(
-        atom_id=resource_id,
-        **{k: v for k, v in properties.items()},
-    )
+    properties['atomId'] = resource_id
+    properties_obj = PersistedProcessProperties._unmap(properties)
 
     result = sdk.persisted_process_properties.update_persisted_process_properties(
         id_=resource_id,
