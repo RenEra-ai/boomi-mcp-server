@@ -1546,7 +1546,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "profile": "str (required)",
                 "action": "str (required) — where_used | dependencies | compare_versions | merge",
                 "component_id": "str (required)",
-                "config": "JSON str (optional) — action-specific config",
+                "config": "JSON str (optional) — action-specific config. where_used/dependencies type filter: DEPENDENT or INDEPENDENT",
             },
             "examples": [
                 'analyze_component(profile="prod", action="where_used", component_id="abc-123")',

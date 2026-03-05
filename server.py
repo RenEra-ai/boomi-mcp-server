@@ -1303,10 +1303,11 @@ if analyze_component_action:
 
             where_used - Find all components that reference this component (inbound):
                 component_id="abc-123-def"
-                config='{"type": "process"}'  (optional: filter by reference type)
+                config='{"type": "DEPENDENT"}'  (optional: filter — DEPENDENT or INDEPENDENT)
 
             dependencies - Find all components this component references (outbound):
                 component_id="abc-123-def"
+                config='{"type": "DEPENDENT"}'  (optional: filter — DEPENDENT or INDEPENDENT)
 
             compare_versions - Compare two versions of a component:
                 component_id="abc-123-def"
