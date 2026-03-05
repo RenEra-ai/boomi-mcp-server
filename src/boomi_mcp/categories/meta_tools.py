@@ -1692,7 +1692,7 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 4: Execution (2 tools) ===
+        # === Category 4: Execution (3 tools) ===
         "manage_process": {
             "category": "Execution",
             "description": "Manage process components with YAML-based configuration and scheduling",
@@ -1711,6 +1711,27 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
             "sdk_examples_covered": [
                 "create_process_component.py",
+            ],
+        },
+        "manage_schedules": {
+            "category": "Execution",
+            "description": "Manage process schedules — list, get, update, delete cron-based schedules",
+            "actions": ["list", "get", "update", "delete"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — list | get | update | delete",
+                "resource_id": "str (optional) — base64 schedule ID",
+                "config": "JSON str (optional) — process_id, atom_id, cron, max_retry",
+            },
+            "examples": [
+                'manage_schedules(profile="prod", action="list")',
+                'manage_schedules(profile="prod", action="list", config=\'{"process_id": "abc-123"}\')',
+                'manage_schedules(profile="prod", action="get", config=\'{"process_id": "abc-123", "atom_id": "atom-456"}\')',
+                'manage_schedules(profile="prod", action="update", resource_id="Q1BTLi4u", config=\'{"cron": "0 9 * * *"}\')',
+                'manage_schedules(profile="prod", action="delete", resource_id="Q1BTLi4u")',
+            ],
+            "sdk_examples_covered": [
                 "manage_process_schedules.py",
             ],
         },

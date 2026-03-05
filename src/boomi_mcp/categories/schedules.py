@@ -51,6 +51,28 @@ def _schedule_id_from_ids(atom_id: str, process_id: str) -> str:
     return base64.b64encode(f"CPS{atom_id}:{process_id}".encode()).decode()
 
 
+def _ids_from_schedule_id(schedule_id: str) -> tuple:
+    """Decode base64 schedule ID back to (atom_id, process_id).
+
+    Raises ValueError on invalid format.
+    """
+    try:
+        # Pad to multiple of 4 — Boomi API returns unpadded base64
+        padded = schedule_id + "=" * (-len(schedule_id) % 4)
+        decoded = base64.b64decode(padded).decode()
+    except Exception as e:
+        raise ValueError(f"Invalid schedule ID (not valid base64): {schedule_id}") from e
+    if not decoded.startswith("CPS"):
+        raise ValueError(f"Invalid schedule ID (missing CPS prefix): {decoded}")
+    payload = decoded[3:]  # strip "CPS"
+    if ":" not in payload:
+        raise ValueError(f"Invalid schedule ID (no ':' separator): {decoded}")
+    atom_id, process_id = payload.split(":", 1)
+    if not atom_id or not process_id:
+        raise ValueError(f"Invalid schedule ID (empty atom_id or process_id): {decoded}")
+    return (atom_id, process_id)
+
+
 def _schedule_to_dict(sched) -> Dict[str, str]:
     """Convert SDK Schedule object to plain dict."""
     return {
@@ -130,6 +152,12 @@ def _action_list(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     process_id = kwargs.get("process_id")
     atom_id = kwargs.get("atom_id")
 
+    if process_id and atom_id:
+        return {
+            "_success": False,
+            "error": "Cannot filter by both process_id and atom_id in 'list'. Use one filter, or use action='get' with both.",
+        }
+
     if process_id:
         expression = ProcessSchedulesSimpleExpression(
             operator=ProcessSchedulesSimpleExpressionOperator.EQUALS,
@@ -203,6 +231,17 @@ def _action_update(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                 "error": "Provide either resource_id or both process_id and atom_id in config.",
             }
 
+    # Decode resource_id to fill missing process_id/atom_id
+    if not process_id or not atom_id:
+        try:
+            decoded_atom, decoded_process = _ids_from_schedule_id(resource_id)
+        except ValueError as e:
+            return {"_success": False, "error": str(e)}
+        if not process_id:
+            process_id = decoded_process
+        if not atom_id:
+            atom_id = decoded_atom
+
     # Parse cron expression
     try:
         cron_parts = _parse_cron(cron)
@@ -221,13 +260,11 @@ def _action_update(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
     ps_kwargs = {
         "id_": resource_id,
+        "process_id": process_id,
+        "atom_id": atom_id,
         "schedule": [schedule],
         "retry": retry,
     }
-    if process_id:
-        ps_kwargs["process_id"] = process_id
-    if atom_id:
-        ps_kwargs["atom_id"] = atom_id
 
     process_schedule = ProcessSchedules(**ps_kwargs)
 
@@ -258,17 +295,26 @@ def _action_delete(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                 "error": "Provide either resource_id or both process_id and atom_id in config.",
             }
 
+    # Decode resource_id to fill missing process_id/atom_id
+    if not process_id or not atom_id:
+        try:
+            decoded_atom, decoded_process = _ids_from_schedule_id(resource_id)
+        except ValueError as e:
+            return {"_success": False, "error": str(e)}
+        if not process_id:
+            process_id = decoded_process
+        if not atom_id:
+            atom_id = decoded_atom
+
     # Empty schedule array disables scheduling
     retry = ScheduleRetry(max_retry=5)
     ps_kwargs = {
         "id_": resource_id,
+        "process_id": process_id,
+        "atom_id": atom_id,
         "schedule": [],
         "retry": retry,
     }
-    if process_id:
-        ps_kwargs["process_id"] = process_id
-    if atom_id:
-        ps_kwargs["atom_id"] = atom_id
 
     process_schedule = ProcessSchedules(**ps_kwargs)
 
