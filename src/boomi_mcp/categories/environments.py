@@ -558,6 +558,17 @@ def _action_update_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
                      "[{\"key\": \"prop1\", \"value\": \"val1\"}]}]}}]}",
         }
 
+    if "Process" not in properties:
+        return {
+            "_success": False,
+            "error": "'properties' must contain a 'Process' key with the nested structure. "
+                     "Keys like 'processId' or 'ProcessProperty' at top level are not recognized "
+                     "by the SDK and will be silently dropped. "
+                     "Expected format: {\"Process\": [{\"processId\": \"<process-id>\", "
+                     "\"ProcessProperties\": {\"ProcessProperty\": [{\"ProcessPropertyValue\": "
+                     "[{\"key\": \"prop1\", \"value\": \"val1\"}]}]}}]}",
+        }
+
     from boomi.models import PersistedProcessProperties
 
     properties['atomId'] = resource_id
