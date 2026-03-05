@@ -69,7 +69,7 @@ def _query_execution_record(sdk: Boomi, execution_id: str):
 def _query_error_executions(sdk: Boomi, process_id: str = None,
                             days: int = 7, limit: int = 10):
     """Query recent error executions, optionally filtered by process_id."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     from boomi.models import (
         ExecutionRecordQueryConfig,
         ExecutionRecordQueryConfigQueryFilter,
@@ -97,7 +97,7 @@ def _query_error_executions(sdk: Boomi, process_id: str = None,
         ))
 
     # Date filter
-    since_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     expressions.append(ExecutionRecordSimpleExpression(
         operator=ExecutionRecordSimpleExpressionOperator.GREATERTHANOREQUAL,
         property=ExecutionRecordSimpleExpressionProperty.EXECUTIONTIME,
@@ -116,9 +116,21 @@ def _query_error_executions(sdk: Boomi, process_id: str = None,
     result = sdk.execution_record.query_execution_record(request_body=query_config)
 
     records = []
-    if hasattr(result, "result") and result.result:
-        for rec in result.result[:limit]:
-            records.append(_execution_to_dict(rec))
+
+    def _collect(res):
+        if hasattr(res, "result") and res.result:
+            for rec in res.result:
+                if len(records) >= limit:
+                    return
+                records.append(_execution_to_dict(rec))
+
+    _collect(result)
+    while len(records) < limit and hasattr(result, "query_token") and result.query_token:
+        result = sdk.execution_record.query_more_execution_record(
+            request_body=result.query_token
+        )
+        _collect(result)
+
     return records
 
 
@@ -444,6 +456,12 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
     elif isinstance(result, dict):
         request_id = result.get("requestId", result.get("request_id"))
 
+    if not request_id:
+        return {
+            "_success": False,
+            "error": f"{context.capitalize()} request accepted but no request_id returned. Check Boomi execution history manually.",
+        }
+
     response = {
         "_success": True,
         "context": context,
@@ -479,7 +497,10 @@ def handle_list_queues(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, A
     if not atom_id:
         return {"_success": False, "error": "atom_id is required in config for list_queues action"}
 
-    timeout_seconds = config.get("timeout", 60)
+    try:
+        timeout_seconds = int(config.get("timeout", 60))
+    except (ValueError, TypeError):
+        return {"_success": False, "error": "config.timeout must be a numeric value (seconds)"}
 
     try:
         # Step 1: Initiate async list queues operation

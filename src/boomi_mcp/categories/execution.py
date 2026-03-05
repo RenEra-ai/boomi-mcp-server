@@ -123,8 +123,15 @@ def _build_process_properties(props_dict: Optional[Dict[str, Dict[str, str]]]):
     if not props_dict:
         return ExecutionRequestProcessProperties()
 
+    if not isinstance(props_dict, dict):
+        raise ValueError("process_properties must be a dict of {componentId: {key: value}}")
+
     prop_list = []
     for component_id, values in props_dict.items():
+        if not isinstance(values, dict):
+            raise ValueError(
+                f"process_properties['{component_id}'] must be a dict of {{key: value}}, got {type(values).__name__}"
+            )
         ppv_list = [
             ProcessPropertyValue(key=str(k), value=str(v))
             for k, v in values.items()
@@ -242,8 +249,11 @@ def execute_process_action(
             return {"_success": False, "error": error}
 
     # Build properties
-    dynamic_props = _build_dynamic_properties(config_data.get("dynamic_properties"))
-    process_props = _build_process_properties(config_data.get("process_properties"))
+    try:
+        dynamic_props = _build_dynamic_properties(config_data.get("dynamic_properties"))
+        process_props = _build_process_properties(config_data.get("process_properties"))
+    except (ValueError, TypeError) as e:
+        return {"_success": False, "error": str(e)}
 
     # Create execution request
     execution_request = ExecutionRequest(
@@ -280,6 +290,12 @@ def execute_process_action(
     elif isinstance(result, str):
         request_id = result
 
+    if not request_id:
+        return {
+            "_success": False,
+            "error": "Execution request accepted but no request_id returned. Check Boomi execution history manually.",
+        }
+
     response = {
         "_success": True,
         "request_id": request_id,
@@ -293,7 +309,10 @@ def execute_process_action(
 
     # If wait=True, poll for completion before returning
     if config_data.get("wait") and request_id:
-        poll_timeout = int(config_data.get("timeout", 300))
+        try:
+            poll_timeout = int(config_data.get("timeout", 300))
+        except (ValueError, TypeError):
+            return {"_success": False, "error": "config.timeout must be a numeric value (seconds)"}
         poll_result = _poll_execution_status(sdk, request_id, timeout=poll_timeout)
         response["execution_result"] = poll_result
 
