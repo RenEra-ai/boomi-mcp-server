@@ -56,6 +56,11 @@ from boomi.models import (
     RuntimeCloudSimpleExpression,
     RuntimeCloudSimpleExpressionOperator,
     RuntimeCloudSimpleExpressionProperty,
+    ListenerStatusQueryConfig,
+    ListenerStatusQueryConfigQueryFilter,
+    ListenerStatusSimpleExpression,
+    ListenerStatusSimpleExpressionOperator,
+    ListenerStatusSimpleExpressionProperty,
 )
 
 
@@ -977,20 +982,18 @@ def _poll_async_token(poll_fn, token: str, poll_interval: int = 2,
     return None
 
 
-def _run_single_async(sdk, start_fn, poll_fn, atom_id: str) -> Any:
+def _run_single_async(start_fn, poll_fn) -> Any:
     """Start an async operation and poll until complete.
 
     Args:
-        sdk: Boomi SDK instance.
-        start_fn: Callable that takes id_= and returns an object with async_token.
+        start_fn: No-arg callable that returns an object with async_token.
         poll_fn: Callable that takes token= and returns the result.
-        atom_id: The atom/runtime ID.
 
     Returns:
         The final result object, or a dict with error info.
     """
     try:
-        initial = start_fn(id_=atom_id)
+        initial = start_fn()
         if not hasattr(initial, 'async_token') or not initial.async_token:
             return {"error": "No async token returned"}
         token = initial.async_token.token
@@ -1022,10 +1025,8 @@ def _action_diagnostics(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
     # 1. Atom counters
     counters_result = _run_single_async(
-        sdk,
-        sdk.atom.async_get_atom_counters,
+        lambda: sdk.atom.async_get_atom_counters(id_=resource_id),
         sdk.atom.async_token_atom_counters,
-        resource_id,
     )
     if isinstance(counters_result, dict) and "error" in counters_result:
         report["counters"] = counters_result
@@ -1046,10 +1047,8 @@ def _action_diagnostics(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
     # 2. Disk space
     disk_result = _run_single_async(
-        sdk,
-        sdk.atom_disk_space.async_get_atom_disk_space,
+        lambda: sdk.atom_disk_space.async_get_atom_disk_space(id_=resource_id),
         sdk.atom_disk_space.async_token_atom_disk_space,
-        resource_id,
     )
     if isinstance(disk_result, dict) and "error" in disk_result:
         report["disk_space"] = disk_result
@@ -1066,11 +1065,18 @@ def _action_diagnostics(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         report["disk_space"] = disk_data
 
     # 3. Listener status
+    listener_query = ListenerStatusQueryConfig(
+        query_filter=ListenerStatusQueryConfigQueryFilter(
+            expression=ListenerStatusSimpleExpression(
+                operator=ListenerStatusSimpleExpressionOperator.EQUALS,
+                property=ListenerStatusSimpleExpressionProperty.CONTAINERID,
+                argument=[resource_id],
+            )
+        )
+    )
     listener_result = _run_single_async(
-        sdk,
-        sdk.listener_status.async_get_listener_status,
+        lambda: sdk.listener_status.async_get_listener_status(request_body=listener_query),
         sdk.listener_status.async_token_listener_status,
-        resource_id,
     )
     if isinstance(listener_result, dict) and "error" in listener_result:
         report["listener_status"] = listener_result
