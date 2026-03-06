@@ -1771,7 +1771,8 @@ def list_capabilities_action() -> Dict[str, Any]:
             "examples": [
                 'troubleshoot_execution(profile="prod", action="error_details", config=\'{"days": 1, "limit": 5}\')',
                 'troubleshoot_execution(profile="prod", action="retry", execution_id="exec-123")',
-                'troubleshoot_execution(profile="prod", action="reprocess", execution_id="exec-123", process_id="proc-456", environment_id="env-789")',
+                'troubleshoot_execution(profile="prod", action="reprocess", execution_id="exec-123")',
+                'troubleshoot_execution(profile="prod", action="reprocess", process_id="proc-456", environment_id="env-789")',
                 'troubleshoot_execution(profile="prod", action="list_queues", config=\'{"atom_id": "atom-123"}\')',
                 'troubleshoot_execution(profile="prod", action="clear_queue", config=\'{"atom_id": "atom-123", "queue_name": "my-queue"}\')',
             ],
