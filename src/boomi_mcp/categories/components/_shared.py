@@ -219,52 +219,68 @@ def metadata_to_dict(comp) -> Dict[str, Any]:
 # Soft-delete helper
 # ============================================================================
 
-def soft_delete_component(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
-    """Soft-delete a component (mark deleted=true via XML update, with metadata fallback).
+def _create_component_raw(boomi_client: Boomi, xml: str) -> Dict[str, Any]:
+    """Create a component via raw POST, returning parsed XML response.
 
-    Primary: soft-delete via XML (safe, reversible) per SDK examples.
-    Fallback: metadata API delete if soft-delete fails.
+    The SDK's create_component() fails to parse GenericConnectionConfig responses,
+    so we use the Serializer directly (same approach as component_get_xml).
     """
-    try:
-        current = component_get_xml(boomi_client, component_id)
-        raw_xml = current['xml']
-        root = ET.fromstring(raw_xml)
-        root.set('deleted', 'true')
-        modified_xml = ET.tostring(root, encoding='unicode')
-        boomi_client.component.update_component_raw(component_id, modified_xml)
+    svc = boomi_client.component
+    serialized_request = (
+        Serializer(
+            f"{svc.base_url or Environment.DEFAULT.url}/Component",
+            [svc.get_access_token(), svc.get_basic_auth()],
+        )
+        .add_header("Accept", "application/xml")
+        .add_header("Content-Type", "application/xml")
+        .serialize()
+        .set_method("POST")
+    )
+    serialized_request.body = xml.encode('utf-8') if isinstance(xml, str) else xml
+    response, status, content = svc.send_request(serialized_request)
 
-        result = {
-            "component_name": current['name'],
-            "component_id": component_id,
-            "method": "soft_delete",
-        }
-        # Verify deletion took effect
-        try:
-            verify = component_get_xml(boomi_client, component_id)
-            verify_root = ET.fromstring(verify['xml'])
-            if verify_root.attrib.get('deleted', 'false').lower() != 'true':
-                result["verify_warning"] = "deleted flag may not have been applied"
-        except Exception:
-            pass
+    if status >= 400:
+        raw = response if isinstance(response, str) else response.decode('utf-8')
+        raise Exception(f"Create failed: HTTP {status} — {raw}")
 
-        return result
+    raw_xml = response if isinstance(response, str) else response.decode('utf-8')
+    root = ET.fromstring(raw_xml)
 
-    except ApiError as e:
-        error_msg = str(e)
-        status = getattr(e, 'status', None)
-        if status and 400 <= status < 600 and status != 408:
-            try:
-                boomi_client.component_metadata.delete_component_metadata(id_=component_id)
-                return {
-                    "component_name": component_id,
-                    "component_id": component_id,
-                    "method": "metadata_delete",
-                }
-            except Exception as e2:
-                raise Exception(
-                    f"Soft-delete failed: {error_msg}. Metadata delete also failed: {str(e2)}"
-                ) from e
-        raise
+    return {
+        'component_id': root.attrib.get('componentId', ''),
+        'name': root.attrib.get('name', ''),
+        'type': root.attrib.get('type', ''),
+        'sub_type': root.attrib.get('subType', ''),
+        'folder_name': root.attrib.get('folderName', ''),
+        'version': root.attrib.get('version', ''),
+    }
 
-    except Exception:
-        raise
+
+def _extract_api_error_msg(e) -> str:
+    """Extract user-friendly error message from ApiError."""
+    detail = getattr(e, "error_detail", None)
+    if detail:
+        return detail
+    resp = getattr(e, "response", None)
+    if resp:
+        body = getattr(resp, "body", None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, "message", "") or str(e)
+
+
+def soft_delete_component(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
+    """Delete a component via the metadata API.
+
+    The XML soft-delete (setting deleted=true via PUT) is silently ignored by
+    Boomi's API. The metadata delete is the only reliable method.
+    """
+    current = component_get_xml(boomi_client, component_id)
+    boomi_client.component_metadata.delete_component_metadata(id_=component_id)
+    return {
+        "component_name": current['name'],
+        "component_id": component_id,
+        "method": "metadata_delete",
+    }

@@ -29,10 +29,10 @@ from boomi.models import (
     ConnectorSimpleExpressionOperator,
     ConnectorSimpleExpressionProperty,
 )
-from boomi.net.transport.serializer import Serializer
-from boomi.net.environment.environment import Environment
-
-from ._shared import component_get_xml, set_description_element, soft_delete_component, paginate_metadata
+from ._shared import (
+    component_get_xml, set_description_element, soft_delete_component,
+    paginate_metadata, _create_component_raw,
+)
 from .builders.connector_builder import (
     get_connector_builder, CONNECTOR_BUILDERS,
     find_http_settings, update_http_settings_fields,
@@ -280,43 +280,6 @@ def get_connector(
 # Write Actions
 # ============================================================================
 
-def _create_component_raw(boomi_client: Boomi, xml: str) -> Dict[str, Any]:
-    """Create a component via raw POST, returning parsed XML response.
-
-    The SDK's create_component() fails to parse GenericConnectionConfig responses,
-    so we use the Serializer directly (same approach as component_get_xml).
-    """
-    svc = boomi_client.component
-    serialized_request = (
-        Serializer(
-            f"{svc.base_url or Environment.DEFAULT.url}/Component",
-            [svc.get_access_token(), svc.get_basic_auth()],
-        )
-        .add_header("Accept", "application/xml")
-        .add_header("Content-Type", "application/xml")
-        .serialize()
-        .set_method("POST")
-    )
-    serialized_request.body = xml.encode('utf-8') if isinstance(xml, str) else xml
-    response, status, content = svc.send_request(serialized_request)
-
-    if status >= 400:
-        raw = response if isinstance(response, str) else response.decode('utf-8')
-        raise Exception(f"Create failed: HTTP {status} — {raw}")
-
-    raw_xml = response if isinstance(response, str) else response.decode('utf-8')
-    root = ET.fromstring(raw_xml)
-
-    return {
-        'component_id': root.attrib.get('componentId', ''),
-        'name': root.attrib.get('name', ''),
-        'type': root.attrib.get('type', ''),
-        'sub_type': root.attrib.get('subType', ''),
-        'folder_name': root.attrib.get('folderName', ''),
-        'version': root.attrib.get('version', ''),
-    }
-
-
 def create_connector(
     boomi_client: Boomi,
     profile: str,
@@ -493,20 +456,14 @@ def delete_connector(
     """Soft-delete a connector component."""
     try:
         result = soft_delete_component(boomi_client, component_id)
-        warning = "Dependent components (operations, processes) are NOT automatically deleted."
-        if result.get("verify_warning"):
-            warning += f" {result['verify_warning']}. Verify in Boomi Platform UI."
-        resp = {
+        return {
             "_success": True,
             "message": f"Deleted connector '{result['component_name']}'",
             "component_id": component_id,
             "profile": profile,
             "method": result["method"],
-            "warning": warning,
+            "warning": "Dependent components (operations, processes) are NOT automatically deleted.",
         }
-        if result["method"] == "metadata_delete":
-            resp["warning"] = "Used metadata API delete (not soft-delete). This may be irreversible."
-        return resp
 
     except Exception as e:
         return {
