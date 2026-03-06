@@ -27,6 +27,26 @@ from ._shared import component_get_xml, paginate_metadata
 DEFAULT_LIMIT = 100
 
 
+def _parse_limit(raw) -> int:
+    """Parse limit from user-supplied filter value."""
+    if raw is None:
+        return DEFAULT_LIMIT
+    if isinstance(raw, bool):
+        return DEFAULT_LIMIT
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        if raw != int(raw):
+            return DEFAULT_LIMIT
+        return int(raw)
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError:
+            return DEFAULT_LIMIT
+    return DEFAULT_LIMIT
+
+
 def _extract_api_error_msg(e) -> str:
     """Extract user-friendly error message from ApiError."""
     detail = getattr(e, "error_detail", None)
@@ -83,8 +103,7 @@ def list_components(
             components = [c for c in components if c.get('folder_name') == folder]
 
         # Apply limit after all client-side filters
-        raw_limit = filters.get('limit') if filters else None
-        limit = int(raw_limit) if raw_limit is not None else DEFAULT_LIMIT
+        limit = _parse_limit(filters.get('limit') if filters else None)
         total_available = len(components)
         if limit > 0 and total_available > limit:
             components = components[:limit]
@@ -212,8 +231,7 @@ def search_components(
             components = [c for c in components if c.get('folder_name') == folder]
 
         # Apply limit after all client-side filters
-        raw_limit = filters.get('limit')
-        limit = int(raw_limit) if raw_limit is not None else DEFAULT_LIMIT
+        limit = _parse_limit(filters.get('limit'))
         total_available = len(components)
         if limit > 0 and total_available > limit:
             components = components[:limit]
