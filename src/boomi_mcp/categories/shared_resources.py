@@ -76,6 +76,11 @@ def _web_server_to_dict(data: dict) -> Dict[str, Any]:
         result['max_number_of_threads'] = mnt
 
     auth_type = gs.get('authType')
+    if auth_type is None:
+        # Local atoms nest authType under authentication object
+        auth_obj = gs.get('authentication')
+        if auth_obj and isinstance(auth_obj, dict):
+            auth_type = auth_obj.get('authType')
     if auth_type is not None:
         result['auth_type'] = auth_type
 
@@ -215,7 +220,6 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
         'base_url': 'baseUrl', 'api_type': 'apiType',
         'external_host': 'externalHost', 'internal_host': 'internalHost',
         'ssl_certificate': 'sslCertificate', 'max_number_of_threads': 'maxNumberOfThreads',
-        'auth_type': 'authType',
     }
     PORT_MAP = {
         'port': 'port', 'ssl': 'ssl', 'external_port': 'externalPort',
@@ -225,8 +229,9 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
     general_updates = {GENERAL_MAP[k]: v for k, v in kwargs.items() if k in GENERAL_MAP}
     port_updates = {PORT_MAP[k]: v for k, v in kwargs.items() if k in PORT_MAP}
     port_index = kwargs.get('port_index')
+    auth_type_value = kwargs.get('auth_type')
 
-    if not general_updates and not port_updates:
+    if not general_updates and not port_updates and auth_type_value is None:
         return {
             "_success": False,
             "error": "No valid update fields provided in config. "
@@ -239,13 +244,23 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
     current = _raw_web_server_request(sdk, resource_id)
 
     # Cloud atoms use cloudTennantGeneral, local atoms use generalSettings
-    gs_key = "generalSettings" if "generalSettings" in current else "cloudTennantGeneral"
-    gs = current.get(gs_key)
+    gs = current.get("generalSettings") or current.get("cloudTennantGeneral")
+    is_local = "generalSettings" in current and current["generalSettings"]
 
     if general_updates:
         if not gs:
             return {"_success": False, "error": "Server has no settings section to update"}
         gs.update(general_updates)
+
+    # auth_type at general level: cloud stores directly, local nests under authentication
+    if auth_type_value is not None:
+        if not gs:
+            return {"_success": False, "error": "Server has no settings section to update"}
+        if is_local:
+            auth_obj = gs.setdefault("authentication", {})
+            auth_obj["authType"] = auth_type_value
+        else:
+            gs["authType"] = auth_type_value
 
     if port_updates:
         lp = gs.get("listenerPorts") if gs else None
