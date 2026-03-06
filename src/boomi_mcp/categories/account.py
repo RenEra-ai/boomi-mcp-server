@@ -244,8 +244,11 @@ def _action_manage_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         description = kwargs.get("description")
         privileges_list = kwargs.get("privileges")
 
+        if privileges_list is not None and not isinstance(privileges_list, list):
+            return {"_success": False, "error": "config.privileges must be a list of privilege names, e.g. [\"API\", \"EXECUTE\"]"}
+
         role_privileges = None
-        if privileges_list and isinstance(privileges_list, list):
+        if privileges_list is not None and isinstance(privileges_list, list):
             privilege_objects = [Privilege(name=p) for p in privileges_list]
             role_privileges = Privileges(privilege=privilege_objects)
 
@@ -280,7 +283,10 @@ def _action_manage_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         description = kwargs.get("description")
         privileges_list = kwargs.get("privileges")
 
-        if not name and not description and not privileges_list:
+        if privileges_list is not None and not isinstance(privileges_list, list):
+            return {"_success": False, "error": "config.privileges must be a list of privilege names, e.g. [\"API\", \"EXECUTE\"]"}
+
+        if name is None and description is None and privileges_list is None:
             return {
                 "_success": False,
                 "error": "At least one of name, description, or privileges is required for update",
@@ -297,7 +303,7 @@ def _action_manage_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         elif hasattr(current, 'description'):
             update_role.description = current.description
 
-        if privileges_list and isinstance(privileges_list, list):
+        if privileges_list is not None and isinstance(privileges_list, list):
             privilege_objects = [Privilege(name=p) for p in privileges_list]
             update_role.privileges = Privileges(privilege=privilege_objects)
         elif hasattr(current, 'privileges'):
