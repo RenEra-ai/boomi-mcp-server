@@ -120,6 +120,24 @@ class TestUpdatePrivilegesStringRejected:
         sdk.role.update_role.assert_not_called()
 
 
+# ── Update: empty name rejected ──────────────────────────────────────
+
+class TestUpdateEmptyNameRejected:
+    def test_empty_name_returns_error(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="update",
+            resource_id="role-1",
+            name="",
+        )
+
+        assert result["_success"] is False
+        assert "cannot be empty" in result["error"]
+        sdk.role.get_role.assert_not_called()
+        sdk.role.update_role.assert_not_called()
+
+
 # ── Update: no fields still rejected ────────────────────────────────
 
 class TestUpdateNoFieldsRejected:

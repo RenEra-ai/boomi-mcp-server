@@ -292,6 +292,9 @@ def _action_manage_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                 "error": "At least one of name, description, or privileges is required for update",
             }
 
+        if name is not None and not name:
+            return {"_success": False, "error": "config.name cannot be empty. Omit it to keep the current name."}
+
         # Get current role to preserve fields
         current = sdk.role.get_role(id_=resource_id)
 
