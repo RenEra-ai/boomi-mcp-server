@@ -2330,7 +2330,7 @@ if manage_shared_resources_action:
                 resource_id="<atom_id>"
                 config='{"base_url": "/ws", "max_number_of_threads": 200}'
                 General fields: base_url, api_type, external_host, internal_host,
-                    ssl_certificate, max_number_of_threads
+                    ssl_certificate, max_number_of_threads, auth_type
                 Port fields (applied to all ports, or specify port_index):
                     port, ssl, external_port, external_ssl, auth_type, enable_port
 

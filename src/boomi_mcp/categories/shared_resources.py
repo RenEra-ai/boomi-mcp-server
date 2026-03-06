@@ -215,6 +215,7 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
         'base_url': 'baseUrl', 'api_type': 'apiType',
         'external_host': 'externalHost', 'internal_host': 'internalHost',
         'ssl_certificate': 'sslCertificate', 'max_number_of_threads': 'maxNumberOfThreads',
+        'auth_type': 'authType',
     }
     PORT_MAP = {
         'port': 'port', 'ssl': 'ssl', 'external_port': 'externalPort',
@@ -230,7 +231,7 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
             "_success": False,
             "error": "No valid update fields provided in config. "
                      "General fields: base_url, api_type, external_host, internal_host, "
-                     "ssl_certificate, max_number_of_threads. "
+                     "ssl_certificate, max_number_of_threads, auth_type. "
                      "Port fields: port, ssl, external_port, external_ssl, auth_type, enable_port",
         }
 
@@ -251,6 +252,12 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
         ports = lp.get("port") if lp else None
         if not ports:
             return {"_success": False, "error": "Server has no listener ports to update"}
+        if port_index is not None:
+            if not isinstance(port_index, int) or port_index < 0 or port_index >= len(ports):
+                return {
+                    "_success": False,
+                    "error": f"port_index {port_index} is out of range (valid: 0–{len(ports) - 1})",
+                }
         targets = [ports[port_index]] if port_index is not None else ports
         for p in targets:
             p.update(port_updates)
