@@ -35,6 +35,14 @@ from boomi.net.environment.environment import Environment
 # Helpers
 # ============================================================================
 
+def _validate_privileges_list(privileges_list):
+    """Return error string if any element is not a non-empty string, else None."""
+    for i, p in enumerate(privileges_list):
+        if not isinstance(p, str) or not p.strip():
+            return f"config.privileges[{i}] must be a non-empty string, got {type(p).__name__}"
+    return None
+
+
 def _role_to_dict(role) -> Dict[str, Any]:
     """Convert SDK Role object to plain dict."""
     result = {
@@ -249,6 +257,9 @@ def _action_manage_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
         role_privileges = None
         if privileges_list is not None and isinstance(privileges_list, list):
+            err = _validate_privileges_list(privileges_list)
+            if err:
+                return {"_success": False, "error": err}
             privilege_objects = [Privilege(name=p) for p in privileges_list]
             role_privileges = Privileges(privilege=privilege_objects)
 
@@ -295,6 +306,11 @@ def _action_manage_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         if name is not None:
             if not isinstance(name, str) or not name.strip():
                 return {"_success": False, "error": "config.name must be a non-empty string. Omit it to keep the current name."}
+
+        if privileges_list is not None and isinstance(privileges_list, list):
+            err = _validate_privileges_list(privileges_list)
+            if err:
+                return {"_success": False, "error": err}
 
         # Get current role to preserve fields
         current = sdk.role.get_role(id_=resource_id)

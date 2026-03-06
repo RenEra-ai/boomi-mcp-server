@@ -196,6 +196,83 @@ class TestCreateInvalidNameRejected:
 
 # ── Update: no fields still rejected ────────────────────────────────
 
+# ── Create: privileges element validation ────────────────────────────
+
+class TestCreatePrivilegesElementValidation:
+    def test_integer_element_rejected(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="create",
+            name="TestRole",
+            privileges=[1, "API"],
+        )
+
+        assert result["_success"] is False
+        assert "privileges[0]" in result["error"]
+        sdk.role.create_role.assert_not_called()
+
+    def test_empty_string_element_rejected(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="create",
+            name="TestRole",
+            privileges=["API", ""],
+        )
+
+        assert result["_success"] is False
+        assert "privileges[1]" in result["error"]
+        sdk.role.create_role.assert_not_called()
+
+    def test_whitespace_only_element_rejected(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="create",
+            name="TestRole",
+            privileges=["API", "   "],
+        )
+
+        assert result["_success"] is False
+        assert "privileges[1]" in result["error"]
+        sdk.role.create_role.assert_not_called()
+
+
+# ── Update: privileges element validation ────────────────────────────
+
+class TestUpdatePrivilegesElementValidation:
+    def test_integer_element_rejected(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="update",
+            resource_id="role-1",
+            privileges=[1, "API"],
+        )
+
+        assert result["_success"] is False
+        assert "privileges[0]" in result["error"]
+        sdk.role.get_role.assert_not_called()
+        sdk.role.update_role.assert_not_called()
+
+    def test_empty_string_element_rejected(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="update",
+            resource_id="role-1",
+            privileges=["API", ""],
+        )
+
+        assert result["_success"] is False
+        assert "privileges[1]" in result["error"]
+        sdk.role.get_role.assert_not_called()
+        sdk.role.update_role.assert_not_called()
+
+
+# ── Update: no fields still rejected ────────────────────────────────
+
 class TestUpdateNoFieldsRejected:
     def test_no_fields_returns_error(self):
         sdk = _make_sdk()
