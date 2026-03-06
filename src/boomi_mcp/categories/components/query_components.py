@@ -36,9 +36,12 @@ def _parse_limit(raw) -> int:
     if isinstance(raw, int):
         return raw
     if isinstance(raw, float):
-        if raw != int(raw):
+        try:
+            if raw != int(raw):
+                return DEFAULT_LIMIT
+            return int(raw)
+        except (ValueError, OverflowError):
             return DEFAULT_LIMIT
-        return int(raw)
     if isinstance(raw, str):
         try:
             return int(raw)
