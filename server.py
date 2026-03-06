@@ -2328,9 +2328,11 @@ if manage_shared_resources_action:
 
             update_web_server - Update web server settings:
                 resource_id="<atom_id>"
-                config='{"port": 9090, "max_connections": 200}'
-                Updatable fields: url, port, ssl_port, max_connections, max_threads,
-                    auth_type, api_type, external_host, external_port, external_ssl_port
+                config='{"base_url": "/ws", "max_number_of_threads": 200}'
+                General fields: base_url, api_type, external_host, internal_host,
+                    ssl_certificate, max_number_of_threads
+                Port fields (applied to all ports, or specify port_index):
+                    port, ssl, external_port, external_ssl, auth_type, enable_port
 
             list_channels - List shared communication channels:
                 (no config needed - lists all channels)

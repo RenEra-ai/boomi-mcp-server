@@ -13,6 +13,8 @@ from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
 from boomi.net.transport.api_error import ApiError
+from boomi.net.transport.serializer import Serializer
+from boomi.net.environment import Environment
 from boomi.models import (
     SharedWebServer,
     SharedCommunicationChannelComponent,
@@ -29,28 +31,84 @@ from boomi.models import (
 # Helpers
 # ============================================================================
 
-def _web_server_to_dict(server) -> Dict[str, Any]:
-    """Convert SDK SharedWebServer object to plain dict."""
-    result = {
-        "id": getattr(server, 'id_', ''),
-    }
-    for attr in (
-        'url', 'base_url', 'port', 'ssl_port', 'api_type',
-        'auth_type', 'max_connections', 'max_threads',
-        'external_host', 'external_port', 'external_ssl_port',
-    ):
-        val = getattr(server, attr, None)
+def _raw_web_server_request(sdk: Boomi, resource_id: str, method: str = "GET",
+                            body: dict = None) -> dict:
+    """Make raw SharedWebServer API call, bypassing SDK model deserialization.
+
+    The SDK's SharedWebServer model requires constructor args (cors_configuration,
+    general_settings) that cloud atoms don't return, causing TypeError on _unmap().
+    """
+    svc = sdk.shared_web_server
+    base = svc.base_url or Environment.DEFAULT.url
+    url = f"{base}/SharedWebServer/{resource_id}"
+
+    ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])
+    ser = ser.add_header("Accept", "application/json")
+    serialized = ser.serialize().set_method(method)
+
+    if body is not None:
+        serialized = serialized.set_body(body, "application/json")
+
+    response, status, _ = svc.send_request(serialized)
+    return response
+
+
+def _web_server_to_dict(data: dict) -> Dict[str, Any]:
+    """Convert raw SharedWebServer JSON response to a clean dict.
+
+    Handles both cloud atoms (settings in cloudTennantGeneral) and
+    local atoms (settings in generalSettings).
+    """
+    result = {"atom_id": data.get("atomId", "")}
+
+    # Cloud atoms use cloudTennantGeneral, local atoms use generalSettings
+    gs = data.get("generalSettings") or data.get("cloudTennantGeneral") or {}
+
+    for key in ('apiType', 'baseUrl', 'externalHost', 'internalHost', 'sslCertificate'):
+        val = gs.get(key)
         if val is not None:
-            result[attr] = val if isinstance(val, (bool, int)) else str(val)
+            # camelCase → snake_case for user-facing output
+            snake = ''.join(f'_{c.lower()}' if c.isupper() else c for c in key)
+            result[snake] = val
+
+    mnt = gs.get('maxNumberOfThreads')
+    if mnt is not None:
+        result['max_number_of_threads'] = mnt
+
+    auth_type = gs.get('authType')
+    if auth_type is not None:
+        result['auth_type'] = auth_type
+
+    lp = gs.get("listenerPorts") or {}
+    ports_list = lp.get("port", [])
+    if ports_list:
+        result['ports'] = []
+        for p in ports_list:
+            port_dict = {}
+            for camel, snake in (('authType', 'auth_type'), ('baseUrlForRequest', 'base_url_for_request')):
+                v = p.get(camel)
+                if v is not None:
+                    port_dict[snake] = v
+            for camel, snake in (('port', 'port'), ('externalPort', 'external_port')):
+                v = p.get(camel)
+                if v is not None:
+                    port_dict[snake] = v
+            for camel, snake in (('ssl', 'ssl'), ('externalSSL', 'external_ssl'),
+                                  ('enablePort', 'enable_port'), ('defaultPort', 'default_port')):
+                v = p.get(camel)
+                if v is not None:
+                    port_dict[snake] = v
+            result['ports'].append(port_dict)
+
     return result
 
 
 def _channel_to_dict(channel) -> Dict[str, Any]:
     """Convert SDK SharedCommunicationChannelComponent to plain dict."""
     result = {
-        "id": getattr(channel, 'id_', ''),
-        "name": getattr(channel, 'component_name', '') or getattr(channel, 'name', ''),
-        "type": getattr(channel, 'communication_type', None) or getattr(channel, 'type', None),
+        "id": getattr(channel, 'component_id', ''),
+        "name": getattr(channel, 'component_name', ''),
+        "type": getattr(channel, 'communication_type', None),
     }
     # Remove type if still None
     if result["type"] is None:
@@ -60,9 +118,8 @@ def _channel_to_dict(channel) -> Dict[str, Any]:
     else:
         result["type"] = str(result["type"])
     for attr in (
-        'folder_id', 'folder_full_path',
-        'created_date', 'modified_date', 'created_by', 'modified_by',
-        'component_id', 'version', 'current_version', 'deleted',
+        'folder_id', 'folder_full_path', 'component_id', 'deleted',
+        'description', 'folder_name', 'branch_id', 'branch_name',
     ):
         val = getattr(channel, attr, None)
         if val is not None:
@@ -140,10 +197,10 @@ def _action_list_web_servers(sdk: Boomi, profile: str, **kwargs) -> Dict[str, An
     if not resource_id:
         return {"_success": False, "error": "resource_id (atom_id) is required for 'list_web_servers' action"}
 
-    server = sdk.shared_web_server.get_shared_web_server(id_=resource_id)
+    data = _raw_web_server_request(sdk, resource_id)
     return {
         "_success": True,
-        "web_server": _web_server_to_dict(server),
+        "web_server": _web_server_to_dict(data),
     }
 
 
@@ -153,35 +210,59 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
     if not resource_id:
         return {"_success": False, "error": "resource_id (atom_id) is required for 'update_web_server' action"}
 
-    # Get current config first
-    current = sdk.shared_web_server.get_shared_web_server(id_=resource_id)
-
-    # Apply updates from config
-    update_fields = {
-        k: v for k, v in kwargs.items()
-        if k not in ("resource_id",) and hasattr(current, k)
+    # snake_case config keys → camelCase JSON keys
+    GENERAL_MAP = {
+        'base_url': 'baseUrl', 'api_type': 'apiType',
+        'external_host': 'externalHost', 'internal_host': 'internalHost',
+        'ssl_certificate': 'sslCertificate', 'max_number_of_threads': 'maxNumberOfThreads',
+    }
+    PORT_MAP = {
+        'port': 'port', 'ssl': 'ssl', 'external_port': 'externalPort',
+        'external_ssl': 'externalSSL', 'auth_type': 'authType', 'enable_port': 'enablePort',
     }
 
-    if not update_fields:
+    general_updates = {GENERAL_MAP[k]: v for k, v in kwargs.items() if k in GENERAL_MAP}
+    port_updates = {PORT_MAP[k]: v for k, v in kwargs.items() if k in PORT_MAP}
+    port_index = kwargs.get('port_index')
+
+    if not general_updates and not port_updates:
         return {
             "_success": False,
             "error": "No valid update fields provided in config. "
-                     "Provide fields like: url, port, ssl_port, max_connections, max_threads, "
-                     "auth_type, api_type, external_host, external_port, external_ssl_port",
+                     "General fields: base_url, api_type, external_host, internal_host, "
+                     "ssl_certificate, max_number_of_threads. "
+                     "Port fields: port, ssl, external_port, external_ssl, auth_type, enable_port",
         }
 
-    for key, value in update_fields.items():
-        setattr(current, key, value)
+    # GET raw JSON, modify, PUT back — bypasses SDK model deserialization bugs
+    current = _raw_web_server_request(sdk, resource_id)
 
-    updated = sdk.shared_web_server.update_shared_web_server(
-        id_=resource_id,
-        request_body=current,
-    )
+    # Cloud atoms use cloudTennantGeneral, local atoms use generalSettings
+    gs_key = "generalSettings" if "generalSettings" in current else "cloudTennantGeneral"
+    gs = current.get(gs_key)
 
+    if general_updates:
+        if not gs:
+            return {"_success": False, "error": "Server has no settings section to update"}
+        gs.update(general_updates)
+
+    if port_updates:
+        lp = gs.get("listenerPorts") if gs else None
+        ports = lp.get("port") if lp else None
+        if not ports:
+            return {"_success": False, "error": "Server has no listener ports to update"}
+        targets = [ports[port_index]] if port_index is not None else ports
+        for p in targets:
+            p.update(port_updates)
+
+    updated = _raw_web_server_request(sdk, resource_id, method="POST", body=current)
+
+    # Collect user-facing field names for the response
+    updated_names = [k for k in kwargs if k in {*GENERAL_MAP, *PORT_MAP}]
     return {
         "_success": True,
         "web_server": _web_server_to_dict(updated),
-        "updated_fields": list(update_fields.keys()),
+        "updated_fields": updated_names,
     }
 
 
