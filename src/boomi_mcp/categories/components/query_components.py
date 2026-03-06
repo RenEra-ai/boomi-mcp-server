@@ -83,7 +83,8 @@ def list_components(
             components = [c for c in components if c.get('folder_name') == folder]
 
         # Apply limit after all client-side filters
-        limit = int(filters.get('limit', DEFAULT_LIMIT)) if filters else DEFAULT_LIMIT
+        raw_limit = filters.get('limit') if filters else None
+        limit = int(raw_limit) if raw_limit is not None else DEFAULT_LIMIT
         total_available = len(components)
         if limit > 0 and total_available > limit:
             components = components[:limit]
@@ -211,7 +212,8 @@ def search_components(
             components = [c for c in components if c.get('folder_name') == folder]
 
         # Apply limit after all client-side filters
-        limit = int(filters.get('limit', DEFAULT_LIMIT))
+        raw_limit = filters.get('limit')
+        limit = int(raw_limit) if raw_limit is not None else DEFAULT_LIMIT
         total_available = len(components)
         if limit > 0 and total_available > limit:
             components = components[:limit]
