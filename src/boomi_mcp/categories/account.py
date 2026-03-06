@@ -249,10 +249,12 @@ def _action_manage_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
             privilege_objects = [Privilege(name=p) for p in privileges_list]
             role_privileges = Privileges(privilege=privilege_objects)
 
+        account_id = sdk._base_url_account_id
         new_role = Role(
             name=name,
             description=description,
             privileges=role_privileges,
+            account_id=account_id,
         )
         created = sdk.role.create_role(request_body=new_role)
 
@@ -287,7 +289,8 @@ def _action_manage_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         # Get current role to preserve fields
         current = sdk.role.get_role(id_=resource_id)
 
-        update_role = Role(id_=resource_id)
+        account_id = sdk._base_url_account_id
+        update_role = Role(id_=resource_id, account_id=account_id)
         update_role.name = name if name else getattr(current, 'name', None)
         if description is not None:
             update_role.description = description
