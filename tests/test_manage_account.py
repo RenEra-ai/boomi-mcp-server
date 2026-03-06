@@ -120,9 +120,9 @@ class TestUpdatePrivilegesStringRejected:
         sdk.role.update_role.assert_not_called()
 
 
-# ── Update: empty name rejected ──────────────────────────────────────
+# ── Update: invalid name rejected ────────────────────────────────────
 
-class TestUpdateEmptyNameRejected:
+class TestUpdateInvalidNameRejected:
     def test_empty_name_returns_error(self):
         sdk = _make_sdk()
         result = _action_manage_role(
@@ -133,9 +133,65 @@ class TestUpdateEmptyNameRejected:
         )
 
         assert result["_success"] is False
-        assert "cannot be empty" in result["error"]
+        assert "non-empty string" in result["error"]
         sdk.role.get_role.assert_not_called()
         sdk.role.update_role.assert_not_called()
+
+    def test_whitespace_only_name_returns_error(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="update",
+            resource_id="role-1",
+            name="   ",
+        )
+
+        assert result["_success"] is False
+        assert "non-empty string" in result["error"]
+        sdk.role.get_role.assert_not_called()
+        sdk.role.update_role.assert_not_called()
+
+    def test_non_string_name_returns_error(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="update",
+            resource_id="role-1",
+            name=123,
+        )
+
+        assert result["_success"] is False
+        assert "non-empty string" in result["error"]
+        sdk.role.get_role.assert_not_called()
+        sdk.role.update_role.assert_not_called()
+
+
+# ── Create: invalid name rejected ────────────────────────────────────
+
+class TestCreateInvalidNameRejected:
+    def test_whitespace_only_name_returns_error(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="create",
+            name="   ",
+        )
+
+        assert result["_success"] is False
+        assert "non-empty string" in result["error"]
+        sdk.role.create_role.assert_not_called()
+
+    def test_non_string_name_returns_error(self):
+        sdk = _make_sdk()
+        result = _action_manage_role(
+            sdk, "dev",
+            operation="create",
+            name=123,
+        )
+
+        assert result["_success"] is False
+        assert "non-empty string" in result["error"]
+        sdk.role.create_role.assert_not_called()
 
 
 # ── Update: no fields still rejected ────────────────────────────────
