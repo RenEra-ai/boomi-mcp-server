@@ -24,6 +24,8 @@ from boomi.net.transport.api_error import ApiError
 
 from ._shared import component_get_xml, paginate_metadata
 
+DEFAULT_LIMIT = 100
+
 
 def _extract_api_error_msg(e) -> str:
     """Extract user-friendly error message from ApiError."""
@@ -55,7 +57,7 @@ def list_components(
         if filters:
             show_all = filters.get('show_all', False)
 
-        comp_type = filters.get('type') if filters else None
+        comp_type = (filters.get('type') or filters.get('component_type')) if filters else None
 
         if comp_type:
             expression = ComponentMetadataSimpleExpression(
@@ -81,16 +83,21 @@ def list_components(
             components = [c for c in components if c.get('folder_name') == folder]
 
         # Apply limit after all client-side filters
-        limit = int(filters.get('limit', 0)) if filters else 0
-        if limit > 0 and len(components) > limit:
+        limit = int(filters.get('limit', DEFAULT_LIMIT)) if filters else DEFAULT_LIMIT
+        total_available = len(components)
+        if limit > 0 and total_available > limit:
             components = components[:limit]
 
-        return {
+        result = {
             "_success": True,
             "total_count": len(components),
             "components": components,
             "profile": profile,
         }
+        if limit > 0 and total_available > len(components):
+            result["has_more"] = True
+            result["total_available"] = total_available
+        return result
 
     except ApiError as e:
         return {
@@ -141,8 +148,8 @@ def search_components(
     filters: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Multi-field component search with AND logic."""
-    KNOWN_FILTER_KEYS = {'name', 'type', 'sub_type', 'component_id', 'created_by',
-                         'modified_by', 'folder_name', 'show_all', 'limit'}
+    KNOWN_FILTER_KEYS = {'name', 'type', 'component_type', 'sub_type', 'component_id',
+                         'created_by', 'modified_by', 'folder_name', 'show_all', 'limit'}
     try:
         expressions = []
 
@@ -153,11 +160,12 @@ def search_components(
                 argument=[filters['name']]
             ))
 
-        if filters.get('type'):
+        comp_type = filters.get('type') or filters.get('component_type')
+        if comp_type:
             expressions.append(ComponentMetadataSimpleExpression(
                 operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
                 property=ComponentMetadataSimpleExpressionProperty.TYPE,
-                argument=[filters['type']]
+                argument=[comp_type]
             ))
 
         # Additional filter fields (EQUALS operator)
@@ -203,8 +211,9 @@ def search_components(
             components = [c for c in components if c.get('folder_name') == folder]
 
         # Apply limit after all client-side filters
-        limit = int(filters.get('limit', 0))
-        if limit > 0 and len(components) > limit:
+        limit = int(filters.get('limit', DEFAULT_LIMIT))
+        total_available = len(components)
+        if limit > 0 and total_available > limit:
             components = components[:limit]
 
         unknown = set(filters.keys()) - KNOWN_FILTER_KEYS
@@ -215,6 +224,9 @@ def search_components(
             "profile": profile,
             "filters_applied": {k: v for k, v in filters.items() if v and k in KNOWN_FILTER_KEYS and k != 'limit'},
         }
+        if limit > 0 and total_available > len(components):
+            result["has_more"] = True
+            result["total_available"] = total_available
         if unknown:
             result["ignored_filters"] = sorted(unknown)
         return result
