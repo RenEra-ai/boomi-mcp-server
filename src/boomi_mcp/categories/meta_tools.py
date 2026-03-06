@@ -1763,7 +1763,7 @@ def list_capabilities_action() -> Dict[str, Any]:
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
-                "execution_id": "str (optional) — required for error_details, retry, reprocess",
+                "execution_id": "str (optional) — required for error_details, retry; optional for reprocess (see process_id, environment_id, config.atom_id)",
                 "process_id": "str (optional) — required for reprocess (with environment_id)",
                 "environment_id": "str (optional) — required for reprocess (with process_id)",
                 "config": "JSON str (optional) — action-specific options (e.g. days, limit, atom_id, queue_name, dest_queue)",
