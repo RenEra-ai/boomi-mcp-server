@@ -423,6 +423,7 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
     """Create an execution request (shared by retry and reprocess)."""
     from boomi.models import (
         ExecutionRequest,
+        ExecutionRequestProcessProperties,
         ExecutionRequestDynamicProcessProperties,
         DynamicProcessProperty,
     )
@@ -442,6 +443,7 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
     execution_request = ExecutionRequest(
         process_id=process_id,
         atom_id=atom_id,
+        process_properties=ExecutionRequestProcessProperties(),
         dynamic_process_properties=dynamic_props,
     )
 
