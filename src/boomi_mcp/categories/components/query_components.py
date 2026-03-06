@@ -20,8 +20,24 @@ from boomi.models import (
     ComponentMetadataGroupingExpression,
     ComponentMetadataGroupingExpressionOperator,
 )
+from boomi.net.transport.api_error import ApiError
 
 from ._shared import component_get_xml, paginate_metadata
+
+
+def _extract_api_error_msg(e) -> str:
+    """Extract user-friendly error message from ApiError."""
+    detail = getattr(e, "error_detail", None)
+    if detail:
+        return detail
+    resp = getattr(e, "response", None)
+    if resp:
+        body = getattr(resp, "body", None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, "message", "") or str(e)
 
 
 # ============================================================================
@@ -71,6 +87,12 @@ def list_components(
             "profile": profile,
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to list components: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -92,6 +114,13 @@ def get_component(
             "component": comp_data,
             "profile": profile,
         }
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to get component '{component_id}': {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+            "hint": "Verify the component ID exists and is accessible",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -107,6 +136,8 @@ def search_components(
     filters: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Multi-field component search with AND logic."""
+    KNOWN_FILTER_KEYS = {'name', 'type', 'sub_type', 'component_id', 'created_by',
+                         'modified_by', 'folder_name', 'show_all'}
     try:
         expressions = []
 
@@ -166,14 +197,24 @@ def search_components(
             folder = filters['folder_name']
             components = [c for c in components if c.get('folder_name') == folder]
 
-        return {
+        unknown = set(filters.keys()) - KNOWN_FILTER_KEYS
+        result = {
             "_success": True,
             "total_count": len(components),
             "components": components,
             "profile": profile,
-            "filters_applied": {k: v for k, v in filters.items() if v},
+            "filters_applied": {k: v for k, v in filters.items() if v and k in KNOWN_FILTER_KEYS},
         }
+        if unknown:
+            result["ignored_filters"] = sorted(unknown)
+        return result
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to search components: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -212,20 +253,31 @@ def bulk_get_components(
                 # Remove full XML from bulk response to keep it lighter
                 comp_summary = {k: v for k, v in comp.items() if k != 'xml'}
                 components.append(comp_summary)
+            except ApiError as e:
+                errors.append({'component_id': cid, 'error': _extract_api_error_msg(e)})
             except Exception as e:
                 errors.append({'component_id': cid, 'error': str(e)})
 
+        all_failed = errors and not components
         result = {
-            "_success": True,
+            "_success": not all_failed,
             "total_count": len(components),
             "components": components,
             "profile": profile,
         }
         if errors:
             result["errors"] = errors
+        if all_failed:
+            result["error"] = f"All {len(errors)} component(s) failed to retrieve"
 
         return result
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to bulk get components: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -262,7 +314,7 @@ def query_components_action(
 
         elif action == "search":
             filters = params.get("filters")
-            if not filters:
+            if filters is None:
                 return {
                     "_success": False,
                     "error": "config with search filters is required for 'search' action",
@@ -272,7 +324,7 @@ def query_components_action(
 
         elif action == "bulk_get":
             component_ids = params.get("component_ids")
-            if not component_ids:
+            if component_ids is None:
                 return {
                     "_success": False,
                     "error": "component_ids is required for 'bulk_get' action",
@@ -287,6 +339,12 @@ def query_components_action(
                 "hint": "Valid actions are: list, get, search, bulk_get",
             }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,

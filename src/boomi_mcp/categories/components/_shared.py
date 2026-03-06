@@ -84,7 +84,7 @@ def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
         'folder_id': root.attrib.get('folderId', ''),
         'folder_full_path': root.attrib.get('folderFullPath', ''),
         'type': root.attrib.get('type', ''),
-        'version': root.attrib.get('version', ''),
+        'version': int(root.attrib.get('version', 0)),
         'description': _extract_description(root),
         'xml': raw_xml,
     }
@@ -101,7 +101,7 @@ def parse_component_xml(raw_xml: str, fallback_id: str = '') -> Dict[str, Any]:
         'folder_id': root.attrib.get('folderId', ''),
         'folder_full_path': root.attrib.get('folderFullPath', ''),
         'type': root.attrib.get('type', ''),
-        'version': root.attrib.get('version', ''),
+        'version': int(root.attrib.get('version', 0)),
         'description': _extract_description(root),
         'current_version': root.attrib.get('currentVersion', 'false'),
         'deleted': root.attrib.get('deleted', 'false'),
@@ -194,7 +194,7 @@ def metadata_to_dict(comp) -> Dict[str, Any]:
     """Convert a ComponentMetadata SDK object to a plain dict."""
     return {
         'component_id': getattr(comp, 'component_id', ''),
-        'id': getattr(comp, 'id_', ''),
+        'id': getattr(comp, 'component_id', '') or getattr(comp, 'id_', ''),
         'name': getattr(comp, 'name', ''),
         'folder_name': getattr(comp, 'folder_name', ''),
         'type': getattr(comp, 'type_', ''),
@@ -205,7 +205,6 @@ def metadata_to_dict(comp) -> Dict[str, Any]:
         'modified_date': getattr(comp, 'modified_date', ''),
         'created_by': getattr(comp, 'created_by', ''),
         'modified_by': getattr(comp, 'modified_by', ''),
-        'folder_full_path': getattr(comp, 'folder_full_path', ''),
     }
 
 
