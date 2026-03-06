@@ -1,13 +1,16 @@
 """
 Component Analysis MCP Tools for Boomi API Integration.
 
-Provides component dependency analysis and version comparison:
+Provides component dependency analysis, version comparison, and merge:
 - where_used: Find all components that reference a given component (inbound)
 - dependencies: Find all components that a given component references (outbound)
 - compare_versions: Compare two versions of a component to see changes
+- merge: Merge component versions across branches
 """
 
 from typing import Dict, Any, List, Optional
+import xml.etree.ElementTree as ET
+import difflib
 
 from boomi import Boomi
 from boomi.models import (
@@ -279,6 +282,124 @@ def compare_versions(
         }
 
 
+def merge_versions(
+    boomi_client: Boomi,
+    profile: str,
+    component_id: str,
+    config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Merge component content across branches or versions.
+
+    Supports two modes:
+    - Branch merge: source_branch + target_branch (uses componentId~branchId API format)
+    - Version merge: source_version + optional target_version (legacy behavior)
+
+    In both modes, source content is applied onto target, preserving target's
+    version metadata. The update targets the target branch/version.
+    """
+    try:
+        source_branch = config.get('source_branch')
+        target_branch = config.get('target_branch')
+        source_version = config.get('source_version')
+        target_version = config.get('target_version')
+
+        if source_branch is None and source_version is None:
+            return {
+                "_success": False,
+                "error": "Either source_branch or source_version is required in config",
+                "hint": 'Branch merge: {"source_branch": "dev-branch-id", "target_branch": "main-branch-id"}\n'
+                        'Version merge: {"source_version": 1, "target_version": 2}',
+            }
+
+        # Determine source/target component IDs for GET requests
+        if source_branch:
+            # Branch merge mode: componentId~branchId
+            source_get_id = f"{component_id}~{source_branch}"
+            target_get_id = f"{component_id}~{target_branch}" if target_branch else component_id
+            source_label = f"branch {source_branch}"
+            target_label = f"branch {target_branch}" if target_branch else "main branch"
+        else:
+            # Version merge mode: componentId~version
+            source_get_id = f"{component_id}~{source_version}"
+            target_get_id = f"{component_id}~{target_version}" if target_version is not None else component_id
+            source_label = f"version {source_version}"
+            target_label = f"version {target_version}" if target_version is not None else "current"
+
+        # Get source XML
+        source_meta = component_get_xml(boomi_client, source_get_id)
+        source_xml = source_meta['xml']
+        source_root = ET.fromstring(source_xml)
+
+        # Get target XML
+        target_meta = component_get_xml(boomi_client, target_get_id)
+        target_xml = target_meta['xml']
+        target_root = ET.fromstring(target_xml)
+
+        # Compare source and target
+        source_lines = source_xml.splitlines(keepends=True)
+        target_lines = target_xml.splitlines(keepends=True)
+        diff = list(difflib.unified_diff(
+            target_lines, source_lines,
+            fromfile=target_label,
+            tofile=source_label,
+            lineterm=""
+        ))
+
+        # Apply source content onto target: preserve target's version metadata
+        target_version_attr = target_root.attrib.get('version', '')
+        target_current_version = target_root.attrib.get('currentVersion', '')
+
+        merged_root = ET.fromstring(source_xml)
+        if target_version_attr:
+            merged_root.set('version', target_version_attr)
+        if target_current_version:
+            merged_root.set('currentVersion', target_current_version)
+
+        # Always strip branchId from source XML to prevent writing to wrong branch,
+        # then explicitly set it only if targeting a specific branch
+        if 'branchId' in merged_root.attrib:
+            del merged_root.attrib['branchId']
+        if target_branch:
+            merged_root.set('branchId', target_branch)
+
+        merged_xml = ET.tostring(merged_root, encoding='unicode')
+
+        # Perform the update (target branch context)
+        boomi_client.component.update_component_raw(component_id, merged_xml)
+
+        # Verify the update (always read the updated head, not an immutable version snapshot)
+        verify_id = f"{component_id}~{target_branch}" if target_branch else component_id
+        verify = component_get_xml(boomi_client, verify_id)
+
+        result = {
+            "_success": True,
+            "component_id": component_id,
+            "component_name": target_meta.get('name', ''),
+            "source": source_label,
+            "target": target_label,
+            "new_version": verify.get('version', ''),
+            "diff_lines": len(diff),
+            "diff_preview": ''.join(diff[:50]) if diff else "No differences found",
+            "profile": profile,
+            "note": f"Source ({source_label}) content merged onto target ({target_label}). Component version incremented.",
+        }
+
+        if source_branch:
+            result["source_branch"] = source_branch
+            result["target_branch"] = target_branch or "main"
+
+        return result
+
+    except Exception as e:
+        return {
+            "_success": False,
+            "error": f"Failed to merge component '{component_id}': {str(e)}",
+            "exception_type": type(e).__name__,
+            "hint": "Ensure the component exists on both branches/versions. "
+                    "Use query_components to find component IDs and manage_account list_branches for branch IDs.",
+        }
+
+
 # ============================================================================
 # Helpers
 # ============================================================================
@@ -391,11 +512,28 @@ def analyze_component_action(
                 }
             return compare_versions(boomi_client, profile, component_id, config)
 
+        elif action == "merge":
+            component_id = params.get("component_id")
+            if not component_id:
+                return {
+                    "_success": False,
+                    "error": "component_id is required for 'merge' action",
+                }
+            config = params.get("config", {})
+            if not config:
+                return {
+                    "_success": False,
+                    "error": "config with source_branch or source_version is required",
+                    "hint": 'Branch merge: {"source_branch": "branch-id", "target_branch": "branch-id"}\n'
+                            'Version merge: {"source_version": 1, "target_version": 2}',
+                }
+            return merge_versions(boomi_client, profile, component_id, config)
+
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: where_used, dependencies, compare_versions",
+                "hint": "Valid actions are: where_used, dependencies, compare_versions, merge",
             }
 
     except Exception as e:

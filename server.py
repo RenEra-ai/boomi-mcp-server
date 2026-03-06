@@ -205,6 +205,38 @@ except ImportError as e:
     print(f"[WARNING] Failed to import execution tools: {e}")
     execute_process_action = None
 
+# --- Shared Resources Tools ---
+try:
+    from boomi_mcp.categories.shared_resources import manage_shared_resources_action
+    print(f"[INFO] Shared resources tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import shared resources tools: {e}")
+    manage_shared_resources_action = None
+
+# --- Troubleshooting Tools ---
+try:
+    from boomi_mcp.categories.troubleshooting import troubleshoot_execution_action
+    print(f"[INFO] Troubleshooting tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import troubleshooting tools: {e}")
+    troubleshoot_execution_action = None
+
+# --- Schedule Tools ---
+try:
+    from boomi_mcp.categories.schedules import manage_schedules_action
+    print(f"[INFO] Schedule tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import schedule tools: {e}")
+    manage_schedules_action = None
+
+# --- Account Tools ---
+try:
+    from boomi_mcp.categories.account import manage_account_action
+    print(f"[INFO] Account tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import account tools: {e}")
+    manage_account_action = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -940,11 +972,11 @@ if monitor_platform_action:
         config: str = None,
     ):
         """
-        Monitor Boomi platform: execution history, logs, artifacts, audit trail, and events.
+        Monitor Boomi platform: execution history, logs, artifacts, audit trail, events, certificates, throughput, and metrics.
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events
+            action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events, certificates, throughput, execution_metrics, connector_documents
             config: JSON string with action-specific configuration (see examples below)
 
         Actions and config examples:
@@ -988,6 +1020,22 @@ if monitor_platform_action:
                     "execution_id": "abc-123-def",
                     "limit": 100
                 }'
+
+            certificates - Query expiring/expired deployed certificates:
+                config='{"days_ahead": 30, "limit": 50}'
+                days_ahead: days to look ahead for expiration (default: 30)
+
+            throughput - Account-level throughput metrics by date range:
+                config='{"start_date": "2025-01-01", "end_date": "2025-01-31", "atom_id": "abc-123", "limit": 100}'
+                At least one filter required: start_date, end_date, atom_id
+
+            execution_metrics - Aggregated execution statistics (success rate, avg duration, top failures):
+                config='{"start_date": "2025-01-01T00:00:00Z", "end_date": "2025-01-31T23:59:59Z", "top_failures": 5, "limit": 200}'
+                Same filters as execution_records. Returns aggregated stats instead of raw records.
+
+            connector_documents - Document-level tracking for connector operations:
+                config='{"execution_id": "abc-123-def", "connector_type": "http", "status": "SUCCESS", "action_type": "GET", "limit": 50}'
+                execution_id is REQUIRED. Optional: connector_type, status (SUCCESS/ERROR), action_type.
 
         Returns:
             Action result with success status and data/error
@@ -1235,7 +1283,7 @@ if manage_component_action:
 
 # --- Component Analysis MCP Tools ---
 if analyze_component_action:
-    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    @mcp.tool(annotations={"readOnlyHint": False, "openWorldHint": True})
     def analyze_component(
         profile: str,
         action: str,
@@ -1243,11 +1291,11 @@ if analyze_component_action:
         config: str = None,
     ):
         """
-        Analyze component dependencies and compare versions.
+        Analyze component dependencies, compare versions, and merge.
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: where_used, dependencies, compare_versions
+            action: One of: where_used, dependencies, compare_versions, merge
             component_id: Component ID (required for all actions)
             config: JSON string with action-specific configuration
 
@@ -1255,18 +1303,25 @@ if analyze_component_action:
 
             where_used - Find all components that reference this component (inbound):
                 component_id="abc-123-def"
-                config='{"type": "process"}'  (optional: filter by reference type)
+                config='{"type": "DEPENDENT"}'  (optional: filter — DEPENDENT or INDEPENDENT)
 
             dependencies - Find all components this component references (outbound):
                 component_id="abc-123-def"
+                config='{"type": "DEPENDENT"}'  (optional: filter — DEPENDENT or INDEPENDENT)
 
             compare_versions - Compare two versions of a component:
                 component_id="abc-123-def"
                 config='{"source_version": 1, "target_version": 2}'
 
+            merge - Merge component content across branches or versions:
+                Branch merge: config='{"source_branch": "branch-id", "target_branch": "branch-id"}'
+                Version merge: config='{"source_version": 1, "target_version": 2}'
+
         Notes:
             - where_used and dependencies show immediate references only (one level)
             - compare_versions requires both version numbers to exist for the component
+            - merge supports branch-aware merging (componentId~branchId) or version-based merging
+            - Use manage_account action="list_branches" to find branch IDs
             - Use query_components action="get" to find a component's current version
 
         Returns:
@@ -1308,6 +1363,9 @@ if analyze_component_action:
                 if config_data:
                     params["filters"] = config_data
             elif action == "compare_versions":
+                params["component_id"] = component_id
+                params["config"] = config_data
+            elif action == "merge":
                 params["component_id"] = component_id
                 params["config"] = config_data
 
@@ -1702,7 +1760,7 @@ if manage_environments_action:
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: list, get, create, update, delete, get_extensions, update_extensions, query_extensions, stats
+            action: One of: list, get, create, update, delete, get_extensions, update_extensions, query_extensions, stats, get_properties, update_properties
             resource_id: Environment ID (required for get, update, delete, get_extensions, update_extensions, query_extensions)
             config: JSON string with action-specific configuration (see examples below)
 
@@ -1736,6 +1794,13 @@ if manage_environments_action:
                 resource_id="abc-123-def"
 
             stats - Environment summary by classification (no params needed)
+
+            get_properties - Get persisted process properties for a runtime (async):
+                resource_id="<atom_id>"
+
+            update_properties - Update persisted process properties:
+                resource_id="<atom_id>"
+                config='{"properties": {"Process": [{"processId": "<proc_id>", "ProcessProperties": {"ProcessProperty": [{"ProcessPropertyValue": [{"key": "prop1", "value": "val1"}]}]}}]}}'
 
         Classification values: TEST, PROD
         Note: Classification is immutable after creation. Only name can be updated.
@@ -1818,7 +1883,7 @@ if manage_runtimes_action:
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: list, get, create, update, delete, attach, detach, list_attachments, restart, configure_java, create_installer_token, available_clouds, cloud_list, cloud_get, cloud_create, cloud_update, cloud_delete
+            action: One of: list, get, create, update, delete, attach, detach, list_attachments, restart, configure_java, create_installer_token, available_clouds, cloud_list, cloud_get, cloud_create, cloud_update, cloud_delete, diagnostics
             resource_id: Runtime ID (most actions) or attachment ID (detach) or cloud ID (cloud_get, cloud_update, cloud_delete)
             environment_id: Environment ID (for attach, detach, list_attachments)
             config: JSON string with action-specific parameters
@@ -1894,6 +1959,9 @@ if manage_runtimes_action:
 
             cloud_delete - Delete private runtime cloud (permanent!):
                 resource_id="abc-123-def"
+
+            diagnostics - Get combined runtime diagnostics (counters, disk space, listener status):
+                resource_id="<atom_id>"
 
         Runtime types: ATOM, MOLECULE, CLOUD
         Install types: ATOM, MOLECULE, CLOUD, BROKER, GATEWAY
@@ -2076,22 +2144,35 @@ if execute_process_action:
           2. monitor_platform(action="execution_records", config='{"execution_id":"<request_id>"}')
           3. If ERROR: monitor_platform(action="execution_logs", config='{"execution_id":"<request_id>"}')
 
+        OR use wait mode to poll automatically:
+          execute_process(..., config='{"wait": true}')
+
         Examples:
 
-            Basic:
+            Basic (fire and forget):
                 process_id="abc-123", environment_id="env-456"
+
+            Wait for completion (up to 5 min):
+                process_id="abc-123", environment_id="env-456",
+                config='{"wait": true}'
+
+            Wait with custom timeout (120 seconds):
+                process_id="abc-123", environment_id="env-456",
+                config='{"wait": true, "timeout": 120}'
 
             With dynamic properties:
                 process_id="abc-123", environment_id="env-456",
                 config='{"dynamic_properties": {"inputFile": "/data/orders.csv"}}'
 
         Config fields:
+            wait: If true, poll execution_record until completion or timeout (default: false)
+            timeout: Max seconds to wait when wait=true (default: 300)
             dynamic_properties: Dict of key-value pairs (e.g. {"key": "value"})
             process_properties: Dict of component overrides
                 Format: {"componentId": {"key": "value", ...}}
 
         Returns:
-            request_id for polling via monitor_platform(action="execution_records")
+            request_id (and execution_result with status details when wait=true)
         """
         config_data = {}
         if config:
@@ -2129,6 +2210,363 @@ if execute_process_action:
             return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
 
     print("[INFO] Execute process tool registered successfully")
+
+
+# ============================================================
+# troubleshoot_execution — Troubleshoot failed executions
+# ============================================================
+if troubleshoot_execution_action:
+    @mcp.tool(annotations={"destructiveHint": True, "openWorldHint": True})
+    def troubleshoot_execution(
+        profile: str,
+        action: str,
+        execution_id: str = None,
+        process_id: str = None,
+        environment_id: str = None,
+        config: str = None,
+    ):
+        """Troubleshoot failed executions: get error details, retry, reprocess documents, manage queues.
+
+        Actions: error_details, retry, reprocess, list_queues, clear_queue, move_queue
+
+        Args:
+            profile: Boomi profile name (required)
+            action: Action to perform (required)
+            execution_id: Execution ID (for error_details, retry, reprocess)
+            process_id: Process ID (for error_details filtering, reprocess)
+            environment_id: Environment ID (for reprocess when no atom_id)
+            config: JSON string with action-specific parameters
+
+        Action details:
+
+            error_details — Get error info from failed executions
+                execution_id: specific execution to analyze
+                process_id: filter recent errors by process
+                config: {"days": 7, "limit": 10, "fetch_logs": true, "log_level": "ALL"}
+
+            retry — Retry a failed execution with same process/atom
+                execution_id: required - the failed execution to retry
+                config: {"dynamic_properties": {"key": "value"}}
+
+            reprocess — Re-execute a process (from failed execution or fresh)
+                execution_id: get process_id/atom_id from failed execution
+                process_id + environment_id: specify directly
+                config: {"atom_id": "...", "dynamic_properties": {"key": "value"}}
+
+            list_queues — List all queues for a runtime (async)
+                config: {"atom_id": "required", "timeout": 60}
+
+            clear_queue — Clear messages from a stuck queue
+                config: {"atom_id": "required", "queue_name": "required", "dlq": false, "subscriber_name": "..."}
+
+            move_queue — Move messages between queues
+                config: {"atom_id": "required", "source_queue": "required", "dest_queue": "required",
+                         "source_dlq": false, "dest_dlq": false, "source_subscriber": "...", "dest_subscriber": "..."}
+        """
+        cfg = {}
+        if config:
+            try:
+                cfg = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config JSON: {e}"}
+            if not isinstance(cfg, dict):
+                return {"_success": False, "error": "config must be a JSON object"}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] troubleshoot_execution called by user: {subject}, profile: {profile}, action: {action}")
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            return troubleshoot_execution_action(
+                sdk, action,
+                execution_id=execution_id,
+                process_id=process_id,
+                environment_id=environment_id,
+                config=cfg,
+            )
+
+        except Exception as e:
+            print(f"[ERROR] troubleshoot_execution failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Troubleshoot execution tool registered successfully")
+
+
+# --- Shared Resources Management MCP Tools ---
+if manage_shared_resources_action:
+    @mcp.tool()
+    def manage_shared_resources(
+        profile: str,
+        action: str,
+        resource_id: str = None,
+        config: str = None,
+    ):
+        """Manage shared resources: web servers and communication channels on Boomi runtimes.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: list_web_servers, update_web_server, list_channels, get_channel, create_channel
+            resource_id: Atom ID (web server actions) or channel ID (get_channel)
+            config: JSON string with action-specific parameters
+
+        Actions and config examples:
+
+            list_web_servers - Get shared web server config for an atom:
+                resource_id="<atom_id>"
+
+            update_web_server - Update web server settings:
+                resource_id="<atom_id>"
+                config='{"base_url": "/ws", "max_number_of_threads": 200}'
+                General fields: base_url, api_type, external_host, internal_host,
+                    ssl_certificate, max_number_of_threads, auth_type
+                Port fields (applied to all ports, or specify port_index):
+                    port, ssl, external_port, external_ssl, auth_type, enable_port
+
+            list_channels - List shared communication channels:
+                (no config needed - lists all channels)
+                config='{"name_pattern": "%HTTP%"}'
+
+            get_channel - Get a specific channel by ID:
+                resource_id="<channel_id>"
+
+            create_channel - Create a new communication channel:
+                config='{"name": "My Channel", "channel_type": "HTTP"}'
+                Optional: folder_id
+
+        Returns:
+            Action result with success status and data/error
+        """
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] manage_shared_resources called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if resource_id:
+                params["resource_id"] = resource_id
+
+            return manage_shared_resources_action(sdk, profile, action, config_data=config_data, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} manage_shared_resources: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Shared resources management tool registered successfully")
+
+
+# --- Account Administration MCP Tools ---
+if manage_account_action:
+    @mcp.tool()
+    def manage_account(
+        profile: str,
+        action: str,
+        resource_id: str = None,
+        config: str = None,
+    ):
+        """Manage Boomi account administration: roles and component branches.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: list_roles, manage_role, list_branches, manage_branch
+            resource_id: Role or Branch ID (required for get/update/delete operations)
+            config: JSON string with action-specific configuration (see examples below)
+
+        Actions and config examples:
+
+            list_roles - List all roles, optional exact name filter:
+                (no config needed — lists all)
+                config='{"name": "Administrator"}'
+
+            manage_role - Create, get, update, or delete a role:
+                Create: config='{"operation": "create", "name": "API Developer", "description": "API access role", "privileges": ["API", "BUILD", "EXECUTE"]}'
+                Get:    resource_id="role-id", config='{"operation": "get"}'
+                Update: resource_id="role-id", config='{"operation": "update", "name": "New Name", "privileges": ["API", "EXECUTE"]}'
+                Delete: resource_id="role-id", config='{"operation": "delete"}'
+
+            list_branches - List all component branches, optional name filter:
+                (no config needed — lists all)
+                config='{"name_pattern": "%feature%"}'
+
+            manage_branch - Create, get, or delete a branch:
+                Create: config='{"operation": "create", "name": "feature-branch", "description": "New feature"}'
+                Get:    resource_id="branch-id", config='{"operation": "get"}'
+                Delete: resource_id="branch-id", config='{"operation": "delete"}'
+
+        Common privileges: EXECUTE, VIEW_RESULT, BUILD, DEVELOPER, ACCOUNT_ADMIN,
+            USER_MANAGEMENT, ENV_MANAGEMENT, ATOM_MANAGEMENT, DEPLOY, API
+
+        Note: Branch functionality requires Enterprise accounts with Git integration.
+
+        Returns:
+            Action result with success status and data/error
+        """
+        # Parse config JSON
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] manage_account called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if resource_id:
+                params["resource_id"] = resource_id
+
+            return manage_account_action(sdk, profile, action, config_data=config_data, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} manage_account: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Account management tool registered successfully (1 consolidated tool)")
+
+
+
+# --- Schedule Management MCP Tools ---
+# ============================================================
+if manage_schedules_action:
+    @mcp.tool()
+    def manage_schedules(
+        profile: str,
+        action: str,
+        resource_id: str = None,
+        config: str = None,
+    ):
+        """Manage process schedules — when and how often Boomi processes run automatically.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: list, get, update, delete
+            resource_id: Schedule ID (base64-encoded, from list/get results)
+            config: JSON string with action-specific parameters
+
+        Actions and config examples:
+
+            list - List all schedules, optional filters:
+                (no config) — list all schedules
+                config='{"process_id": "abc-123"}'
+                config='{"atom_id": "def-456"}'
+
+            get - Get specific schedule:
+                resource_id="Q1BTMmQ0ZDVkYTQtMGRmZS00MWY4..."
+                OR config='{"process_id": "abc-123", "atom_id": "def-456"}'
+
+            update - Set schedule with cron expression:
+                config='{"process_id": "abc-123", "atom_id": "def-456", "cron": "0 9 * * *"}'
+                config='{"process_id": "abc-123", "atom_id": "def-456", "cron": "*/15 9-17 * * 1-5", "max_retry": 3}'
+
+            delete - Clear/disable schedule (process stops running automatically):
+                resource_id="Q1BTMmQ0ZDVkYTQtMGRmZS00MWY4..."
+                OR config='{"process_id": "abc-123", "atom_id": "def-456"}'
+
+        Cron format: minute hour day_of_month month day_of_week
+            "0 9 * * *"         — Daily at 9:00 AM
+            "*/15 * * * *"      — Every 15 minutes
+            "0 */6 * * *"       — Every 6 hours
+            "0 9 * * 1-5"       — Weekdays at 9:00 AM
+            "*/30 9-17 * * 1-5" — Every 30 min during business hours
+
+        Schedule ID: Base64-encoded from "CPS{atomId}:{processId}".
+        Use list or get to discover schedule IDs.
+
+        Note: Listener processes cannot be scheduled (returns 400).
+        Requires Runtime Management + Scheduling privileges.
+
+        Returns:
+            Action result with success status and schedule data
+        """
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config JSON: {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object"}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] manage_schedules called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            params = {}
+            if resource_id:
+                params["resource_id"] = resource_id
+
+            return manage_schedules_action(sdk, profile, action, config_data=config_data, **params)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} manage_schedules: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Schedule management tool registered successfully")
 
 
 # --- Credential Management Tools (local dev only) ---
@@ -2572,8 +3010,8 @@ if __name__ == "__main__":
             print("    Actions: create, update, clone, delete")
         if analyze_component_action:
             print("\n  Component Analysis:")
-            print("  analyze_component - Dependencies and version comparison")
-            print("    Actions: where_used, dependencies, compare_versions")
+            print("  analyze_component - Dependencies, version comparison, and merge")
+            print("    Actions: where_used, dependencies, compare_versions, merge")
         if monitor_platform_action:
             print("\n  Platform Monitoring:")
             print("  monitor_platform - Logs, artifacts, audit trail, and events")
@@ -2592,6 +3030,10 @@ if __name__ == "__main__":
             print("\n  Process Execution:")
             print("  execute_process - Execute a process on a runtime")
             print("    Returns request_id for polling via monitor_platform(action='execution_records')")
+        if manage_shared_resources_action:
+            print("\n  Shared Resources:")
+            print("  manage_shared_resources - Web servers and communication channels")
+            print("    Actions: list_web_servers, update_web_server, list_channels, get_channel, create_channel")
         if invoke_api:
             print("\n  Generic API Access:")
             print("  invoke_boomi_api - Direct access to any Boomi REST API endpoint")

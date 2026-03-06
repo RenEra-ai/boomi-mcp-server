@@ -80,6 +80,8 @@ setup_claude_code.sh
 
 # Project documentation (local only)
 CLAUDE.md
+docs/QA_REVIEW_MANUAL.md
+/AGENTS.md
 STANDARDS_STATUS.md
 TRADING_PARTNER_VERIFICATION.md
 *_VERIFICATION.md

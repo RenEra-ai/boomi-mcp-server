@@ -604,7 +604,7 @@ _COMPONENT_OVERVIEW = {
     "tools": {
         "query_components": ["list", "get", "search", "bulk_get"],
         "manage_component": ["create", "update", "clone", "delete"],
-        "analyze_component": ["where_used", "dependencies", "compare_versions"],
+        "analyze_component": ["where_used", "dependencies", "compare_versions", "merge"],
     },
     "component_types": [
         "process", "processproperty", "processroute",
@@ -725,7 +725,7 @@ _ORGANIZATION_CREATE = {
 _MONITORING_OVERVIEW = {
     "resource_type": "monitoring",
     "tool": "monitor_platform",
-    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events"],
+    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"],
     "hint": "Use operation='execution_records' or 'audit_logs' etc. for action-specific templates",
 }
 
@@ -803,6 +803,55 @@ _MONITORING_EVENTS = {
         "atom_name": "(optional filter)",
         "execution_id": "(optional filter)",
         "limit": 100,
+    },
+}
+
+_MONITORING_CERTIFICATES = {
+    "resource_type": "monitoring",
+    "operation": "certificates",
+    "tool": "monitor_platform",
+    "template": {
+        "days_ahead": 30,
+        "limit": 50,
+    },
+}
+
+_MONITORING_THROUGHPUT = {
+    "resource_type": "monitoring",
+    "operation": "throughput",
+    "tool": "monitor_platform",
+    "template": {
+        "start_date": "2025-01-01",
+        "end_date": "2025-01-31",
+        "atom_id": "(optional filter)",
+        "limit": 100,
+    },
+    "required": "At least one filter: start_date, end_date, atom_id",
+}
+
+_MONITORING_EXECUTION_METRICS = {
+    "resource_type": "monitoring",
+    "operation": "execution_metrics",
+    "tool": "monitor_platform",
+    "template": {
+        "start_date": "2025-01-01T00:00:00Z",
+        "end_date": "2025-01-31T23:59:59Z",
+        "top_failures": 5,
+        "limit": 200,
+    },
+    "required": "Same filters as execution_records",
+}
+
+_MONITORING_CONNECTOR_DOCUMENTS = {
+    "resource_type": "monitoring",
+    "operation": "connector_documents",
+    "tool": "monitor_platform",
+    "template": {
+        "execution_id": "REQUIRED - from execution_records result",
+        "connector_type": "(optional filter)",
+        "status": "SUCCESS | ERROR",
+        "action_type": "(optional filter)",
+        "limit": 50,
     },
 }
 
@@ -1416,6 +1465,10 @@ def _get_monitoring_template(operation=None, **_):
         "execution_artifacts": _MONITORING_EXECUTION_ARTIFACTS,
         "audit_logs": _MONITORING_AUDIT_LOGS,
         "events": _MONITORING_EVENTS,
+        "certificates": _MONITORING_CERTIFICATES,
+        "throughput": _MONITORING_THROUGHPUT,
+        "execution_metrics": _MONITORING_EXECUTION_METRICS,
+        "connector_documents": _MONITORING_CONNECTOR_DOCUMENTS,
     }
 
     tpl = templates.get(operation)
@@ -1486,18 +1539,19 @@ def list_capabilities_action() -> Dict[str, Any]:
         },
         "analyze_component": {
             "category": "Components",
-            "description": "Analyze component relationships — where used, dependencies, version diffs",
-            "actions": ["where_used", "dependencies", "compare_versions"],
-            "read_only": True,
+            "description": "Analyze component relationships, version diffs, and merge across branches",
+            "actions": ["where_used", "dependencies", "compare_versions", "merge"],
+            "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — where_used | dependencies | compare_versions",
+                "action": "str (required) — where_used | dependencies | compare_versions | merge",
                 "component_id": "str (required)",
-                "config": "JSON str (optional) — action-specific config",
+                "config": "JSON str (optional) — action-specific config. where_used/dependencies type filter: DEPENDENT or INDEPENDENT",
             },
             "examples": [
                 'analyze_component(profile="prod", action="where_used", component_id="abc-123")',
                 'analyze_component(profile="prod", action="compare_versions", component_id="abc-123", config=\'{"source_version": 1, "target_version": 2}\')',
+                'analyze_component(profile="prod", action="merge", component_id="abc-123", config=\'{"source_branch": "dev-id", "target_branch": "main-id"}\')',
             ],
             "sdk_examples_covered": [
                 "find_where_used.py",
@@ -1505,6 +1559,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "analyze_dependencies.py",
                 "compare_component_versions.py",
                 "component_diff.py",
+                "merge_components.py",
             ],
         },
 
@@ -1637,7 +1692,7 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 4: Execution (2 tools) ===
+        # === Category 4: Execution (3 tools) ===
         "manage_process": {
             "category": "Execution",
             "description": "Manage process components with YAML-based configuration and scheduling",
@@ -1656,6 +1711,27 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
             "sdk_examples_covered": [
                 "create_process_component.py",
+            ],
+        },
+        "manage_schedules": {
+            "category": "Execution",
+            "description": "Manage process schedules — list, get, update, delete cron-based schedules",
+            "actions": ["list", "get", "update", "delete"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — list | get | update | delete",
+                "resource_id": "str (optional) — base64 schedule ID",
+                "config": "JSON str (optional) — process_id, atom_id, cron, max_retry",
+            },
+            "examples": [
+                'manage_schedules(profile="prod", action="list")',
+                'manage_schedules(profile="prod", action="list", config=\'{"process_id": "abc-123"}\')',
+                'manage_schedules(profile="prod", action="get", config=\'{"process_id": "abc-123", "atom_id": "atom-456"}\')',
+                'manage_schedules(profile="prod", action="update", resource_id="Q1BTLi4u", config=\'{"cron": "0 9 * * *"}\')',
+                'manage_schedules(profile="prod", action="delete", resource_id="Q1BTLi4u")',
+            ],
+            "sdk_examples_covered": [
                 "manage_process_schedules.py",
             ],
         },
@@ -1679,11 +1755,34 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
+        "troubleshoot_execution": {
+            "category": "Execution",
+            "description": "Troubleshoot failed executions — error details, retry, reprocess, queue management",
+            "actions": ["error_details", "retry", "reprocess", "list_queues", "clear_queue", "move_queue"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "execution_id": "str (optional) — required for error_details, retry; optional for reprocess (see process_id, environment_id, config.atom_id)",
+                "process_id": "str (optional) — required for reprocess (with environment_id)",
+                "environment_id": "str (optional) — required for reprocess (with process_id)",
+                "config": "JSON str (optional) — action-specific options (e.g. days, limit, atom_id, queue_name, dest_queue)",
+            },
+            "examples": [
+                'troubleshoot_execution(profile="prod", action="error_details", config=\'{"days": 1, "limit": 5}\')',
+                'troubleshoot_execution(profile="prod", action="retry", execution_id="exec-123")',
+                'troubleshoot_execution(profile="prod", action="reprocess", execution_id="exec-123")',
+                'troubleshoot_execution(profile="prod", action="reprocess", process_id="proc-456", environment_id="env-789")',
+                'troubleshoot_execution(profile="prod", action="list_queues", config=\'{"atom_id": "atom-123"}\')',
+                'troubleshoot_execution(profile="prod", action="clear_queue", config=\'{"atom_id": "atom-123", "queue_name": "my-queue"}\')',
+            ],
+        },
+
         # === Category 5: Monitoring (1 tool) ===
         "monitor_platform": {
             "category": "Monitoring",
-            "description": "Monitor executions, logs, artifacts, audit trail, and events",
-            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events"],
+            "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, and connector documents",
+            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"],
             "read_only": True,
             "parameters": {
                 "profile": "str (required)",
@@ -1694,6 +1793,10 @@ def list_capabilities_action() -> Dict[str, Any]:
                 'monitor_platform(profile="prod", action="execution_records", config=\'{"execution_id": "exec-123"}\')',
                 'monitor_platform(profile="prod", action="audit_logs", config=\'{"start_date": "2025-01-01", "user": "admin@co.com"}\')',
                 'monitor_platform(profile="prod", action="events", config=\'{"event_level": "ERROR"}\')',
+                'monitor_platform(profile="prod", action="certificates", config=\'{"days_ahead": 30}\')',
+                'monitor_platform(profile="prod", action="throughput", config=\'{"start_date": "2025-01-01", "end_date": "2025-01-31"}\')',
+                'monitor_platform(profile="prod", action="execution_metrics", config=\'{"start_date": "2025-01-01T00:00:00Z", "top_failures": 5}\')',
+                'monitor_platform(profile="prod", action="connector_documents", config=\'{"execution_id": "exec-123"}\')',
             ],
             "sdk_examples_covered": [
                 "poll_execution_status.py",
