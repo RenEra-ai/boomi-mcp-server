@@ -73,13 +73,17 @@ def list_components(
         query_filter = ComponentMetadataQueryConfigQueryFilter(expression=expression)
         query_config = ComponentMetadataQueryConfig(query_filter=query_filter)
 
-        limit = int(filters.get('limit', 0)) if filters else 0
-        components = paginate_metadata(boomi_client, query_config, show_all=show_all, limit=limit)
+        components = paginate_metadata(boomi_client, query_config, show_all=show_all)
 
         # Client-side folder filter
         if filters and filters.get('folder_name'):
             folder = filters['folder_name']
             components = [c for c in components if c.get('folder_name') == folder]
+
+        # Apply limit after all client-side filters
+        limit = int(filters.get('limit', 0)) if filters else 0
+        if limit > 0 and len(components) > limit:
+            components = components[:limit]
 
         return {
             "_success": True,
@@ -191,13 +195,17 @@ def search_components(
         query_config = ComponentMetadataQueryConfig(query_filter=query_filter)
 
         show_all = filters.get('show_all', False)
-        limit = int(filters.get('limit', 0))
-        components = paginate_metadata(boomi_client, query_config, show_all=show_all, limit=limit)
+        components = paginate_metadata(boomi_client, query_config, show_all=show_all)
 
         # Client-side folder filter
         if filters.get('folder_name'):
             folder = filters['folder_name']
             components = [c for c in components if c.get('folder_name') == folder]
+
+        # Apply limit after all client-side filters
+        limit = int(filters.get('limit', 0))
+        if limit > 0 and len(components) > limit:
+            components = components[:limit]
 
         unknown = set(filters.keys()) - KNOWN_FILTER_KEYS
         result = {
