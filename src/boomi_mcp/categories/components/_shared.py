@@ -159,8 +159,11 @@ def parse_bulk_response(raw_xml: str) -> List[Dict[str, Any]]:
 # Pagination helpers for component metadata queries
 # ============================================================================
 
-def paginate_metadata(boomi_client: Boomi, query_config, show_all: bool = False) -> List[Dict[str, Any]]:
-    """Execute a metadata query with pagination. Returns list of component dicts."""
+def paginate_metadata(boomi_client: Boomi, query_config, show_all: bool = False, limit: int = 0) -> List[Dict[str, Any]]:
+    """Execute a metadata query with pagination. Returns list of component dicts.
+
+    When limit > 0, stops collecting after reaching the cap (applied after filtering).
+    """
     result = boomi_client.component_metadata.query_component_metadata(
         request_body=query_config
     )
@@ -186,6 +189,10 @@ def paginate_metadata(boomi_client: Boomi, query_config, show_all: bool = False)
             if str(c.get('current_version', 'false')).lower() == 'true'
             and str(c.get('deleted', 'true')).lower() == 'false'
         ]
+
+    # Apply limit after filtering
+    if limit > 0 and len(components) > limit:
+        components = components[:limit]
 
     return components
 

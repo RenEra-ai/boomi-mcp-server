@@ -73,7 +73,8 @@ def list_components(
         query_filter = ComponentMetadataQueryConfigQueryFilter(expression=expression)
         query_config = ComponentMetadataQueryConfig(query_filter=query_filter)
 
-        components = paginate_metadata(boomi_client, query_config, show_all=show_all)
+        limit = int(filters.get('limit', 0)) if filters else 0
+        components = paginate_metadata(boomi_client, query_config, show_all=show_all, limit=limit)
 
         # Client-side folder filter
         if filters and filters.get('folder_name'):
@@ -137,7 +138,7 @@ def search_components(
 ) -> Dict[str, Any]:
     """Multi-field component search with AND logic."""
     KNOWN_FILTER_KEYS = {'name', 'type', 'sub_type', 'component_id', 'created_by',
-                         'modified_by', 'folder_name', 'show_all'}
+                         'modified_by', 'folder_name', 'show_all', 'limit'}
     try:
         expressions = []
 
@@ -190,7 +191,8 @@ def search_components(
         query_config = ComponentMetadataQueryConfig(query_filter=query_filter)
 
         show_all = filters.get('show_all', False)
-        components = paginate_metadata(boomi_client, query_config, show_all=show_all)
+        limit = int(filters.get('limit', 0))
+        components = paginate_metadata(boomi_client, query_config, show_all=show_all, limit=limit)
 
         # Client-side folder filter
         if filters.get('folder_name'):
@@ -203,7 +205,7 @@ def search_components(
             "total_count": len(components),
             "components": components,
             "profile": profile,
-            "filters_applied": {k: v for k, v in filters.items() if v and k in KNOWN_FILTER_KEYS},
+            "filters_applied": {k: v for k, v in filters.items() if v and k in KNOWN_FILTER_KEYS and k != 'limit'},
         }
         if unknown:
             result["ignored_filters"] = sorted(unknown)
