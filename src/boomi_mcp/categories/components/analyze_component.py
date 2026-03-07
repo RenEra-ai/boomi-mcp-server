@@ -22,9 +22,11 @@ from boomi.models import (
     ComponentReferenceGroupingExpression,
     ComponentReferenceGroupingExpressionOperator,
     ComponentDiffRequest,
+    ComponentDiffResponse,
 )
 
-from ._shared import component_get_xml
+from boomi.net.transport.api_error import ApiError
+from ._shared import component_get_xml, _extract_api_error_msg
 
 
 # ============================================================================
@@ -147,6 +149,12 @@ def where_used(
             "note": "Shows immediate references only (one level, not recursive)",
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to find where component '{component_id}' is used: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -225,6 +233,12 @@ def find_dependencies(
             "note": "Shows immediate dependencies only (one level, not recursive)",
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to find dependencies for '{component_id}': {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -273,6 +287,13 @@ def compare_versions(
             "profile": profile,
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to compare versions for '{component_id}': {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+            "hint": "Ensure both version numbers exist for this component",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -390,6 +411,14 @@ def merge_versions(
 
         return result
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to merge component '{component_id}': {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+            "hint": "Ensure the component exists on both branches/versions. "
+                    "Use query_components to find component IDs and manage_account list_branches for branch IDs.",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -415,6 +444,10 @@ def _parse_diff_response(result) -> Dict[str, Any]:
     }
 
     cdr = getattr(result, 'component_diff_response', None)
+    if not cdr:
+        raw = getattr(result, '_kwargs', {})
+        if raw:
+            cdr = ComponentDiffResponse._unmap(raw)
     if not cdr:
         diff_data['message'] = 'No diff response returned'
         return diff_data
@@ -536,6 +569,12 @@ def analyze_component_action(
                 "hint": "Valid actions are: where_used, dependencies, compare_versions, merge",
             }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
