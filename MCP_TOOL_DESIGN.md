@@ -582,8 +582,8 @@ def manage_component(
 @mcp.tool()
 def analyze_component(
     profile: str,
-    action: Literal["where_used", "dependencies", "compare_versions", "merge"],
-    component_id: str,
+    action: str,
+    component_id: str = None,
     config: Optional[str] = None,
 ) -> dict:
     """Analyze component dependencies and compare versions.
@@ -595,7 +595,7 @@ def analyze_component(
     - merge: Merge component from one branch to another
 
     compare_versions config: {"source_version": 1, "target_version": 2}
-    merge config: {"source_branch_name": "feature", "target_branch_name": "main"}
+    merge config: {"source_branch": "branch-id", "target_branch": "branch-id"}
     """
 ```
 
