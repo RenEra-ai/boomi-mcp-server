@@ -287,7 +287,7 @@ def manage_component_action(
                 return {
                     "_success": False,
                     "error": "config or config_yaml is required for 'create' action",
-                    "hint": 'Provide config: {"name": "My Component", "type": "process"} or config_yaml for process creation',
+                    "hint": 'Provide config: {"xml": "<Component ...>"} with valid Boomi XML, or config_yaml for process creation. Use query_components get action on an existing component to obtain an XML template.',
                 }
             return create_component(boomi_client, profile, config or {}, config_yaml)
 

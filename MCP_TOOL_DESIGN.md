@@ -1319,21 +1319,19 @@ def list_capabilities() -> dict:
 - **Complex payloads**: Trading partners, components require specific structures
 - **Error reduction**: Show users correct format before they try
 - **Self-service**: Reduces need for external documentation
-- **Especially useful** for XML-based operations where tool builds XML internally
+- **Especially useful** for XML-based operations like component create/update
 
 **Your excellent idea** - helps users construct correct requests
 
-### 6. Why XML Builders Stay Internal?
+### 6. Why XML Template Workflow?
 
-**Decision**: Never expose XML to LLM, always use builders internally
+**Decision**: Component create/update uses raw XML obtained from existing components
 
 **Rationale:**
-- **Complexity**: Boomi XML is highly nested with namespaces
-- **Error-prone**: LLMs struggle with balanced tags and exact syntax
-- **Better UX**: User provides simple params, tool handles XML
-- **Validated approach**: Multiple MCP servers use this pattern
-
-**Research confirmed this is correct**
+- **25+ component types**: Each has unique XML schemas with namespaces — generic builders are impractical
+- **Template pattern**: Get XML from existing component → modify → POST as new
+- **Process exception**: `manage_process` with `config_yaml` handles YAML→XML for processes
+- **Validated approach**: This is the standard Boomi integration pattern
 
 ### 7. Why Read/Write Split for Some Resources?
 
@@ -1375,7 +1373,7 @@ def list_capabilities() -> dict:
 | Pattern | When | Config Format | Builder Layer | Tools |
 |---------|------|---------------|---------------|-------|
 | JSON config | JSON-based APIs (99% of Boomi endpoints) | `config` JSON string with flat keys | `build_*_model()` → Pydantic → SDK | Trading partners, organizations, environments, atoms, etc. |
-| YAML config | XML-based APIs (Component create/update only) | `config_yaml` YAML string | YAML parser → ProcessBuilder → XML → SDK | Processes, maps, connectors |
+| YAML config | Process creation only | `config_yaml` YAML string | YAML parser → ProcessBuilder → XML → SDK | `manage_process` |
 
 All consolidated tools share a minimal signature:
 
@@ -1418,7 +1416,7 @@ Only `POST /Component` and `POST /Component/{componentId}` require XML (2 of 100
 | Pattern | Tools |
 |---------|-------|
 | `config` (JSON) | `manage_trading_partner` (incl. org actions), `manage_environments` (incl. extensions: get/update/query), `monitor_platform`, future `manage_runtimes` |
-| `config_yaml` (YAML) | `manage_process` (incl. schedule actions), future `manage_component` for XML-based types (maps, connectors) |
+| `config_yaml` (YAML) | `manage_process` (incl. schedule actions) |
 | Neither (few params) | `set_boomi_credentials`, `list_boomi_profiles`, `execute_process`, meta tools |
 
 ### Token Impact
