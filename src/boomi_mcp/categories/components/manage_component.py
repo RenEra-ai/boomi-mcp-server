@@ -5,7 +5,7 @@ Provides component CRUD operations:
 - create: Create a component from XML or delegate process creation to processes.py
 - update: Update component metadata or full XML
 - clone: Clone an existing component with a new name
-- delete: Soft-delete a component (mark deleted=true)
+- delete: Delete a component via metadata API
 """
 
 from typing import Dict, Any, Optional
