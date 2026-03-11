@@ -86,8 +86,10 @@ STANDARDS_STATUS.md
 TRADING_PARTNER_VERIFICATION.md
 *_VERIFICATION.md
 
-# Test files (local only)
+# Test files and directories (dev only — keep off main)
 test_*.py
+tests/
+**/tests/
 analyze_*.py
 
 # Plans (local only)
@@ -95,3 +97,9 @@ docs/plans/
 
 # Agents (local only)
 agents/
+
+# Tasks (local only)
+tasks/
+
+# Lock files (local only)
+.~lock.*
