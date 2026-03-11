@@ -69,6 +69,8 @@ secrets/
 
 # Temp files
 *.Zone.Identifier
+.~lock.*
+~$*
 
 # Cloned Repositories (examples/references)
 mcp-streamable-http/

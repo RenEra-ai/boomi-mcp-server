@@ -31,6 +31,7 @@ from .components.processes import create_process, update_process
 from .components.trading_partners import create_trading_partner, update_trading_partner
 
 
+# Session-scoped; lost on server restart. Verify calls are best-effort.
 _BUILD_REGISTRY: Dict[str, Dict[str, Any]] = {}
 
 _TYPE_ALIASES = {
@@ -416,13 +417,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     conflict_policy = planned["conflict_policy"]
     execution_order = planned["execution_order"]
     components_by_key = {comp.key: comp for comp in spec.components}
+    existing_ids = {step["key"]: step["existing_component_id"] for step in planned["steps"]}
 
     id_registry: Dict[str, str] = {}
     results: Dict[str, Dict[str, Any]] = {}
 
     for key in execution_order:
         comp = components_by_key[key]
-        existing_id = _find_existing_component_id(boomi_client, comp)
+        existing_id = existing_ids.get(key)
         resolved_config = _resolve_dependency_tokens(comp.config, id_registry)
 
         if comp.action == "create" and existing_id:
