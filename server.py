@@ -237,6 +237,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import account tools: {e}")
     manage_account_action = None
 
+# --- Integration Builder Tool ---
+try:
+    from boomi_mcp.categories.integration_builder import build_integration_action
+    print(f"[INFO] Integration builder tool loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import integration builder tool: {e}")
+    build_integration_action = None
+
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     """Store credentials for a user profile."""
@@ -807,20 +815,17 @@ if manage_process_action:
         profile: str,
         action: str,
         process_id: str = None,
-        config_yaml: str = None,
+        config: str = None,
         filters: str = None
     ):
         """
-        Manage Boomi process components with AI-friendly YAML configuration.
-
-        This tool enables creation of simple processes or complex multi-component
-        workflows with automatic dependency management and ID resolution.
+        Manage Boomi process components with JSON configuration.
 
         Args:
             profile: Boomi profile name (required)
             action: Action to perform - must be one of: list, get, create, update, delete
             process_id: Process component ID (required for get, update, delete)
-            config_yaml: YAML configuration string (required for create, update)
+            config: JSON configuration string (required for create, update)
             filters: JSON string with filters for list action (optional)
 
         Actions:
@@ -831,51 +836,19 @@ if manage_process_action:
             - get: Get specific process by ID
                 Example: action="get", process_id="abc-123-def"
 
-            - create: Create new process(es) from YAML
-                Single process example:
-                    config_yaml = '''
-                    name: "Hello World"
-                    folder_name: "Test"
-                    shapes:
-                      - type: start
-                        name: start
-                      - type: message
-                        name: msg
-                        config:
-                          message_text: "Hello from Boomi!"
-                      - type: stop
-                        name: end
-                    '''
-
-                Multi-component with dependencies:
-                    config_yaml = '''
-                    components:
-                      - name: "Transform Map"
-                        type: map
-                        dependencies: []
-                      - name: "Main Process"
-                        type: process
-                        dependencies: ["Transform Map"]
-                        config:
-                          name: "Main Process"
-                          shapes:
-                            - type: start
-                              name: start
-                            - type: map
-                              name: transform
-                              config:
-                                map_ref: "Transform Map"
-                            - type: stop
-                              name: end
-                    '''
+            - create: Create new process(es) from JSON config
+                Single process:
+                    config='{"name":"Hello World","folder_name":"Test","shapes":[{"type":"start","name":"start"},{"type":"message","name":"msg","config":{"message_text":"Hello from Boomi!"}},{"type":"stop","name":"end"}]}'
+                Multi-component:
+                    config='{"components":[{"name":"Transform Map","type":"map","dependencies":[]},{"name":"Main Process","type":"process","dependencies":["Transform Map"],"config":{"name":"Main Process","shapes":[{"type":"start","name":"start"},{"type":"map","name":"transform","config":{"map_ref":"Transform Map"}},{"type":"stop","name":"end"}]}}]}'
 
             - update: Update existing process
-                Example: action="update", process_id="abc-123", config_yaml="..."
+                Example: action="update", process_id="abc-123", config='{"name":"Updated Process","shapes":[...]}'
 
             - delete: Delete process
                 Example: action="delete", process_id="abc-123-def"
 
-        YAML Shape Types:
+        Shape Types:
             - start: Process start (required first shape)
             - stop: Process termination (can be last shape)
             - return: Return documents (alternative last shape)
@@ -897,7 +870,7 @@ if manage_process_action:
             result = manage_process(
                 profile="prod",
                 action="create",
-                config_yaml="name: Test\\nshapes: [...]"
+                config='{"name":"Test","shapes":[...]}'
             )
 
             # Get process details
@@ -941,11 +914,25 @@ if manage_process_action:
                 params["process_id"] = process_id
 
             elif action == "create":
-                params["config_yaml"] = config_yaml
+                if not config:
+                    return {"_success": False, "error": "config is required for create action"}
+                try:
+                    params["config"] = json.loads(config)
+                except (json.JSONDecodeError, TypeError) as e:
+                    return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+                if not isinstance(params["config"], dict):
+                    return {"_success": False, "error": "config must be a JSON object, not " + type(params["config"]).__name__}
 
             elif action == "update":
                 params["process_id"] = process_id
-                params["config_yaml"] = config_yaml
+                if not config:
+                    return {"_success": False, "error": "config is required for update action"}
+                try:
+                    params["config"] = json.loads(config)
+                except (json.JSONDecodeError, TypeError) as e:
+                    return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+                if not isinstance(params["config"], dict):
+                    return {"_success": False, "error": "config must be a JSON object, not " + type(params["config"]).__name__}
 
             elif action == "delete":
                 params["process_id"] = process_id
@@ -1195,7 +1182,6 @@ if manage_component_action:
         action: str,
         component_id: str = None,
         config: str = None,
-        config_yaml: str = None,
     ):
         """
         Create, update, clone, and delete Boomi components.
@@ -1205,13 +1191,12 @@ if manage_component_action:
             action: One of: create, update, clone, delete
             component_id: Component ID (required for update, clone, delete)
             config: JSON string with action-specific configuration
-            config_yaml: YAML string (for creating process components via manage_process)
 
         Actions and config examples:
 
             create - Create a component from XML template:
                 config='{"xml": "<full-component-xml>...</full-component-xml>"}'
-                For processes, use manage_process with config_yaml instead.
+                For processes, use manage_process with config (JSON) instead.
                 For connectors (connector-settings, connector-action), use manage_connector.
                 Tip: Use query_components get on a similar component to obtain an XML template.
 
@@ -1261,8 +1246,6 @@ if manage_component_action:
             params = {}
             if action == "create":
                 params["config"] = config_data
-                if config_yaml:
-                    params["config_yaml"] = config_yaml
             elif action == "update":
                 params["component_id"] = component_id
                 params["config"] = config_data
@@ -1480,6 +1463,74 @@ if manage_connector_action:
     print("[INFO] Connector tool registered successfully (1 consolidated tool)")
 
 
+# --- Integration Builder MCP Tool ---
+if build_integration_action:
+    @mcp.tool(annotations={"openWorldHint": True})
+    def build_integration(
+        profile: str,
+        action: str,
+        config: str = None,
+    ):
+        """Build Boomi integrations from component-oriented JSON specs.
+
+        Args:
+            profile: Boomi profile name (required)
+            action: One of: plan, apply, verify
+            config: JSON string with action-specific payload
+
+        Actions:
+            plan:
+                - Normalize and validate integration spec
+                - Build deterministic execution order
+                - Resolve current component existence for conflict handling
+                Example:
+                    config='{"mode":"lift_shift","components":[{"key":"conn","type":"connector-settings","name":"HTTP API","action":"create","config":{"connector_type":"http","component_name":"HTTP API","url":"https://api.example.com"}}]}'
+
+            apply:
+                - Execute plan in dependency order
+                - Honors conflict_policy: reuse | clone | fail
+                - dry_run defaults to true
+                Example:
+                    config='{"dry_run":false,"conflict_policy":"reuse","integration_spec":{"name":"Order Sync","mode":"lift_shift","components":[...]}}'
+
+            verify:
+                - Verify components exist and declared dependencies were resolved
+                Example:
+                    config='{"build_id":"<uuid-from-apply>"}'
+        """
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "error": "config must be a JSON object, not " + type(config_data).__name__}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] build_integration called by user: {subject}, profile: {profile}, action: {action}")
+
+            creds = get_secret(subject, profile)
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            return build_integration_action(sdk, profile, action, config=config_data)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to {action} build_integration: {e}")
+            return {"_success": False, "error": str(e)}
+
+    print("[INFO] Integration builder tool registered successfully")
+
+
 # --- Folder Management MCP Tools ---
 if manage_folders_action:
     @mcp.tool()
@@ -1579,13 +1630,13 @@ if get_schema_template_action:
         component_type: str = None,
         protocol: str = None,
     ):
-        """Get JSON/YAML template and enum values for constructing tool requests.
+        """Get JSON template and enum values for constructing tool requests.
 
         Returns example payloads, required/optional fields, and valid enum values.
         No API calls — pure reference data. Use before create/update operations.
 
         Args:
-            resource_type: One of: trading_partner, process, component, environment, package, execution_request, organization, folder, monitoring
+            resource_type: One of: trading_partner, process, integration, component, environment, package, execution_request, organization, folder, monitoring
             operation: Optional action context: create, update, list, execute, search, clone, compare_versions, execution_records, execution_logs, execution_artifacts, audit_logs, events
             standard: For trading_partner create: x12, edifact, hl7, rosettanet, tradacoms, odette, custom
             component_type: For component: process, connector-settings, transform.map, etc.
@@ -1595,7 +1646,8 @@ if get_schema_template_action:
             get_schema_template("trading_partner") → overview of all actions/standards
             get_schema_template("trading_partner", "create", standard="x12") → X12 create template
             get_schema_template("trading_partner", protocol="as2") → AS2 protocol fields
-            get_schema_template("process", "create") → YAML process template
+            get_schema_template("process", "create") → JSON process template
+            get_schema_template("integration", "plan") → IntegrationSpecV1 planner template
             get_schema_template("component") → overview of component tools
             get_schema_template("monitoring", "execution_records") → execution query template
             get_schema_template("organization", "create") → organization create template
@@ -1724,7 +1776,7 @@ if list_capabilities_action:
         """List all available MCP tools and their capabilities.
 
         Returns summary of:
-        - All 17 tools with descriptions and actions
+        - All available tools with descriptions and actions
         - Implementation status (which tools are ready)
         - Workflow suggestions for common multi-step tasks
         - Coverage statistics (SDK example coverage)
@@ -3000,6 +3052,10 @@ if __name__ == "__main__":
         if manage_process_action:
             print("\n  Process Management:")
             print("  manage_process - Unified tool for all process operations")
+        if build_integration_action:
+            print("\n  Integration Builder:")
+            print("  build_integration - Plan/apply/verify full integration builds")
+            print("    Actions: plan, apply, verify")
         if query_components_action:
             print("\n  Component Discovery:")
             print("  query_components - List, get, search, bulk_get components")

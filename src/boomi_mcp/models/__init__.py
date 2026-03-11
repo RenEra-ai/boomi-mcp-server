@@ -9,9 +9,15 @@ from .process_models import (
     ProcessConfig,
     ComponentSpec,
 )
+from .integration_models import (
+    IntegrationSpecV1,
+    IntegrationComponentSpec,
+)
 
 __all__ = [
     'ShapeConfig',
     'ProcessConfig',
     'ComponentSpec',
+    'IntegrationSpecV1',
+    'IntegrationComponentSpec',
 ]

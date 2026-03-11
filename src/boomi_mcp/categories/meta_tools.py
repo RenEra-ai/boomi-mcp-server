@@ -504,72 +504,56 @@ _PROCESS_OVERVIEW = {
     "resource_type": "process",
     "tool": "manage_process",
     "available_actions": ["list", "get", "create", "update", "delete"],
-    "config_format": "YAML (config_yaml parameter)",
+    "config_format": "JSON (config parameter)",
     "shape_types": ["start", "stop", "return", "message", "map", "connector", "decision", "branch", "note", "documentproperties"],
-    "hint": "Use operation='create' for a full YAML template",
+    "hint": "Use operation='create' for a full JSON template",
 }
 
 _PROCESS_CREATE = {
     "resource_type": "process",
     "operation": "create",
-    "single_process_template": (
-        'name: "My Process Name"\n'
-        'folder_name: "Home"\n'
-        'description: "Optional description"\n'
-        'shapes:\n'
-        '  - type: start\n'
-        '    name: start\n'
-        '  - type: message\n'
-        '    name: log_msg\n'
-        '    config:\n'
-        '      message_text: "Process started"\n'
-        '  - type: map\n'
-        '    name: transform\n'
-        '    config:\n'
-        '      map_id: "existing-map-component-id"\n'
-        '  - type: connector\n'
-        '    name: get_data\n'
-        '    config:\n'
-        '      connector_id: "connector-component-id"\n'
-        '      operation: "Get"\n'
-        '      object_type: "Object"\n'
-        '  - type: decision\n'
-        '    name: check_result\n'
-        '    config:\n'
-        '      expression: "document property equals value"\n'
-        '  - type: branch\n'
-        '    name: parallel_work\n'
-        '    config:\n'
-        '      num_branches: 2\n'
-        '  - type: stop\n'
-        '    name: end\n'
-    ),
-    "multi_component_template": (
-        'components:\n'
-        '  - name: "Transform Map"\n'
-        '    type: map\n'
-        '    dependencies: []\n'
-        '  - name: "Main Process"\n'
-        '    type: process\n'
-        '    dependencies: ["Transform Map"]\n'
-        '    config:\n'
-        '      name: "Main Process"\n'
-        '      shapes:\n'
-        '        - type: start\n'
-        '          name: start\n'
-        '        - type: map\n'
-        '          name: transform\n'
-        '          config:\n'
-        '            map_ref: "Transform Map"\n'
-        '        - type: stop\n'
-        '          name: end\n'
-    ),
+    "single_process_template": {
+        "name": "My Process Name",
+        "folder_name": "Home",
+        "description": "Optional description",
+        "shapes": [
+            {"type": "start", "name": "start"},
+            {"type": "message", "name": "log_msg", "config": {"message_text": "Process started"}},
+            {"type": "map", "name": "transform", "config": {"map_id": "existing-map-component-id"}},
+            {
+                "type": "connector",
+                "name": "get_data",
+                "config": {"connector_id": "connector-component-id", "operation": "Get", "object_type": "Object"}
+            },
+            {"type": "decision", "name": "check_result", "config": {"expression": "document property equals value"}},
+            {"type": "branch", "name": "parallel_work", "config": {"num_branches": 2}},
+            {"type": "stop", "name": "end"},
+        ],
+    },
+    "multi_component_template": {
+        "components": [
+            {"name": "Transform Map", "type": "map", "dependencies": []},
+            {
+                "name": "Main Process",
+                "type": "process",
+                "dependencies": ["Transform Map"],
+                "config": {
+                    "name": "Main Process",
+                    "shapes": [
+                        {"type": "start", "name": "start"},
+                        {"type": "map", "name": "transform", "config": {"map_ref": "Transform Map"}},
+                        {"type": "stop", "name": "end"},
+                    ],
+                },
+            },
+        ],
+    },
     "shape_reference": {
         "start": {"required": True, "position": "first", "config": "none"},
         "stop": {"position": "last", "config": {"continue_": "true|false"}},
         "return": {"position": "last", "config": {"label": "text"}},
         "message": {"config": {"message_text": "REQUIRED"}},
-        "map": {"config": {"map_id": "existing map component ID", "map_ref": "name in multi-component YAML"}},
+        "map": {"config": {"map_id": "existing map component ID", "map_ref": "name in multi-component JSON"}},
         "connector": {"config": {"connector_id": "REQUIRED", "operation": "Get|Send", "object_type": "REQUIRED"}},
         "decision": {"config": {"expression": "REQUIRED"}},
         "branch": {"config": {"num_branches": "REQUIRED (integer >= 2)"}},
@@ -592,6 +576,122 @@ _PROCESS_LIST = {
     "filters_param": "filters (JSON string)",
     "template": '{"folder_name": "Home"}',
     "available_filters": ["folder_name"],
+}
+
+
+# ============================================================================
+# Integration Builder Templates
+# ============================================================================
+
+_INTEGRATION_OVERVIEW = {
+    "resource_type": "integration",
+    "tool": "build_integration",
+    "available_actions": ["plan", "apply", "verify"],
+    "config_format": "JSON (config parameter)",
+    "conflict_policy": ["reuse", "clone", "fail"],
+    "hint": "Use operation='plan' for full IntegrationSpecV1 templates and routing behavior.",
+}
+
+_INTEGRATION_PLAN = {
+    "resource_type": "integration",
+    "operation": "plan",
+    "tool": "build_integration (action='plan')",
+    "template": {
+        "name": "Order Sync",
+        "mode": "lift_shift",
+        "conflict_policy": "reuse",
+        "source_description": {
+            "name": "Order Sync from legacy iPaaS",
+            "goals": ["Receive orders", "Transform payloads", "Deliver to ERP"],
+            "components": [
+                {
+                    "key": "http_connection",
+                    "type": "connector-settings",
+                    "action": "create",
+                    "name": "Order API Connection",
+                    "config": {
+                        "connector_type": "http",
+                        "component_name": "Order API Connection",
+                        "url": "https://api.example.com/orders",
+                        "auth_type": "NONE",
+                    },
+                },
+                {
+                    "key": "order_process",
+                    "type": "process",
+                    "action": "create",
+                    "name": "Order Sync Process",
+                    "depends_on": ["http_connection"],
+                    "config": {
+                        "name": "Order Sync Process",
+                        "shapes": [
+                            {"type": "start", "name": "start"},
+                            {
+                                "type": "connector",
+                                "name": "get_orders",
+                                "config": {
+                                    "connector_id": "$ref:http_connection",
+                                    "operation": "Get",
+                                    "object_type": "orders",
+                                },
+                            },
+                            {"type": "stop", "name": "end"},
+                        ],
+                    },
+                },
+            ],
+        },
+    },
+    "notes": [
+        "You can also provide integration_spec directly instead of source_description.",
+        "plan is read-only and returns deterministic execution order with endpoint routes.",
+        "Dependency tokens in config can reference previous components with $ref:<component_key>.",
+    ],
+}
+
+_INTEGRATION_APPLY = {
+    "resource_type": "integration",
+    "operation": "apply",
+    "tool": "build_integration (action='apply')",
+    "template": {
+        "dry_run": False,
+        "conflict_policy": "reuse",
+        "integration_spec": {
+            "version": "1.0",
+            "name": "Order Sync",
+            "mode": "lift_shift",
+            "components": [
+                {
+                    "key": "order_partner",
+                    "type": "trading_partner",
+                    "action": "create",
+                    "name": "ACME Partner",
+                    "config": {
+                        "component_name": "ACME Partner",
+                        "standard": "x12",
+                        "classification": "tradingpartner",
+                        "isa_id": "ACME",
+                    },
+                }
+            ],
+        },
+    },
+    "notes": [
+        "dry_run defaults to true; set dry_run=false to mutate Boomi resources.",
+        "apply returns build_id; use it with verify.",
+    ],
+}
+
+_INTEGRATION_VERIFY = {
+    "resource_type": "integration",
+    "operation": "verify",
+    "tool": "build_integration (action='verify')",
+    "template": {
+        "build_id": "<uuid-from-apply>",
+    },
+    "notes": [
+        "verify is read-only and validates component existence plus dependency resolution.",
+    ],
 }
 
 
@@ -621,7 +721,7 @@ _COMPONENT_OVERVIEW = {
 _COMPONENT_CREATE = {
     "resource_type": "component",
     "operation": "create",
-    "note": "Boomi's Component API requires type-specific XML. For processes, use manage_process with config_yaml instead.",
+    "note": "Boomi's Component API requires type-specific XML. For processes, use manage_process with config (JSON object) instead.",
     "xml_template": (
         '<Component xmlns="http://api.platform.boomi.com/"\n'
         '    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
@@ -639,7 +739,7 @@ _COMPONENT_CREATE = {
         "2. Use query_components get action to retrieve its full XML",
         "3. Modify the XML for your new component",
         "4. Pass modified XML as config.xml to manage_component create action",
-        "   OR for processes: use manage_process with config_yaml (YAML is simpler)",
+        "   OR for processes: use manage_process with config (JSON object)",
     ],
 }
 
@@ -1113,7 +1213,7 @@ def invoke_api(
 _VALID_RESOURCE_TYPES = [
     "trading_partner", "process", "component",
     "environment", "package", "execution_request",
-    "organization", "folder", "monitoring",
+    "organization", "folder", "monitoring", "integration",
 ]
 
 
@@ -1129,6 +1229,7 @@ def get_schema_template_action(
     registry = {
         "trading_partner": _get_trading_partner_template,
         "process": _get_process_template,
+        "integration": _get_integration_template,
         "component": _get_component_template,
         "environment": _get_environment_template,
         "package": _get_package_template,
@@ -1230,6 +1331,26 @@ def _get_process_template(operation=None, **_):
     }
 
 
+def _get_integration_template(operation=None, **_):
+    if not operation:
+        return {"_success": True, **_INTEGRATION_OVERVIEW}
+
+    if operation == "plan":
+        return {"_success": True, **_INTEGRATION_PLAN}
+
+    if operation == "apply":
+        return {"_success": True, **_INTEGRATION_APPLY}
+
+    if operation == "verify":
+        return {"_success": True, **_INTEGRATION_VERIFY}
+
+    return {
+        "_success": False,
+        "error": f"Unknown integration operation: {operation}",
+        "valid_operations": ["plan", "apply", "verify"],
+    }
+
+
 def _get_component_template(operation=None, component_type=None, **_):
     if not operation:
         result = {"_success": True, **_COMPONENT_OVERVIEW}
@@ -1249,7 +1370,7 @@ def _get_component_template(operation=None, component_type=None, **_):
     if operation == "create":
         result = {"_success": True, **_COMPONENT_CREATE}
         if component_type == "process":
-            result["recommendation"] = "For processes, use manage_process with config_yaml instead of raw XML."
+            result["recommendation"] = "For processes, use manage_process with config (JSON object) instead of raw XML."
         return result
 
     if operation == "search":
@@ -1524,7 +1645,6 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "action": "str (required) — create | update | clone | delete",
                 "component_id": "str (optional) — required for update/clone/delete",
                 "config": "JSON str (optional) — action-specific config (XML for create, fields for update)",
-                "config_yaml": "YAML str (optional) — for process creation with shapes",
             },
             "examples": [
                 'manage_component(profile="prod", action="clone", component_id="abc-123", config=\'{"name": "My Clone"}\')',
@@ -1692,25 +1812,41 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 4: Execution (3 tools) ===
+        # === Category 4: Execution ===
         "manage_process": {
             "category": "Execution",
-            "description": "Manage process components with YAML-based configuration and scheduling",
+            "description": "Manage process components with JSON-based configuration and scheduling",
             "actions": ["list", "get", "create", "update", "delete"],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
                 "process_id": "str (optional)",
-                "config_yaml": "YAML str (optional) — process definition with shapes",
+                "config": "JSON str (optional) — process definition with shapes",
                 "filters": "JSON str (optional)",
             },
             "examples": [
                 'manage_process(profile="prod", action="list")',
-                'manage_process(profile="prod", action="create", config_yaml="name: My Process\\nshapes:\\n  - type: start...")',
+                'manage_process(profile="prod", action="create", config=\'{"name":"My Process","shapes":[{"type":"start","name":"start"},{"type":"stop","name":"end"}]}\')',
             ],
             "sdk_examples_covered": [
                 "create_process_component.py",
+            ],
+        },
+        "build_integration": {
+            "category": "Execution",
+            "description": "High-level orchestrator for building integrations from component-oriented JSON specs",
+            "actions": ["plan", "apply", "verify"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — plan | apply | verify",
+                "config": "JSON str (optional) — IntegrationSpecV1 payload and execution options",
+            },
+            "examples": [
+                'build_integration(profile="prod", action="plan", config=\'{"name":"Order Sync","mode":"lift_shift","components":[{"key":"p1","type":"process","action":"create","name":"Order Process","config":{"name":"Order Process","shapes":[{"type":"start","name":"start"},{"type":"stop","name":"end"}]}}]}\')',
+                'build_integration(profile="prod", action="apply", config=\'{"dry_run":false,"conflict_policy":"reuse","integration_spec":{"name":"Order Sync","mode":"lift_shift","components":[...]}}\')',
+                'build_integration(profile="prod", action="verify", config=\'{"build_id":"<uuid>"}\')',
             ],
         },
         "manage_schedules": {
@@ -1835,14 +1971,14 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 7: Meta / Power Tools (3 tools) ===
+        # === Category 7: Meta / Power Tools ===
         "get_schema_template": {
             "category": "Meta Tools",
             "description": "Get example payloads, field descriptions, and enum values for all tools",
             "actions": ["(single action — specify resource_type and operation)"],
             "read_only": True,
             "parameters": {
-                "resource_type": "str (required) — trading_partner | process | component | environment | etc.",
+                "resource_type": "str (required) — trading_partner | process | integration | component | environment | etc.",
                 "operation": "str (optional) — create | update | list | etc.",
                 "standard": "str (optional) — for trading_partner: x12, edifact, hl7, etc.",
                 "component_type": "str (optional) — for component: process, connector-settings, transform.map, etc.",
@@ -1851,6 +1987,7 @@ def list_capabilities_action() -> Dict[str, Any]:
             "examples": [
                 'get_schema_template(resource_type="trading_partner", operation="create", standard="x12")',
                 'get_schema_template(resource_type="process", operation="create")',
+                'get_schema_template(resource_type="integration", operation="plan")',
                 'get_schema_template(resource_type="trading_partner", protocol="http")',
             ],
             "note": "No profile needed — returns static reference data. No API calls.",
@@ -1940,12 +2077,21 @@ def list_capabilities_action() -> Dict[str, Any]:
         "create_and_deploy_process": {
             "description": "Build a process from scratch and deploy it",
             "steps": [
-                "1. get_schema_template(resource_type='process', operation='create') → get YAML template",
-                "2. manage_process(action='create', config_yaml='...') → create process",
+                "1. get_schema_template(resource_type='process', operation='create') → get JSON template",
+                "2. manage_process(action='create', config='...') → create process",
                 "3. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
                 "4. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
                 "5. invoke_boomi_api(endpoint='ExecutionRequest', method='POST', ...) → run it (execute_process not yet implemented)",
                 "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
+            ],
+        },
+        "build_integration_from_description": {
+            "description": "Convert a source integration description into Boomi components (lift-shift or redesign)",
+            "steps": [
+                "1. get_schema_template(resource_type='integration', operation='plan') → get IntegrationSpecV1 template",
+                "2. build_integration(action='plan', config='...') → validate and produce deterministic execution plan",
+                "3. build_integration(action='apply', config='{\"dry_run\": false, ...}') → execute ordered component creation/update",
+                "4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify created components and dependencies",
             ],
         },
         "set_up_b2b_trading_partner": {

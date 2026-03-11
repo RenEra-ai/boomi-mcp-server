@@ -4,7 +4,7 @@ Execution MCP Tool for Boomi Platform.
 Provides process execution via the Boomi execution request API.
 This is a dedicated tool (not merged into manage_process) because:
 - Uses sdk.execution_request (JSON API), not sdk.component (XML API)
-- Different parameter shape (process_id, environment_id, atom_id vs config_yaml)
+- Different parameter shape (process_id, environment_id, atom_id vs process config JSON)
 - Purely destructive (triggers real side effects)
 - MCP atomic principle: single focused operation
 
