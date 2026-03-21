@@ -46,6 +46,7 @@ if src_path.exists():
 
 try:
     from boomi import Boomi
+    from boomi.net.transport.api_error import ApiError
 except ImportError as e:
     print(f"ERROR: Failed to import Boomi SDK: {e}")
     print(f"       Boomi-python path: {boomi_python_path}")
@@ -244,6 +245,36 @@ try:
 except ImportError as e:
     print(f"[WARNING] Failed to import integration builder tool: {e}")
     build_integration_action = None
+
+
+def _extract_api_error_msg(e) -> str:
+    """Extract user-friendly message from ApiError."""
+    detail = getattr(e, "error_detail", None)
+    if detail:
+        return detail
+    resp = getattr(e, "response", None)
+    if resp:
+        body = getattr(resp, "body", None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, "message", "") or str(e)
+
+
+def _serialize_sdk_object(obj):
+    """Recursively convert SDK objects to JSON-safe dicts."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, list):
+        return [_serialize_sdk_object(item) for item in obj]
+    if isinstance(obj, dict):
+        return {k: _serialize_sdk_object(v) for k, v in obj.items()
+                if not k.startswith("_") and v is not None}
+    if hasattr(obj, "__dict__"):
+        return {k: _serialize_sdk_object(v) for k, v in obj.__dict__.items()
+                if not k.startswith("_") and v is not None}
+    return str(obj)
 
 
 def put_secret(sub: str, profile: str, payload: Dict[str, str]):
@@ -551,12 +582,9 @@ def boomi_account_info(profile: str):
         # Call the same endpoint the sample demonstrates
         result = sdk.account.get_account(id_=creds["account_id"])
 
-        # Convert to plain dict for transport
+        # Convert to plain dict for transport (recursive for nested SDK objects)
         if hasattr(result, "__dict__"):
-            out = {
-                k: v for k, v in result.__dict__.items()
-                if not k.startswith("_") and v is not None
-            }
+            out = _serialize_sdk_object(result)
             out["_success"] = True
             out["_note"] = "Account data retrieved successfully"
             print(f"[INFO] Successfully retrieved account info for {creds['account_id']}")
@@ -568,6 +596,14 @@ def boomi_account_info(profile: str):
             "_note": "This indicates successful authentication."
         }
 
+    except ApiError as e:
+        print(f"[ERROR] Boomi API call failed: {e}")
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "account_id": creds["account_id"],
+            "_note": "Check credentials and API access permissions"
+        }
     except Exception as e:
         print(f"[ERROR] Boomi API call failed: {e}")
         return {
@@ -2670,6 +2706,13 @@ if LOCAL_MODE:
                 )
                 test_sdk.account.get_account(id_=account_id)
                 print(f"[INFO] Credentials validated successfully for {account_id}")
+            except ApiError as e:
+                print(f"[ERROR] Credential validation failed: {e}")
+                return {
+                    "_success": False,
+                    "error": f"Credential validation failed: {_extract_api_error_msg(e)}",
+                    "_note": "Please check your account_id, username, and password"
+                }
             except Exception as e:
                 print(f"[ERROR] Credential validation failed: {e}")
                 return {
