@@ -21,6 +21,21 @@ import httpx
 import zipfile
 import io
 
+def _extract_api_error_msg(e: ApiError) -> str:
+    """Extract user-friendly error message from ApiError."""
+    detail = getattr(e, 'error_detail', None)
+    if detail:
+        return detail
+    resp = getattr(e, 'response', None)
+    if resp:
+        body = getattr(resp, 'body', None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, 'message', '') or str(e)
+
+
 MAX_ZIP_BYTES = 10 * 1024 * 1024       # 10 MB
 MAX_FILE_CHARS = 50_000                 # per file
 MAX_TOTAL_CHARS = 200_000              # across all files in ZIP
@@ -1226,10 +1241,9 @@ def monitor_platform_action(
             }
 
     except ApiError as e:
-        detail = getattr(e, 'error_detail', None) or getattr(e, 'message', '') or str(e)
         return {
             "_success": False,
-            "error": f"Action '{action}' failed: {detail}",
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
             "exception_type": "ApiError",
         }
     except Exception as e:
