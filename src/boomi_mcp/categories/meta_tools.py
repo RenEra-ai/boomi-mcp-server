@@ -825,7 +825,7 @@ _ORGANIZATION_CREATE = {
 _MONITORING_OVERVIEW = {
     "resource_type": "monitoring",
     "tool": "monitor_platform",
-    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"],
+    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents", "download_connector_document"],
     "hint": "Use operation='execution_records' or 'audit_logs' etc. for action-specific templates",
 }
 
@@ -953,6 +953,18 @@ _MONITORING_CONNECTOR_DOCUMENTS = {
         "action_type": "(optional filter)",
         "limit": 50,
     },
+}
+
+_MONITORING_DOWNLOAD_CONNECTOR_DOCUMENT = {
+    "resource_type": "monitoring",
+    "operation": "download_connector_document",
+    "tool": "monitor_platform",
+    "template": {
+        "generic_connector_record_id": "REQUIRED - from connector_documents result (id_ field)",
+        "fetch_content": True,
+    },
+    "notes": "Downloads actual document content. Text content returned inline, binary as base64. "
+             "Set fetch_content=false for URL-only metadata.",
 }
 
 
@@ -1590,6 +1602,7 @@ def _get_monitoring_template(operation=None, **_):
         "throughput": _MONITORING_THROUGHPUT,
         "execution_metrics": _MONITORING_EXECUTION_METRICS,
         "connector_documents": _MONITORING_CONNECTOR_DOCUMENTS,
+        "download_connector_document": _MONITORING_DOWNLOAD_CONNECTOR_DOCUMENT,
     }
 
     tpl = templates.get(operation)
@@ -1917,9 +1930,9 @@ def list_capabilities_action() -> Dict[str, Any]:
         # === Category 5: Monitoring (1 tool) ===
         "monitor_platform": {
             "category": "Monitoring",
-            "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, and connector documents",
-            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"],
-            "read_only": True,
+            "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, connector documents, and connector document downloads",
+            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents", "download_connector_document"],
+            "read_only": False,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
@@ -1933,6 +1946,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 'monitor_platform(profile="prod", action="throughput", config=\'{"start_date": "2025-01-01", "end_date": "2025-01-31"}\')',
                 'monitor_platform(profile="prod", action="execution_metrics", config=\'{"start_date": "2025-01-01T00:00:00Z", "top_failures": 5}\')',
                 'monitor_platform(profile="prod", action="connector_documents", config=\'{"execution_id": "exec-123"}\')',
+                'monitor_platform(profile="prod", action="download_connector_document", config=\'{"generic_connector_record_id": "rec-123"}\')',
             ],
             "sdk_examples_covered": [
                 "poll_execution_status.py",

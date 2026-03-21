@@ -102,6 +102,59 @@ def _download_and_extract_zip(download_url: str, creds: Dict[str, str]) -> Dict[
         return {"_downloaded": False, "error": str(e)}
 
 
+def _download_content(download_url: str, creds: Dict[str, str],
+                      max_bytes: int = 10 * 1024 * 1024) -> Dict[str, Any]:
+    """Download raw (non-ZIP) content from Boomi, polling 202→200.
+
+    Returns inline text for text-like responses, base64 + metadata for binary.
+    """
+    import time
+    import base64
+    auth = (creds["username"], creds["password"])
+    try:
+        resp = None
+        with httpx.Client(timeout=30) as client:
+            for attempt in range(5):
+                resp = client.get(download_url, auth=auth)
+                if resp.status_code == 200:
+                    break
+                if resp.status_code == 202:
+                    time.sleep(2)
+                    continue
+                break
+        if resp is None or resp.status_code != 200:
+            status = resp.status_code if resp else "no response"
+            return {"_downloaded": False, "http_status": status,
+                    "error": f"Download failed with HTTP {status} after polling"}
+
+        if len(resp.content) > max_bytes:
+            return {
+                "_downloaded": False,
+                "error": f"Response too large ({len(resp.content)} bytes, limit {max_bytes})",
+                "download_url": download_url,
+            }
+
+        content_type = resp.headers.get("content-type", "application/octet-stream")
+        is_text = any(t in content_type.lower() for t in
+                      ("text/", "json", "xml", "html", "csv", "yaml"))
+
+        if is_text:
+            text = resp.content.decode("utf-8", errors="replace")
+            if len(text) > MAX_FILE_CHARS:
+                text = text[:MAX_FILE_CHARS] + f"\n\n... [truncated at {MAX_FILE_CHARS} chars]"
+            return {"_downloaded": True, "content": text,
+                    "content_type": content_type, "size_bytes": len(resp.content)}
+        else:
+            return {"_downloaded": True,
+                    "content_base64": base64.b64encode(resp.content).decode("ascii"),
+                    "content_type": content_type, "size_bytes": len(resp.content)}
+
+    except httpx.TimeoutException:
+        return {"_downloaded": False, "error": "Download timed out (30s)"}
+    except Exception as e:
+        return {"_downloaded": False, "error": str(e)}
+
+
 # ============================================================================
 # Action: execution_logs
 # ============================================================================
@@ -1053,6 +1106,69 @@ def _convert_connector_records(entries) -> List[Dict[str, Any]]:
     return records
 
 
+def handle_download_connector_document(
+    boomi_client, config_data: Dict[str, Any], creds=None
+) -> Dict[str, Any]:
+    """Download the actual content of a connector document.
+
+    Uses the Boomi ConnectorDocument API: POST to get a download URL,
+    then GET the URL on platform.boomi.com with Basic auth.
+    """
+    record_id = config_data.get("generic_connector_record_id")
+    if not record_id:
+        return {
+            "_success": False,
+            "error": "generic_connector_record_id is required for 'download_connector_document'",
+        }
+
+    fetch_content = config_data.get("fetch_content", True)
+
+    from boomi.models import ConnectorDocument
+    doc_request = ConnectorDocument(generic_connector_record_id=record_id)
+    result = boomi_client.connector_document.create_connector_document(
+        request_body=doc_request,
+    )
+
+    # Extract download URL from SDK response
+    if hasattr(result, '_map'):
+        result_data = result._map()
+    elif isinstance(result, dict):
+        result_data = result
+    else:
+        result_data = {}
+
+    download_url = result_data.get("url", "")
+    status_code = result_data.get("statusCode", result_data.get("status_code", ""))
+    message = result_data.get("message", "")
+
+    response = {
+        "_success": True,
+        "generic_connector_record_id": record_id,
+        "download_url": download_url,
+        "status_code": status_code,
+        "message": message,
+    }
+
+    if not fetch_content:
+        response["note"] = "fetch_content=false — use download_url with Basic auth to retrieve content"
+        return response
+
+    if not download_url:
+        return {
+            "_success": False,
+            "error": "No download URL returned from ConnectorDocument API",
+            "api_response": result_data,
+        }
+
+    if not creds:
+        response["note"] = "No credentials available for download — use download_url with Basic auth"
+        return response
+
+    downloaded = _download_content(download_url, creds)
+    response.update(downloaded)
+    return response
+
+
 # ============================================================================
 # Consolidated Action Router
 # ============================================================================
@@ -1099,11 +1215,13 @@ def monitor_platform_action(
             return handle_execution_metrics(boomi_client, config_data)
         elif action == "connector_documents":
             return handle_connector_documents(boomi_client, config_data)
+        elif action == "download_connector_document":
+            return handle_download_connector_document(boomi_client, config_data, creds=creds)
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "valid_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"]
+                "valid_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents", "download_connector_document"]
             }
 
     except Exception as e:

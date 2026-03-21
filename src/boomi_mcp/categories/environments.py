@@ -117,22 +117,31 @@ def _extract_api_error_msg(e: ApiError) -> str:
     return getattr(e, 'message', '') or str(e)
 
 
-def _extract_raw_extensions(result) -> Dict[str, Any]:
-    """Extract raw extensions dict from SDK response (handles _kwargs wrapping)."""
-    if hasattr(result, '_kwargs') and 'EnvironmentExtensions' in result._kwargs:
-        return result._kwargs['EnvironmentExtensions']
-    elif hasattr(result, '_kwargs') and result._kwargs:
-        return result._kwargs
-    elif hasattr(result, 'to_dict'):
-        return result.to_dict()
-    elif isinstance(result, dict):
-        return result
+def _strip_at_type(obj):
+    """Recursively remove @type keys from a dict tree."""
+    if isinstance(obj, dict):
+        return {k: _strip_at_type(v) for k, v in obj.items() if k != '@type'}
+    if isinstance(obj, list):
+        return [_strip_at_type(item) for item in obj]
+    return obj
+
+
+def _normalize_extensions(result) -> Dict[str, Any]:
+    """Convert SDK EnvironmentExtensions model to a clean API-style dict.
+
+    Uses the SDK's _map() method to produce camelCase keys, then strips
+    the @type annotations the SDK adds at every level.
+    """
+    if hasattr(result, '_map'):
+        return _strip_at_type(result._map())
+    if isinstance(result, dict):
+        return _strip_at_type(result)
     return {}
 
 
 def _parse_extensions_response(result) -> Dict[str, Any]:
     """Parse the nested extensions response from the SDK."""
-    data = _extract_raw_extensions(result)
+    data = _normalize_extensions(result)
 
     summary = {
         "environment_id": data.get('environmentId', getattr(result, 'environment_id', '')),
@@ -378,6 +387,108 @@ def _action_get_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     }
 
 
+def _verify_extensions_persisted(requested: Dict[str, Any],
+                                 verified: Dict[str, Any]) -> List[str]:
+    """Compare requested extension changes against the verified GET response.
+
+    Returns a list of warning strings for fields that did not persist.
+    Encrypted fields (password, etc.) are considered persisted if useDefault=false,
+    since the API always returns empty strings for encrypted values on read.
+    """
+    ENCRYPTED_FIELD_IDS = {"password", "token", "secret", "passphrase",
+                           "private_key", "privateKey", "clientSecret",
+                           "client_secret"}
+    warnings = []
+
+    # Build a lookup of verified fields by (extension_type, item_id, field_id)
+    verified_fields = {}
+    for ext_key in ("connections", "operations", "properties", "cross_references",
+                    "trading_partners", "pgp_certificates", "process_properties",
+                    "data_maps"):
+        section = verified.get(ext_key, {})
+        items = section.get("items", []) if isinstance(section, dict) else []
+        for item in items:
+            item_id = item.get("id", "")
+            fields = item.get("field", [])
+            if not isinstance(fields, list):
+                fields = [fields] if fields else []
+            for field in fields:
+                fid = field.get("id", "")
+                verified_fields[(ext_key, item_id, fid)] = field
+
+    # Walk the requested changes and compare
+    ext_type_map = {
+        "connections": "connection", "operations": "operation",
+        "properties": "property", "crossReferences": "crossReference",
+        "tradingPartners": "tradingPartner", "PGPCertificates": "PGPCertificate",
+        "processProperties": "ProcessProperty", "dataMaps": "dataMap",
+    }
+    # Also map snake_case keys used in the verified response
+    snake_to_camel = {
+        "cross_references": "crossReferences", "trading_partners": "tradingPartners",
+        "pgp_certificates": "PGPCertificates", "process_properties": "processProperties",
+        "data_maps": "dataMaps",
+    }
+
+    for outer_key, inner_key in ext_type_map.items():
+        section = requested.get(outer_key, {})
+        if not isinstance(section, dict):
+            continue
+        items = section.get(inner_key, [])
+        if not isinstance(items, list):
+            items = [items] if items else []
+        # Determine the snake_case key used in the verified dict
+        verified_key = outer_key
+        for sk, ck in snake_to_camel.items():
+            if ck == outer_key:
+                verified_key = sk
+                break
+
+        for item in items:
+            item_id = item.get("id", "")
+            fields = item.get("field", [])
+            if not isinstance(fields, list):
+                fields = [fields] if fields else []
+            for field in fields:
+                fid = field.get("id", "")
+                req_use_default = field.get("useDefault")
+                req_value = field.get("value")
+
+                if req_use_default is True:
+                    continue  # Requesting default — no verification needed
+
+                vf = verified_fields.get((verified_key, item_id, fid))
+                if not vf:
+                    warnings.append(
+                        f"{outer_key}/{item_id}/field/{fid}: not found in verified response"
+                    )
+                    continue
+
+                v_use_default = vf.get("useDefault", True)
+                if v_use_default is True or v_use_default == "true":
+                    warnings.append(
+                        f"{outer_key}/{item_id}/field/{fid}: still useDefault=true after update"
+                    )
+                    continue
+
+                # For encrypted fields, useDefault=false is sufficient
+                is_encrypted = (fid.lower() in ENCRYPTED_FIELD_IDS
+                                or field.get("encryptedValueSet") is True
+                                or vf.get("encryptedValueSet") is True)
+                if is_encrypted:
+                    continue
+
+                # For non-encrypted, verify the value matches
+                v_value = vf.get("value", "")
+                if req_value is not None and str(req_value) != str(v_value):
+                    warnings.append(
+                        f"{outer_key}/{item_id}/field/{fid}: value mismatch — "
+                        f"sent '{req_value}', got '{v_value}'"
+                    )
+
+    return warnings
+
+
 def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     """Update environment extensions (partial merge by default)."""
     resource_id = kwargs.get("resource_id")
@@ -393,7 +504,7 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
         # GET current extensions first, then merge
         try:
             current_result = sdk.environment_extensions.get_environment_extensions(id_=resource_id)
-            current_data = _extract_raw_extensions(current_result)
+            current_data = _normalize_extensions(current_result)
             merged = _deep_merge(current_data, extensions_data)
         except ApiError as e:
             status = getattr(e, 'status', None)
@@ -403,8 +514,6 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
             else:
                 # Abort on any other error (including 400 = no extensible components
                 # deployed, 500 = transient) to avoid destructive partial update.
-                # Note: 400 typically means no extensions exist, in which case the
-                # subsequent UPDATE would also fail — better to surface it here.
                 return {
                     "_success": False,
                     "error": f"Failed to read current extensions for partial merge (HTTP {status}). "
@@ -414,20 +523,31 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
     else:
         merged = extensions_data
 
-    # Build the extensions update object
+    # Build the extensions update object with required ID and partial fields
     merged['environmentId'] = resource_id
-    extensions_update = EnvironmentExtensions(**merged)
+    merged['id'] = resource_id
+    merged['partial'] = partial
+    extensions_update = EnvironmentExtensions._unmap(merged)
 
-    result = sdk.environment_extensions.update_environment_extensions(
+    sdk.environment_extensions.update_environment_extensions(
         id_=resource_id,
         request_body=extensions_update,
     )
 
-    return {
+    # Verification: immediate GET to confirm persistence
+    verify_result = sdk.environment_extensions.get_environment_extensions(id_=resource_id)
+    verified = _parse_extensions_response(verify_result)
+
+    warnings = _verify_extensions_persisted(extensions_data, verified)
+
+    response = {
         "_success": True,
-        "extensions": _parse_extensions_response(result),
+        "extensions": verified,
         "partial_update": partial,
     }
+    if warnings:
+        response["verification_warnings"] = warnings
+    return response
 
 
 def _action_query_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:

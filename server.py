@@ -952,18 +952,18 @@ if manage_process_action:
 
 # --- Monitoring MCP Tools ---
 if monitor_platform_action:
-    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    @mcp.tool(annotations={"openWorldHint": True})
     def monitor_platform(
         profile: str,
         action: str,
         config: str = None,
     ):
         """
-        Monitor Boomi platform: execution history, logs, artifacts, audit trail, events, certificates, throughput, and metrics.
+        Monitor Boomi platform: execution history, logs, artifacts, audit trail, events, certificates, throughput, metrics, and connector document downloads.
 
         Args:
             profile: Boomi profile name (required)
-            action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events, certificates, throughput, execution_metrics, connector_documents
+            action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events, certificates, throughput, execution_metrics, connector_documents, download_connector_document
             config: JSON string with action-specific configuration (see examples below)
 
         Actions and config examples:
@@ -1023,6 +1023,12 @@ if monitor_platform_action:
             connector_documents - Document-level tracking for connector operations:
                 config='{"execution_id": "abc-123-def", "connector_type": "http", "status": "SUCCESS", "action_type": "GET", "limit": 50}'
                 execution_id is REQUIRED. Optional: connector_type, status (SUCCESS/ERROR), action_type.
+
+            download_connector_document - Download actual connector document content:
+                config='{"generic_connector_record_id": "rec-123"}'
+                generic_connector_record_id is REQUIRED (from connector_documents result).
+                Set "fetch_content": false to get only the download URL without fetching content.
+                Text content is returned inline; binary content is returned as base64.
 
         Returns:
             Action result with success status and data/error
@@ -1835,12 +1841,17 @@ if manage_environments_action:
             delete - Delete environment (permanent!):
                 resource_id="abc-123-def"
 
-            get_extensions - Get environment config overrides:
+            get_extensions - Get environment config overrides (returns ALL override points including defaults):
                 resource_id="abc-123-def"
+                Returns all deployed extension entries. Fields with useDefault=true are available
+                override points that still use the component default. Use the returned IDs verbatim
+                in update_extensions.
 
-            update_extensions - Update environment extensions:
+            update_extensions - Update environment extensions (performs verification read after update):
                 resource_id="abc-123-def"
-                config='{"partial": true, "extensions": {"connections": {...}}}'
+                config='{"extensions": {"connections": {"connection": [{"id": "<componentId>", "field": [{"id": "host", "value": "myhost", "useDefault": false}]}]}}}'
+                Full workflow: get_extensions → copy IDs → update_extensions → verify with get_extensions.
+                The tool performs an automatic verification GET after each update to confirm persistence.
 
             query_extensions - Check if environment has extensions:
                 resource_id="abc-123-def"
