@@ -17,6 +17,7 @@ from src.boomi_mcp.categories.environments import (
     _deep_merge,
     _merge_lists,
     _verify_extensions_persisted,
+    _action_get,
     _action_get_extensions,
     _action_update_extensions,
 )
@@ -61,6 +62,69 @@ SAMPLE_EXTENSIONS = {
         }],
     },
 }
+
+
+# ── _action_get ──────────────────────────────────────────────────────
+
+
+def _make_env_obj(id_="env-1", name="Test Env", classification="TEST"):
+    """Create a mock SDK Environment object."""
+    env = MagicMock()
+    env.id_ = id_
+    env.name = name
+    env.classification = MagicMock(value=classification)
+    env.created_by = None
+    env.created_date = None
+    return env
+
+
+class TestActionGet:
+    def test_active_environment(self):
+        sdk = _make_sdk()
+        env = _make_env_obj()
+        sdk.environment.get_environment.return_value = env
+        query_result = MagicMock()
+        query_result.result = [env]
+        sdk.environment.query_environment.return_value = query_result
+
+        result = _action_get(sdk, "dev", resource_id="env-1")
+        assert result["_success"] is True
+        assert result["environment"]["id"] == "env-1"
+        assert "deleted" not in result["environment"]
+        assert "warning" not in result
+        assert "soft_delete_check" not in result
+
+    def test_soft_deleted_environment(self):
+        sdk = _make_sdk()
+        env = _make_env_obj()
+        sdk.environment.get_environment.return_value = env
+        query_result = MagicMock()
+        query_result.result = []
+        query_result.query_token = None
+        sdk.environment.query_environment.return_value = query_result
+
+        result = _action_get(sdk, "dev", resource_id="env-1")
+        assert result["_success"] is True
+        assert result["environment"]["deleted"] is True
+        assert "soft-delete" in result["warning"]
+
+    def test_probe_failure_returns_success_with_unavailable(self):
+        sdk = _make_sdk()
+        env = _make_env_obj()
+        sdk.environment.get_environment.return_value = env
+        sdk.environment.query_environment.side_effect = Exception("transient")
+
+        result = _action_get(sdk, "dev", resource_id="env-1")
+        assert result["_success"] is True
+        assert result["environment"]["id"] == "env-1"
+        assert "deleted" not in result["environment"]
+        assert result["soft_delete_check"] == "unavailable"
+
+    def test_requires_resource_id(self):
+        sdk = _make_sdk()
+        result = _action_get(sdk, "dev")
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]
 
 
 # ── _normalize_extensions ────────────────────────────────────────────

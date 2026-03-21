@@ -312,7 +312,7 @@ def _action_get(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                 "It is no longer visible in list/query results but the API still returns its metadata."
             )
     except Exception:
-        pass  # Query is best-effort; GET already succeeded
+        response["soft_delete_check"] = "unavailable"
     return response
 
 
