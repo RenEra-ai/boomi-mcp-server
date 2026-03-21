@@ -179,6 +179,33 @@ class TestComponentGetXmlStatusCodePath:
         assert "404" in msg
         assert "Not Found" in msg
 
+    @patch("boomi_mcp.categories.components._shared.Serializer")
+    def test_http_error_parsed_dict_body(self, mock_serializer_cls):
+        """HTTP error where send_request returns a parsed dict extracts message."""
+        from boomi_mcp.categories.components._shared import component_get_xml
+
+        mock_chain = MagicMock()
+        mock_serializer_cls.return_value = mock_chain
+        mock_chain.add_header.return_value = mock_chain
+        mock_chain.serialize.return_value = mock_chain
+        mock_chain.set_method.return_value = mock_chain
+
+        mock_sdk = MagicMock()
+        svc = mock_sdk.component
+        # send_request returns response.body as a parsed dict for JSON
+        svc.send_request.return_value = (
+            {"message": "ComponentId is invalid"},
+            400,
+            "application/json",
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            component_get_xml(mock_sdk, "bad-id")
+
+        msg = str(exc_info.value)
+        assert "ComponentId is invalid" in msg
+        assert "400" in msg
+
 
 # ── QA-016: single-process create top-level IDs ──────────────────────
 
