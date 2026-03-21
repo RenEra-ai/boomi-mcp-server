@@ -290,10 +290,30 @@ def _action_get(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         return {"_success": False, "error": "resource_id is required for 'get' action"}
 
     env = sdk.environment.get_environment(id_=resource_id)
-    return {
-        "_success": True,
-        "environment": _env_to_dict(env),
-    }
+    env_dict = _env_to_dict(env)
+
+    # Best-effort soft-delete detection: GET succeeds but query-by-ID returns nothing.
+    # If the query itself fails, return the GET result without annotation.
+    response = {"_success": True, "environment": env_dict}
+    try:
+        expression = EnvironmentSimpleExpression(
+            operator=EnvironmentSimpleExpressionOperator.EQUALS,
+            property=EnvironmentSimpleExpressionProperty.ID,
+            argument=[resource_id],
+        )
+        query_filter = EnvironmentQueryConfigQueryFilter(expression=expression)
+        query_config = EnvironmentQueryConfig(query_filter=query_filter)
+        query_result = sdk.environment.query_environment(request_body=query_config)
+        found = hasattr(query_result, 'result') and query_result.result and len(query_result.result) > 0
+        if not found:
+            env_dict["deleted"] = True
+            response["warning"] = (
+                "This environment has been deleted (soft-delete). "
+                "It is no longer visible in list/query results but the API still returns its metadata."
+            )
+    except Exception:
+        pass  # Query is best-effort; GET already succeeded
+    return response
 
 
 def _action_create(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
@@ -376,7 +396,7 @@ def _action_get_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     """Get environment-specific configuration overrides."""
     resource_id = kwargs.get("resource_id")
     if not resource_id:
-        return {"_success": False, "error": "resource_id is required for 'get_extensions' action"}
+        return {"_success": False, "error": "resource_id (environment_id) is required for 'get_extensions' action"}
 
     result = sdk.environment_extensions.get_environment_extensions(id_=resource_id)
     extensions = _parse_extensions_response(result)
@@ -554,7 +574,7 @@ def _action_query_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, An
     """Query which environments have extensions configured."""
     resource_id = kwargs.get("resource_id")
     if not resource_id:
-        return {"_success": False, "error": "resource_id is required for 'query_extensions' action"}
+        return {"_success": False, "error": "resource_id (environment_id) is required for 'query_extensions' action"}
 
     expression = EnvironmentExtensionsSimpleExpression(
         operator=EnvironmentExtensionsSimpleExpressionOperator.EQUALS,
