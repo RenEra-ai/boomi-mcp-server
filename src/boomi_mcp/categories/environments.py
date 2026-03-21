@@ -518,7 +518,7 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
                     "_success": False,
                     "error": f"Failed to read current extensions for partial merge (HTTP {status}). "
                              f"Aborting to avoid data loss. If no extensions exist yet, deploy a "
-                             f"process with extensible components first. Detail: {e}",
+                             f"process with extensible components first. Detail: {_extract_api_error_msg(e)}",
                 }
     else:
         merged = extensions_data

@@ -16,6 +16,7 @@ Provides 9 read-only monitoring actions:
 
 from typing import Dict, Any, Optional, List
 
+from boomi.net.transport.api_error import ApiError
 import httpx
 import zipfile
 import io
@@ -1224,9 +1225,16 @@ def monitor_platform_action(
                 "valid_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents", "download_connector_document"]
             }
 
+    except ApiError as e:
+        detail = getattr(e, 'error_detail', None) or getattr(e, 'message', '') or str(e)
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {detail}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,
             "error": f"Action '{action}' failed: {str(e)}",
-            "exception_type": type(e).__name__
+            "exception_type": type(e).__name__,
         }
