@@ -18,6 +18,7 @@ When BOOMI_LOCAL is not set (production):
 import json
 import os
 import sys
+from enum import Enum
 from typing import Dict
 from pathlib import Path
 
@@ -266,6 +267,8 @@ def _serialize_sdk_object(obj):
     """Recursively convert SDK objects to JSON-safe dicts."""
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
+    if isinstance(obj, Enum):
+        return obj.value
     if isinstance(obj, list):
         return [_serialize_sdk_object(item) for item in obj]
     if isinstance(obj, dict):

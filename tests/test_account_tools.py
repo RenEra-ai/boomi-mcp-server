@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from enum import Enum
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -129,6 +130,44 @@ class TestAccountInfoSuccessSerialization:
         # Private and None fields excluded
         assert "_private_field" not in result
         assert "empty_field" not in result
+
+
+# ── boomi_account_info: enum-backed fields ───────────────────────────
+
+class _FakeAccountStatus(Enum):
+    ACTIVE = "active"
+
+class _FakeSupportLevel(Enum):
+    STANDARD = "standard"
+
+
+def _make_account_with_enums():
+    """Build a fake account using enum fields matching real SDK shape."""
+    return SimpleNamespace(
+        id_="acct-test-123",
+        name="Test Account",
+        status=_FakeAccountStatus.ACTIVE,
+        support_level=_FakeSupportLevel.STANDARD,
+        licensing=SimpleNamespace(type="enterprise", max_connections=100),
+    )
+
+
+class TestAccountInfoEnumFields:
+    @patch("server.Boomi")
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.get_current_user", return_value="test-user")
+    def test_enum_fields_serialized_as_values(self, _user, _secret, mock_boomi_cls):
+        mock_sdk = MagicMock()
+        mock_sdk.account.get_account.return_value = _make_account_with_enums()
+        mock_boomi_cls.return_value = mock_sdk
+
+        result = _call_tool(server.boomi_account_info, profile="dev")
+
+        assert result["_success"] is True
+        assert result["status"] == "active"
+        assert result["support_level"] == "standard"
+        # Must still be JSON-serializable
+        json.dumps(result)
 
 
 # ── boomi_account_info: ApiError sanitized ───────────────────────────
