@@ -127,6 +127,59 @@ class TestProcessGetErrorCleanup:
         _assert_no_leak(result["error"])
 
 
+class TestComponentGetXmlStatusCodePath:
+    """component_get_xml status-code error path must not leak raw response."""
+
+    @patch("boomi_mcp.categories.components._shared.Serializer")
+    def test_http_error_json_body(self, mock_serializer_cls):
+        """HTTP error with JSON body extracts the message field."""
+        from boomi_mcp.categories.components._shared import component_get_xml
+
+        # Wire up the Serializer chain mock
+        mock_chain = MagicMock()
+        mock_serializer_cls.return_value = mock_chain
+        mock_chain.add_header.return_value = mock_chain
+        mock_chain.serialize.return_value = mock_chain
+        mock_chain.set_method.return_value = mock_chain
+
+        mock_sdk = MagicMock()
+        svc = mock_sdk.component
+
+        import json as _json
+        body = _json.dumps({"message": "ComponentId is invalid"})
+        svc.send_request.return_value = (body, 400, None)
+
+        with pytest.raises(Exception) as exc_info:
+            component_get_xml(mock_sdk, "bad-id")
+
+        msg = str(exc_info.value)
+        assert "ComponentId is invalid" in msg
+        assert "response=<" not in msg
+        assert "object at 0x" not in msg
+
+    @patch("boomi_mcp.categories.components._shared.Serializer")
+    def test_http_error_plain_text_body(self, mock_serializer_cls):
+        """HTTP error with plain text body uses first line, no raw dump."""
+        from boomi_mcp.categories.components._shared import component_get_xml
+
+        mock_chain = MagicMock()
+        mock_serializer_cls.return_value = mock_chain
+        mock_chain.add_header.return_value = mock_chain
+        mock_chain.serialize.return_value = mock_chain
+        mock_chain.set_method.return_value = mock_chain
+
+        mock_sdk = MagicMock()
+        svc = mock_sdk.component
+        svc.send_request.return_value = ("Not Found", 404, None)
+
+        with pytest.raises(Exception) as exc_info:
+            component_get_xml(mock_sdk, "bad-id")
+
+        msg = str(exc_info.value)
+        assert "404" in msg
+        assert "Not Found" in msg
+
+
 # ── QA-016: single-process create top-level IDs ──────────────────────
 
 

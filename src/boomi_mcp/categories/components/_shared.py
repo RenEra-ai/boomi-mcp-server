@@ -74,7 +74,17 @@ def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
     except Exception as exc:
         raise Exception(f"GET failed: {_extract_api_error_msg(exc)}") from exc
     if status >= 400:
-        raise Exception(f"GET failed: HTTP {status} — {response}")
+        # Extract a clean message from the error response body
+        body_msg = ""
+        if isinstance(response, (str, bytes)):
+            raw = response if isinstance(response, str) else response.decode("utf-8", errors="replace")
+            try:
+                import json as _json
+                body_msg = _json.loads(raw).get("message", "")
+            except Exception:
+                # XML or plain-text body — strip to first useful line
+                body_msg = raw.split("\n")[0][:200] if raw else ""
+        raise Exception(f"GET failed (HTTP {status}): {body_msg}" if body_msg else f"GET failed: HTTP {status}")
 
     raw_xml = response if isinstance(response, str) else response.decode('utf-8')
     root = ET.fromstring(raw_xml)

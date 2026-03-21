@@ -1211,7 +1211,15 @@ if query_components_action:
             elif action == "search":
                 params["filters"] = config_data
             elif action == "bulk_get":
-                ids = ids_list or (config_data.get("component_ids") if config_data else None)
+                if ids_list is not None:
+                    ids = ids_list
+                elif config_data and "component_ids" in config_data:
+                    cfg_ids = config_data["component_ids"]
+                    if not isinstance(cfg_ids, list):
+                        return {"_success": False, "error": "config.component_ids must be a JSON array"}
+                    ids = cfg_ids
+                else:
+                    ids = None
                 params["component_ids"] = ids
 
             return query_components_action(sdk, profile, action, **params)

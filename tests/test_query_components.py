@@ -155,6 +155,41 @@ class TestBulkGetConfigRouting:
         assert result["_success"] is False
         assert "5" in result["error"]
 
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.Boomi")
+    @patch("server.get_current_user", return_value="test-user")
+    def test_direct_empty_list_returns_empty_error(self, _user, mock_boomi_cls, _creds):
+        """component_ids='[]' should return 'list is empty', not fall through to config."""
+        mock_boomi_cls.return_value = MagicMock()
+
+        result = _call_tool(
+            server.query_components,
+            profile="dev",
+            action="bulk_get",
+            component_ids='[]',
+            config=json.dumps({"component_ids": ["should-not-reach"]}),
+        )
+
+        assert result["_success"] is False
+        assert "empty" in result["error"].lower()
+
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.Boomi")
+    @patch("server.get_current_user", return_value="test-user")
+    def test_config_ids_string_rejected(self, _user, mock_boomi_cls, _creds):
+        """config.component_ids as a string (not array) is rejected at routing."""
+        mock_boomi_cls.return_value = MagicMock()
+
+        result = _call_tool(
+            server.query_components,
+            profile="dev",
+            action="bulk_get",
+            config=json.dumps({"component_ids": "abc"}),
+        )
+
+        assert result["_success"] is False
+        assert "array" in result["error"].lower()
+
     def test_no_ids_at_all(self):
         """bulk_get with neither direct nor config IDs returns required error."""
         from boomi_mcp.categories.components.query_components import (
