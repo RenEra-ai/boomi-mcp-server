@@ -2,12 +2,14 @@
 
 import sys
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from boomi.net.transport.api_error import ApiError
 
 from src.boomi_mcp.categories.runtimes import (
     _action_list,
@@ -236,12 +238,8 @@ class TestActionDetachValidation:
     """Test detach action validation for attachment_id vs runtime_id."""
 
     def test_detach_with_valid_attachment_id_no_env(self):
-        """Direct detach with a known attachment ID should succeed."""
+        """Direct detach with a valid attachment ID should succeed (no pre-flight query)."""
         sdk = _make_sdk()
-        att = _make_attachment(id_="att-1", atom_id="rt-1", environment_id="env-1")
-        sdk.environment_atom_attachment.query_environment_atom_attachment.return_value = (
-            _make_query_result([att])
-        )
 
         result = _action_detach(sdk, "dev", resource_id="att-1")
 
@@ -250,6 +248,8 @@ class TestActionDetachValidation:
         sdk.environment_atom_attachment.delete_environment_atom_attachment.assert_called_once_with(
             id_="att-1"
         )
+        # Should NOT query attachments for validation
+        sdk.environment_atom_attachment.query_environment_atom_attachment.assert_not_called()
 
     def test_detach_with_runtime_id_and_env(self):
         """Lookup path: runtime_id + environment_id should find and delete attachment."""
@@ -267,20 +267,27 @@ class TestActionDetachValidation:
             id_="att-1"
         )
 
-    def test_detach_unknown_id_no_env_returns_error(self):
-        """runtime_id without environment_id should return validation error."""
+    def test_detach_runtime_id_no_env_returns_friendly_error(self):
+        """runtime_id without environment_id: catch Invalid compound id, return guidance."""
         sdk = _make_sdk()
-        # Return attachments that don't match the resource_id
-        att = _make_attachment(id_="att-1", atom_id="rt-1", environment_id="env-1")
-        sdk.environment_atom_attachment.query_environment_atom_attachment.return_value = (
-            _make_query_result([att])
-        )
+        err = ApiError.__new__(ApiError)
+        err.error_detail = "Invalid compound id 'rt-1'"
+        sdk.environment_atom_attachment.delete_environment_atom_attachment.side_effect = err
 
         result = _action_detach(sdk, "dev", resource_id="rt-1")
 
         assert result["_success"] is False
         assert "environment_id is required" in result["error"]
-        sdk.environment_atom_attachment.delete_environment_atom_attachment.assert_not_called()
+
+    def test_detach_stale_attachment_id_no_env_raises(self):
+        """Stale attachment ID without environment_id: non-compound-id error should propagate."""
+        sdk = _make_sdk()
+        err = ApiError.__new__(ApiError)
+        err.error_detail = "Resource not found"
+        sdk.environment_atom_attachment.delete_environment_atom_attachment.side_effect = err
+
+        with pytest.raises(ApiError):
+            _action_detach(sdk, "dev", resource_id="att-stale")
 
     def test_detach_missing_resource_id(self):
         sdk = _make_sdk()

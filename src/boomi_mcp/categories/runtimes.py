@@ -441,18 +441,17 @@ def _action_detach(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                          f"in environment '{environment_id}'.",
             }
         attachment_id = matching[0]["id"]
-    else:
-        # Direct path: validate resource_id is a known attachment ID
-        all_attachments = _query_all_attachments(sdk)
-        known_ids = {a["id"] for a in all_attachments}
-        if resource_id not in known_ids:
+    try:
+        sdk.environment_atom_attachment.delete_environment_atom_attachment(id_=attachment_id)
+    except ApiError as e:
+        msg = _extract_api_error_msg(e)
+        if "Invalid compound id" in msg and not environment_id:
             return {
                 "_success": False,
                 "error": "environment_id is required when resource_id is a runtime_id. "
                          "Provide environment_id or pass an attachment_id directly.",
             }
-
-    sdk.environment_atom_attachment.delete_environment_atom_attachment(id_=attachment_id)
+        raise
 
     return {
         "_success": True,
