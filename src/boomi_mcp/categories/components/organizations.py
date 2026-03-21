@@ -21,6 +21,11 @@ from boomi.models import (
     OrganizationComponentSimpleExpressionOperator,
     OrganizationComponentSimpleExpressionProperty
 )
+from boomi.net.transport.api_error import ApiError
+from boomi.net.transport.serializer import Serializer
+from boomi.net.environment.environment import Environment
+from boomi_mcp.categories.components._shared import _extract_api_error_msg
+import json as json_mod
 
 
 def build_organization_contact_info(**kwargs) -> OrganizationContactInfo:
@@ -116,6 +121,12 @@ def create_organization(boomi_client, profile: str, request_data: Dict[str, Any]
             "message": f"Successfully created organization: {request_data.get('component_name')}"
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to create organization: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -175,6 +186,12 @@ def get_organization(boomi_client, profile: str, organization_id: str) -> Dict[s
             "organization": org_data
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to get organization: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -197,38 +214,67 @@ def list_organizations(boomi_client, profile: str, filters: Optional[Dict[str, A
         List of organizations or error
     """
     try:
-        # Build query expression
+        # Build query body
+        name_pattern = '%'
         if filters and "name_pattern" in filters:
-            expression = OrganizationComponentSimpleExpression(
-                operator=OrganizationComponentSimpleExpressionOperator.LIKE,
-                property=OrganizationComponentSimpleExpressionProperty.NAME,
-                argument=[filters["name_pattern"]]
-            )
-        else:
-            # Get all organizations
-            expression = OrganizationComponentSimpleExpression(
-                operator=OrganizationComponentSimpleExpressionOperator.LIKE,
-                property=OrganizationComponentSimpleExpressionProperty.NAME,
-                argument=['%']
-            )
+            name_pattern = filters["name_pattern"]
 
-        query_filter = OrganizationComponentQueryConfigQueryFilter(expression=expression)
-        query_config = OrganizationComponentQueryConfig(query_filter=query_filter)
+        query_body = {
+            "QueryFilter": {
+                "expression": {
+                    "operator": "LIKE",
+                    "property": "name",
+                    "argument": [name_pattern]
+                }
+            }
+        }
 
-        result = boomi_client.organization_component.query_organization_component(
-            request_body=query_config
-        )
+        # Use raw Serializer to avoid SDK model hydration failures
+        # on sparse OrganizationContactInfo payloads
+        svc = boomi_client.organization_component
+        base = svc.base_url or Environment.DEFAULT.url
+        url = f"{base.rstrip('/')}/OrganizationComponent/query"
+
+        ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])
+        ser = ser.add_header("Accept", "application/json")
+        serialized = ser.serialize().set_method("POST")
+        serialized = serialized.set_body(query_body, "application/json")
+
+        response, status, _ = svc.send_request(serialized)
+        if isinstance(response, (bytes, bytearray)):
+            response = response.decode("utf-8")
+        data = json_mod.loads(response) if isinstance(response, str) else response
 
         organizations = []
-        if hasattr(result, 'result') and result.result:
-            for org in result.result:
-                org_id = getattr(org, 'component_id', None) or getattr(org, 'id_', None)
+        if "result" in data:
+            for org in data["result"]:
                 organizations.append({
-                    "component_id": org_id,
-                    "name": getattr(org, 'component_name', None),
-                    "folder_name": getattr(org, 'folder_name', None),
-                    "folder_id": getattr(org, 'folder_id', None)
+                    "component_id": org.get("componentId") or org.get("id"),
+                    "name": org.get("componentName"),
+                    "folder_name": org.get("folderName"),
+                    "folder_id": org.get("folderId")
                 })
+
+        # Handle pagination
+        while data.get("queryToken"):
+            token = data["queryToken"]
+            url_more = f"{base.rstrip('/')}/OrganizationComponent/queryMore"
+            ser2 = Serializer(url_more, [svc.get_access_token(), svc.get_basic_auth()])
+            ser2 = ser2.add_header("Accept", "application/json")
+            serialized2 = ser2.serialize().set_method("POST")
+            serialized2 = serialized2.set_body(token, "text/plain")
+            response2, _, _ = svc.send_request(serialized2)
+            if isinstance(response2, (bytes, bytearray)):
+                response2 = response2.decode("utf-8")
+            data = json_mod.loads(response2) if isinstance(response2, str) else response2
+            if "result" in data:
+                for org in data["result"]:
+                    organizations.append({
+                        "component_id": org.get("componentId") or org.get("id"),
+                        "name": org.get("componentName"),
+                        "folder_name": org.get("folderName"),
+                        "folder_id": org.get("folderId")
+                    })
 
         return {
             "_success": True,
@@ -236,6 +282,12 @@ def list_organizations(boomi_client, profile: str, filters: Optional[Dict[str, A
             "organizations": organizations
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to list organizations: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -316,6 +368,12 @@ def update_organization(boomi_client, profile: str, organization_id: str, update
             "message": f"Successfully updated organization: {organization_id}"
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to update organization: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -346,6 +404,12 @@ def delete_organization(boomi_client, profile: str, organization_id: str) -> Dic
             "message": f"Successfully deleted organization: {organization_id}"
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to delete organization: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -414,8 +478,8 @@ def manage_organization_action(
             if not request_data:
                 return {
                     "_success": False,
-                    "error": "request_data is required for 'create' action",
-                    "hint": "Provide organization configuration including component_name and contact info"
+                    "error": "config is required for 'create' action",
+                    "hint": "config must include at least component_name. Provide organization configuration including contact info."
                 }
             return create_organization(boomi_client, profile, request_data)
 
@@ -453,6 +517,12 @@ def manage_organization_action(
                 "hint": "Valid actions are: list, get, create, update, delete"
             }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError"
+        }
     except Exception as e:
         return {
             "_success": False,

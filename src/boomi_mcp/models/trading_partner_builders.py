@@ -1469,6 +1469,10 @@ def build_x12_partner_info(**kwargs):
     isa_qualifier = kwargs.get('isa_qualifier')
     gs_id = kwargs.get('gs_id')
 
+    # Default qualifier to ZZ when isa_id is provided without explicit qualifier
+    if isa_id and not isa_qualifier:
+        isa_qualifier = 'ZZ'
+
     if not any([isa_id, isa_qualifier, gs_id]):
         return None
 

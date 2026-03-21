@@ -840,6 +840,9 @@ if manage_trading_partner_action:
 
             return manage_trading_partner_action(sdk, profile, action, **params)
 
+        except ApiError as e:
+            print(f"[ERROR] Failed to {action} trading partner: {e}")
+            return {"_success": False, "error": _extract_api_error_msg(e)}
         except Exception as e:
             print(f"[ERROR] Failed to {action} trading partner: {e}")
             return {"_success": False, "error": str(e)}

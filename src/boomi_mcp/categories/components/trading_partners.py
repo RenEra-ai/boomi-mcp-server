@@ -28,6 +28,8 @@ from boomi.models import (
     TradingPartnerComponentSimpleExpressionOperator,
     TradingPartnerComponentSimpleExpressionProperty
 )
+from boomi.net.transport.api_error import ApiError
+from boomi_mcp.categories.components._shared import _extract_api_error_msg
 
 
 def _ga(obj, *attrs):
@@ -247,12 +249,19 @@ def create_trading_partner(boomi_client, profile: str, request_data: Dict[str, A
             "warnings": warnings if warnings else None
         }
 
-    except Exception as e:
-        error_msg = str(e)
-        # Provide helpful error messages for common issues
+    except ApiError as e:
+        error_msg = _extract_api_error_msg(e)
         if "B2B" in error_msg or "EDI" in error_msg:
             error_msg = f"{error_msg}. Note: Account must have B2B/EDI feature enabled for trading partner creation."
-
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to create trading partner: {error_msg}"
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "B2B" in error_msg or "EDI" in error_msg:
+            error_msg = f"{error_msg}. Note: Account must have B2B/EDI feature enabled for trading partner creation."
         return {
             "_success": False,
             "error": str(e),
@@ -1001,6 +1010,12 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
 
         return {"_success": True, "trading_partner": tp}
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to get trading partner: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -1163,6 +1178,12 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
             }
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to list trading partners: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -1245,6 +1266,12 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
             existing_tp = boomi_client.trading_partner_component.get_trading_partner_component(
                 id_=component_id
             )
+        except ApiError as e:
+            return {
+                "_success": False,
+                "error": f"Component not found: {_extract_api_error_msg(e)}",
+                "message": f"Trading partner {component_id} not found or could not be retrieved"
+            }
         except Exception as e:
             return {
                 "_success": False,
@@ -2701,6 +2728,12 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
             "warnings": warnings if warnings else None
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to update trading partner: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -2731,6 +2764,12 @@ def delete_trading_partner(boomi_client, profile: str, component_id: str) -> Dic
             "message": f"Successfully deleted trading partner: {component_id}"
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to delete trading partner: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -2793,6 +2832,12 @@ def bulk_create_trading_partners(boomi_client, profile: str, partners: List[Dict
             "message": f"Successfully created {len(created_partners)} trading partners"
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to bulk create trading partners: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -2913,6 +2958,12 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
 
         return analysis
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to analyze trading partner usage: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -3046,8 +3097,8 @@ def manage_trading_partner_action(
             if not request_data:
                 return {
                     "_success": False,
-                    "error": "request_data is required for 'create' action",
-                    "hint": "Provide trading partner configuration including standard, name, and standard-specific parameters. Use get_schema_template for expected format."
+                    "error": "config is required for 'create' action",
+                    "hint": "config must include at least component_name and standard. Use action='list_options' to see valid values."
                 }
             return create_trading_partner(boomi_client, profile, request_data)
 
@@ -3098,6 +3149,12 @@ def manage_trading_partner_action(
                 "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, list_options, org_list, org_get, org_create, org_update, org_delete"
             }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError"
+        }
     except Exception as e:
         return {
             "_success": False,
