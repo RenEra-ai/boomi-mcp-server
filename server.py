@@ -1211,7 +1211,8 @@ if query_components_action:
             elif action == "search":
                 params["filters"] = config_data
             elif action == "bulk_get":
-                params["component_ids"] = ids_list
+                ids = ids_list or (config_data.get("component_ids") if config_data else None)
+                params["component_ids"] = ids
 
             return query_components_action(sdk, profile, action, **params)
 

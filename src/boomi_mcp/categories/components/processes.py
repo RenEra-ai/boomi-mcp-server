@@ -33,7 +33,7 @@ from boomi.models import (
 )
 
 # Import shared helper
-from ._shared import component_get_xml as _component_get_xml
+from ._shared import component_get_xml as _component_get_xml, _extract_api_error_msg
 
 
 def _component_delete(boomi_client: Boomi, component_id: str) -> None:
@@ -159,7 +159,7 @@ def get_process(
     except Exception as e:
         return {
             "_success": False,
-            "error": f"Failed to get process '{process_id}': {str(e)}",
+            "error": f"Failed to get process '{process_id}': {_extract_api_error_msg(e)}",
             "exception_type": type(e).__name__,
             "hint": "Verify the process ID exists and is accessible"
         }
@@ -208,6 +208,10 @@ def create_process(
             "components": created_components,
             "profile": profile
         }
+        if len(created_components) == 1:
+            only = next(iter(created_components.values()))
+            result["process_id"] = only["component_id"]
+            result["component_id"] = only["component_id"]
         if orchestrator.warnings:
             result["warnings"] = orchestrator.warnings
         return result

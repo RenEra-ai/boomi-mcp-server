@@ -69,7 +69,10 @@ def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
         .serialize()
         .set_method("GET")
     )
-    response, status, content = svc.send_request(serialized_request)
+    try:
+        response, status, content = svc.send_request(serialized_request)
+    except Exception as exc:
+        raise Exception(f"GET failed: {_extract_api_error_msg(exc)}") from exc
     if status >= 400:
         raise Exception(f"GET failed: HTTP {status} — {response}")
 
@@ -207,7 +210,7 @@ def metadata_to_dict(comp) -> Dict[str, Any]:
         'type': getattr(comp, 'type_', ''),
         'version': getattr(comp, 'version', ''),
         'current_version': str(getattr(comp, 'current_version', 'false')),
-        'deleted': str(getattr(comp, 'deleted', 'false')),
+        'deleted': str(getattr(comp, 'deleted', 'false')).lower() == 'true',
         'created_date': getattr(comp, 'created_date', ''),
         'modified_date': getattr(comp, 'modified_date', ''),
         'created_by': getattr(comp, 'created_by', ''),
