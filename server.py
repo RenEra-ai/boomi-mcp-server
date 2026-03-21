@@ -1995,10 +1995,12 @@ if manage_runtimes_action:
 
         Actions and config examples:
 
-            list - List all runtimes, optional filters:
+            list - List runtimes, optional filters (one at a time; precedence: runtime_type > status > name > name_pattern):
                 config='{"runtime_type": "ATOM"}'
                 config='{"status": "ONLINE"}'
-                config='{"name_pattern": "%prod%"}'
+                config='{"name": "Production Atom"}'         (exact match)
+                config='{"name_pattern": "Prod"}'            (substring — bare text treated as %Prod%)
+                config='{"name_pattern": "Prod%"}'           (prefix match)
 
             get - Get runtime by ID (no config needed):
                 resource_id="abc-123-def"
@@ -2021,9 +2023,9 @@ if manage_runtimes_action:
                 environment_id="env-456-ghi"
 
             detach - Detach runtime from environment:
-                resource_id="attachment-789-jkl"    (attachment_id)
+                resource_id="attachment-789-jkl"    (attachment_id — validated against known attachments)
                 OR:
-                resource_id="abc-123-def"           (runtime_id)
+                resource_id="abc-123-def"           (runtime_id — requires environment_id)
                 environment_id="env-456-ghi"        (auto-lookup attachment_id)
 
             list_attachments - List environment-runtime attachments:

@@ -22,6 +22,7 @@ Provides 18 runtime management actions:
 - diagnostics: Get combined runtime diagnostics (counters, disk space, listener status)
 """
 
+import re
 import time
 from typing import Dict, Any, Optional, List
 
@@ -107,6 +108,23 @@ def _parse_int(val, field_name: str) -> tuple:
         return int(val), None
     except (TypeError, ValueError):
         return None, f"config.{field_name} must be a number, got: {val!r}"
+
+
+def _match_name_pattern(name: str, pattern: str) -> bool:
+    """Match a runtime name against a %-wildcard pattern.
+
+    - Bare text (no %) -> substring match (like %text%)
+    - % is the only wildcard char, converted to .* regex
+    - Case-sensitive matching
+    """
+    if not pattern or pattern == "%":
+        return True
+    if "%" not in pattern:
+        return pattern in name
+    # Split on %, escape each literal segment, join with .*
+    parts = pattern.split("%")
+    regex = ".*".join(re.escape(p) for p in parts)
+    return bool(re.fullmatch(regex, name))
 
 
 def _runtime_to_dict(runtime) -> Dict[str, Any]:
@@ -229,10 +247,19 @@ def _query_all_attachments(sdk: Boomi, expression=None) -> List[Dict[str, Any]]:
 # ============================================================================
 
 def _action_list(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """List runtimes with optional type/status/name filters."""
+    """List runtimes with optional filters.
+
+    Filter precedence: runtime_type > status > name > name_pattern.
+    runtime_type and status use SDK query expressions.
+    name uses SDK EQUALS for exact match.
+    name_pattern fetches all runtimes and filters wrapper-side.
+    """
     runtime_type = kwargs.get("runtime_type")
     status = kwargs.get("status")
+    name = kwargs.get("name")
     name_pattern = kwargs.get("name_pattern")
+
+    expression = None
 
     if runtime_type:
         upper = runtime_type.upper()
@@ -260,18 +287,21 @@ def _action_list(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
             property=AtomSimpleExpressionProperty.STATUS,
             argument=[upper],
         )
-    elif name_pattern:
-        # CONTAINS does substring matching; strip any SQL-style % wildcards
-        clean_pattern = name_pattern.strip("%")
+    elif name:
         expression = AtomSimpleExpression(
-            operator=AtomSimpleExpressionOperator.CONTAINS,
+            operator=AtomSimpleExpressionOperator.EQUALS,
             property=AtomSimpleExpressionProperty.NAME,
-            argument=[clean_pattern],
+            argument=[name],
         )
-    else:
-        expression = None
 
     runtimes = _query_all_runtimes(sdk, expression)
+
+    # Wrapper-side pattern filtering (only when no higher-precedence filter)
+    if name_pattern and not runtime_type and not status and not name:
+        runtimes = [
+            r for r in runtimes
+            if _match_name_pattern(r.get("name", ""), name_pattern)
+        ]
 
     return {
         "_success": True,
@@ -394,8 +424,8 @@ def _action_detach(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
     attachment_id = resource_id
 
-    # If environment_id is provided, treat resource_id as runtime_id and look up attachment
     if environment_id:
+        # Lookup path: treat resource_id as runtime_id, find attachment
         expression = EnvironmentAtomAttachmentSimpleExpression(
             operator=EnvironmentAtomAttachmentSimpleExpressionOperator.EQUALS,
             property=EnvironmentAtomAttachmentSimpleExpressionProperty.ENVIRONMENTID,
@@ -403,7 +433,6 @@ def _action_detach(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         )
         attachments = _query_all_attachments(sdk, expression)
 
-        # Find the attachment matching both runtime_id and environment_id
         matching = [a for a in attachments if a["atom_id"] == resource_id]
         if not matching:
             return {
@@ -412,6 +441,16 @@ def _action_detach(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
                          f"in environment '{environment_id}'.",
             }
         attachment_id = matching[0]["id"]
+    else:
+        # Direct path: validate resource_id is a known attachment ID
+        all_attachments = _query_all_attachments(sdk)
+        known_ids = {a["id"] for a in all_attachments}
+        if resource_id not in known_ids:
+            return {
+                "_success": False,
+                "error": "environment_id is required when resource_id is a runtime_id. "
+                         "Provide environment_id or pass an attachment_id directly.",
+            }
 
     sdk.environment_atom_attachment.delete_environment_atom_attachment(id_=attachment_id)
 
