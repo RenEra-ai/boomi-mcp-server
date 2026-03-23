@@ -14,6 +14,7 @@ Provides 7 folder management actions:
 from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
+from boomi.net.transport.api_error import ApiError
 from boomi.models import (
     Folder,
     FolderQueryConfig,
@@ -32,6 +33,21 @@ from boomi.models import (
 # ============================================================================
 # Helpers
 # ============================================================================
+
+def _extract_api_error_msg(e: ApiError) -> str:
+    """Extract user-friendly error message from ApiError."""
+    detail = getattr(e, "error_detail", None)
+    if detail:
+        return detail
+    resp = getattr(e, "response", None)
+    if resp:
+        body = getattr(resp, "body", None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, "message", "") or str(e)
+
 
 def _folder_to_dict(folder) -> Dict[str, Any]:
     """Convert SDK Folder object to plain dict."""
@@ -574,6 +590,12 @@ def manage_folders_action(
 
     try:
         return handler(sdk, profile, **merged)
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": type(e).__name__,
+        }
     except Exception as e:
         return {
             "_success": False,
