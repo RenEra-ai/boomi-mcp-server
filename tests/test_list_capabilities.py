@@ -121,3 +121,23 @@ class TestWorkflowMetadata:
         step_5 = steps[4]
         assert "execute_process" in step_5
         assert "invoke_boomi_api" not in step_5
+
+    def test_admin_workflow_uses_manage_account(self):
+        result = _get_capabilities()
+        steps = result["workflows"]["manage_admin_operations"]["steps"]
+        role_steps = [s for s in steps if "role" in s.lower()]
+        branch_steps = [s for s in steps if "branch" in s.lower()]
+        # Roles and branches should route through manage_account
+        for s in role_steps + branch_steps:
+            assert "manage_account" in s, f"Expected manage_account in: {s}"
+            assert "invoke_boomi_api" not in s, f"Stale invoke_boomi_api ref in: {s}"
+
+    def test_filtered_workflows_exclude_absent_tools(self):
+        """Workflows referencing tools not in available_tools should be dropped."""
+        # Use a subset that excludes manage_account
+        subset = _get_registry_names() - {"manage_account"}
+        result = list_capabilities_action(available_tools=subset)
+        # manage_admin_operations references manage_account, so it should be gone
+        assert "manage_admin_operations" not in result["workflows"]
+        # Workflows that only reference present tools should remain
+        assert "discover_components" in result["workflows"]

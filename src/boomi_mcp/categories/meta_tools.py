@@ -2199,15 +2199,33 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             ],
         },
         "manage_admin_operations": {
-            "description": "Admin tasks not covered by dedicated tools",
+            "description": "Account administration — roles, branches, and uncovered APIs",
             "steps": [
-                "1. invoke_boomi_api(endpoint='Role/query', method='POST', ...) → list roles",
-                "2. invoke_boomi_api(endpoint='Branch/query', method='POST', ...) → list branches",
-                "3. invoke_boomi_api(endpoint='Folder/query', method='POST', ...) → list folders",
-                "4. See invoke_boomi_api docstring for all 30+ available endpoints",
+                "1. manage_account(action='list_roles') → list roles",
+                "2. manage_account(action='manage_role', config='{\"operation\": \"create\", \"name\": \"...\", \"privileges\": [...]}') → create/update/delete roles",
+                "3. manage_account(action='list_branches') → list branches",
+                "4. manage_account(action='manage_branch', config='{\"operation\": \"create\", \"name\": \"...\"}') → create/delete branches",
+                "5. invoke_boomi_api(...) → for remaining uncovered APIs (integration packs, etc.)",
             ],
         },
     }
+
+    # --- Filter workflows to only reference tools in the catalog ---
+    if available_tools is not None:
+        import re
+        tool_names = set(tools.keys())
+        filtered_workflows = {}
+        for wf_key, wf in workflows.items():
+            # Extract tool names from step strings: "N. tool_name(...) → ..."
+            refs = set()
+            for step in wf.get("steps", []):
+                m = re.match(r"\d+\.\s+(\w+)\(", step)
+                if m:
+                    refs.add(m.group(1))
+            # Keep workflow only if all referenced tools are in the catalog
+            if refs <= tool_names:
+                filtered_workflows[wf_key] = wf
+        workflows = filtered_workflows
 
     # --- Coverage stats ---
     coverage = {
