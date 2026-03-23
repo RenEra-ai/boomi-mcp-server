@@ -15,6 +15,7 @@ from typing import Dict, Any, Optional
 import xml.etree.ElementTree as ET
 
 from boomi import Boomi
+from boomi.net.transport.api_error import ApiError
 from boomi.models import (
     ComponentMetadataQueryConfig,
     ComponentMetadataQueryConfigQueryFilter,
@@ -31,7 +32,7 @@ from boomi.models import (
 )
 from ._shared import (
     component_get_xml, set_description_element, soft_delete_component,
-    paginate_metadata, _create_component_raw,
+    paginate_metadata, _create_component_raw, _extract_api_error_msg,
 )
 from .builders.connector_builder import (
     get_connector_builder, CONNECTOR_BUILDERS,
@@ -143,6 +144,13 @@ def get_connector_type(
             "connector_type": type_info,
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to get connector type '{connector_type}': {_extract_api_error_msg(e)}",
+            "exception_type": type(e).__name__,
+            "hint": "Use action='list_types' to see available connector types",
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -266,6 +274,13 @@ def get_connector(
             "_success": True,
             "connector": comp_data,
             "profile": profile,
+        }
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to get connector '{component_id}': {_extract_api_error_msg(e)}",
+            "exception_type": type(e).__name__,
+            "hint": "Verify the component ID exists and is a connector component",
         }
     except Exception as e:
         return {
@@ -440,6 +455,12 @@ def update_connector(
             "profile": profile,
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to update connector '{component_id}': {_extract_api_error_msg(e)}",
+            "exception_type": type(e).__name__,
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -465,6 +486,13 @@ def delete_connector(
             "warning": "Dependent components (operations, processes) are NOT automatically deleted.",
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to delete connector '{component_id}': {_extract_api_error_msg(e)}",
+            "exception_type": type(e).__name__,
+            "hint": "Retry or use Boomi Platform UI to delete this component.",
+        }
     except Exception as e:
         return {
             "_success": False,

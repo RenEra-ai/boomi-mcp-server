@@ -1,0 +1,141 @@
+{
+  "project": "boomi-mcp-server",
+  "report_date": "2026-03-21",
+  "batch": "batch_06_connectors",
+  "tool": "manage_connector",
+  "summary": "22 tests run, 18 passed, 4 failed, 0 errors, 0 skipped. All 4 failures are raw ApiError repr leaking in error messages across get_type, get, update, and delete actions when handling invalid inputs. CRUD lifecycle (create, get, update, delete) works correctly. Connector type reference data is solid. List filtering by component_type and connector_type works well. Data consistency between list counts is correct (connections + operations = all). The get response for deleted connectors does not expose the deleted flag in the response dict (only in raw XML), which is a known Boomi soft-delete pattern also seen in environments (QA-009).",
+  "test_results": {
+    "total": 22,
+    "passed": 18,
+    "failed": 4,
+    "errors": 0,
+    "skipped": 0
+  },
+  "issues": [
+    {
+      "id": "QA-018",
+      "bug_id": "#46",
+      "severity": "HIGH",
+      "title": "manage_connector get_type leaks raw ApiError repr on invalid connector type",
+      "tool": "manage_connector",
+      "action": "get_type",
+      "status": "Fixed",
+      "description": "When get_type is called with an invalid connector_type, the error message contains the raw ApiError repr including 'ApiError(\\n    message=...', 'response=<boomi.net.transport.response.Response object at 0x...>'. This exposes internal SDK object references to the user.",
+      "steps_to_reproduce": "manage_connector.fn(profile='dev', action='get_type', config='{\"connector_type\": \"nonexistent-connector-type-xyz\"}')",
+      "expected": "Clean error like: \"Connector type 'nonexistent-connector-type-xyz' not found. Use action='list_types' to see available types.\"",
+      "actual": "{\"_success\": false, \"error\": \"Failed to get connector type 'nonexistent-connector-type-xyz': ApiError(\\n    message='400 error in request to: https://api.boomi.com/api/rest/v1/.../Connector/nonexistent-connector-type-xyz',\\n    status=400,\\n    response=<boomi.net.transport.response.Response object at 0x...>\\n)\", \"exception_type\": \"ApiError\", \"hint\": \"Use action='list_types' to see available connector types\"}",
+      "root_cause": "The except ApiError handler in the get_type action uses str(e) or repr(e) which produces the raw ApiError representation instead of extracting just the message/error_detail fields."
+    },
+    {
+      "id": "QA-019",
+      "bug_id": "#47",
+      "severity": "HIGH",
+      "title": "manage_connector get leaks raw ApiError repr on invalid component_id",
+      "tool": "manage_connector",
+      "action": "get",
+      "status": "Fixed",
+      "description": "When get is called with an invalid component_id, the error message contains the raw ApiError repr including internal SDK object references (response=<...object at 0x...>). The error_detail from Boomi ('ComponentId ... is invalid') is embedded in the ApiError repr rather than extracted cleanly.",
+      "steps_to_reproduce": "manage_connector.fn(profile='dev', action='get', component_id='fake-connector-id-xyz')",
+      "expected": "Clean error like: \"ComponentId fake-connector-id-xyz is invalid. Provide a valid componentId to complete this action.\"",
+      "actual": "{\"_success\": false, \"error\": \"Failed to get connector 'fake-connector-id-xyz': ApiError(\\n    message='400 error in request to: .../Component/fake-connector-id-xyz',\\n    status=400,\\n    response=<boomi.net.transport.response.Response object at 0x...>,\\n    error_detail='ComponentId fake-connector-id-xyz is invalid...'\\n)\"}",
+      "root_cause": "Same pattern as QA-018: except handler uses str(e)/repr(e) on ApiError instead of _extract_api_error_msg() or accessing e.error_detail directly."
+    },
+    {
+      "id": "QA-020",
+      "bug_id": "#48",
+      "severity": "HIGH",
+      "title": "manage_connector update leaks raw ApiError repr on invalid component_id",
+      "tool": "manage_connector",
+      "action": "update",
+      "status": "Fixed",
+      "description": "When update is called with an invalid component_id, the error message contains the raw ApiError repr. Same root cause as QA-019.",
+      "steps_to_reproduce": "manage_connector.fn(profile='dev', action='update', component_id='fake-id', config='{\"url\": \"https://example.com\"}')",
+      "expected": "Clean error message extracting the error_detail from ApiError",
+      "actual": "{\"_success\": false, \"error\": \"Failed to update connector 'fake-id': ApiError(\\n    message='400 error in request to: .../Component/fake-id',\\n    status=400,\\n    response=<boomi.net.transport.response.Response object at 0x...>,\\n    error_detail='ComponentId fake-id is invalid...'\\n)\"}",
+      "root_cause": "Same pattern: except ApiError handler uses str(e)/repr(e) instead of clean message extraction."
+    },
+    {
+      "id": "QA-021",
+      "bug_id": "#49",
+      "severity": "HIGH",
+      "title": "manage_connector delete leaks raw ApiError repr on invalid component_id",
+      "tool": "manage_connector",
+      "action": "delete",
+      "status": "Fixed",
+      "description": "When delete is called with an invalid component_id, the error message contains the raw ApiError repr. Same root cause as QA-019 and QA-020.",
+      "steps_to_reproduce": "manage_connector.fn(profile='dev', action='delete', component_id='fake-id')",
+      "expected": "Clean error message extracting the error_detail from ApiError",
+      "actual": "{\"_success\": false, \"error\": \"Failed to delete connector 'fake-id': ApiError(\\n    message='400 error in request to: .../Component/fake-id',\\n    status=400,\\n    response=<boomi.net.transport.response.Response object at 0x...>,\\n    error_detail='ComponentId fake-id is invalid...'\\n)\"}",
+      "root_cause": "Same pattern: except ApiError handler uses str(e)/repr(e) instead of clean message extraction."
+    }
+  ],
+  "observations": [
+    {
+      "id": "OBS-01",
+      "title": "get response does not expose deleted flag for soft-deleted connectors",
+      "description": "When a connector is soft-deleted via the delete action, the get action still returns _success=true with the full component data. The XML contains deleted='true' but the response dict has deleted: None. This is the same Boomi soft-delete pattern observed for environments (QA-009). The list action correctly filters deleted connectors from default results.",
+      "severity": "LOW"
+    },
+    {
+      "id": "OBS-02",
+      "title": "list deleted and current_version fields are strings not booleans",
+      "description": "In list responses, the 'deleted' field is the string 'False' (not boolean false) and 'current_version' is the string 'True'/'False'. This is the same issue as Bug #45 (query_components) and appears to be a systemic issue with ComponentMetadata query results. Not filing a new bug since it's the same root cause.",
+      "severity": "LOW"
+    },
+    {
+      "id": "OBS-03",
+      "title": "CRUD lifecycle works end-to-end",
+      "description": "Create -> Get -> Update -> Get (verify) -> Delete lifecycle works correctly for HTTP connectors. The create action returns component_id at top level. The update correctly increments version (1->2). Delete uses metadata_delete method which is reliable.",
+      "severity": "INFO"
+    },
+    {
+      "id": "OBS-04",
+      "title": "Data consistency between list filters is correct",
+      "description": "list(all) = 80, list(connection) = 23, list(operation) = 57, sum = 80. show_all=true returns 143 (includes deleted/old versions). Consistent.",
+      "severity": "INFO"
+    },
+    {
+      "id": "OBS-05",
+      "title": "All 4 bugs share the same root cause",
+      "description": "All 4 issues (QA-018 through QA-021) are the same pattern: the except ApiError handler in connectors.py uses str(e) or f-string interpolation that produces the raw ApiError repr. The fix is to use _extract_api_error_msg(e) or access e.message/e.error_detail directly, as was done for other tools (e.g., Bug #32 fix for manage_component).",
+      "severity": "HIGH"
+    }
+  ],
+  "verified_fixes": [
+    {
+      "id": "QA-018",
+      "status": "Fixed",
+      "fix": "Added except ApiError branch in get_connector_type using _extract_api_error_msg(e)",
+      "verified": "get_type with invalid connector_type returns clean error with list_types hint, no raw ApiError repr"
+    },
+    {
+      "id": "QA-019",
+      "status": "Fixed",
+      "fix": "Added except ApiError branch in get_connector using _extract_api_error_msg(e)",
+      "verified": "get with invalid component_id returns clean error including the ID, no raw ApiError repr"
+    },
+    {
+      "id": "QA-020",
+      "status": "Fixed",
+      "fix": "Added except ApiError branch in update_connector using _extract_api_error_msg(e)",
+      "verified": "update with invalid component_id returns clean error including the ID, no raw ApiError repr"
+    },
+    {
+      "id": "QA-021",
+      "status": "Fixed",
+      "fix": "Added except ApiError branch in delete_connector using _extract_api_error_msg(e)",
+      "verified": "delete with invalid component_id returns clean error including the ID, no raw ApiError repr"
+    }
+  ],
+  "test_environment": {
+    "profile": "dev",
+    "sdk_version": "boomi 2.1.0+",
+    "python": ".venv/bin/python",
+    "connector_types_count": 288,
+    "existing_connectors_count": 80,
+    "connections_count": 23,
+    "operations_count": 57,
+    "created_test_id": "ee70de9a-5480-4765-93e4-e75f8dfd0eda",
+    "test_connector_cleaned_up": true
+  }
+}
