@@ -1,11 +1,19 @@
 """
 Account Administration MCP Tools for Boomi Platform.
 
-Provides 4 account management actions:
+Provides 12 account management actions:
 - list_roles: List all roles with optional name filter
 - manage_role: Create, get, update, or delete a role (via config.operation)
 - list_branches: List all component branches
 - manage_branch: Create, get, or delete a branch (via config.operation)
+- list_assignable_roles: List roles assignable under the account
+- list_user_roles: List user-role assignments with optional user_id filter
+- assign_user_role: Assign a role to a user
+- remove_user_role: Remove a user-role assignment
+- list_user_federations: List user federation mappings with optional user_id filter
+- create_user_federation: Create a user federation mapping (enable SSO for user)
+- delete_user_federation: Delete a user federation mapping (disable SSO for user)
+- get_sso_config: Get account SSO configuration (read-only)
 """
 
 from typing import Dict, Any, Optional, List
@@ -25,6 +33,18 @@ from boomi.models import (
     BranchQueryConfigQueryFilter,
     BranchSimpleExpression,
     BranchSimpleExpressionOperator,
+    AccountUserRole,
+    AccountUserRoleQueryConfig,
+    AccountUserRoleQueryConfigQueryFilter,
+    AccountUserRoleSimpleExpression,
+    AccountUserRoleSimpleExpressionOperator,
+    AccountUserRoleSimpleExpressionProperty,
+    AccountUserFederation,
+    AccountUserFederationQueryConfig,
+    AccountUserFederationQueryConfigQueryFilter,
+    AccountUserFederationSimpleExpression,
+    AccountUserFederationSimpleExpressionOperator,
+    AccountUserFederationSimpleExpressionProperty,
 )
 from boomi.net.transport.api_error import ApiError
 from boomi.net.transport.serializer import Serializer
@@ -201,6 +221,89 @@ def _query_all_branches(sdk: Boomi, expression) -> List[Dict[str, Any]]:
             branches.extend([_branch_to_dict(b) for b in result.result])
 
     return branches
+
+
+def _user_role_to_dict(ur) -> Dict[str, Any]:
+    """Convert SDK AccountUserRole object to plain dict."""
+    result = {
+        "id": getattr(ur, 'id_', ''),
+        "user_id": getattr(ur, 'user_id', ''),
+        "role_id": getattr(ur, 'role_id', ''),
+        "account_id": getattr(ur, 'account_id', ''),
+    }
+    first_name = getattr(ur, 'first_name', None)
+    if first_name:
+        result["first_name"] = first_name
+    last_name = getattr(ur, 'last_name', None)
+    if last_name:
+        result["last_name"] = last_name
+    notify_user = getattr(ur, 'notify_user', None)
+    if notify_user is not None:
+        result["notify_user"] = notify_user
+    return result
+
+
+def _user_federation_to_dict(uf) -> Dict[str, Any]:
+    """Convert SDK AccountUserFederation object to plain dict."""
+    return {
+        "id": getattr(uf, 'id_', ''),
+        "user_id": getattr(uf, 'user_id', ''),
+        "federation_id": getattr(uf, 'federation_id', ''),
+        "account_id": getattr(uf, 'account_id', ''),
+    }
+
+
+def _sso_config_to_dict(sso) -> Dict[str, Any]:
+    """Convert SDK AccountSsoConfig object to plain dict."""
+    result = {}
+    for field in ('account_id', 'enabled', 'idp_url', 'cert_info',
+                  'assertion_encryption', 'authn_context',
+                  'authn_context_comparison', 'fed_id_from_name_id',
+                  'name_id_policy', 'signout_redirect_url'):
+        val = getattr(sso, field, None)
+        if val is not None:
+            result[field] = val
+    # certificate is a list
+    cert = getattr(sso, 'certificate', None)
+    if cert is not None:
+        result["certificate"] = cert
+    return result
+
+
+def _query_all_user_roles(sdk: Boomi, expression) -> List[Dict[str, Any]]:
+    """Execute a user-role query with pagination, return list of dicts."""
+    query_filter = AccountUserRoleQueryConfigQueryFilter(expression=expression)
+    query_config = AccountUserRoleQueryConfig(query_filter=query_filter)
+    result = sdk.account_user_role.query_account_user_role(request_body=query_config)
+
+    user_roles = []
+    if hasattr(result, 'result') and result.result:
+        user_roles.extend([_user_role_to_dict(ur) for ur in result.result])
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.account_user_role.query_more_account_user_role(request_body=result.query_token)
+        if hasattr(result, 'result') and result.result:
+            user_roles.extend([_user_role_to_dict(ur) for ur in result.result])
+
+    return user_roles
+
+
+def _query_all_user_federations(sdk: Boomi, expression) -> List[Dict[str, Any]]:
+    """Execute a user-federation query with pagination, return list of dicts."""
+    query_filter = AccountUserFederationQueryConfigQueryFilter(expression=expression)
+    query_config = AccountUserFederationQueryConfig(query_filter=query_filter)
+    result = sdk.account_user_federation.query_account_user_federation(request_body=query_config)
+
+    federations = []
+    if hasattr(result, 'result') and result.result:
+        federations.extend([_user_federation_to_dict(uf) for uf in result.result])
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.account_user_federation.query_more_account_user_federation(request_body=result.query_token)
+        if hasattr(result, 'result') and result.result:
+            federations.extend([_user_federation_to_dict(uf) for uf in result.result])
+
+    return federations
 
 
 # ============================================================================
@@ -459,6 +562,231 @@ def _action_manage_branch(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
 
 # ============================================================================
+# Action Handlers — User Roles
+# ============================================================================
+
+def _action_list_assignable_roles(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """List roles assignable under the account.
+
+    Uses the SDK method directly. Note: some account types may not support
+    this endpoint (returns 'Unknown objectType' error).
+    """
+    result = sdk.get_assignable_roles.get_get_assignable_roles()
+
+    roles = []
+    if hasattr(result, 'role') and result.role:
+        role_list = result.role if isinstance(result.role, list) else [result.role]
+        roles = [_role_to_dict(r) for r in role_list]
+
+    return {
+        "_success": True,
+        "roles": roles,
+        "total_count": len(roles),
+    }
+
+
+def _action_list_user_roles(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """List user-role assignments with optional user_id filter."""
+    user_id = kwargs.get("user_id")
+
+    if user_id:
+        expression = AccountUserRoleSimpleExpression(
+            operator=AccountUserRoleSimpleExpressionOperator.EQUALS,
+            property=AccountUserRoleSimpleExpressionProperty.USERID,
+            argument=[user_id],
+        )
+    else:
+        expression = AccountUserRoleSimpleExpression(
+            operator=AccountUserRoleSimpleExpressionOperator.ISNOTNULL,
+            property=AccountUserRoleSimpleExpressionProperty.USERID,
+            argument=[],
+        )
+
+    user_roles = _query_all_user_roles(sdk, expression)
+
+    return {
+        "_success": True,
+        "user_roles": user_roles,
+        "total_count": len(user_roles),
+    }
+
+
+def _action_assign_user_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Assign a role to a user."""
+    user_id = kwargs.get("user_id")
+    role_id = kwargs.get("role_id")
+
+    if not user_id:
+        return {"_success": False, "error": "config.user_id is required for assign_user_role"}
+    if not role_id:
+        return {"_success": False, "error": "config.role_id is required for assign_user_role"}
+
+    new_ur = AccountUserRole(user_id=user_id, role_id=role_id)
+
+    # Optional fields
+    notify_user = kwargs.get("notify_user")
+    if notify_user is not None:
+        new_ur.notify_user = notify_user
+    first_name = kwargs.get("first_name")
+    if first_name:
+        new_ur.first_name = first_name
+    last_name = kwargs.get("last_name")
+    if last_name:
+        new_ur.last_name = last_name
+
+    created = sdk.account_user_role.create_account_user_role(request_body=new_ur)
+
+    return {
+        "_success": True,
+        "user_role": _user_role_to_dict(created),
+    }
+
+
+def _action_remove_user_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Remove a user-role assignment by resource_id, or resolve from user_id+role_id."""
+    resource_id = kwargs.get("resource_id")
+
+    if not resource_id:
+        # Try to resolve from user_id + role_id
+        user_id = kwargs.get("user_id")
+        role_id = kwargs.get("role_id")
+        if not user_id or not role_id:
+            return {
+                "_success": False,
+                "error": "Either resource_id or both user_id and role_id are required for remove_user_role",
+            }
+        # Query to find the assignment
+        expression = AccountUserRoleSimpleExpression(
+            operator=AccountUserRoleSimpleExpressionOperator.EQUALS,
+            property=AccountUserRoleSimpleExpressionProperty.USERID,
+            argument=[user_id],
+        )
+        user_roles = _query_all_user_roles(sdk, expression)
+        matches = [ur for ur in user_roles if ur.get("role_id") == role_id]
+        if not matches:
+            return {
+                "_success": False,
+                "error": f"No user-role assignment found for user_id={user_id}, role_id={role_id}",
+            }
+        resource_id = matches[0]["id"]
+
+    sdk.account_user_role.delete_account_user_role(id_=resource_id)
+
+    return {
+        "_success": True,
+        "deleted_id": resource_id,
+        "warning": "User-role assignment removal is permanent.",
+    }
+
+
+# ============================================================================
+# Action Handlers — User Federations
+# ============================================================================
+
+def _action_list_user_federations(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """List user federation mappings with optional user_id filter."""
+    user_id = kwargs.get("user_id")
+
+    if user_id:
+        expression = AccountUserFederationSimpleExpression(
+            operator=AccountUserFederationSimpleExpressionOperator.EQUALS,
+            property=AccountUserFederationSimpleExpressionProperty.USERID,
+            argument=[user_id],
+        )
+    else:
+        expression = AccountUserFederationSimpleExpression(
+            operator=AccountUserFederationSimpleExpressionOperator.ISNOTNULL,
+            property=AccountUserFederationSimpleExpressionProperty.USERID,
+            argument=[],
+        )
+
+    federations = _query_all_user_federations(sdk, expression)
+
+    return {
+        "_success": True,
+        "user_federations": federations,
+        "total_count": len(federations),
+    }
+
+
+def _action_create_user_federation(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Create a user federation mapping (enable SSO for a user)."""
+    user_id = kwargs.get("user_id")
+    federation_id = kwargs.get("federation_id")
+
+    if not user_id:
+        return {"_success": False, "error": "config.user_id is required for create_user_federation"}
+    if not federation_id:
+        return {"_success": False, "error": "config.federation_id is required for create_user_federation"}
+
+    new_uf = AccountUserFederation(user_id=user_id, federation_id=federation_id)
+
+    created = sdk.account_user_federation.create_account_user_federation(request_body=new_uf)
+
+    return {
+        "_success": True,
+        "user_federation": _user_federation_to_dict(created),
+    }
+
+
+def _action_delete_user_federation(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Delete a user federation mapping by resource_id, or resolve from user_id+federation_id."""
+    resource_id = kwargs.get("resource_id")
+
+    if not resource_id:
+        # Try to resolve from user_id + federation_id
+        user_id = kwargs.get("user_id")
+        federation_id = kwargs.get("federation_id")
+        if not user_id or not federation_id:
+            return {
+                "_success": False,
+                "error": "Either resource_id or both user_id and federation_id are required for delete_user_federation",
+            }
+        # Query to find the mapping
+        expression = AccountUserFederationSimpleExpression(
+            operator=AccountUserFederationSimpleExpressionOperator.EQUALS,
+            property=AccountUserFederationSimpleExpressionProperty.USERID,
+            argument=[user_id],
+        )
+        federations = _query_all_user_federations(sdk, expression)
+        matches = [uf for uf in federations if uf.get("federation_id") == federation_id]
+        if not matches:
+            return {
+                "_success": False,
+                "error": f"No user-federation mapping found for user_id={user_id}, federation_id={federation_id}",
+            }
+        resource_id = matches[0]["id"]
+
+    sdk.account_user_federation.delete_account_user_federation(id_=resource_id)
+
+    return {
+        "_success": True,
+        "deleted_id": resource_id,
+        "warning": "User-federation mapping removal is permanent. SSO is disabled for this user.",
+    }
+
+
+# ============================================================================
+# Action Handlers — SSO Config
+# ============================================================================
+
+def _action_get_sso_config(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get account SSO configuration (read-only).
+
+    Note: The SDK does have update/delete methods for SSO config, but this
+    action is intentionally read-only to prevent accidental SSO disruption.
+    """
+    account_id = sdk._base_url_account_id
+    sso = sdk.account_sso_config.get_account_sso_config(id_=account_id)
+
+    return {
+        "_success": True,
+        "sso_config": _sso_config_to_dict(sso),
+        "_note": "SSO config is read-only via this tool. Use the Boomi UI to modify SSO settings.",
+    }
+
+
+# ============================================================================
 # Action Router
 # ============================================================================
 
@@ -475,7 +803,10 @@ def manage_account_action(
     Args:
         sdk: Authenticated Boomi SDK client
         profile: Profile name
-        action: One of: list_roles, manage_role, list_branches, manage_branch
+        action: One of: list_roles, manage_role, list_branches, manage_branch,
+            list_assignable_roles, list_user_roles, assign_user_role, remove_user_role,
+            list_user_federations, create_user_federation, delete_user_federation,
+            get_sso_config
         config_data: Action-specific configuration dict
         **kwargs: Additional parameters (resource_id, etc.)
     """
@@ -490,6 +821,14 @@ def manage_account_action(
         "manage_role": _action_manage_role,
         "list_branches": _action_list_branches,
         "manage_branch": _action_manage_branch,
+        "list_assignable_roles": _action_list_assignable_roles,
+        "list_user_roles": _action_list_user_roles,
+        "assign_user_role": _action_assign_user_role,
+        "remove_user_role": _action_remove_user_role,
+        "list_user_federations": _action_list_user_federations,
+        "create_user_federation": _action_create_user_federation,
+        "delete_user_federation": _action_delete_user_federation,
+        "get_sso_config": _action_get_sso_config,
     }
 
     handler = actions.get(action)

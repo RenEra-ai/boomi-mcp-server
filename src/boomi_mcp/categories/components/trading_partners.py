@@ -3,7 +3,8 @@
 Trading Partner MCP Tools for Boomi API Integration.
 
 This module provides comprehensive trading partner management capabilities
-including CRUD operations, bulk operations, and querying for B2B/EDI partners.
+including CRUD operations, bulk operations, querying for B2B/EDI partners,
+and trading partner processing group management.
 
 Supported Standards:
 - X12 (EDI)
@@ -13,6 +14,13 @@ Supported Standards:
 - TRADACOMS
 - ODETTE
 - Custom formats
+
+Processing Group Actions:
+- pg_list: Query trading partner processing groups
+- pg_get: Get a processing group by ID
+- pg_create: Create a new processing group
+- pg_update: Update a processing group by ID
+- pg_delete: Delete a processing group by ID
 """
 
 from typing import Dict, Any, List, Optional
@@ -26,7 +34,12 @@ from boomi.models import (
     TradingPartnerComponentQueryConfigQueryFilter,
     TradingPartnerComponentSimpleExpression,
     TradingPartnerComponentSimpleExpressionOperator,
-    TradingPartnerComponentSimpleExpressionProperty
+    TradingPartnerComponentSimpleExpressionProperty,
+    TradingPartnerProcessingGroup,
+    TradingPartnerProcessingGroupQueryConfig,
+    TradingPartnerProcessingGroupQueryConfigQueryFilter,
+    TradingPartnerProcessingGroupSimpleExpression,
+    TradingPartnerProcessingGroupSimpleExpressionOperator,
 )
 from boomi.net.transport.api_error import ApiError
 from boomi_mcp.categories.components._shared import _extract_api_error_msg
@@ -3073,6 +3086,184 @@ def list_options() -> Dict[str, Any]:
     }
 
 
+# ============================================================================
+# Trading Partner Processing Group Operations
+# ============================================================================
+
+
+def _pg_to_dict(pg) -> Dict[str, Any]:
+    """Convert SDK TradingPartnerProcessingGroup to plain dict."""
+    result = {}
+    for attr in (
+        'component_id', 'component_name', 'deleted', 'description',
+        'folder_id', 'folder_name', 'branch_id', 'branch_name',
+    ):
+        val = getattr(pg, attr, None)
+        if val is not None:
+            if hasattr(val, 'value'):
+                result[attr] = str(val.value)
+            elif isinstance(val, (bool, int)):
+                result[attr] = val
+            else:
+                result[attr] = str(val)
+    # Include routing info if present
+    for routing_attr in ('default_routing', 'document_routing', 'partner_routing', 'trading_partners'):
+        val = getattr(pg, routing_attr, None)
+        if val is not None:
+            # Convert to dict via _kwargs or serialization
+            if hasattr(val, '__dict__'):
+                d = {k: v for k, v in val.__dict__.items() if not k.startswith('_') and v is not None}
+                if d:
+                    result[routing_attr] = d
+    return result
+
+
+def _query_all_processing_groups(sdk, expression=None) -> List[Dict[str, Any]]:
+    """Execute processing group query with pagination, return list of dicts."""
+    if expression:
+        query_filter = TradingPartnerProcessingGroupQueryConfigQueryFilter(
+            expression=expression
+        )
+    else:
+        expression = TradingPartnerProcessingGroupSimpleExpression(
+            operator=TradingPartnerProcessingGroupSimpleExpressionOperator.LIKE,
+            property="name",
+            argument=["%"],
+        )
+        query_filter = TradingPartnerProcessingGroupQueryConfigQueryFilter(
+            expression=expression
+        )
+
+    query_config = TradingPartnerProcessingGroupQueryConfig(
+        query_filter=query_filter
+    )
+    result = sdk.trading_partner_processing_group.query_trading_partner_processing_group(
+        request_body=query_config
+    )
+
+    groups = []
+    if hasattr(result, 'result') and result.result:
+        items = result.result if isinstance(result.result, list) else [result.result]
+        groups.extend([_pg_to_dict(g) for g in items])
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.trading_partner_processing_group.query_more_trading_partner_processing_group(
+            request_body=result.query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            items = result.result if isinstance(result.result, list) else [result.result]
+            groups.extend([_pg_to_dict(g) for g in items])
+
+    return groups
+
+
+def _action_pg_list(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Query trading partner processing groups."""
+    name_pattern = kwargs.get("name_pattern")
+
+    if name_pattern:
+        like_pattern = name_pattern if "%" in name_pattern else f"%{name_pattern}%"
+        expression = TradingPartnerProcessingGroupSimpleExpression(
+            operator=TradingPartnerProcessingGroupSimpleExpressionOperator.LIKE,
+            property="name",
+            argument=[like_pattern],
+        )
+    else:
+        expression = None
+
+    groups = _query_all_processing_groups(sdk, expression)
+    return {
+        "_success": True,
+        "processing_groups": groups,
+        "total_count": len(groups),
+    }
+
+
+def _action_pg_get(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get a trading partner processing group by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'pg_get' action"}
+
+    pg = sdk.trading_partner_processing_group.get_trading_partner_processing_group(
+        id_=resource_id
+    )
+    return {
+        "_success": True,
+        "processing_group": _pg_to_dict(pg),
+    }
+
+
+def _action_pg_create(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Create a new trading partner processing group."""
+    component_name = kwargs.get("component_name") or kwargs.get("name")
+    if not component_name:
+        return {"_success": False, "error": "config.component_name is required for 'pg_create' action"}
+
+    pg_kwargs = {"component_name": component_name}
+    for key in ("folder_id", "folder_name", "description"):
+        val = kwargs.get(key)
+        if val is not None:
+            pg_kwargs[key] = val
+
+    pg = TradingPartnerProcessingGroup(**pg_kwargs)
+    created = sdk.trading_partner_processing_group.create_trading_partner_processing_group(
+        request_body=pg
+    )
+    return {
+        "_success": True,
+        "processing_group": _pg_to_dict(created),
+    }
+
+
+def _action_pg_update(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update a trading partner processing group by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'pg_update' action"}
+
+    pg_kwargs = {}
+    for key in ("component_name", "name", "folder_id", "folder_name", "description"):
+        val = kwargs.get(key)
+        if val is not None:
+            if key == "name":
+                pg_kwargs["component_name"] = val
+            else:
+                pg_kwargs[key] = val
+
+    if not pg_kwargs:
+        return {
+            "_success": False,
+            "error": "No valid update fields provided in config. "
+                     "Valid fields: component_name, folder_id, folder_name, description",
+        }
+
+    pg_kwargs["id_"] = resource_id
+    pg = TradingPartnerProcessingGroup(**pg_kwargs)
+    updated = sdk.trading_partner_processing_group.update_trading_partner_processing_group(
+        id_=resource_id, request_body=pg
+    )
+    return {
+        "_success": True,
+        "processing_group": _pg_to_dict(updated),
+    }
+
+
+def _action_pg_delete(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Delete a trading partner processing group by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'pg_delete' action"}
+
+    sdk.trading_partner_processing_group.delete_trading_partner_processing_group(
+        id_=resource_id
+    )
+    return {
+        "_success": True,
+        "message": f"Processing group {resource_id} deleted successfully",
+    }
+
+
 def manage_trading_partner_action(
     boomi_client,
     profile: str,
@@ -3178,11 +3369,28 @@ def manage_trading_partner_action(
         elif action == "list_options":
             return list_options()
 
+        elif action == "pg_list":
+            return _action_pg_list(boomi_client, profile, **params)
+
+        elif action == "pg_get":
+            return _action_pg_get(boomi_client, profile, **params)
+
+        elif action == "pg_create":
+            return _action_pg_create(boomi_client, profile, **params)
+
+        elif action == "pg_update":
+            return _action_pg_update(boomi_client, profile, **params)
+
+        elif action == "pg_delete":
+            return _action_pg_delete(boomi_client, profile, **params)
+
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, list_options, org_list, org_get, org_create, org_update, org_delete"
+                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, list_options, "
+                        "pg_list, pg_get, pg_create, pg_update, pg_delete, "
+                        "org_list, org_get, org_create, org_update, org_delete"
             }
 
     except ApiError as e:

@@ -1,10 +1,11 @@
 """
 Troubleshooting MCP Tools for Boomi Platform.
 
-Provides 6 troubleshooting actions for failed executions:
+Provides 7 troubleshooting actions for failed executions:
 - error_details: Get error details from failed execution records + process logs
 - retry: Retry a failed execution with same or modified properties
 - reprocess: Re-execute a failed process with new execution request
+- cancel: Cancel a running execution
 - list_queues: List all queues for a runtime (async operation)
 - clear_queue: Clear messages from a stuck queue
 - move_queue: Move messages between queues
@@ -416,6 +417,30 @@ def handle_reprocess(sdk: Boomi, execution_id: str = None,
     )
 
 
+# ============================================================================
+# Action: cancel
+# ============================================================================
+
+def handle_cancel(sdk: Boomi, execution_id: str = None,
+                  config: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Cancel a running execution."""
+    if not execution_id:
+        return {"_success": False, "error": "execution_id is required for cancel action"}
+
+    try:
+        sdk.cancel_execution.cancel_execution(execution_id=execution_id)
+        return {
+            "_success": True,
+            "execution_id": execution_id,
+            "message": "Cancel request submitted",
+        }
+    except ApiError as e:
+        msg = _extract_api_error_msg(e)
+        return {"_success": False, "error": f"Cancel failed: {msg}"}
+    except Exception as e:
+        return {"_success": False, "error": f"Cancel failed: {e}"}
+
+
 def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
                                dynamic_properties: Dict[str, str] = None,
                                original_execution_id: str = None,
@@ -502,6 +527,8 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
 
 def handle_list_queues(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, Any]:
     """List all queues for a runtime using async operations."""
+    from boomi_mcp.utils.async_polling import poll_async_result
+
     if config is None:
         config = {}
 
@@ -515,39 +542,28 @@ def handle_list_queues(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, A
         return {"_success": False, "error": "config.timeout must be a numeric value (seconds)"}
 
     try:
-        # Step 1: Initiate async list queues operation
-        token_result = sdk.list_queues.async_get_list_queues(id_=atom_id)
+        response = poll_async_result(
+            initiate_fn=lambda: sdk.list_queues.async_get_list_queues(id_=atom_id),
+            poll_fn=lambda token: sdk.list_queues.async_token_list_queues(token=token),
+            timeout=timeout_seconds,
+            resource_label="queue list",
+        )
 
-        if not hasattr(token_result, "async_token") or not hasattr(token_result.async_token, "token"):
-            return {"_success": False, "error": "Failed to get async operation token"}
+        queues = []
+        if hasattr(response, "result") and response.result:
+            queues = _parse_queue_response(response.result)
 
-        token = token_result.async_token.token
+        return {
+            "_success": True,
+            "atom_id": atom_id,
+            "total_queues": len(queues),
+            "queues": queues,
+        }
 
-        # Step 2: Poll for results
-        start_time = time.time()
-        while time.time() - start_time < timeout_seconds:
-            try:
-                response = sdk.list_queues.async_token_list_queues(token=token)
-
-                if hasattr(response, "result") and response.result:
-                    queues = _parse_queue_response(response.result)
-                    return {
-                        "_success": True,
-                        "atom_id": atom_id,
-                        "total_queues": len(queues),
-                        "queues": queues,
-                    }
-
-                time.sleep(2)
-
-            except Exception as poll_error:
-                if "still processing" in str(poll_error).lower():
-                    time.sleep(2)
-                    continue
-                raise poll_error
-
-        return {"_success": False, "error": f"Timeout after {timeout_seconds}s waiting for queue list"}
-
+    except TimeoutError as e:
+        return {"_success": False, "error": str(e)}
+    except ValueError as e:
+        return {"_success": False, "error": str(e)}
     except ApiError as e:
         msg = _extract_api_error_msg(e)
         return {"_success": False, "error": f"Failed to list queues: {msg}"}
@@ -721,7 +737,7 @@ def troubleshoot_execution_action(
 
     Args:
         sdk: Authenticated Boomi SDK client
-        action: One of: error_details, retry, reprocess, list_queues, clear_queue
+        action: One of: error_details, retry, reprocess, cancel, list_queues, clear_queue
         execution_id: Execution ID (for error_details, retry, reprocess)
         process_id: Process ID (for error_details, reprocess)
         environment_id: Environment ID (for reprocess)
@@ -743,6 +759,8 @@ def troubleshoot_execution_action(
             return handle_reprocess(sdk, execution_id=execution_id,
                                     process_id=process_id,
                                     environment_id=environment_id, config=config)
+        elif action == "cancel":
+            return handle_cancel(sdk, execution_id=execution_id, config=config)
         elif action == "list_queues":
             return handle_list_queues(sdk, config=config)
         elif action == "clear_queue":
@@ -753,7 +771,7 @@ def troubleshoot_execution_action(
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "valid_actions": ["error_details", "retry", "reprocess", "list_queues", "clear_queue", "move_queue"],
+                "valid_actions": ["error_details", "retry", "reprocess", "cancel", "list_queues", "clear_queue", "move_queue"],
             }
 
     except ApiError as e:

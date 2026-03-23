@@ -2,7 +2,7 @@
 """
 Monitoring MCP Tools for Boomi Platform.
 
-Provides 9 read-only monitoring actions:
+Provides 17 read-only monitoring actions:
 - execution_records: Query execution history (like Process Reporting)
 - execution_logs: Request process log download URL
 - execution_artifacts: Request execution artifact download URL
@@ -12,6 +12,14 @@ Provides 9 read-only monitoring actions:
 - throughput: Account-level throughput metrics by date range
 - execution_metrics: Aggregated execution statistics (success rate, avg duration, top failures)
 - connector_documents: Document-level tracking for connector operations
+- download_connector_document: Download actual content of a connector document
+- execution_summary: Aggregated execution summary records (process_id, atom_id, date range)
+- document_counts: Document count metrics per account or account group
+- execution_counts: Execution count metrics per account or account group
+- api_usage_counts: API usage count metrics
+- connection_licensing_report: Generate connection licensing download report
+- custom_tracked_fields: Query custom tracked fields
+- edi_connector_records: Query EDI-standard connector records (x12, edifact, as2, etc.)
 """
 
 from typing import Dict, Any, Optional, List
@@ -1186,6 +1194,683 @@ def handle_download_connector_document(
 
 
 # ============================================================================
+# Action: execution_summary
+# ============================================================================
+
+def handle_execution_summary(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Query ExecutionSummaryRecord with optional filters."""
+    from boomi.models import (
+        ExecutionSummaryRecordQueryConfig,
+        ExecutionSummaryRecordQueryConfigQueryFilter,
+        ExecutionSummaryRecordSimpleExpression,
+        ExecutionSummaryRecordSimpleExpressionOperator,
+        ExecutionSummaryRecordSimpleExpressionProperty,
+        ExecutionSummaryRecordGroupingExpression,
+    )
+
+    limit = config_data.get("limit", 100)
+    expressions = []
+
+    # Date range filter (BETWEEN on TIMEBLOCK)
+    start_date = config_data.get("start_date")
+    end_date = config_data.get("end_date")
+    if start_date and end_date:
+        expressions.append(ExecutionSummaryRecordSimpleExpression(
+            operator=ExecutionSummaryRecordSimpleExpressionOperator.BETWEEN,
+            property=ExecutionSummaryRecordSimpleExpressionProperty.TIMEBLOCK,
+            argument=[start_date, end_date]
+        ))
+    elif start_date:
+        expressions.append(ExecutionSummaryRecordSimpleExpression(
+            operator=ExecutionSummaryRecordSimpleExpressionOperator.GREATERTHANOREQUAL,
+            property=ExecutionSummaryRecordSimpleExpressionProperty.TIMEBLOCK,
+            argument=[start_date]
+        ))
+
+    # Process ID filter
+    process_id = config_data.get("process_id")
+    if process_id:
+        expressions.append(ExecutionSummaryRecordSimpleExpression(
+            operator=ExecutionSummaryRecordSimpleExpressionOperator.EQUALS,
+            property=ExecutionSummaryRecordSimpleExpressionProperty.PROCESSID,
+            argument=[process_id]
+        ))
+
+    # Atom ID filter
+    atom_id = config_data.get("atom_id")
+    if atom_id:
+        expressions.append(ExecutionSummaryRecordSimpleExpression(
+            operator=ExecutionSummaryRecordSimpleExpressionOperator.EQUALS,
+            property=ExecutionSummaryRecordSimpleExpressionProperty.ATOMID,
+            argument=[atom_id]
+        ))
+
+    # Status filter
+    status = config_data.get("status")
+    if status:
+        expressions.append(ExecutionSummaryRecordSimpleExpression(
+            operator=ExecutionSummaryRecordSimpleExpressionOperator.EQUALS,
+            property=ExecutionSummaryRecordSimpleExpressionProperty.STATUS,
+            argument=[status.upper()]
+        ))
+
+    if not expressions:
+        return {
+            "_success": False,
+            "error": "At least one filter is required",
+            "hint": "Provide start_date/end_date, process_id, atom_id, or status"
+        }
+
+    if len(expressions) == 1:
+        query_filter = ExecutionSummaryRecordQueryConfigQueryFilter(expression=expressions[0])
+    else:
+        query_filter = ExecutionSummaryRecordQueryConfigQueryFilter(
+            expression=ExecutionSummaryRecordGroupingExpression(
+                operator="and",
+                nested_expression=expressions
+            )
+        )
+
+    query_config = ExecutionSummaryRecordQueryConfig(query_filter=query_filter)
+    result = boomi_client.execution_summary_record.query_execution_summary_record(
+        request_body=query_config
+    )
+
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_execution_summary(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = boomi_client.execution_summary_record.query_more_execution_summary_record(
+            request_body=query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_execution_summary(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "total_count": len(all_records),
+        "execution_summary_records": all_records
+    }
+
+
+def _convert_execution_summary(entries) -> List[Dict[str, Any]]:
+    """Convert SDK ExecutionSummaryRecord entries to flat dicts."""
+    records = []
+    for entry in entries:
+        record = {
+            "process_id": getattr(entry, 'process_id', None),
+            "process_name": getattr(entry, 'process_name', None),
+            "atom_id": getattr(entry, 'atom_id', None),
+            "atom_name": getattr(entry, 'atom_name', None),
+            "time_block": getattr(entry, 'time_block', None),
+            "status": getattr(entry, 'status', None),
+            "execution_count": getattr(entry, 'execution_count', None),
+            "elapsed_time": getattr(entry, 'elapsed_time', None),
+            "max_elapsed_time": getattr(entry, 'max_elapsed_time', None),
+            "inbound_doc_count": getattr(entry, 'inbound_doc_count', None),
+            "inbound_doc_size": getattr(entry, 'inbound_doc_size', None),
+            "outbound_doc_count": getattr(entry, 'outbound_doc_count', None),
+            "outbound_doc_size": getattr(entry, 'outbound_doc_size', None),
+            "return_doc_count": getattr(entry, 'return_doc_count', None),
+            "return_doc_size": getattr(entry, 'return_doc_size', None),
+            "launcher_id": getattr(entry, 'launcher_id', None),
+            "report_key": getattr(entry, 'report_key', None),
+            "account_id": getattr(entry, 'account_id', None),
+        }
+        records.append({k: v for k, v in record.items() if v is not None})
+    return records
+
+
+# ============================================================================
+# Action: document_counts
+# ============================================================================
+
+def handle_document_counts(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Query document count metrics. Dispatches to account or account-group service."""
+    account_group_id = config_data.get("account_group_id")
+
+    if account_group_id:
+        return _query_document_counts_group(boomi_client, config_data, account_group_id)
+    return _query_document_counts_account(boomi_client, config_data)
+
+
+def _query_document_counts_account(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    from boomi.models import (
+        DocumentCountAccountQueryConfig,
+        DocumentCountAccountQueryConfigQueryFilter,
+        DocumentCountAccountSimpleExpression,
+        DocumentCountAccountSimpleExpressionOperator,
+        DocumentCountAccountSimpleExpressionProperty,
+        DocumentCountAccountGroupingExpression,
+    )
+
+    limit = config_data.get("limit", 100)
+    expressions = []
+
+    start_date = config_data.get("start_date")
+    end_date = config_data.get("end_date")
+    if start_date and end_date:
+        expressions.append(DocumentCountAccountSimpleExpression(
+            operator=DocumentCountAccountSimpleExpressionOperator.BETWEEN,
+            property=DocumentCountAccountSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date, end_date]
+        ))
+    elif start_date:
+        expressions.append(DocumentCountAccountSimpleExpression(
+            operator=DocumentCountAccountSimpleExpressionOperator.GREATERTHANOREQUAL,
+            property=DocumentCountAccountSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date]
+        ))
+
+    if not expressions:
+        return {
+            "_success": False,
+            "error": "At least one filter is required (e.g. start_date)",
+            "hint": "Provide start_date/end_date for a date range"
+        }
+
+    if len(expressions) == 1:
+        query_filter = DocumentCountAccountQueryConfigQueryFilter(expression=expressions[0])
+    else:
+        query_filter = DocumentCountAccountQueryConfigQueryFilter(
+            expression=DocumentCountAccountGroupingExpression(
+                operator="and",
+                nested_expression=expressions
+            )
+        )
+
+    query_config = DocumentCountAccountQueryConfig(query_filter=query_filter)
+    result = boomi_client.document_count_account.query_document_count_account(
+        request_body=query_config
+    )
+
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_generic_results(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = boomi_client.document_count_account.query_more_document_count_account(
+            request_body=query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_generic_results(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "scope": "account",
+        "total_count": len(all_records),
+        "document_counts": all_records
+    }
+
+
+def _query_document_counts_group(boomi_client, config_data: Dict[str, Any], account_group_id: str) -> Dict[str, Any]:
+    from boomi.models import (
+        DocumentCountAccountGroupQueryConfig,
+        DocumentCountAccountGroupQueryConfigQueryFilter,
+        DocumentCountAccountGroupSimpleExpression,
+        DocumentCountAccountGroupSimpleExpressionOperator,
+        DocumentCountAccountGroupSimpleExpressionProperty,
+        DocumentCountAccountGroupGroupingExpression,
+    )
+
+    limit = config_data.get("limit", 100)
+    expressions = []
+
+    # Account group ID filter (required for group queries)
+    expressions.append(DocumentCountAccountGroupSimpleExpression(
+        operator=DocumentCountAccountGroupSimpleExpressionOperator.EQUALS,
+        property=DocumentCountAccountGroupSimpleExpressionProperty.ACCOUNTGROUPID,
+        argument=[account_group_id]
+    ))
+
+    start_date = config_data.get("start_date")
+    end_date = config_data.get("end_date")
+    if start_date and end_date:
+        expressions.append(DocumentCountAccountGroupSimpleExpression(
+            operator=DocumentCountAccountGroupSimpleExpressionOperator.BETWEEN,
+            property=DocumentCountAccountGroupSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date, end_date]
+        ))
+    elif start_date:
+        expressions.append(DocumentCountAccountGroupSimpleExpression(
+            operator=DocumentCountAccountGroupSimpleExpressionOperator.GREATERTHANOREQUAL,
+            property=DocumentCountAccountGroupSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date]
+        ))
+
+    if len(expressions) == 1:
+        query_filter = DocumentCountAccountGroupQueryConfigQueryFilter(expression=expressions[0])
+    else:
+        query_filter = DocumentCountAccountGroupQueryConfigQueryFilter(
+            expression=DocumentCountAccountGroupGroupingExpression(
+                operator="and",
+                nested_expression=expressions
+            )
+        )
+
+    query_config = DocumentCountAccountGroupQueryConfig(query_filter=query_filter)
+    result = boomi_client.document_count_account_group.query_document_count_account_group(
+        request_body=query_config
+    )
+
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_generic_results(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = boomi_client.document_count_account_group.query_more_document_count_account_group(
+            request_body=query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_generic_results(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "scope": "account_group",
+        "account_group_id": account_group_id,
+        "total_count": len(all_records),
+        "document_counts": all_records
+    }
+
+
+# ============================================================================
+# Action: execution_counts
+# ============================================================================
+
+def handle_execution_counts(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Query execution count metrics. Dispatches to account or account-group service."""
+    account_group_id = config_data.get("account_group_id")
+
+    if account_group_id:
+        return _query_execution_counts_group(boomi_client, config_data, account_group_id)
+    return _query_execution_counts_account(boomi_client, config_data)
+
+
+def _query_execution_counts_account(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    from boomi.models import (
+        ExecutionCountAccountQueryConfig,
+        ExecutionCountAccountQueryConfigQueryFilter,
+        ExecutionCountAccountSimpleExpression,
+        ExecutionCountAccountSimpleExpressionOperator,
+        ExecutionCountAccountSimpleExpressionProperty,
+        ExecutionCountAccountGroupingExpression,
+    )
+
+    limit = config_data.get("limit", 100)
+    expressions = []
+
+    start_date = config_data.get("start_date")
+    end_date = config_data.get("end_date")
+    if start_date and end_date:
+        expressions.append(ExecutionCountAccountSimpleExpression(
+            operator=ExecutionCountAccountSimpleExpressionOperator.BETWEEN,
+            property=ExecutionCountAccountSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date, end_date]
+        ))
+    elif start_date:
+        expressions.append(ExecutionCountAccountSimpleExpression(
+            operator=ExecutionCountAccountSimpleExpressionOperator.GREATERTHANOREQUAL,
+            property=ExecutionCountAccountSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date]
+        ))
+
+    if not expressions:
+        return {
+            "_success": False,
+            "error": "At least one filter is required (e.g. start_date)",
+            "hint": "Provide start_date/end_date for a date range"
+        }
+
+    if len(expressions) == 1:
+        query_filter = ExecutionCountAccountQueryConfigQueryFilter(expression=expressions[0])
+    else:
+        query_filter = ExecutionCountAccountQueryConfigQueryFilter(
+            expression=ExecutionCountAccountGroupingExpression(
+                operator="and",
+                nested_expression=expressions
+            )
+        )
+
+    query_config = ExecutionCountAccountQueryConfig(query_filter=query_filter)
+    result = boomi_client.execution_count_account.query_execution_count_account(
+        request_body=query_config
+    )
+
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_generic_results(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = boomi_client.execution_count_account.query_more_execution_count_account(
+            request_body=query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_generic_results(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "scope": "account",
+        "total_count": len(all_records),
+        "execution_counts": all_records
+    }
+
+
+def _query_execution_counts_group(boomi_client, config_data: Dict[str, Any], account_group_id: str) -> Dict[str, Any]:
+    from boomi.models import (
+        ExecutionCountAccountGroupQueryConfig,
+        ExecutionCountAccountGroupQueryConfigQueryFilter,
+        ExecutionCountAccountGroupSimpleExpression,
+        ExecutionCountAccountGroupSimpleExpressionOperator,
+        ExecutionCountAccountGroupSimpleExpressionProperty,
+        ExecutionCountAccountGroupGroupingExpression,
+    )
+
+    limit = config_data.get("limit", 100)
+    expressions = []
+
+    expressions.append(ExecutionCountAccountGroupSimpleExpression(
+        operator=ExecutionCountAccountGroupSimpleExpressionOperator.EQUALS,
+        property=ExecutionCountAccountGroupSimpleExpressionProperty.ACCOUNTGROUPID,
+        argument=[account_group_id]
+    ))
+
+    start_date = config_data.get("start_date")
+    end_date = config_data.get("end_date")
+    if start_date and end_date:
+        expressions.append(ExecutionCountAccountGroupSimpleExpression(
+            operator=ExecutionCountAccountGroupSimpleExpressionOperator.BETWEEN,
+            property=ExecutionCountAccountGroupSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date, end_date]
+        ))
+    elif start_date:
+        expressions.append(ExecutionCountAccountGroupSimpleExpression(
+            operator=ExecutionCountAccountGroupSimpleExpressionOperator.GREATERTHANOREQUAL,
+            property=ExecutionCountAccountGroupSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date]
+        ))
+
+    if len(expressions) == 1:
+        query_filter = ExecutionCountAccountGroupQueryConfigQueryFilter(expression=expressions[0])
+    else:
+        query_filter = ExecutionCountAccountGroupQueryConfigQueryFilter(
+            expression=ExecutionCountAccountGroupGroupingExpression(
+                operator="and",
+                nested_expression=expressions
+            )
+        )
+
+    query_config = ExecutionCountAccountGroupQueryConfig(query_filter=query_filter)
+    result = boomi_client.execution_count_account_group.query_execution_count_account_group(
+        request_body=query_config
+    )
+
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_generic_results(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = boomi_client.execution_count_account_group.query_more_execution_count_account_group(
+            request_body=query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_generic_results(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "scope": "account_group",
+        "account_group_id": account_group_id,
+        "total_count": len(all_records),
+        "execution_counts": all_records
+    }
+
+
+# ============================================================================
+# Action: api_usage_counts
+# ============================================================================
+
+def handle_api_usage_counts(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Query API usage count metrics."""
+    from boomi.models import (
+        ApiUsageCountQueryConfig,
+        ApiUsageCountQueryConfigQueryFilter,
+        ApiUsageCountSimpleExpression,
+        ApiUsageCountSimpleExpressionOperator,
+        ApiUsageCountSimpleExpressionProperty,
+        ApiUsageCountGroupingExpression,
+    )
+
+    limit = config_data.get("limit", 100)
+    expressions = []
+
+    start_date = config_data.get("start_date")
+    end_date = config_data.get("end_date")
+    if start_date and end_date:
+        expressions.append(ApiUsageCountSimpleExpression(
+            operator=ApiUsageCountSimpleExpressionOperator.BETWEEN,
+            property=ApiUsageCountSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date, end_date]
+        ))
+    elif start_date:
+        expressions.append(ApiUsageCountSimpleExpression(
+            operator=ApiUsageCountSimpleExpressionOperator.GREATERTHANOREQUAL,
+            property=ApiUsageCountSimpleExpressionProperty.PROCESSDATE,
+            argument=[start_date]
+        ))
+
+    if not expressions:
+        return {
+            "_success": False,
+            "error": "At least one filter is required (e.g. start_date)",
+            "hint": "Provide start_date/end_date for a date range"
+        }
+
+    if len(expressions) == 1:
+        query_filter = ApiUsageCountQueryConfigQueryFilter(expression=expressions[0])
+    else:
+        query_filter = ApiUsageCountQueryConfigQueryFilter(
+            expression=ApiUsageCountGroupingExpression(
+                operator="and",
+                nested_expression=expressions
+            )
+        )
+
+    query_config = ApiUsageCountQueryConfig(query_filter=query_filter)
+    result = boomi_client.api_usage_count.query_api_usage_count(
+        request_body=query_config
+    )
+
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_generic_results(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = boomi_client.api_usage_count.query_more_api_usage_count(
+            request_body=query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_generic_results(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "total_count": len(all_records),
+        "api_usage_counts": all_records
+    }
+
+
+# ============================================================================
+# Action: connection_licensing_report
+# ============================================================================
+
+def handle_connection_licensing_report(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a connection licensing report and return the download URL."""
+    # The SDK accepts None for an empty body — returns all connector classes
+    result = boomi_client.connection_licensing_report.create_connection_licensing_report(
+        request_body=None
+    )
+
+    url = getattr(result, 'url', None)
+    status_code = getattr(result, 'status_code', None)
+    message = getattr(result, 'message', None)
+
+    return {
+        "_success": True,
+        "url": url,
+        "status_code": status_code,
+        "message": message,
+        "hint": "Use the returned URL with Basic auth (GET) to download the CSV report"
+    }
+
+
+# ============================================================================
+# Action: custom_tracked_fields
+# ============================================================================
+
+def handle_custom_tracked_fields(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Query custom tracked fields (max 20 fields, no filters needed)."""
+    result = boomi_client.custom_tracked_field.query_custom_tracked_field(
+        request_body=None
+    )
+
+    limit = config_data.get("limit", 100)
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_generic_results(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = boomi_client.custom_tracked_field.query_more_custom_tracked_field(
+            request_body=query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_generic_results(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "total_count": len(all_records),
+        "custom_tracked_fields": all_records
+    }
+
+
+# ============================================================================
+# Action: edi_connector_records
+# ============================================================================
+
+# Mapping of EDI standard name -> (sdk service attr, query method, query_more method)
+_EDI_STANDARD_MAP = {
+    "as2": ("as2_connector_record", "query_as2_connector_record", "query_more_as2_connector_record"),
+    "edifact": ("edifact_connector_record", "query_edifact_connector_record", "query_more_edifact_connector_record"),
+    "edi_custom": ("edi_custom_connector_record", "query_edi_custom_connector_record", "query_more_edi_custom_connector_record"),
+    "hl7": ("hl7_connector_record", "query_hl7_connector_record", "query_more_hl7_connector_record"),
+    "odette": ("odette_connector_record", "query_odette_connector_record", "query_more_odette_connector_record"),
+    "oftp2": ("oftp2_connector_record", "query_oftp2_connector_record", "query_more_oftp2_connector_record"),
+    "rosettanet": ("rosetta_net_connector_record", "query_rosetta_net_connector_record", "query_more_rosetta_net_connector_record"),
+    "tradacoms": ("tradacoms_connector_record", "query_tradacoms_connector_record", "query_more_tradacoms_connector_record"),
+    "x12": ("x12_connector_record", "query_x12_connector_record", "query_more_x12_connector_record"),
+}
+
+
+def handle_edi_connector_records(boomi_client, config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Query EDI connector records for a specific standard."""
+    standard = config_data.get("standard", "").lower()
+    if not standard:
+        return {
+            "_success": False,
+            "error": "standard is required",
+            "valid_standards": sorted(_EDI_STANDARD_MAP.keys())
+        }
+
+    if standard not in _EDI_STANDARD_MAP:
+        return {
+            "_success": False,
+            "error": f"Unknown EDI standard: {standard}",
+            "valid_standards": sorted(_EDI_STANDARD_MAP.keys())
+        }
+
+    service_attr, query_method, query_more_method = _EDI_STANDARD_MAP[standard]
+    service = getattr(boomi_client, service_attr)
+    query_fn = getattr(service, query_method)
+    query_more_fn = getattr(service, query_more_method)
+
+    # Build a minimal query config — pass raw config_data as the request body
+    # The SDK accepts None/empty query configs for these services
+    result = query_fn(request_body=config_data.get("query_config"))
+
+    limit = config_data.get("limit", 100)
+    all_records = []
+    if hasattr(result, 'result') and result.result:
+        all_records.extend(_convert_generic_results(result.result))
+
+    query_token = getattr(result, 'query_token', None)
+    while query_token and len(all_records) < limit:
+        result = query_more_fn(request_body=query_token)
+        if hasattr(result, 'result') and result.result:
+            all_records.extend(_convert_generic_results(result.result))
+        query_token = getattr(result, 'query_token', None)
+
+    if len(all_records) > limit:
+        all_records = all_records[:limit]
+
+    return {
+        "_success": True,
+        "standard": standard,
+        "total_count": len(all_records),
+        "edi_connector_records": all_records
+    }
+
+
+# ============================================================================
+# Shared converter for generic SDK result objects
+# ============================================================================
+
+def _convert_generic_results(entries) -> List[Dict[str, Any]]:
+    """Convert SDK result entries to flat dicts using _map() or getattr fallback."""
+    records = []
+    for entry in entries:
+        if hasattr(entry, '_map'):
+            record = entry._map()
+        else:
+            record = {k: v for k, v in vars(entry).items() if not k.startswith('_')}
+        # Strip None values
+        records.append({k: v for k, v in record.items() if v is not None})
+    return records
+
+
+# ============================================================================
 # Consolidated Action Router
 # ============================================================================
 
@@ -1202,7 +1887,7 @@ def monitor_platform_action(
     Args:
         boomi_client: Authenticated Boomi SDK client
         profile: Profile name
-        action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events, certificates, throughput, execution_metrics, connector_documents
+        action: One of: execution_records, execution_logs, execution_artifacts, audit_logs, events, certificates, throughput, execution_metrics, connector_documents, download_connector_document, execution_summary, document_counts, execution_counts, api_usage_counts, connection_licensing_report, custom_tracked_fields, edi_connector_records
         config_data: Action-specific configuration dict
         creds: Boomi credentials dict (username, password) for downloading log/artifact content
 
@@ -1233,11 +1918,32 @@ def monitor_platform_action(
             return handle_connector_documents(boomi_client, config_data)
         elif action == "download_connector_document":
             return handle_download_connector_document(boomi_client, config_data, creds=creds)
+        elif action == "execution_summary":
+            return handle_execution_summary(boomi_client, config_data)
+        elif action == "document_counts":
+            return handle_document_counts(boomi_client, config_data)
+        elif action == "execution_counts":
+            return handle_execution_counts(boomi_client, config_data)
+        elif action == "api_usage_counts":
+            return handle_api_usage_counts(boomi_client, config_data)
+        elif action == "connection_licensing_report":
+            return handle_connection_licensing_report(boomi_client, config_data)
+        elif action == "custom_tracked_fields":
+            return handle_custom_tracked_fields(boomi_client, config_data)
+        elif action == "edi_connector_records":
+            return handle_edi_connector_records(boomi_client, config_data)
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "valid_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents", "download_connector_document"]
+                "valid_actions": [
+                    "execution_records", "execution_logs", "execution_artifacts",
+                    "audit_logs", "events", "certificates", "throughput",
+                    "execution_metrics", "connector_documents", "download_connector_document",
+                    "execution_summary", "document_counts", "execution_counts",
+                    "api_usage_counts", "connection_licensing_report",
+                    "custom_tracked_fields", "edi_connector_records",
+                ]
             }
 
     except ApiError as e:

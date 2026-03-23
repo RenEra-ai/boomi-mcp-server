@@ -454,3 +454,202 @@ class TestListDeduplication:
         assert "duplicates_removed" not in result
         assert "duplicate_component_ids" not in result
         assert "warning" not in result
+
+
+# ── Processing Group Tests ────────────────────────────────────────────
+
+from boomi_mcp.categories.components.trading_partners import (
+    _action_pg_list,
+    _action_pg_get,
+    _action_pg_create,
+    _action_pg_update,
+    _action_pg_delete,
+    _pg_to_dict,
+)
+
+
+def _make_pg(component_id="pg-001", component_name="Test Group",
+             folder_name="Home", deleted=False):
+    pg = SimpleNamespace(
+        component_id=component_id,
+        component_name=component_name,
+        folder_name=folder_name,
+        folder_id=None,
+        deleted=deleted,
+        description=None,
+        branch_id=None,
+        branch_name=None,
+        default_routing=None,
+        document_routing=None,
+        partner_routing=None,
+        trading_partners=None,
+    )
+    return pg
+
+
+class TestPgToDict:
+    def test_basic_conversion(self):
+        pg = _make_pg("pg-1", "My Group")
+        result = _pg_to_dict(pg)
+        assert result["component_id"] == "pg-1"
+        assert result["component_name"] == "My Group"
+        assert result["folder_name"] == "Home"
+
+    def test_deleted_flag(self):
+        pg = _make_pg(deleted=True)
+        result = _pg_to_dict(pg)
+        assert result["deleted"] is True
+
+
+class TestPgList:
+    def test_list_success(self):
+        sdk = MagicMock()
+        pg1 = _make_pg("pg-001", "Group A")
+        pg2 = _make_pg("pg-002", "Group B")
+        query_result = MagicMock()
+        query_result.result = [pg1, pg2]
+        query_result.query_token = None
+        sdk.trading_partner_processing_group.query_trading_partner_processing_group.return_value = query_result
+
+        result = _action_pg_list(sdk, "dev")
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+        assert len(result["processing_groups"]) == 2
+
+    def test_list_with_name_pattern(self):
+        sdk = MagicMock()
+        query_result = MagicMock()
+        query_result.result = []
+        query_result.query_token = None
+        sdk.trading_partner_processing_group.query_trading_partner_processing_group.return_value = query_result
+
+        result = _action_pg_list(sdk, "dev", name_pattern="EDI")
+        assert result["_success"] is True
+        assert result["total_count"] == 0
+
+    def test_list_pagination(self):
+        sdk = MagicMock()
+        pg1 = _make_pg("pg-001", "Group A")
+        pg2 = _make_pg("pg-002", "Group B")
+        page1 = MagicMock()
+        page1.result = [pg1]
+        page1.query_token = "tok-1"
+        page2 = MagicMock()
+        page2.result = [pg2]
+        page2.query_token = None
+        sdk.trading_partner_processing_group.query_trading_partner_processing_group.return_value = page1
+        sdk.trading_partner_processing_group.query_more_trading_partner_processing_group.return_value = page2
+
+        result = _action_pg_list(sdk, "dev")
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+
+
+class TestPgGet:
+    def test_missing_resource_id(self):
+        sdk = MagicMock()
+        result = _action_pg_get(sdk, "dev")
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]
+
+    def test_get_success(self):
+        sdk = MagicMock()
+        pg = _make_pg("pg-001", "Test Group")
+        sdk.trading_partner_processing_group.get_trading_partner_processing_group.return_value = pg
+
+        result = _action_pg_get(sdk, "dev", resource_id="pg-001")
+        assert result["_success"] is True
+        assert result["processing_group"]["component_id"] == "pg-001"
+        assert result["processing_group"]["component_name"] == "Test Group"
+
+
+class TestPgCreate:
+    def test_missing_name(self):
+        sdk = MagicMock()
+        result = _action_pg_create(sdk, "dev")
+        assert result["_success"] is False
+        assert "component_name" in result["error"]
+
+    def test_create_success(self):
+        sdk = MagicMock()
+        created = _make_pg("pg-new", "New Group")
+        sdk.trading_partner_processing_group.create_trading_partner_processing_group.return_value = created
+
+        result = _action_pg_create(sdk, "dev", component_name="New Group", folder_name="Home")
+        assert result["_success"] is True
+        assert result["processing_group"]["component_id"] == "pg-new"
+        assert result["processing_group"]["component_name"] == "New Group"
+
+    def test_create_with_name_alias(self):
+        sdk = MagicMock()
+        created = _make_pg("pg-alias", "Alias Group")
+        sdk.trading_partner_processing_group.create_trading_partner_processing_group.return_value = created
+
+        result = _action_pg_create(sdk, "dev", name="Alias Group")
+        assert result["_success"] is True
+
+
+class TestPgUpdate:
+    def test_missing_resource_id(self):
+        sdk = MagicMock()
+        result = _action_pg_update(sdk, "dev")
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]
+
+    def test_no_update_fields(self):
+        sdk = MagicMock()
+        result = _action_pg_update(sdk, "dev", resource_id="pg-001")
+        assert result["_success"] is False
+        assert "No valid update fields" in result["error"]
+
+    def test_update_success(self):
+        sdk = MagicMock()
+        updated = _make_pg("pg-001", "Updated Group")
+        sdk.trading_partner_processing_group.update_trading_partner_processing_group.return_value = updated
+
+        result = _action_pg_update(sdk, "dev", resource_id="pg-001", component_name="Updated Group")
+        assert result["_success"] is True
+        assert result["processing_group"]["component_name"] == "Updated Group"
+
+
+class TestPgDelete:
+    def test_missing_resource_id(self):
+        sdk = MagicMock()
+        result = _action_pg_delete(sdk, "dev")
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]
+
+    def test_delete_success(self):
+        sdk = MagicMock()
+        result = _action_pg_delete(sdk, "dev", resource_id="pg-001")
+        assert result["_success"] is True
+        assert "deleted" in result["message"].lower()
+        sdk.trading_partner_processing_group.delete_trading_partner_processing_group.assert_called_once_with(
+            id_="pg-001"
+        )
+
+
+# ── Processing Group ApiError Tests (via server.py router) ───────────
+
+
+class TestPgApiErrorHandling:
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.Boomi")
+    @patch("server.get_current_user", return_value="test-user")
+    def test_pg_get_api_error_sanitized(self, _user, mock_boomi_cls, _creds):
+        mock_sdk = MagicMock()
+        mock_sdk.trading_partner_processing_group.get_trading_partner_processing_group.side_effect = (
+            _fake_api_error(detail="Processing group not found")
+        )
+        mock_boomi_cls.return_value = mock_sdk
+
+        result = _call_tool(
+            server.manage_trading_partner,
+            profile="dev",
+            action="pg_get",
+            resource_id="bad-pg-id",
+        )
+
+        assert result["_success"] is False
+        assert "Processing group not found" in result["error"]
+        _assert_no_leak(result["error"])

@@ -20,6 +20,17 @@ from src.boomi_mcp.categories.environments import (
     _action_get,
     _action_get_extensions,
     _action_update_extensions,
+    _action_get_map_extension,
+    _action_bulk_get_map_extensions,
+    _action_list_map_udf_summaries,
+    _action_create_map_udf,
+    _action_get_map_udf,
+    _action_update_map_udf,
+    _action_delete_map_udf,
+    _action_list_map_external_components,
+    _action_list_environment_roles,
+    _action_create_environment_role,
+    _action_delete_environment_role,
 )
 
 
@@ -421,3 +432,381 @@ class TestVerifyExtensionsPersisted:
         }
         warnings = _verify_extensions_persisted(requested, verified)
         assert warnings == []
+
+
+# ── _action_get_map_extension ────────────────────────────────────────
+
+
+class TestActionGetMapExtension:
+    def test_returns_map_extension(self):
+        sdk = _make_sdk()
+        mock_result = MagicMock()
+        mock_result.id_ = "me-123"
+        mock_result.environment_id = "env-1"
+        mock_result.name = "Test Map"
+        sdk.environment_map_extension.get_environment_map_extension.return_value = mock_result
+
+        result = _action_get_map_extension(sdk, "dev", resource_id="me-123")
+        assert result["_success"] is True
+        assert "map_extension" in result
+        sdk.environment_map_extension.get_environment_map_extension.assert_called_once_with(id_="me-123")
+
+    def test_requires_resource_id(self):
+        sdk = _make_sdk()
+        result = _action_get_map_extension(sdk, "dev")
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]
+
+
+# ── _action_bulk_get_map_extensions ──────────────────────────────────
+
+
+class TestActionBulkGetMapExtensions:
+    def test_returns_bulk_responses(self):
+        sdk = _make_sdk()
+        item1 = MagicMock()
+        item1.id_ = "me-1"
+        item1.status_code = 200
+        item1.error_message = None
+        item1.result = MagicMock()
+        item1.result.name = "Map1"
+        item2 = MagicMock()
+        item2.id_ = "me-2"
+        item2.status_code = 200
+        item2.error_message = None
+        item2.result = MagicMock()
+        item2.result.name = "Map2"
+        bulk_resp = MagicMock()
+        bulk_resp.response = [item1, item2]
+        sdk.environment_map_extension.bulk_environment_map_extension.return_value = bulk_resp
+
+        result = _action_bulk_get_map_extensions(sdk, "dev", ids=["me-1", "me-2"])
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+        assert len(result["responses"]) == 2
+
+    def test_requires_ids_list(self):
+        sdk = _make_sdk()
+        result = _action_bulk_get_map_extensions(sdk, "dev")
+        assert result["_success"] is False
+        assert "ids" in result["error"]
+
+    def test_requires_ids_to_be_list(self):
+        sdk = _make_sdk()
+        result = _action_bulk_get_map_extensions(sdk, "dev", ids="not-a-list")
+        assert result["_success"] is False
+        assert "ids" in result["error"]
+
+
+# ── _action_list_map_udf_summaries ───────────────────────────────────
+
+
+class TestActionListMapUdfSummaries:
+    def test_queries_by_environment_id(self):
+        sdk = _make_sdk()
+        query_result = MagicMock()
+        query_result.result = [MagicMock(), MagicMock()]
+        query_result.query_token = None
+        sdk.environment_map_extension_user_defined_function_summary.query_environment_map_extension_user_defined_function_summary.return_value = query_result
+
+        result = _action_list_map_udf_summaries(sdk, "dev", environment_id="env-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+        sdk.environment_map_extension_user_defined_function_summary.query_environment_map_extension_user_defined_function_summary.assert_called_once()
+
+    def test_queries_by_extension_group_id(self):
+        sdk = _make_sdk()
+        query_result = MagicMock()
+        query_result.result = [MagicMock()]
+        query_result.query_token = None
+        sdk.environment_map_extension_user_defined_function_summary.query_environment_map_extension_user_defined_function_summary.return_value = query_result
+
+        result = _action_list_map_udf_summaries(sdk, "dev", extension_group_id="eg-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 1
+
+    def test_requires_filter(self):
+        sdk = _make_sdk()
+        result = _action_list_map_udf_summaries(sdk, "dev")
+        assert result["_success"] is False
+        assert "environment_id" in result["error"]
+
+    def test_paginates(self):
+        sdk = _make_sdk()
+        page1 = MagicMock()
+        page1.result = [MagicMock()]
+        page1.query_token = "token-1"
+        page2 = MagicMock()
+        page2.result = [MagicMock()]
+        page2.query_token = None
+        sdk.environment_map_extension_user_defined_function_summary.query_environment_map_extension_user_defined_function_summary.return_value = page1
+        sdk.environment_map_extension_user_defined_function_summary.query_more_environment_map_extension_user_defined_function_summary.return_value = page2
+
+        result = _action_list_map_udf_summaries(sdk, "dev", environment_id="env-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+
+
+# ── _action_create_map_udf ──────────────────────────────────────────
+
+
+SAMPLE_UDF_DATA = {
+    "name": "MyUDF",
+    "Inputs": {"Input": [{"name": "in1", "key": 1}]},
+    "Outputs": {"Output": [{"name": "out1", "key": 1}]},
+    "Steps": {"Step": [{
+        "position": 1, "id": "FUNCEXT--1", "type": "MathCeil",
+        "Configuration": {},
+        "Inputs": {"Input": [{"name": "in1", "key": 1}]},
+        "Outputs": {"Output": [{"name": "out1", "key": 1}]},
+    }]},
+    "Mappings": {"Mapping": [{"fromFunction": "0", "fromKey": 1, "toFunction": "1", "toKey": 1}]},
+}
+
+
+class TestActionCreateMapUdf:
+    def test_creates_udf(self):
+        sdk = _make_sdk()
+        mock_result = MagicMock()
+        mock_result.id_ = "udf-new"
+        sdk.environment_map_extension_user_defined_function.create_environment_map_extension_user_defined_function.return_value = mock_result
+
+        result = _action_create_map_udf(sdk, "dev", udf_data=SAMPLE_UDF_DATA)
+        assert result["_success"] is True
+        assert "udf" in result
+        sdk.environment_map_extension_user_defined_function.create_environment_map_extension_user_defined_function.assert_called_once()
+
+    def test_requires_udf_data(self):
+        sdk = _make_sdk()
+        result = _action_create_map_udf(sdk, "dev")
+        assert result["_success"] is False
+        assert "udf_data" in result["error"]
+
+    def test_requires_udf_data_dict(self):
+        sdk = _make_sdk()
+        result = _action_create_map_udf(sdk, "dev", udf_data="not-a-dict")
+        assert result["_success"] is False
+        assert "udf_data" in result["error"]
+
+
+# ── _action_get_map_udf ─────────────────────────────────────────────
+
+
+class TestActionGetMapUdf:
+    def test_returns_udf(self):
+        sdk = _make_sdk()
+        mock_result = MagicMock()
+        mock_result.id_ = "udf-1"
+        sdk.environment_map_extension_user_defined_function.get_environment_map_extension_user_defined_function.return_value = mock_result
+
+        result = _action_get_map_udf(sdk, "dev", resource_id="udf-1")
+        assert result["_success"] is True
+        assert "udf" in result
+        sdk.environment_map_extension_user_defined_function.get_environment_map_extension_user_defined_function.assert_called_once_with(id_="udf-1")
+
+    def test_requires_resource_id(self):
+        sdk = _make_sdk()
+        result = _action_get_map_udf(sdk, "dev")
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]
+
+
+# ── _action_update_map_udf ──────────────────────────────────────────
+
+
+class TestActionUpdateMapUdf:
+    def test_updates_udf(self):
+        sdk = _make_sdk()
+        mock_result = MagicMock()
+        mock_result.id_ = "udf-1"
+        sdk.environment_map_extension_user_defined_function.update_environment_map_extension_user_defined_function.return_value = mock_result
+
+        udf_data = dict(SAMPLE_UDF_DATA)
+        udf_data["name"] = "Updated"
+        result = _action_update_map_udf(sdk, "dev", resource_id="udf-1", udf_data=udf_data)
+        assert result["_success"] is True
+        assert "udf" in result
+        sdk.environment_map_extension_user_defined_function.update_environment_map_extension_user_defined_function.assert_called_once()
+
+    def test_requires_resource_id(self):
+        sdk = _make_sdk()
+        result = _action_update_map_udf(sdk, "dev", udf_data={"name": "X"})
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]
+
+    def test_requires_udf_data(self):
+        sdk = _make_sdk()
+        result = _action_update_map_udf(sdk, "dev", resource_id="udf-1")
+        assert result["_success"] is False
+        assert "udf_data" in result["error"]
+
+
+# ── _action_delete_map_udf ──────────────────────────────────────────
+
+
+class TestActionDeleteMapUdf:
+    def test_deletes_udf(self):
+        sdk = _make_sdk()
+        sdk.environment_map_extension_user_defined_function.delete_environment_map_extension_user_defined_function.return_value = None
+
+        result = _action_delete_map_udf(sdk, "dev", resource_id="udf-1")
+        assert result["_success"] is True
+        assert "udf-1" in result["message"]
+        sdk.environment_map_extension_user_defined_function.delete_environment_map_extension_user_defined_function.assert_called_once_with(id_="udf-1")
+
+    def test_requires_resource_id(self):
+        sdk = _make_sdk()
+        result = _action_delete_map_udf(sdk, "dev")
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]
+
+
+# ── _action_list_map_external_components ─────────────────────────────
+
+
+class TestActionListMapExternalComponents:
+    def test_queries_by_eme_id(self):
+        sdk = _make_sdk()
+        query_result = MagicMock()
+        query_result.result = [MagicMock(), MagicMock()]
+        query_result.query_token = None
+        sdk.environment_map_extension_external_component.query_environment_map_extension_external_component.return_value = query_result
+
+        result = _action_list_map_external_components(sdk, "dev", environment_map_extension_id="eme-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+
+    def test_queries_by_component_id(self):
+        sdk = _make_sdk()
+        query_result = MagicMock()
+        query_result.result = [MagicMock()]
+        query_result.query_token = None
+        sdk.environment_map_extension_external_component.query_environment_map_extension_external_component.return_value = query_result
+
+        result = _action_list_map_external_components(sdk, "dev", component_id="comp-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 1
+
+    def test_requires_filter(self):
+        sdk = _make_sdk()
+        result = _action_list_map_external_components(sdk, "dev")
+        assert result["_success"] is False
+        assert "environment_map_extension_id" in result["error"]
+
+    def test_paginates(self):
+        sdk = _make_sdk()
+        page1 = MagicMock()
+        page1.result = [MagicMock()]
+        page1.query_token = "token-1"
+        page2 = MagicMock()
+        page2.result = [MagicMock(), MagicMock()]
+        page2.query_token = None
+        sdk.environment_map_extension_external_component.query_environment_map_extension_external_component.return_value = page1
+        sdk.environment_map_extension_external_component.query_more_environment_map_extension_external_component.return_value = page2
+
+        result = _action_list_map_external_components(sdk, "dev", environment_map_extension_id="eme-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 3
+
+
+# ── _action_list_environment_roles ───────────────────────────────────
+
+
+class TestActionListEnvironmentRoles:
+    def test_queries_by_environment_id(self):
+        sdk = _make_sdk()
+        role1 = MagicMock()
+        role1.environment_id = "env-1"
+        role1.role_id = "role-1"
+        role1.id_ = "env-1-role-1"
+        query_result = MagicMock()
+        query_result.result = [role1]
+        query_result.query_token = None
+        sdk.environment_role.query_environment_role.return_value = query_result
+
+        result = _action_list_environment_roles(sdk, "dev", environment_id="env-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 1
+        sdk.environment_role.query_environment_role.assert_called_once()
+
+    def test_queries_by_role_id(self):
+        sdk = _make_sdk()
+        query_result = MagicMock()
+        query_result.result = [MagicMock()]
+        query_result.query_token = None
+        sdk.environment_role.query_environment_role.return_value = query_result
+
+        result = _action_list_environment_roles(sdk, "dev", role_id="role-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 1
+
+    def test_requires_filter(self):
+        sdk = _make_sdk()
+        result = _action_list_environment_roles(sdk, "dev")
+        assert result["_success"] is False
+        assert "environment_id" in result["error"]
+
+    def test_paginates(self):
+        sdk = _make_sdk()
+        page1 = MagicMock()
+        page1.result = [MagicMock()]
+        page1.query_token = "token-1"
+        page2 = MagicMock()
+        page2.result = [MagicMock()]
+        page2.query_token = None
+        sdk.environment_role.query_environment_role.return_value = page1
+        sdk.environment_role.query_more_environment_role.return_value = page2
+
+        result = _action_list_environment_roles(sdk, "dev", environment_id="env-1")
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+
+
+# ── _action_create_environment_role ──────────────────────────────────
+
+
+class TestActionCreateEnvironmentRole:
+    def test_creates_role(self):
+        sdk = _make_sdk()
+        mock_result = MagicMock()
+        mock_result.environment_id = "env-1"
+        mock_result.role_id = "role-1"
+        mock_result.id_ = "env-1-role-1"
+        sdk.environment_role.create_environment_role.return_value = mock_result
+
+        result = _action_create_environment_role(sdk, "dev", environment_id="env-1", role_id="role-1")
+        assert result["_success"] is True
+        assert "environment_role" in result
+        sdk.environment_role.create_environment_role.assert_called_once()
+
+    def test_requires_environment_id(self):
+        sdk = _make_sdk()
+        result = _action_create_environment_role(sdk, "dev", role_id="role-1")
+        assert result["_success"] is False
+        assert "environment_id" in result["error"]
+
+    def test_requires_role_id(self):
+        sdk = _make_sdk()
+        result = _action_create_environment_role(sdk, "dev", environment_id="env-1")
+        assert result["_success"] is False
+        assert "role_id" in result["error"]
+
+
+# ── _action_delete_environment_role ──────────────────────────────────
+
+
+class TestActionDeleteEnvironmentRole:
+    def test_deletes_role(self):
+        sdk = _make_sdk()
+        sdk.environment_role.delete_environment_role.return_value = None
+
+        result = _action_delete_environment_role(sdk, "dev", resource_id="env-1-role-1")
+        assert result["_success"] is True
+        assert "env-1-role-1" in result["message"]
+        sdk.environment_role.delete_environment_role.assert_called_once_with(id_="env-1-role-1")
+
+    def test_requires_resource_id(self):
+        sdk = _make_sdk()
+        result = _action_delete_environment_role(sdk, "dev")
+        assert result["_success"] is False
+        assert "resource_id" in result["error"]

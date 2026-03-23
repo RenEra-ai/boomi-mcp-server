@@ -1735,7 +1735,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "manage_environments": {
             "category": "Environments & Runtimes",
             "description": "Manage environments and their configuration extensions",
-            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions", "query_extensions", "stats", "get_properties", "update_properties"],
+            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions", "query_extensions", "stats", "get_properties", "update_properties", "get_map_extension", "bulk_get_map_extensions", "list_map_udf_summaries", "create_map_udf", "get_map_udf", "update_map_udf", "delete_map_udf", "list_map_external_components", "list_environment_roles", "create_environment_role", "delete_environment_role"],
             "read_only": False,
             "implemented": True,
             "parameters": {
@@ -1758,8 +1758,23 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         },
         "manage_runtimes": {
             "category": "Environments & Runtimes",
-            "description": "Manage Boomi runtimes — cloud attachments, environment bindings, restart, Java upgrades, installer tokens, and private runtime clouds (enterprise)",
-            "actions": ["list", "get", "create", "update", "delete", "attach", "detach", "list_attachments", "restart", "configure_java", "create_installer_token", "available_clouds", "cloud_list", "cloud_get", "cloud_create", "cloud_update", "cloud_delete", "diagnostics"],
+            "description": "Manage Boomi runtimes — cloud attachments, environment bindings, restart, Java upgrades, release schedules, observability, security, and more",
+            "actions": [
+                "list", "get", "create", "update", "delete", "attach", "detach", "list_attachments",
+                "restart", "configure_java", "create_installer_token",
+                "available_clouds", "cloud_list", "cloud_get", "cloud_create", "cloud_update", "cloud_delete",
+                "diagnostics",
+                "get_release_schedule", "create_release_schedule", "update_release_schedule", "delete_release_schedule",
+                "get_observability_settings", "update_observability_settings",
+                "get_startup_properties", "reset_counters", "purge",
+                "get_security_policies", "update_security_policies",
+                "get_connector_versions", "offboard_node", "refresh_secrets_manager",
+                "get_account_cloud_attachment_properties", "update_account_cloud_attachment_properties",
+                "list_account_cloud_attachment_quotas", "get_account_cloud_attachment_quota",
+                "create_account_cloud_attachment_quota", "update_account_cloud_attachment_quota",
+                "delete_account_cloud_attachment_quota",
+                "get_cloud_attachment_properties", "update_cloud_attachment_properties",
+            ],
             "read_only": False,
             "implemented": True,
             "parameters": {
@@ -1784,10 +1799,14 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         # === Category 3: Deployment & B2B (3 tools) ===
         "manage_deployment": {
             "category": "Deployment & B2B",
-            "description": "Manage deployment packages and deploy to environments",
+            "description": "Manage deployment packages, deploy to environments, and manage component/process attachments",
             "actions": [
                 "list_packages", "get_package", "create_package", "delete_package",
                 "deploy", "undeploy", "list_deployments", "get_deployment",
+                "list_component_atom_attachments", "attach_component_atom", "detach_component_atom",
+                "list_component_environment_attachments", "attach_component_environment", "detach_component_environment",
+                "list_process_atom_attachments", "attach_process_atom", "detach_process_atom",
+                "attach_process_environment", "get_package_manifest",
             ],
             "read_only": False,
             "implemented": True,
@@ -1810,11 +1829,12 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         },
         "manage_trading_partner": {
             "category": "Deployment & B2B",
-            "description": "Manage B2B/EDI trading partners (all 7 standards) and organizations",
+            "description": "Manage B2B/EDI trading partners (all 7 standards), organizations, and processing groups",
             "actions": [
                 "list", "get", "create", "update", "delete",
                 "analyze_usage", "list_options",
                 "org_list", "org_get", "org_create", "org_update", "org_delete",
+                "pg_list", "pg_get", "pg_create", "pg_update", "pg_delete",
             ],
             "read_only": False,
             "parameters": {
@@ -1873,21 +1893,20 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         },
         "manage_schedules": {
             "category": "Execution",
-            "description": "Manage process schedules — list, get, update, delete cron-based schedules",
-            "actions": ["list", "get", "update", "delete"],
+            "description": "Manage process schedules — cron-based schedules and schedule enable/disable status",
+            "actions": ["list", "get", "update", "delete", "list_status", "get_status", "enable", "disable"],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — list | get | update | delete",
+                "action": "str (required) — list | get | update | delete | list_status | get_status | enable | disable",
                 "resource_id": "str (optional) — base64 schedule ID",
                 "config": "JSON str (optional) — process_id, atom_id, cron, max_retry",
             },
             "examples": [
                 'manage_schedules(profile="prod", action="list")',
-                'manage_schedules(profile="prod", action="list", config=\'{"process_id": "abc-123"}\')',
-                'manage_schedules(profile="prod", action="get", config=\'{"process_id": "abc-123", "atom_id": "atom-456"}\')',
                 'manage_schedules(profile="prod", action="update", resource_id="Q1BTLi4u", config=\'{"cron": "0 9 * * *"}\')',
-                'manage_schedules(profile="prod", action="delete", resource_id="Q1BTLi4u")',
+                'manage_schedules(profile="prod", action="list_status")',
+                'manage_schedules(profile="prod", action="enable", config=\'{"process_id": "abc-123", "atom_id": "atom-456"}\')',
             ],
             "sdk_examples_covered": [
                 "manage_process_schedules.py",
@@ -1913,8 +1932,8 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
 
         "troubleshoot_execution": {
             "category": "Execution",
-            "description": "Troubleshoot failed executions — error details, retry, reprocess, queue management",
-            "actions": ["error_details", "retry", "reprocess", "list_queues", "clear_queue", "move_queue"],
+            "description": "Troubleshoot failed executions — error details, retry, reprocess, cancel, queue management",
+            "actions": ["error_details", "retry", "reprocess", "cancel", "list_queues", "clear_queue", "move_queue"],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
@@ -1937,8 +1956,14 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         # === Category 5: Monitoring (1 tool) ===
         "monitor_platform": {
             "category": "Monitoring",
-            "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, connector documents, and connector document downloads",
-            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents", "download_connector_document"],
+            "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, connector documents, summaries, counts, API usage, licensing, and EDI records",
+            "actions": [
+                "execution_records", "execution_logs", "execution_artifacts",
+                "audit_logs", "events", "certificates", "throughput",
+                "execution_metrics", "connector_documents", "download_connector_document",
+                "execution_summary", "document_counts", "execution_counts",
+                "api_usage_counts", "connection_licensing_report", "custom_tracked_fields", "edi_connector_records",
+            ],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
@@ -1995,13 +2020,17 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         # === Category 7: Administration (2 tools) ===
         "manage_shared_resources": {
             "category": "Administration",
-            "description": "Manage shared web servers and communication channels on Boomi runtimes",
-            "actions": ["list_web_servers", "update_web_server", "list_channels", "get_channel", "create_channel"],
+            "description": "Manage shared web servers, communication channels, and server information on Boomi runtimes",
+            "actions": [
+                "list_web_servers", "update_web_server", "get_web_server",
+                "list_channels", "get_channel", "create_channel", "update_channel", "delete_channel",
+                "get_server_info", "update_server_info",
+            ],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — list_web_servers | update_web_server | list_channels | get_channel | create_channel",
-                "resource_id": "str (optional) — atom ID (web server actions) or channel ID (get_channel)",
+                "action": "str (required) — list_web_servers | get_web_server | update_web_server | list_channels | get_channel | create_channel | update_channel | delete_channel | get_server_info | update_server_info",
+                "resource_id": "str (optional) — atom ID (web server/server info actions) or channel ID (channel actions)",
                 "config": "JSON str (optional) — action-specific parameters",
             },
             "examples": [
@@ -2012,19 +2041,24 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         },
         "manage_account": {
             "category": "Administration",
-            "description": "Manage Boomi account administration — roles and component branches",
-            "actions": ["list_roles", "manage_role", "list_branches", "manage_branch"],
+            "description": "Manage Boomi account administration — roles, branches, user roles, federations, SSO",
+            "actions": [
+                "list_roles", "manage_role", "list_branches", "manage_branch",
+                "list_assignable_roles", "list_user_roles", "assign_user_role", "remove_user_role",
+                "list_user_federations", "create_user_federation", "delete_user_federation", "get_sso_config",
+            ],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — list_roles | manage_role | list_branches | manage_branch",
-                "resource_id": "str (optional) — role or branch ID (required for get/update/delete)",
-                "config": "JSON str (optional) — action-specific config (operation, name, privileges, etc.)",
+                "action": "str (required)",
+                "resource_id": "str (optional) — role, branch, or association ID",
+                "config": "JSON str (optional) — action-specific config",
             },
             "examples": [
                 'manage_account(profile="prod", action="list_roles")',
-                'manage_account(profile="prod", action="manage_role", config=\'{"operation": "create", "name": "API Dev", "privileges": ["API", "EXECUTE"]}\')',
-                'manage_account(profile="prod", action="list_branches")',
+                'manage_account(profile="prod", action="list_assignable_roles")',
+                'manage_account(profile="prod", action="assign_user_role", config=\'{"user_id": "usr-1", "role_id": "role-2"}\')',
+                'manage_account(profile="prod", action="get_sso_config")',
             ],
         },
 
@@ -2069,7 +2103,6 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'invoke_boomi_api(profile="prod", endpoint="Component/abc-123", method="GET", accept="xml")',
             ],
             "covers_uncovered_apis": [
-                "Integration Packs",
                 "Queue Management (async)",
                 "Secrets Rotation",
                 "Document Reprocessing",
@@ -2084,6 +2117,76 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "read_only": True,
             "parameters": {},
             "note": "No parameters needed. Returns this catalog.",
+        },
+
+        # === Category 8b: Account Group Management ===
+        "manage_account_groups": {
+            "category": "Administration",
+            "description": "Manage account groups — CRUD, account associations, user roles, integration pack sharing",
+            "actions": [
+                "list", "get", "create", "update", "delete",
+                "list_accounts", "add_account", "remove_account",
+                "list_user_roles", "assign_user_role", "remove_user_role",
+                "list_integration_packs", "share_integration_pack", "unshare_integration_pack",
+            ],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "resource_id": "str (optional) — group or association ID",
+                "config": "JSON str (optional) — action-specific parameters",
+            },
+            "examples": [
+                'manage_account_groups(profile="prod", action="list")',
+                'manage_account_groups(profile="prod", action="create", config=\'{"name": "Team A"}\')',
+                'manage_account_groups(profile="prod", action="add_account", config=\'{"account_group_id": "grp-1", "account_id": "acc-2"}\')',
+            ],
+        },
+
+        # === Category 9: Listener Management ===
+        "manage_listeners": {
+            "category": "Runtime Operations",
+            "description": "Manage Boomi listener processes — status, pause, resume, restart",
+            "actions": ["status", "pause", "resume", "restart"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — status | pause | resume | restart",
+                "resource_id": "str (required) — container/atom ID",
+                "config": "JSON str (optional) — listener_id to target single listener",
+            },
+            "examples": [
+                'manage_listeners(profile="prod", action="status", resource_id="atom-123")',
+                'manage_listeners(profile="prod", action="pause", resource_id="atom-123", config=\'{"listener_id": "lid-456"}\')',
+                'manage_listeners(profile="prod", action="restart", resource_id="atom-123")',
+            ],
+        },
+
+        # === Category 10: Integration Pack Management ===
+        "manage_integration_packs": {
+            "category": "Administration",
+            "description": "Manage integration packs — publisher packs, instances, releases, attachments",
+            "actions": [
+                "list_packs", "get_pack",
+                "list_publisher_packs", "get_publisher_pack", "create_publisher_pack",
+                "update_publisher_pack", "delete_publisher_pack",
+                "list_instances", "install_instance", "uninstall_instance",
+                "release_pack", "update_release", "get_release_status",
+                "list_atom_attachments", "attach_atom", "detach_atom",
+                "list_environment_attachments", "attach_environment", "detach_environment",
+            ],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "resource_id": "str (optional) — pack, instance, or attachment ID",
+                "config": "JSON str (optional) — action-specific parameters",
+            },
+            "examples": [
+                'manage_integration_packs(profile="prod", action="list_packs")',
+                'manage_integration_packs(profile="prod", action="get_pack", resource_id="pack-123")',
+                'manage_integration_packs(profile="prod", action="install_instance", config=\'{"integration_pack_id": "pack-123"}\')',
+            ],
         },
 
         # === Credential Management ===

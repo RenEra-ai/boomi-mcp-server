@@ -1,7 +1,7 @@
 """
 Runtime Management MCP Tools for Boomi Platform.
 
-Provides 18 runtime management actions:
+Provides 45 runtime management actions:
 - list: List runtimes with optional type/status/name filters
 - get: Get single runtime details
 - create: Create a cloud attachment (requires cloud_id from available_clouds or cloud_list)
@@ -20,6 +20,33 @@ Provides 18 runtime management actions:
 - cloud_update: Update private runtime cloud settings
 - cloud_delete: Delete private runtime cloud
 - diagnostics: Get combined runtime diagnostics (counters, disk space, listener status)
+- get_release_schedule: Get the release schedule for a runtime
+- create_release_schedule: Create a release schedule for a runtime
+- update_release_schedule: Update the release schedule for a runtime
+- delete_release_schedule: Delete the release schedule for a runtime
+- get_observability_settings: Get observability settings for a runtime (async)
+- update_observability_settings: Update observability settings for a runtime
+- get_security_policies: Get security policies for a runtime cluster/cloud (async)
+- update_security_policies: Update security policies for a runtime cluster/cloud
+- get_startup_properties: Get startup properties for a runtime
+- reset_counters: Reset counters for a runtime
+- purge: Purge processed data from a runtime cloud attachment
+- get_connector_versions: Get connector versions for a runtime
+- offboard_node: Offboard a node from a runtime cluster/cloud
+- refresh_secrets_manager: Refresh secrets manager cache
+- get_account_cloud_attachment_properties: Get account cloud attachment properties (async)
+- update_account_cloud_attachment_properties: Update account cloud attachment properties
+- list_account_cloud_attachment_summaries: Query account cloud attachment summaries
+- get_account_cloud_attachment_summary: Get a single account cloud attachment summary
+- list_account_cloud_attachment_quotas: Bulk-get account cloud attachment quotas
+- get_account_cloud_attachment_quota: Get a single account cloud attachment quota
+- create_account_cloud_attachment_quota: Create an account cloud attachment quota
+- update_account_cloud_attachment_quota: Update an account cloud attachment quota
+- delete_account_cloud_attachment_quota: Delete an account cloud attachment quota
+- get_cloud_attachment_properties: Get cloud attachment properties (async)
+- update_cloud_attachment_properties: Update cloud attachment properties
+- get_account_cloud_attachment_defaults: Get account cloud attachment property defaults (async)
+- update_account_cloud_attachment_defaults: Update account cloud attachment property defaults
 """
 
 import re
@@ -28,6 +55,13 @@ from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
 from boomi.net.transport.api_error import ApiError
+from boomi.net.transport.serializer import Serializer
+from boomi.net.environment.environment import Environment
+
+
+def _get_env_url():
+    """Get the default Boomi API base URL."""
+    return Environment.DEFAULT.url
 from boomi.models import (
     Atom,
     AtomQueryConfig,
@@ -62,7 +96,13 @@ from boomi.models import (
     ListenerStatusSimpleExpression,
     ListenerStatusSimpleExpressionOperator,
     ListenerStatusSimpleExpressionProperty,
+    RuntimeReleaseSchedule,
+    AtomCounters,
+    AtomPurge,
+    NodeOffboard,
+    SecretsManagerRefreshRequest,
 )
+from boomi_mcp.utils.async_polling import poll_async_result
 
 
 # ============================================================================
@@ -1141,6 +1181,814 @@ def _action_diagnostics(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
 
 # ============================================================================
+# Release Schedule Actions
+# ============================================================================
+
+def _action_get_release_schedule(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get the release schedule for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_release_schedule' action"}
+
+    result = sdk.runtime_release_schedule.get_runtime_release_schedule(id_=resource_id)
+
+    schedule = {
+        "atom_id": getattr(result, 'atom_id', ''),
+        "schedule_type": _enum_str(getattr(result, 'schedule_type', '')),
+    }
+    for attr, key in [('day_of_week', 'day_of_week'), ('hour_of_day', 'hour_of_day'), ('time_zone', 'time_zone')]:
+        val = getattr(result, attr, None)
+        if val is not None:
+            schedule[key] = val
+
+    return {"_success": True, "release_schedule": schedule}
+
+
+def _action_create_release_schedule(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Create a release schedule for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    schedule_type = kwargs.get("schedule_type")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (atom_id) is required for 'create_release_schedule' action"}
+    if not schedule_type:
+        return {
+            "_success": False,
+            "error": "config.schedule_type is required (NEVER, FIRST, or LAST)",
+        }
+
+    schedule_kwargs = {"atom_id": resource_id, "schedule_type": schedule_type.upper()}
+
+    for key in ("day_of_week", "time_zone"):
+        val = kwargs.get(key)
+        if val:
+            schedule_kwargs[key] = val
+
+    hour = kwargs.get("hour_of_day")
+    if hour is not None:
+        parsed, err = _parse_int(hour, "hour_of_day")
+        if err:
+            return {"_success": False, "error": err}
+        schedule_kwargs["hour_of_day"] = parsed
+
+    request = RuntimeReleaseSchedule(**schedule_kwargs)
+    result = sdk.runtime_release_schedule.create_runtime_release_schedule(request_body=request)
+
+    schedule = {
+        "atom_id": getattr(result, 'atom_id', ''),
+        "schedule_type": _enum_str(getattr(result, 'schedule_type', '')),
+    }
+    for attr, key in [('day_of_week', 'day_of_week'), ('hour_of_day', 'hour_of_day'), ('time_zone', 'time_zone')]:
+        val = getattr(result, attr, None)
+        if val is not None:
+            schedule[key] = val
+
+    return {"_success": True, "release_schedule": schedule}
+
+
+def _action_update_release_schedule(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update the release schedule for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'update_release_schedule' action"}
+
+    schedule_kwargs = {"atom_id": resource_id}
+
+    schedule_type = kwargs.get("schedule_type")
+    if schedule_type:
+        schedule_kwargs["schedule_type"] = schedule_type.upper()
+
+    for key in ("day_of_week", "time_zone"):
+        val = kwargs.get(key)
+        if val:
+            schedule_kwargs[key] = val
+
+    hour = kwargs.get("hour_of_day")
+    if hour is not None:
+        parsed, err = _parse_int(hour, "hour_of_day")
+        if err:
+            return {"_success": False, "error": err}
+        schedule_kwargs["hour_of_day"] = parsed
+
+    request = RuntimeReleaseSchedule(**schedule_kwargs)
+    result = sdk.runtime_release_schedule.update_runtime_release_schedule(
+        id_=resource_id, request_body=request
+    )
+
+    schedule = {
+        "atom_id": getattr(result, 'atom_id', ''),
+        "schedule_type": _enum_str(getattr(result, 'schedule_type', '')),
+    }
+    for attr, key in [('day_of_week', 'day_of_week'), ('hour_of_day', 'hour_of_day'), ('time_zone', 'time_zone')]:
+        val = getattr(result, attr, None)
+        if val is not None:
+            schedule[key] = val
+
+    return {"_success": True, "release_schedule": schedule}
+
+
+def _action_delete_release_schedule(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Delete the release schedule for a runtime (resets to NEVER)."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'delete_release_schedule' action"}
+
+    sdk.runtime_release_schedule.delete_runtime_release_schedule(id_=resource_id)
+
+    return {
+        "_success": True,
+        "runtime_id": resource_id,
+        "message": "Release schedule deleted (reset to NEVER).",
+    }
+
+
+# ============================================================================
+# Observability Settings Actions (async reads)
+# ============================================================================
+
+def _action_get_observability_settings(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get observability settings for a runtime (async operation).
+
+    Uses raw API call for the token poll because the SDK model deserialization
+    can fail when RuntimeObservabilitySettings requires runtime_id.
+    """
+    import json as json_mod
+
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_observability_settings' action"}
+
+    timeout = kwargs.get("timeout", 60)
+
+    # Step 1: Get async token
+    token_result = sdk.runtime_observability_settings.async_get_runtime_observability_settings(
+        id_=resource_id
+    )
+
+    if not hasattr(token_result, 'async_token') or not token_result.async_token:
+        return {"_success": False, "error": "Failed to get async token for observability settings"}
+
+    token = token_result.async_token.token
+
+    # Step 2: Poll with raw API to avoid SDK deserialization errors
+    svc = sdk.runtime_observability_settings
+    base = svc.base_url or _get_env_url()
+    poll_url = f"{base.rstrip('/')}/async/RuntimeObservabilitySettings/response/{token}"
+
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            ser = Serializer(poll_url, [svc.get_access_token(), svc.get_basic_auth()])
+            ser = ser.add_header("Accept", "application/json")
+            serialized = ser.serialize().set_method("GET")
+            response, status, _ = svc.send_request(serialized)
+
+            if isinstance(response, (bytes, bytearray)):
+                response = response.decode("utf-8")
+            data = json_mod.loads(response) if isinstance(response, str) else response
+
+            if data and isinstance(data, dict) and data.get("result"):
+                settings_list = data["result"] if isinstance(data["result"], list) else [data["result"]]
+                return {
+                    "_success": True,
+                    "runtime_id": resource_id,
+                    "settings": settings_list,
+                    "total_count": len(settings_list),
+                }
+            elif data and isinstance(data, dict) and not data.get("@type", "").endswith("AsyncOperationTokenResult"):
+                # Direct response, not a token
+                return {
+                    "_success": True,
+                    "runtime_id": resource_id,
+                    "settings": [data],
+                    "total_count": 1,
+                }
+        except Exception as e:
+            err_str = str(e).lower()
+            if "202" in err_str or "still processing" in err_str:
+                time.sleep(2)
+                continue
+            return {"_success": False, "error": f"Error polling observability settings: {e}"}
+
+        time.sleep(2)
+
+    return {"_success": False, "error": f"Timeout after {timeout}s waiting for observability settings"}
+
+
+def _action_update_observability_settings(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update observability settings for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    request_body = kwargs.get("request_body")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'update_observability_settings' action"}
+    if not request_body:
+        return {
+            "_success": False,
+            "error": "config.request_body is required for 'update_observability_settings' action. "
+                     "Must include general_settings, log_settings, metric_settings, and trace_settings.",
+        }
+
+    result = sdk.runtime_observability_settings.update_runtime_observability_settings(
+        id_=resource_id, request_body=request_body
+    )
+
+    settings = {"runtime_id": getattr(result, 'runtime_id', resource_id)}
+    for attr in ('general_settings', 'log_settings', 'metric_settings', 'trace_settings'):
+        val = getattr(result, attr, None)
+        if val is not None:
+            settings[attr] = str(val)
+
+    return {"_success": True, "observability_settings": settings}
+
+
+# ============================================================================
+# Security Policies Actions (async reads)
+# ============================================================================
+
+def _action_get_security_policies(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get security policies for a runtime cluster or cloud (async operation)."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_security_policies' action"}
+
+    def initiate_fn():
+        return sdk.atom_security_policies.async_get_atom_security_policies(id_=resource_id)
+
+    def poll_fn(token):
+        return sdk.atom_security_policies.async_token_atom_security_policies(token=token)
+
+    response = poll_async_result(
+        initiate_fn=initiate_fn,
+        poll_fn=poll_fn,
+        timeout=60,
+        interval=2,
+        resource_label="security policies",
+    )
+
+    policies_list = []
+    if hasattr(response, 'result') and response.result:
+        items = response.result if isinstance(response.result, list) else [response.result]
+        for item in items:
+            entry = {"atom_id": getattr(item, 'atom_id', '')}
+            for section in ('common', 'browser', 'runner', 'worker'):
+                val = getattr(item, section, None)
+                if val is not None:
+                    entry[section] = str(val)
+            policies_list.append(entry)
+
+    return {
+        "_success": True,
+        "security_policies": policies_list[0] if len(policies_list) == 1 else policies_list,
+    }
+
+
+def _action_update_security_policies(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update security policies for a runtime cluster or cloud."""
+    resource_id = kwargs.get("resource_id")
+    request_body = kwargs.get("request_body")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'update_security_policies' action"}
+    if not request_body:
+        return {
+            "_success": False,
+            "error": "config.request_body is required for 'update_security_policies' action. "
+                     "Must include atom_id and common section at minimum.",
+        }
+
+    result = sdk.atom_security_policies.update_atom_security_policies(
+        id_=resource_id, request_body=request_body
+    )
+
+    policies = {"atom_id": getattr(result, 'atom_id', resource_id)}
+    for section in ('common', 'browser', 'runner', 'worker'):
+        val = getattr(result, section, None)
+        if val is not None:
+            policies[section] = str(val)
+
+    return {"_success": True, "security_policies": policies}
+
+
+# ============================================================================
+# Other Runtime Operations
+# ============================================================================
+
+def _action_get_startup_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get startup properties for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_startup_properties' action"}
+
+    result = sdk.atom_startup_properties.get_atom_startup_properties(id_=resource_id)
+
+    properties = []
+    if hasattr(result, 'property') and result.property:
+        items = result.property if isinstance(result.property, list) else [result.property]
+        for prop in items:
+            # SDK model may use 'key' or 'name' for the property identifier
+            key = getattr(prop, 'key', '') or getattr(prop, 'name', '')
+            properties.append({
+                "key": key,
+                "value": getattr(prop, 'value', ''),
+            })
+
+    return {
+        "_success": True,
+        "runtime_id": getattr(result, 'id_', resource_id),
+        "properties": properties,
+        "total_count": len(properties),
+    }
+
+
+def _action_reset_counters(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Reset counters for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'reset_counters' action"}
+
+    # UPDATE with empty counters resets them
+    request = AtomCounters(atom_id=resource_id)
+    result = sdk.atom_counters.update_atom_counters(id_=resource_id, request_body=request)
+
+    return {
+        "_success": True,
+        "runtime_id": resource_id,
+        "message": "Counters reset successfully.",
+    }
+
+
+def _action_purge(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Purge processed data from a runtime cloud attachment."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'purge' action"}
+
+    request = AtomPurge(atom_id=resource_id)
+    result = sdk.atom_purge.update_atom_purge(id_=resource_id, request_body=request)
+
+    return {
+        "_success": True,
+        "runtime_id": resource_id,
+        "message": "Purge initiated for runtime cloud attachment.",
+    }
+
+
+def _action_get_connector_versions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get connector versions for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_connector_versions' action"}
+
+    result = sdk.atom_connector_versions.get_atom_connector_versions(id_=resource_id)
+
+    connectors = []
+    if hasattr(result, 'connector_version') and result.connector_version:
+        items = result.connector_version if isinstance(result.connector_version, list) else [result.connector_version]
+        for cv in items:
+            connectors.append({
+                "name": getattr(cv, 'name', ''),
+                "version": getattr(cv, 'version', ''),
+            })
+
+    return {
+        "_success": True,
+        "runtime_id": getattr(result, 'id_', resource_id),
+        "connector_versions": connectors,
+        "total_count": len(connectors),
+    }
+
+
+def _action_offboard_node(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Offboard a node from a runtime cluster or cloud."""
+    resource_id = kwargs.get("resource_id")
+    node_id = kwargs.get("node_id")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (atom_id) is required for 'offboard_node' action"}
+    if not node_id:
+        return {"_success": False, "error": "config.node_id is required for 'offboard_node' action"}
+
+    # node_id can be a single string or a list
+    if isinstance(node_id, str):
+        node_id = [node_id]
+
+    request = NodeOffboard(atom_id=resource_id, node_id=node_id)
+    result = sdk.node_offboard.create_node_offboard(request_body=request)
+
+    return {
+        "_success": True,
+        "runtime_id": resource_id,
+        "node_id": node_id,
+        "message": "Node offboard initiated. Node status will change to 'Deleting'.",
+    }
+
+
+def _action_refresh_secrets_manager(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Refresh secrets manager cache."""
+    provider = kwargs.get("provider")
+
+    req_kwargs = {}
+    if provider:
+        req_kwargs["provider"] = provider.upper()
+
+    request = SecretsManagerRefreshRequest(**req_kwargs)
+    result = sdk.refresh_secrets_manager.refresh_secrets_manager(request_body=request)
+
+    message = getattr(result, 'message', None) or "Secrets manager refresh initiated."
+
+    return {
+        "_success": True,
+        "message": message,
+    }
+
+
+# ============================================================================
+# Cloud Attachment Management Actions
+# ============================================================================
+
+def _action_get_account_cloud_attachment_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get account cloud attachment properties (async operation)."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (container_id) is required for 'get_account_cloud_attachment_properties' action"}
+
+    def initiate_fn():
+        return sdk.account_cloud_attachment_properties.async_get_account_cloud_attachment_properties(
+            id_=resource_id
+        )
+
+    def poll_fn(token):
+        return sdk.account_cloud_attachment_properties.async_token_account_cloud_attachment_properties(
+            token=token
+        )
+
+    response = poll_async_result(
+        initiate_fn=initiate_fn,
+        poll_fn=poll_fn,
+        timeout=60,
+        interval=2,
+        resource_label="account cloud attachment properties",
+    )
+
+    # Extract properties from the async response
+    properties = {}
+    if hasattr(response, 'result') and response.result:
+        items = response.result if isinstance(response.result, list) else [response.result]
+        if items:
+            item = items[0]
+            # Convert object attributes to dict
+            for attr in dir(item):
+                if not attr.startswith('_'):
+                    val = getattr(item, attr, None)
+                    if val is not None and not callable(val):
+                        properties[attr] = val
+
+    return {"_success": True, "properties": properties}
+
+
+def _action_update_account_cloud_attachment_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update account cloud attachment properties."""
+    resource_id = kwargs.get("resource_id")
+    request_body = kwargs.get("request_body")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (container_id) is required for 'update_account_cloud_attachment_properties' action"}
+    if not request_body:
+        return {"_success": False, "error": "config.request_body is required for 'update_account_cloud_attachment_properties' action"}
+
+    result = sdk.account_cloud_attachment_properties.update_account_cloud_attachment_properties(
+        id_=resource_id, request_body=request_body
+    )
+
+    properties = {}
+    for attr in dir(result):
+        if not attr.startswith('_'):
+            val = getattr(result, attr, None)
+            if val is not None and not callable(val):
+                properties[attr] = val
+
+    return {"_success": True, "properties": properties}
+
+
+def _action_list_account_cloud_attachment_summaries(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Query account cloud attachment summaries with optional cloud_id filter."""
+    from boomi.models import (
+        AccountCloudAttachmentSummaryQueryConfig,
+        AccountCloudAttachmentSummaryQueryConfigQueryFilter,
+        AccountCloudAttachmentSummarySimpleExpression,
+        AccountCloudAttachmentSummarySimpleExpressionOperator,
+        AccountCloudAttachmentSummarySimpleExpressionProperty,
+    )
+
+    cloud_id = kwargs.get("cloud_id")
+
+    if cloud_id:
+        expression = AccountCloudAttachmentSummarySimpleExpression(
+            operator=AccountCloudAttachmentSummarySimpleExpressionOperator.EQUALS,
+            property=AccountCloudAttachmentSummarySimpleExpressionProperty.CLOUDID,
+            argument=[cloud_id],
+        )
+    else:
+        expression = AccountCloudAttachmentSummarySimpleExpression(
+            operator=AccountCloudAttachmentSummarySimpleExpressionOperator.ISNOTNULL,
+            property=AccountCloudAttachmentSummarySimpleExpressionProperty.CLOUDID,
+            argument=[],
+        )
+
+    query_filter = AccountCloudAttachmentSummaryQueryConfigQueryFilter(expression=expression)
+    query_config = AccountCloudAttachmentSummaryQueryConfig(query_filter=query_filter)
+    result = sdk.account_cloud_attachment_summary.query_account_cloud_attachment_summary(
+        request_body=query_config
+    )
+
+    summaries = []
+    if hasattr(result, 'result') and result.result:
+        items = result.result if isinstance(result.result, list) else [result.result]
+        for item in items:
+            entry = {}
+            for attr in dir(item):
+                if not attr.startswith('_'):
+                    val = getattr(item, attr, None)
+                    if val is not None and not callable(val):
+                        entry[attr] = _enum_str(val) if hasattr(val, 'value') else val
+            summaries.append(entry)
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.account_cloud_attachment_summary.query_more_account_cloud_attachment_summary(
+            request_body=result.query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            items = result.result if isinstance(result.result, list) else [result.result]
+            for item in items:
+                entry = {}
+                for attr in dir(item):
+                    if not attr.startswith('_'):
+                        val = getattr(item, attr, None)
+                        if val is not None and not callable(val):
+                            entry[attr] = _enum_str(val) if hasattr(val, 'value') else val
+                summaries.append(entry)
+
+    return {"_success": True, "summaries": summaries, "total_count": len(summaries)}
+
+
+def _action_get_account_cloud_attachment_summary(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get a single account cloud attachment summary by resource_id."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_account_cloud_attachment_summary' action"}
+
+    result = sdk.account_cloud_attachment_summary.get_account_cloud_attachment_summary(
+        id_=resource_id
+    )
+
+    summary = {}
+    for attr in dir(result):
+        if not attr.startswith('_'):
+            val = getattr(result, attr, None)
+            if val is not None and not callable(val):
+                summary[attr] = _enum_str(val) if hasattr(val, 'value') else val
+
+    return {"_success": True, "summary": summary}
+
+
+def _action_list_account_cloud_attachment_quotas(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Bulk-get account cloud attachment quotas by IDs."""
+    from boomi.models import AccountCloudAttachmentQuotaBulkRequest
+
+    resource_ids = kwargs.get("resource_ids")
+    if not resource_ids:
+        return {"_success": False, "error": "config.resource_ids (list of quota IDs) is required for 'list_account_cloud_attachment_quotas' action"}
+
+    if isinstance(resource_ids, str):
+        resource_ids = [resource_ids]
+
+    request = AccountCloudAttachmentQuotaBulkRequest(id_=resource_ids)
+    result = sdk.account_cloud_attachment_quota.bulk_account_cloud_attachment_quota(
+        request_body=request
+    )
+
+    quotas = []
+    if hasattr(result, 'result') and result.result:
+        items = result.result if isinstance(result.result, list) else [result.result]
+        for item in items:
+            entry = {}
+            for attr in dir(item):
+                if not attr.startswith('_'):
+                    val = getattr(item, attr, None)
+                    if val is not None and not callable(val):
+                        entry[attr] = _enum_str(val) if hasattr(val, 'value') else val
+            quotas.append(entry)
+
+    return {"_success": True, "quotas": quotas, "total_count": len(quotas)}
+
+
+def _action_get_account_cloud_attachment_quota(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get a single account cloud attachment quota by resource_id."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_account_cloud_attachment_quota' action"}
+
+    result = sdk.account_cloud_attachment_quota.get_account_cloud_attachment_quota(
+        id_=resource_id
+    )
+
+    quota = {}
+    for attr in dir(result):
+        if not attr.startswith('_'):
+            val = getattr(result, attr, None)
+            if val is not None and not callable(val):
+                quota[attr] = _enum_str(val) if hasattr(val, 'value') else val
+
+    return {"_success": True, "quota": quota}
+
+
+def _action_create_account_cloud_attachment_quota(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Create an account cloud attachment quota."""
+    request_body = kwargs.get("request_body")
+    if not request_body:
+        return {"_success": False, "error": "config.request_body is required for 'create_account_cloud_attachment_quota' action"}
+
+    result = sdk.account_cloud_attachment_quota.create_account_cloud_attachment_quota(
+        request_body=request_body
+    )
+
+    quota = {}
+    for attr in dir(result):
+        if not attr.startswith('_'):
+            val = getattr(result, attr, None)
+            if val is not None and not callable(val):
+                quota[attr] = _enum_str(val) if hasattr(val, 'value') else val
+
+    return {"_success": True, "quota": quota}
+
+
+def _action_update_account_cloud_attachment_quota(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update an account cloud attachment quota."""
+    resource_id = kwargs.get("resource_id")
+    request_body = kwargs.get("request_body")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'update_account_cloud_attachment_quota' action"}
+    if not request_body:
+        return {"_success": False, "error": "config.request_body is required for 'update_account_cloud_attachment_quota' action"}
+
+    result = sdk.account_cloud_attachment_quota.update_account_cloud_attachment_quota(
+        id_=resource_id, request_body=request_body
+    )
+
+    quota = {}
+    for attr in dir(result):
+        if not attr.startswith('_'):
+            val = getattr(result, attr, None)
+            if val is not None and not callable(val):
+                quota[attr] = _enum_str(val) if hasattr(val, 'value') else val
+
+    return {"_success": True, "quota": quota}
+
+
+def _action_delete_account_cloud_attachment_quota(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Delete an account cloud attachment quota."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'delete_account_cloud_attachment_quota' action"}
+
+    sdk.account_cloud_attachment_quota.delete_account_cloud_attachment_quota(
+        id_=resource_id
+    )
+
+    return {
+        "_success": True,
+        "deleted_id": resource_id,
+        "message": "Account cloud attachment quota deleted.",
+    }
+
+
+def _action_get_cloud_attachment_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get cloud attachment properties (async operation)."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_cloud_attachment_properties' action"}
+
+    def initiate_fn():
+        return sdk.cloud_attachment_properties.async_get_cloud_attachment_properties(
+            id_=resource_id
+        )
+
+    def poll_fn(token):
+        return sdk.cloud_attachment_properties.async_token_cloud_attachment_properties(
+            token=token
+        )
+
+    response = poll_async_result(
+        initiate_fn=initiate_fn,
+        poll_fn=poll_fn,
+        timeout=60,
+        interval=2,
+        resource_label="cloud attachment properties",
+    )
+
+    properties = {}
+    if hasattr(response, 'result') and response.result:
+        items = response.result if isinstance(response.result, list) else [response.result]
+        if items:
+            item = items[0]
+            for attr in dir(item):
+                if not attr.startswith('_'):
+                    val = getattr(item, attr, None)
+                    if val is not None and not callable(val):
+                        properties[attr] = val
+
+    return {"_success": True, "properties": properties}
+
+
+def _action_update_cloud_attachment_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update cloud attachment properties."""
+    resource_id = kwargs.get("resource_id")
+    request_body = kwargs.get("request_body")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'update_cloud_attachment_properties' action"}
+    if not request_body:
+        return {"_success": False, "error": "config.request_body is required for 'update_cloud_attachment_properties' action"}
+
+    result = sdk.cloud_attachment_properties.update_cloud_attachment_properties(
+        id_=resource_id, request_body=request_body
+    )
+
+    properties = {}
+    for attr in dir(result):
+        if not attr.startswith('_'):
+            val = getattr(result, attr, None)
+            if val is not None and not callable(val):
+                properties[attr] = val
+
+    return {"_success": True, "properties": properties}
+
+
+def _action_get_account_cloud_attachment_defaults(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get account cloud attachment property defaults (async operation)."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_account_cloud_attachment_defaults' action"}
+
+    def initiate_fn():
+        return sdk.account_cloud_attachment_properties_default.async_get_account_cloud_attachment_properties_default(
+            id_=resource_id
+        )
+
+    def poll_fn(token):
+        return sdk.account_cloud_attachment_properties_default.async_token_account_cloud_attachment_properties_default(
+            token=token
+        )
+
+    response = poll_async_result(
+        initiate_fn=initiate_fn,
+        poll_fn=poll_fn,
+        timeout=60,
+        interval=2,
+        resource_label="account cloud attachment property defaults",
+    )
+
+    defaults = {}
+    if hasattr(response, 'result') and response.result:
+        items = response.result if isinstance(response.result, list) else [response.result]
+        if items:
+            item = items[0]
+            for attr in dir(item):
+                if not attr.startswith('_'):
+                    val = getattr(item, attr, None)
+                    if val is not None and not callable(val):
+                        defaults[attr] = val
+
+    return {"_success": True, "defaults": defaults}
+
+
+def _action_update_account_cloud_attachment_defaults(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update account cloud attachment property defaults."""
+    resource_id = kwargs.get("resource_id")
+    request_body = kwargs.get("request_body")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'update_account_cloud_attachment_defaults' action"}
+    if not request_body:
+        return {"_success": False, "error": "config.request_body is required for 'update_account_cloud_attachment_defaults' action"}
+
+    result = sdk.account_cloud_attachment_properties_default.update_account_cloud_attachment_properties_default(
+        id_=resource_id, request_body=request_body
+    )
+
+    defaults = {}
+    for attr in dir(result):
+        if not attr.startswith('_'):
+            val = getattr(result, attr, None)
+            if val is not None and not callable(val):
+                defaults[attr] = val
+
+    return {"_success": True, "defaults": defaults}
+
+
+# ============================================================================
 # Error Helpers
 # ============================================================================
 
@@ -1199,6 +2047,33 @@ def manage_runtimes_action(
         "cloud_update": _action_cloud_update,
         "cloud_delete": _action_cloud_delete,
         "diagnostics": _action_diagnostics,
+        "get_release_schedule": _action_get_release_schedule,
+        "create_release_schedule": _action_create_release_schedule,
+        "update_release_schedule": _action_update_release_schedule,
+        "delete_release_schedule": _action_delete_release_schedule,
+        "get_observability_settings": _action_get_observability_settings,
+        "update_observability_settings": _action_update_observability_settings,
+        "get_security_policies": _action_get_security_policies,
+        "update_security_policies": _action_update_security_policies,
+        "get_startup_properties": _action_get_startup_properties,
+        "reset_counters": _action_reset_counters,
+        "purge": _action_purge,
+        "get_connector_versions": _action_get_connector_versions,
+        "offboard_node": _action_offboard_node,
+        "refresh_secrets_manager": _action_refresh_secrets_manager,
+        "get_account_cloud_attachment_properties": _action_get_account_cloud_attachment_properties,
+        "update_account_cloud_attachment_properties": _action_update_account_cloud_attachment_properties,
+        "list_account_cloud_attachment_summaries": _action_list_account_cloud_attachment_summaries,
+        "get_account_cloud_attachment_summary": _action_get_account_cloud_attachment_summary,
+        "list_account_cloud_attachment_quotas": _action_list_account_cloud_attachment_quotas,
+        "get_account_cloud_attachment_quota": _action_get_account_cloud_attachment_quota,
+        "create_account_cloud_attachment_quota": _action_create_account_cloud_attachment_quota,
+        "update_account_cloud_attachment_quota": _action_update_account_cloud_attachment_quota,
+        "delete_account_cloud_attachment_quota": _action_delete_account_cloud_attachment_quota,
+        "get_cloud_attachment_properties": _action_get_cloud_attachment_properties,
+        "update_cloud_attachment_properties": _action_update_cloud_attachment_properties,
+        "get_account_cloud_attachment_defaults": _action_get_account_cloud_attachment_defaults,
+        "update_account_cloud_attachment_defaults": _action_update_account_cloud_attachment_defaults,
     }
 
     handler = actions.get(action)

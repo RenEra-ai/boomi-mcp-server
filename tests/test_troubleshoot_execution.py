@@ -1,4 +1,4 @@
-"""Unit tests for troubleshoot_execution batch-08 bugfixes (QA-024/025/026)."""
+"""Unit tests for troubleshoot_execution (batch-08 bugfixes + cancel action)."""
 
 import json
 import os
@@ -167,3 +167,74 @@ class TestReprocessApiError:
         assert result["_success"] is False
         assert "Resource does not exist" in result.get("error", "")
         _assert_no_leak(result.get("error", ""))
+
+
+# ── Cancel action tests ──────────────────────────────────────────────
+
+from src.boomi_mcp.categories.troubleshooting import handle_cancel
+
+
+class TestCancelAction:
+    def test_cancel_success(self):
+        sdk = MagicMock()
+        result = handle_cancel(sdk, execution_id="exec-123", config={})
+        assert result["_success"] is True
+        assert result["execution_id"] == "exec-123"
+        assert result["message"] == "Cancel request submitted"
+        sdk.cancel_execution.cancel_execution.assert_called_once_with(execution_id="exec-123")
+
+    def test_cancel_missing_execution_id(self):
+        sdk = MagicMock()
+        result = handle_cancel(sdk, execution_id=None, config={})
+        assert result["_success"] is False
+        assert "execution_id is required" in result["error"]
+
+    def test_cancel_empty_execution_id(self):
+        sdk = MagicMock()
+        result = handle_cancel(sdk, execution_id="", config={})
+        assert result["_success"] is False
+        assert "execution_id is required" in result["error"]
+
+    def test_cancel_api_error(self):
+        sdk = MagicMock()
+        sdk.cancel_execution.cancel_execution.side_effect = (
+            _fake_api_error(detail="Execution not found")
+        )
+        result = handle_cancel(sdk, execution_id="exec-123", config={})
+        assert result["_success"] is False
+        assert "Execution not found" in result["error"]
+        _assert_no_leak(result["error"])
+
+    def test_cancel_api_error_body_message(self):
+        sdk = MagicMock()
+        sdk.cancel_execution.cancel_execution.side_effect = (
+            _fake_api_error(body_message="Cannot cancel completed execution")
+        )
+        result = handle_cancel(sdk, execution_id="exec-123", config={})
+        assert result["_success"] is False
+        assert "Cannot cancel completed execution" in result["error"]
+        _assert_no_leak(result["error"])
+
+    def test_cancel_general_exception(self):
+        sdk = MagicMock()
+        sdk.cancel_execution.cancel_execution.side_effect = RuntimeError("connection lost")
+        result = handle_cancel(sdk, execution_id="exec-123", config={})
+        assert result["_success"] is False
+        assert "connection lost" in result["error"]
+
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.Boomi")
+    @patch("server.get_current_user", return_value="test-user")
+    def test_cancel_via_router(self, _user, mock_boomi_cls, _creds):
+        """Test cancel action dispatched through the troubleshoot_execution tool."""
+        mock_sdk = MagicMock()
+        mock_boomi_cls.return_value = mock_sdk
+        result = _call_tool(
+            server.troubleshoot_execution,
+            profile="dev",
+            action="cancel",
+            execution_id="exec-456",
+        )
+        assert result["_success"] is True
+        assert result["execution_id"] == "exec-456"
+        mock_sdk.cancel_execution.cancel_execution.assert_called_once_with(execution_id="exec-456")
