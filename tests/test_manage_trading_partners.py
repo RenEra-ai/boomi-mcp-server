@@ -280,28 +280,31 @@ class TestCreateValidationWording:
         assert "config" in result["error"].lower()
 
 
-# ── QA-007 (excluded): List duplicates preserved ─────────────────────
+# ── QA-007: List deduplication by component_id ───────────────────────
 
 
-class TestListDuplicatesPreserved:
+class TestListDeduplication:
     @patch("server.get_secret", return_value=FAKE_CREDS)
     @patch("server.Boomi")
     @patch("server.get_current_user", return_value="test-user")
-    def test_duplicate_ids_preserved(self, _user, mock_boomi_cls, _creds):
-        """Duplicate component_ids from the API should be preserved, not deduplicated."""
+    def test_duplicates_are_deduplicated(self, _user, mock_boomi_cls, _creds):
+        """Duplicate component_ids should be collapsed to one row with metadata."""
         mock_sdk = MagicMock()
 
-        # Build query result with duplicate IDs
-        dup_partner = SimpleNamespace(
-            id_="tp-dup-001",
-            name="Duplicate Partner",
+        dup = SimpleNamespace(
+            id_="tp-dup-001", name="Dup Partner",
             standard=SimpleNamespace(value="x12"),
             classification=SimpleNamespace(value="tradingpartner"),
-            folder_name="Home",
-            deleted=False,
+            folder_name="Home", deleted=False,
+        )
+        unique = SimpleNamespace(
+            id_="tp-unique-002", name="Unique Partner",
+            standard=SimpleNamespace(value="x12"),
+            classification=SimpleNamespace(value="tradingpartner"),
+            folder_name="Home", deleted=False,
         )
         query_result = SimpleNamespace(
-            result=[dup_partner, dup_partner, dup_partner],
+            result=[dup, unique, dup],
             query_token=None,
         )
         mock_sdk.trading_partner_component.query_trading_partner_component.return_value = query_result
@@ -309,13 +312,145 @@ class TestListDuplicatesPreserved:
 
         result = _call_tool(
             server.manage_trading_partner,
-            profile="dev",
-            action="list",
+            profile="dev", action="list",
             config=json.dumps({"standard": "x12"}),
         )
 
         assert result["_success"] is True
-        assert result["total_count"] == 3
-        assert len(result["partners"]) == 3
+        assert result["total_count"] == 2
+        assert len(result["partners"]) == 2
+        assert result["raw_total_count"] == 3
+        assert result["duplicates_removed"] == 1
+        assert result["duplicate_component_ids"] == ["tp-dup-001"]
+        assert "warning" in result
         ids = [p["component_id"] for p in result["partners"]]
-        assert ids == ["tp-dup-001", "tp-dup-001", "tp-dup-001"]
+        assert ids == ["tp-dup-001", "tp-unique-002"]
+
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.Boomi")
+    @patch("server.get_current_user", return_value="test-user")
+    def test_duplicates_across_pages(self, _user, mock_boomi_cls, _creds):
+        """Duplicate split across query and query_more should still be deduplicated."""
+        mock_sdk = MagicMock()
+
+        p1 = SimpleNamespace(
+            id_="tp-cross-001", name="Cross Page",
+            standard=SimpleNamespace(value="x12"),
+            classification=SimpleNamespace(value="tradingpartner"),
+            folder_name="Home", deleted=False,
+        )
+        page1 = SimpleNamespace(result=[p1], query_token="tok-1")
+        page2 = SimpleNamespace(result=[p1], query_token=None)
+        mock_sdk.trading_partner_component.query_trading_partner_component.return_value = page1
+        mock_sdk.trading_partner_component.query_more_trading_partner_component.return_value = page2
+        mock_boomi_cls.return_value = mock_sdk
+
+        result = _call_tool(
+            server.manage_trading_partner,
+            profile="dev", action="list",
+            config=json.dumps({"standard": "x12"}),
+        )
+
+        assert result["_success"] is True
+        assert result["total_count"] == 1
+        assert result["duplicates_removed"] == 1
+        assert result["duplicate_component_ids"] == ["tp-cross-001"]
+
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.Boomi")
+    @patch("server.get_current_user", return_value="test-user")
+    def test_backfill_missing_fields(self, _user, mock_boomi_cls, _creds):
+        """Later duplicate should backfill missing fields on the kept row."""
+        mock_sdk = MagicMock()
+
+        sparse = SimpleNamespace(
+            id_="tp-bf-001", name="Sparse Partner",
+            standard=None, classification=None,
+            folder_name=None, deleted=False,
+        )
+        full = SimpleNamespace(
+            id_="tp-bf-001", name="Sparse Partner",
+            standard=SimpleNamespace(value="edifact"),
+            classification=SimpleNamespace(value="tradingpartner"),
+            folder_name="Partners", deleted=False,
+        )
+        query_result = SimpleNamespace(result=[sparse, full], query_token=None)
+        mock_sdk.trading_partner_component.query_trading_partner_component.return_value = query_result
+        # GET fallback for the sparse row should also return None standard
+        mock_sdk.trading_partner_component.get_trading_partner_component.return_value = SimpleNamespace(standard=None)
+        mock_boomi_cls.return_value = mock_sdk
+
+        result = _call_tool(
+            server.manage_trading_partner,
+            profile="dev", action="list",
+        )
+
+        assert result["_success"] is True
+        assert result["total_count"] == 1
+        kept = result["partners"][0]
+        assert kept["component_id"] == "tp-bf-001"
+        assert kept["standard"] == "edifact"
+        assert kept["classification"] == "tradingpartner"
+        assert kept["folder_name"] == "Partners"
+
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.Boomi")
+    @patch("server.get_current_user", return_value="test-user")
+    def test_no_component_id_rows_preserved(self, _user, mock_boomi_cls, _creds):
+        """Rows with no component_id should each be preserved, not collapsed."""
+        mock_sdk = MagicMock()
+
+        no_id = SimpleNamespace(
+            id_=None, name="No ID Partner",
+            standard=SimpleNamespace(value="x12"),
+            classification=SimpleNamespace(value="tradingpartner"),
+            folder_name="Home", deleted=False,
+        )
+        query_result = SimpleNamespace(result=[no_id, no_id], query_token=None)
+        mock_sdk.trading_partner_component.query_trading_partner_component.return_value = query_result
+        mock_boomi_cls.return_value = mock_sdk
+
+        result = _call_tool(
+            server.manage_trading_partner,
+            profile="dev", action="list",
+        )
+
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+        assert len(result["partners"]) == 2
+        assert "duplicates_removed" not in result
+
+    @patch("server.get_secret", return_value=FAKE_CREDS)
+    @patch("server.Boomi")
+    @patch("server.get_current_user", return_value="test-user")
+    def test_no_duplicates_no_metadata(self, _user, mock_boomi_cls, _creds):
+        """When no duplicates exist, duplicate-specific metadata should be absent."""
+        mock_sdk = MagicMock()
+
+        p1 = SimpleNamespace(
+            id_="tp-u-001", name="Partner A",
+            standard=SimpleNamespace(value="x12"),
+            classification=SimpleNamespace(value="tradingpartner"),
+            folder_name="Home", deleted=False,
+        )
+        p2 = SimpleNamespace(
+            id_="tp-u-002", name="Partner B",
+            standard=SimpleNamespace(value="edifact"),
+            classification=SimpleNamespace(value="tradingpartner"),
+            folder_name="Home", deleted=False,
+        )
+        query_result = SimpleNamespace(result=[p1, p2], query_token=None)
+        mock_sdk.trading_partner_component.query_trading_partner_component.return_value = query_result
+        mock_boomi_cls.return_value = mock_sdk
+
+        result = _call_tool(
+            server.manage_trading_partner,
+            profile="dev", action="list",
+        )
+
+        assert result["_success"] is True
+        assert result["total_count"] == 2
+        assert "raw_total_count" not in result
+        assert "duplicates_removed" not in result
+        assert "duplicate_component_ids" not in result
+        assert "warning" not in result

@@ -1303,6 +1303,9 @@ def _get_trading_partner_template(operation=None, standard=None, protocol=None, 
                 "classification": "tradingpartner | mycompany",
                 "folder_name": "(optional folder filter)",
             },
+            "note": "Results are deduplicated by component_id. "
+                    "When upstream duplicates are removed, response includes "
+                    "raw_total_count, duplicates_removed, duplicate_component_ids, and warning.",
         }
 
     if operation == "update":

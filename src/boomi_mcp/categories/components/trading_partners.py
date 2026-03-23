@@ -1152,6 +1152,36 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                     "deleted": getattr(partner, 'deleted', False)
                 })
 
+        # --- Deduplicate by component_id (QA-007) ---
+        raw_count = len(partners)
+        seen = {}          # component_id -> index in deduped list
+        deduped = []
+        duplicate_ids = []
+
+        for p in partners:
+            cid = p.get("component_id")
+            if cid is None:
+                # No stable key — keep as-is
+                deduped.append(p)
+                continue
+            if cid in seen:
+                # Backfill missing fields from later duplicate
+                kept = deduped[seen[cid]]
+                for field in ("name", "standard", "classification", "folder_name"):
+                    if kept.get(field) is None and p.get(field) is not None:
+                        kept[field] = p[field]
+                # deleted=True is dominant
+                if p.get("deleted"):
+                    kept["deleted"] = True
+                if cid not in duplicate_ids:
+                    duplicate_ids.append(cid)
+            else:
+                seen[cid] = len(deduped)
+                deduped.append(p)
+
+        partners = deduped
+        duplicates_removed = raw_count - len(partners)
+
         # Group partners by standard
         grouped = {}
         for partner in partners:
@@ -1162,7 +1192,7 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                     grouped[standard_upper] = []
                 grouped[standard_upper].append(partner)
 
-        return {
+        response = {
             "_success": True,
             "total_count": len(partners),
             "partners": partners,
@@ -1177,6 +1207,12 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                 "odette": len(grouped.get("ODETTE", []))
             }
         }
+        if duplicates_removed > 0:
+            response["raw_total_count"] = raw_count
+            response["duplicates_removed"] = duplicates_removed
+            response["duplicate_component_ids"] = duplicate_ids
+            response["warning"] = "Removed duplicate trading partner rows returned by the upstream Boomi query API."
+        return response
 
     except ApiError as e:
         return {

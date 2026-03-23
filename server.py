@@ -648,8 +648,10 @@ if manage_trading_partner_action:
             list_options - Get all valid enum values (no config needed, no API call):
                 Returns standards, classifications, protocols, and protocol-specific enums
 
-            list - List trading partners, optional filters:
+            list - List trading partners (deduplicated by component_id), optional filters:
                 config='{"standard": "x12", "classification": "tradingpartner", "folder_name": "Partners"}'
+                Note: Results are deduplicated by component_id. When duplicates are removed,
+                response includes raw_total_count, duplicates_removed, duplicate_component_ids, and warning.
 
             get - Get partner by ID (no config needed):
                 resource_id="abc-123-def"
