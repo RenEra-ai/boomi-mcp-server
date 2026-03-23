@@ -1619,10 +1619,16 @@ def _get_monitoring_template(operation=None, **_):
     return {"_success": True, **tpl}
 
 
-def list_capabilities_action() -> Dict[str, Any]:
+def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
     """Return full catalog of MCP tools, actions, and workflows.
 
     Zero API calls — returns static metadata about this MCP server.
+
+    Args:
+        available_tools: Optional set of tool names from the live FastMCP registry.
+            When provided, the returned catalog is filtered to only tools actually
+            registered in the current runtime (e.g., local-only credential tools
+            are excluded in production mode).
     """
 
     tools = {
@@ -1729,13 +1735,13 @@ def list_capabilities_action() -> Dict[str, Any]:
         "manage_environments": {
             "category": "Environments & Runtimes",
             "description": "Manage environments and their configuration extensions",
-            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions", "query_extensions", "stats"],
+            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions", "query_extensions", "stats", "get_properties", "update_properties"],
             "read_only": False,
             "implemented": True,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
-                "resource_id": "str (optional) — environment ID",
+                "resource_id": "str (optional) — environment ID; for get_properties/update_properties this is the atom/runtime ID",
                 "config": "JSON str (optional)",
             },
             "sdk_examples_covered": [
@@ -1753,7 +1759,7 @@ def list_capabilities_action() -> Dict[str, Any]:
         "manage_runtimes": {
             "category": "Environments & Runtimes",
             "description": "Manage Boomi runtimes — cloud attachments, environment bindings, restart, Java upgrades, installer tokens, and private runtime clouds (enterprise)",
-            "actions": ["list", "get", "create", "update", "delete", "attach", "detach", "list_attachments", "restart", "configure_java", "create_installer_token", "available_clouds", "cloud_list", "cloud_get", "cloud_create", "cloud_update", "cloud_delete"],
+            "actions": ["list", "get", "create", "update", "delete", "attach", "detach", "list_attachments", "restart", "configure_java", "create_installer_token", "available_clouds", "cloud_list", "cloud_get", "cloud_create", "cloud_update", "cloud_delete", "diagnostics"],
             "read_only": False,
             "implemented": True,
             "parameters": {
@@ -1986,7 +1992,43 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 7: Meta / Power Tools ===
+        # === Category 7: Administration (2 tools) ===
+        "manage_shared_resources": {
+            "category": "Administration",
+            "description": "Manage shared web servers and communication channels on Boomi runtimes",
+            "actions": ["list_web_servers", "update_web_server", "list_channels", "get_channel", "create_channel"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — list_web_servers | update_web_server | list_channels | get_channel | create_channel",
+                "resource_id": "str (optional) — atom ID (web server actions) or channel ID (get_channel)",
+                "config": "JSON str (optional) — action-specific parameters",
+            },
+            "examples": [
+                'manage_shared_resources(profile="prod", action="list_web_servers", resource_id="<atom_id>")',
+                'manage_shared_resources(profile="prod", action="list_channels")',
+                'manage_shared_resources(profile="prod", action="create_channel", config=\'{"name": "My Channel", "channel_type": "HTTP"}\')',
+            ],
+        },
+        "manage_account": {
+            "category": "Administration",
+            "description": "Manage Boomi account administration — roles and component branches",
+            "actions": ["list_roles", "manage_role", "list_branches", "manage_branch"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — list_roles | manage_role | list_branches | manage_branch",
+                "resource_id": "str (optional) — role or branch ID (required for get/update/delete)",
+                "config": "JSON str (optional) — action-specific config (operation, name, privileges, etc.)",
+            },
+            "examples": [
+                'manage_account(profile="prod", action="list_roles")',
+                'manage_account(profile="prod", action="manage_role", config=\'{"operation": "create", "name": "API Dev", "privileges": ["API", "EXECUTE"]}\')',
+                'manage_account(profile="prod", action="list_branches")',
+            ],
+        },
+
+        # === Category 8: Meta / Power Tools ===
         "get_schema_template": {
             "category": "Meta Tools",
             "description": "Get example payloads, field descriptions, and enum values for all tools",
@@ -2067,7 +2109,36 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "profile": "str (required) — profile name from list_boomi_profiles",
             },
         },
+        "set_boomi_credentials": {
+            "category": "Credentials",
+            "description": "Store Boomi API credentials for local testing (local dev only)",
+            "actions": ["(single action — stores credentials)"],
+            "read_only": False,
+            "local_only": True,
+            "parameters": {
+                "profile": "str (required) — profile name (e.g. 'production', 'sandbox')",
+                "account_id": "str (required) — Boomi account ID",
+                "username": "str (required) — Boomi API username (BOOMI_TOKEN.*)",
+                "password": "str (required) — Boomi API password/token",
+            },
+            "note": "Only available in local development mode (BOOMI_LOCAL=true).",
+        },
+        "delete_boomi_profile": {
+            "category": "Credentials",
+            "description": "Delete a stored Boomi credential profile (local dev only)",
+            "actions": ["(single action — deletes profile)"],
+            "read_only": False,
+            "local_only": True,
+            "parameters": {
+                "profile": "str (required) — profile name to delete",
+            },
+            "note": "Only available in local development mode (BOOMI_LOCAL=true).",
+        },
     }
+
+    # --- Filter to live registry when available ---
+    if available_tools is not None:
+        tools = {k: v for k, v in tools.items() if k in available_tools}
 
     # --- Build implementation status ---
     implemented = []
@@ -2096,7 +2167,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "2. manage_process(action='create', config='...') → create process",
                 "3. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
                 "4. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
-                "5. invoke_boomi_api(endpoint='ExecutionRequest', method='POST', ...) → run it (execute_process not yet implemented)",
+                "5. execute_process(profile='...', process_id='<proc_id>', environment_id='<env_id>') → run it",
                 "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
             ],
         },

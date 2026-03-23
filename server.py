@@ -1850,7 +1850,8 @@ if list_capabilities_action:
         - Find the right get_schema_template call before creating resources
         """
         try:
-            return list_capabilities_action()
+            registered = set(mcp._tool_manager._tools.keys())
+            return list_capabilities_action(available_tools=registered)
         except Exception as e:
             return {"_success": False, "error": str(e)}
 
