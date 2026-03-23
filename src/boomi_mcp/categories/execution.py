@@ -231,13 +231,22 @@ def execute_process_action(
     sdk: Boomi,
     profile: str,
     process_id: str,
-    environment_id: str,
+    environment_id: str = None,
     atom_id: str = None,
     config_data: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Execute a Boomi process."""
     if config_data is None:
         config_data = {}
+
+    # Validate: need at least one of atom_id or environment_id
+    if not atom_id and not environment_id:
+        return {
+            "_success": False,
+            "error": "Either atom_id or environment_id is required. "
+                     "Provide atom_id to target a specific runtime, or "
+                     "environment_id to auto-resolve the runtime.",
+        }
 
     # Resolve atom_id if not provided
     if not atom_id:

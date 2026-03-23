@@ -1790,7 +1790,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "action": "str (required)",
                 "package_id": "str (optional) — package ID or deployment ID depending on action",
                 "environment_id": "str (optional) — target env for deploy, filter for list_deployments",
-                "config": "str (optional) — JSON string with action-specific parameters",
+                "config": "str (optional) — JSON with action-specific params. get_deployment/undeploy accept deployment_id as alias for package_id. list_deployments accepts component_id filter.",
             },
             "sdk_examples_covered": [
                 "create_packaged_component.py",
@@ -1892,15 +1892,13 @@ def list_capabilities_action() -> Dict[str, Any]:
             "description": "Execute a Boomi process (sync or async)",
             "actions": ["execute"],
             "read_only": False,
-            "implemented": False,
+            "implemented": True,
             "parameters": {
                 "profile": "str (required)",
                 "process_id": "str (required)",
-                "environment_id": "str (required)",
-                "atom_id": "str (optional)",
-                "execution_type": "str (optional) — sync | async (default: async)",
-                "input_data": "str (optional) — input document",
-                "wait_for_completion": "bool (optional, default=false)",
+                "environment_id": "str (optional) — required when atom_id not provided (for runtime auto-resolution)",
+                "atom_id": "str (optional) — if provided, skips auto-resolution and environment_id is not needed",
+                "config": "JSON str (optional) — {wait: bool, timeout: int, dynamic_properties: {}, process_properties: {}}",
             },
             "sdk_examples_covered": [
                 "execute_process.py",

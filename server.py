@@ -2180,13 +2180,17 @@ if manage_deployment_action:
 
             undeploy - Remove deployment from environment:
                 package_id="deployment-789"   (this is the deployment_id)
+                config='{"deployment_id": "deployment-789"}'   (alias — same effect)
 
             list_deployments - List deployments with optional filters:
                 environment_id="env-456"
                 config='{"package_id": "pkg-123", "active_only": true}'
+                config='{"component_id": "comp-123"}'
+                config='{"environment_id": "env-456", "component_id": "comp-123"}'
 
             get_deployment - Get deployment details:
                 package_id="deployment-789"   (this is the deployment_id)
+                config='{"deployment_id": "deployment-789"}'   (alias — same effect)
 
         Listener statuses: RUNNING, PAUSED
 
@@ -2244,7 +2248,7 @@ if execute_process_action:
     def execute_process(
         profile: str,
         process_id: str,
-        environment_id: str,
+        environment_id: str = None,
         atom_id: str = None,
         config: str = None,
     ):
@@ -2253,8 +2257,8 @@ if execute_process_action:
         Args:
             profile: Boomi profile name (required)
             process_id: Process component ID to execute (required)
-            environment_id: Environment to execute in (required)
-            atom_id: Runtime ID (auto-detected if only one attached to environment)
+            environment_id: Environment ID — required for auto-resolution when atom_id not provided
+            atom_id: Runtime ID — if provided, skips auto-resolution (environment_id not needed)
             config: JSON string with optional parameters
 
         RECOMMENDED WORKFLOW:
@@ -2269,6 +2273,9 @@ if execute_process_action:
 
             Basic (fire and forget):
                 process_id="abc-123", environment_id="env-456"
+
+            Direct atom_id (skip auto-resolution):
+                process_id="abc-123", atom_id="atom-789"
 
             Wait for completion (up to 5 min):
                 process_id="abc-123", environment_id="env-456",

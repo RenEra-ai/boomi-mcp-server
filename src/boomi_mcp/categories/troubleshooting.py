@@ -756,6 +756,12 @@ def troubleshoot_execution_action(
                 "valid_actions": ["error_details", "retry", "reprocess", "list_queues", "clear_queue", "move_queue"],
             }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,

@@ -278,7 +278,7 @@ def _action_deploy(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
 
 def _action_undeploy(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    package_id = kwargs.get("package_id")  # actually deployment_id passed via package_id param
+    package_id = kwargs.get("package_id") or kwargs.get("deployment_id")
     if not package_id:
         return {"_success": False, "error": "package_id (deployment_id) is required for 'undeploy'"}
 
@@ -300,6 +300,7 @@ def _action_undeploy(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 def _action_list_deployments(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     environment_id = kwargs.get("environment_id")
     filter_package_id = kwargs.get("package_id")
+    component_id = kwargs.get("component_id")
     active_only = _parse_bool(kwargs.get("active_only", False))
 
     expressions = []
@@ -315,6 +316,12 @@ def _action_list_deployments(sdk: Boomi, profile: str, **kwargs) -> Dict[str, An
             operator=DeployedPackageSimpleExpressionOperator.EQUALS,
             property=DeployedPackageSimpleExpressionProperty.PACKAGEID,
             argument=[filter_package_id],
+        ))
+    if component_id:
+        expressions.append(DeployedPackageSimpleExpression(
+            operator=DeployedPackageSimpleExpressionOperator.EQUALS,
+            property=DeployedPackageSimpleExpressionProperty.COMPONENTID,
+            argument=[component_id],
         ))
 
     if not expressions:
@@ -356,7 +363,7 @@ def _action_list_deployments(sdk: Boomi, profile: str, **kwargs) -> Dict[str, An
 
 
 def _action_get_deployment(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    package_id = kwargs.get("package_id")  # actually deployment_id
+    package_id = kwargs.get("package_id") or kwargs.get("deployment_id")
     if not package_id:
         return {"_success": False, "error": "package_id (deployment_id) is required for 'get_deployment'"}
 
