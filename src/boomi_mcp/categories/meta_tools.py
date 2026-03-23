@@ -2069,12 +2069,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'invoke_boomi_api(profile="prod", endpoint="Component/abc-123", method="GET", accept="xml")',
             ],
             "covers_uncovered_apis": [
-                "Roles & Permissions",
-                "Branches",
                 "Integration Packs",
-                "Shared Web Servers",
-                "Communication Channels",
-                "Persisted Process Properties (async)",
                 "Queue Management (async)",
                 "Secrets Rotation",
                 "Document Reprocessing",
@@ -2260,7 +2255,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "hints": {
             "start_here": "Call list_boomi_profiles() first to see available profiles",
             "need_template": "Use get_schema_template() before create/update operations",
-            "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (roles, branches, etc.)",
+            "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (integration packs, secrets rotation, etc.)",
             "profile_required": "Most tools require a 'profile' parameter — get it from list_boomi_profiles()",
         },
     }
