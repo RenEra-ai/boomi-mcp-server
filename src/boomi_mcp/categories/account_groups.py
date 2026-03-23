@@ -208,23 +208,17 @@ def _query_all_account_group_user_roles(
 def _query_all_account_group_integration_packs(
     sdk: Boomi, account_group_id_filter: str = None
 ) -> List[Dict[str, Any]]:
-    """Execute an AccountGroupIntegrationPack query with pagination."""
-    if account_group_id_filter:
-        expression = AccountGroupIntegrationPackExpression(
-            id_=account_group_id_filter,
+    """Execute an AccountGroupIntegrationPack query with pagination.
+
+    Note: The SDK query expression model has no account_group_id field, so we
+    query all associations and filter client-side when a group filter is given.
+    """
+    # Always query with an empty expression — the model has no group-scoped filter
+    query_config = AccountGroupIntegrationPackQueryConfig(
+        query_filter=AccountGroupIntegrationPackQueryConfigQueryFilter(
+            expression=AccountGroupIntegrationPackExpression()
         )
-        query_filter = AccountGroupIntegrationPackQueryConfigQueryFilter(
-            expression=expression
-        )
-        query_config = AccountGroupIntegrationPackQueryConfig(
-            query_filter=query_filter
-        )
-    else:
-        query_config = AccountGroupIntegrationPackQueryConfig(
-            query_filter=AccountGroupIntegrationPackQueryConfigQueryFilter(
-                expression=AccountGroupIntegrationPackExpression()
-            )
-        )
+    )
 
     result = sdk.account_group_integration_pack.query_account_group_integration_pack(
         request_body=query_config
@@ -244,6 +238,11 @@ def _query_all_account_group_integration_packs(
             items.extend(
                 [_account_group_integration_pack_to_dict(r) for r in result.result]
             )
+
+    # Client-side filter by account_group_id since the expression model
+    # only supports filtering by pack id/name, not by group
+    if account_group_id_filter:
+        items = [i for i in items if i.get("account_group_id") == account_group_id_filter]
 
     return items
 

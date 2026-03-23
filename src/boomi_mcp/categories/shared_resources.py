@@ -367,32 +367,34 @@ def _action_create_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
 
 
 def _action_update_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """Update a shared communication channel by ID."""
+    """Update a shared communication channel by ID.
+
+    Performs a GET-then-merge to preserve existing channel config (partner_archiving,
+    partner_communication, etc.) when only metadata fields are being updated.
+    """
     resource_id = kwargs.get("resource_id")
     if not resource_id:
         return {"_success": False, "error": "resource_id (channel_id) is required for 'update_channel' action"}
 
-    # Build update model from kwargs
-    channel_kwargs = {}
+    # Fetch existing channel to preserve its full config
+    existing = sdk.shared_communication_channel_component.get_shared_communication_channel_component(
+        id_=resource_id
+    )
+
+    # Apply user-provided overrides onto the existing object
     for key in ("component_name", "name", "communication_type", "channel_type",
                 "folder_id", "folder_name", "description"):
         val = kwargs.get(key)
         if val is not None:
-            # Map user-friendly names to SDK constructor params
             if key == "name":
-                channel_kwargs["component_name"] = val
+                existing.component_name = val
             elif key == "channel_type":
-                channel_kwargs["communication_type"] = val
+                existing.communication_type = val
             else:
-                channel_kwargs[key] = val
+                setattr(existing, key, val)
 
-    channel = SharedCommunicationChannelComponent(
-        partner_archiving=PartnerArchiving(),
-        partner_communication=PartnerCommunication(),
-        **channel_kwargs,
-    )
     updated = sdk.shared_communication_channel_component.update_shared_communication_channel_component(
-        id_=resource_id, request_body=channel
+        id_=resource_id, request_body=existing
     )
     return {
         "_success": True,

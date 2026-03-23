@@ -1794,6 +1794,7 @@ def handle_custom_tracked_fields(boomi_client, config_data: Dict[str, Any]) -> D
 _EDI_STANDARD_MAP = {
     "as2": ("as2_connector_record", "query_as2_connector_record", "query_more_as2_connector_record"),
     "edifact": ("edifact_connector_record", "query_edifact_connector_record", "query_more_edifact_connector_record"),
+    "custom": ("edi_custom_connector_record", "query_edi_custom_connector_record", "query_more_edi_custom_connector_record"),
     "edi_custom": ("edi_custom_connector_record", "query_edi_custom_connector_record", "query_more_edi_custom_connector_record"),
     "hl7": ("hl7_connector_record", "query_hl7_connector_record", "query_more_hl7_connector_record"),
     "odette": ("odette_connector_record", "query_odette_connector_record", "query_more_odette_connector_record"),

@@ -111,12 +111,16 @@ class TestUpdateChannel:
 
     def test_update_success(self):
         sdk = _make_sdk()
+        existing_ch = _make_channel("ch-001", "Old Channel")
         updated_ch = _make_channel("ch-001", "Updated Channel")
+        sdk.shared_communication_channel_component.get_shared_communication_channel_component.return_value = existing_ch
         sdk.shared_communication_channel_component.update_shared_communication_channel_component.return_value = updated_ch
 
         result = _action_update_channel(sdk, "dev", resource_id="ch-001", name="Updated Channel")
         assert result["_success"] is True
         assert result["channel"]["name"] == "Updated Channel"
+        # Verifies GET-then-merge: fetches existing first, then updates
+        sdk.shared_communication_channel_component.get_shared_communication_channel_component.assert_called_once_with(id_="ch-001")
         sdk.shared_communication_channel_component.update_shared_communication_channel_component.assert_called_once()
 
 
