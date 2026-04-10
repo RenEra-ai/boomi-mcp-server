@@ -1,12 +1,17 @@
 """
 Shared Resources Management MCP Tools for Boomi Platform.
 
-Provides 5 shared resource management actions:
+Provides 10 shared resource management actions:
 - list_web_servers: Get shared web server configuration for an atom
 - update_web_server: Update shared web server settings
+- get_web_server: Alias for list_web_servers (single-runtime GET)
 - list_channels: List shared communication channels
 - get_channel: Get a specific communication channel by ID
 - create_channel: Create a new communication channel
+- update_channel: Update a shared communication channel by ID
+- delete_channel: Delete a shared communication channel by ID
+- get_server_info: Get shared server information for a runtime
+- update_server_info: Update shared server information for a runtime
 """
 
 from typing import Dict, Any, Optional, List
@@ -24,7 +29,26 @@ from boomi.models import (
     SharedCommunicationChannelComponentQueryConfigQueryFilter,
     PartnerArchiving,
     PartnerCommunication,
+    SharedServerInformation,
+    FtpCommunicationOptions,
+    SftpCommunicationOptions,
+    HttpCommunicationOptions,
+    As2CommunicationOptions,
+    DiskCommunicationOptions,
+    MllpCommunicationOptions,
+    OftpCommunicationOptions,
 )
+
+# Map channel types to their PartnerCommunication kwarg and options class
+_CHANNEL_TYPE_COMM_OPTIONS = {
+    'FTP': ('ftp_communication_options', FtpCommunicationOptions),
+    'SFTP': ('sftp_communication_options', SftpCommunicationOptions),
+    'HTTP': ('http_communication_options', HttpCommunicationOptions),
+    'AS2': ('as2_communication_options', As2CommunicationOptions),
+    'DISK': ('disk_communication_options', DiskCommunicationOptions),
+    'MLLP': ('mllp_communication_options', MllpCommunicationOptions),
+    'OFTP': ('oftp_communication_options', OftpCommunicationOptions),
+}
 
 
 # ============================================================================
@@ -220,6 +244,7 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
         'base_url': 'baseUrl', 'api_type': 'apiType',
         'external_host': 'externalHost', 'internal_host': 'internalHost',
         'ssl_certificate': 'sslCertificate', 'max_number_of_threads': 'maxNumberOfThreads',
+        'max_threads': 'maxNumberOfThreads',
     }
     PORT_MAP = {
         'port': 'port', 'ssl': 'ssl', 'external_port': 'externalPort',
@@ -236,7 +261,7 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
             "_success": False,
             "error": "No valid update fields provided in config. "
                      "General fields: base_url, api_type, external_host, internal_host, "
-                     "ssl_certificate, max_number_of_threads, auth_type. "
+                     "ssl_certificate, max_number_of_threads (or max_threads), auth_type. "
                      "Port fields: port, ssl, external_port, external_ssl, auth_type, enable_port",
         }
 
@@ -333,11 +358,17 @@ def _action_create_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
 
     if not name:
         return {"_success": False, "error": "config.name is required for 'create_channel' action"}
+    if not channel_type:
+        return {"_success": False, "error": "config.channel_type is required (FTP, SFTP, HTTP, AS2, DISK, MLLP, OFTP)"}
+
+    # Normalize to uppercase for Boomi API
+    channel_type = channel_type.upper()
+    valid_types = ('FTP', 'SFTP', 'HTTP', 'AS2', 'DISK', 'MLLP', 'OFTP')
+    if channel_type not in valid_types:
+        return {"_success": False, "error": f"Invalid channel_type: {channel_type}. Valid types: {', '.join(valid_types)}"}
 
     # Map user-facing names to SDK constructor params
-    channel_kwargs = {"component_name": name}
-    if channel_type:
-        channel_kwargs["communication_type"] = channel_type
+    channel_kwargs = {"component_name": name, "communication_type": channel_type}
 
     # Pass through additional SDK-recognized fields
     for key in ("folder_id", "folder_name", "description"):
@@ -345,9 +376,17 @@ def _action_create_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
         if val is not None:
             channel_kwargs[key] = val
 
+    # Build PartnerCommunication with type-appropriate options so it serializes correctly
+    comm_entry = _CHANNEL_TYPE_COMM_OPTIONS.get(channel_type)
+    if comm_entry:
+        kwarg_name, opts_cls = comm_entry
+        pc = PartnerCommunication(**{kwarg_name: opts_cls()})
+    else:
+        pc = PartnerCommunication()
+
     channel = SharedCommunicationChannelComponent(
         partner_archiving=PartnerArchiving(),
-        partner_communication=PartnerCommunication(),
+        partner_communication=pc,
         **channel_kwargs,
     )
     created = sdk.shared_communication_channel_component.create_shared_communication_channel_component(
@@ -357,6 +396,150 @@ def _action_create_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     return {
         "_success": True,
         "channel": _channel_to_dict(created),
+    }
+
+
+def _action_update_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update a shared communication channel by ID.
+
+    Performs a GET-then-merge to preserve existing channel config (partner_archiving,
+    partner_communication, etc.) when only metadata fields are being updated.
+    """
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (channel_id) is required for 'update_channel' action"}
+
+    # Fetch existing channel to preserve its full config
+    existing = sdk.shared_communication_channel_component.get_shared_communication_channel_component(
+        id_=resource_id
+    )
+
+    # Normalize channel_type / communication_type the same way as create
+    new_type = kwargs.get("channel_type") or kwargs.get("communication_type")
+    if new_type is not None:
+        new_type = new_type.upper()
+        valid_types = ('FTP', 'SFTP', 'HTTP', 'AS2', 'DISK', 'MLLP', 'OFTP')
+        if new_type not in valid_types:
+            return {"_success": False, "error": f"Invalid channel_type: {new_type}. Valid types: {', '.join(valid_types)}"}
+        old_type = getattr(existing, "communication_type", None)
+        existing.communication_type = new_type
+        # Only rebuild partner_communication when the protocol actually changes;
+        # a same-type update (e.g. "ftp" → "FTP") must preserve existing settings.
+        if new_type != old_type:
+            comm_entry = _CHANNEL_TYPE_COMM_OPTIONS.get(new_type)
+            if comm_entry:
+                kwarg_name, opts_cls = comm_entry
+                existing.partner_communication = PartnerCommunication(**{kwarg_name: opts_cls()})
+            else:
+                existing.partner_communication = PartnerCommunication()
+
+    # Apply remaining user-provided overrides onto the existing object
+    for key in ("component_name", "name", "folder_id", "folder_name", "description"):
+        val = kwargs.get(key)
+        if val is not None:
+            if key == "name":
+                existing.component_name = val
+            else:
+                setattr(existing, key, val)
+
+    updated = sdk.shared_communication_channel_component.update_shared_communication_channel_component(
+        id_=resource_id, request_body=existing
+    )
+    return {
+        "_success": True,
+        "channel": _channel_to_dict(updated),
+    }
+
+
+def _action_delete_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Delete a shared communication channel by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (channel_id) is required for 'delete_channel' action"}
+
+    sdk.shared_communication_channel_component.delete_shared_communication_channel_component(
+        id_=resource_id
+    )
+    return {
+        "_success": True,
+        "message": f"Channel {resource_id} deleted successfully",
+    }
+
+
+def _server_info_to_dict(info) -> Dict[str, Any]:
+    """Convert SDK SharedServerInformation to plain dict."""
+    result = {}
+    for attr in (
+        'api_type', 'atom_id', 'auth', 'auth_token',
+        'check_forwarded_headers', 'external_host',
+        'external_http_port', 'external_https_port',
+        'http_port', 'https_port', 'internal_host',
+        'max_threads', 'min_auth', 'override_url',
+        'ssl_certificate_id', 'url',
+    ):
+        val = getattr(info, attr, None)
+        if val is not None:
+            if hasattr(val, 'value'):
+                result[attr] = str(val.value)
+            elif isinstance(val, (bool, int)):
+                result[attr] = val
+            else:
+                result[attr] = str(val)
+    return result
+
+
+def _action_get_server_info(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get shared server information for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (atom_id) is required for 'get_server_info' action"}
+
+    info = sdk.shared_server_information.get_shared_server_information(id_=resource_id)
+    return {
+        "_success": True,
+        "server_info": _server_info_to_dict(info),
+    }
+
+
+def _action_update_server_info(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update shared server information for a runtime."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id (atom_id) is required for 'update_server_info' action"}
+
+    # Build SharedServerInformation from kwargs
+    info_kwargs = {}
+    FIELD_MAP = {
+        'api_type': 'api_type', 'auth': 'auth', 'min_auth': 'min_auth',
+        'external_host': 'external_host', 'internal_host': 'internal_host',
+        'http_port': 'http_port', 'https_port': 'https_port',
+        'external_http_port': 'external_http_port',
+        'external_https_port': 'external_https_port',
+        'max_threads': 'max_threads', 'override_url': 'override_url',
+        'check_forwarded_headers': 'check_forwarded_headers',
+        'ssl_certificate_id': 'ssl_certificate_id', 'url': 'url',
+    }
+    for user_key, sdk_key in FIELD_MAP.items():
+        val = kwargs.get(user_key)
+        if val is not None:
+            info_kwargs[sdk_key] = val
+
+    if not info_kwargs:
+        return {
+            "_success": False,
+            "error": "No valid update fields provided in config. "
+                     "Valid fields: " + ", ".join(sorted(FIELD_MAP.keys())),
+        }
+
+    info = SharedServerInformation(**info_kwargs)
+    info.atom_id = resource_id
+    updated = sdk.shared_server_information.update_shared_server_information(
+        id_=resource_id, request_body=info
+    )
+    return {
+        "_success": True,
+        "server_info": _server_info_to_dict(updated),
+        "updated_fields": list(info_kwargs.keys()),
     }
 
 
@@ -377,7 +560,9 @@ def manage_shared_resources_action(
     Args:
         sdk: Authenticated Boomi SDK client
         profile: Profile name
-        action: One of: list_web_servers, update_web_server, list_channels, get_channel, create_channel
+        action: One of: list_web_servers, get_web_server, update_web_server, list_channels,
+            get_channel, create_channel, update_channel, delete_channel,
+            get_server_info, update_server_info
         config_data: Action-specific configuration dict
         **kwargs: Additional parameters (resource_id, etc.)
     """
@@ -389,10 +574,15 @@ def manage_shared_resources_action(
 
     actions = {
         "list_web_servers": _action_list_web_servers,
+        "get_web_server": _action_list_web_servers,
         "update_web_server": _action_update_web_server,
         "list_channels": _action_list_channels,
         "get_channel": _action_get_channel,
         "create_channel": _action_create_channel,
+        "update_channel": _action_update_channel,
+        "delete_channel": _action_delete_channel,
+        "get_server_info": _action_get_server_info,
+        "update_server_info": _action_update_server_info,
     }
 
     handler = actions.get(action)

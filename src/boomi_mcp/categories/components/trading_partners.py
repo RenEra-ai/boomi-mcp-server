@@ -3,7 +3,8 @@
 Trading Partner MCP Tools for Boomi API Integration.
 
 This module provides comprehensive trading partner management capabilities
-including CRUD operations, bulk operations, and querying for B2B/EDI partners.
+including CRUD operations, bulk operations, querying for B2B/EDI partners,
+and trading partner processing group management.
 
 Supported Standards:
 - X12 (EDI)
@@ -13,6 +14,13 @@ Supported Standards:
 - TRADACOMS
 - ODETTE
 - Custom formats
+
+Processing Group Actions:
+- pg_list: Query trading partner processing groups
+- pg_get: Get a processing group by ID
+- pg_create: Create a new processing group
+- pg_update: Update a processing group by ID
+- pg_delete: Delete a processing group by ID
 """
 
 from typing import Dict, Any, List, Optional
@@ -26,7 +34,21 @@ from boomi.models import (
     TradingPartnerComponentQueryConfigQueryFilter,
     TradingPartnerComponentSimpleExpression,
     TradingPartnerComponentSimpleExpressionOperator,
-    TradingPartnerComponentSimpleExpressionProperty
+    TradingPartnerComponentSimpleExpressionProperty,
+    TradingPartnerProcessingGroup,
+    TradingPartnerProcessingGroupQueryConfig,
+    TradingPartnerProcessingGroupQueryConfigQueryFilter,
+    TradingPartnerProcessingGroupSimpleExpression,
+    TradingPartnerProcessingGroupSimpleExpressionOperator,
+)
+from boomi.net.transport.api_error import ApiError
+from boomi_mcp.categories.components._shared import _extract_api_error_msg
+from boomi_mcp.categories.components.organizations import (
+    list_organizations,
+    get_organization,
+    create_organization,
+    update_organization,
+    delete_organization,
 )
 
 
@@ -82,9 +104,11 @@ def _strip_enum_prefix(val):
         return None
     s = getattr(val, 'value', val)  # extract .value from enum if needed
     if isinstance(s, str) and '_' in s:
-        # Known prefixes: X12IDQUAL_, EDIFACTIDQUAL_, EDIFACTSYNTAXVERSION_, EDIFACTTEST_,
+        # Known prefixes: X12IDQUAL_, X12AUTHQUAL_, X12SECQUAL_,
+        # EDIFACTIDQUAL_, EDIFACTSYNTAXVERSION_, EDIFACTTEST_,
         # ODETTEIDQUAL_, ODETTESYNTAXVERSION_, ODETTETEST_
-        for prefix in ('X12IDQUAL_', 'EDIFACTIDQUAL_', 'EDIFACTSYNTAXVERSION_', 'EDIFACTTEST_',
+        for prefix in ('X12IDQUAL_', 'X12AUTHQUAL_', 'X12SECQUAL_',
+                       'EDIFACTIDQUAL_', 'EDIFACTSYNTAXVERSION_', 'EDIFACTTEST_',
                        'ODETTEIDQUAL_', 'ODETTESYNTAXVERSION_', 'ODETTETEST_'):
             if s.startswith(prefix):
                 return s[len(prefix):]
@@ -247,12 +271,19 @@ def create_trading_partner(boomi_client, profile: str, request_data: Dict[str, A
             "warnings": warnings if warnings else None
         }
 
-    except Exception as e:
-        error_msg = str(e)
-        # Provide helpful error messages for common issues
+    except ApiError as e:
+        error_msg = _extract_api_error_msg(e)
         if "B2B" in error_msg or "EDI" in error_msg:
             error_msg = f"{error_msg}. Note: Account must have B2B/EDI feature enabled for trading partner creation."
-
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to create trading partner: {error_msg}"
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "B2B" in error_msg or "EDI" in error_msg:
+            error_msg = f"{error_msg}. Note: Account must have B2B/EDI feature enabled for trading partner creation."
         return {
             "_success": False,
             "error": str(e),
@@ -306,6 +337,8 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
                     if isa_ctrl:
                         partner_info["isa_id"] = getattr(isa_ctrl, 'interchange_id', None)
                         partner_info["isa_qualifier"] = _strip_enum_prefix(getattr(isa_ctrl, 'interchange_id_qualifier', None))
+                        partner_info["isa_auth_qualifier"] = _strip_enum_prefix(getattr(isa_ctrl, 'authorization_information_qualifier', None))
+                        partner_info["isa_sec_qualifier"] = _strip_enum_prefix(getattr(isa_ctrl, 'security_information_qualifier', None))
                     if gs_ctrl:
                         partner_info["gs_id"] = getattr(gs_ctrl, 'applicationcode', None)
 
@@ -1001,6 +1034,12 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
 
         return {"_success": True, "trading_partner": tp}
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to get trading partner: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -1147,7 +1186,7 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                     grouped[standard_upper] = []
                 grouped[standard_upper].append(partner)
 
-        return {
+        response = {
             "_success": True,
             "total_count": len(partners),
             "partners": partners,
@@ -1162,7 +1201,14 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                 "odette": len(grouped.get("ODETTE", []))
             }
         }
+        return response
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to list trading partners: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -1245,6 +1291,12 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
             existing_tp = boomi_client.trading_partner_component.get_trading_partner_component(
                 id_=component_id
             )
+        except ApiError as e:
+            return {
+                "_success": False,
+                "error": f"Component not found: {_extract_api_error_msg(e)}",
+                "message": f"Trading partner {component_id} not found or could not be retrieved"
+            }
         except Exception as e:
             return {
                 "_success": False,
@@ -1333,7 +1385,7 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
 
         # Standard-specific partner_info update
         partner_info_fields = {
-            'x12': ['isa_id', 'isa_qualifier', 'gs_id'],
+            'x12': ['isa_id', 'isa_qualifier', 'gs_id', 'isa_auth_qualifier', 'isa_sec_qualifier'],
             'edifact': ['edifact_interchange_id', 'edifact_interchange_id_qual', 'edifact_syntax_id',
                         'edifact_syntax_version', 'edifact_test_indicator'],
             'hl7': ['hl7_application', 'hl7_facility'],
@@ -1369,6 +1421,8 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                                 if isa_ctrl:
                                     existing_pi_values['isa_id'] = getattr(isa_ctrl, 'interchange_id', None)
                                     existing_pi_values['isa_qualifier'] = _strip_enum_prefix(getattr(isa_ctrl, 'interchange_id_qualifier', None))
+                                    existing_pi_values['isa_auth_qualifier'] = _strip_enum_prefix(getattr(isa_ctrl, 'authorization_information_qualifier', None))
+                                    existing_pi_values['isa_sec_qualifier'] = _strip_enum_prefix(getattr(isa_ctrl, 'security_information_qualifier', None))
                                 if gs_ctrl:
                                     existing_pi_values['gs_id'] = getattr(gs_ctrl, 'applicationcode', None)
                     elif std_lower == 'edifact':
@@ -2701,6 +2755,12 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
             "warnings": warnings if warnings else None
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to update trading partner: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -2731,6 +2791,12 @@ def delete_trading_partner(boomi_client, profile: str, component_id: str) -> Dic
             "message": f"Successfully deleted trading partner: {component_id}"
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to delete trading partner: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -2793,6 +2859,12 @@ def bulk_create_trading_partners(boomi_client, profile: str, partners: List[Dict
             "message": f"Successfully created {len(created_partners)} trading partners"
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to bulk create trading partners: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -2913,6 +2985,12 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
 
         return analysis
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": _extract_api_error_msg(e),
+            "message": f"Failed to analyze trading partner usage: {_extract_api_error_msg(e)}"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -2986,6 +3064,184 @@ def list_options() -> Dict[str, Any]:
     }
 
 
+# ============================================================================
+# Trading Partner Processing Group Operations
+# ============================================================================
+
+
+def _pg_to_dict(pg) -> Dict[str, Any]:
+    """Convert SDK TradingPartnerProcessingGroup to plain dict."""
+    result = {}
+    for attr in (
+        'component_id', 'component_name', 'deleted', 'description',
+        'folder_id', 'folder_name', 'branch_id', 'branch_name',
+    ):
+        val = getattr(pg, attr, None)
+        if val is not None:
+            if hasattr(val, 'value'):
+                result[attr] = str(val.value)
+            elif isinstance(val, (bool, int)):
+                result[attr] = val
+            else:
+                result[attr] = str(val)
+    # Include routing info if present
+    for routing_attr in ('default_routing', 'document_routing', 'partner_routing', 'trading_partners'):
+        val = getattr(pg, routing_attr, None)
+        if val is not None:
+            # Convert to dict via _kwargs or serialization
+            if hasattr(val, '__dict__'):
+                d = {k: v for k, v in val.__dict__.items() if not k.startswith('_') and v is not None}
+                if d:
+                    result[routing_attr] = d
+    return result
+
+
+def _query_all_processing_groups(sdk, expression=None) -> List[Dict[str, Any]]:
+    """Execute processing group query with pagination, return list of dicts."""
+    if expression:
+        query_filter = TradingPartnerProcessingGroupQueryConfigQueryFilter(
+            expression=expression
+        )
+    else:
+        expression = TradingPartnerProcessingGroupSimpleExpression(
+            operator=TradingPartnerProcessingGroupSimpleExpressionOperator.LIKE,
+            property="name",
+            argument=["%"],
+        )
+        query_filter = TradingPartnerProcessingGroupQueryConfigQueryFilter(
+            expression=expression
+        )
+
+    query_config = TradingPartnerProcessingGroupQueryConfig(
+        query_filter=query_filter
+    )
+    result = sdk.trading_partner_processing_group.query_trading_partner_processing_group(
+        request_body=query_config
+    )
+
+    groups = []
+    if hasattr(result, 'result') and result.result:
+        items = result.result if isinstance(result.result, list) else [result.result]
+        groups.extend([_pg_to_dict(g) for g in items])
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.trading_partner_processing_group.query_more_trading_partner_processing_group(
+            request_body=result.query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            items = result.result if isinstance(result.result, list) else [result.result]
+            groups.extend([_pg_to_dict(g) for g in items])
+
+    return groups
+
+
+def _action_pg_list(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Query trading partner processing groups."""
+    name_pattern = kwargs.get("name_pattern")
+
+    if name_pattern:
+        like_pattern = name_pattern if "%" in name_pattern else f"%{name_pattern}%"
+        expression = TradingPartnerProcessingGroupSimpleExpression(
+            operator=TradingPartnerProcessingGroupSimpleExpressionOperator.LIKE,
+            property="name",
+            argument=[like_pattern],
+        )
+    else:
+        expression = None
+
+    groups = _query_all_processing_groups(sdk, expression)
+    return {
+        "_success": True,
+        "processing_groups": groups,
+        "total_count": len(groups),
+    }
+
+
+def _action_pg_get(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get a trading partner processing group by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'pg_get' action"}
+
+    pg = sdk.trading_partner_processing_group.get_trading_partner_processing_group(
+        id_=resource_id
+    )
+    return {
+        "_success": True,
+        "processing_group": _pg_to_dict(pg),
+    }
+
+
+def _action_pg_create(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Create a new trading partner processing group."""
+    component_name = kwargs.get("component_name") or kwargs.get("name")
+    if not component_name:
+        return {"_success": False, "error": "config.component_name is required for 'pg_create' action"}
+
+    pg_kwargs = {"component_name": component_name}
+    for key in ("folder_id", "folder_name", "description"):
+        val = kwargs.get(key)
+        if val is not None:
+            pg_kwargs[key] = val
+
+    pg = TradingPartnerProcessingGroup(**pg_kwargs)
+    created = sdk.trading_partner_processing_group.create_trading_partner_processing_group(
+        request_body=pg
+    )
+    return {
+        "_success": True,
+        "processing_group": _pg_to_dict(created),
+    }
+
+
+def _action_pg_update(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update a trading partner processing group by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'pg_update' action"}
+
+    pg_kwargs = {}
+    for key in ("component_name", "name", "folder_id", "folder_name", "description"):
+        val = kwargs.get(key)
+        if val is not None:
+            if key == "name":
+                pg_kwargs["component_name"] = val
+            else:
+                pg_kwargs[key] = val
+
+    if not pg_kwargs:
+        return {
+            "_success": False,
+            "error": "No valid update fields provided in config. "
+                     "Valid fields: component_name, folder_id, folder_name, description",
+        }
+
+    pg_kwargs["component_id"] = resource_id
+    pg = TradingPartnerProcessingGroup(**pg_kwargs)
+    updated = sdk.trading_partner_processing_group.update_trading_partner_processing_group(
+        id_=resource_id, request_body=pg
+    )
+    return {
+        "_success": True,
+        "processing_group": _pg_to_dict(updated),
+    }
+
+
+def _action_pg_delete(sdk, profile: str, **kwargs) -> Dict[str, Any]:
+    """Delete a trading partner processing group by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'pg_delete' action"}
+
+    sdk.trading_partner_processing_group.delete_trading_partner_processing_group(
+        id_=resource_id
+    )
+    return {
+        "_success": True,
+        "message": f"Processing group {resource_id} deleted successfully",
+    }
+
+
 def manage_trading_partner_action(
     boomi_client,
     profile: str,
@@ -3043,11 +3299,17 @@ def manage_trading_partner_action(
 
         elif action == "create":
             request_data = params.get("request_data")
-            if not request_data:
+            if request_data is None:
                 return {
                     "_success": False,
-                    "error": "request_data is required for 'create' action",
-                    "hint": "Provide trading partner configuration including standard, name, and standard-specific parameters. Use get_schema_template for expected format."
+                    "error": "config is required for 'create' action",
+                    "hint": "config must include at least component_name and standard. Use action='list_options' to see valid values."
+                }
+            if isinstance(request_data, dict) and not request_data:
+                return {
+                    "_success": False,
+                    "error": "config is empty — component_name and standard are required",
+                    "hint": "Provide at minimum: {\"component_name\": \"...\", \"standard\": \"x12|edifact|hl7|custom|...\"}. Use action='list_options' to see valid values."
                 }
             return create_trading_partner(boomi_client, profile, request_data)
 
@@ -3091,13 +3353,87 @@ def manage_trading_partner_action(
         elif action == "list_options":
             return list_options()
 
+        elif action == "pg_list":
+            return _action_pg_list(boomi_client, profile, **params)
+
+        elif action == "pg_get":
+            return _action_pg_get(boomi_client, profile, **params)
+
+        elif action == "pg_create":
+            return _action_pg_create(boomi_client, profile, **params)
+
+        elif action == "pg_update":
+            return _action_pg_update(boomi_client, profile, **params)
+
+        elif action == "pg_delete":
+            return _action_pg_delete(boomi_client, profile, **params)
+
+        elif action == "org_list":
+            filters = params.get("filters", None)
+            return list_organizations(boomi_client, profile, filters)
+
+        elif action == "org_get":
+            organization_id = params.get("organization_id") or params.get("resource_id")
+            if not organization_id:
+                return {
+                    "_success": False,
+                    "error": "organization_id is required for 'org_get' action",
+                    "hint": "Provide the organization component ID to retrieve"
+                }
+            return get_organization(boomi_client, profile, organization_id)
+
+        elif action == "org_create":
+            request_data = params.get("request_data") or params.get("config")
+            if not request_data:
+                return {
+                    "_success": False,
+                    "error": "config is required for 'org_create' action",
+                    "hint": "config must include at least component_name"
+                }
+            return create_organization(boomi_client, profile, request_data)
+
+        elif action == "org_update":
+            organization_id = params.get("organization_id") or params.get("resource_id")
+            updates = params.get("updates") or params.get("config")
+            if not organization_id:
+                return {
+                    "_success": False,
+                    "error": "organization_id is required for 'org_update' action",
+                    "hint": "Provide the organization component ID to update"
+                }
+            if not updates:
+                return {
+                    "_success": False,
+                    "error": "updates dict is required for 'org_update' action",
+                    "hint": "Provide the fields to update"
+                }
+            return update_organization(boomi_client, profile, organization_id, updates)
+
+        elif action == "org_delete":
+            organization_id = params.get("organization_id") or params.get("resource_id")
+            if not organization_id:
+                return {
+                    "_success": False,
+                    "error": "organization_id is required for 'org_delete' action",
+                    "hint": "Provide the organization component ID to delete"
+                }
+            return delete_organization(boomi_client, profile, organization_id)
+
         else:
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, list_options, org_list, org_get, org_create, org_update, org_delete"
+                "hint": "Valid actions are: list, get, create, update, delete, analyze_usage, list_options, "
+                        "pg_list, pg_get, pg_create, pg_update, pg_delete, "
+                        "org_list, org_get, org_create, org_update, org_delete"
             }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError"
+        }
     except Exception as e:
         return {
             "_success": False,

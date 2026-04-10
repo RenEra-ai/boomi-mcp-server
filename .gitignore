@@ -69,6 +69,8 @@ secrets/
 
 # Temp files
 *.Zone.Identifier
+.~lock.*
+~$*
 
 # Cloned Repositories (examples/references)
 mcp-streamable-http/
@@ -80,16 +82,15 @@ setup_claude_code.sh
 
 # Project documentation (local only)
 CLAUDE.md
-docs/QA_REVIEW_MANUAL.md
+docs/
 /AGENTS.md
 STANDARDS_STATUS.md
 TRADING_PARTNER_VERIFICATION.md
 *_VERIFICATION.md
 
-# Test files and directories (dev only — keep off main)
+# Test files (local only, except tests/ dir)
 test_*.py
-tests/
-**/tests/
+!tests/test_*.py
 analyze_*.py
 
 # Plans (local only)

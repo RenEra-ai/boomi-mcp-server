@@ -1,11 +1,15 @@
 """
 Process Schedules MCP Tool for Boomi Platform.
 
-Provides 4 schedule management actions:
+Provides 8 schedule management actions:
 - list: Query all process schedules with optional process_id/atom_id filters
 - get: Get specific schedule by schedule_id (or by process_id + atom_id)
 - update: Update/create schedule with cron expression
 - delete: Clear/disable schedule (sets empty schedule array)
+- list_status: Query schedule statuses with optional process_id/atom_id filters
+- get_status: Get specific schedule status by ID or process_id + atom_id
+- enable: Enable a process schedule
+- disable: Disable a process schedule
 
 SDK reference: boomi-python/examples/06_configure_deployment/manage_process_schedules.py
 """
@@ -22,6 +26,12 @@ from boomi.models import (
     ProcessSchedulesSimpleExpression,
     ProcessSchedulesSimpleExpressionOperator,
     ProcessSchedulesSimpleExpressionProperty,
+    ProcessScheduleStatus,
+    ProcessScheduleStatusQueryConfig,
+    ProcessScheduleStatusQueryConfigQueryFilter,
+    ProcessScheduleStatusSimpleExpression,
+    ProcessScheduleStatusSimpleExpressionOperator,
+    ProcessScheduleStatusSimpleExpressionProperty,
     Schedule,
     ScheduleRetry,
 )
@@ -47,8 +57,11 @@ def _extract_api_error_msg(e) -> str:
 
 
 def _schedule_id_from_ids(atom_id: str, process_id: str) -> str:
-    """Build the base64-encoded schedule ID from atom and process IDs."""
-    return base64.b64encode(f"CPS{atom_id}:{process_id}".encode()).decode()
+    """Build the base64-encoded schedule ID from atom and process IDs.
+
+    Boomi uses unpadded base64, so we strip trailing '=' characters.
+    """
+    return base64.b64encode(f"CPS{atom_id}:{process_id}".encode()).decode().rstrip("=")
 
 
 def _ids_from_schedule_id(schedule_id: str) -> tuple:
@@ -142,6 +155,36 @@ def _query_all_schedules(sdk: Boomi, query_config) -> List[Dict[str, Any]]:
             schedules.extend([_process_schedule_to_dict(s) for s in result.result])
 
     return schedules
+
+
+def _schedule_status_to_dict(status) -> Dict[str, Any]:
+    """Convert SDK ProcessScheduleStatus object to plain dict."""
+    return {
+        "id": getattr(status, 'id_', ''),
+        "process_id": getattr(status, 'process_id', ''),
+        "atom_id": getattr(status, 'atom_id', ''),
+        "enabled": bool(getattr(status, 'enabled', False)),
+    }
+
+
+def _query_all_schedule_statuses(sdk: Boomi, query_config) -> List[Dict[str, Any]]:
+    """Execute a schedule status query with pagination, return list of dicts."""
+    result = sdk.process_schedule_status.query_process_schedule_status(
+        request_body=query_config
+    )
+
+    statuses = []
+    if hasattr(result, 'result') and result.result:
+        statuses.extend([_schedule_status_to_dict(s) for s in result.result])
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.process_schedule_status.query_more_process_schedule_status(
+            request_body=result.query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            statuses.extend([_schedule_status_to_dict(s) for s in result.result])
+
+    return statuses
 
 
 # ============================================================================
@@ -331,6 +374,141 @@ def _action_delete(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     }
 
 
+def _action_list_status(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """List schedule statuses with optional process_id/atom_id filters."""
+    process_id = kwargs.get("process_id")
+    atom_id = kwargs.get("atom_id")
+
+    if process_id:
+        expression = ProcessScheduleStatusSimpleExpression(
+            operator=ProcessScheduleStatusSimpleExpressionOperator.EQUALS,
+            property=ProcessScheduleStatusSimpleExpressionProperty.PROCESSID,
+            argument=[process_id],
+        )
+        query_filter = ProcessScheduleStatusQueryConfigQueryFilter(expression=expression)
+        query_config = ProcessScheduleStatusQueryConfig(query_filter=query_filter)
+    elif atom_id:
+        expression = ProcessScheduleStatusSimpleExpression(
+            operator=ProcessScheduleStatusSimpleExpressionOperator.EQUALS,
+            property=ProcessScheduleStatusSimpleExpressionProperty.ATOMID,
+            argument=[atom_id],
+        )
+        query_filter = ProcessScheduleStatusQueryConfigQueryFilter(expression=expression)
+        query_config = ProcessScheduleStatusQueryConfig(query_filter=query_filter)
+    else:
+        expression = ProcessScheduleStatusSimpleExpression(
+            operator=ProcessScheduleStatusSimpleExpressionOperator.ISNOTNULL,
+            property=ProcessScheduleStatusSimpleExpressionProperty.PROCESSID,
+            argument=[],
+        )
+        query_filter = ProcessScheduleStatusQueryConfigQueryFilter(expression=expression)
+        query_config = ProcessScheduleStatusQueryConfig(query_filter=query_filter)
+
+    statuses = _query_all_schedule_statuses(sdk, query_config)
+
+    return {
+        "_success": True,
+        "statuses": statuses,
+        "total_count": len(statuses),
+    }
+
+
+def _action_get_status(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get a specific schedule status by ID or by process_id + atom_id."""
+    resource_id = kwargs.get("resource_id")
+    process_id = kwargs.get("process_id")
+    atom_id = kwargs.get("atom_id")
+
+    if not resource_id:
+        if process_id and atom_id:
+            resource_id = _schedule_id_from_ids(atom_id, process_id)
+        else:
+            return {
+                "_success": False,
+                "error": "Provide either resource_id (schedule ID) or both process_id and atom_id in config.",
+            }
+
+    result = sdk.process_schedule_status.get_process_schedule_status(id_=resource_id)
+    return {
+        "_success": True,
+        "status": _schedule_status_to_dict(result),
+    }
+
+
+def _action_enable(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Enable a process schedule."""
+    resource_id = kwargs.get("resource_id")
+    process_id = kwargs.get("process_id")
+    atom_id = kwargs.get("atom_id")
+
+    if not resource_id:
+        if process_id and atom_id:
+            resource_id = _schedule_id_from_ids(atom_id, process_id)
+        else:
+            return {
+                "_success": False,
+                "error": "Provide either resource_id (schedule ID) or both process_id and atom_id in config.",
+            }
+
+    # Decode resource_id to fill missing process_id/atom_id (API requires all fields)
+    if not process_id or not atom_id:
+        try:
+            decoded_atom, decoded_process = _ids_from_schedule_id(resource_id)
+        except ValueError as e:
+            return {"_success": False, "error": str(e)}
+        if not process_id:
+            process_id = decoded_process
+        if not atom_id:
+            atom_id = decoded_atom
+
+    result = sdk.process_schedule_status.update_process_schedule_status(
+        id_=resource_id,
+        request_body=ProcessScheduleStatus(id_=resource_id, enabled=True, atom_id=atom_id, process_id=process_id),
+    )
+    return {
+        "_success": True,
+        "status": _schedule_status_to_dict(result),
+        "message": "Schedule enabled",
+    }
+
+
+def _action_disable(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Disable a process schedule."""
+    resource_id = kwargs.get("resource_id")
+    process_id = kwargs.get("process_id")
+    atom_id = kwargs.get("atom_id")
+
+    if not resource_id:
+        if process_id and atom_id:
+            resource_id = _schedule_id_from_ids(atom_id, process_id)
+        else:
+            return {
+                "_success": False,
+                "error": "Provide either resource_id (schedule ID) or both process_id and atom_id in config.",
+            }
+
+    # Decode resource_id to fill missing process_id/atom_id (API requires all fields)
+    if not process_id or not atom_id:
+        try:
+            decoded_atom, decoded_process = _ids_from_schedule_id(resource_id)
+        except ValueError as e:
+            return {"_success": False, "error": str(e)}
+        if not process_id:
+            process_id = decoded_process
+        if not atom_id:
+            atom_id = decoded_atom
+
+    result = sdk.process_schedule_status.update_process_schedule_status(
+        id_=resource_id,
+        request_body=ProcessScheduleStatus(id_=resource_id, enabled=False, atom_id=atom_id, process_id=process_id),
+    )
+    return {
+        "_success": True,
+        "status": _schedule_status_to_dict(result),
+        "message": "Schedule disabled",
+    }
+
+
 # ============================================================================
 # Action Router
 # ============================================================================
@@ -348,7 +526,7 @@ def manage_schedules_action(
     Args:
         sdk: Authenticated Boomi SDK client
         profile: Profile name
-        action: One of: list, get, update, delete
+        action: One of: list, get, update, delete, list_status, get_status, enable, disable
         config_data: Action-specific configuration dict
         **kwargs: Additional parameters (resource_id, etc.)
     """
@@ -362,6 +540,10 @@ def manage_schedules_action(
         "get": _action_get,
         "update": _action_update,
         "delete": _action_delete,
+        "list_status": _action_list_status,
+        "get_status": _action_get_status,
+        "enable": _action_enable,
+        "disable": _action_disable,
     }
 
     handler = actions.get(action)

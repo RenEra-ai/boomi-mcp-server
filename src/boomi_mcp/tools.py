@@ -119,7 +119,34 @@ class BoomiMCPTools:
         Returns:
             Success status and message
         """
+        import re as _re
         try:
+            # Validate required parameters are not empty/whitespace
+            validation_errors = []
+            for param_name, param_val in [("profile", profile), ("account_id", account_id), ("username", username), ("password", password)]:
+                if not param_val or not param_val.strip():
+                    validation_errors.append(param_name)
+            if validation_errors:
+                return SetBoomiCredentialsOutput(
+                    success=False,
+                    message=f"Required parameter(s) cannot be empty: {', '.join(validation_errors)}",
+                    profile=profile or ""
+                )
+
+            # Strip whitespace
+            profile = profile.strip()
+            account_id = account_id.strip()
+            username = username.strip()
+            password = password.strip()
+
+            # Validate account_id format
+            if not _re.fullmatch(r'[A-Za-z0-9_-]+', account_id):
+                return SetBoomiCredentialsOutput(
+                    success=False,
+                    message="account_id contains invalid characters. Expected alphanumeric, hyphens, or underscores only.",
+                    profile=profile
+                )
+
             self.credential_store.store_credentials(
                 subject=subject,
                 profile=profile,
@@ -132,16 +159,23 @@ class BoomiMCPTools:
             # Never log passwords
             logger.info(f"Stored credentials for {subject}:{profile} (username: {username[:10]}***)")
 
+            msg = f"Credentials stored successfully for profile '{profile}'"
+            if not username.startswith("BOOMI_TOKEN."):
+                msg += " (warning: username does not start with 'BOOMI_TOKEN.' — Boomi API tokens typically use this prefix)"
+
             return SetBoomiCredentialsOutput(
                 success=True,
-                message=f"Credentials stored successfully for profile '{profile}'",
+                message=msg,
                 profile=profile
             )
         except Exception as e:
             logger.error(f"Failed to store credentials for {subject}:{profile}: {e}")
+            # Sanitize error message to avoid leaking URLs/paths
+            from .sanitize import sanitize_error_msg
+            raw = sanitize_error_msg(str(e))
             return SetBoomiCredentialsOutput(
                 success=False,
-                message=f"Failed to store credentials: {str(e)}",
+                message=f"Failed to store credentials: {raw}",
                 profile=profile
             )
 

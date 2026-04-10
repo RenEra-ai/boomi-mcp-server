@@ -2,13 +2,13 @@
 Component Management MCP Tools for Boomi API Integration.
 
 Provides component CRUD operations:
-- create: Create a component from XML or delegate process creation to processes.py
+- create: Create a component from XML
 - update: Update component metadata or full XML
 - clone: Clone an existing component with a new name
 - delete: Delete a component via metadata API
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import xml.etree.ElementTree as ET
 
 from boomi import Boomi
@@ -27,30 +27,18 @@ from ._shared import (
 def create_component(
     boomi_client: Boomi,
     profile: str,
-    config: Dict[str, Any],
-    config_yaml: Optional[str] = None
+    config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Create a new component.
 
-    If type is 'process' and config_yaml is provided, delegates to processes.py.
-    Otherwise requires raw XML in config['xml'].
+    Requires raw XML in config['xml'].
 
     Note: Boomi's Component API requires type-specific XML structures with proper
     namespaces and object elements. Minimal XML without these is rejected with 400.
     Use query_components get action on an existing component to obtain a valid XML
-    template, or use manage_process with config_yaml for process components.
+    template.
     """
     try:
-        comp_type = config.get('type', '')
-
-        # Delegate process creation to processes.py if YAML provided
-        if config_yaml:
-            if not comp_type:
-                comp_type = 'process'
-            if comp_type == 'process':
-                from .processes import create_process
-                return create_process(boomi_client, profile, config_yaml)
-
         # Create from raw XML
         if config.get('xml'):
             result = _create_component_raw(boomi_client, config['xml'])
@@ -71,7 +59,6 @@ def create_component(
                 "Boomi requires type-specific XML with proper namespaces. "
                 "Use query_components get action on an existing component to obtain "
                 "a valid XML template, then modify and pass as config.xml. "
-                "For processes, use manage_process with config_yaml instead. "
                 "For connectors (connector-settings, connector-action), use "
                 "manage_connector action='get' on a similar connector to obtain XML, "
                 "then modify and pass as config.xml."
@@ -282,14 +269,13 @@ def manage_component_action(
     try:
         if action == "create":
             config = params.get("config", {})
-            config_yaml = params.get("config_yaml")
-            if not config and not config_yaml:
+            if not config:
                 return {
                     "_success": False,
-                    "error": "config or config_yaml is required for 'create' action",
-                    "hint": 'Provide config: {"xml": "<Component ...>"} with valid Boomi XML, or config_yaml for process creation. Use query_components get action on an existing component to obtain an XML template.',
+                    "error": "config is required for 'create' action",
+                    "hint": 'Provide config: {"xml": "<Component ...>"} with valid Boomi XML. Use query_components get action on an existing component to obtain an XML template.',
                 }
-            return create_component(boomi_client, profile, config or {}, config_yaml)
+            return create_component(boomi_client, profile, config)
 
         elif action == "update":
             component_id = params.get("component_id")

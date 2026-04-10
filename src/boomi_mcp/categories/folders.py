@@ -5,7 +5,7 @@ Provides 7 folder management actions:
 - list: List all folders with optional tree view and filters
 - get: Get single folder by ID
 - create: Create folder or folder hierarchy from path
-- move: Move a component to a different folder
+- move_component: Move a component to a different folder (alias: move)
 - delete: Delete an empty folder
 - restore: Restore a deleted folder
 - contents: List components and sub-folders in a folder
@@ -14,6 +14,7 @@ Provides 7 folder management actions:
 from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
+from boomi.net.transport.api_error import ApiError
 from boomi.models import (
     Folder,
     FolderQueryConfig,
@@ -32,6 +33,21 @@ from boomi.models import (
 # ============================================================================
 # Helpers
 # ============================================================================
+
+def _extract_api_error_msg(e: ApiError) -> str:
+    """Extract user-friendly error message from ApiError."""
+    detail = getattr(e, "error_detail", None)
+    if detail:
+        return detail
+    resp = getattr(e, "response", None)
+    if resp:
+        body = getattr(resp, "body", None)
+        if isinstance(body, dict):
+            msg = body.get("message", "")
+            if msg:
+                return msg
+    return getattr(e, "message", "") or str(e)
+
 
 def _folder_to_dict(folder) -> Dict[str, Any]:
     """Convert SDK Folder object to plain dict."""
@@ -273,7 +289,7 @@ def _action_create(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     }
 
 
-def _action_move(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+def _action_move_component(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     """Move a component to a different folder via XML manipulation."""
     import xml.etree.ElementTree as ET
 
@@ -281,9 +297,9 @@ def _action_move(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     target_folder_id = kwargs.get("target_folder_id")
 
     if not component_id:
-        return {"_success": False, "error": "component_id is required for 'move' action"}
+        return {"_success": False, "error": "component_id is required for 'move_component' action", "hint": "This action moves a component to a folder. Use component_id and target_folder_id."}
     if not target_folder_id:
-        return {"_success": False, "error": "target_folder_id is required for 'move' action"}
+        return {"_success": False, "error": "target_folder_id is required for 'move_component' action"}
 
     # Import from _shared.py
     from boomi_mcp.categories.components._shared import component_get_xml
@@ -544,7 +560,7 @@ def manage_folders_action(
     Args:
         sdk: Authenticated Boomi SDK client
         profile: Profile name
-        action: One of: list, get, create, move, delete, restore, contents
+        action: One of: list, get, create, move_component, delete, restore, contents (move is accepted as alias)
         config_data: Action-specific configuration dict
         **kwargs: Additional parameters (folder_id, etc.)
     """
@@ -558,7 +574,8 @@ def manage_folders_action(
         "list": _action_list,
         "get": _action_get,
         "create": _action_create,
-        "move": _action_move,
+        "move_component": _action_move_component,
+        "move": _action_move_component,  # backward-compat alias
         "delete": _action_delete,
         "restore": _action_restore,
         "contents": _action_contents,
@@ -574,6 +591,12 @@ def manage_folders_action(
 
     try:
         return handler(sdk, profile, **merged)
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": type(e).__name__,
+        }
     except Exception as e:
         return {
             "_success": False,

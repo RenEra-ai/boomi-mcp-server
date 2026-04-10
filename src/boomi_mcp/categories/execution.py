@@ -4,7 +4,7 @@ Execution MCP Tool for Boomi Platform.
 Provides process execution via the Boomi execution request API.
 This is a dedicated tool (not merged into manage_process) because:
 - Uses sdk.execution_request (JSON API), not sdk.component (XML API)
-- Different parameter shape (process_id, environment_id, atom_id vs config_yaml)
+- Different parameter shape (process_id, environment_id, atom_id vs process config JSON)
 - Purely destructive (triggers real side effects)
 - MCP atomic principle: single focused operation
 
@@ -34,6 +34,7 @@ from boomi.models import (
     ExecutionRecordSimpleExpression,
     ExecutionRecordSimpleExpressionOperator,
     ExecutionRecordSimpleExpressionProperty,
+    ExecutionRecordGroupingExpression,
 )
 
 
@@ -50,6 +51,132 @@ def _extract_api_error_msg(e) -> str:
             if msg:
                 return msg
     return getattr(e, "message", "") or str(e)
+
+
+def _check_cloud_detachment(sdk: Boomi, environment_id: str) -> Optional[str]:
+    """Check if the environment may be affected by cloud runtime auto-detachment.
+
+    Returns a helpful hint string if cloud atoms exist, else None.
+    """
+    try:
+        from boomi.models import (
+            AccountCloudAttachmentSummaryQueryConfig,
+            AccountCloudAttachmentSummaryQueryConfigQueryFilter,
+            AccountCloudAttachmentSummarySimpleExpression,
+            AccountCloudAttachmentSummarySimpleExpressionOperator,
+            AccountCloudAttachmentSummarySimpleExpressionProperty,
+        )
+        expression = AccountCloudAttachmentSummarySimpleExpression(
+            operator=AccountCloudAttachmentSummarySimpleExpressionOperator.ISNOTNULL,
+            property=AccountCloudAttachmentSummarySimpleExpressionProperty.CLOUDID,
+            argument=["true"],
+        )
+        query_filter = AccountCloudAttachmentSummaryQueryConfigQueryFilter(expression=expression)
+        query_config = AccountCloudAttachmentSummaryQueryConfig(query_filter=query_filter)
+        result = sdk.account_cloud_attachment_summary.query_account_cloud_attachment_summary(
+            request_body=query_config
+        )
+        if result and hasattr(result, "result") and result.result:
+            items = result.result if isinstance(result.result, list) else [result.result]
+            runtime_ids = [getattr(s, "runtime_id", None) for s in items]
+            runtime_ids = [r for r in runtime_ids if r]
+            if runtime_ids:
+                return (
+                    f"Your account has cloud test runtimes that auto-detach after execution. "
+                    f"If this environment uses a cloud runtime, re-attach it with "
+                    f"manage_runtimes(action='attach', resource_id='<runtime_id>', "
+                    f"environment_id='{environment_id}'). "
+                    f"Use manage_runtimes(action='list') to find available runtimes."
+                )
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_execution_id(
+    sdk: Boomi, request_id: str, timeout: int = 5
+) -> Tuple[Optional[str], Optional[str]]:
+    """Best-effort resolve execution_id via the async endpoint.
+
+    async_get_execution_record returns None (HTTP 202) while the execution is
+    still running.  This helper is for the *non-wait* path where we want to
+    return quickly; use ``_await_execution_completion`` for wait=true.
+
+    Returns (execution_id, error_string).
+    """
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        try:
+            record = sdk.execution_record.async_get_execution_record(id_=request_id)
+            if record is not None:
+                exec_id = getattr(record, "execution_id", None)
+                if exec_id:
+                    return exec_id, None
+        except Exception:
+            pass
+        time.sleep(2)
+
+    return None, "Execution still running; execution_id not yet available"
+
+
+def _await_execution_completion(
+    sdk: Boomi, request_id: str, timeout: int = 300
+) -> Dict[str, Any]:
+    """Poll async_get_execution_record until the execution completes or timeout.
+
+    Used by the wait=true path.  Correlates by request_id directly — no
+    separate execution_id resolution step needed.
+
+    Returns dict matching the shape of _poll_execution_status output.
+    """
+    start = time.monotonic()
+    poll_count = 0
+
+    while True:
+        elapsed = time.monotonic() - start
+        if elapsed >= timeout:
+            return {
+                "poll_status": "TIMEOUT",
+                "elapsed_seconds": round(elapsed, 1),
+                "poll_count": poll_count,
+                "message": f"Timed out after {timeout}s waiting for execution to complete",
+            }
+
+        poll_count += 1
+
+        try:
+            record = sdk.execution_record.async_get_execution_record(id_=request_id)
+            if record is not None:
+                def _safe_int(val, default=0):
+                    try:
+                        return int(val)
+                    except (ValueError, TypeError):
+                        return default
+
+                return {
+                    "poll_status": "COMPLETED",
+                    "elapsed_seconds": round(time.monotonic() - start, 1),
+                    "poll_count": poll_count,
+                    "execution_id": getattr(record, "execution_id", None),
+                    "status": getattr(record, "status", "UNKNOWN"),
+                    "process_name": getattr(record, "process_name", None),
+                    "atom_name": getattr(record, "atom_name", None),
+                    "execution_time": getattr(record, "execution_time", None),
+                    "execution_duration": getattr(record, "execution_duration", None),
+                    "inbound_document_count": _safe_int(getattr(record, "inbound_document_count", 0)),
+                    "outbound_document_count": _safe_int(getattr(record, "outbound_document_count", 0)),
+                    "inbound_error_document_count": _safe_int(getattr(record, "inbound_error_document_count", 0)),
+                    "error": getattr(record, "error", None),
+                }
+        except Exception:
+            pass
+
+        # Back off: 2s for first 30s, then 5s
+        interval = 2 if elapsed < 30 else 5
+        remaining = timeout - (time.monotonic() - start)
+        if remaining <= 0:
+            continue
+        time.sleep(min(interval, remaining))
 
 
 def _resolve_atom_id(sdk: Boomi, environment_id: str) -> tuple:
@@ -231,13 +358,28 @@ def execute_process_action(
     sdk: Boomi,
     profile: str,
     process_id: str,
-    environment_id: str,
+    environment_id: str = None,
     atom_id: str = None,
     config_data: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """Execute a Boomi process."""
-    if config_data is None:
+    if not isinstance(config_data, dict):
         config_data = {}
+
+    # Allow atom_id and environment_id from config_data as fallback
+    if not atom_id:
+        atom_id = config_data.get('atom_id')
+    if not environment_id:
+        environment_id = config_data.get('environment_id')
+
+    # Validate: need at least one of atom_id or environment_id
+    if not atom_id and not environment_id:
+        return {
+            "_success": False,
+            "error": "Either atom_id or environment_id is required. "
+                     "Provide atom_id to target a specific runtime, or "
+                     "environment_id to auto-resolve the runtime.",
+        }
 
     # Resolve atom_id if not provided
     if not atom_id:
@@ -249,7 +391,13 @@ def execute_process_action(
         except Exception as e:
             return {"_success": False, "error": f"Failed to resolve atom_id: {e}"}
         if error:
-            return {"_success": False, "error": error}
+            result = {"_success": False, "error": error}
+            # BUG-38: Check if this is a cloud auto-detachment scenario
+            if "No runtime attached" in error:
+                cloud_hint = _check_cloud_detachment(sdk, environment_id)
+                if cloud_hint:
+                    result["hint"] = cloud_hint
+            return result
 
     # Build properties
     try:
@@ -310,14 +458,17 @@ def execute_process_action(
     if config_data.get("dynamic_properties"):
         response["dynamic_properties"] = config_data["dynamic_properties"]
 
-    # If wait=True, poll for completion before returning
+    # If wait=True, poll via async endpoint until execution completes
     if config_data.get("wait") and request_id:
         try:
             poll_timeout = int(config_data.get("timeout", 300))
         except (ValueError, TypeError):
             return {"_success": False, "error": "config.timeout must be a numeric value (seconds)"}
-        poll_result = _poll_execution_status(sdk, request_id, timeout=poll_timeout)
+        poll_result = _await_execution_completion(sdk, request_id, timeout=poll_timeout)
         response["execution_result"] = poll_result
+
+        if poll_result.get("execution_id"):
+            response["execution_id"] = poll_result["execution_id"]
 
         # Reflect terminal status in top-level success flag
         if poll_result.get("poll_status") == "COMPLETED":
@@ -329,9 +480,21 @@ def execute_process_action(
             response["_success"] = False
             response["error"] = poll_result["message"]
     else:
-        response["next_step"] = (
-            f"Poll status: monitor_platform(action='execution_records', "
-            f"config='{{\"execution_id\": \"{request_id}\"}}')"
-        )
+        # Non-wait: best-effort resolve execution_id (short timeout)
+        exec_id, resolve_err = _resolve_execution_id(sdk, request_id, timeout=5)
+        if exec_id:
+            response["execution_id"] = exec_id
+        if resolve_err:
+            response["resolve_warning"] = resolve_err
+        if exec_id:
+            response["next_step"] = (
+                f"Poll status: monitor_platform(action='execution_records', "
+                f"config='{{\"execution_id\": \"{exec_id}\"}}')"
+            )
+        else:
+            response["next_step"] = (
+                f"Poll status: monitor_platform(action='execution_records', "
+                f"config='{{\"process_id\": \"{process_id}\", \"start_date\": \"<recent_iso_date>\"}}')"
+            )
 
     return response

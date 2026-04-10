@@ -61,6 +61,8 @@ _TP_CREATE = {
             "folder_name": "Home",
             "isa_id": "ACME (REQUIRED for x12)",
             "isa_qualifier": "ZZ (default)",
+            "isa_auth_qualifier": "00 (default, optional)",
+            "isa_sec_qualifier": "00 (default, optional)",
             "gs_id": "ACMECORP",
             "organization_id": "(optional) link to existing organization",
             "communication_protocols": ["http", "as2"],
@@ -504,72 +506,56 @@ _PROCESS_OVERVIEW = {
     "resource_type": "process",
     "tool": "manage_process",
     "available_actions": ["list", "get", "create", "update", "delete"],
-    "config_format": "YAML (config_yaml parameter)",
+    "config_format": "JSON (config parameter)",
     "shape_types": ["start", "stop", "return", "message", "map", "connector", "decision", "branch", "note", "documentproperties"],
-    "hint": "Use operation='create' for a full YAML template",
+    "hint": "Use operation='create' for a full JSON template",
 }
 
 _PROCESS_CREATE = {
     "resource_type": "process",
     "operation": "create",
-    "single_process_template": (
-        'name: "My Process Name"\n'
-        'folder_name: "Home"\n'
-        'description: "Optional description"\n'
-        'shapes:\n'
-        '  - type: start\n'
-        '    name: start\n'
-        '  - type: message\n'
-        '    name: log_msg\n'
-        '    config:\n'
-        '      message_text: "Process started"\n'
-        '  - type: map\n'
-        '    name: transform\n'
-        '    config:\n'
-        '      map_id: "existing-map-component-id"\n'
-        '  - type: connector\n'
-        '    name: get_data\n'
-        '    config:\n'
-        '      connector_id: "connector-component-id"\n'
-        '      operation: "Get"\n'
-        '      object_type: "Object"\n'
-        '  - type: decision\n'
-        '    name: check_result\n'
-        '    config:\n'
-        '      expression: "document property equals value"\n'
-        '  - type: branch\n'
-        '    name: parallel_work\n'
-        '    config:\n'
-        '      num_branches: 2\n'
-        '  - type: stop\n'
-        '    name: end\n'
-    ),
-    "multi_component_template": (
-        'components:\n'
-        '  - name: "Transform Map"\n'
-        '    type: map\n'
-        '    dependencies: []\n'
-        '  - name: "Main Process"\n'
-        '    type: process\n'
-        '    dependencies: ["Transform Map"]\n'
-        '    config:\n'
-        '      name: "Main Process"\n'
-        '      shapes:\n'
-        '        - type: start\n'
-        '          name: start\n'
-        '        - type: map\n'
-        '          name: transform\n'
-        '          config:\n'
-        '            map_ref: "Transform Map"\n'
-        '        - type: stop\n'
-        '          name: end\n'
-    ),
+    "single_process_template": {
+        "name": "My Process Name",
+        "folder_name": "Home",
+        "description": "Optional description",
+        "shapes": [
+            {"type": "start", "name": "start"},
+            {"type": "message", "name": "log_msg", "config": {"message_text": "Process started"}},
+            {"type": "map", "name": "transform", "config": {"map_id": "existing-map-component-id"}},
+            {
+                "type": "connector",
+                "name": "get_data",
+                "config": {"connector_id": "connector-component-id", "operation": "Get", "object_type": "Object"}
+            },
+            {"type": "decision", "name": "check_result", "config": {"expression": "document property equals value"}},
+            {"type": "branch", "name": "parallel_work", "config": {"num_branches": 2}},
+            {"type": "stop", "name": "end"},
+        ],
+    },
+    "multi_component_template": {
+        "components": [
+            {"name": "Transform Map", "type": "map", "dependencies": []},
+            {
+                "name": "Main Process",
+                "type": "process",
+                "dependencies": ["Transform Map"],
+                "config": {
+                    "name": "Main Process",
+                    "shapes": [
+                        {"type": "start", "name": "start"},
+                        {"type": "map", "name": "transform", "config": {"map_ref": "Transform Map"}},
+                        {"type": "stop", "name": "end"},
+                    ],
+                },
+            },
+        ],
+    },
     "shape_reference": {
         "start": {"required": True, "position": "first", "config": "none"},
         "stop": {"position": "last", "config": {"continue_": "true|false"}},
         "return": {"position": "last", "config": {"label": "text"}},
         "message": {"config": {"message_text": "REQUIRED"}},
-        "map": {"config": {"map_id": "existing map component ID", "map_ref": "name in multi-component YAML"}},
+        "map": {"config": {"map_id": "existing map component ID", "map_ref": "name in multi-component JSON"}},
         "connector": {"config": {"connector_id": "REQUIRED", "operation": "Get|Send", "object_type": "REQUIRED"}},
         "decision": {"config": {"expression": "REQUIRED"}},
         "branch": {"config": {"num_branches": "REQUIRED (integer >= 2)"}},
@@ -592,6 +578,122 @@ _PROCESS_LIST = {
     "filters_param": "filters (JSON string)",
     "template": '{"folder_name": "Home"}',
     "available_filters": ["folder_name"],
+}
+
+
+# ============================================================================
+# Integration Builder Templates
+# ============================================================================
+
+_INTEGRATION_OVERVIEW = {
+    "resource_type": "integration",
+    "tool": "build_integration",
+    "available_actions": ["plan", "apply", "verify"],
+    "config_format": "JSON (config parameter)",
+    "conflict_policy": ["reuse", "clone", "fail"],
+    "hint": "Use operation='plan' for full IntegrationSpecV1 templates and routing behavior.",
+}
+
+_INTEGRATION_PLAN = {
+    "resource_type": "integration",
+    "operation": "plan",
+    "tool": "build_integration (action='plan')",
+    "template": {
+        "name": "Order Sync",
+        "mode": "lift_shift",
+        "conflict_policy": "reuse",
+        "source_description": {
+            "name": "Order Sync from legacy iPaaS",
+            "goals": ["Receive orders", "Transform payloads", "Deliver to ERP"],
+            "components": [
+                {
+                    "key": "http_connection",
+                    "type": "connector-settings",
+                    "action": "create",
+                    "name": "Order API Connection",
+                    "config": {
+                        "connector_type": "http",
+                        "component_name": "Order API Connection",
+                        "url": "https://api.example.com/orders",
+                        "auth_type": "NONE",
+                    },
+                },
+                {
+                    "key": "order_process",
+                    "type": "process",
+                    "action": "create",
+                    "name": "Order Sync Process",
+                    "depends_on": ["http_connection"],
+                    "config": {
+                        "name": "Order Sync Process",
+                        "shapes": [
+                            {"type": "start", "name": "start"},
+                            {
+                                "type": "connector",
+                                "name": "get_orders",
+                                "config": {
+                                    "connector_id": "$ref:http_connection",
+                                    "operation": "Get",
+                                    "object_type": "orders",
+                                },
+                            },
+                            {"type": "stop", "name": "end"},
+                        ],
+                    },
+                },
+            ],
+        },
+    },
+    "notes": [
+        "You can also provide integration_spec directly instead of source_description.",
+        "plan is read-only and returns deterministic execution order with endpoint routes.",
+        "Dependency tokens in config can reference previous components with $ref:<component_key>.",
+    ],
+}
+
+_INTEGRATION_APPLY = {
+    "resource_type": "integration",
+    "operation": "apply",
+    "tool": "build_integration (action='apply')",
+    "template": {
+        "dry_run": False,
+        "conflict_policy": "reuse",
+        "integration_spec": {
+            "version": "1.0",
+            "name": "Order Sync",
+            "mode": "lift_shift",
+            "components": [
+                {
+                    "key": "order_partner",
+                    "type": "trading_partner",
+                    "action": "create",
+                    "name": "ACME Partner",
+                    "config": {
+                        "component_name": "ACME Partner",
+                        "standard": "x12",
+                        "classification": "tradingpartner",
+                        "isa_id": "ACME",
+                    },
+                }
+            ],
+        },
+    },
+    "notes": [
+        "dry_run defaults to true; set dry_run=false to mutate Boomi resources.",
+        "apply returns build_id; use it with verify.",
+    ],
+}
+
+_INTEGRATION_VERIFY = {
+    "resource_type": "integration",
+    "operation": "verify",
+    "tool": "build_integration (action='verify')",
+    "template": {
+        "build_id": "<uuid-from-apply>",
+    },
+    "notes": [
+        "verify is read-only and validates component existence plus dependency resolution.",
+    ],
 }
 
 
@@ -621,7 +723,7 @@ _COMPONENT_OVERVIEW = {
 _COMPONENT_CREATE = {
     "resource_type": "component",
     "operation": "create",
-    "note": "Boomi's Component API requires type-specific XML. For processes, use manage_process with config_yaml instead.",
+    "note": "Boomi's Component API requires type-specific XML. For processes, use manage_process with config (JSON object) instead.",
     "xml_template": (
         '<Component xmlns="http://api.platform.boomi.com/"\n'
         '    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
@@ -639,7 +741,7 @@ _COMPONENT_CREATE = {
         "2. Use query_components get action to retrieve its full XML",
         "3. Modify the XML for your new component",
         "4. Pass modified XML as config.xml to manage_component create action",
-        "   OR for processes: use manage_process with config_yaml (YAML is simpler)",
+        "   OR for processes: use manage_process with config (JSON object)",
     ],
 }
 
@@ -725,7 +827,7 @@ _ORGANIZATION_CREATE = {
 _MONITORING_OVERVIEW = {
     "resource_type": "monitoring",
     "tool": "monitor_platform",
-    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"],
+    "available_actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents", "download_connector_document"],
     "hint": "Use operation='execution_records' or 'audit_logs' etc. for action-specific templates",
 }
 
@@ -855,6 +957,18 @@ _MONITORING_CONNECTOR_DOCUMENTS = {
     },
 }
 
+_MONITORING_DOWNLOAD_CONNECTOR_DOCUMENT = {
+    "resource_type": "monitoring",
+    "operation": "download_connector_document",
+    "tool": "monitor_platform",
+    "template": {
+        "generic_connector_record_id": "REQUIRED - from connector_documents result (id_ field)",
+        "fetch_content": True,
+    },
+    "notes": "Downloads actual document content. Text content returned inline, binary as base64. "
+             "Set fetch_content=false for URL-only metadata.",
+}
+
 
 # ============================================================================
 # Environment Templates
@@ -949,6 +1063,65 @@ _EXECUTION_REQUEST_EXECUTE = {
 # ============================================================================
 # Generic API Invoker
 # ============================================================================
+
+
+def _truncate_json_response(parsed, max_size):
+    """Truncate a parsed JSON response to fit within max_size characters.
+
+    For dict responses containing a list value (common Boomi pattern like
+    {'result': [...], 'numberOfResults': N}), removes trailing array elements
+    until the serialized result fits.  Root-level arrays are handled the same
+    way.  For any other shape that still exceeds max_size, the serialized JSON
+    is hard-truncated as a last resort.  Returns (truncated_obj, metadata_dict).
+    """
+    import json as _json
+    meta = {}
+
+    # --- Root-level list ---
+    if isinstance(parsed, list) and len(parsed) > 0:
+        total_items = len(parsed)
+        lo, hi = 0, total_items
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if len(_json.dumps(parsed[:mid])) <= max_size:
+                lo = mid
+            else:
+                hi = mid - 1
+        meta["items_returned"] = lo
+        meta["items_total"] = total_items
+        return parsed[:lo], meta
+
+    # --- Dict with a list field (common Boomi pattern) ---
+    if isinstance(parsed, dict):
+        list_key = None
+        for k, v in parsed.items():
+            if isinstance(v, list) and len(v) > 0:
+                list_key = k
+                break
+        if list_key is not None:
+            items = parsed[list_key]
+            total_items = len(items)
+            # Binary search for the largest count that fits
+            lo, hi = 0, total_items
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                parsed[list_key] = items[:mid]
+                if len(_json.dumps(parsed)) <= max_size:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            parsed[list_key] = items[:lo]
+            meta["items_returned"] = lo
+            meta["items_total"] = total_items
+            return parsed, meta
+
+    # --- Fallback: hard-truncate serialized JSON ---
+    serialized = _json.dumps(parsed)
+    if len(serialized) <= max_size:
+        return parsed, meta
+    meta["note"] = "Response too large to truncate cleanly; data may be incomplete"
+    return serialized[:max_size], meta
+
 
 def invoke_api(
     boomi_client: Boomi,
@@ -1085,18 +1258,33 @@ def invoke_api(
         "profile": profile,
     }
 
-    if truncated:
-        result["truncated"] = True
-        result["total_size"] = len(raw)
-
     if accept == "json":
         try:
-            parsed = json_mod.loads(raw[:MAX_RESPONSE_SIZE] if truncated else raw)
-            result["data"] = parsed
+            parsed = json_mod.loads(raw)
+            if truncated:
+                parsed, trunc_meta = _truncate_json_response(parsed, MAX_RESPONSE_SIZE)
+                result["truncated"] = True
+                result["total_size"] = len(raw)
+                result.update(trunc_meta)
+            if truncated and isinstance(parsed, str):
+                # Hard-truncated fallback — not valid JSON, use raw_response
+                result["raw_response"] = parsed + "... [TRUNCATED]"
+            else:
+                result["data"] = parsed
         except (json_mod.JSONDecodeError, TypeError):
-            result["raw_response"] = raw[:MAX_RESPONSE_SIZE]
+            if truncated:
+                result["truncated"] = True
+                result["total_size"] = len(raw)
+                result["raw_response"] = raw[:MAX_RESPONSE_SIZE] + "... [TRUNCATED]"
+            else:
+                result["raw_response"] = raw
     else:
-        result["raw_response"] = raw[:MAX_RESPONSE_SIZE]
+        if truncated:
+            result["truncated"] = True
+            result["total_size"] = len(raw)
+            result["raw_response"] = raw[:MAX_RESPONSE_SIZE] + "... [TRUNCATED]"
+        else:
+            result["raw_response"] = raw
 
     if status >= 400:
         result["error"] = f"HTTP {status}"
@@ -1113,7 +1301,7 @@ def invoke_api(
 _VALID_RESOURCE_TYPES = [
     "trading_partner", "process", "component",
     "environment", "package", "execution_request",
-    "organization", "folder", "monitoring",
+    "organization", "folder", "monitoring", "integration",
 ]
 
 
@@ -1129,6 +1317,7 @@ def get_schema_template_action(
     registry = {
         "trading_partner": _get_trading_partner_template,
         "process": _get_process_template,
+        "integration": _get_integration_template,
         "component": _get_component_template,
         "environment": _get_environment_template,
         "package": _get_package_template,
@@ -1190,6 +1379,8 @@ def _get_trading_partner_template(operation=None, standard=None, protocol=None, 
                 "classification": "tradingpartner | mycompany",
                 "folder_name": "(optional folder filter)",
             },
+            "note": "Returns total_count, partners, by_standard (grouped by standard), and summary. "
+                    "Results reflect upstream API rows faithfully, including any duplicate component_ids.",
         }
 
     if operation == "update":
@@ -1205,10 +1396,9 @@ def _get_trading_partner_template(operation=None, standard=None, protocol=None, 
         }
 
     return {
-        "_success": True,
-        "resource_type": "trading_partner",
-        "operation": operation,
-        "hint": f"See manage_trading_partner tool docstring for '{operation}' action details",
+        "_success": False,
+        "error": f"Unknown trading_partner operation: {operation}",
+        "valid_operations": ["create", "list", "update"],
     }
 
 
@@ -1223,10 +1413,29 @@ def _get_process_template(operation=None, **_):
         return {"_success": True, **_PROCESS_LIST}
 
     return {
-        "_success": True,
-        "resource_type": "process",
-        "operation": operation,
-        "hint": f"See manage_process tool docstring for '{operation}' action details",
+        "_success": False,
+        "error": f"Unknown process operation: {operation}",
+        "valid_operations": ["create", "list"],
+    }
+
+
+def _get_integration_template(operation=None, **_):
+    if not operation:
+        return {"_success": True, **_INTEGRATION_OVERVIEW}
+
+    if operation == "plan":
+        return {"_success": True, **_INTEGRATION_PLAN}
+
+    if operation == "apply":
+        return {"_success": True, **_INTEGRATION_APPLY}
+
+    if operation == "verify":
+        return {"_success": True, **_INTEGRATION_VERIFY}
+
+    return {
+        "_success": False,
+        "error": f"Unknown integration operation: {operation}",
+        "valid_operations": ["plan", "apply", "verify"],
     }
 
 
@@ -1249,7 +1458,7 @@ def _get_component_template(operation=None, component_type=None, **_):
     if operation == "create":
         result = {"_success": True, **_COMPONENT_CREATE}
         if component_type == "process":
-            result["recommendation"] = "For processes, use manage_process with config_yaml instead of raw XML."
+            result["recommendation"] = "For processes, use manage_process with config (JSON object) instead of raw XML."
         return result
 
     if operation == "search":
@@ -1262,10 +1471,9 @@ def _get_component_template(operation=None, component_type=None, **_):
         return {"_success": True, **_COMPONENT_COMPARE}
 
     return {
-        "_success": True,
-        "resource_type": "component",
-        "operation": operation,
-        "hint": f"See query_components or manage_component tool docstring for '{operation}' action details",
+        "_success": False,
+        "error": f"Unknown component operation: {operation}",
+        "valid_operations": ["create", "search", "clone", "compare_versions"],
     }
 
 
@@ -1277,10 +1485,9 @@ def _get_environment_template(operation=None, **_):
         return {"_success": True, **_ENVIRONMENT_CREATE}
 
     return {
-        "_success": True,
-        "resource_type": "environment",
-        "operation": operation,
-        "hint": "Environment management is available via the Boomi SDK",
+        "_success": False,
+        "error": f"Unknown environment operation: {operation}",
+        "valid_operations": ["create"],
     }
 
 
@@ -1295,10 +1502,9 @@ def _get_package_template(operation=None, **_):
         return {"_success": True, **_PACKAGE_DEPLOY}
 
     return {
-        "_success": True,
-        "resource_type": "package",
-        "operation": operation,
-        "hint": "See package/deployment SDK patterns",
+        "_success": False,
+        "error": f"Unknown package operation: {operation}",
+        "valid_operations": ["create", "deploy"],
     }
 
 
@@ -1310,10 +1516,9 @@ def _get_execution_request_template(operation=None, **_):
         return {"_success": True, **_EXECUTION_REQUEST_EXECUTE}
 
     return {
-        "_success": True,
-        "resource_type": "execution_request",
-        "operation": operation,
-        "hint": "Use operation='execute' for the execution template",
+        "_success": False,
+        "error": f"Unknown execution_request operation: {operation}",
+        "valid_operations": ["execute"],
     }
 
 
@@ -1365,7 +1570,7 @@ def _get_folder_template(operation=None, **_):
             "list": "List all folders with tree view, optional filters (include_deleted, folder_name, folder_path)",
             "get": "Get single folder by ID (requires folder_id)",
             "create": "Create folder or hierarchy from path like 'Parent/Child/Grand' (requires folder_name in config)",
-            "move": "Move a component to a different folder (requires component_id, target_folder_id in config)",
+            "move_component": "Move a component to a different folder (requires component_id, target_folder_id in config)",
             "delete": "Delete an empty folder (requires folder_id)",
             "restore": "Restore a deleted folder by ID (requires folder_id)",
             "contents": "List components and sub-folders in a folder (requires folder_id or folder_name in config)",
@@ -1375,7 +1580,7 @@ def _get_folder_template(operation=None, **_):
             "list_filtered": 'manage_folders(profile="prod", action="list", config=\'{"folder_name": "Production"}\')',
             "get": 'manage_folders(profile="prod", action="get", folder_id="abc-123")',
             "create_hierarchy": 'manage_folders(profile="prod", action="create", config=\'{"folder_name": "Production/APIs/v2"}\')',
-            "move": 'manage_folders(profile="prod", action="move", config=\'{"component_id": "comp-123", "target_folder_id": "folder-456"}\')',
+            "move_component": 'manage_folders(profile="prod", action="move_component", config=\'{"component_id": "comp-123", "target_folder_id": "folder-456"}\')',
             "delete": 'manage_folders(profile="prod", action="delete", folder_id="abc-123")',
             "restore": 'manage_folders(profile="prod", action="restore", folder_id="abc-123")',
             "contents": 'manage_folders(profile="prod", action="contents", folder_id="abc-123")',
@@ -1427,16 +1632,17 @@ def _get_folder_template(operation=None, **_):
             },
         }
 
-    if operation == "move":
+    if operation in ("move_component", "move"):
         return {
             "_success": True,
             "resource_type": "folder",
-            "operation": "move",
-            "tool": "manage_folders (action='move')",
+            "operation": "move_component",
+            "tool": "manage_folders (action='move_component')",
             "template": {
                 "component_id": "(required) ID of the component to move",
                 "target_folder_id": "(required) destination folder ID",
             },
+            "note": "This moves a component into a folder, not a folder into another folder.",
         }
 
     if operation in ("get", "delete", "restore"):
@@ -1451,7 +1657,7 @@ def _get_folder_template(operation=None, **_):
     return {
         "_success": False,
         "error": f"Unknown folder operation: {operation}",
-        "valid_operations": ["list", "get", "create", "move", "delete", "restore", "contents"],
+        "valid_operations": ["list", "get", "create", "move_component", "delete", "restore", "contents"],
     }
 
 
@@ -1469,6 +1675,7 @@ def _get_monitoring_template(operation=None, **_):
         "throughput": _MONITORING_THROUGHPUT,
         "execution_metrics": _MONITORING_EXECUTION_METRICS,
         "connector_documents": _MONITORING_CONNECTOR_DOCUMENTS,
+        "download_connector_document": _MONITORING_DOWNLOAD_CONNECTOR_DOCUMENT,
     }
 
     tpl = templates.get(operation)
@@ -1482,10 +1689,16 @@ def _get_monitoring_template(operation=None, **_):
     return {"_success": True, **tpl}
 
 
-def list_capabilities_action() -> Dict[str, Any]:
+def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
     """Return full catalog of MCP tools, actions, and workflows.
 
     Zero API calls — returns static metadata about this MCP server.
+
+    Args:
+        available_tools: Optional set of tool names from the live FastMCP registry.
+            When provided, the returned catalog is filtered to only tools actually
+            registered in the current runtime (e.g., local-only credential tools
+            are excluded in production mode).
     """
 
     tools = {
@@ -1524,7 +1737,6 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "action": "str (required) — create | update | clone | delete",
                 "component_id": "str (optional) — required for update/clone/delete",
                 "config": "JSON str (optional) — action-specific config (XML for create, fields for update)",
-                "config_yaml": "YAML str (optional) — for process creation with shapes",
             },
             "examples": [
                 'manage_component(profile="prod", action="clone", component_id="abc-123", config=\'{"name": "My Clone"}\')',
@@ -1593,13 +1805,13 @@ def list_capabilities_action() -> Dict[str, Any]:
         "manage_environments": {
             "category": "Environments & Runtimes",
             "description": "Manage environments and their configuration extensions",
-            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions", "query_extensions", "stats"],
+            "actions": ["list", "get", "create", "update", "delete", "get_extensions", "update_extensions", "query_extensions", "stats", "get_properties", "update_properties", "get_map_extension", "bulk_get_map_extensions", "list_map_udf_summaries", "create_map_udf", "get_map_udf", "update_map_udf", "delete_map_udf", "list_map_external_components", "list_environment_roles", "create_environment_role", "delete_environment_role"],
             "read_only": False,
             "implemented": True,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
-                "resource_id": "str (optional) — environment ID",
+                "resource_id": "str (optional) — environment ID; for get_properties/update_properties this is the atom/runtime ID",
                 "config": "JSON str (optional)",
             },
             "sdk_examples_covered": [
@@ -1616,8 +1828,23 @@ def list_capabilities_action() -> Dict[str, Any]:
         },
         "manage_runtimes": {
             "category": "Environments & Runtimes",
-            "description": "Manage Boomi runtimes — cloud attachments, environment bindings, restart, Java upgrades, installer tokens, and private runtime clouds (enterprise)",
-            "actions": ["list", "get", "create", "update", "delete", "attach", "detach", "list_attachments", "restart", "configure_java", "create_installer_token", "available_clouds", "cloud_list", "cloud_get", "cloud_create", "cloud_update", "cloud_delete"],
+            "description": "Manage Boomi runtimes — cloud attachments, environment bindings, restart, Java upgrades, release schedules, observability, security, and more",
+            "actions": [
+                "list", "get", "create", "update", "delete", "attach", "detach", "list_attachments",
+                "restart", "configure_java", "create_installer_token",
+                "available_clouds", "cloud_list", "cloud_get", "cloud_create", "cloud_update", "cloud_delete",
+                "diagnostics",
+                "get_release_schedule", "create_release_schedule", "update_release_schedule", "delete_release_schedule",
+                "get_observability_settings", "update_observability_settings",
+                "get_startup_properties", "reset_counters", "purge",
+                "get_security_policies", "update_security_policies",
+                "get_connector_versions", "offboard_node", "refresh_secrets_manager",
+                "get_account_cloud_attachment_properties", "update_account_cloud_attachment_properties",
+                "list_account_cloud_attachment_quotas", "get_account_cloud_attachment_quota",
+                "create_account_cloud_attachment_quota", "update_account_cloud_attachment_quota",
+                "delete_account_cloud_attachment_quota",
+                "get_cloud_attachment_properties", "update_cloud_attachment_properties",
+            ],
             "read_only": False,
             "implemented": True,
             "parameters": {
@@ -1642,19 +1869,24 @@ def list_capabilities_action() -> Dict[str, Any]:
         # === Category 3: Deployment & B2B (3 tools) ===
         "manage_deployment": {
             "category": "Deployment & B2B",
-            "description": "Manage deployment packages and deploy to environments",
+            "description": "Manage deployment packages, deploy to environments, and manage component/process attachments",
             "actions": [
                 "list_packages", "get_package", "create_package", "delete_package",
                 "deploy", "undeploy", "list_deployments", "get_deployment",
+                "list_component_atom_attachments", "attach_component_atom", "detach_component_atom",
+                "list_component_environment_attachments", "attach_component_environment", "detach_component_environment",
+                "list_process_atom_attachments", "attach_process_atom", "detach_process_atom",
+                "list_process_environment_attachments", "attach_process_environment", "detach_process_environment", "get_package_manifest",
             ],
             "read_only": False,
             "implemented": True,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
-                "package_id": "str (optional) — package ID or deployment ID depending on action",
+                "package_id": "str (optional) — package ID for get/delete/deploy/get_package_manifest",
                 "environment_id": "str (optional) — target env for deploy, filter for list_deployments",
-                "config": "str (optional) — JSON string with action-specific parameters",
+                "resource_id": "str (optional) — attachment ID for detach actions",
+                "config": "str (optional) — JSON with action-specific params. undeploy/get_deployment accept deployment_id or package_id+environment_id. list_deployments accepts component_id filter.",
             },
             "sdk_examples_covered": [
                 "create_packaged_component.py",
@@ -1668,11 +1900,12 @@ def list_capabilities_action() -> Dict[str, Any]:
         },
         "manage_trading_partner": {
             "category": "Deployment & B2B",
-            "description": "Manage B2B/EDI trading partners (all 7 standards) and organizations",
+            "description": "Manage B2B/EDI trading partners (all 7 standards), organizations, and processing groups",
             "actions": [
                 "list", "get", "create", "update", "delete",
                 "analyze_usage", "list_options",
                 "org_list", "org_get", "org_create", "org_update", "org_delete",
+                "pg_list", "pg_get", "pg_create", "pg_update", "pg_delete",
             ],
             "read_only": False,
             "parameters": {
@@ -1692,44 +1925,59 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 4: Execution (3 tools) ===
+        # === Category 4: Execution ===
         "manage_process": {
             "category": "Execution",
-            "description": "Manage process components with YAML-based configuration and scheduling",
+            "description": "Manage process components with JSON-based configuration and scheduling",
             "actions": ["list", "get", "create", "update", "delete"],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
                 "process_id": "str (optional)",
-                "config_yaml": "YAML str (optional) — process definition with shapes",
+                "config": "JSON str (optional) — process definition with shapes",
                 "filters": "JSON str (optional)",
             },
             "examples": [
                 'manage_process(profile="prod", action="list")',
-                'manage_process(profile="prod", action="create", config_yaml="name: My Process\\nshapes:\\n  - type: start...")',
+                'manage_process(profile="prod", action="create", config=\'{"name":"My Process","shapes":[{"type":"start","name":"start"},{"type":"stop","name":"end"}]}\')',
             ],
             "sdk_examples_covered": [
                 "create_process_component.py",
             ],
         },
-        "manage_schedules": {
+        "build_integration": {
             "category": "Execution",
-            "description": "Manage process schedules — list, get, update, delete cron-based schedules",
-            "actions": ["list", "get", "update", "delete"],
+            "description": "High-level orchestrator for building integrations from component-oriented JSON specs",
+            "actions": ["plan", "apply", "verify"],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — list | get | update | delete",
+                "action": "str (required) — plan | apply | verify",
+                "config": "JSON str (optional) — IntegrationSpecV1 payload and execution options",
+            },
+            "examples": [
+                'build_integration(profile="prod", action="plan", config=\'{"name":"Order Sync","mode":"lift_shift","components":[{"key":"p1","type":"process","action":"create","name":"Order Process","config":{"name":"Order Process","shapes":[{"type":"start","name":"start"},{"type":"stop","name":"end"}]}}]}\')',
+                'build_integration(profile="prod", action="apply", config=\'{"dry_run":false,"conflict_policy":"reuse","integration_spec":{"name":"Order Sync","mode":"lift_shift","components":[...]}}\')',
+                'build_integration(profile="prod", action="verify", config=\'{"build_id":"<uuid>"}\')',
+            ],
+        },
+        "manage_schedules": {
+            "category": "Execution",
+            "description": "Manage process schedules — cron-based schedules and schedule enable/disable status",
+            "actions": ["list", "get", "update", "delete", "list_status", "get_status", "enable", "disable"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — list | get | update | delete | list_status | get_status | enable | disable",
                 "resource_id": "str (optional) — base64 schedule ID",
                 "config": "JSON str (optional) — process_id, atom_id, cron, max_retry",
             },
             "examples": [
                 'manage_schedules(profile="prod", action="list")',
-                'manage_schedules(profile="prod", action="list", config=\'{"process_id": "abc-123"}\')',
-                'manage_schedules(profile="prod", action="get", config=\'{"process_id": "abc-123", "atom_id": "atom-456"}\')',
                 'manage_schedules(profile="prod", action="update", resource_id="Q1BTLi4u", config=\'{"cron": "0 9 * * *"}\')',
-                'manage_schedules(profile="prod", action="delete", resource_id="Q1BTLi4u")',
+                'manage_schedules(profile="prod", action="list_status")',
+                'manage_schedules(profile="prod", action="enable", config=\'{"process_id": "abc-123", "atom_id": "atom-456"}\')',
             ],
             "sdk_examples_covered": [
                 "manage_process_schedules.py",
@@ -1740,15 +1988,13 @@ def list_capabilities_action() -> Dict[str, Any]:
             "description": "Execute a Boomi process (sync or async)",
             "actions": ["execute"],
             "read_only": False,
-            "implemented": False,
+            "implemented": True,
             "parameters": {
                 "profile": "str (required)",
                 "process_id": "str (required)",
-                "environment_id": "str (required)",
-                "atom_id": "str (optional)",
-                "execution_type": "str (optional) — sync | async (default: async)",
-                "input_data": "str (optional) — input document",
-                "wait_for_completion": "bool (optional, default=false)",
+                "environment_id": "str (optional) — required when atom_id not provided (for runtime auto-resolution)",
+                "atom_id": "str (optional) — if provided, skips auto-resolution and environment_id is not needed",
+                "config": "JSON str (optional) — {wait: bool, timeout: int, dynamic_properties: {}, process_properties: {}, atom_id: str (fallback), environment_id: str (fallback)}",
             },
             "sdk_examples_covered": [
                 "execute_process.py",
@@ -1757,8 +2003,8 @@ def list_capabilities_action() -> Dict[str, Any]:
 
         "troubleshoot_execution": {
             "category": "Execution",
-            "description": "Troubleshoot failed executions — error details, retry, reprocess, queue management",
-            "actions": ["error_details", "retry", "reprocess", "list_queues", "clear_queue", "move_queue"],
+            "description": "Troubleshoot failed executions — error details, retry, reprocess, cancel, queue management",
+            "actions": ["error_details", "retry", "reprocess", "cancel", "list_queues", "clear_queue", "move_queue"],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
@@ -1781,9 +2027,15 @@ def list_capabilities_action() -> Dict[str, Any]:
         # === Category 5: Monitoring (1 tool) ===
         "monitor_platform": {
             "category": "Monitoring",
-            "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, and connector documents",
-            "actions": ["execution_records", "execution_logs", "execution_artifacts", "audit_logs", "events", "certificates", "throughput", "execution_metrics", "connector_documents"],
-            "read_only": True,
+            "description": "Monitor executions, logs, artifacts, audit trail, events, certificates, throughput, metrics, connector documents, summaries, counts, API usage, licensing, and EDI records",
+            "actions": [
+                "execution_records", "execution_logs", "execution_artifacts",
+                "audit_logs", "events", "certificates", "throughput",
+                "execution_metrics", "connector_documents", "download_connector_document",
+                "execution_summary", "document_counts", "execution_counts",
+                "api_usage_counts", "connection_licensing_report", "custom_tracked_fields", "edi_connector_records",
+            ],
+            "read_only": False,
             "parameters": {
                 "profile": "str (required)",
                 "action": "str (required)",
@@ -1797,6 +2049,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 'monitor_platform(profile="prod", action="throughput", config=\'{"start_date": "2025-01-01", "end_date": "2025-01-31"}\')',
                 'monitor_platform(profile="prod", action="execution_metrics", config=\'{"start_date": "2025-01-01T00:00:00Z", "top_failures": 5}\')',
                 'monitor_platform(profile="prod", action="connector_documents", config=\'{"execution_id": "exec-123"}\')',
+                'monitor_platform(profile="prod", action="download_connector_document", config=\'{"generic_connector_record_id": "rec-123"}\')',
             ],
             "sdk_examples_covered": [
                 "poll_execution_status.py",
@@ -1813,12 +2066,12 @@ def list_capabilities_action() -> Dict[str, Any]:
         # === Category 6: Organization (1 tool) ===
         "manage_folders": {
             "category": "Organization",
-            "description": "Manage folder hierarchy for organizing components — CRUD, move, tree view, contents",
-            "actions": ["list", "get", "create", "move", "delete", "restore", "contents"],
+            "description": "Manage folder hierarchy for organizing components — CRUD, move_component, tree view, contents",
+            "actions": ["list", "get", "create", "move_component", "delete", "restore", "contents"],
             "read_only": False,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required) — list | get | create | move | delete | restore | contents",
+                "action": "str (required) — list | get | create | move_component | delete | restore | contents",
                 "folder_id": "str (optional) — folder ID (required for get, delete, restore, contents)",
                 "config": "JSON str (optional) — action-specific config",
             },
@@ -1827,7 +2080,7 @@ def list_capabilities_action() -> Dict[str, Any]:
                 'manage_folders(profile="prod", action="list", config=\'{"include_deleted": true}\')',
                 'manage_folders(profile="prod", action="create", config=\'{"folder_name": "Production/APIs/v2"}\')',
                 'manage_folders(profile="prod", action="contents", folder_id="abc-123")',
-                'manage_folders(profile="prod", action="move", config=\'{"component_id": "comp-123", "target_folder_id": "folder-456"}\')',
+                'manage_folders(profile="prod", action="move_component", config=\'{"component_id": "comp-123", "target_folder_id": "folder-456"}\')',
             ],
             "sdk_examples_covered": [
                 "manage_folders.py",
@@ -1835,14 +2088,69 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
 
-        # === Category 7: Meta / Power Tools (3 tools) ===
+        # === Category 7: Administration (2 tools) ===
+        "manage_shared_resources": {
+            "category": "Administration",
+            "description": "Manage shared web servers, communication channels, and server information on Boomi runtimes",
+            "actions": [
+                "list_web_servers", "update_web_server", "get_web_server",
+                "list_channels", "get_channel", "create_channel", "update_channel", "delete_channel",
+                "get_server_info", "update_server_info",
+            ],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — list_web_servers | get_web_server | update_web_server | list_channels | get_channel | create_channel | update_channel | delete_channel | get_server_info | update_server_info",
+                "resource_id": "str (optional) — atom ID (web server/server info actions) or channel ID (channel actions)",
+                "config": "JSON str (optional) — action-specific parameters",
+            },
+            "examples": [
+                'manage_shared_resources(profile="prod", action="list_web_servers", resource_id="<atom_id>")',
+                'manage_shared_resources(profile="prod", action="list_channels")',
+                'manage_shared_resources(profile="prod", action="create_channel", config=\'{"name": "My Channel", "channel_type": "HTTP"}\')',
+            ],
+        },
+        "manage_account": {
+            "category": "Administration",
+            "description": "Manage Boomi account administration — roles, branches, user roles, federations, SSO",
+            "actions": [
+                "list_roles", "manage_role", "list_branches", "manage_branch",
+                "list_assignable_roles", "list_user_roles", "assign_user_role", "remove_user_role",
+                "list_user_federations", "create_user_federation", "delete_user_federation", "get_sso_config",
+            ],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "resource_id": "str (optional) — role, branch, or association ID (ignored by list_assignable_roles)",
+                "config": "JSON str (optional) — action-specific config",
+            },
+            "notes": {
+                "remove_user_role": (
+                    "Requires config.confirm_remove=true. "
+                    "Blocks removal of a user's last remaining role (prevents total access loss). "
+                    "Blocks removal of critical roles (Administrator, Standard User, API - Full Access). "
+                    "Blocks removal when critical-role lookup fails (fails closed). "
+                    "When using resource_id, user_id must also be provided in config."
+                ),
+            },
+            "examples": [
+                'manage_account(profile="prod", action="list_roles")',
+                'manage_account(profile="prod", action="list_assignable_roles")',
+                'manage_account(profile="prod", action="assign_user_role", config=\'{"user_id": "usr-1", "role_id": "role-2"}\')',
+                'manage_account(profile="prod", action="remove_user_role", config=\'{"user_id": "usr-1", "role_id": "role-2", "confirm_remove": true}\')',
+                'manage_account(profile="prod", action="get_sso_config")',
+            ],
+        },
+
+        # === Category 8: Meta / Power Tools ===
         "get_schema_template": {
             "category": "Meta Tools",
             "description": "Get example payloads, field descriptions, and enum values for all tools",
             "actions": ["(single action — specify resource_type and operation)"],
             "read_only": True,
             "parameters": {
-                "resource_type": "str (required) — trading_partner | process | component | environment | etc.",
+                "resource_type": "str (required) — trading_partner | process | integration | component | environment | etc.",
                 "operation": "str (optional) — create | update | list | etc.",
                 "standard": "str (optional) — for trading_partner: x12, edifact, hl7, etc.",
                 "component_type": "str (optional) — for component: process, connector-settings, transform.map, etc.",
@@ -1851,6 +2159,7 @@ def list_capabilities_action() -> Dict[str, Any]:
             "examples": [
                 'get_schema_template(resource_type="trading_partner", operation="create", standard="x12")',
                 'get_schema_template(resource_type="process", operation="create")',
+                'get_schema_template(resource_type="integration", operation="plan")',
                 'get_schema_template(resource_type="trading_partner", protocol="http")',
             ],
             "note": "No profile needed — returns static reference data. No API calls.",
@@ -1875,12 +2184,6 @@ def list_capabilities_action() -> Dict[str, Any]:
                 'invoke_boomi_api(profile="prod", endpoint="Component/abc-123", method="GET", accept="xml")',
             ],
             "covers_uncovered_apis": [
-                "Roles & Permissions",
-                "Branches",
-                "Integration Packs",
-                "Shared Web Servers",
-                "Communication Channels",
-                "Persisted Process Properties (async)",
                 "Queue Management (async)",
                 "Secrets Rotation",
                 "Document Reprocessing",
@@ -1895,6 +2198,76 @@ def list_capabilities_action() -> Dict[str, Any]:
             "read_only": True,
             "parameters": {},
             "note": "No parameters needed. Returns this catalog.",
+        },
+
+        # === Category 8b: Account Group Management ===
+        "manage_account_groups": {
+            "category": "Administration",
+            "description": "Manage account groups — CRUD, account associations, user roles, integration pack sharing",
+            "actions": [
+                "list", "get", "create", "update", "delete",
+                "list_accounts", "add_account", "remove_account",
+                "list_user_roles", "assign_user_role", "remove_user_role",
+                "list_integration_packs", "share_integration_pack", "unshare_integration_pack",
+            ],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "resource_id": "str (optional) — group or association ID",
+                "config": "JSON str (optional) — action-specific parameters",
+            },
+            "examples": [
+                'manage_account_groups(profile="prod", action="list")',
+                'manage_account_groups(profile="prod", action="create", config=\'{"name": "Team A"}\')',
+                'manage_account_groups(profile="prod", action="add_account", config=\'{"account_group_id": "grp-1", "account_id": "acc-2"}\')',
+            ],
+        },
+
+        # === Category 9: Listener Management ===
+        "manage_listeners": {
+            "category": "Runtime Operations",
+            "description": "Manage Boomi listener processes — status, pause, resume, restart",
+            "actions": ["status", "pause", "resume", "restart"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required) — status | pause | resume | restart",
+                "resource_id": "str (required) — container/atom ID",
+                "config": "JSON str (optional) — listener_id to target single listener",
+            },
+            "examples": [
+                'manage_listeners(profile="prod", action="status", resource_id="atom-123")',
+                'manage_listeners(profile="prod", action="pause", resource_id="atom-123", config=\'{"listener_id": "lid-456"}\')',
+                'manage_listeners(profile="prod", action="restart", resource_id="atom-123")',
+            ],
+        },
+
+        # === Category 10: Integration Pack Management ===
+        "manage_integration_packs": {
+            "category": "Administration",
+            "description": "Manage integration packs — publisher packs, instances, releases, attachments",
+            "actions": [
+                "list_packs", "get_pack",
+                "list_publisher_packs", "get_publisher_pack", "create_publisher_pack",
+                "update_publisher_pack", "delete_publisher_pack",
+                "list_instances", "install_instance", "uninstall_instance",
+                "release_pack", "update_release", "get_release_status",
+                "list_atom_attachments", "attach_atom", "detach_atom",
+                "list_environment_attachments", "attach_environment", "detach_environment",
+            ],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "action": "str (required)",
+                "resource_id": "str (optional) — pack, instance, or attachment ID",
+                "config": "JSON str (optional) — action-specific parameters",
+            },
+            "examples": [
+                'manage_integration_packs(profile="prod", action="list_packs")',
+                'manage_integration_packs(profile="prod", action="get_pack", resource_id="pack-123")',
+                'manage_integration_packs(profile="prod", action="install_instance", config=\'{"integration_pack_id": "pack-123"}\')',
+            ],
         },
 
         # === Credential Management ===
@@ -1915,7 +2288,36 @@ def list_capabilities_action() -> Dict[str, Any]:
                 "profile": "str (required) — profile name from list_boomi_profiles",
             },
         },
+        "set_boomi_credentials": {
+            "category": "Credentials",
+            "description": "Store Boomi API credentials for local testing (local dev only)",
+            "actions": ["(single action — stores credentials)"],
+            "read_only": False,
+            "local_only": True,
+            "parameters": {
+                "profile": "str (required) — profile name (e.g. 'production', 'sandbox')",
+                "account_id": "str (required) — Boomi account ID",
+                "username": "str (required) — Boomi API username (BOOMI_TOKEN.*)",
+                "password": "str (required) — Boomi API password/token",
+            },
+            "note": "Only available in local development mode (BOOMI_LOCAL=true).",
+        },
+        "delete_boomi_profile": {
+            "category": "Credentials",
+            "description": "Delete a stored Boomi credential profile (local dev only)",
+            "actions": ["(single action — deletes profile)"],
+            "read_only": False,
+            "local_only": True,
+            "parameters": {
+                "profile": "str (required) — profile name to delete",
+            },
+            "note": "Only available in local development mode (BOOMI_LOCAL=true).",
+        },
     }
+
+    # --- Filter to live registry when available ---
+    if available_tools is not None:
+        tools = {k: v for k, v in tools.items() if k in available_tools}
 
     # --- Build implementation status ---
     implemented = []
@@ -1940,12 +2342,21 @@ def list_capabilities_action() -> Dict[str, Any]:
         "create_and_deploy_process": {
             "description": "Build a process from scratch and deploy it",
             "steps": [
-                "1. get_schema_template(resource_type='process', operation='create') → get YAML template",
-                "2. manage_process(action='create', config_yaml='...') → create process",
+                "1. get_schema_template(resource_type='process', operation='create') → get JSON template",
+                "2. manage_process(action='create', config='...') → create process",
                 "3. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
                 "4. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
-                "5. invoke_boomi_api(endpoint='ExecutionRequest', method='POST', ...) → run it (execute_process not yet implemented)",
+                "5. execute_process(profile='...', process_id='<proc_id>', environment_id='<env_id>') → run it",
                 "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
+            ],
+        },
+        "build_integration_from_description": {
+            "description": "Convert a source integration description into Boomi components (lift-shift or redesign)",
+            "steps": [
+                "1. get_schema_template(resource_type='integration', operation='plan') → get IntegrationSpecV1 template",
+                "2. build_integration(action='plan', config='...') → validate and produce deterministic execution plan",
+                "3. build_integration(action='apply', config='{\"dry_run\": false, ...}') → execute ordered component creation/update",
+                "4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify created components and dependencies",
             ],
         },
         "set_up_b2b_trading_partner": {
@@ -1967,15 +2378,33 @@ def list_capabilities_action() -> Dict[str, Any]:
             ],
         },
         "manage_admin_operations": {
-            "description": "Admin tasks not covered by dedicated tools",
+            "description": "Account administration — roles, branches, and uncovered APIs",
             "steps": [
-                "1. invoke_boomi_api(endpoint='Role/query', method='POST', ...) → list roles",
-                "2. invoke_boomi_api(endpoint='Branch/query', method='POST', ...) → list branches",
-                "3. invoke_boomi_api(endpoint='Folder/query', method='POST', ...) → list folders",
-                "4. See invoke_boomi_api docstring for all 30+ available endpoints",
+                "1. manage_account(action='list_roles') → list roles",
+                "2. manage_account(action='manage_role', config='{\"operation\": \"create\", \"name\": \"...\", \"privileges\": [...]}') → create/update/delete roles",
+                "3. manage_account(action='list_branches') → list branches",
+                "4. manage_account(action='manage_branch', config='{\"operation\": \"create\", \"name\": \"...\"}') → create/delete branches",
+                "5. invoke_boomi_api(...) → for remaining uncovered APIs (integration packs, etc.)",
             ],
         },
     }
+
+    # --- Filter workflows to only reference tools in the catalog ---
+    if available_tools is not None:
+        import re
+        tool_names = set(tools.keys())
+        filtered_workflows = {}
+        for wf_key, wf in workflows.items():
+            # Extract tool names from step strings: "N. tool_name(...) → ..."
+            refs = set()
+            for step in wf.get("steps", []):
+                m = re.match(r"\d+\.\s+(\w+)\(", step)
+                if m:
+                    refs.add(m.group(1))
+            # Keep workflow only if all referenced tools are in the catalog
+            if refs <= tool_names:
+                filtered_workflows[wf_key] = wf
+        workflows = filtered_workflows
 
     # --- Coverage stats ---
     coverage = {
@@ -2010,7 +2439,7 @@ def list_capabilities_action() -> Dict[str, Any]:
         "hints": {
             "start_here": "Call list_boomi_profiles() first to see available profiles",
             "need_template": "Use get_schema_template() before create/update operations",
-            "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (roles, branches, etc.)",
+            "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (integration packs, secrets rotation, etc.)",
             "profile_required": "Most tools require a 'profile' parameter — get it from list_boomi_profiles()",
         },
     }

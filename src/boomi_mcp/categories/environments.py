@@ -1,7 +1,7 @@
 """
 Environment Management MCP Tools for Boomi Platform.
 
-Provides 11 environment management actions:
+Provides 22 environment management actions:
 - list: List all environments with optional classification/name filters
 - get: Get single environment by ID
 - create: Create new environment with name + classification
@@ -13,6 +13,17 @@ Provides 11 environment management actions:
 - stats: Environment summary by classification
 - get_properties: Get persisted process properties for a runtime (async)
 - update_properties: Update persisted process properties for a runtime
+- get_map_extension: Get an extensible map by its Environment Map Extension object ID
+- bulk_get_map_extensions: Bulk-GET multiple environment map extensions by IDs
+- list_map_udf_summaries: Query UDF summaries for an environment map extension
+- create_map_udf: Create a new user-defined function for a map extension
+- get_map_udf: Get a user-defined function by ID
+- update_map_udf: Update a user-defined function by ID
+- delete_map_udf: Delete a user-defined function by ID
+- list_map_external_components: Query external components for a map extension
+- list_environment_roles: Query environment-role associations with optional filters
+- create_environment_role: Associate a role with an environment
+- delete_environment_role: Remove a role-environment association
 """
 
 import time
@@ -98,7 +109,11 @@ def _sdk_to_dict(obj):
     if isinstance(obj, dict):
         return {k: _sdk_to_dict(v) for k, v in obj.items()}
     if hasattr(obj, '__dict__') and not isinstance(obj, (str, int, float, bool)):
-        return {k: _sdk_to_dict(v) for k, v in obj.__dict__.items() if not k.startswith('_')}
+        return {
+            ('id' if k == 'id_' else k): _sdk_to_dict(v)
+            for k, v in obj.__dict__.items()
+            if not k.startswith('_')
+        }
     return obj
 
 
@@ -117,22 +132,31 @@ def _extract_api_error_msg(e: ApiError) -> str:
     return getattr(e, 'message', '') or str(e)
 
 
-def _extract_raw_extensions(result) -> Dict[str, Any]:
-    """Extract raw extensions dict from SDK response (handles _kwargs wrapping)."""
-    if hasattr(result, '_kwargs') and 'EnvironmentExtensions' in result._kwargs:
-        return result._kwargs['EnvironmentExtensions']
-    elif hasattr(result, '_kwargs') and result._kwargs:
-        return result._kwargs
-    elif hasattr(result, 'to_dict'):
-        return result.to_dict()
-    elif isinstance(result, dict):
-        return result
+def _strip_at_type(obj):
+    """Recursively remove @type keys from a dict tree."""
+    if isinstance(obj, dict):
+        return {k: _strip_at_type(v) for k, v in obj.items() if k != '@type'}
+    if isinstance(obj, list):
+        return [_strip_at_type(item) for item in obj]
+    return obj
+
+
+def _normalize_extensions(result) -> Dict[str, Any]:
+    """Convert SDK EnvironmentExtensions model to a clean API-style dict.
+
+    Uses the SDK's _map() method to produce camelCase keys, then strips
+    the @type annotations the SDK adds at every level.
+    """
+    if hasattr(result, '_map'):
+        return _strip_at_type(result._map())
+    if isinstance(result, dict):
+        return _strip_at_type(result)
     return {}
 
 
 def _parse_extensions_response(result) -> Dict[str, Any]:
     """Parse the nested extensions response from the SDK."""
-    data = _extract_raw_extensions(result)
+    data = _normalize_extensions(result)
 
     summary = {
         "environment_id": data.get('environmentId', getattr(result, 'environment_id', '')),
@@ -281,10 +305,30 @@ def _action_get(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         return {"_success": False, "error": "resource_id is required for 'get' action"}
 
     env = sdk.environment.get_environment(id_=resource_id)
-    return {
-        "_success": True,
-        "environment": _env_to_dict(env),
-    }
+    env_dict = _env_to_dict(env)
+
+    # Best-effort soft-delete detection: GET succeeds but query-by-ID returns nothing.
+    # If the query itself fails, return the GET result without annotation.
+    response = {"_success": True, "environment": env_dict}
+    try:
+        expression = EnvironmentSimpleExpression(
+            operator=EnvironmentSimpleExpressionOperator.EQUALS,
+            property=EnvironmentSimpleExpressionProperty.ID,
+            argument=[resource_id],
+        )
+        query_filter = EnvironmentQueryConfigQueryFilter(expression=expression)
+        query_config = EnvironmentQueryConfig(query_filter=query_filter)
+        query_result = sdk.environment.query_environment(request_body=query_config)
+        found = hasattr(query_result, 'result') and query_result.result and len(query_result.result) > 0
+        if not found:
+            env_dict["deleted"] = True
+            response["warning"] = (
+                "This environment has been deleted (soft-delete). "
+                "It is no longer visible in list/query results but the API still returns its metadata."
+            )
+    except Exception:
+        response["soft_delete_check"] = "unavailable"
+    return response
 
 
 def _action_create(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
@@ -367,7 +411,7 @@ def _action_get_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     """Get environment-specific configuration overrides."""
     resource_id = kwargs.get("resource_id")
     if not resource_id:
-        return {"_success": False, "error": "resource_id is required for 'get_extensions' action"}
+        return {"_success": False, "error": "resource_id (environment_id) is required for 'get_extensions' action"}
 
     result = sdk.environment_extensions.get_environment_extensions(id_=resource_id)
     extensions = _parse_extensions_response(result)
@@ -376,6 +420,108 @@ def _action_get_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
         "_success": True,
         "extensions": extensions,
     }
+
+
+def _verify_extensions_persisted(requested: Dict[str, Any],
+                                 verified: Dict[str, Any]) -> List[str]:
+    """Compare requested extension changes against the verified GET response.
+
+    Returns a list of warning strings for fields that did not persist.
+    Encrypted fields (password, etc.) are considered persisted if useDefault=false,
+    since the API always returns empty strings for encrypted values on read.
+    """
+    ENCRYPTED_FIELD_IDS = {"password", "token", "secret", "passphrase",
+                           "private_key", "privateKey", "clientSecret",
+                           "client_secret"}
+    warnings = []
+
+    # Build a lookup of verified fields by (extension_type, item_id, field_id)
+    verified_fields = {}
+    for ext_key in ("connections", "operations", "properties", "cross_references",
+                    "trading_partners", "pgp_certificates", "process_properties",
+                    "data_maps"):
+        section = verified.get(ext_key, {})
+        items = section.get("items", []) if isinstance(section, dict) else []
+        for item in items:
+            item_id = item.get("id", "")
+            fields = item.get("field", [])
+            if not isinstance(fields, list):
+                fields = [fields] if fields else []
+            for field in fields:
+                fid = field.get("id", "")
+                verified_fields[(ext_key, item_id, fid)] = field
+
+    # Walk the requested changes and compare
+    ext_type_map = {
+        "connections": "connection", "operations": "operation",
+        "properties": "property", "crossReferences": "crossReference",
+        "tradingPartners": "tradingPartner", "PGPCertificates": "PGPCertificate",
+        "processProperties": "ProcessProperty", "dataMaps": "dataMap",
+    }
+    # Also map snake_case keys used in the verified response
+    snake_to_camel = {
+        "cross_references": "crossReferences", "trading_partners": "tradingPartners",
+        "pgp_certificates": "PGPCertificates", "process_properties": "processProperties",
+        "data_maps": "dataMaps",
+    }
+
+    for outer_key, inner_key in ext_type_map.items():
+        section = requested.get(outer_key, {})
+        if not isinstance(section, dict):
+            continue
+        items = section.get(inner_key, [])
+        if not isinstance(items, list):
+            items = [items] if items else []
+        # Determine the snake_case key used in the verified dict
+        verified_key = outer_key
+        for sk, ck in snake_to_camel.items():
+            if ck == outer_key:
+                verified_key = sk
+                break
+
+        for item in items:
+            item_id = item.get("id", "")
+            fields = item.get("field", [])
+            if not isinstance(fields, list):
+                fields = [fields] if fields else []
+            for field in fields:
+                fid = field.get("id", "")
+                req_use_default = field.get("useDefault")
+                req_value = field.get("value")
+
+                if req_use_default is True:
+                    continue  # Requesting default — no verification needed
+
+                vf = verified_fields.get((verified_key, item_id, fid))
+                if not vf:
+                    warnings.append(
+                        f"{outer_key}/{item_id}/field/{fid}: not found in verified response"
+                    )
+                    continue
+
+                v_use_default = vf.get("useDefault", True)
+                if v_use_default is True or v_use_default == "true":
+                    warnings.append(
+                        f"{outer_key}/{item_id}/field/{fid}: still useDefault=true after update"
+                    )
+                    continue
+
+                # For encrypted fields, useDefault=false is sufficient
+                is_encrypted = (fid.lower() in ENCRYPTED_FIELD_IDS
+                                or field.get("encryptedValueSet") is True
+                                or vf.get("encryptedValueSet") is True)
+                if is_encrypted:
+                    continue
+
+                # For non-encrypted, verify the value matches
+                v_value = vf.get("value", "")
+                if req_value is not None and str(req_value) != str(v_value):
+                    warnings.append(
+                        f"{outer_key}/{item_id}/field/{fid}: value mismatch — "
+                        f"sent '{req_value}', got '{v_value}'"
+                    )
+
+    return warnings
 
 
 def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
@@ -393,7 +539,7 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
         # GET current extensions first, then merge
         try:
             current_result = sdk.environment_extensions.get_environment_extensions(id_=resource_id)
-            current_data = _extract_raw_extensions(current_result)
+            current_data = _normalize_extensions(current_result)
             merged = _deep_merge(current_data, extensions_data)
         except ApiError as e:
             status = getattr(e, 'status', None)
@@ -403,38 +549,47 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
             else:
                 # Abort on any other error (including 400 = no extensible components
                 # deployed, 500 = transient) to avoid destructive partial update.
-                # Note: 400 typically means no extensions exist, in which case the
-                # subsequent UPDATE would also fail — better to surface it here.
                 return {
                     "_success": False,
                     "error": f"Failed to read current extensions for partial merge (HTTP {status}). "
                              f"Aborting to avoid data loss. If no extensions exist yet, deploy a "
-                             f"process with extensible components first. Detail: {e}",
+                             f"process with extensible components first. Detail: {_extract_api_error_msg(e)}",
                 }
     else:
         merged = extensions_data
 
-    # Build the extensions update object
+    # Build the extensions update object with required ID and partial fields
     merged['environmentId'] = resource_id
-    extensions_update = EnvironmentExtensions(**merged)
+    merged['id'] = resource_id
+    merged['partial'] = partial
+    extensions_update = EnvironmentExtensions._unmap(merged)
 
-    result = sdk.environment_extensions.update_environment_extensions(
+    sdk.environment_extensions.update_environment_extensions(
         id_=resource_id,
         request_body=extensions_update,
     )
 
-    return {
+    # Verification: immediate GET to confirm persistence
+    verify_result = sdk.environment_extensions.get_environment_extensions(id_=resource_id)
+    verified = _parse_extensions_response(verify_result)
+
+    warnings = _verify_extensions_persisted(extensions_data, verified)
+
+    response = {
         "_success": True,
-        "extensions": _parse_extensions_response(result),
+        "extensions": verified,
         "partial_update": partial,
     }
+    if warnings:
+        response["verification_warnings"] = warnings
+    return response
 
 
 def _action_query_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     """Query which environments have extensions configured."""
     resource_id = kwargs.get("resource_id")
     if not resource_id:
-        return {"_success": False, "error": "resource_id is required for 'query_extensions' action"}
+        return {"_success": False, "error": "resource_id (environment_id) is required for 'query_extensions' action"}
 
     expression = EnvironmentExtensionsSimpleExpression(
         operator=EnvironmentExtensionsSimpleExpressionOperator.EQUALS,
@@ -490,47 +645,40 @@ def _action_stats(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
 def _action_get_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     """Get persisted process properties for a runtime/atom (async operation)."""
+    from boomi_mcp.utils.async_polling import poll_async_result
+
     resource_id = kwargs.get("resource_id")
     if not resource_id:
         return {"_success": False, "error": "resource_id (atom_id) is required for 'get_properties' action"}
 
     timeout = kwargs.get("timeout", 30)
 
-    # Initiate async request
-    token_result = sdk.persisted_process_properties.async_get_persisted_process_properties(
-        id_=resource_id
-    )
-
-    if not hasattr(token_result, 'async_token') or not token_result.async_token:
-        return {"_success": False, "error": "Failed to get async token for persisted properties request"}
-
-    token = token_result.async_token.token
-
-    # Poll for results
-    start_time = time.time()
-    poll_interval = 2
-
-    while time.time() - start_time < timeout:
-        time.sleep(poll_interval)
-        try:
-            response = sdk.persisted_process_properties.async_token_persisted_process_properties(
+    try:
+        response = poll_async_result(
+            initiate_fn=lambda: sdk.persisted_process_properties.async_get_persisted_process_properties(
+                id_=resource_id
+            ),
+            poll_fn=lambda token: sdk.persisted_process_properties.async_token_persisted_process_properties(
                 token=token
-            )
-            if response:
-                status = getattr(response, 'response_status_code', None)
-                if status and status != 200:
-                    continue
-                return {
-                    "_success": True,
-                    "atom_id": resource_id,
-                    "properties": _sdk_to_dict(response),
-                }
-        except Exception as e:
-            if "202" in str(e) or "not ready" in str(e).lower():
-                continue
-            return {"_success": False, "error": f"Error polling for properties: {e}"}
-
-    return {"_success": False, "error": f"Timeout after {timeout}s waiting for persisted properties"}
+            ),
+            timeout=timeout,
+            resource_label="persisted process properties",
+        )
+        return {
+            "_success": True,
+            "atom_id": resource_id,
+            "properties": _sdk_to_dict(response),
+        }
+    except TimeoutError as e:
+        return {"_success": False, "error": str(e)}
+    except ValueError as e:
+        return {"_success": False, "error": str(e)}
+    except ApiError as e:
+        return {"_success": False, "error": f"Error polling for properties: {_extract_api_error_msg(e)}"}
+    except TypeError as e:
+        return {"_success": False, "error": f"Error deserializing properties response: {e}"}
+    except Exception as e:
+        return {"_success": False, "error": f"Error polling for properties: {e}"}
 
 
 def _action_update_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
@@ -587,6 +735,387 @@ def _action_update_properties(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
 
 
 # ============================================================================
+# Map Extension Action Handlers
+# ============================================================================
+
+def _action_get_map_extension(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get an extensible map by its Environment Map Extension object ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_map_extension' action"}
+
+    result = sdk.environment_map_extension.get_environment_map_extension(id_=resource_id)
+    return {
+        "_success": True,
+        "map_extension": _sdk_to_dict(result),
+    }
+
+
+def _action_bulk_get_map_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Bulk-GET multiple environment map extensions by IDs."""
+    from boomi.models import EnvironmentMapExtensionBulkRequest, BulkId
+
+    ids = kwargs.get("ids")
+    if not ids or not isinstance(ids, list):
+        return {"_success": False, "error": "ids (list of map extension IDs) is required for 'bulk_get_map_extensions' action"}
+
+    bulk_request = EnvironmentMapExtensionBulkRequest(
+        request=[BulkId(id_=id_val) for id_val in ids],
+        type_="GET",
+    )
+    result = sdk.environment_map_extension.bulk_environment_map_extension(request_body=bulk_request)
+
+    responses = []
+    if hasattr(result, 'response') and result.response:
+        for item in result.response:
+            entry = {}
+            if hasattr(item, 'id_'):
+                entry["id"] = item.id_
+            if hasattr(item, 'status_code'):
+                entry["status_code"] = item.status_code
+            if hasattr(item, 'error_message') and item.error_message:
+                entry["error_message"] = item.error_message
+            if hasattr(item, 'result') and item.result:
+                entry["result"] = _sdk_to_dict(item.result)
+            responses.append(entry)
+
+    return {
+        "_success": True,
+        "responses": responses,
+        "total_count": len(responses),
+    }
+
+
+def _action_list_map_udf_summaries(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Query UDF summaries for an environment map extension."""
+    from boomi.models import (
+        EnvironmentMapExtensionUserDefinedFunctionSummaryQueryConfig,
+        EnvironmentMapExtensionUserDefinedFunctionSummaryQueryConfigQueryFilter,
+        EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpression,
+        EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpressionOperator,
+        EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpressionProperty,
+    )
+
+    environment_id = kwargs.get("environment_id")
+    extension_group_id = kwargs.get("extension_group_id")
+    environment_map_extension_id = kwargs.get("environment_map_extension_id")
+
+    if environment_map_extension_id:
+        expression = EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpression(
+            operator=EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpressionOperator.EQUALS,
+            property=EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpressionProperty.ENVIRONMENTMAPEXTENSIONID,
+            argument=[environment_map_extension_id],
+        )
+    elif environment_id:
+        expression = EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpression(
+            operator=EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpressionOperator.EQUALS,
+            property=EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpressionProperty.ENVIRONMENTID,
+            argument=[environment_id],
+        )
+    elif extension_group_id:
+        expression = EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpression(
+            operator=EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpressionOperator.EQUALS,
+            property=EnvironmentMapExtensionUserDefinedFunctionSummarySimpleExpressionProperty.EXTENSIONGROUPID,
+            argument=[extension_group_id],
+        )
+    else:
+        return {
+            "_success": False,
+            "error": "environment_map_extension_id, environment_id, or extension_group_id is required for 'list_map_udf_summaries' action",
+        }
+
+    query_filter = EnvironmentMapExtensionUserDefinedFunctionSummaryQueryConfigQueryFilter(expression=expression)
+    query_config = EnvironmentMapExtensionUserDefinedFunctionSummaryQueryConfig(query_filter=query_filter)
+    result = sdk.environment_map_extension_user_defined_function_summary.query_environment_map_extension_user_defined_function_summary(
+        request_body=query_config
+    )
+
+    summaries = []
+    if hasattr(result, 'result') and result.result:
+        summaries.extend([_sdk_to_dict(s) for s in result.result])
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.environment_map_extension_user_defined_function_summary.query_more_environment_map_extension_user_defined_function_summary(
+            request_body=result.query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            summaries.extend([_sdk_to_dict(s) for s in result.result])
+
+    return {
+        "_success": True,
+        "udf_summaries": summaries,
+        "total_count": len(summaries),
+    }
+
+
+def _normalize_udf_data(udf_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize UDF payload so nested step objects satisfy SDK constructors.
+
+    Callers may supply steps under three key combinations:
+      - steps.Step   — SDK _unmap native form
+      - Steps.Step   — Boomi wire / API JSON format
+      - steps.step   — round-tripped through _sdk_to_dict (read-modify-write)
+
+    MapExtensionsFunctionStep requires configuration, inputs, and outputs as
+    positional args.  Default them to empty dicts when absent so _unmap() can
+    construct valid SDK objects.
+    """
+    data = dict(udf_data)  # shallow copy
+
+    # Normalise outer key: accept both "Steps" (wire) and "steps" (python).
+    # _unmap expects the python form "steps".
+    steps_block = data.get("steps") or data.get("Steps")
+    if steps_block is not None:
+        if isinstance(steps_block, dict):
+            # Normalise inner key: accept "Step" (wire/_unmap) and "step" (sdk_to_dict).
+            fn_steps = steps_block.get("Step") or steps_block.get("step")
+            if isinstance(fn_steps, list):
+                normalized = []
+                for step in fn_steps:
+                    if isinstance(step, dict):
+                        step = dict(step)
+                        step.setdefault("configuration", {})
+                        step.setdefault("inputs", {})
+                        step.setdefault("outputs", {})
+                    normalized.append(step)
+                # Write back with the key _unmap expects.
+                steps_block = {"Step": normalized}
+        # Ensure outer key is the python form _unmap expects.
+        data.pop("Steps", None)
+        data["steps"] = steps_block
+    return data
+
+
+def _action_create_map_udf(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Create a new user-defined function for a map extension."""
+    from boomi.models import EnvironmentMapExtensionUserDefinedFunction
+
+    udf_data = kwargs.get("udf_data")
+    if not udf_data or not isinstance(udf_data, dict):
+        return {"_success": False, "error": "udf_data (dict) is required for 'create_map_udf' action"}
+
+    udf_data = _normalize_udf_data(udf_data)
+    try:
+        udf_obj = EnvironmentMapExtensionUserDefinedFunction._unmap(udf_data)
+    except TypeError as exc:
+        return {"_success": False, "error": f"Invalid udf_data structure: {exc}"}
+    result = sdk.environment_map_extension_user_defined_function.create_environment_map_extension_user_defined_function(
+        request_body=udf_obj
+    )
+
+    return {
+        "_success": True,
+        "udf": _sdk_to_dict(result),
+    }
+
+
+def _action_get_map_udf(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get a user-defined function by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'get_map_udf' action"}
+
+    result = sdk.environment_map_extension_user_defined_function.get_environment_map_extension_user_defined_function(
+        id_=resource_id
+    )
+    return {
+        "_success": True,
+        "udf": _sdk_to_dict(result),
+    }
+
+
+def _action_update_map_udf(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Update a user-defined function by ID."""
+    from boomi.models import EnvironmentMapExtensionUserDefinedFunction
+
+    resource_id = kwargs.get("resource_id")
+    udf_data = kwargs.get("udf_data")
+
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'update_map_udf' action"}
+    if not udf_data or not isinstance(udf_data, dict):
+        return {"_success": False, "error": "udf_data (dict) is required for 'update_map_udf' action"}
+
+    udf_data = _normalize_udf_data(udf_data)
+    try:
+        udf_obj = EnvironmentMapExtensionUserDefinedFunction._unmap(udf_data)
+    except TypeError as exc:
+        return {"_success": False, "error": f"Invalid udf_data structure: {exc}"}
+    result = sdk.environment_map_extension_user_defined_function.update_environment_map_extension_user_defined_function(
+        id_=resource_id, request_body=udf_obj
+    )
+
+    return {
+        "_success": True,
+        "udf": _sdk_to_dict(result),
+    }
+
+
+def _action_delete_map_udf(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Delete a user-defined function by ID."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'delete_map_udf' action"}
+
+    sdk.environment_map_extension_user_defined_function.delete_environment_map_extension_user_defined_function(
+        id_=resource_id
+    )
+
+    return {
+        "_success": True,
+        "message": f"User-defined function '{resource_id}' deleted successfully.",
+    }
+
+
+def _action_list_map_external_components(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Query external components for a map extension."""
+    from boomi.models import (
+        EnvironmentMapExtensionExternalComponentQueryConfig,
+        EnvironmentMapExtensionExternalComponentQueryConfigQueryFilter,
+        EnvironmentMapExtensionExternalComponentSimpleExpression,
+        EnvironmentMapExtensionExternalComponentSimpleExpressionOperator,
+        EnvironmentMapExtensionExternalComponentSimpleExpressionProperty,
+    )
+
+    environment_map_extension_id = kwargs.get("environment_map_extension_id")
+    component_id = kwargs.get("component_id")
+
+    if environment_map_extension_id:
+        expression = EnvironmentMapExtensionExternalComponentSimpleExpression(
+            operator=EnvironmentMapExtensionExternalComponentSimpleExpressionOperator.EQUALS,
+            property=EnvironmentMapExtensionExternalComponentSimpleExpressionProperty.ENVIRONMENTMAPEXTENSIONID,
+            argument=[environment_map_extension_id],
+        )
+    elif component_id:
+        expression = EnvironmentMapExtensionExternalComponentSimpleExpression(
+            operator=EnvironmentMapExtensionExternalComponentSimpleExpressionOperator.EQUALS,
+            property=EnvironmentMapExtensionExternalComponentSimpleExpressionProperty.COMPONENTID,
+            argument=[component_id],
+        )
+    else:
+        return {
+            "_success": False,
+            "error": "environment_map_extension_id or component_id is required for 'list_map_external_components' action",
+        }
+
+    query_filter = EnvironmentMapExtensionExternalComponentQueryConfigQueryFilter(expression=expression)
+    query_config = EnvironmentMapExtensionExternalComponentQueryConfig(query_filter=query_filter)
+    result = sdk.environment_map_extension_external_component.query_environment_map_extension_external_component(
+        request_body=query_config
+    )
+
+    components = []
+    if hasattr(result, 'result') and result.result:
+        components.extend([_sdk_to_dict(c) for c in result.result])
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.environment_map_extension_external_component.query_more_environment_map_extension_external_component(
+            request_body=result.query_token
+        )
+        if hasattr(result, 'result') and result.result:
+            components.extend([_sdk_to_dict(c) for c in result.result])
+
+    return {
+        "_success": True,
+        "external_components": components,
+        "total_count": len(components),
+    }
+
+
+# ============================================================================
+# Environment Role Action Handlers
+# ============================================================================
+
+def _action_list_environment_roles(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Query environment-role associations with optional environment_id or role_id filter."""
+    from boomi.models import (
+        EnvironmentRoleQueryConfig,
+        EnvironmentRoleQueryConfigQueryFilter,
+        EnvironmentRoleSimpleExpression,
+        EnvironmentRoleSimpleExpressionOperator,
+        EnvironmentRoleSimpleExpressionProperty,
+    )
+
+    environment_id = kwargs.get("environment_id") or kwargs.get("resource_id")
+    role_id = kwargs.get("role_id")
+
+    if environment_id:
+        expression = EnvironmentRoleSimpleExpression(
+            operator=EnvironmentRoleSimpleExpressionOperator.EQUALS,
+            property=EnvironmentRoleSimpleExpressionProperty.ENVIRONMENTID,
+            argument=[environment_id],
+        )
+    elif role_id:
+        expression = EnvironmentRoleSimpleExpression(
+            operator=EnvironmentRoleSimpleExpressionOperator.EQUALS,
+            property=EnvironmentRoleSimpleExpressionProperty.ROLEID,
+            argument=[role_id],
+        )
+    else:
+        return {
+            "_success": False,
+            "error": "environment_id or role_id is required for 'list_environment_roles' action",
+        }
+
+    query_filter = EnvironmentRoleQueryConfigQueryFilter(expression=expression)
+    query_config = EnvironmentRoleQueryConfig(query_filter=query_filter)
+    result = sdk.environment_role.query_environment_role(request_body=query_config)
+
+    roles = []
+    if hasattr(result, 'result') and result.result:
+        roles.extend([_sdk_to_dict(r) for r in result.result])
+
+    while hasattr(result, 'query_token') and result.query_token:
+        result = sdk.environment_role.query_more_environment_role(request_body=result.query_token)
+        if hasattr(result, 'result') and result.result:
+            roles.extend([_sdk_to_dict(r) for r in result.result])
+
+    return {
+        "_success": True,
+        "environment_roles": roles,
+        "total_count": len(roles),
+    }
+
+
+def _action_create_environment_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Associate a role with an environment."""
+    from boomi.models import EnvironmentRole
+
+    environment_id = kwargs.get("environment_id")
+    role_id = kwargs.get("role_id")
+
+    if not environment_id:
+        return {"_success": False, "error": "environment_id is required for 'create_environment_role' action"}
+    if not role_id:
+        return {"_success": False, "error": "role_id is required for 'create_environment_role' action"}
+
+    env_role = EnvironmentRole(
+        environment_id=environment_id,
+        role_id=role_id,
+    )
+    result = sdk.environment_role.create_environment_role(request_body=env_role)
+
+    return {
+        "_success": True,
+        "environment_role": _sdk_to_dict(result),
+    }
+
+
+def _action_delete_environment_role(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Remove a role-environment association."""
+    resource_id = kwargs.get("resource_id")
+    if not resource_id:
+        return {"_success": False, "error": "resource_id is required for 'delete_environment_role' action"}
+
+    sdk.environment_role.delete_environment_role(id_=resource_id)
+
+    return {
+        "_success": True,
+        "message": f"Environment role '{resource_id}' deleted successfully.",
+    }
+
+
+# ============================================================================
 # Action Router
 # ============================================================================
 
@@ -603,7 +1132,7 @@ def manage_environments_action(
     Args:
         sdk: Authenticated Boomi SDK client
         profile: Profile name
-        action: One of: list, get, create, update, delete, get_extensions, update_extensions, query_extensions, stats, get_properties, update_properties
+        action: One of: list, get, create, update, delete, get_extensions, update_extensions, query_extensions, stats, get_properties, update_properties, get_map_extension, bulk_get_map_extensions, list_map_udf_summaries, create_map_udf, get_map_udf, update_map_udf, delete_map_udf, list_map_external_components, list_environment_roles, create_environment_role, delete_environment_role
         config_data: Action-specific configuration dict
         **kwargs: Additional parameters (resource_id, etc.)
     """
@@ -625,6 +1154,17 @@ def manage_environments_action(
         "stats": _action_stats,
         "get_properties": _action_get_properties,
         "update_properties": _action_update_properties,
+        "get_map_extension": _action_get_map_extension,
+        "bulk_get_map_extensions": _action_bulk_get_map_extensions,
+        "list_map_udf_summaries": _action_list_map_udf_summaries,
+        "create_map_udf": _action_create_map_udf,
+        "get_map_udf": _action_get_map_udf,
+        "update_map_udf": _action_update_map_udf,
+        "delete_map_udf": _action_delete_map_udf,
+        "list_map_external_components": _action_list_map_external_components,
+        "list_environment_roles": _action_list_environment_roles,
+        "create_environment_role": _action_create_environment_role,
+        "delete_environment_role": _action_delete_environment_role,
     }
 
     handler = actions.get(action)

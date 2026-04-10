@@ -9,7 +9,7 @@ Features:
 - Simple process creation (single component, no dependencies)
 - Complex workflows (multi-component with dependency management)
 - Fuzzy ID resolution (component names → IDs)
-- YAML configuration support
+- JSON configuration support
 - Topological sorting for dependencies
 """
 
@@ -17,10 +17,11 @@ from typing import Dict, Any, List, Optional
 import xml.etree.ElementTree as ET
 
 from boomi import Boomi
+from boomi.net.transport.api_error import ApiError
 
 # Import our modules
 from ...xml_builders.builders.orchestrator import ComponentOrchestrator
-from ...xml_builders.yaml_parser import parse_yaml_to_specs
+from ...xml_builders.json_parser import parse_json_to_specs
 from ...models.process_models import ComponentSpec, ProcessConfig
 
 # Import typed models for query operations
@@ -33,7 +34,7 @@ from boomi.models import (
 )
 
 # Import shared helper
-from ._shared import component_get_xml as _component_get_xml
+from ._shared import component_get_xml as _component_get_xml, _extract_api_error_msg
 
 
 def _component_delete(boomi_client: Boomi, component_id: str) -> None:
@@ -101,6 +102,7 @@ def list_processes(
                             continue
 
                     processes.append({
+                        'process_id': getattr(comp, 'component_id', ''),
                         'component_id': getattr(comp, 'component_id', ''),
                         'id': getattr(comp, 'id_', ''),
                         'name': getattr(comp, 'name', ''),
@@ -118,6 +120,12 @@ def list_processes(
             "profile": profile
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to list processes: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -149,6 +157,7 @@ def get_process(
     try:
         # Use raw XML helper — SDK's get_component() returns 406 (JSON-only Accept header)
         process_data = _component_get_xml(boomi_client, process_id)
+        process_data['process_id'] = process_data.get('component_id', process_id)
 
         return {
             "_success": True,
@@ -159,7 +168,7 @@ def get_process(
     except Exception as e:
         return {
             "_success": False,
-            "error": f"Failed to get process '{process_id}': {str(e)}",
+            "error": f"Failed to get process '{process_id}': {_extract_api_error_msg(e)}",
             "exception_type": type(e).__name__,
             "hint": "Verify the process ID exists and is accessible"
         }
@@ -168,62 +177,24 @@ def get_process(
 def create_process(
     boomi_client: Boomi,
     profile: str,
-    config_yaml: str
+    config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Create process component(s) from YAML configuration.
+    Create process component(s) from JSON configuration.
 
     Supports both single process and multi-component workflows with dependencies.
 
     Args:
         boomi_client: Authenticated Boomi SDK client
         profile: Profile name (for context)
-        config_yaml: YAML configuration string
+        config: JSON object configuration
 
     Returns:
         Dict with success status and created component IDs
-
-    Example (single process):
-        yaml_config = '''
-        name: "Hello World"
-        shapes:
-          - type: start
-            name: start
-          - type: message
-            name: msg
-            config:
-              message_text: "Hello from Boomi!"
-          - type: stop
-            name: end
-        '''
-        result = create_process(sdk, "production", yaml_config)
-
-    Example (multi-component):
-        yaml_config = '''
-        components:
-          - name: "Transform Map"
-            type: map
-            dependencies: []
-          - name: "Main Process"
-            type: process
-            dependencies: ["Transform Map"]
-            config:
-              name: "Main Process"
-              shapes:
-                - type: start
-                  name: start
-                - type: map
-                  name: transform
-                  config:
-                    map_ref: "Transform Map"
-                - type: stop
-                  name: end
-        '''
-        result = create_process(sdk, "production", yaml_config)
     """
     try:
-        # Parse YAML to ComponentSpec list
-        specs = parse_yaml_to_specs(config_yaml)
+        # Parse JSON to ComponentSpec list
+        specs = parse_json_to_specs(config)
 
         # Create orchestrator
         orchestrator = ComponentOrchestrator(boomi_client)
@@ -246,6 +217,10 @@ def create_process(
             "components": created_components,
             "profile": profile
         }
+        if len(created_components) == 1:
+            only = next(iter(created_components.values()))
+            result["process_id"] = only["component_id"]
+            result["component_id"] = only["component_id"]
         if orchestrator.warnings:
             result["warnings"] = orchestrator.warnings
         return result
@@ -256,7 +231,7 @@ def create_process(
             "_success": False,
             "error": f"Configuration error: {str(e)}",
             "exception_type": "ValidationError",
-            "hint": "Check YAML syntax and required fields. Ensure dependencies are declared correctly."
+            "hint": "Check JSON structure and required fields. Ensure dependencies are declared correctly."
         }
 
     except Exception as e:
@@ -271,41 +246,27 @@ def update_process(
     boomi_client: Boomi,
     profile: str,
     process_id: str,
-    config_yaml: str
+    config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Update existing process component.
 
-    Note: This performs a full rebuild of the process XML from the YAML config.
+    Note: This performs a full rebuild of the process XML from the JSON config.
     Partial updates are not supported by Boomi's Component API.
 
     Args:
         boomi_client: Authenticated Boomi SDK client
         profile: Profile name (for context)
         process_id: Process component ID to update
-        config_yaml: New YAML configuration
+        config: New JSON configuration
 
     Returns:
         Dict with success status
 
-    Example:
-        yaml_config = '''
-        name: "Updated Process"
-        shapes:
-          - type: start
-            name: start
-          - type: message
-            name: msg
-            config:
-              message_text: "Updated message"
-          - type: stop
-            name: end
-        '''
-        result = update_process(sdk, "production", "abc-123", yaml_config)
     """
     try:
-        # Parse YAML
-        specs = parse_yaml_to_specs(config_yaml)
+        # Parse JSON
+        specs = parse_json_to_specs(config)
 
         if len(specs) > 1:
             return {
@@ -341,6 +302,12 @@ def update_process(
             "exception_type": "ValidationError"
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to update process '{process_id}': {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -387,6 +354,12 @@ def delete_process(
             "hint": "Delete process components from the Boomi Platform Build page instead."
         }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Failed to delete process '{process_id}': {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError"
+        }
     except Exception as e:
         return {
             "_success": False,
@@ -420,11 +393,11 @@ def manage_process_action(
         - get: Get specific process by ID
           Params: process_id (required str)
 
-        - create: Create new process(es) from YAML
-          Params: config_yaml (required str)
+        - create: Create new process(es) from JSON config
+          Params: config (required dict)
 
         - update: Update existing process
-          Params: process_id (required str), config_yaml (required str)
+          Params: process_id (required str), config (required dict)
 
         - delete: Delete process
           Params: process_id (required str)
@@ -439,7 +412,7 @@ def manage_process_action(
         # Create simple process
         result = manage_process_action(
             sdk, "prod", "create",
-            config_yaml="name: Test\\nshapes: [...]"
+            config={"name": "Test", "shapes": [...]}
         )
 
         # Get process
@@ -464,31 +437,31 @@ def manage_process_action(
             return get_process(boomi_client, profile, process_id)
 
         elif action == "create":
-            config_yaml = params.get("config_yaml")
-            if not config_yaml:
+            config = params.get("config")
+            if not config:
                 return {
                     "_success": False,
-                    "error": "config_yaml is required for 'create' action",
-                    "hint": "Provide YAML configuration with process structure. See documentation for examples."
+                    "error": "config is required for 'create' action",
+                    "hint": "Provide JSON config with process structure."
                 }
-            return create_process(boomi_client, profile, config_yaml)
+            return create_process(boomi_client, profile, config)
 
         elif action == "update":
             process_id = params.get("process_id")
-            config_yaml = params.get("config_yaml")
+            config = params.get("config")
             if not process_id:
                 return {
                     "_success": False,
                     "error": "process_id is required for 'update' action",
                     "hint": "Provide the process component ID to update"
                 }
-            if not config_yaml:
+            if not config:
                 return {
                     "_success": False,
-                    "error": "config_yaml is required for 'update' action",
-                    "hint": "Provide new YAML configuration for the process"
+                    "error": "config is required for 'update' action",
+                    "hint": "Provide new JSON configuration for the process"
                 }
-            return update_process(boomi_client, profile, process_id, config_yaml)
+            return update_process(boomi_client, profile, process_id, config)
 
         elif action == "delete":
             process_id = params.get("process_id")
@@ -507,6 +480,12 @@ def manage_process_action(
                 "hint": "Valid actions are: list, get, create, update, delete"
             }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError"
+        }
     except Exception as e:
         return {
             "_success": False,

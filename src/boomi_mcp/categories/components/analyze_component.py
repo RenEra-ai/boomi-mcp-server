@@ -433,6 +433,60 @@ def merge_versions(
 # Helpers
 # ============================================================================
 
+def _change_value_to_plain(val):
+    """Convert a ChangeValue SDK object (or plain string) to plain data."""
+    if val is None:
+        return ''
+    if isinstance(val, str):
+        return val
+    # ChangeValue has xpath and/or value attributes (SDK sentinel pattern
+    # means either may be absent on the instance when not provided)
+    has_value = hasattr(val, 'value')
+    has_xpath = hasattr(val, 'xpath')
+    if has_value or has_xpath:
+        result = {'value': getattr(val, 'value', '')}
+        xpath = getattr(val, 'xpath', None)
+        if xpath:
+            result['xpath'] = xpath
+        return result
+    return str(val)
+
+
+def _element_key_to_dict(ek):
+    """Convert an element_key SDK object to a plain dict."""
+    if ek is None or not hasattr(ek, 'element_name'):
+        return None
+    result = {'element_name': getattr(ek, 'element_name', '')}
+    # Use key_parts (plural) to capture all entries, not just the first
+    parts = getattr(ek, 'key_parts', None) or []
+    if parts:
+        serialized = [
+            {
+                'attribute': getattr(kp, 'attribute', ''),
+                'value': getattr(kp, 'value', ''),
+            }
+            for kp in parts
+            if hasattr(kp, 'attribute')
+        ]
+    else:
+        # Fallback to singular key_part
+        kp = getattr(ek, 'key_part', None)
+        if kp and hasattr(kp, 'attribute'):
+            serialized = [{
+                'attribute': getattr(kp, 'attribute', ''),
+                'value': getattr(kp, 'value', ''),
+            }]
+        else:
+            serialized = []
+    if serialized:
+        # Always emit key_part (first entry) for backward compat
+        result['key_part'] = serialized[0]
+        # Also emit key_parts (full list) when composite
+        if len(serialized) > 1:
+            result['key_parts'] = serialized
+    return result
+
+
 def _parse_diff_response(result) -> Dict[str, Any]:
     """Parse ComponentDiffResponseCreate into a plain dict."""
     diff_data = {
@@ -463,11 +517,15 @@ def _parse_diff_response(result) -> Dict[str, Any]:
         diff_data['summary']['additions'] = getattr(addition, 'total', 0)
         changes = getattr(addition, 'change', []) or []
         for c in changes:
-            diff_data['additions'].append({
+            entry = {
                 'type': getattr(c, 'type_', ''),
                 'changed_particle_name': getattr(c, 'changed_particle_name', ''),
-                'new_value': getattr(c, 'new_value', ''),
-            })
+                'new_value': _change_value_to_plain(getattr(c, 'new_value', '')),
+            }
+            ek = _element_key_to_dict(getattr(c, 'element_key', None))
+            if ek:
+                entry['element_key'] = ek
+            diff_data['additions'].append(entry)
 
     # Deletions
     deletion = getattr(generic_diff, 'deletion', None)
@@ -475,11 +533,15 @@ def _parse_diff_response(result) -> Dict[str, Any]:
         diff_data['summary']['deletions'] = getattr(deletion, 'total', 0)
         changes = getattr(deletion, 'change', []) or []
         for c in changes:
-            diff_data['deletions'].append({
+            entry = {
                 'type': getattr(c, 'type_', ''),
                 'changed_particle_name': getattr(c, 'changed_particle_name', ''),
-                'old_value': getattr(c, 'old_value', ''),
-            })
+                'old_value': _change_value_to_plain(getattr(c, 'old_value', '')),
+            }
+            ek = _element_key_to_dict(getattr(c, 'element_key', None))
+            if ek:
+                entry['element_key'] = ek
+            diff_data['deletions'].append(entry)
 
     # Modifications
     modification = getattr(generic_diff, 'modification', None)
@@ -487,12 +549,16 @@ def _parse_diff_response(result) -> Dict[str, Any]:
         diff_data['summary']['modifications'] = getattr(modification, 'total', 0)
         changes = getattr(modification, 'change', []) or []
         for c in changes:
-            diff_data['modifications'].append({
+            entry = {
                 'type': getattr(c, 'type_', ''),
                 'changed_particle_name': getattr(c, 'changed_particle_name', ''),
-                'old_value': getattr(c, 'old_value', ''),
-                'new_value': getattr(c, 'new_value', ''),
-            })
+                'old_value': _change_value_to_plain(getattr(c, 'old_value', '')),
+                'new_value': _change_value_to_plain(getattr(c, 'new_value', '')),
+            }
+            ek = _element_key_to_dict(getattr(c, 'element_key', None))
+            if ek:
+                entry['element_key'] = ek
+            diff_data['modifications'].append(entry)
 
     return diff_data
 

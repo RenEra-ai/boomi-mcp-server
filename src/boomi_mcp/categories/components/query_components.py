@@ -177,10 +177,13 @@ def search_components(
         expressions = []
 
         if filters.get('name'):
+            name_val = filters['name']
+            if '%' not in name_val:
+                name_val = '%' + name_val + '%'
             expressions.append(ComponentMetadataSimpleExpression(
                 operator=ComponentMetadataSimpleExpressionOperator.LIKE,
                 property=ComponentMetadataSimpleExpressionProperty.NAME,
-                argument=[filters['name']]
+                argument=[name_val]
             ))
 
         comp_type = filters.get('type') or filters.get('component_type')
@@ -363,7 +366,7 @@ def query_components_action(
                 return {
                     "_success": False,
                     "error": "config with search filters is required for 'search' action",
-                    "hint": 'Provide config like: {"name": "%Test%", "type": "process"}',
+                    "hint": 'Provide config like: {"name": "Test", "type": "process"}',
                 }
             return search_components(boomi_client, profile, filters)
 

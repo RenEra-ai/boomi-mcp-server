@@ -1,10 +1,11 @@
 """
 Troubleshooting MCP Tools for Boomi Platform.
 
-Provides 6 troubleshooting actions for failed executions:
+Provides 7 troubleshooting actions for failed executions:
 - error_details: Get error details from failed execution records + process logs
 - retry: Retry a failed execution with same or modified properties
 - reprocess: Re-execute a failed process with new execution request
+- cancel: Cancel a running execution
 - list_queues: List all queues for a runtime (async operation)
 - clear_queue: Clear messages from a stuck queue
 - move_queue: Move messages between queues
@@ -169,7 +170,7 @@ def handle_error_details(sdk: Boomi, execution_id: str = None,
         limit = int(config.get("limit", 10))
     except (ValueError, TypeError):
         return {"_success": False, "error": "config.days and config.limit must be numeric values"}
-    fetch_logs = config.get("fetch_logs", False)
+    fetch_logs = _parse_bool(config.get("fetch_logs", False))
     log_level = config.get("log_level", "ALL")
 
     if execution_id:
@@ -185,6 +186,11 @@ def handle_error_details(sdk: Boomi, execution_id: str = None,
             "execution": exec_dict,
             "error_analysis": _analyze_error(exec_dict),
         }
+
+        if not fetch_logs:
+            result["error_analysis"]["troubleshooting_tips"].append(
+                "Use fetch_logs=true in config to download process logs for detailed stack traces"
+            )
 
         # Optionally fetch process logs
         if fetch_logs:
@@ -270,10 +276,6 @@ def _analyze_error(exec_dict: Dict[str, Any]) -> Dict[str, Any]:
 
     if errors > 10:
         analysis["severity"] = "High"
-
-    analysis["troubleshooting_tips"].append(
-        "Use fetch_logs=true in config to download process logs for detailed stack traces"
-    )
 
     return analysis
 
@@ -416,6 +418,30 @@ def handle_reprocess(sdk: Boomi, execution_id: str = None,
     )
 
 
+# ============================================================================
+# Action: cancel
+# ============================================================================
+
+def handle_cancel(sdk: Boomi, execution_id: str = None,
+                  config: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Cancel a running execution."""
+    if not execution_id:
+        return {"_success": False, "error": "execution_id is required for cancel action"}
+
+    try:
+        sdk.cancel_execution.cancel_execution(execution_id=execution_id)
+        return {
+            "_success": True,
+            "execution_id": execution_id,
+            "message": "Cancel request submitted",
+        }
+    except ApiError as e:
+        msg = _extract_api_error_msg(e)
+        return {"_success": False, "error": f"Cancel failed: {msg}"}
+    except Exception as e:
+        return {"_success": False, "error": f"Cancel failed: {e}"}
+
+
 def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
                                dynamic_properties: Dict[str, str] = None,
                                original_execution_id: str = None,
@@ -474,6 +500,10 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
             "error": f"{context.capitalize()} request accepted but no request_id returned. Check Boomi execution history manually.",
         }
 
+    # Resolve the real execution_id from execution records
+    from .execution import _resolve_execution_id
+    exec_id, resolve_err = _resolve_execution_id(sdk, request_id, timeout=15)
+
     response = {
         "_success": True,
         "context": context,
@@ -482,16 +512,27 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
         "atom_id": atom_id,
     }
 
+    if exec_id:
+        response["execution_id"] = exec_id
+    if resolve_err:
+        response["resolve_warning"] = resolve_err
+
     if original_execution_id:
         response["original_execution_id"] = original_execution_id
 
     if dynamic_properties:
         response["dynamic_properties"] = dynamic_properties
 
-    response["next_step"] = (
-        f"Poll status: monitor_platform(action='execution_records', "
-        f"config='{{\"execution_id\": \"{request_id}\"}}')"
-    )
+    if exec_id:
+        response["next_step"] = (
+            f"Poll status: monitor_platform(action='execution_records', "
+            f"config='{{\"execution_id\": \"{exec_id}\"}}')"
+        )
+    else:
+        response["next_step"] = (
+            f"Poll status: monitor_platform(action='execution_records', "
+            f"config='{{\"process_id\": \"{process_id}\", \"start_date\": \"<recent_iso_date>\"}}')"
+        )
 
     return response
 
@@ -502,6 +543,8 @@ def _create_execution_request(sdk: Boomi, process_id: str, atom_id: str,
 
 def handle_list_queues(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, Any]:
     """List all queues for a runtime using async operations."""
+    from boomi_mcp.utils.async_polling import poll_async_result
+
     if config is None:
         config = {}
 
@@ -515,39 +558,28 @@ def handle_list_queues(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, A
         return {"_success": False, "error": "config.timeout must be a numeric value (seconds)"}
 
     try:
-        # Step 1: Initiate async list queues operation
-        token_result = sdk.list_queues.async_get_list_queues(id_=atom_id)
+        response = poll_async_result(
+            initiate_fn=lambda: sdk.list_queues.async_get_list_queues(id_=atom_id),
+            poll_fn=lambda token: sdk.list_queues.async_token_list_queues(token=token),
+            timeout=timeout_seconds,
+            resource_label="queue list",
+        )
 
-        if not hasattr(token_result, "async_token") or not hasattr(token_result.async_token, "token"):
-            return {"_success": False, "error": "Failed to get async operation token"}
+        queues = []
+        if hasattr(response, "result") and response.result:
+            queues = _parse_queue_response(response.result)
 
-        token = token_result.async_token.token
+        return {
+            "_success": True,
+            "atom_id": atom_id,
+            "total_queues": len(queues),
+            "queues": queues,
+        }
 
-        # Step 2: Poll for results
-        start_time = time.time()
-        while time.time() - start_time < timeout_seconds:
-            try:
-                response = sdk.list_queues.async_token_list_queues(token=token)
-
-                if hasattr(response, "result") and response.result:
-                    queues = _parse_queue_response(response.result)
-                    return {
-                        "_success": True,
-                        "atom_id": atom_id,
-                        "total_queues": len(queues),
-                        "queues": queues,
-                    }
-
-                time.sleep(2)
-
-            except Exception as poll_error:
-                if "still processing" in str(poll_error).lower():
-                    time.sleep(2)
-                    continue
-                raise poll_error
-
-        return {"_success": False, "error": f"Timeout after {timeout_seconds}s waiting for queue list"}
-
+    except TimeoutError as e:
+        return {"_success": False, "error": str(e)}
+    except ValueError as e:
+        return {"_success": False, "error": str(e)}
     except ApiError as e:
         msg = _extract_api_error_msg(e)
         return {"_success": False, "error": f"Failed to list queues: {msg}"}
@@ -583,6 +615,15 @@ def _parse_queue_response(queue_results) -> List[Dict[str, Any]]:
     return queues
 
 
+def _parse_bool(val) -> bool:
+    """Parse a boolean value, handling string inputs correctly."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes")
+    return bool(val)
+
+
 # ============================================================================
 # Action: clear_queue
 # ============================================================================
@@ -600,17 +641,20 @@ def handle_clear_queue(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, A
     if not queue_name:
         return {"_success": False, "error": "queue_name is required in config for clear_queue action"}
 
-    clear_dlq = config.get("dlq", False)
+    clear_dlq = _parse_bool(config.get("dlq", False))
     subscriber_name = config.get("subscriber_name")
 
     try:
         from boomi.models import ClearQueueRequest
 
-        clear_request = ClearQueueRequest(
-            atom_id=atom_id,
-            queue_name=queue_name,
-            dlq=clear_dlq,
-        )
+        try:
+            clear_request = ClearQueueRequest(
+                atom_id=str(atom_id),
+                queue_name=str(queue_name),
+                dlq=clear_dlq,
+            )
+        except TypeError as e:
+            return {"_success": False, "error": f"Failed to build ClearQueueRequest: {e}. atom_id={atom_id!r}, queue_name={queue_name!r}"}
 
         if subscriber_name:
             clear_request.subscriber_name = subscriber_name
@@ -656,33 +700,36 @@ def handle_move_queue(sdk: Boomi, config: Dict[str, Any] = None) -> Dict[str, An
     if not dest_queue:
         return {"_success": False, "error": "dest_queue is required in config for move_queue action"}
 
-    source_dlq = config.get("source_dlq", False)
-    dest_dlq = config.get("dest_dlq", False)
+    source_dlq = _parse_bool(config.get("source_dlq", False))
+    dest_dlq = _parse_bool(config.get("dest_dlq", False))
     source_subscriber = config.get("source_subscriber")
     dest_subscriber = config.get("dest_subscriber")
 
     try:
         from boomi.models import MoveQueueRequest, QueueAttributes
 
-        source_attrs = QueueAttributes(
-            dlq=source_dlq,
-            queue_name=source_queue,
-        )
-        if source_subscriber:
-            source_attrs.subscriber_name = source_subscriber
+        try:
+            source_attrs = QueueAttributes(
+                dlq=source_dlq,
+                queue_name=str(source_queue),
+            )
+            if source_subscriber:
+                source_attrs.subscriber_name = source_subscriber
 
-        dest_attrs = QueueAttributes(
-            dlq=dest_dlq,
-            queue_name=dest_queue,
-        )
-        if dest_subscriber:
-            dest_attrs.subscriber_name = dest_subscriber
+            dest_attrs = QueueAttributes(
+                dlq=dest_dlq,
+                queue_name=str(dest_queue),
+            )
+            if dest_subscriber:
+                dest_attrs.subscriber_name = dest_subscriber
 
-        move_request = MoveQueueRequest(
-            atom_id=atom_id,
-            source_queue=source_attrs,
-            destination_queue=dest_attrs,
-        )
+            move_request = MoveQueueRequest(
+                atom_id=str(atom_id),
+                source_queue=source_attrs,
+                destination_queue=dest_attrs,
+            )
+        except TypeError as e:
+            return {"_success": False, "error": f"Failed to build MoveQueueRequest: {e}. atom_id={atom_id!r}, source_queue={source_queue!r}, dest_queue={dest_queue!r}"}
 
         sdk.move_queue_request.create_move_queue_request(request_body=move_request)
 
@@ -721,7 +768,7 @@ def troubleshoot_execution_action(
 
     Args:
         sdk: Authenticated Boomi SDK client
-        action: One of: error_details, retry, reprocess, list_queues, clear_queue
+        action: One of: error_details, retry, reprocess, cancel, list_queues, clear_queue
         execution_id: Execution ID (for error_details, retry, reprocess)
         process_id: Process ID (for error_details, reprocess)
         environment_id: Environment ID (for reprocess)
@@ -743,6 +790,8 @@ def troubleshoot_execution_action(
             return handle_reprocess(sdk, execution_id=execution_id,
                                     process_id=process_id,
                                     environment_id=environment_id, config=config)
+        elif action == "cancel":
+            return handle_cancel(sdk, execution_id=execution_id, config=config)
         elif action == "list_queues":
             return handle_list_queues(sdk, config=config)
         elif action == "clear_queue":
@@ -753,9 +802,15 @@ def troubleshoot_execution_action(
             return {
                 "_success": False,
                 "error": f"Unknown action: {action}",
-                "valid_actions": ["error_details", "retry", "reprocess", "list_queues", "clear_queue", "move_queue"],
+                "valid_actions": ["error_details", "retry", "reprocess", "cancel", "list_queues", "clear_queue", "move_queue"],
             }
 
+    except ApiError as e:
+        return {
+            "_success": False,
+            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "exception_type": "ApiError",
+        }
     except Exception as e:
         return {
             "_success": False,

@@ -1469,6 +1469,10 @@ def build_x12_partner_info(**kwargs):
     isa_qualifier = kwargs.get('isa_qualifier')
     gs_id = kwargs.get('gs_id')
 
+    # Default qualifier to ZZ when isa_id is provided without explicit qualifier
+    if isa_id and not isa_qualifier:
+        isa_qualifier = 'ZZ'
+
     if not any([isa_id, isa_qualifier, gs_id]):
         return None
 
@@ -1484,6 +1488,16 @@ def build_x12_partner_info(**kwargs):
             isa_kwargs['interchange_id'] = isa_id
         if isa_qualifier:
             isa_kwargs['interchange_id_qualifier'] = isa_qualifier
+        # Mandatory ISA defaults - API rejects body without these
+        # Use `or` to treat None/falsy the same as absent (use default)
+        isa_auth_qual = kwargs.get('isa_auth_qualifier') or 'X12AUTHQUAL_00'
+        if not isa_auth_qual.startswith('X12AUTHQUAL_'):
+            isa_auth_qual = f'X12AUTHQUAL_{isa_auth_qual}'
+        isa_sec_qual = kwargs.get('isa_sec_qualifier') or 'X12SECQUAL_00'
+        if not isa_sec_qual.startswith('X12SECQUAL_'):
+            isa_sec_qual = f'X12SECQUAL_{isa_sec_qual}'
+        isa_kwargs.setdefault('authorization_information_qualifier', isa_auth_qual)
+        isa_kwargs.setdefault('security_information_qualifier', isa_sec_qual)
         isa_control_info = IsaControlInfo(**isa_kwargs)
 
     # Build GS control info if we have GS fields

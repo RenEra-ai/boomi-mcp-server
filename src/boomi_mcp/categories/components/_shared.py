@@ -69,9 +69,25 @@ def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
         .serialize()
         .set_method("GET")
     )
-    response, status, content = svc.send_request(serialized_request)
+    try:
+        response, status, content = svc.send_request(serialized_request)
+    except Exception as exc:
+        raise Exception(f"GET failed: {_extract_api_error_msg(exc)}") from exc
     if status >= 400:
-        raise Exception(f"GET failed: HTTP {status} — {response}")
+        # Extract a clean message from the error response body.
+        # send_request() returns response.body which is a parsed dict for
+        # JSON responses, raw str/bytes for XML/text.
+        body_msg = ""
+        if isinstance(response, dict):
+            body_msg = response.get("message", "")
+        elif isinstance(response, (str, bytes)):
+            raw = response if isinstance(response, str) else response.decode("utf-8", errors="replace")
+            try:
+                import json as _json
+                body_msg = _json.loads(raw).get("message", "")
+            except Exception:
+                body_msg = raw.split("\n")[0][:200] if raw else ""
+        raise Exception(f"GET failed (HTTP {status}): {body_msg}" if body_msg else f"GET failed: HTTP {status}")
 
     raw_xml = response if isinstance(response, str) else response.decode('utf-8')
     root = ET.fromstring(raw_xml)
@@ -206,8 +222,8 @@ def metadata_to_dict(comp) -> Dict[str, Any]:
         'folder_name': getattr(comp, 'folder_name', ''),
         'type': getattr(comp, 'type_', ''),
         'version': getattr(comp, 'version', ''),
-        'current_version': str(getattr(comp, 'current_version', 'false')),
-        'deleted': str(getattr(comp, 'deleted', 'false')),
+        'current_version': str(getattr(comp, 'current_version', 'false')).lower() == 'true',
+        'deleted': str(getattr(comp, 'deleted', 'false')).lower() == 'true',
         'created_date': getattr(comp, 'created_date', ''),
         'modified_date': getattr(comp, 'modified_date', ''),
         'created_by': getattr(comp, 'created_by', ''),
