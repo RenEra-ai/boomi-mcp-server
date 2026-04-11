@@ -69,8 +69,10 @@ After access token expiry (~1 hour), check that refresh works:
 
 ```bash
 # Look for /token requests - should be 200, not 401
+# Compute the timestamp first (works on both Linux and macOS)
+SINCE=$(python3 -c "from datetime import datetime,timedelta,timezone; print((datetime.now(timezone.utc)-timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
 gcloud logging read \
-  'resource.type="cloud_run_revision" AND resource.labels.service_name="boomi-mcp-server" AND httpRequest.requestUrl=~"/token" AND timestamp>="$(date -u -v-2H +%Y-%m-%dT%H:%M:%SZ)"' \
+  "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"boomi-mcp-server\" AND httpRequest.requestUrl=~\"/token\" AND timestamp>=\"${SINCE}\"" \
   --project boomimcp --limit 20 \
   --format="table(timestamp,httpRequest.status,httpRequest.requestMethod)"
 ```

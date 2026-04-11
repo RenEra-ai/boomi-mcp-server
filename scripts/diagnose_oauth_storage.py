@@ -85,8 +85,10 @@ async def main():
     client = AsyncIOMotorClient(MONGODB_URI)
     db = client[DB_NAME]
 
+    import hashlib
+    key_fingerprint = hashlib.sha256(STORAGE_ENCRYPTION_KEY.encode()).hexdigest()[:12]
     print(f"Connected to MongoDB: {DB_NAME}")
-    print(f"Encryption key: {STORAGE_ENCRYPTION_KEY[:8]}...{STORAGE_ENCRYPTION_KEY[-4:]}")
+    print(f"Encryption key loaded (sha256:{key_fingerprint})")
     print()
 
     # List all collections in the database
