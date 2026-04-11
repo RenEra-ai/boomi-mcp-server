@@ -104,3 +104,9 @@ tasks/
 
 # Lock files (local only)
 .~lock.*
+
+# Vendored FastMCP (replaced by upstream v3.1.1 via pip)
+fastmcp/
+
+# Incident investigation bundles
+incident-*/

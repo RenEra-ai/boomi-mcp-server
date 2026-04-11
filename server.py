@@ -411,6 +411,13 @@ if not LOCAL_MODE:
         print(f"       - OIDC_BASE_URL")
         sys.exit(1)
 
+    # Temporary diagnostic logging for post-migration OAuth cutover.
+    # Enable with BOOMI_OAUTH_DIAGNOSTICS=true; remove after refresh path is stable.
+    if os.getenv("BOOMI_OAUTH_DIAGNOSTICS", "").lower() in ("true", "1", "yes"):
+        from diagnostic_logging import apply_all_patches
+        apply_all_patches(auth_provider=auth, encrypted_storage=encrypted_storage)
+        print("[INFO] OAuth diagnostic logging ENABLED")
+
     # Create FastMCP server with auth
     mcp = FastMCP(
         name="Boomi MCP Server",
