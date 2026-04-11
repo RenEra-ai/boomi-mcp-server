@@ -104,7 +104,7 @@ def test_wrapper_forwards_resource_id():
         patch.object(server, "Boomi", return_value=MagicMock()),
         patch.object(server, "manage_account_groups_action", mock_action),
     ):
-        server.manage_account_groups.fn(
+        server.manage_account_groups(
             profile="dev", action="list_accounts", resource_id=GROUP_ID
         )
     _, kwargs = mock_action.call_args
@@ -125,7 +125,7 @@ def test_e2e_list_accounts_resource_id_reaches_query(mock_query):
         patch.object(server, "get_secret", return_value=FAKE_CREDS),
         patch.object(server, "Boomi", return_value=MagicMock()),
     ):
-        result = server.manage_account_groups.fn(
+        result = server.manage_account_groups(
             profile="dev", action="list_accounts", resource_id=GROUP_ID
         )
     assert result["_success"] is True
@@ -142,7 +142,7 @@ def test_e2e_list_user_roles_resource_id_reaches_query(mock_query):
         patch.object(server, "get_secret", return_value=FAKE_CREDS),
         patch.object(server, "Boomi", return_value=MagicMock()),
     ):
-        result = server.manage_account_groups.fn(
+        result = server.manage_account_groups(
             profile="dev", action="list_user_roles", resource_id=GROUP_ID
         )
     assert result["_success"] is True
@@ -158,7 +158,7 @@ def test_e2e_list_integration_packs_resource_id_reaches_query(mock_query):
         patch.object(server, "get_secret", return_value=FAKE_CREDS),
         patch.object(server, "Boomi", return_value=MagicMock()),
     ):
-        result = server.manage_account_groups.fn(
+        result = server.manage_account_groups(
             profile="dev", action="list_integration_packs", resource_id=GROUP_ID
         )
     assert result["_success"] is True

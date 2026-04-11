@@ -96,7 +96,7 @@ def test_wrapper_forwards_resource_id():
         patch.object(server, "Boomi", return_value=MagicMock()),
         patch.object(server, "manage_environments_action", mock_action),
     ):
-        server.manage_environments.fn(
+        server.manage_environments(
             profile="dev", action="list_environment_roles", resource_id=ENV_ID
         )
     _, kwargs = mock_action.call_args

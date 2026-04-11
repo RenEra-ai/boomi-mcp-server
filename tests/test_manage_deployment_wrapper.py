@@ -41,7 +41,7 @@ def _mock_auth_and_sdk():
 
 def _call_wrapper(**kwargs):
     """Call the underlying manage_deployment function (unwrapped from @mcp.tool)."""
-    return server.manage_deployment.fn(**kwargs)
+    return server.manage_deployment(**kwargs)
 
 
 def test_resource_id_forwarded():

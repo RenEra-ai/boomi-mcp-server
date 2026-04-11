@@ -342,6 +342,10 @@ if not LOCAL_MODE:
     from key_value.aio.stores.mongodb import MongoDBStore
     from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
     from cryptography.fernet import Fernet
+    from verified_storage import VerifiedStorage
+    from consent_csp_patch import apply_consent_csp_patch
+
+    apply_consent_csp_patch()
 
     # Create Google OAuth provider
     try:
@@ -372,37 +376,25 @@ if not LOCAL_MODE:
             coll_name="oauth_tokens"
         )
 
-        encrypted_storage = FernetEncryptionWrapper(
-            key_value=mongodb_storage,
-            fernet=Fernet(storage_encryption_key.encode())
+        encrypted_storage = VerifiedStorage(
+            FernetEncryptionWrapper(
+                key_value=mongodb_storage,
+                fernet=Fernet(storage_encryption_key.encode())
+            )
         )
 
         print(f"[INFO] OAuth tokens will be stored in MongoDB Atlas")
-        print(f"[INFO] Token storage encrypted with Fernet")
+        print(f"[INFO] Token storage encrypted with Fernet (write-verified)")
 
         # Create GoogleProvider with encrypted MongoDB storage
+        # Upstream v3.1.1 defaults to access_type=offline + prompt=consent
         auth = GoogleProvider(
             client_id=client_id,
             client_secret=client_secret,
             base_url=base_url,
-            jwt_signing_key=jwt_signing_key,  # Explicit JWT signing key (production requirement)
-            client_storage=encrypted_storage,  # Encrypted MongoDB storage
-            extra_authorize_params={
-                "access_type": "offline",  # Request refresh tokens from Google
-                "prompt": "consent",       # Force consent to ensure refresh token is issued
-            },
+            jwt_signing_key=jwt_signing_key,
+            client_storage=encrypted_storage,
         )
-
-        # FIX: Patch register_client to clear client_secret when token_endpoint_auth_method="none"
-        # This fixes a bug where MCP clients send a secret during registration but don't send it
-        # during token exchange when using auth_method="none". The MCP SDK's ClientAuthenticator
-        # incorrectly requires the secret if it's stored, regardless of auth_method.
-        original_register_client = auth.register_client
-        async def patched_register_client(client_info):
-            if hasattr(client_info, 'client_secret') and client_info.client_secret:
-                client_info = client_info.model_copy(update={"client_secret": None})
-            return await original_register_client(client_info)
-        auth.register_client = patched_register_client
 
         print(f"[INFO] Google OAuth 2.0 configured")
         print(f"[INFO] Base URL: {base_url}")
@@ -425,18 +417,7 @@ if not LOCAL_MODE:
         auth=auth
     )
 
-    # Add SessionMiddleware for web UI OAuth flow
-    session_secret = os.getenv("SESSION_SECRET")
-    if not session_secret:
-        print("[ERROR] SESSION_SECRET environment variable must be set for web UI")
-        sys.exit(1)
-
-    if hasattr(mcp, '_app'):
-        mcp._app.add_middleware(SessionMiddleware, secret_key=session_secret, max_age=3600)
-        print(f"[INFO] SessionMiddleware configured for web UI")
-    elif hasattr(mcp, 'app'):
-        mcp.app.add_middleware(SessionMiddleware, secret_key=session_secret, max_age=3600)
-        print(f"[INFO] SessionMiddleware configured for web UI")
+    # SessionMiddleware is configured in server_http.py via mcp.http_app()
 
     # --- Helper: get authenticated user info ---
     def get_user_subject() -> str:
@@ -3241,7 +3222,6 @@ if LOCAL_MODE:
 if not LOCAL_MODE:
     from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
     from starlette.requests import Request
-    from starlette.middleware.sessions import SessionMiddleware
     import urllib.parse
     import httpx
 
@@ -3618,28 +3598,6 @@ if __name__ == "__main__":
 
         mcp.run(transport="stdio")
     else:
-        # Print startup info
-        print("\n" + "=" * 60)
-        print("Boomi MCP Server")
-        print("=" * 60)
-
-        provider_type = os.getenv("OIDC_PROVIDER", "google")
-        base_url = os.getenv("OIDC_BASE_URL", "http://localhost:8000")
-        backend_type = os.getenv("SECRETS_BACKEND", "gcp")
-        print(f"Auth Mode:     OAuth 2.0 ({provider_type})")
-        print(f"Base URL:      {base_url}")
-        print(f"Login URL:     {base_url}/auth/login")
-        print(f"Secrets:       {backend_type.upper()}")
-        if backend_type == "gcp":
-            print(f"GCP Project:   {os.getenv('GCP_PROJECT_ID', 'boomimcp')}")
-        print("=" * 60)
-
-        host = os.getenv("MCP_HOST", "127.0.0.1")
-        port = int(os.getenv("MCP_PORT", "8000"))
-
-        print(f"Starting server on http://{host}:{port}")
-        print(f"MCP endpoint: /mcp")
-        print(f"OAuth endpoints: /authorize, /auth/callback, /token")
-        print("\nPress Ctrl+C to stop\n")
-
-        mcp.run(transport="http", host=host, port=port)
+        print("[ERROR] Direct HTTP startup via server.py is no longer supported.")
+        print("[ERROR] Use: python server_http.py")
+        sys.exit(1)

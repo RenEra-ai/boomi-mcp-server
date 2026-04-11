@@ -6,7 +6,7 @@ A production-ready Model Context Protocol (MCP) server that enables Claude Code 
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![FastMCP](https://img.shields.io/badge/FastMCP-2.13.0-green.svg)
+![FastMCP](https://img.shields.io/badge/FastMCP-3.1.1-green.svg)
 
 **🌐 Live Service**: [https://boomi.renera.ai](https://boomi.renera.ai)
 
@@ -151,20 +151,30 @@ git push origin main
 
 ### Environment Variables (Cloud Run)
 
-Configured in Cloud Run service using GCP Secret Manager:
+#### OAuth Proxy Persistence
+
+Required for MCP OAuth flow to survive Cloud Run instance sleep/restart.
+OAuth state is stored in MongoDB Atlas with Fernet encryption:
 
 ```bash
-OIDC_CLIENT_ID          # From secret: oidc-client-id
-OIDC_CLIENT_SECRET      # From secret: oidc-client-secret
+OIDC_CLIENT_ID          # Google OAuth client ID
+OIDC_CLIENT_SECRET      # Google OAuth client secret
 OIDC_BASE_URL           # https://boomi.renera.ai
-SESSION_SECRET          # From secret: session-secret
+SESSION_SECRET          # Session signing key for web UI
+MONGODB_URI             # MongoDB Atlas connection string for OAuth state
+JWT_SIGNING_KEY         # Stable key for signing MCP JWT tokens
+STORAGE_ENCRYPTION_KEY  # Fernet key for encrypting OAuth tokens at rest
+```
+
+#### User Credentials Storage
+
+User Boomi API credentials are stored separately in GCP Secret Manager:
+
+```bash
 SECRETS_BACKEND         # gcp
 GCP_PROJECT_ID          # boomimcp
 ```
 
-### User Credentials Storage
-
-User Boomi credentials are stored in GCP Secret Manager:
 - Format: `boomi-mcp-{user-id}-{profile-name}`
 - Example: `boomi-mcp-glebuar-at-gmail-com-production`
 - Encryption: At rest and in transit

@@ -35,7 +35,7 @@ def _mock_auth():
 
 
 def _call(**kwargs):
-    return server.set_boomi_credentials.fn(**kwargs)
+    return server.set_boomi_credentials(**kwargs)
 
 
 # ---------------------------------------------------------------------------

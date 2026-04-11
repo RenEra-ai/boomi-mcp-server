@@ -174,7 +174,7 @@ def test_wrapper_forwards_config_atom_id_to_action():
         patch.object(server, "Boomi", return_value=MagicMock()),
         patch.object(server, "execute_process_action", mock_action),
     ):
-        result = server.execute_process.fn(
+        result = server.execute_process(
             profile="dev",
             process_id="proc-1",
             environment_id=None,
@@ -199,7 +199,7 @@ def test_wrapper_forwards_config_environment_id_to_action():
         patch.object(server, "Boomi", return_value=MagicMock()),
         patch.object(server, "execute_process_action", mock_action),
     ):
-        result = server.execute_process.fn(
+        result = server.execute_process(
             profile="dev",
             process_id="proc-1",
             environment_id=None,

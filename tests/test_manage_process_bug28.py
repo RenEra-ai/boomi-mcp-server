@@ -149,7 +149,7 @@ def _mock_auth():
 
 
 def _call_wrapper(**kwargs):
-    return server.manage_process.fn(**kwargs)
+    return server.manage_process(**kwargs)
 
 
 def test_wrapper_list_returns_process_id(_mock_auth):
