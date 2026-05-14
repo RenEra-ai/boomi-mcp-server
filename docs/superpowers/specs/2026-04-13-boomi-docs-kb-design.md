@@ -54,7 +54,7 @@ required in v1.
                      │  Docker build downloads the     │
                      │  pinned release and untars to   │
                      │  /app/kb/boomi_knowledge_db/    │
-                     │  ML deps installed in image     │
+                     │  ML deps installed only for KB  │
                      │                                 │
                      │  Runtime (BOOMI_DOCS_ENABLED):  │
                      │   - load manifest + validate    │
@@ -89,23 +89,29 @@ required in v1.
 
 ### 3.1 `chunk_docs.py`
 
-Add two metadata fields to each emitted chunk dict (currently at
+Add page identity metadata to each emitted chunk dict (currently at
 `chunk_docs.py:287-297`):
 
-- `chunk_index` — 0-based integer counter within the source file (same
-  value as the numeric tail of the current `id` slug, but stored as a
-  first-class integer, not parsed from the ID string).
-- `page_title` — copy of `title` (already per-page); exposed explicitly
-  so the consumer never has to disambiguate it from `section_heading`.
+- `page_key` — non-empty stable page identity. Use normalized
+  `source_url` when present; otherwise fall back to a deterministic key
+  derived from the source filename. Consumer lookup and diversification
+  must never depend on `source_url` being present.
+- `chunk_index` — 0-based integer counter within each `page_key`, not
+  within the recursive HTML file. This is the ordering and pagination
+  key for `read_boomi_doc_page`.
 
-Keep `source_url` as the page identity. Keep `id` in the current
+Keep `source_url` as citation metadata only. Keep `id` in the current
 `{slug}_{nnn}` format — it is the Chroma primary key.
 
 ### 3.2 `build_index.py`
 
-1. Add `chunk_index` and `page_title` to the `metadatas` dicts written
-   into Chroma at `build_index.py:50-57`.
-2. After the index build, write a `manifest.json` beside the Chroma
+1. Add `page_key`, page-local `chunk_index`, and citation `source_url`
+   to the `metadatas` dicts written into Chroma at
+   `build_index.py:50-57`.
+2. Validate duplicate chunk IDs before indexing and fail the build with
+   a clear message if any duplicate `id` exists. This makes
+   `manifest.chunk_count` failures producer-side and actionable.
+3. After the index build, write a `manifest.json` beside the Chroma
    directory. Schema v1:
 
    ```json
@@ -116,7 +122,7 @@ Keep `source_url` as the page identity. Keep `id` in the current
      "embedding_dim": 384,
      "build_timestamp": "<ISO-8601 UTC>",
      "chunk_count": <int>,
-     "page_count": <int, distinct source_url count>,
+     "page_count": <int, distinct page_key count>,
      "category_counts": { "<category>": <int>, ... },
      "source_roots": ["<root URL>", ...],
      "artifact_tag": "<GitHub release tag, e.g. kb-42>",
@@ -125,7 +131,7 @@ Keep `source_url` as the page identity. Keep `id` in the current
    }
    ```
 
-3. Strengthen `--verify` so that a named set of smoke queries must each
+4. Strengthen `--verify` so that a named set of smoke queries must each
    return at least one hit with cosine distance below a threshold
    (e.g., `< 0.45`). Non-zero exit on failure. This is the release
    gate.
@@ -263,7 +269,7 @@ def search_boomi_docs(query: str, top_k: int = 5) -> dict:
 > Boomi documentation changes over time. Chunks are returned in full,
 > so the top result is usually enough to answer directly. If a hit
 > looks relevant but you need surrounding page context, follow up by
-> calling `read_boomi_doc_page` with that hit's `source_url`. If results
+> calling `read_boomi_doc_page` with that hit's `page_key`. If results
 > look off-topic, retry with reformulated query terms. If the response
 > status is `low_confidence` or `no_match`, do not invent unsupported
 > Boomi facts; tell the user the KB does not provide enough support.
@@ -293,6 +299,7 @@ def search_boomi_docs(query: str, top_k: int = 5) -> dict:
       "title": "<page title>",
       "section_heading": "<heading>",
       "breadcrumb": "<path>",
+      "page_key": "<stable non-empty page identity>",
       "source_url": "<https://help.boomi.com/...>",
       "category": "<category>",
       "chunk_index": <int>,
@@ -330,10 +337,10 @@ list while other relevant pages exist. Algorithm:
 
 1. Over-fetch candidates from Chroma: `n_results = top_k * 3` (capped
    at a sane ceiling, e.g., `30`).
-2. Group candidates by `source_url`, each group sorted ascending by
+2. Group candidates by `page_key`, each group sorted ascending by
    `distance`.
 3. Round-robin across groups, taking one best-remaining chunk per
-   `source_url` per pass, until `top_k` hits are collected or all
+   `page_key` per pass, until `top_k` hits are collected or all
    candidates are exhausted.
 4. Preserve overall distance order in the final output.
 
@@ -342,7 +349,7 @@ of the first 5 hits comes from a different page. If fewer distinct
 pages exist, the remaining slots fall back to next-best same-page
 chunks so the tool still returns `top_k` hits when the corpus has
 enough material. Claude can always follow up with
-`read_boomi_doc_page(source_url)` to get the full page for any hit.
+`read_boomi_doc_page(page_key)` to get the full page for any hit.
 
 **Text fallback**: JSON-pretty-printed version of the same object for
 clients that don't render `structuredContent`.
@@ -358,7 +365,7 @@ within Claude context and remote connector limits. No truncation in v1.
 ```python
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
 def read_boomi_doc_page(
-    source_url: str,
+    page_key: str,
     max_chunks: int = 15,
     start_chunk_index: int = 0,
 ) -> dict:
@@ -367,7 +374,7 @@ def read_boomi_doc_page(
 
 **Description**
 
-> Return chunks of the Boomi documentation page for a given source URL
+> Return chunks of the Boomi documentation page for a given page key
 > in `chunk_index` order. Use this after `search_boomi_docs` when a
 > search hit looks relevant but you need the surrounding page context
 > — prerequisites, step sequences, or sections adjacent to the matched
@@ -378,7 +385,7 @@ def read_boomi_doc_page(
 
 **Input validation**
 
-- `source_url`: required, non-empty after trim.
+- `page_key`: required, non-empty after trim.
 - `max_chunks`: clamp to `[1, 30]`. Default `15` covers virtually
   every page in the Boomi corpus (typical 3–10 chunks per page).
 - `start_chunk_index`: clamp to `>= 0`. If it exceeds the page's
@@ -387,7 +394,7 @@ def read_boomi_doc_page(
 
 **Behavior**
 
-1. Call `collection.get(where={"source_url": source_url},
+1. Call `collection.get(where={"page_key": page_key},
    include=["documents", "metadatas"])` — a metadata-filtered read,
    not a vector query, so no embedding is computed.
 2. Sort returned items by `metadatas[i]["chunk_index"]` ascending.
@@ -401,6 +408,7 @@ def read_boomi_doc_page(
 
 ```json
 {
+  "page_key": "<stable non-empty page identity>",
   "source_url": "<...>",
   "title": "<page title>",
   "breadcrumb": "<path>",
@@ -426,8 +434,8 @@ def read_boomi_doc_page(
 
 **Errors**
 
-- Unknown `source_url` (zero chunks): structured error `{"error":
-  "no_chunks_for_source_url", "source_url": "..."}`. No raise.
+- Unknown `page_key` (zero chunks): structured error `{"error":
+  "no_chunks_for_page_key", "page_key": "..."}`. No raise.
 - Non-contiguous `chunk_index` (gap detected in the underlying
   corpus): log warning, return the slice as-is. Do not fail the call.
   `chunk_count` reflects actual returned-group size.
@@ -461,7 +469,7 @@ coverage map before relying on it.
 - Builder commit: abc1234
 
 Use `search_boomi_docs` for factual Boomi questions and
-`read_boomi_doc_page(source_url)` for full-page context. Treat search
+`read_boomi_doc_page(page_key)` for full-page context. Treat search
 results as authoritative only for the corpus version and build date
 shown above.
 ```
@@ -487,15 +495,22 @@ templates.
 
 ### 7.1 Image build
 
-- Add to `requirements.txt` (or a new `requirements-kb.txt` installed
-  unconditionally in v1): `chromadb`, `sentence-transformers`.
+- Add `requirements-kb.txt` with `chromadb` and
+  `sentence-transformers`. Do not add these dependencies to the default
+  `requirements.txt`.
 - Add a Docker build arg `KB_RELEASE_TAG`, **optional and empty by
-  default**. The corpus download and model pre-warm steps both run
-  only when the arg is a non-empty string. This keeps non-KB builds
-  (the current default) identical in shape to today's build.
+  default**. The KB dependency install, corpus download, and model
+  pre-warm steps all run only when the arg is a non-empty string. This
+  keeps non-KB builds (the current default) materially identical to
+  today's image.
 
   ```dockerfile
   ARG KB_RELEASE_TAG=""
+
+  # KB dependencies: installed only for KB-enabled images.
+  RUN if [ -n "$KB_RELEASE_TAG" ]; then \
+        pip install --no-cache-dir -r requirements-kb.txt; \
+      fi
 
   # Corpus: downloaded and extracted only when a release tag is provided.
   # When unset, the image ships with no /app/kb contents and runtime must
@@ -518,16 +533,19 @@ templates.
 
 - **Build contract**:
   - Non-KB build (current default): invoke `docker build` with no
-    extra args. `KB_RELEASE_TAG=""`, both conditional RUN steps are
-    no-ops, image is unchanged in shape (though ~1–1.5 GB larger from
-    always-installed ML deps — see §7.3). Runtime must keep
-    `BOOMI_DOCS_ENABLED=false`; if set to true without a corpus,
-    startup fails with a clear message (§4.3 step 1).
+    extra args. `KB_RELEASE_TAG=""`, KB conditional steps are
+    no-ops, and ML dependencies are not installed. Runtime must keep
+    `BOOMI_DOCS_ENABLED=false`; if set to true without KB dependencies
+    or a corpus, startup fails with a clear message (§4.3 step 1).
   - KB-enabled build: `docker build --build-arg KB_RELEASE_TAG=kb-42 …`.
-    Both RUN steps fire, corpus lands at `/app/kb/boomi_knowledge_db`,
-    model cache is warmed. Default `BOOMI_DOCS_ENABLED` stays `false`
-    at the image layer; the k8s ConfigMap (§7.2) flips it per
+    KB dependencies install, corpus lands at `/app/kb/boomi_knowledge_db`,
+    and the model cache is warmed. Default `BOOMI_DOCS_ENABLED` stays
+    `false` at the image layer; the k8s ConfigMap (§7.2) flips it per
     environment.
+  - GitHub release download is unauthenticated in v1 because the
+    producer repository is currently publicly reachable. If releases
+    become private, switch to a BuildKit secret such as `GITHUB_TOKEN`
+    rather than baking credentials into image layers.
 
 ### 7.2 Kubernetes manifest
 
@@ -556,9 +574,9 @@ Default configmap key to `"false"` until operators opt in.
 
 ### 7.3 Image size
 
-ML deps add ~1–1.5 GB. Chroma artifact adds 50–200 MB (unknown until
-first full build). Acceptable for v1. Future optimization: split into
-two image variants only if pull time becomes a real problem.
+KB-enabled images add ~1–1.5 GB from ML deps. Chroma artifact adds
+50–200 MB (unknown until first full build). Non-KB images do not install
+ML deps. Acceptable for v1.
 
 ## 8. Test plan
 
@@ -582,8 +600,8 @@ real tiny fixture corpus. No FastMCP involved.
   structured error, emits `ok` / `low_confidence` / `no_match` status,
   includes corpus freshness fields, and verifies **per-page
   diversification behavior** (§5.1).
-- `test_service_page.py`: correct order by `chunk_index`, unknown
-  `source_url`, `max_chunks` / `start_chunk_index` behavior, the
+- `test_service_page.py`: correct order by page-local `chunk_index`,
+  unknown `page_key`, `max_chunks` / `start_chunk_index` behavior, the
   `truncated` / `next_chunk_index` fields, non-contiguous indices
   logged but not raised.
 - `test_service_startup.py`: manifest validation matrix (valid,
@@ -601,8 +619,8 @@ to assert the public shape, input coercion, and error surface.
     structured output shape, including status and corpus provenance.
   - Annotations on the tool object include
     `readOnlyHint=True, openWorldHint=False`.
-  - `server.read_boomi_doc_page(source_url="...")` returns documented
-    shape; `server.read_boomi_doc_page(source_url="...", max_chunks=2)`
+  - `server.read_boomi_doc_page(page_key="...")` returns documented
+    shape; `server.read_boomi_doc_page(page_key="...", max_chunks=2)`
     honors the cap and sets `truncated=true`.
   - Empty-query / unknown-URL paths return structured errors, not
     exceptions.
@@ -623,7 +641,7 @@ to assert the public shape, input coercion, and error surface.
 ### 8.2 Fixture corpus
 
 Build a tiny corpus once per session (10 chunks, 3 distinct
-`source_url`s, 2 categories, a deliberate 30-chunk "big page" for the
+`page_key`s, 2 categories, a deliberate 30-chunk "big page" for the
 `max_chunks` truncation test). Use the real `build_index.py` flow so
 the fixture is shaped exactly like production artifacts, and write a
 matching `manifest.json`. Check the input JSONL into
@@ -663,17 +681,20 @@ Not blockers for the spec; listed so we don't lose them.
 - Tunable diversification factor (v1 hardcodes the over-fetch
   multiplier).
 - Category filter — only if reformulation proves insufficient.
-- Two image variants (with / without ML deps) if image size hurts.
+- Further KB-enabled image slimming if pull time becomes a real problem.
 - Subscriptions / live updates — only if corpus cadence changes.
 
 ## 11. Acceptance criteria
 
-- Producer writes a spec-compliant `manifest.json` with `artifact_tag`,
-  bundles it into the existing release tarball, and fails the release on
-  verification regression.
+- Producer writes chunks with non-empty `page_key` and page-local
+  `chunk_index`, validates duplicate chunk IDs, writes a
+  spec-compliant `manifest.json` with `artifact_tag`, bundles it into
+  the existing release tarball, and fails the release on verification
+  regression.
 - Non-KB Docker builds (the current default, `KB_RELEASE_TAG` unset)
-  succeed without touching GitHub releases or the sentence-transformers
-  cache, and run identically to today with `BOOMI_DOCS_ENABLED=false`.
+  succeed without touching GitHub releases, installing ML dependencies,
+  or warming the sentence-transformers cache, and run identically to
+  today with `BOOMI_DOCS_ENABLED=false`.
 - KB-enabled Docker builds (`--build-arg KB_RELEASE_TAG=kb-<n>`)
   produce an image with the corpus at `/app/kb/boomi_knowledge_db` and
   the model cache warmed.
@@ -682,13 +703,13 @@ Not blockers for the spec; listed so we don't lose them.
   and a valid corpus is mounted; fails fast with a clear message in
   any other combination.
 - `search_boomi_docs` returns bounded ranked hits with full chunk
-  content, stable metadata, corpus freshness fields, confidence status,
-  and page-diversified ordering when ≥ `top_k` distinct pages are
-  available.
-- `read_boomi_doc_page` returns chunks in `chunk_index` order, honors
-  `max_chunks` and `start_chunk_index`, and emits `truncated` /
-  `next_chunk_index` correctly for large pages, with the same corpus
-  freshness fields as search.
+  content, `page_key`, citation `source_url`, corpus freshness fields,
+  confidence status, and page-diversified ordering when ≥ `top_k`
+  distinct pages are available.
+- `read_boomi_doc_page(page_key, ...)` returns chunks in page-local
+  `chunk_index` order, honors `max_chunks` and `start_chunk_index`, and
+  emits `truncated` / `next_chunk_index` correctly for large pages, with
+  the same corpus freshness fields as search.
 - `resources/list` returns exactly one entry (`kb://boomi-docs/corpus`),
   and that resource reads as a coverage map.
 - KB-enabled server instructions and high-impact tool descriptions steer
