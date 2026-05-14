@@ -119,6 +119,7 @@ Keep `source_url` as the page identity. Keep `id` in the current
      "page_count": <int, distinct source_url count>,
      "category_counts": { "<category>": <int>, ... },
      "source_roots": ["<root URL>", ...],
+     "artifact_tag": "<GitHub release tag, e.g. kb-42>",
      "builder_commit": "<git sha, short>",
      "builder_version": "<semver or placeholder>"
    }
@@ -148,6 +149,10 @@ Changes:
 - Add to release notes: build timestamp, chunk count, page count,
   embedding model, top 5 categories by chunk count, count of failed
   source URLs.
+- Pass the release tag into `build_index.py` or write it into the
+  manifest during the workflow so `manifest.artifact_tag` identifies the
+  exact published corpus artifact. If absent, consumers fall back to
+  `manifest.builder_commit` as the corpus version.
 - Keep scheduled weekly builds as preview/health-check only (no release).
 
 ## 4. Consumer changes (`boomi-mcp-server`)
@@ -161,6 +166,7 @@ Changes:
 | `BOOMI_DOCS_COLLECTION` | `boomi_docs` | Must match `manifest.collection_name` or startup fails. |
 | `BOOMI_DOCS_TOP_K_DEFAULT` | `5` | Default `top_k` for `search_boomi_docs`. |
 | `BOOMI_DOCS_TOP_K_MAX` | `10` | Upper bound enforced on incoming `top_k`. |
+| `BOOMI_DOCS_LOW_CONFIDENCE_DISTANCE` | `0.45` | Best-hit distance above which search returns `status="low_confidence"`. |
 
 No `BOOMI_DOCS_PREVIEW_CHARS` — chunks are returned whole (see §5.1).
 
@@ -207,6 +213,33 @@ The KB service is constructed once during startup and stored on the
 FastMCP server instance. Tools close over it. No per-request client or
 model loading.
 
+Define `corpus_version` as `manifest.artifact_tag` when present,
+otherwise `manifest.builder_commit`. Include `corpus_version`,
+`corpus_built_at` (`manifest.build_timestamp`), and `embedding_model`
+in all KB tool responses so Claude can reason about provenance and
+freshness without first reading the corpus resource.
+
+### 4.5 Routing guidance
+
+When `BOOMI_DOCS_ENABLED=true`, both FastMCP constructors in `server.py`
+(authenticated and local dev) pass an `instructions` string with a short
+policy:
+
+> This server includes authoritative Boomi documentation retrieval. For
+> factual questions about Boomi platform behavior, connectors,
+> configuration, EDI/API behavior, deployment/runtime behavior,
+> scripting, or error messages, consult `search_boomi_docs` before
+> answering from model memory. Prefer retrieved KB evidence over
+> parametric knowledge because Boomi documentation changes. If search
+> returns `low_confidence` or `no_match`, say the KB does not provide
+> enough support rather than inventing details.
+
+Also add a short cross-reference to high-impact existing tool
+descriptions, especially write/configuration tools: for Boomi product
+behavior or configuration semantics, use `search_boomi_docs` before
+making factual claims. This keeps the KB discoverable during agentic
+workflows, not only direct documentation questions.
+
 ## 5. Public API
 
 ### 5.1 Tool: `search_boomi_docs`
@@ -222,16 +255,19 @@ def search_boomi_docs(query: str, top_k: int = 5) -> dict:
 **Description (tool-level, Claude-facing)**
 
 > Search the Boomi documentation knowledge base by semantic similarity
-> and return the top-ranked chunks with inline content. Use this as
-> the primary entrypoint when the user asks a question about Boomi —
-> how a feature works, how to configure a connector, what a term
-> means, what an error code implies, or when you need authoritative
-> product reference material before suggesting a change or generating
-> a plan. Chunks are returned in full, so the top result is usually
-> enough to answer directly. If a hit looks relevant but you need the
-> surrounding context on that page, follow up by calling
-> `read_boomi_doc_page` with that hit's `source_url`. If results look
-> off-topic, retry with reformulated query terms. Read-only.
+> and return the top-ranked chunks with inline content. Use this as the
+> primary entrypoint for factual Boomi questions: platform behavior,
+> connector/configuration details, EDI/API behavior,
+> deployment/runtime behavior, scripting, terminology, and error
+> messages. Prefer retrieved KB evidence over model memory because
+> Boomi documentation changes over time. Chunks are returned in full,
+> so the top result is usually enough to answer directly. If a hit
+> looks relevant but you need surrounding page context, follow up by
+> calling `read_boomi_doc_page` with that hit's `source_url`. If results
+> look off-topic, retry with reformulated query terms. If the response
+> status is `low_confidence` or `no_match`, do not invent unsupported
+> Boomi facts; tell the user the KB does not provide enough support.
+> Read-only.
 
 **Input validation**
 
@@ -245,6 +281,12 @@ def search_boomi_docs(query: str, top_k: int = 5) -> dict:
 {
   "query": "<echo of trimmed query>",
   "top_k": <effective int>,
+  "status": "ok | low_confidence | no_match",
+  "best_distance": <float | null>,
+  "low_confidence_distance": <float>,
+  "corpus_built_at": "<ISO-8601 UTC>",
+  "corpus_version": "<artifact tag or builder commit>",
+  "embedding_model": "<model name>",
   "hits": [
     {
       "chunk_id": "<slug_nnn>",
@@ -261,6 +303,20 @@ def search_boomi_docs(query: str, top_k: int = 5) -> dict:
   ]
 }
 ```
+
+**Confidence semantics**
+
+- `status="ok"`: at least one hit exists and the best distance is less
+  than or equal to `BOOMI_DOCS_LOW_CONFIDENCE_DISTANCE`.
+- `status="low_confidence"`: hits exist, but the best distance is above
+  `BOOMI_DOCS_LOW_CONFIDENCE_DISTANCE`.
+- `status="no_match"`: no hits were returned by Chroma.
+
+When `status` is `low_confidence` or `no_match`, the text fallback and
+structured result both include a short warning that the KB does not
+provide strong support for the query. Claude should reformulate the
+query once if useful, otherwise answer with that limitation instead of
+filling gaps from memory.
 
 **Ranking and diversification**
 
@@ -349,6 +405,9 @@ def read_boomi_doc_page(
   "title": "<page title>",
   "breadcrumb": "<path>",
   "category": "<category>",
+  "corpus_built_at": "<ISO-8601 UTC>",
+  "corpus_version": "<artifact tag or builder commit>",
+  "embedding_model": "<model name>",
   "chunk_count": <int, total chunks on this page>,
   "start_chunk_index": <int, echo of input>,
   "chunks_returned": <int, length of chunks array>,
@@ -382,8 +441,8 @@ calls with `start_chunk_index`.
 ### 5.3 Resource: `kb://boomi-docs/corpus`
 
 Static, not on the retrieval path. Exists so MCP clients listing
-resources see a single stable entry and operators can eyeball build
-state.
+resources see a single stable entry and operators can inspect the KB's
+coverage map before relying on it.
 
 **Body** (text/markdown):
 
@@ -393,15 +452,23 @@ state.
 - Collection: boomi_docs
 - Embedding model: all-MiniLM-L6-v2 (384 dim)
 - Build: 2026-04-13T06:12:44Z
-- Chunks: 4,821 across 1,203 pages
-- Categories: Integration (3,400), API Management (720), ...
+- Corpus version: kb-42
+- Sources: https://help.boomi.com/, https://developer.boomi.com/
+- Coverage: 4,821 chunks across 1,203 pages
+- Categories: Integration (3,400), API Management (720), EDI (501), ...
+- Known exclusions: community posts, support tickets, tenant-specific
+  configuration, and docs published after the build timestamp.
 - Builder commit: abc1234
 
-Search via the `search_boomi_docs` tool; fetch a full page with
-`read_boomi_doc_page(source_url)`.
+Use `search_boomi_docs` for factual Boomi questions and
+`read_boomi_doc_page(source_url)` for full-page context. Treat search
+results as authoritative only for the corpus version and build date
+shown above.
 ```
 
 Rendered from `manifest.json` at registration time. No dynamic fields.
+The resource is a coverage map, not a retrieval path; tools remain the
+model-controlled lookup interface.
 
 `resources/list` returns exactly one entry (this one). No chunk
 templates.
@@ -512,7 +579,9 @@ real tiny fixture corpus. No FastMCP involved.
 
 - `test_service_search.py`: correct fields, respects `top_k`, clamps
   to max, handles zero-hit queries, rejects empty query with
-  structured error, **per-page diversification behavior** (§5.1).
+  structured error, emits `ok` / `low_confidence` / `no_match` status,
+  includes corpus freshness fields, and verifies **per-page
+  diversification behavior** (§5.1).
 - `test_service_page.py`: correct order by `chunk_index`, unknown
   `source_url`, `max_chunks` / `start_chunk_index` behavior, the
   `truncated` / `next_chunk_index` fields, non-contiguous indices
@@ -529,7 +598,7 @@ to assert the public shape, input coercion, and error surface.
 
 - `test_tools_surface.py`:
   - `server.search_boomi_docs(query="x")` returns the documented
-    structured output shape.
+    structured output shape, including status and corpus provenance.
   - Annotations on the tool object include
     `readOnlyHint=True, openWorldHint=False`.
   - `server.read_boomi_doc_page(source_url="...")` returns documented
@@ -540,7 +609,7 @@ to assert the public shape, input coercion, and error surface.
 - `test_resource.py`:
   - `resources/list` returns exactly one entry.
   - `resources/read kb://boomi-docs/corpus` returns the documented
-    metadata body.
+    coverage map body.
   - No chunk template registered.
 
 **Startup integration**
@@ -548,7 +617,8 @@ to assert the public shape, input coercion, and error surface.
 - `test_startup.py`: valid corpus boots; corrupt manifest fails with
   the expected message; `BOOMI_DOCS_ENABLED=false` boots clean and
   `chromadb` / `sentence_transformers` are not imported (assert via
-  `sys.modules`).
+  `sys.modules`); KB-enabled startup registers server instructions with
+  the documented routing policy.
 
 ### 8.2 Fixture corpus
 
@@ -598,9 +668,9 @@ Not blockers for the spec; listed so we don't lose them.
 
 ## 11. Acceptance criteria
 
-- Producer writes a spec-compliant `manifest.json`, bundles it into
-  the existing release tarball, and fails the release on verification
-  regression.
+- Producer writes a spec-compliant `manifest.json` with `artifact_tag`,
+  bundles it into the existing release tarball, and fails the release on
+  verification regression.
 - Non-KB Docker builds (the current default, `KB_RELEASE_TAG` unset)
   succeed without touching GitHub releases or the sentence-transformers
   cache, and run identically to today with `BOOMI_DOCS_ENABLED=false`.
@@ -612,12 +682,17 @@ Not blockers for the spec; listed so we don't lose them.
   and a valid corpus is mounted; fails fast with a clear message in
   any other combination.
 - `search_boomi_docs` returns bounded ranked hits with full chunk
-  content, stable metadata, and page-diversified ordering when ≥
-  `top_k` distinct pages are available.
+  content, stable metadata, corpus freshness fields, confidence status,
+  and page-diversified ordering when ≥ `top_k` distinct pages are
+  available.
 - `read_boomi_doc_page` returns chunks in `chunk_index` order, honors
   `max_chunks` and `start_chunk_index`, and emits `truncated` /
-  `next_chunk_index` correctly for large pages.
-- `resources/list` returns exactly one entry (`kb://boomi-docs/corpus`).
+  `next_chunk_index` correctly for large pages, with the same corpus
+  freshness fields as search.
+- `resources/list` returns exactly one entry (`kb://boomi-docs/corpus`),
+  and that resource reads as a coverage map.
+- KB-enabled server instructions and high-impact tool descriptions steer
+  Claude to `search_boomi_docs` for factual Boomi claims.
 - All new retrieval interfaces are read-only, size-bounded, and
   explicitly annotated for remote-connector use.
 - Kubernetes memory request/limit raised to 1 Gi / 2 Gi.
