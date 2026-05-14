@@ -29,3 +29,8 @@ data:
 
   # Server Configuration
   log_level: "info"
+
+  # Boomi Docs Knowledge Base
+  # "true" only on deployments built with a KB corpus (docker build
+  # --build-arg KB_RELEASE_TAG=kb-<n>); otherwise startup fails fast.
+  boomi_docs_enabled: "false"
