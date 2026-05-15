@@ -163,8 +163,9 @@ not set the KB runtime env vars. Point it at the source-controlled config
 once:
 
 ```bash
-gcloud beta builds triggers update 8623a6fa-3295-430a-b018-7c728ba941e8 \
+gcloud builds triggers update github 8623a6fa-3295-430a-b018-7c728ba941e8 \
   --project=boomimcp \
+  --region=global \
   --build-config=cloudbuild.yaml
 ```
 
@@ -181,8 +182,13 @@ If you need to deploy manually (skips the GitHub trigger):
 gcloud auth login
 gcloud config set project boomimcp
 
-# Submit the same pipeline that the trigger runs
-gcloud builds submit --config cloudbuild.yaml
+# Submit the same pipeline that the trigger runs.
+# REPO_NAME and COMMIT_SHA are populated by Cloud Build only for
+# trigger-driven runs, so pass them explicitly via --substitutions
+# when submitting from the CLI.
+gcloud builds submit \
+  --config=cloudbuild.yaml \
+  --substitutions="REPO_NAME=boomi-mcp-server,COMMIT_SHA=$(git rev-parse HEAD)"
 
 # Or use the trigger by pushing
 git push origin main
