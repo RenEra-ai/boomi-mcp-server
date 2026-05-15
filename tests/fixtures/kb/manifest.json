@@ -1,0 +1,19 @@
+{
+  "schema_version": "1",
+  "collection_name": "boomi_docs",
+  "embedding_model": "all-MiniLM-L6-v2",
+  "embedding_dim": 384,
+  "build_timestamp": "2026-05-01T00:00:00+00:00",
+  "chunk_count": 40,
+  "page_count": 3,
+  "category_counts": {
+    "Integration": 35,
+    "EDI": 5
+  },
+  "source_roots": [
+    "https://help.boomi.com"
+  ],
+  "artifact_tag": "kb-test",
+  "builder_commit": "fixture0",
+  "builder_version": "0.1.0"
+}

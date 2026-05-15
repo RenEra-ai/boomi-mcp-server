@@ -88,9 +88,9 @@ STANDARDS_STATUS.md
 TRADING_PARTNER_VERIFICATION.md
 *_VERIFICATION.md
 
-# Test files (local only, except tests/ dir)
+# Test files (local only, except anywhere under tests/)
 test_*.py
-!tests/test_*.py
+!tests/**/test_*.py
 analyze_*.py
 
 # Plans (local only)
@@ -104,3 +104,9 @@ tasks/
 
 # Lock files (local only)
 .~lock.*
+
+# Vendored FastMCP (replaced by upstream v3.1.1 via pip)
+fastmcp/
+
+# Incident investigation bundles
+incident-*/

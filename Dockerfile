@@ -4,6 +4,10 @@
 # Stage 1: Builder
 FROM python:3.11-slim AS builder
 
+# Optional KB feature: empty by default. When unset, the KB steps below are
+# no-ops and the image is materially identical to a non-KB build.
+ARG KB_RELEASE_TAG=""
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -13,12 +17,18 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy dependency files
-COPY requirements.txt requirements-cloud.txt ./
+COPY requirements.txt requirements-cloud.txt requirements-kb.txt ./
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r requirements-cloud.txt
+
+# KB dependencies (chromadb, sentence-transformers): installed only for
+# KB-enabled images so the default build stays light.
+RUN if [ -n "$KB_RELEASE_TAG" ]; then \
+        pip install --no-cache-dir -r requirements-kb.txt; \
+    fi
 
 # Stage 2: Runtime
 FROM python:3.11-slim
@@ -44,8 +54,25 @@ COPY --chown=appuser:appuser . .
 # Create data directory for SQLite database
 RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 
+# Boomi Docs knowledge base mount point (populated only for KB-enabled builds)
+ARG KB_RELEASE_TAG=""
+RUN mkdir -p /app/kb && chown -R appuser:appuser /app/kb
+
 # Switch to non-root user
 USER appuser
+
+# KB corpus + model cache: fetched only when a release tag is provided at build
+# time. With KB_RELEASE_TAG empty these are no-ops and the image is unchanged;
+# runtime must then keep BOOMI_DOCS_ENABLED=false or startup fails fast.
+RUN if [ -n "$KB_RELEASE_TAG" ]; then \
+        curl -fsSL -o /tmp/kb.tgz \
+          "https://github.com/RenEra-ai/knowledge-base-builder/releases/download/${KB_RELEASE_TAG}/boomi_knowledge_db.tar.gz" && \
+        tar -xzf /tmp/kb.tgz -C /app/kb && \
+        rm /tmp/kb.tgz; \
+    fi
+RUN if [ -n "$KB_RELEASE_TAG" ]; then \
+        python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"; \
+    fi
 
 # Environment variables (can be overridden at runtime)
 ENV PYTHONUNBUFFERED=1 \

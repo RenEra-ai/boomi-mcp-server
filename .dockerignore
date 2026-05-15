@@ -48,3 +48,12 @@ docker-compose.yml
 
 # Kubernetes
 k8s/
+
+# Vendored FastMCP (no longer used, upstream v3.1.1 installed via pip)
+fastmcp/
+
+# Incident bundles
+incident-*/
+
+# Diagnostic scripts (not needed in production)
+scripts/diagnose_*

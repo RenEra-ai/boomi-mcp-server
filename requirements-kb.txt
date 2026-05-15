@@ -1,0 +1,12 @@
+# Optional Boomi-docs knowledge base dependencies.
+#
+# Installed ONLY for KB-enabled images (docker build --build-arg KB_RELEASE_TAG=...)
+# and in the test environment that exercises tests/kb/. Deliberately NOT in
+# requirements.txt / requirements-cloud.txt so the default deployment stays light.
+#
+# These must stay compatible with the chromadb version that knowledge-base-builder
+# used to BUILD the corpus — a major-version mismatch can break the persisted
+# index format. The Phase-9 QA loop builds a corpus with the producer and reads
+# it with the consumer in one environment, which is the real compatibility check.
+chromadb>=0.5.0,<2.0.0
+sentence-transformers>=3.0.0,<6.0.0
