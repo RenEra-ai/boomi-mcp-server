@@ -119,14 +119,26 @@ spec:
               name: boomi-mcp-config
               key: cors_origins
 
+        # Boomi Docs Knowledge Base (optional retrieval layer)
+        - name: BOOMI_DOCS_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: boomi-mcp-config
+              key: boomi_docs_enabled
+              optional: true
+        - name: BOOMI_DOCS_DB_PATH
+          value: "/app/kb/boomi_knowledge_db"
+
         # Resource limits
+        # Sized for the KB retrieval stack (sentence-transformers + Chroma).
+        # KB-disabled deployments can run leaner, but these limits are safe for both.
         resources:
           requests:
-            cpu: 100m
-            memory: 256Mi
+            cpu: 250m
+            memory: 1Gi
           limits:
-            cpu: 500m
-            memory: 512Mi
+            cpu: 1000m
+            memory: 2Gi
 
         # Probes
         livenessProbe:

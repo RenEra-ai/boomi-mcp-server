@@ -1,0 +1,111 @@
+# Cloud Build pipeline for boomi-mcp-server.
+#
+# Mirrors the original auto-generated Cloud Run deploy trigger
+# (8623a6fa-3295-430a-b018-7c728ba941e8) but adds:
+#   1. A pinned knowledge-base release loaded from deploy/kb-release.env so
+#      the KB corpus version embedded in the image is reviewable in source.
+#   2. A preflight HEAD request against the pinned GitHub release asset so
+#      builds fail fast if the tag does not exist instead of silently
+#      producing a non-KB image.
+#   3. Cloud Run env vars to enable the KB at runtime
+#      (BOOMI_DOCS_ENABLED, BOOMI_DOCS_DB_PATH, BOOMI_DOCS_RELEASE_TAG).
+#
+# Substitutions match the existing trigger so the migration is value-stable.
+
+substitutions:
+  _AR_HOSTNAME: us-central1-docker.pkg.dev
+  _AR_PROJECT_ID: boomimcp
+  _AR_REPOSITORY: cloud-run-source-deploy
+  _DEPLOY_REGION: us-central1
+  _PLATFORM: managed
+  _SERVICE_NAME: boomi-mcp-server
+  _TRIGGER_ID: 8623a6fa-3295-430a-b018-7c728ba941e8
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: ALLOW_LOOSE
+
+tags:
+  - gcp-cloud-build-deploy-cloud-run
+  - gcp-cloud-build-deploy-cloud-run-managed
+  - boomi-mcp-server
+
+steps:
+  - id: LoadKBPin
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ ! -f deploy/kb-release.env ]; then
+          echo "ERROR: deploy/kb-release.env is missing." >&2
+          exit 1
+        fi
+        set -a
+        . deploy/kb-release.env
+        set +a
+        if [ -z "${KB_RELEASE_TAG:-}" ]; then
+          echo "ERROR: KB_RELEASE_TAG is empty in deploy/kb-release.env." >&2
+          exit 1
+        fi
+        printf '%s' "$KB_RELEASE_TAG" > /workspace/kb_release_tag
+        echo "Pinned KB release: $KB_RELEASE_TAG"
+
+  - id: PreflightKBAsset
+    name: gcr.io/cloud-builders/curl
+    entrypoint: bash
+    waitFor: [LoadKBPin]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        TAG="$(cat /workspace/kb_release_tag)"
+        URL="https://github.com/RenEra-ai/knowledge-base-builder/releases/download/${TAG}/boomi_knowledge_db.tar.gz"
+        echo "Preflight HEAD $URL"
+        curl -fIL --retry 3 --retry-delay 2 "$URL" >/dev/null
+
+  - id: Build
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    waitFor: [PreflightKBAsset]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        TAG="$(cat /workspace/kb_release_tag)"
+        IMAGE="$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA"
+        docker build \
+          --no-cache \
+          --build-arg "KB_RELEASE_TAG=$TAG" \
+          -t "$IMAGE" \
+          -f Dockerfile \
+          .
+
+  - id: Push
+    name: gcr.io/cloud-builders/docker
+    waitFor: [Build]
+    args:
+      - push
+      - $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA
+
+  - id: Deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    waitFor: [Push]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        TAG="$(cat /workspace/kb_release_tag)"
+        IMAGE="$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA"
+        gcloud run services update "$_SERVICE_NAME" \
+          --platform=managed \
+          --image="$IMAGE" \
+          --labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=$_TRIGGER_ID \
+          --region=$_DEPLOY_REGION \
+          --update-env-vars="BOOMI_DOCS_ENABLED=true,BOOMI_DOCS_DB_PATH=/app/kb/boomi_knowledge_db,BOOMI_DOCS_RELEASE_TAG=$TAG" \
+          --quiet
+
+images:
+  - $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA
