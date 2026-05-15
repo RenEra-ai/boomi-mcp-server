@@ -10,7 +10,10 @@
 #   3. Cloud Run env vars to enable the KB at runtime
 #      (BOOMI_DOCS_ENABLED, BOOMI_DOCS_DB_PATH, BOOMI_DOCS_RELEASE_TAG).
 #
-# Substitutions match the existing trigger so the migration is value-stable.
+# NOTE: bash-only variables (e.g. $$TAG, $${KB_RELEASE_TAG:-}) are escaped
+# with $$ so Cloud Build leaves them alone during its pre-execution
+# substitution pass. Single-$ references like $_AR_HOSTNAME, $COMMIT_SHA,
+# $REPO_NAME, $BUILD_ID are resolved by Cloud Build before bash runs.
 
 substitutions:
   _AR_HOSTNAME: us-central1-docker.pkg.dev
@@ -45,12 +48,12 @@ steps:
         set -a
         . deploy/kb-release.env
         set +a
-        if [ -z "${KB_RELEASE_TAG:-}" ]; then
+        if [ -z "$${KB_RELEASE_TAG:-}" ]; then
           echo "ERROR: KB_RELEASE_TAG is empty in deploy/kb-release.env." >&2
           exit 1
         fi
-        printf '%s' "$KB_RELEASE_TAG" > /workspace/kb_release_tag
-        echo "Pinned KB release: $KB_RELEASE_TAG"
+        printf '%s' "$$KB_RELEASE_TAG" > /workspace/kb_release_tag
+        echo "Pinned KB release: $$KB_RELEASE_TAG"
 
   - id: PreflightKBAsset
     name: gcr.io/cloud-builders/curl
@@ -60,10 +63,10 @@ steps:
       - -c
       - |
         set -euo pipefail
-        TAG="$(cat /workspace/kb_release_tag)"
-        URL="https://github.com/RenEra-ai/knowledge-base-builder/releases/download/${TAG}/boomi_knowledge_db.tar.gz"
-        echo "Preflight HEAD $URL"
-        curl -fIL --retry 3 --retry-delay 2 "$URL" >/dev/null
+        TAG="$$(cat /workspace/kb_release_tag)"
+        URL="https://github.com/RenEra-ai/knowledge-base-builder/releases/download/$${TAG}/boomi_knowledge_db.tar.gz"
+        echo "Preflight HEAD $$URL"
+        curl -fIL --retry 3 --retry-delay 2 "$$URL" >/dev/null
 
   - id: Build
     name: gcr.io/cloud-builders/docker
@@ -73,12 +76,12 @@ steps:
       - -c
       - |
         set -euo pipefail
-        TAG="$(cat /workspace/kb_release_tag)"
+        TAG="$$(cat /workspace/kb_release_tag)"
         IMAGE="$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA"
         docker build \
           --no-cache \
-          --build-arg "KB_RELEASE_TAG=$TAG" \
-          -t "$IMAGE" \
+          --build-arg "KB_RELEASE_TAG=$$TAG" \
+          -t "$$IMAGE" \
           -f Dockerfile \
           .
 
@@ -97,14 +100,18 @@ steps:
       - -c
       - |
         set -euo pipefail
-        TAG="$(cat /workspace/kb_release_tag)"
+        TAG="$$(cat /workspace/kb_release_tag)"
         IMAGE="$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA"
+        # Memory bumped from the legacy 512Mi to 2Gi because the KB image
+        # loads torch, sentence-transformers, and chromadb at startup; the
+        # legacy non-KB image's 512Mi caused an OOM at first deploy.
         gcloud run services update "$_SERVICE_NAME" \
           --platform=managed \
-          --image="$IMAGE" \
+          --image="$$IMAGE" \
           --labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=$_TRIGGER_ID \
           --region=$_DEPLOY_REGION \
-          --update-env-vars="BOOMI_DOCS_ENABLED=true,BOOMI_DOCS_DB_PATH=/app/kb/boomi_knowledge_db,BOOMI_DOCS_RELEASE_TAG=$TAG" \
+          --memory=2Gi \
+          --update-env-vars="BOOMI_DOCS_ENABLED=true,BOOMI_DOCS_DB_PATH=/app/kb/boomi_knowledge_db,BOOMI_DOCS_RELEASE_TAG=$$TAG" \
           --quiet
 
 images:
