@@ -160,11 +160,11 @@ version change is a visible repo edit — builds must never use a floating
 ### KB Release Promotion
 
 1. In `RenEra-ai/knowledge-base-builder`, cut a manual `workflow_dispatch`
-   release (for example `kb-5`). The release must publish
+   release (for example `kb-13`). The release must publish
    `boomi_knowledge_db.tar.gz` as an asset.
 2. In this repo, bump the single line in `deploy/kb-release.env`:
    ```
-   KB_RELEASE_TAG=kb-5
+   KB_RELEASE_TAG=kb-13
    ```
 3. Open a PR with that change and merge to `main`.
 4. The Cloud Build trigger reads `cloudbuild.yaml`, runs a `curl -fI`
