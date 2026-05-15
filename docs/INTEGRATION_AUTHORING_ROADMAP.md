@@ -10,6 +10,22 @@ This roadmap implements V3 component creation in depth-first order. The first go
 
 Each milestone should be implemented as one project epic with smaller issues under it. A milestone is not complete until handler tests, MCP-surface tests, and the documented validation path pass.
 
+## Roadmap Dates
+
+Dates assume one main implementer, code review time, and live Boomi QA buffers. Repository milestones are the source of truth for due dates.
+
+| Milestone | Start | Due | Status |
+|---|---:|---:|---|
+| M0 Docs Alignment | 2026-05-18 | 2026-05-18 | Done after docs/date commit is pushed |
+| M1 Archetype Framework Skeleton | 2026-05-18 | 2026-05-29 | First implementation milestone |
+| M2 `database_to_api_sync` Vertical Slice | 2026-06-01 | 2026-06-26 | Depends on M1 |
+| M3 Deploy and Test Orchestration | 2026-06-29 | 2026-07-10 | Depends on M2 apply path |
+| M4 Agent Ergonomics | 2026-07-13 | 2026-07-24 | Depends on M1/M2 tool surface |
+| M5 API Variants | 2026-07-27 | 2026-08-21 | Depends on M2/M4 |
+| M6 Event and Listener Variants | 2026-08-24 | 2026-09-11 | Depends on M3/M5 |
+| M7 Discovery Tools | 2026-09-14 | 2026-10-02 | Depends on core archetypes |
+| M8 Archetype Composition | 2026-10-05 | 2026-10-23 | Depends on at least 3 stable archetypes |
+
 ## M0: Docs Alignment
 
 Goal: make the V3 design the active project direction.
