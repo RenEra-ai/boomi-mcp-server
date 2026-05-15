@@ -102,11 +102,15 @@ steps:
         set -euo pipefail
         TAG="$$(cat /workspace/kb_release_tag)"
         IMAGE="$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA"
+        # Memory bumped from the legacy 512Mi to 2Gi because the KB image
+        # loads torch, sentence-transformers, and chromadb at startup; the
+        # legacy non-KB image's 512Mi caused an OOM at first deploy.
         gcloud run services update "$_SERVICE_NAME" \
           --platform=managed \
           --image="$$IMAGE" \
           --labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=$_TRIGGER_ID \
           --region=$_DEPLOY_REGION \
+          --memory=2Gi \
           --update-env-vars="BOOMI_DOCS_ENABLED=true,BOOMI_DOCS_DB_PATH=/app/kb/boomi_knowledge_db,BOOMI_DOCS_RELEASE_TAG=$$TAG" \
           --quiet
 
