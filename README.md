@@ -126,22 +126,65 @@ Show me my Boomi profiles
 Automatic deployment on push to `main` branch:
 
 ```
-GitHub Push → Cloud Build → Docker Build → Artifact Registry → Cloud Run
+GitHub Push → Cloud Build (cloudbuild.yaml) → Docker Build (KB pin) → Artifact Registry → Cloud Run
 ```
+
+The pipeline is source-controlled in [`cloudbuild.yaml`](cloudbuild.yaml) and
+embeds a pinned Boomi Docs knowledge-base release into the image. The KB tag
+lives in [`deploy/kb-release.env`](deploy/kb-release.env) so every corpus
+version change is a visible repo edit — builds must never use a floating
+`latest` KB release.
+
+### KB Release Promotion
+
+1. In `RenEra-ai/knowledge-base-builder`, cut a manual `workflow_dispatch`
+   release (for example `kb-5`). The release must publish
+   `boomi_knowledge_db.tar.gz` as an asset.
+2. In this repo, bump the single line in `deploy/kb-release.env`:
+   ```
+   KB_RELEASE_TAG=kb-5
+   ```
+3. Open a PR with that change and merge to `main`.
+4. The Cloud Build trigger reads `cloudbuild.yaml`, runs a `curl -fI`
+   preflight against the GitHub release asset, then builds the image with
+   `--build-arg KB_RELEASE_TAG=$KB_RELEASE_TAG`. A missing or empty pin
+   fails the build before any Docker work happens.
+5. Cloud Run is updated with `BOOMI_DOCS_ENABLED=true`,
+   `BOOMI_DOCS_DB_PATH=/app/kb/boomi_knowledge_db`, and
+   `BOOMI_DOCS_RELEASE_TAG=<tag>`, which causes the server to register the
+   `search_boomi_docs` and `read_boomi_doc_page` tools plus the
+   `kb://boomi-docs/corpus` resource at startup.
+
+### Cloud Build Trigger Migration
+
+The existing trigger `8623a6fa-3295-430a-b018-7c728ba941e8` was created from
+an inline auto-generated config that did not pass `KB_RELEASE_TAG` and did
+not set the KB runtime env vars. Point it at the source-controlled config
+once:
+
+```bash
+gcloud beta builds triggers update 8623a6fa-3295-430a-b018-7c728ba941e8 \
+  --project=boomimcp \
+  --build-config=cloudbuild.yaml
+```
+
+After migration, every push to `main` runs the steps in `cloudbuild.yaml`
+and a `git log -- cloudbuild.yaml deploy/kb-release.env` shows exactly which
+KB version is live.
 
 ### Manual Deployment
 
-If you need to deploy manually:
+If you need to deploy manually (skips the GitHub trigger):
 
 ```bash
 # Authenticate with GCP
 gcloud auth login
 gcloud config set project boomimcp
 
-# Build and deploy
-gcloud builds submit --config cloudbuild.yaml.example
+# Submit the same pipeline that the trigger runs
+gcloud builds submit --config cloudbuild.yaml
 
-# Or use the trigger
+# Or use the trigger by pushing
 git push origin main
 ```
 
