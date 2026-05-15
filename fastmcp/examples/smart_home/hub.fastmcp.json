@@ -1,9 +1,0 @@
-{
-  "$schema": "https://gofastmcp.com/public/schemas/fastmcp.json/v1.json",
-  "entrypoint": "src/smart_home/hub.py",
-  "environment": {
-    "dependencies": [
-      "smart_home@git+https://github.com/jlowin/fastmcp.git#subdirectory=examples/smart_home"
-    ]
-  }
-}

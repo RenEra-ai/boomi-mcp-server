@@ -27,6 +27,43 @@ from fastmcp import FastMCP
 # --- Mode Detection ---
 LOCAL_MODE = os.getenv("BOOMI_LOCAL", "").lower() in ("true", "1", "yes")
 
+# --- Boomi Docs KB feature flag ---
+# Master switch for the optional documentation retrieval layer. When false (the
+# default) no KB modules are imported and no KB tools/resource are registered,
+# so existing deployments are unchanged until an operator opts in.
+BOOMI_DOCS_ENABLED = os.getenv("BOOMI_DOCS_ENABLED", "").lower() in ("true", "1", "yes")
+
+# Routing guidance passed to FastMCP as `instructions` when the KB is enabled, so
+# hosts steer Boomi factual questions to search_boomi_docs before answering from
+# model memory (spec §4.5).
+KB_INSTRUCTIONS = (
+    "This server includes authoritative Boomi documentation retrieval. For "
+    "factual questions about Boomi platform behavior, connectors, configuration, "
+    "EDI/API behavior, deployment/runtime behavior, scripting, or error messages, "
+    "consult `search_boomi_docs` before answering from model memory. Prefer "
+    "retrieved KB evidence over parametric knowledge because Boomi documentation "
+    "changes. If search returns `low_confidence` or `no_match`, say the KB does "
+    "not provide enough support rather than inventing details."
+)
+
+
+def _kb_hint(func):
+    """Append the KB cross-reference to a tool's docstring — but only when the
+    KB is enabled.
+
+    Applied below @mcp.tool() on high-impact write/config tools so the hint is
+    captured into the registered tool description. When BOOMI_DOCS_ENABLED is
+    false the docstring is left untouched, so default deployments never point
+    the model at a search_boomi_docs tool that isn't registered (spec §4.5).
+    """
+    if BOOMI_DOCS_ENABLED and func.__doc__:
+        func.__doc__ = func.__doc__.rstrip() + (
+            "\n\n        For Boomi product behavior or configuration semantics, "
+            "use search_boomi_docs before making factual claims.\n"
+        )
+    return func
+
+
 # Additional imports for production mode
 if not LOCAL_MODE:
     import secrets
@@ -411,10 +448,18 @@ if not LOCAL_MODE:
         print(f"       - OIDC_BASE_URL")
         sys.exit(1)
 
+    # Temporary diagnostic logging for post-migration OAuth cutover.
+    # Enable with BOOMI_OAUTH_DIAGNOSTICS=true; remove after refresh path is stable.
+    if os.getenv("BOOMI_OAUTH_DIAGNOSTICS", "").lower() in ("true", "1", "yes"):
+        from diagnostic_logging import apply_all_patches
+        apply_all_patches(auth_provider=auth, encrypted_storage=encrypted_storage)
+        print("[INFO] OAuth diagnostic logging ENABLED")
+
     # Create FastMCP server with auth
     mcp = FastMCP(
         name="Boomi MCP Server",
-        auth=auth
+        auth=auth,
+        instructions=KB_INSTRUCTIONS if BOOMI_DOCS_ENABLED else None,
     )
 
     # SessionMiddleware is configured in server_http.py via mcp.http_app()
@@ -439,7 +484,8 @@ if not LOCAL_MODE:
 else:
     # Local dev mode - no auth
     mcp = FastMCP(
-        name="Boomi MCP Server (Local Dev)"
+        name="Boomi MCP Server (Local Dev)",
+        instructions=KB_INSTRUCTIONS if BOOMI_DOCS_ENABLED else None,
     )
 
 
@@ -636,6 +682,7 @@ def boomi_account_info(profile: str):
 # --- Trading Partner MCP Tools ---
 if manage_trading_partner_action:
     @mcp.tool()
+    @_kb_hint
     def manage_trading_partner(
         profile: str,
         action: str,
@@ -895,6 +942,7 @@ if manage_trading_partner_action:
 # --- Process MCP Tools ---
 if manage_process_action:
     @mcp.tool()
+    @_kb_hint
     def manage_process(
         profile: str,
         action: str,
@@ -1276,6 +1324,7 @@ if query_components_action:
 # --- Component Management MCP Tools ---
 if manage_component_action:
     @mcp.tool()
+    @_kb_hint
     def manage_component(
         profile: str,
         action: str,
@@ -1565,6 +1614,7 @@ if manage_connector_action:
 # --- Integration Builder MCP Tool ---
 if build_integration_action:
     @mcp.tool(annotations={"openWorldHint": True})
+    @_kb_hint
     def build_integration(
         profile: str,
         action: str,
@@ -2220,6 +2270,7 @@ if manage_runtimes_action:
 # --- Deployment Management MCP Tools ---
 if manage_deployment_action:
     @mcp.tool()
+    @_kb_hint
     def manage_deployment(
         profile: str,
         action: str,
@@ -2350,6 +2401,7 @@ if manage_deployment_action:
 # ============================================================
 if execute_process_action:
     @mcp.tool(annotations={"destructiveHint": True, "openWorldHint": True})
+    @_kb_hint
     def execute_process(
         profile: str,
         process_id: str,
@@ -3520,6 +3572,72 @@ if not LOCAL_MODE:
             })
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# --- Boomi Docs KB (optional) ---
+# Registered only when BOOMI_DOCS_ENABLED=true. The import below is what pulls in
+# chromadb/sentence-transformers, so a default server never loads the ML stack.
+if BOOMI_DOCS_ENABLED:
+    from boomi_mcp.kb.service import build_kb_service
+    from boomi_mcp.kb.manifest import render_corpus_resource
+
+    try:
+        _kb_service = build_kb_service()
+    except Exception as e:
+        print(f"[ERROR] Boomi Docs KB startup failed: {e}")
+        sys.exit(1)
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def search_boomi_docs(query: str, top_k: int = None) -> dict:
+        """Search the Boomi documentation knowledge base by semantic similarity
+        and return the top-ranked chunks with inline content. Use this as the
+        primary entrypoint for factual Boomi questions: platform behavior,
+        connector/configuration details, EDI/API behavior, deployment/runtime
+        behavior, scripting, terminology, and error messages. Prefer retrieved KB
+        evidence over model memory because Boomi documentation changes over time.
+        Chunks are returned in full, so the top result is usually enough to
+        answer directly. If a hit looks relevant but you need surrounding page
+        context, follow up by calling read_boomi_doc_page with that hit's
+        page_key. If results look off-topic, retry with reformulated query terms.
+        If the response status is low_confidence or no_match, do not invent
+        unsupported Boomi facts; tell the user the KB does not provide enough
+        support. Read-only.
+        """
+        try:
+            return _kb_service.search(query, top_k)
+        except Exception as e:
+            return {"_success": False, "error": "kb_query_error", "message": str(e)}
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def read_boomi_doc_page(
+        page_key: str,
+        max_chunks: int = 15,
+        start_chunk_index: int = 0,
+    ) -> dict:
+        """Return chunks of the Boomi documentation page for a given page key in
+        chunk_index order. Use this after search_boomi_docs when a search hit
+        looks relevant but you need the surrounding page context — prerequisites,
+        step sequences, or sections adjacent to the matched chunk. Most Boomi doc
+        pages fit in a single call (default 15 chunks); if the response has
+        "truncated": true, call again with start_chunk_index set to the returned
+        next_chunk_index to continue. Read-only.
+        """
+        try:
+            return _kb_service.read_page(page_key, max_chunks, start_chunk_index)
+        except Exception as e:
+            return {"_success": False, "error": "kb_query_error", "message": str(e)}
+
+    @mcp.resource("kb://boomi-docs/corpus", mime_type="text/markdown")
+    def boomi_docs_corpus() -> str:
+        """Boomi documentation corpus coverage map: collection, embedding model,
+        build date, corpus version, source roots, chunk/page counts, category
+        breakdown, and known exclusions. Static — not the retrieval path; use
+        search_boomi_docs and read_boomi_doc_page for lookups.
+        """
+        return render_corpus_resource(_kb_service.manifest)
+
+    print("[INFO] Boomi Docs KB registered: tools search_boomi_docs, "
+          "read_boomi_doc_page; resource kb://boomi-docs/corpus")
 
 
 if __name__ == "__main__":

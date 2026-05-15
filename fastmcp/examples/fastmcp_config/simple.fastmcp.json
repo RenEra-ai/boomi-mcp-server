@@ -1,7 +1,0 @@
-{
-  "$schema": "https://gofastmcp.com/schemas/fastmcp/v1.json",
-  "entrypoint": "server.py",
-  "deployment": {
-    "transport": "stdio"
-  }
-}
