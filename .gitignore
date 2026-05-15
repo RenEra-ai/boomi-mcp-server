@@ -80,13 +80,26 @@ boomi-python/
 server.pid
 setup_claude_code.sh
 
-# Project documentation (local only)
+# Project documentation
 CLAUDE.md
-docs/
 /AGENTS.md
 STANDARDS_STATUS.md
 TRADING_PARTNER_VERIFICATION.md
 *_VERIFICATION.md
+
+# Local docs history remains ignored, but active design docs are tracked.
+docs/*
+!docs/
+!docs/MCP_TOOL_DESIGN.md
+!docs/INTEGRATION_AUTHORING_ROADMAP.md
+!docs/oauth-migration-runbook.md
+!docs/superpowers/
+!docs/superpowers/specs/
+!docs/superpowers/specs/2026-04-13-boomi-docs-kb-design.md
+!docs/archive/
+docs/archive/*
+!docs/archive/MCP_TOOL_DESIGN_V2_2026-03-10.md
+!docs/archive/xml_builders_README_legacy_2026-05-15.md
 
 # Test files (local only, except anywhere under tests/)
 test_*.py
