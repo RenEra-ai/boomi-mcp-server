@@ -308,6 +308,20 @@ except ImportError as e:
     print(f"[WARNING] Failed to import integration builder tool: {e}")
     build_integration_action = None
 
+# --- V3 Integration Authoring Tools (Issue #18) ---
+try:
+    from boomi_mcp.categories.integration_authoring import (
+        list_integration_archetypes_action,
+        get_integration_archetype_action,
+        build_from_archetype_action,
+    )
+    print("[INFO] Integration authoring tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import integration authoring tools: {e}")
+    list_integration_archetypes_action = None
+    get_integration_archetype_action = None
+    build_from_archetype_action = None
+
 
 def _sanitize_error_msg(msg: str) -> str:
     """Strip URLs and file paths from error messages to prevent information leaks."""
@@ -1678,6 +1692,60 @@ if build_integration_action:
             return {"_success": False, "error": str(e)}
 
     print("[INFO] Integration builder tool registered successfully")
+
+
+# --- V3 Integration Authoring MCP Tools (Issue #18) ---
+if list_integration_archetypes_action:
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def list_integration_archetypes(
+        query: str = None,
+        tags: list[str] = None,
+    ):
+        """List V3 integration archetypes from the pattern registry.
+
+        Read-only. Does not call Boomi. Use this to discover archetypes that
+        you can then build with `build_from_archetype`.
+
+        Args:
+            query: Optional case-insensitive substring filter over name,
+                description, tags, use_cases, and not_for.
+            tags: Optional list of tags; archetype must have all listed tags.
+        """
+        return list_integration_archetypes_action(query=query, tags=tags)
+
+    print("[INFO] list_integration_archetypes tool registered successfully")
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def get_integration_archetype(name: str):
+        """Get an archetype's metadata + machine-readable parameter schema.
+
+        Read-only. Does not call Boomi. Returns describe() output plus a
+        `next_tool` pointer to `build_from_archetype`.
+
+        Args:
+            name: Archetype name (see `list_integration_archetypes`).
+        """
+        return get_integration_archetype_action(name=name)
+
+    print("[INFO] get_integration_archetype tool registered successfully")
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def build_from_archetype(name: str, parameters: dict = None):
+        """Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi.
+
+        Read-only. Does not mutate Boomi. The returned `integration_spec`
+        can be passed to `build_integration(action='plan', config=...)` to
+        preview steps before applying.
+
+        Args:
+            name: Archetype name (see `list_integration_archetypes`).
+            parameters: Native dict matching the archetype's parameter_schema
+                (or a JSON-encoded string). None uses archetype defaults.
+        """
+        return build_from_archetype_action(name=name, parameters=parameters)
+
+    print("[INFO] build_from_archetype tool registered successfully")
 
 
 # --- Folder Management MCP Tools ---
