@@ -1989,7 +1989,7 @@ if invoke_api:
 # --- List Capabilities ---
 if list_capabilities_action:
     @mcp.tool(annotations={"readOnlyHint": True})
-    def list_capabilities():
+    async def list_capabilities():
         """List all available MCP tools and their capabilities.
 
         Returns summary of:
@@ -2008,7 +2008,7 @@ if list_capabilities_action:
         - Find the right get_schema_template call before creating resources
         """
         try:
-            registered = set(mcp._tool_manager._tools.keys())
+            registered = {t.name for t in await mcp.list_tools()}
             return list_capabilities_action(available_tools=registered)
         except Exception as e:
             return {"_success": False, "error": str(e)}
