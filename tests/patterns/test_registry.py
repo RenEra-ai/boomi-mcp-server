@@ -492,11 +492,14 @@ def test_from_package_import_failure_raises_discovery_failed(
     assert excinfo.value.context.get("module") == f"{pkg_name}.broken"
 
 
-def test_from_package_canonical_path_returns_empty_for_now():
-    # The shipped boomi_mcp.patterns package has no concrete patterns yet
-    # (those land in #17), but discovery must succeed and return an empty list.
+def test_from_package_canonical_path_succeeds():
+    # Smoke test: discovery must succeed on the real on-disk patterns package
+    # (no validation failures, no import errors). The pattern *count* is
+    # intentionally not asserted because future issues will add concrete
+    # patterns under this package.
     registry = PatternRegistry.from_package("boomi_mcp.patterns")
-    assert registry.list_patterns() == []
+    assert isinstance(registry, PatternRegistry)
+    assert isinstance(registry.list_patterns(), list)
 
 
 # ---------------------------------------------------------------------------
