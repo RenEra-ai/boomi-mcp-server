@@ -234,6 +234,33 @@ def test_call_tool_get_returns_structured_success():
     assert payload["archetype"]["parameter_schema"]["additionalProperties"] is False
 
 
+def test_call_tool_get_returns_enriched_describe_payload():
+    """The MCP-facing call_tool path surfaces the same enrichment as the direct action."""
+    result = _call_tool(
+        "get_integration_archetype",
+        {"name": "stub_minimal_integration"},
+    )
+    payload = _payload(result)
+    arch = payload["archetype"]
+    for key in ("capability_notes", "limitations", "examples", "example_policy"):
+        assert key in arch, f"call_tool archetype payload missing {key!r}"
+
+    assert arch["example_policy"] == "example_only_not_reusable_template"
+    assert arch["capability_notes"]
+    assert arch["limitations"]
+    assert arch["examples"]
+
+    for example in arch["examples"]:
+        assert example["is_template"] is False
+        assert example["template_status"] == "example_only_not_reusable_template"
+
+    props = arch["parameter_schema"]["properties"]
+    for prop_name, prop_schema in props.items():
+        assert prop_schema.get("description"), (
+            f"property {prop_name!r} is missing a description"
+        )
+
+
 def test_call_tool_build_returns_structured_success():
     result = _call_tool(
         "build_from_archetype",

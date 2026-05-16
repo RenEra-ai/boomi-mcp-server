@@ -21,6 +21,7 @@ from src.boomi_mcp.patterns import (
     NoParameters,
     PatternBase,
     PatternError,
+    PatternExample,
     PatternFieldError,
     PatternIOContract,
     PatternKind,
@@ -95,6 +96,7 @@ PUBLIC_NAMES = {
     "NoParameters",
     "PatternBase",
     "PatternError",
+    "PatternExample",
     "PatternFieldError",
     "PatternIOContract",
     "PatternKind",
@@ -186,11 +188,25 @@ def test_parameter_schema_contains_field_names():
 
 def test_describe_includes_metadata_schema_and_primitive_contracts():
     arch_described = ExampleArchetype.describe()
-    assert set(arch_described.keys()) == {"metadata", "parameter_schema"}
+    archetype_expected_keys = {
+        "metadata",
+        "parameter_schema",
+        "capability_notes",
+        "limitations",
+        "examples",
+        "example_policy",
+    }
+    assert set(arch_described.keys()) == archetype_expected_keys
     assert arch_described["metadata"]["name"] == "example_archetype"
     assert arch_described["metadata"]["kind"] == "archetype"
     assert arch_described["metadata"]["tags"] == ["test"]
     assert "properties" in arch_described["parameter_schema"]
+    # Archetypes that don't populate the new lists default to empty + the
+    # constant example_policy marker — never None, never missing.
+    assert arch_described["capability_notes"] == []
+    assert arch_described["limitations"] == []
+    assert arch_described["examples"] == []
+    assert arch_described["example_policy"] == "example_only_not_reusable_template"
 
     prim_described = ExamplePrimitive.describe()
     expected_keys = {
@@ -201,6 +217,9 @@ def test_describe_includes_metadata_schema_and_primitive_contracts():
         "required_builders",
     }
     assert expected_keys <= set(prim_described.keys())
+    # Primitive describe() must not gain the archetype-only keys.
+    for archetype_only_key in ("capability_notes", "limitations", "examples", "example_policy"):
+        assert archetype_only_key not in prim_described
 
     input_contract = prim_described["input_contract"]
     assert input_contract is not None
@@ -313,3 +332,37 @@ def test_to_dict_excludes_none_optional_fields():
     assert "suggestion" not in payload
     assert payload["_success"] is False
     assert payload["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_pattern_example_rejects_template_true_and_custom_status():
+    # Defaults are the only legal values: Literal[False] / Literal[constant].
+    ex = PatternExample(name="ok", description="d")
+    assert ex.is_template is False
+    assert ex.template_status == "example_only_not_reusable_template"
+    assert ex.parameters == {}
+
+    # Construction with is_template=True must fail at the type layer so an
+    # example cannot be confused with a hidden reusable template.
+    with pytest.raises(ValidationError):
+        PatternExample(name="bad", description="d", is_template=True)
+
+    # Any other template_status value is also rejected.
+    with pytest.raises(ValidationError):
+        PatternExample(name="bad", description="d", template_status="reusable_template")
+
+    # extra="forbid" means unknown fields are rejected too — protects against
+    # silently smuggling a "hidden" template flag through a typo.
+    with pytest.raises(ValidationError):
+        PatternExample(name="bad", description="d", reusable=True)
+
+
+def test_pattern_example_serializes_with_marker_fields():
+    ex = PatternExample(
+        name="run-1",
+        description="Illustrative payload — not a template.",
+        parameters={"integration_name": "demo"},
+    )
+    dumped = ex.model_dump(mode="json")
+    assert dumped["is_template"] is False
+    assert dumped["template_status"] == "example_only_not_reusable_template"
+    assert dumped["parameters"] == {"integration_name": "demo"}

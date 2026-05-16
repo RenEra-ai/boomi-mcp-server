@@ -2,20 +2,35 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ...models.integration_models import IntegrationSpecV1
-from ..base import ArchetypePattern, PatternKind, PatternMetadata
+from ..base import ArchetypePattern, PatternExample, PatternKind, PatternMetadata
 
 
 class StubMinimalIntegrationParameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    integration_name: str
-    goal: str = "Validate V3 archetype build path without Boomi mutation."
-    source_label: str = "Stub source"
-    target_label: str = "Stub target"
-    component_prefix: str = "STUB"
+    integration_name: str = Field(
+        ...,
+        description="Logical integration name; used as the emitted IntegrationSpecV1.name.",
+    )
+    goal: str = Field(
+        default="Validate V3 archetype build path without Boomi mutation.",
+        description="Human-readable goal recorded in the emitted spec's goals list.",
+    )
+    source_label: str = Field(
+        default="Stub source",
+        description="Display label for the stub source endpoint in the emitted spec.",
+    )
+    target_label: str = Field(
+        default="Stub target",
+        description="Display label for the stub target endpoint in the emitted spec.",
+    )
+    component_prefix: str = Field(
+        default="STUB",
+        description="Prefix recorded under spec.naming.component_prefix; the stub emits zero components, so this is illustrative only.",
+    )
 
     @field_validator(
         "integration_name",
@@ -43,6 +58,34 @@ class StubMinimalIntegrationArchetype(ArchetypePattern):
         not_for=["real integration creation", "production integration creation"],
     )
     parameters_model = StubMinimalIntegrationParameters
+
+    capability_notes = [
+        "Validates the V3 archetype pipeline end-to-end without touching Boomi.",
+        "Emits a zero-component IntegrationSpecV1, so build_integration(action='plan') reports zero executable steps.",
+        "Useful as a smoke test for MCP wrappers, the pattern registry, and the build planner.",
+    ]
+    limitations = [
+        "Does not represent any real integration shape or business workflow.",
+        "Emits no executable Boomi components; build_integration(action='apply') has nothing to mutate.",
+        "Must never be used as a starting point for production authoring — choose a real archetype in M2+ when those land.",
+    ]
+    examples = [
+        PatternExample(
+            name="smoke_test_run",
+            description=(
+                "Illustrative parameter set for a framework smoke test. Demonstrates which "
+                "parameters the stub archetype accepts; the emitted spec deliberately does no "
+                "Boomi work and contains no executable components."
+            ),
+            parameters={
+                "integration_name": "demo-stub-integration",
+                "goal": "Smoke-test the V3 archetype pipeline",
+                "source_label": "Stub source",
+                "target_label": "Stub target",
+                "component_prefix": "STUB",
+            },
+        ),
+    ]
 
     @classmethod
     def emit_spec(

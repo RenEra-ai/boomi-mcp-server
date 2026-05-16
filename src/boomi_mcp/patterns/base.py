@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, ClassVar, Dict, List, Mapping, Optional, Type, Union
+from typing import Any, ClassVar, Dict, List, Literal, Mapping, Optional, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -76,6 +76,28 @@ class NoParameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PatternExample(BaseModel):
+    """Documentation-only example for an archetype.
+
+    Examples are illustrative payloads, never reusable templates. ``is_template``
+    and ``template_status`` are constrained at the type level so an example cannot
+    be constructed in a way that would mistake it for a hidden template.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Short label for the example (not a template id)")
+    description: str = Field(..., description="Plain-English description of the scenario")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Example parameter values — illustrative only, not a reusable template",
+    )
+    is_template: Literal[False] = False
+    template_status: Literal["example_only_not_reusable_template"] = (
+        "example_only_not_reusable_template"
+    )
+
+
 class PatternBase(ABC):
     """Abstract base for all archetype and primitive patterns."""
 
@@ -111,10 +133,23 @@ class PatternBase(ABC):
 class ArchetypePattern(PatternBase):
     """Abstract archetype pattern: emits a full IntegrationSpecV1."""
 
+    capability_notes: ClassVar[List[str]] = []
+    limitations: ClassVar[List[str]] = []
+    examples: ClassVar[List[PatternExample]] = []
+
     @classmethod
     @abstractmethod
     def emit_spec(cls, parameters: BaseModel) -> IntegrationSpecV1:
         ...
+
+    @classmethod
+    def describe(cls) -> Dict[str, Any]:
+        described = super().describe()
+        described["capability_notes"] = list(cls.capability_notes)
+        described["limitations"] = list(cls.limitations)
+        described["examples"] = [ex.model_dump(mode="json") for ex in cls.examples]
+        described["example_policy"] = "example_only_not_reusable_template"
+        return described
 
 
 class PrimitivePattern(PatternBase):

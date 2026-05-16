@@ -426,3 +426,35 @@ def test_build_success_spec_is_accepted_by_build_integration_plan():
     assert plan["steps"] == []
     assert plan["warnings"] is not None
     assert any("zero executable steps" in w for w in plan["warnings"])
+
+
+def test_get_action_returns_enriched_describe_payload():
+    """get_integration_archetype_action surfaces the new describe() fields end-to-end."""
+    result = get_integration_archetype_action("stub_minimal_integration")
+    assert result["_success"] is True
+    arch = result["archetype"]
+
+    # The 4 enrichment keys are present alongside the legacy metadata/parameter_schema.
+    for key in ("metadata", "parameter_schema", "capability_notes", "limitations", "examples", "example_policy"):
+        assert key in arch, f"archetype payload missing {key!r}"
+
+    assert arch["example_policy"] == "example_only_not_reusable_template"
+    assert arch["capability_notes"], "stub archetype must publish capability_notes"
+    assert arch["limitations"], "stub archetype must publish limitations"
+    assert arch["examples"], "stub archetype must publish at least one example"
+
+    for example in arch["examples"]:
+        assert example["is_template"] is False
+        assert example["template_status"] == "example_only_not_reusable_template"
+
+    # Every parameter property has a description, so an LLM client can fill the
+    # schema without reading source.
+    props = arch["parameter_schema"]["properties"]
+    assert props, "parameter_schema must expose properties"
+    for prop_name, prop_schema in props.items():
+        assert prop_schema.get("description"), (
+            f"property {prop_name!r} is missing a description"
+        )
+
+    # Whole payload remains JSON-serializable.
+    json.dumps(result)
