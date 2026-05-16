@@ -15,16 +15,24 @@ from .errors import (
     PatternFieldError,
     pattern_validation_error,
 )
+from .registry import (
+    PatternClass,
+    PatternRegistry,
+    PatternRegistryError,
+)
 
 __all__ = [
     "ArchetypePattern",
     "NoParameters",
     "PatternBase",
+    "PatternClass",
     "PatternError",
     "PatternFieldError",
     "PatternIOContract",
     "PatternKind",
     "PatternMetadata",
+    "PatternRegistry",
+    "PatternRegistryError",
     "PrimitiveBuildContext",
     "PrimitivePattern",
     "pattern_validation_error",
