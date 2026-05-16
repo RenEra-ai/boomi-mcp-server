@@ -24,7 +24,24 @@ def list_integration_archetypes_action(
     query: str | None = None,
     tags: list[str] | str | None = None,
 ) -> dict[str, Any]:
-    normalized_tags = _normalize_tags(tags)
+    try:
+        normalized_tags = _normalize_tags(tags)
+    except (TypeError, ValueError) as exc:
+        return PatternError(
+            error_code="INVALID_INPUT",
+            error=f"Invalid tags argument: {exc}",
+            suggestion="Provide tags as a list of strings, a comma-separated string, or a JSON array string.",
+            retryable=False,
+        ).to_dict()
+
+    if query is not None and not isinstance(query, str):
+        return PatternError(
+            error_code="INVALID_INPUT",
+            error=f"query must be a string or None; got {type(query).__name__}",
+            suggestion="Provide query as a substring to match (or omit to list all archetypes).",
+            retryable=False,
+        ).to_dict()
+
     try:
         registry = PatternRegistry.from_package("boomi_mcp.patterns")
         patterns = registry.list_patterns(
@@ -81,7 +98,7 @@ def build_from_archetype_action(
         return exc.to_pattern_error().to_dict()
 
     try:
-        params_obj = cls.parameters_model(**params_dict)
+        params_obj = cls.validate_parameters(params_dict)
     except ValidationError as exc:
         return pattern_validation_error(
             exc,

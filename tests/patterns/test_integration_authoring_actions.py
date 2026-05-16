@@ -1,13 +1,28 @@
-"""Tests for V3 integration authoring action layer (Issue #18)."""
+"""Tests for V3 integration authoring action layer (Issues #18, #19)."""
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
+import boomi_mcp.categories.integration_authoring as authoring_module
 from boomi_mcp.categories.integration_authoring import (
     build_from_archetype_action,
     get_integration_archetype_action,
     list_integration_archetypes_action,
+)
+from boomi_mcp.categories.integration_builder import build_integration_action
+from boomi_mcp.models.integration_models import IntegrationSpecV1
+from boomi_mcp.patterns import (
+    ArchetypePattern,
+    NoParameters,
+    PatternKind,
+    PatternMetadata,
+    PatternRegistry,
+    PatternRegistryError,
+    PrimitiveBuildContext,
+    PrimitivePattern,
 )
 
 
@@ -163,3 +178,251 @@ def test_outputs_have_no_xml_or_primitive_markers(callable_factory):
     payload = json.dumps(result)
     for marker in ("<?xml", "<process", "<component", "<connector", "<operation"):
         assert marker not in payload, f"Unexpected XML marker {marker!r} in {payload[:200]}..."
+
+
+# ===========================================================================
+# Issue #19 — additional hardening tests
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Synthetic patterns used to exercise registry behavior without depending on
+# whatever real patterns happen to be installed.
+# ---------------------------------------------------------------------------
+
+
+class _SynthArchetypeParameters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    integration_name: str
+
+
+class _SynthArchetype(ArchetypePattern):
+    metadata = PatternMetadata(
+        name="_synth_archetype",
+        version="0.0.1",
+        kind=PatternKind.ARCHETYPE,
+        description="Synthetic archetype used only by the Issue #19 tests.",
+        tags=["synthetic"],
+    )
+    parameters_model = _SynthArchetypeParameters
+
+    @classmethod
+    def emit_spec(cls, parameters: _SynthArchetypeParameters) -> IntegrationSpecV1:
+        return IntegrationSpecV1(version="1.0", name=parameters.integration_name)
+
+
+class _SynthPrimitive(PrimitivePattern):
+    metadata = PatternMetadata(
+        name="_synth_primitive",
+        version="0.0.1",
+        kind=PatternKind.PRIMITIVE,
+        description="Synthetic primitive used only by the Issue #19 tests.",
+        tags=["synthetic"],
+    )
+    parameters_model = NoParameters
+
+    @classmethod
+    def emit_components(cls, context: PrimitiveBuildContext, parameters):
+        return []
+
+
+class _RecordingArchetype(ArchetypePattern):
+    """Archetype whose validate_parameters override records each call."""
+
+    metadata = PatternMetadata(
+        name="_recording_archetype",
+        version="0.0.1",
+        kind=PatternKind.ARCHETYPE,
+        description="Records each validate_parameters() call for Issue #19 tests.",
+    )
+    parameters_model = _SynthArchetypeParameters
+    invocations: list = []
+
+    @classmethod
+    def validate_parameters(cls, parameters=None):
+        cls.invocations.append(parameters)
+        return super().validate_parameters(parameters)
+
+    @classmethod
+    def emit_spec(cls, parameters: _SynthArchetypeParameters) -> IntegrationSpecV1:
+        return IntegrationSpecV1(version="1.0", name=parameters.integration_name)
+
+
+def _install_registry(monkeypatch, *patterns) -> None:
+    registry = PatternRegistry(patterns)
+    monkeypatch.setattr(
+        authoring_module.PatternRegistry,
+        "from_package",
+        classmethod(lambda cls, *_a, **_kw: registry),
+    )
+
+
+# ---------------------------------------------------------------------------
+# list_integration_archetypes_action — registry filtering / discovery errors
+# ---------------------------------------------------------------------------
+
+
+def test_list_excludes_primitives(monkeypatch):
+    _install_registry(monkeypatch, _SynthArchetype, _SynthPrimitive)
+    result = list_integration_archetypes_action()
+    assert result["_success"] is True
+    names = [a["name"] for a in result["archetypes"]]
+    kinds = {a["kind"] for a in result["archetypes"]}
+    assert "_synth_archetype" in names
+    assert "_synth_primitive" not in names
+    assert kinds == {"archetype"}
+
+
+def test_list_returns_structured_error_when_discovery_fails(monkeypatch):
+    def _boom(cls, *_a, **_kw):
+        raise PatternRegistryError(
+            error_code="PATTERN_DISCOVERY_FAILED",
+            error="boom — synthetic discovery failure",
+            suggestion="Fix the broken module.",
+        )
+
+    monkeypatch.setattr(
+        authoring_module.PatternRegistry,
+        "from_package",
+        classmethod(_boom),
+    )
+    result = list_integration_archetypes_action()
+    assert result["_success"] is False
+    assert result["error_code"] == "PATTERN_DISCOVERY_FAILED"
+    assert "synthetic discovery failure" in result["error"]
+
+
+def test_list_invalid_tags_returns_structured_error():
+    result = list_integration_archetypes_action(tags=42)
+    assert result["_success"] is False
+    assert result["error_code"] == "INVALID_INPUT"
+    assert "tags" in result["error"].lower()
+
+
+def test_list_invalid_query_returns_structured_error():
+    result = list_integration_archetypes_action(query=123)
+    assert result["_success"] is False
+    assert result["error_code"] == "INVALID_INPUT"
+    assert "query" in result["error"].lower()
+
+
+# ---------------------------------------------------------------------------
+# get_integration_archetype_action — schema hardening
+# ---------------------------------------------------------------------------
+
+
+def test_get_schema_is_machine_readable_and_strict():
+    result = get_integration_archetype_action("stub_minimal_integration")
+    assert result["_success"] is True
+    arch = result["archetype"]
+
+    md = arch["metadata"]
+    assert md["name"] == "stub_minimal_integration"
+    assert md["version"] == "0.1.0"
+    assert md["kind"] == "archetype"
+    assert isinstance(md["tags"], list)
+    assert isinstance(md["use_cases"], list)
+    assert isinstance(md["not_for"], list)
+
+    schema = arch["parameter_schema"]
+    assert isinstance(schema, dict)
+    assert schema.get("type") == "object"
+    assert schema.get("additionalProperties") is False, (
+        "Pattern parameter schemas must reject extra fields"
+    )
+    assert "integration_name" in schema["properties"]
+    assert "integration_name" in schema.get("required", [])
+
+    payload = json.dumps(result)
+    for marker in (
+        "<?xml",
+        "<process",
+        "<component",
+        "<connector",
+        "<operation",
+        "boomi.models",
+        "BoomiClient",
+    ):
+        assert marker not in payload, f"Unexpected leakage marker {marker!r}"
+
+
+def test_get_returns_structured_error_when_discovery_fails(monkeypatch):
+    def _boom(cls, *_a, **_kw):
+        raise PatternRegistryError(
+            error_code="PATTERN_DISCOVERY_FAILED",
+            error="discovery exploded",
+        )
+
+    monkeypatch.setattr(
+        authoring_module.PatternRegistry,
+        "from_package",
+        classmethod(_boom),
+    )
+    result = get_integration_archetype_action("stub_minimal_integration")
+    assert result["_success"] is False
+    assert result["error_code"] == "PATTERN_DISCOVERY_FAILED"
+
+
+# ---------------------------------------------------------------------------
+# build_from_archetype_action — validation path + secret hygiene
+# ---------------------------------------------------------------------------
+
+
+def test_build_uses_validate_parameters_entry_point(monkeypatch):
+    _RecordingArchetype.invocations.clear()
+    _install_registry(monkeypatch, _RecordingArchetype)
+
+    result = build_from_archetype_action(
+        "_recording_archetype",
+        {"integration_name": "demo"},
+    )
+    assert result["_success"] is True, result
+    assert _RecordingArchetype.invocations, (
+        "build_from_archetype_action must route through cls.validate_parameters()"
+    )
+    assert _RecordingArchetype.invocations[0] == {"integration_name": "demo"}
+
+
+def test_build_validation_error_does_not_echo_input_values():
+    secret = "sk_live_super_secret_token_DEADBEEF"
+    result = build_from_archetype_action(
+        "stub_minimal_integration",
+        {"integration_name": "  ", "rogue_field": secret},
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert result["field_errors"], "expected per-field validation errors"
+    for fe in result["field_errors"]:
+        assert {"field_path", "message"}.issubset(fe.keys())
+
+    payload = json.dumps(result)
+    assert secret not in payload, (
+        "PARAM_VALIDATION_FAILED responses must not echo caller-supplied values"
+    )
+
+
+def test_build_success_spec_is_accepted_by_build_integration_plan():
+    built = build_from_archetype_action(
+        "stub_minimal_integration",
+        {"integration_name": "demo"},
+    )
+    assert built["_success"] is True
+    assert built["raw_xml_exposed"] is False
+    assert built["boomi_mutation"] is False
+
+    json.dumps(built)  # must be JSON-serializable
+
+    plan = build_integration_action(
+        MagicMock(),
+        "test-profile",
+        "plan",
+        {
+            "integration_spec": built["integration_spec"],
+            "conflict_policy": "reuse",
+        },
+    )
+    assert plan["_success"] is True, plan
+    assert plan["steps"] == []
+    assert plan["warnings"] is not None
+    assert any("zero executable steps" in w for w in plan["warnings"])
