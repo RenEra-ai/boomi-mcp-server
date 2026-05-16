@@ -1740,8 +1740,8 @@ if list_integration_archetypes_action:
 
         Args:
             name: Archetype name (see `list_integration_archetypes`).
-            parameters: Native dict matching the archetype's parameter_schema
-                (or a JSON-encoded string). None uses archetype defaults.
+            parameters: Dict matching the archetype's parameter_schema.
+                None uses archetype defaults.
         """
         return build_from_archetype_action(name=name, parameters=parameters)
 
