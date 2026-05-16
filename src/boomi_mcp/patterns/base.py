@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, ClassVar, Dict, List, Optional, Type
+from typing import Any, ClassVar, Dict, List, Mapping, Optional, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,10 +38,19 @@ class PatternIOContract(BaseModel):
     # Python attribute is ``schema_`` and the alias keeps the wire format clean.
     model_config = ConfigDict(populate_by_name=True)
 
+    # Only ``name`` is required: operation primitives (schedule, watermark,
+    # error classifier, DLQ, run metadata) don't carry a document profile and
+    # shouldn't have to invent media/profile types just to satisfy the contract.
     name: str = Field(..., description="Logical contract name")
-    description: str = Field(..., description="Human-readable contract summary")
-    profile_type: str = Field(..., description="Profile family (json, xml, edi, flatfile, database)")
-    media_type: str = Field(..., description="MIME-style media type identifier")
+    description: Optional[str] = Field(default=None, description="Human-readable contract summary")
+    profile_type: Optional[str] = Field(
+        default=None,
+        description="Profile family (json, xml, edi, flatfile, database); omit for operation primitives",
+    )
+    media_type: Optional[str] = Field(
+        default=None,
+        description="MIME-style media type identifier; omit for operation primitives",
+    )
     schema_: Optional[Dict[str, Any]] = Field(
         default=None,
         alias="schema",
@@ -54,7 +63,10 @@ class PrimitiveBuildContext(BaseModel):
 
     integration_name: str = Field(..., description="Owning integration name")
     component_prefix: str = Field(..., description="Component name prefix to use")
-    folder_path: str = Field(..., description="Target Boomi folder path")
+    folder_path: Optional[str] = Field(
+        default=None,
+        description="Target Boomi folder path; primitives may fall back to the integration default",
+    )
     refs: Dict[str, Any] = Field(default_factory=dict, description="References to sibling components")
 
 
@@ -82,7 +94,17 @@ class PatternBase(ABC):
         }
 
     @classmethod
-    def validate_parameters(cls, parameters: Dict[str, Any]) -> BaseModel:
+    def validate_parameters(
+        cls,
+        parameters: Optional[Union[Mapping[str, Any], BaseModel]] = None,
+    ) -> BaseModel:
+        # ``None`` is normalized to ``{}`` so patterns whose parameters_model is
+        # NoParameters (or any model with all-defaulted fields) can be invoked
+        # without callers having to pass an empty dict.
+        if parameters is None:
+            parameters = {}
+        if isinstance(parameters, cls.parameters_model):
+            return parameters
         return cls.parameters_model.model_validate(parameters)
 
 

@@ -220,6 +220,49 @@ def test_invalid_parameters_raises_validation_error():
         ExampleArchetype.validate_parameters({})
 
 
+def test_validate_parameters_normalizes_none_and_accepts_model_instance():
+    class _NoParamArchetype(ArchetypePattern):
+        metadata = PatternMetadata(
+            name="np", version="1.0.0", kind=PatternKind.ARCHETYPE, description="d",
+        )
+
+        @classmethod
+        def emit_spec(cls, parameters):
+            return IntegrationSpecV1(name="np-demo")
+
+    # None must normalize to {} so callers don't have to pass an empty dict
+    # when a pattern declares no parameters.
+    none_params = _NoParamArchetype.validate_parameters(None)
+    assert isinstance(none_params, NoParameters)
+
+    # Omitting the argument entirely behaves the same.
+    default_params = _NoParamArchetype.validate_parameters()
+    assert isinstance(default_params, NoParameters)
+
+    # Passing an already-validated model instance must be idempotent.
+    params = ExampleArchetype.validate_parameters({"integration_name": "demo"})
+    again = ExampleArchetype.validate_parameters(params)
+    assert again is params
+
+
+def test_optional_contract_and_context_fields_default_to_none():
+    # Operation-style primitives (schedule, watermark, DLQ, run metadata) need
+    # to be able to declare a contract without faking media/profile types.
+    minimal_contract = PatternIOContract(name="schedule_trigger")
+    assert minimal_contract.description is None
+    assert minimal_contract.profile_type is None
+    assert minimal_contract.media_type is None
+    assert minimal_contract.schema_ is None
+
+    # And the build context allows omitting folder_path for primitives that
+    # use the integration default.
+    minimal_ctx = PrimitiveBuildContext(
+        integration_name="demo", component_prefix="DEMO",
+    )
+    assert minimal_ctx.folder_path is None
+    assert minimal_ctx.refs == {}
+
+
 def test_pattern_validation_error_sanitizes_input():
     secret = "SECRET_VALUE_DO_NOT_LEAK"
     captured: ValidationError
@@ -253,3 +296,20 @@ def test_pattern_validation_error_sanitizes_input():
     # must never appear anywhere in the serialized error.
     dumped = json.dumps(payload)
     assert secret not in dumped
+
+
+def test_to_dict_excludes_none_optional_fields():
+    try:
+        _ExampleParams.model_validate({})
+    except ValidationError as exc:
+        captured = exc
+    else:
+        pytest.fail("Expected ValidationError")
+
+    # No suggestion passed → ``suggestion`` should be absent from the MCP
+    # payload, not serialized as ``null``.
+    err = pattern_validation_error(captured)
+    payload = err.to_dict()
+    assert "suggestion" not in payload
+    assert payload["_success"] is False
+    assert payload["error_code"] == "PARAM_VALIDATION_FAILED"
