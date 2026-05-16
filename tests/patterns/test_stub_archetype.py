@@ -197,3 +197,63 @@ def test_build_plan_warns_no_components_for_stub():
         "No components were provided; plan contains zero executable steps."
         in result["warnings"]
     )
+
+
+def test_stub_parameter_schema_has_field_descriptions():
+    schema = StubMinimalIntegrationArchetype.parameter_schema()
+    properties = schema.get("properties", {})
+    assert properties, "stub parameter schema must expose properties"
+    # Every property must carry a non-empty description so the JSON Schema
+    # alone is enough for an LLM client to fill values without source access.
+    for prop_name, prop_schema in properties.items():
+        desc = prop_schema.get("description")
+        assert desc, f"field {prop_name!r} is missing a description"
+        assert isinstance(desc, str) and desc.strip(), (
+            f"field {prop_name!r} has an empty description"
+        )
+
+
+def test_stub_describe_includes_enriched_keys():
+    described = StubMinimalIntegrationArchetype.describe()
+    assert {
+        "metadata",
+        "parameter_schema",
+        "capability_notes",
+        "limitations",
+        "examples",
+        "example_policy",
+    } <= set(described.keys())
+
+    assert described["example_policy"] == "example_only_not_reusable_template"
+    assert described["capability_notes"], "stub must publish capability_notes"
+    assert described["limitations"], "stub must publish limitations"
+    assert described["examples"], "stub must publish at least one example"
+
+    # Every example crosses the wire as a plain dict and carries the marker
+    # fields that say "not a template".
+    for example in described["examples"]:
+        assert example["is_template"] is False
+        assert example["template_status"] == "example_only_not_reusable_template"
+        assert example["name"]
+        assert example["description"]
+
+
+def test_stub_example_payload_has_no_forbidden_template_markers():
+    described = StubMinimalIntegrationArchetype.describe()
+    # Stub examples MUST be safe documentation. None of the following may
+    # appear: SQL keywords, OData filter syntax, SOAP envelopes, XML tags,
+    # mapping/groovy/script markers. The check is case-insensitive on a
+    # JSON dump of each example so it covers both keys and values.
+    forbidden_substrings = (
+        "select ", "insert ", "update ", "delete ", "from ", "where ",
+        "<?xml", "<soap", "<envelope", "<process", "<connector", "<operation",
+        "$filter=", "$select=", "$expand=",
+        " def ", "import ", "groovy", "javascript:",
+        "script:", "mapping:", " map ",
+    )
+    for example in described["examples"]:
+        payload = json.dumps(example).lower()
+        for marker in forbidden_substrings:
+            assert marker not in payload, (
+                f"example {example['name']!r} contains forbidden marker {marker!r}"
+            )

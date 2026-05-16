@@ -1946,6 +1946,50 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "create_process_component.py",
             ],
         },
+        # === Category 4a: Integration Authoring (3 tools — V3 archetypes, no Boomi mutation) ===
+        "list_integration_archetypes": {
+            "category": "Integration Authoring",
+            "description": "List V3 integration archetypes from the local pattern registry. Read-only, no Boomi mutation.",
+            "actions": ["(single action — lists archetype metadata)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "query": "str (optional) — case-insensitive substring filter over name/description/tags/use_cases/not_for",
+                "tags": "list[str] (optional) — tags the archetype must include (subset match)",
+            },
+            "examples": [
+                'list_integration_archetypes()',
+                'list_integration_archetypes(query="stub")',
+                'list_integration_archetypes(tags=["safe", "no-boomi-mutation"])',
+            ],
+        },
+        "get_integration_archetype": {
+            "category": "Integration Authoring",
+            "description": "Get an archetype's metadata, parameter_schema, capability_notes, limitations, and non-template examples. Read-only, no Boomi mutation.",
+            "actions": ["(single action — returns enriched describe() payload)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "name": "str (required) — archetype name from list_integration_archetypes()",
+            },
+            "examples": [
+                'get_integration_archetype(name="stub_minimal_integration")',
+            ],
+        },
+        "build_from_archetype": {
+            "category": "Integration Authoring",
+            "description": "Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi. Pass the returned spec to build_integration(action='plan') to preview steps.",
+            "actions": ["(single action — emits an IntegrationSpecV1 only)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "name": "str (required) — archetype name from list_integration_archetypes()",
+                "parameters": "dict (optional) — values matching the archetype's parameter_schema",
+            },
+            "examples": [
+                'build_from_archetype(name="stub_minimal_integration", parameters={"integration_name": "demo"})',
+            ],
+        },
         "build_integration": {
             "category": "Execution",
             "description": "High-level orchestrator for building integrations from component-oriented JSON specs",
@@ -2351,13 +2395,24 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             ],
         },
         "build_integration_from_description": {
-            "description": "Convert a source integration description into Boomi components (lift-shift or redesign)",
+            "description": "Author an integration: prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
             "steps": [
-                "1. get_schema_template(resource_type='integration', operation='plan') → get IntegrationSpecV1 template",
-                "2. build_integration(action='plan', config='...') → validate and produce deterministic execution plan",
-                "3. build_integration(action='apply', config='{\"dry_run\": false, ...}') → execute ordered component creation/update",
-                "4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify created components and dependencies",
+                "1. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
+                "2. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
+                "3. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
+                "4. build_integration(action='plan', config='{\"integration_spec\": <spec from step 3>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
+                "5. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 3>, ...}') → execute ordered component creation/update",
+                "6. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
             ],
+            "fallback": {
+                "when": "No archetype fits — e.g., an integration shape not yet covered by the registry.",
+                "steps": [
+                    "F1. get_schema_template(resource_type='integration', operation='plan') → get raw IntegrationSpecV1 template",
+                    "F2. build_integration(action='plan', config='...') → validate the hand-authored spec",
+                    "F3. build_integration(action='apply', config='{\"dry_run\": false, ...}') → execute",
+                    "F4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify",
+                ],
+            },
         },
         "set_up_b2b_trading_partner": {
             "description": "Create a trading partner for EDI/B2B integration",
@@ -2393,17 +2448,33 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
     if available_tools is not None:
         import re
         tool_names = set(tools.keys())
-        filtered_workflows = {}
-        for wf_key, wf in workflows.items():
-            # Extract tool names from step strings: "N. tool_name(...) → ..."
+
+        def _refs_in_steps(steps):
+            # Match both numbered ("1. tool(") and prefixed ("F1. tool(") forms.
             refs = set()
-            for step in wf.get("steps", []):
-                m = re.match(r"\d+\.\s+(\w+)\(", step)
+            for step in steps:
+                m = re.match(r"[A-Z]*\d+\.\s+(\w+)\(", step)
                 if m:
                     refs.add(m.group(1))
-            # Keep workflow only if all referenced tools are in the catalog
-            if refs <= tool_names:
-                filtered_workflows[wf_key] = wf
+            return refs
+
+        filtered_workflows = {}
+        for wf_key, wf in workflows.items():
+            refs = _refs_in_steps(wf.get("steps", []))
+            if not (refs <= tool_names):
+                # Main chain references unregistered tools; drop the workflow.
+                continue
+
+            # Workflow's main chain is intact. If a fallback block exists but
+            # references tools that aren't registered, strip just the fallback
+            # — agents can still follow the main chain.
+            fallback = wf.get("fallback")
+            if fallback:
+                fb_refs = _refs_in_steps(fallback.get("steps", []))
+                if not (fb_refs <= tool_names):
+                    wf = {k: v for k, v in wf.items() if k != "fallback"}
+
+            filtered_workflows[wf_key] = wf
         workflows = filtered_workflows
 
     # --- Coverage stats ---
@@ -2424,6 +2495,23 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         ],
     }
 
+    hints = {
+        "start_here": "Call list_boomi_profiles() first to see available profiles",
+        "need_template": "Use get_schema_template() before create/update operations",
+        "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (integration packs, secrets rotation, etc.)",
+        "profile_required": "Most tools require a 'profile' parameter — get it from list_boomi_profiles()",
+    }
+    # Only recommend the archetype-first flow when the entry-point tool is
+    # actually registered; otherwise the hint points at a tool the catalog
+    # doesn't surface.
+    if available_tools is None or "list_integration_archetypes" in available_tools:
+        hints["prefer_archetypes"] = (
+            "For NEW or migrated integration creation, start with "
+            "list_integration_archetypes() before "
+            "get_schema_template(resource_type='integration') or direct "
+            "build_integration authoring."
+        )
+
     return {
         "_success": True,
         "server_name": "Boomi MCP Server",
@@ -2436,10 +2524,5 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "tools": tools,
         "workflows": workflows,
         "coverage": coverage,
-        "hints": {
-            "start_here": "Call list_boomi_profiles() first to see available profiles",
-            "need_template": "Use get_schema_template() before create/update operations",
-            "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (integration packs, secrets rotation, etc.)",
-            "profile_required": "Most tools require a 'profile' parameter — get it from list_boomi_profiles()",
-        },
+        "hints": hints,
     }
