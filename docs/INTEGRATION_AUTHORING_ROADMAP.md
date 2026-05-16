@@ -17,7 +17,7 @@ Dates assume one main implementer, code review time, and live Boomi QA buffers. 
 | Milestone | Start | Due | Status |
 |---|---:|---:|---|
 | M0 Docs Alignment | 2026-05-18 | 2026-05-18 | Done after docs/date commit is pushed |
-| M1 Archetype Framework Skeleton | 2026-05-18 | 2026-05-29 | First implementation milestone |
+| M1 Archetype Framework Skeleton | 2026-05-18 | 2026-05-29 | Done 2026-05-16 (sub-issues #15–#20 closed; 361 tests passing) |
 | M2 `database_to_api_sync` Vertical Slice | 2026-06-01 | 2026-06-26 | Depends on M1 |
 | M3 Deploy and Test Orchestration | 2026-06-29 | 2026-07-10 | Depends on M2 apply path |
 | M4 Agent Ergonomics | 2026-07-13 | 2026-07-24 | Depends on M1/M2 tool surface |
@@ -51,6 +51,8 @@ Validation:
 - `rg` over active docs does not describe shape-by-shape LLM authoring as the primary path.
 
 ## M1: Archetype Framework Skeleton
+
+Status: Done 2026-05-16 — sub-issues #15–#20 closed; `list_integration_archetypes`, `get_integration_archetype`, `build_from_archetype` registered; stub `StubMinimalIntegrationArchetype` emits a safe `IntegrationSpecV1`; 361 tests passing on `origin/dev`.
 
 Goal: add the framework before adding real integration patterns.
 
