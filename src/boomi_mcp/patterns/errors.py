@@ -24,7 +24,10 @@ class PatternError(BaseModel):
     field_errors: List[PatternFieldError] = Field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"_success": False, **self.model_dump(exclude_none=False)}
+        # ``exclude_none=True`` keeps the MCP response shape compact for LLM
+        # clients: optional fields like ``suggestion`` and per-field
+        # ``error_type`` are dropped when not set.
+        return {"_success": False, **self.model_dump(exclude_none=True)}
 
 
 def pattern_validation_error(
