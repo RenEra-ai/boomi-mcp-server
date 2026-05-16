@@ -50,16 +50,29 @@ def _annotation_value(annotations, key):
     raise AssertionError(f"Cannot read annotation {key!r} from {annotations!r}")
 
 
+def _run_async(coro):
+    # Mirrors tests/kb/_fixture_corpus.run_async: asyncio.run() clears the
+    # thread's current event loop on exit, which poisons legacy modules that
+    # still use asyncio.get_event_loop() (e.g. tests/test_verified_storage.py).
+    # A throwaway loop that is never registered as current keeps that global
+    # state untouched.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 def _resolve_tool(name):
-    return asyncio.run(server.mcp.get_tool(name))
+    return _run_async(server.mcp.get_tool(name))
 
 
 def _listed_tools():
-    return asyncio.run(server.mcp.list_tools())
+    return _run_async(server.mcp.list_tools())
 
 
 def _call_tool(name, args):
-    return asyncio.run(server.mcp.call_tool(name, args))
+    return _run_async(server.mcp.call_tool(name, args))
 
 
 def _payload(result):
