@@ -745,6 +745,101 @@ _COMPONENT_CREATE = {
     ],
 }
 
+_COMPONENT_CREATE_CUSTOMLIBRARY = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "customlibrary",
+    "note": (
+        "Custom Library components wrap JAR files uploaded to Settings > "
+        "Development Resources > Account Libraries. Library_type determines "
+        "where JARs land in the runtime: general → /userlib (restart required), "
+        "scripting → /userlib/script, connector → /userlib/<connector_type>."
+    ),
+    "xml_template": (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+        '               xmlns:bns="http://api.platform.boomi.com/"\n'
+        '               name="{name}"\n'
+        '               type="customlibrary"\n'
+        '               folderFullPath="{folder_full_path}">\n'
+        '  <bns:encryptedValues/>\n'
+        '  <bns:description>{description}</bns:description>\n'
+        '  <bns:object>\n'
+        '    <CustomLibrary xmlns="">\n'
+        '      <Type>{library_type}</Type>{connector_type_element}\n'
+        '      <Files checksum="{checksum}" checksumType="SHA-256"'
+        ' guid="{guid}" md5="{md5}" name="{jar_name}" size="{size}"/>\n'
+        '    </CustomLibrary>\n'
+        '  </bns:object>\n'
+        '</bns:Component>'
+    ),
+    "placeholders": {
+        "name": "Component display name (max 255 chars)",
+        "folder_full_path": "Slash-separated folder path, e.g. 'RenEra AI' or 'Home/Libraries'",
+        "description": "(optional) free-text description",
+        "library_type": "general | scripting | connector",
+        "connector_type_element": (
+            "When library_type='connector': '<connectorType>database</connectorType>' "
+            "(or disk, http, ftp, sftp, etc.). Otherwise: empty string."
+        ),
+        "jar_name": "Exact filename as uploaded, e.g. mssql-jdbc-13.4.0.jre11.jar",
+        "checksum": "SHA-256 hex digest recorded by Boomi when the JAR was uploaded",
+        "guid": "GUID Boomi assigned to the uploaded JAR (Files.guid attribute)",
+        "md5": "MD5 hex digest recorded by Boomi when the JAR was uploaded",
+        "size": "Byte size recorded by Boomi when the JAR was uploaded",
+    },
+    "multiple_files": (
+        "To include several JARs, repeat the <Files .../> element with each JAR's "
+        "name/checksum/guid/md5/size. All entries belong inside the single <CustomLibrary> element."
+    ),
+    "metadata_lookup": (
+        "checksum/guid/md5/size come from the Account Library entry — there is no "
+        "public REST endpoint to list them. Easiest sources: (a) create one Custom "
+        "Library via the Boomi UI, then query_components get its XML to copy the "
+        "Files attributes; (b) inspect an existing customlibrary component in the "
+        "account; (c) compute SHA-256/MD5/size locally if you have the JAR file, "
+        "but the guid is server-assigned and must still come from Boomi."
+    ),
+    "common_failure": (
+        "create_package fails with 'Custom library references deleted jars and cannot "
+        "be packaged' when Files is missing any of checksum/guid/md5/size or the "
+        "values don't match the current Account Library entry. Component create "
+        "succeeds with just name= which is misleading — the error surfaces at packaging."
+    ),
+    "recommended_workflow": [
+        "1. Ensure the JAR is uploaded under Settings > Development Resources > Account Libraries.",
+        "2. Look up the JAR's checksum/guid/md5/size (see 'metadata_lookup').",
+        "3. Substitute placeholders in xml_template and call manage_component create.",
+        "4. manage_deployment create_package with component_type='customlibrary'.",
+        "5. manage_deployment deploy to the target environment — JARs land in "
+        "/<atom>/userlib (or /userlib/script, /userlib/<connector_type>).",
+    ],
+    "example_connector_database": (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+        '               xmlns:bns="http://api.platform.boomi.com/"\n'
+        '               name="Renera MSSQL JDBC Driver"\n'
+        '               type="customlibrary"\n'
+        '               folderFullPath="RenEra AI">\n'
+        '  <bns:encryptedValues/>\n'
+        '  <bns:description></bns:description>\n'
+        '  <bns:object>\n'
+        '    <CustomLibrary xmlns="">\n'
+        '      <Type>connector</Type>\n'
+        '      <connectorType>database</connectorType>\n'
+        '      <Files checksum="e36f5237c1267983e5b88dc2169f6b9d7e50eceec6dc1ca31018e3877e14af66"'
+        ' checksumType="SHA-256"'
+        ' guid="22603703-65de-4b56-bcac-1a59456f2375"'
+        ' md5="dfbc5d35ad9cabc113f8db3725616d9c"'
+        ' name="mssql-jdbc-13.4.0.jre11.jar"'
+        ' size="1547706"/>\n'
+        '    </CustomLibrary>\n'
+        '  </bns:object>\n'
+        '</bns:Component>'
+    ),
+}
+
+
 _COMPONENT_SEARCH = {
     "resource_type": "component",
     "operation": "search",
@@ -1456,6 +1551,8 @@ def _get_component_template(operation=None, component_type=None, **_):
         return result
 
     if operation == "create":
+        if component_type == "customlibrary":
+            return {"_success": True, **_COMPONENT_CREATE_CUSTOMLIBRARY}
         result = {"_success": True, **_COMPONENT_CREATE}
         if component_type == "process":
             result["recommendation"] = "For processes, use manage_process with config (JSON object) instead of raw XML."
