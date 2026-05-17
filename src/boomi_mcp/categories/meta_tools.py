@@ -840,6 +840,106 @@ _COMPONENT_CREATE_CUSTOMLIBRARY = {
 }
 
 
+_COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-settings",
+    "protocol": "database.sqlserver",
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "Database (Legacy) connector for Microsoft SQL Server. Dispatched through "
+        "the builder registry (CONNECTOR_BUILDERS['database']) so callers pass JSON "
+        "config — not raw XML. The builder emits <DatabaseConnectionSettings> with "
+        "Boomi's default <WriteOptions> and <AdapterPoolInfo> blocks."
+    ),
+    "template": {
+        "connector_type": "database",
+        "driver_id": "sqlserver",
+        "component_name": "My SQL Server Connection",
+        "folder_name": "Home",
+        "description": "(optional) free-text description",
+        "host": "host.example.com",
+        "port": 1433,
+        "dbname": "MyDatabase",
+        "username": "sa",
+        "additional": "(optional) JDBC URL suffix appended to urlFormat {3}, e.g. ';encrypt=true;trustServerCertificate=true'",
+    },
+    "required": ["connector_type", "driver_id", "component_name", "host", "dbname", "username"],
+    "defaults": {"connector_type": "database", "driver_id": "sqlserver", "port": 1433, "additional": ""},
+    "password_note": (
+        "Password is not accepted on create. Boomi stores passwords as ciphertext "
+        "produced by its own encryption; there is no public API to encrypt a plaintext "
+        "value. New components are created with <encryptedValue ... isSet=\"false\"/>. "
+        "Set the password in the Boomi UI after create, or supply an existing "
+        "ciphertext via the raw-XML escape hatch (config.xml=...)."
+    ),
+    "gotchas": [
+        (
+            "Atom-in-Docker networking: if the Boomi atom runs in a Docker container "
+            "and SQL Server is reachable via a host port mapping, host='localhost' "
+            "resolves to the atom container itself. Use host='host.docker.internal' "
+            "(Docker Desktop on Mac/Windows) to reach the host's port."
+        ),
+        (
+            "Microsoft JDBC driver 12+ defaults to encrypt=true. The "
+            "mcr.microsoft.com/mssql/server image ships a self-signed certificate, "
+            "so the driver rejects the TLS handshake with a PKIX path error. Set "
+            "additional=';encrypt=true;trustServerCertificate=true' (or "
+            "';encrypt=false' for non-TLS dev only) to proceed."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. manage_connector list_types — confirm 'database' appears.",
+        "2. manage_connector create with the JSON config above.",
+        "3. Set the password in the Boomi UI (or update via raw XML with pre-encrypted ciphertext).",
+        "4. Test the connection from the UI (Connection Test) against an online runtime.",
+        "5. Deploy via manage_deployment.",
+    ],
+    "update_note": (
+        "Field-level update via JSON config is not yet supported for database "
+        "connectors (HTTP only). Use manage_connector update with config.xml=... "
+        "to replace the XML, or edit in the UI."
+    ),
+    "example": {
+        "connector_type": "database",
+        "driver_id": "sqlserver",
+        "component_name": "MS SQL Server Microsoft",
+        "folder_name": "Process Library",
+        "description": "Connection to the MS SQL Server order entry database.",
+        "host": "host.docker.internal",
+        "port": 11433,
+        "dbname": "Expert",
+        "username": "sa",
+        "additional": ";encrypt=true;trustServerCertificate=true",
+    },
+}
+
+
+_COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-settings",
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "connector-settings (connections) are created via manage_connector with a "
+        "connector_type that maps to a builder in CONNECTOR_BUILDERS. Pick a protocol "
+        "for a fully-shaped template, or use the raw-XML escape hatch for unsupported "
+        "connector types."
+    ),
+    "available_protocols": ["database.sqlserver"],
+    "hint": (
+        "Re-call get_schema_template(resource_type='component', operation='create', "
+        "component_type='connector-settings', protocol='<protocol>') for the chosen "
+        "protocol's full JSON template."
+    ),
+    "escape_hatch": (
+        "For connector types without a builder, use manage_connector action='get' on "
+        "an existing connector to export its XML, then pass as config.xml to "
+        "manage_connector action='create'."
+    ),
+}
+
+
 _COMPONENT_SEARCH = {
     "resource_type": "component",
     "operation": "search",
@@ -1534,7 +1634,7 @@ def _get_integration_template(operation=None, **_):
     }
 
 
-def _get_component_template(operation=None, component_type=None, **_):
+def _get_component_template(operation=None, component_type=None, protocol=None, **_):
     if not operation:
         result = {"_success": True, **_COMPONENT_OVERVIEW}
         if component_type:
@@ -1553,6 +1653,16 @@ def _get_component_template(operation=None, component_type=None, **_):
     if operation == "create":
         if component_type == "customlibrary":
             return {"_success": True, **_COMPONENT_CREATE_CUSTOMLIBRARY}
+        if component_type == "connector-settings":
+            if protocol == "database.sqlserver":
+                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER}
+            if protocol:
+                return {
+                    "_success": False,
+                    "error": f"Unknown connector-settings protocol: {protocol}",
+                    "valid_protocols": _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW["available_protocols"],
+                }
+            return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW}
         result = {"_success": True, **_COMPONENT_CREATE}
         if component_type == "process":
             result["recommendation"] = "For processes, use manage_process with config (JSON object) instead of raw XML."

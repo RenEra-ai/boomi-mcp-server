@@ -143,6 +143,113 @@ class HttpConnectorBuilder:
         )
 
 
+class DatabaseConnectorBuilder:
+    """Builder for Database (Legacy) connector-settings components.
+
+    Generates <DatabaseConnectionSettings> XML matching Boomi UI export structure.
+    V1 supports driver_id="sqlserver" (Microsoft JDBC). Architected for additional
+    drivers (mysql, oracle, postgres) — add an entry to DRIVERS.
+
+    Config keys:
+        component_name:     required
+        driver_id:          sqlserver (required; one of DRIVERS keys)
+        host:               required
+        dbname:             required (database name)
+        username:           required
+        port:               optional, falls back to DRIVERS[driver_id]['default_port']
+        folder_name:        optional, defaults to "Home"
+        description:        optional
+        additional:         optional JDBC URL suffix appended verbatim into urlFormat {3}
+                            (e.g. ";encrypt=true;trustServerCertificate=true").
+
+    Password is intentionally NOT accepted on create — Boomi expects ciphertext, not
+    plaintext, and the password ciphertext is only obtainable via the UI's encryption
+    or by copying from an existing component. Created components have
+    <encryptedValue ... isSet="false"/>; set the password via the UI after create.
+    """
+
+    DRIVERS = {
+        "sqlserver": {
+            "driver_id":   "sqlserver",
+            "class_name":  "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+            "url_format":  "jdbc:sqlserver://{0}:{1};database={2}{3}",
+            "default_port": 1433,
+        },
+    }
+
+    def build(self, **params) -> str:
+        component_name = params.get('component_name', '')
+        if not component_name:
+            raise ValueError("component_name is required")
+
+        driver_id = params.get('driver_id', '')
+        if not driver_id:
+            raise ValueError(
+                f"driver_id is required for database connectors "
+                f"(supported: {', '.join(self.DRIVERS.keys())})"
+            )
+        driver = self.DRIVERS.get(driver_id)
+        if not driver:
+            raise ValueError(
+                f"Unsupported driver_id '{driver_id}' "
+                f"(supported: {', '.join(self.DRIVERS.keys())})"
+            )
+
+        host = params.get('host', '')
+        if not host:
+            raise ValueError("host is required for database connectors")
+        dbname = params.get('dbname', '')
+        if not dbname:
+            raise ValueError("dbname is required for database connectors")
+        username = params.get('username', '')
+        if not username:
+            raise ValueError("username is required for database connectors")
+
+        port = params.get('port', driver['default_port'])
+        folder_name = params.get('folder_name', 'Home')
+        description = params.get('description', '')
+        additional = params.get('additional', '')
+
+        safe_name = _escape_xml(component_name)
+        safe_folder = _escape_xml(folder_name)
+        safe_desc = _escape_xml(description)
+        safe_host = _escape_xml(host)
+        safe_dbname = _escape_xml(dbname)
+        safe_username = _escape_xml(username)
+        safe_additional = _escape_xml(additional)
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
+            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+            '               type="connector-settings" subType="database"\n'
+            f'               name="{safe_name}"\n'
+            f'               folderName="{safe_folder}">\n'
+            '    <bns:encryptedValues>\n'
+            '        <bns:encryptedValue path="//DatabaseConnectionSettings/@password" isSet="false"/>\n'
+            '    </bns:encryptedValues>\n'
+            f'    <bns:description>{safe_desc}</bns:description>\n'
+            '    <bns:object>\n'
+            f'        <DatabaseConnectionSettings xmlns="" additional="{safe_additional}"'
+            f' className="{driver["class_name"]}"'
+            f' dbname="{safe_dbname}"'
+            f' driverId="{driver["driver_id"]}"'
+            f' host="{safe_host}"'
+            f' isPoolEnabled="false"'
+            f' port="{port}"'
+            f' urlFormat="{driver["url_format"]}"'
+            f' username="{safe_username}">\n'
+            '            <WriteOptions sqlFilePath="tmp/sqldebug.txt" writeSQLToFile="false"/>\n'
+            '            <AdapterPoolInfo exhaustedAction="1" maxActive="0" maxIdle="0"'
+            ' maxIdleTime="0" maxWait="0" minIdle="0" numberOfTests="0"'
+            ' testIdle="false" testOnBorrow="false" testOnReturn="false"'
+            ' timeBetweenRuns="0" validationQuery=""/>\n'
+            '        </DatabaseConnectionSettings>\n'
+            '    </bns:object>\n'
+            '</bns:Component>'
+        )
+
+
 # ============================================================================
 # Smart-merge helpers for update
 # ============================================================================
@@ -211,10 +318,11 @@ def update_http_settings_fields(http_settings_elem, config: Dict[str, Any]) -> b
 
 CONNECTOR_BUILDERS: Dict[str, type] = {
     "http": HttpConnectorBuilder,
+    "database": DatabaseConnectorBuilder,
 }
 
 
-def get_connector_builder(connector_type: str) -> Optional['HttpConnectorBuilder']:
+def get_connector_builder(connector_type: str):
     """Get a connector builder instance for the given type, or None."""
     builder_class = CONNECTOR_BUILDERS.get(connector_type.lower())
     if builder_class:
