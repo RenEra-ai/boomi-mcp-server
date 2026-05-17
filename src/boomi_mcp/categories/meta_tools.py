@@ -775,14 +775,14 @@ _COMPONENT_CREATE_CUSTOMLIBRARY = {
     ),
     "placeholders": {
         "name": "Component display name (max 255 chars)",
-        "folder_full_path": "Slash-separated folder path, e.g. 'RenEra AI' or 'Home/Libraries'",
+        "folder_full_path": "Slash-separated folder path, e.g. 'Home' or 'Home/Libraries'",
         "description": "(optional) free-text description",
         "library_type": "general | scripting | connector",
         "connector_type_element": (
             "When library_type='connector': '<connectorType>database</connectorType>' "
             "(or disk, http, ftp, sftp, etc.). Otherwise: empty string."
         ),
-        "jar_name": "Exact filename as uploaded, e.g. mssql-jdbc-13.4.0.jre11.jar",
+        "jar_name": "Exact filename as uploaded, e.g. mydb-jdbc-1.0.0.jar",
         "checksum": "SHA-256 hex digest recorded by Boomi when the JAR was uploaded",
         "guid": "GUID Boomi assigned to the uploaded JAR (Files.guid attribute)",
         "md5": "MD5 hex digest recorded by Boomi when the JAR was uploaded",
@@ -818,21 +818,21 @@ _COMPONENT_CREATE_CUSTOMLIBRARY = {
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
         '               xmlns:bns="http://api.platform.boomi.com/"\n'
-        '               name="Renera MSSQL JDBC Driver"\n'
+        '               name="MyDatabase JDBC Driver"\n'
         '               type="customlibrary"\n'
-        '               folderFullPath="RenEra AI">\n'
+        '               folderFullPath="Home/Libraries">\n'
         '  <bns:encryptedValues/>\n'
         '  <bns:description></bns:description>\n'
         '  <bns:object>\n'
         '    <CustomLibrary xmlns="">\n'
         '      <Type>connector</Type>\n'
         '      <connectorType>database</connectorType>\n'
-        '      <Files checksum="e36f5237c1267983e5b88dc2169f6b9d7e50eceec6dc1ca31018e3877e14af66"'
+        '      <Files checksum="REPLACE_WITH_SHA256_FROM_ACCOUNT_LIBRARY"'
         ' checksumType="SHA-256"'
-        ' guid="22603703-65de-4b56-bcac-1a59456f2375"'
-        ' md5="dfbc5d35ad9cabc113f8db3725616d9c"'
-        ' name="mssql-jdbc-13.4.0.jre11.jar"'
-        ' size="1547706"/>\n'
+        ' guid="REPLACE_WITH_GUID_FROM_ACCOUNT_LIBRARY"'
+        ' md5="REPLACE_WITH_MD5_FROM_ACCOUNT_LIBRARY"'
+        ' name="mydb-jdbc-1.0.0.jar"'
+        ' size="REPLACE_WITH_BYTE_SIZE"/>\n'
         '    </CustomLibrary>\n'
         '  </bns:object>\n'
         '</bns:Component>'
