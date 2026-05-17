@@ -178,6 +178,15 @@ class DatabaseConnectorBuilder:
     }
 
     def build(self, **params) -> str:
+        if 'password' in params:
+            raise ValueError(
+                "password cannot be set via the builder — Boomi stores passwords "
+                "as ciphertext and there is no public API to encrypt a plaintext "
+                "value. Omit 'password' from config and either set it in the Boomi "
+                "UI after create, or supply a complete component with pre-encrypted "
+                "ciphertext via the raw-XML escape hatch (config.xml=...)."
+            )
+
         component_name = params.get('component_name', '')
         if not component_name:
             raise ValueError("component_name is required")

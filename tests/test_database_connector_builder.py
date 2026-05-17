@@ -136,6 +136,20 @@ def test_unknown_driver_id_raises_value_error():
         )
 
 
+def test_password_in_config_is_rejected_loudly():
+    """Silently dropping a supplied password would yield an unusable connection
+    that appears configured. Builder must fail instead of pretending success."""
+    with pytest.raises(ValueError, match="password cannot be set via the builder"):
+        DatabaseConnectorBuilder().build(
+            component_name="x",
+            driver_id="sqlserver",
+            host="h",
+            dbname="d",
+            username="u",
+            password="hunter2",
+        )
+
+
 def test_special_xml_characters_in_values_are_escaped():
     xml = _build_minimal(
         component_name='SQL "Prod" & <Dev>',
