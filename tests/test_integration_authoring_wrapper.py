@@ -332,3 +332,96 @@ def test_call_tool_paths_do_not_call_boomi_or_credentials():
     m_user.assert_not_called()
     m_secret.assert_not_called()
     m_boomi.assert_not_called()
+
+
+# ===========================================================================
+# Issue #21 — database_to_api_sync contract-only archetype, MCP wrapper smoke
+# ===========================================================================
+
+
+_DB_TO_API_SYNC_MINIMAL_PAYLOAD = {
+    "naming": {
+        "integration_name": "demo-db-to-api-sync",
+        "component_prefix": "DEMO",
+    },
+    "source": {
+        "binding": {
+            "mode": "create",
+            "settings": {
+                "driver": "microsoft_jdbc",
+                "auth_mode": "username_password",
+                "host": "db.internal",
+                "database": "AppDB",
+                "username": "svc_sync",
+                "credential_ref": "secrets/db/svc_sync",
+            },
+        },
+        "read_operation": {"sql": "<<user-authored SELECT statement>>"},
+    },
+    "target": {
+        "binding": {
+            "mode": "create",
+            "settings": {
+                "base_url": "https://api.example.com",
+                "auth_mode": "none",
+            },
+        },
+        "send_request": {"method": "POST", "path": "/v1/items"},
+    },
+    "transform": {
+        "mappings": [
+            {
+                "source_field": "<<source field name>>",
+                "target_field": "<<target field name>>",
+            },
+        ],
+    },
+    "execution": {"trigger": {"mode": "manual"}},
+    "reliability": {
+        "retry": {"max_attempts": 1},
+        "dlq": {"enabled": False},
+        "error_classifier": {},
+    },
+}
+
+
+def test_call_tool_list_includes_database_to_api_sync():
+    result = _call_tool("list_integration_archetypes", {})
+    payload = _payload(result)
+    assert payload["_success"] is True
+    names = [a["name"] for a in payload["archetypes"]]
+    assert "database_to_api_sync" in names
+
+
+def test_call_tool_get_database_to_api_sync_schema_is_strict():
+    result = _call_tool(
+        "get_integration_archetype",
+        {"name": "database_to_api_sync"},
+    )
+    payload = _payload(result)
+    assert payload["_success"] is True
+    arch = payload["archetype"]
+    schema = arch["parameter_schema"]
+    assert schema["additionalProperties"] is False
+    for prop_name, prop_schema in schema["properties"].items():
+        assert prop_schema.get("description"), (
+            f"top-level property {prop_name!r} is missing a description"
+        )
+
+
+def test_call_tool_build_database_to_api_sync_minimal_succeeds():
+    result = _call_tool(
+        "build_from_archetype",
+        {
+            "name": "database_to_api_sync",
+            "parameters": _DB_TO_API_SYNC_MINIMAL_PAYLOAD,
+        },
+    )
+    payload = _payload(result)
+    assert payload["_success"] is True
+    assert payload["boomi_mutation"] is False
+    assert payload["raw_xml_exposed"] is False
+    spec = payload["integration_spec"]
+    assert spec["components"] == []
+    assert spec["mode"] == "redesign"
+    assert spec["validation_rules"]["contract_only"] is True
