@@ -348,6 +348,35 @@ def test_scheduled_trigger_without_schedule_returns_field_error():
     _assert_path_match(paths, "execution.trigger")
 
 
+def test_username_password_auth_without_username_returns_field_error():
+    payload = _valid_minimal()
+    payload["source"]["binding"]["settings"].pop("username")
+    result = _build(payload)
+    paths = _field_paths(result)
+    _assert_path_match(paths, "source.binding.settings")
+    assert any("username" in fe["message"] for fe in result["field_errors"]), (
+        f"expected the error message to mention username, got {result['field_errors']!r}"
+    )
+
+
+def test_watermark_query_param_without_watermark_returns_field_error():
+    payload = _valid_minimal()
+    payload["target"]["send_request"]["query_parameters"] = [
+        {"name": "since", "value_source": "watermark"},
+    ]
+    result = _build(payload)
+    paths = _field_paths(result)
+    # Top-level model_validator → loc is empty tuple, so field_path is "".
+    # Assert on the message instead so the contract surfaces a usable error.
+    assert any(
+        "watermark" in fe["message"] and "execution.watermark" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected watermark-consistency error, got {result['field_errors']!r}"
+    # field_paths still surfaced (empty string is fine — the message carries
+    # the location info).
+    assert paths, "expected at least one field_error entry"
+
+
 # ---------------------------------------------------------------------------
 # Example + default hygiene (no canned templates, no plaintext credential fields)
 # ---------------------------------------------------------------------------

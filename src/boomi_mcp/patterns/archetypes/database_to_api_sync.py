@@ -166,11 +166,18 @@ class DbCreateSettings(BaseModel):
         return _stripped_nonblank(value)
 
     @model_validator(mode="after")
-    def _enforce_credential_ref_for_username_password(self) -> "DbCreateSettings":
-        if self.auth_mode == "username_password" and not self.credential_ref:
-            raise ValueError(
-                "credential_ref is required when auth_mode='username_password'"
-            )
+    def _enforce_username_password_auth(self) -> "DbCreateSettings":
+        if self.auth_mode == "username_password":
+            missing: List[str] = []
+            if not self.username:
+                missing.append("username")
+            if not self.credential_ref:
+                missing.append("credential_ref")
+            if missing:
+                raise ValueError(
+                    "auth_mode='username_password' requires "
+                    + " and ".join(missing)
+                )
         return self
 
 
@@ -994,6 +1001,23 @@ class DatabaseToApiSyncParameters(BaseModel):
             "to the send step."
         ),
     )
+
+    @model_validator(mode="after")
+    def _enforce_watermark_consistency(self) -> "DatabaseToApiSyncParameters":
+        if self.execution.watermark is not None:
+            return self
+        watermark_params = [
+            qp.name
+            for qp in self.target.send_request.query_parameters
+            if qp.value_source == "watermark"
+        ]
+        if watermark_params:
+            raise ValueError(
+                "REST query parameters with value_source='watermark' require "
+                "execution.watermark to be configured; offenders: "
+                + ", ".join(watermark_params)
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------
