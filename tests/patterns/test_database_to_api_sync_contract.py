@@ -377,6 +377,25 @@ def test_watermark_query_param_without_watermark_returns_field_error():
     assert paths, "expected at least one field_error entry"
 
 
+def test_watermark_consistency_error_does_not_echo_query_param_names():
+    """The watermark validator must not echo caller-supplied query parameter
+    names back through the error envelope. Mirrors the no-echo policy enforced
+    by pattern_validation_error() for raw Pydantic input.
+    """
+    sentinel = "sk_live_ECHO_GUARD_DEADBEEF"
+    payload = _valid_minimal()
+    payload["target"]["send_request"]["query_parameters"] = [
+        {"name": sentinel, "value_source": "watermark"},
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert sentinel not in json.dumps(result), (
+        "watermark-consistency error must not echo caller-supplied query "
+        "parameter names back to the caller"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Example + default hygiene (no canned templates, no plaintext credential fields)
 # ---------------------------------------------------------------------------

@@ -1006,16 +1006,19 @@ class DatabaseToApiSyncParameters(BaseModel):
     def _enforce_watermark_consistency(self) -> "DatabaseToApiSyncParameters":
         if self.execution.watermark is not None:
             return self
-        watermark_params = [
-            qp.name
+        has_watermark_param = any(
+            qp.value_source == "watermark"
             for qp in self.target.send_request.query_parameters
-            if qp.value_source == "watermark"
-        ]
-        if watermark_params:
+        )
+        if has_watermark_param:
+            # The offending parameter names are deliberately omitted: this
+            # error envelope mirrors pattern_validation_error()'s policy of
+            # never echoing caller-supplied input values, which can contain
+            # credentials or other sensitive content.
             raise ValueError(
-                "REST query parameters with value_source='watermark' require "
-                "execution.watermark to be configured; offenders: "
-                + ", ".join(watermark_params)
+                "target.send_request.query_parameters with "
+                "value_source='watermark' require execution.watermark to be "
+                "configured"
             )
         return self
 
