@@ -381,8 +381,10 @@ if not LOCAL_MODE:
     from cryptography.fernet import Fernet
     from verified_storage import VerifiedStorage
     from consent_csp_patch import apply_consent_csp_patch
+    from loopback_redirect_patch import apply_loopback_redirect_patch
 
     apply_consent_csp_patch()
+    apply_loopback_redirect_patch()
 
     # Create Google OAuth provider
     try:
