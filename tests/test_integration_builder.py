@@ -738,6 +738,40 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert "LEAK_NESTED_WO_DEADBEEF" not in repr(plan)
 
     @patch(_PATCH_TARGET)
+    def test_secret_inside_list_of_dicts_redacted_in_plan_output(self, mock_pag):
+        """Codex P2 (post-P1): the builder ignores unknown top-level keys,
+        so a caller can smuggle a list-of-dicts (e.g. `extra: [{password:...}]`)
+        past validate_config. Without descent into list elements, scan misses
+        it and the plan echoes the plaintext value. Must be PLAINTEXT_SECRET_REJECTED
+        with a path like `extra[0].password`, value redacted in echo, and
+        absent from the response payload."""
+        mock_pag.return_value = []
+        comp = _db_comp(extra=[{"password": "LEAK_LIST_PLAN_DEADBEEF"}])
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "extra[0].password"
+        echoed = plan["integration_spec"]["components"][0]["config"]["extra"]
+        assert echoed == [{"password": "[REDACTED]"}]
+        assert "LEAK_LIST_PLAN_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
+    def test_secret_at_list_index_two_redacted_in_plan_output(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp(
+            extra=[{"safe": "ok"}, {"other": "ok"}, {"token": "LEAK_IDX2_PLAN_DEADBEEF"}],
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["field"] == "extra[2].token"
+        echoed = plan["integration_spec"]["components"][0]["config"]["extra"]
+        assert echoed[2]["token"] == "[REDACTED]"
+        assert echoed[0] == {"safe": "ok"}  # non-secret entries preserved
+        assert echoed[1] == {"other": "ok"}
+        assert "LEAK_IDX2_PLAN_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
     def test_mixed_top_level_and_nested_secrets_all_redacted_in_plan_output(self, mock_pag):
         mock_pag.return_value = []
         comp = _db_comp(
