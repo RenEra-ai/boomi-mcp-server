@@ -321,11 +321,16 @@ project `boomimcp`. The script fails fast if no active account.
 
 ### Response runbook (when the alert fires)
 
-1. **Stop the bleeding immediately.** Flip the kill switch:
+1. **Stop the bleeding immediately.** Flip the kill switch with the
+   **additive** flag — `--update-env-vars` adds/overrides the named
+   variable while leaving every other env var (`OIDC_*`, `MONGODB_URI`,
+   `JWT_SIGNING_KEY`, `STORAGE_ENCRYPTION_KEY`, `SESSION_SECRET`, ...)
+   intact. Do **not** use `--set-env-vars` here — it replaces the entire
+   env-var set and would take the service down during the incident:
    ```bash
    gcloud run services update boomi-mcp-server \
      --region us-central1 --project boomimcp \
-     --set-env-vars BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=false
+     --update-env-vars BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=false
    ```
    Cloud Run rolls a new revision; further `get_client` failures still
    log ERROR but no longer delete the document.

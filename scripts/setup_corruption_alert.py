@@ -84,6 +84,7 @@ HEAL_TRIGGER_SUBSTRING = "Corrupted oauth client document detected"
 
 DEFAULT_PROJECT = "boomimcp"
 DEFAULT_SERVICE = "boomi-mcp-server"
+DEFAULT_REGION = "us-central1"
 DEFAULT_METRIC_NAME = "boomi-mcp-oauth-client-corruption"
 DEFAULT_POLICY_NAME = "boomi-mcp-oauth-client-corruption-rate"
 DEFAULT_THRESHOLD = 3
@@ -112,6 +113,8 @@ def build_policy_json(
     policy_name: str,
     metric_name: str,
     project: str,
+    service: str,
+    region: str,
     threshold: int,
     duration_seconds: int,
     notification_channels: Sequence[str],
@@ -129,6 +132,15 @@ def build_policy_json(
         sums across instances. duration='0s' means fire on the first
         breaching data point, no extra debounce -- this is a
         circuit-breaker, not a slow-burning SLO alert.
+
+    The embedded `documentation.content` shows the responder the EXACT
+    kill-switch command for the deployment that produced this policy --
+    the service/region/project come from the caller's flags, not
+    hardcoded defaults, so a staging-only install still surfaces the
+    correct response command. The command uses `--update-env-vars`
+    (additive) rather than `--set-env-vars` (destructive of all other
+    env vars on the service) so the emergency rollout cannot drop
+    required OIDC / Mongo / session settings while flipping one flag.
     """
     metric_type = f"logging.googleapis.com/user/{metric_name}"
     return {
@@ -143,9 +155,9 @@ def build_policy_json(
                 "STORAGE_ENCRYPTION_KEY rotation that drops OLD_KEY before "
                 "scripts/rewrap_oauth_clients.py completes).\n\n"
                 "**Immediate response**: "
-                "`gcloud run services update boomi-mcp-server "
-                "--region us-central1 --project boomimcp "
-                "--set-env-vars BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=false` "
+                f"`gcloud run services update {service} "
+                f"--region {region} --project {project} "
+                "--update-env-vars BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=false` "
                 "to stop further deletions while investigating.\n\n"
                 "See docs/oauth-migration-runbook.md \"Self-heal circuit-breaker alert\"."
             ),
@@ -287,6 +299,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--project", default=DEFAULT_PROJECT)
     parser.add_argument("--service", default=DEFAULT_SERVICE)
+    parser.add_argument(
+        "--region",
+        default=DEFAULT_REGION,
+        help=(
+            "Cloud Run region for the service. Used in the alert "
+            "documentation's response command so a non-default-region "
+            "install points the responder at the right service."
+        ),
+    )
     parser.add_argument("--metric-name", default=DEFAULT_METRIC_NAME)
     parser.add_argument("--policy-name", default=DEFAULT_POLICY_NAME)
     parser.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD)
@@ -330,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     metric_filter = build_metric_filter(args.service)
     print(f"Project: {args.project}")
     print(f"Service: {args.service}")
+    print(f"Region:  {args.region}")
     print(f"Metric:  {args.metric_name}")
     print(f"Policy:  {args.policy_name}")
     print(f"Threshold: more than {args.threshold} events in {args.duration_seconds}s")
@@ -387,6 +409,8 @@ def main(argv: list[str] | None = None) -> int:
         policy_name=args.policy_name,
         metric_name=args.metric_name,
         project=args.project,
+        service=args.service,
+        region=args.region,
         threshold=args.threshold,
         duration_seconds=args.duration_seconds,
         notification_channels=args.notification_channel,
