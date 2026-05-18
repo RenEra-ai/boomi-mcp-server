@@ -154,7 +154,16 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
         """
         if shared_backend is None:
             return None
-        payload = await shared_backend.get(old_hash)
+        try:
+            payload = await shared_backend.get(old_hash)
+        except Exception as exc:  # noqa: BLE001 — shared cache is best-effort
+            logger.warning(
+                "Refresh-token grace shared get failed for key=%s: %s: %s",
+                old_hash[:16] + "..." if old_hash and len(old_hash) > 16 else old_hash,
+                type(exc).__name__,
+                exc,
+            )
+            return None
         if not payload or "access_token" not in payload:
             return None
         return _deserialize(payload)
@@ -172,7 +181,16 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
         from mcp.server.auth.provider import TokenError
         deadline = time.time() + max_wait_seconds
         while time.time() < deadline:
-            payload = await shared_backend.get(old_hash) if shared_backend else None
+            try:
+                payload = await shared_backend.get(old_hash) if shared_backend else None
+            except Exception as exc:  # noqa: BLE001 — degrade to local fallback
+                logger.warning(
+                    "Refresh-token grace shared poll failed for key=%s: %s: %s",
+                    old_hash[:16] + "..." if old_hash and len(old_hash) > 16 else old_hash,
+                    type(exc).__name__,
+                    exc,
+                )
+                payload = None
             if payload:
                 if "error" in payload:
                     raise TokenError(

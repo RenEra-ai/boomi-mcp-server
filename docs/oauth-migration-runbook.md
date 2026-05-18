@@ -386,3 +386,70 @@ corruption, a botched rotation, or a regression in the storage stack
 worth investigating. The alert's 300 s / >3 threshold is the
 *circuit-breaker* tier, not the *SLO* tier; long-term zero is the
 real target.
+
+## Production enablement of cross-instance grace + logging visibility (2026-05-18, third pass)
+
+### Why
+
+The first-pass cache hardening (PR #34) added the cross-instance
+shared grace cache and the per-process Google verifier cache, but
+`BOOMI_RT_GRACE_SHARED` was never wired on the Cloud Run service —
+so Fix D shipped dormant. Additionally, the four hardening patches
+(`refresh_token_grace_patch`, `token_cache_patch`,
+`storage_healing_patch`, `rt_grace_shared_backend`) log under the
+`boomi.*` logger tree, which inherited Python's default WARNING
+level — their `INFO` boot lines were silently dropped, so operators
+had no log-based way to confirm what was running.
+
+This pass pins `BOOMI_RT_GRACE_SHARED=true` in both `cloudbuild.yaml`
+and `k8s/deployment.yaml`, and adds a scoped `boomi.*` stderr handler
+at INFO in `server.py` so the patches' boot lines reach Cloud Logging
+without flooding it with third-party chatter. Shared-cache read
+failures degrade to the local exchange path (no hard 401 on Mongo
+outage), making "on by default" safe.
+
+### One-shot enable on a running revision
+
+If you want Fix D on **before** the next Cloud Build deploy completes:
+
+```bash
+gcloud run services update boomi-mcp-server \
+  --region us-central1 --project boomimcp \
+  --update-env-vars BOOMI_RT_GRACE_SHARED=true
+```
+
+`--update-env-vars` is additive — other env vars (`MONGODB_URI`,
+`OIDC_CLIENT_*`, `STORAGE_ENCRYPTION_KEY`, etc.) are preserved.
+
+### Expected boot log lines
+
+After the new revision rolls out, you should see one of each per
+replica during boot (filter substring → expected line):
+
+| Filter substring | Source | Expected |
+|---|---|---|
+| `Token verifier cache ENABLED` | `token_cache_patch` | Always (Fix B is on by default) |
+| `Refresh-token grace window ENABLED` | `refresh_token_grace_patch` | Always (Fix A is on by default) |
+| `Shared grace cache backend ENABLED` | `rt_grace_shared_backend` | Only after Fix 1 pinning |
+| `Distributed grace lock ENABLED` | `rt_grace_shared_backend` | Only after Fix 1 pinning |
+
+Tail a single boot:
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision"
+  AND resource.labels.service_name="boomi-mcp-server"
+  AND (textPayload:"Shared grace cache backend ENABLED"
+    OR textPayload:"Distributed grace lock ENABLED"
+    OR textPayload:"Refresh-token grace window ENABLED"
+    OR textPayload:"Token verifier cache ENABLED")' \
+  --project boomimcp --freshness=1h --limit 10 --order=asc
+```
+
+### Rollback
+
+Per-fix off-switches: set `BOOMI_RT_GRACE_SHARED=false` (or
+`--remove-env-vars BOOMI_RT_GRACE_SHARED`) to drop back to
+per-process-only grace. The local grace + singleflight from PR #33
+still protects each replica individually. The logging change is
+pure observability — revert by removing the `_boomi_log` block at
+the top of `server.py`.
