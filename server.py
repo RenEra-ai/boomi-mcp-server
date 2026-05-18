@@ -378,7 +378,7 @@ if not LOCAL_MODE:
     from fastmcp.server.auth.providers.google import GoogleProvider
     from key_value.aio.stores.mongodb import MongoDBStore
     from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-    from cryptography.fernet import Fernet
+    from cryptography.fernet import Fernet, MultiFernet
     from verified_storage import VerifiedStorage
     from consent_csp_patch import apply_consent_csp_patch
     from loopback_redirect_patch import apply_loopback_redirect_patch
@@ -417,10 +417,35 @@ if not LOCAL_MODE:
             coll_name="oauth_tokens"
         )
 
+        # Parse STORAGE_ENCRYPTION_KEY as a comma-separated list. Single
+        # value -> Fernet (unchanged). Multiple values -> MultiFernet, which
+        # accepts decryption under any listed key and writes under the
+        # first one. This enables zero-downtime key rotation.
+        _key_list = [
+            k.strip() for k in storage_encryption_key.split(",") if k.strip()
+        ]
+        if not _key_list:
+            raise ValueError(
+                "STORAGE_ENCRYPTION_KEY must contain at least one Fernet key"
+            )
+        try:
+            _fernets = [Fernet(k.encode()) for k in _key_list]
+        except Exception as exc:
+            raise ValueError(
+                "STORAGE_ENCRYPTION_KEY contains an invalid Fernet key "
+                "(comma-separated list expected, newest first): " + str(exc)
+            ) from exc
+        _fernet = _fernets[0] if len(_fernets) == 1 else MultiFernet(_fernets)
+        if len(_fernets) > 1:
+            print(
+                f"[INFO] STORAGE_ENCRYPTION_KEY rotation: {len(_fernets)} keys "
+                "loaded (writes use newest, reads accept any)"
+            )
+
         encrypted_storage = VerifiedStorage(
             FernetEncryptionWrapper(
                 key_value=mongodb_storage,
-                fernet=Fernet(storage_encryption_key.encode())
+                fernet=_fernet
             )
         )
 
