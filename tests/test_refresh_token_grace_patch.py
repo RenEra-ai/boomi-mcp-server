@@ -212,6 +212,124 @@ def test_load_refresh_token_passes_through_when_original_returns(monkeypatch, re
     assert out is sentinel
 
 
+def test_singleflight_coalesces_concurrent_exchanges(monkeypatch, restore_oauth_proxy):
+    """Two concurrent exchanges on the same RT must hit orig exactly once.
+
+    Reproduces the parallel-tab race that Codex flagged: without
+    singleflight, both coroutines observe a cache MISS and both enter
+    orig_exchange. The first call mutates the upstream FastMCP state
+    (deletes _refresh_token_store row + JTI mapping), and the second
+    would fail with `invalid_grant`. Singleflight ensures the second
+    awaits the first's Future and returns the same OAuthToken.
+    """
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+
+    call_count = {"n": 0}
+    from mcp.shared.auth import OAuthToken
+
+    async def slow_exchange(self, client, refresh_token, scopes):
+        # Sleep long enough that a second coroutine can definitely enter
+        # patched_exchange while we're still in flight here.
+        call_count["n"] += 1
+        my_n = call_count["n"]
+        await asyncio.sleep(0.2)
+        return OAuthToken(
+            access_token=f"AT-{my_n}",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token=f"RT-{my_n}",
+            scope=" ".join(scopes),
+        )
+
+    OAuthProxy.exchange_refresh_token = slow_exchange
+
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch()
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    rt = SimpleNamespace(token="rt-shared")
+
+    async def _race():
+        return await asyncio.gather(
+            OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]),
+            OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]),
+            OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]),
+        )
+
+    a, b, c = _run(_race())
+
+    assert call_count["n"] == 1, "underlying exchange must run exactly once under concurrency"
+    assert a.access_token == b.access_token == c.access_token == "AT-1"
+    assert a.refresh_token == b.refresh_token == c.refresh_token == "RT-1"
+
+
+def test_singleflight_propagates_leader_exception(monkeypatch, restore_oauth_proxy):
+    """If the leader's orig_exchange raises, followers must see the same error."""
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+
+    call_count = {"n": 0}
+
+    async def slow_failing_exchange(self, client, refresh_token, scopes):
+        call_count["n"] += 1
+        await asyncio.sleep(0.1)
+        raise RuntimeError("upstream blew up")
+
+    OAuthProxy.exchange_refresh_token = slow_failing_exchange
+
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch()
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    rt = SimpleNamespace(token="rt-shared")
+
+    async def _race():
+        return await asyncio.gather(
+            OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]),
+            OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]),
+            return_exceptions=True,
+        )
+
+    a, b = _run(_race())
+
+    assert call_count["n"] == 1, "underlying exchange must run only once even on failure"
+    assert isinstance(a, RuntimeError) and "upstream blew up" in str(a)
+    assert isinstance(b, RuntimeError) and "upstream blew up" in str(b)
+
+
+def test_singleflight_releases_slot_after_completion(monkeypatch, restore_oauth_proxy):
+    """After leader finishes, a fresh request (cache evicted) must run orig again."""
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "1")  # short window
+    OAuthProxy = restore_oauth_proxy
+
+    call_count = {"n": 0}
+    from mcp.shared.auth import OAuthToken
+
+    async def quick_exchange(self, client, refresh_token, scopes):
+        call_count["n"] += 1
+        return OAuthToken(access_token=f"AT-{call_count['n']}", token_type="Bearer", expires_in=3600)
+
+    OAuthProxy.exchange_refresh_token = quick_exchange
+
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch()
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    rt = SimpleNamespace(token="rt-shared")
+
+    async def _scenario():
+        await OAuthProxy.exchange_refresh_token(proxy, client, rt, ["s"])  # n=1, populates cache
+        await asyncio.sleep(1.2)  # cache expires
+        await OAuthProxy.exchange_refresh_token(proxy, client, rt, ["s"])  # n=2, slot must be free
+
+    _run(_scenario())
+    assert call_count["n"] == 2
+
+
 def test_grace_cache_rejects_cross_client_replay(monkeypatch, restore_oauth_proxy):
     """A cached entry must only be honored for the original client_id."""
     monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
