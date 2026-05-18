@@ -261,6 +261,38 @@ BOOMI_AUTH_HEAL_CORRUPT_CLIENTS # default true. When get_client raises
                                 # re-register cleanly.
 ```
 
+#### OAuth cache hardening (optional)
+
+Closes the remaining Google-call and cross-instance gaps. All ship
+with safe defaults; see `docs/oauth-migration-runbook.md` for the
+rollout and rollback procedure.
+
+```bash
+BOOMI_TOKEN_CACHE_DISABLE           # default off (cache ON). Set true to
+                                    # restore the per-tool-call Google
+                                    # tokeninfo/userinfo round trip.
+BOOMI_TOKEN_CACHE_TTL_SECONDS       # default 300. Upper bound on per-entry
+                                    # TTL; caps Google-revocation latency.
+BOOMI_TOKEN_CACHE_MAX_SIZE          # default 256. LRU capacity.
+BOOMI_TOKEN_CACHE_SWR               # default false. Opt-in stale-while-
+                                    # revalidate against short Google outages.
+BOOMI_TOKEN_CACHE_SWR_WINDOW        # default 30. Seconds before expiry at
+                                    # which SWR serves stale + refreshes.
+
+BOOMI_RT_GRACE_SHARED               # default true. Backs the refresh-token
+                                    # grace cache with a MongoDB collection
+                                    # (mcp-rt-grace, Fernet-encrypted) so
+                                    # multi-replica deployments coalesce
+                                    # rotations across instances.
+BOOMI_RT_GRACE_SHARED_COLLECTION    # default mcp-rt-grace.
+BOOMI_RT_GRACE_DISTRIBUTED_LOCK     # default false. Opt-in cross-instance
+                                    # singleflight via mcp-rt-inflight-locks.
+                                    # Enable only if logs show duplicate
+                                    # orig_exchange calls within ms.
+BOOMI_RT_GRACE_LOCK_TTL_SECONDS     # default 30. Auto-release safety bound.
+BOOMI_RT_GRACE_LOCK_POLL_MS         # default 100. Follower poll interval.
+```
+
 #### User Credentials Storage
 
 User Boomi API credentials are stored separately in GCP Secret Manager:
