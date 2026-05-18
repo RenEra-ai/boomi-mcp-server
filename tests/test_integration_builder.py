@@ -510,6 +510,103 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert step["validation_error"]["field"] == "token"
         assert "LEAK_RAWXML_DEADBEEF" not in repr(plan)
 
+    # ---- Raw-XML subType inference + multi-secret redaction (Codex round-3 P2s)
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_with_database_subtype_and_no_connector_type_rejects_secret(self, mock_pag):
+        """create_connector's raw-XML path doesn't require connector_type.
+        A database connector identified only by subType="database" in the XML
+        must still be scanned for plaintext secrets."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="db_inferred", type="connector-settings", action="create",
+            name="Raw Inferred DB",
+            config={
+                "xml": '<bns:Component type="connector-settings" subType="database"/>',
+                "password": "LEAK_INFERRED_DEADBEEF",
+            },
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "password"
+        assert "LEAK_INFERRED_DEADBEEF" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["password"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_with_database_subtype_single_quote_form_also_rejects(self, mock_pag):
+        """Match both attribute-quote variants."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="db_inferred2", type="connector-settings", action="create",
+            name="Raw Inferred DB",
+            config={
+                "xml": "<bns:Component subType='database'/>",
+                "secret": "LEAK_SINGLEQUOTE_DEADBEEF",
+            },
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert "LEAK_SINGLEQUOTE_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_with_http_subtype_does_not_trigger_db_preflight(self, mock_pag):
+        """A non-database raw-XML connector should not be touched by the
+        database secret scan (different boundary, builder doesn't apply)."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="http_raw", type="connector-settings", action="create",
+            name="Raw HTTP",
+            config={
+                "xml": '<bns:Component subType="http"/>',
+                "password": "LEAK_HTTP_RAWXML_DEADBEEF",
+            },
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        # No DB preflight, plan proceeds normally. The secret IS still echoed
+        # because HTTP raw-XML is a separate boundary outside this fix's scope.
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_multiple_forbidden_secrets_all_redacted(self, mock_pag):
+        """scan_forbidden_secret_fields returns the first offender, but the
+        spec echo must scrub every forbidden field — otherwise a config with
+        password + token leaks the second one."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="db_multi", type="connector-settings", action="update",
+            name="Multi-Secret DB", component_id="existing-id",
+            config={
+                "connector_type": "database",
+                "password": "LEAK_MULTI_A_DEADBEEF",
+                "token": "LEAK_MULTI_B_DEADBEEF",
+                "access_token": "LEAK_MULTI_C_DEADBEEF",
+            },
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        # Error envelope names ONE field (stop-on-first), that's fine.
+        # But the spec echo MUST redact all of them.
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["password"] == "[REDACTED]"
+        assert echoed["token"] == "[REDACTED]"
+        assert echoed["access_token"] == "[REDACTED]"
+        plan_repr = repr(plan)
+        assert "LEAK_MULTI_A_DEADBEEF" not in plan_repr
+        assert "LEAK_MULTI_B_DEADBEEF" not in plan_repr
+        assert "LEAK_MULTI_C_DEADBEEF" not in plan_repr
+
 
 # ---------------------------------------------------------------------------
 # M2.2 — _apply_plan fail-fast on database validation
