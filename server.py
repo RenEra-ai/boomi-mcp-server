@@ -31,9 +31,15 @@ from pathlib import Path
 # We deliberately leave propagate at its default (True) so pytest's caplog
 # (which attaches to root) still captures records — our own handler runs
 # first, and root has no configured handler so there's no double-emit.
+# The handler level is also pinned to INFO so DEBUG records propagated up
+# from a deliberately-verbose child (e.g. diagnostic_logging sets
+# boomi.oauth_diagnostic to DEBUG) do not leak past the parent filter:
+# logger.setLevel only filters records *originating* from that logger,
+# but propagated records bypass it and are filtered only by handler level.
 _boomi_log = logging.getLogger("boomi")
 if not _boomi_log.handlers:
     _h = logging.StreamHandler()
+    _h.setLevel(logging.INFO)
     _h.setFormatter(logging.Formatter("[%(levelname)s] [%(name)s] %(message)s"))
     _boomi_log.addHandler(_h)
     _boomi_log.setLevel(logging.INFO)
