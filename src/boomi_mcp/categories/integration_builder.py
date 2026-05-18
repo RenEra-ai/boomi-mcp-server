@@ -375,6 +375,15 @@ def _execute_component(
     target_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload = dict(config)
+    # Align apply-time dispatcher predicates with plan-time predicates:
+    # _build_plan keys validation off comp.type, but the create_connector /
+    # create_component dispatchers branch on config["component_type"]. A
+    # spec with top-level type="connector-action" or "profile.db" that omits
+    # the duplicate component_type key would plan clean against the right
+    # validator and then misroute at apply (Codex review items 1+2 against
+    # commit f398b35).
+    if comp.type in ("connector-settings", "connector-action", "profile.db"):
+        payload.setdefault("component_type", comp.type)
     if comp.name:
         if comp.type == "process":
             payload.setdefault("name", comp.name)
@@ -517,26 +526,22 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 or xml_says_database
             )
         )
-        # Any profile.db component with a declared profile_type is a builder
-        # candidate. The builder itself decides whether the profile_type is
-        # supported (currently database.read only) — anything else returns
-        # UNSUPPORTED_DB_PROFILE_MODE rather than silently falling through.
-        is_database_read_profile = (
-            comp.type == "profile.db"
-            and bool(raw_config.get("profile_type"))
-        )
+        # Every profile.db component is a builder candidate (regardless of
+        # profile_type value). The builder validator surfaces the right
+        # structured error — UNSUPPORTED_DB_PROFILE_MODE for missing/blank
+        # profile_type, MISSING_DB_QUERY for missing SQL, etc. Without this
+        # widening, a malformed profile.db without profile_type would plan
+        # as a clean `create` and leak any secret-shaped fields into the
+        # plan echo (Codex review item #3).
+        is_database_read_profile = (comp.type == "profile.db")
+        # Every connector-action with connector_type='database' is a builder
+        # candidate (regardless of operation_mode value). The validator
+        # returns UNSUPPORTED_DB_OPERATION_MODE for send/upsert/missing, so
+        # unknown modes can't slip through as clean `create` plans with
+        # un-redacted secret echoes (Codex review item #4).
         is_database_get_operation = (
             comp.type == "connector-action"
             and (raw_config.get("connector_type") or "").lower() == "database"
-            and (raw_config.get("operation_mode") or "").lower() == "get"
-        )
-        # An unsupported db operation_mode (e.g. "send") still needs to fail
-        # loudly at plan time even though there's no builder to dispatch.
-        is_database_unsupported_operation = (
-            comp.type == "connector-action"
-            and (raw_config.get("connector_type") or "").lower() == "database"
-            and (raw_config.get("operation_mode") or "").lower()
-                in DatabaseGetOperationBuilder.UNSUPPORTED_OPERATION_MODES
         )
         will_invoke_builder = (
             (is_database_connector_settings
@@ -551,11 +556,11 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             secret_scanner_cls = DatabaseConnectorBuilder
         elif is_database_read_profile:
             secret_scanner_cls = DatabaseReadProfileBuilder
-        elif is_database_get_operation or is_database_unsupported_operation:
+        elif is_database_get_operation:
             secret_scanner_cls = DatabaseGetOperationBuilder
         if secret_scanner_cls is not None:
             db_err = secret_scanner_cls.scan_forbidden_secret_fields(raw_config)
-            if db_err is None and (will_invoke_builder or is_database_unsupported_operation):
+            if db_err is None and will_invoke_builder:
                 effective_config = dict(raw_config)
                 if comp.name:
                     effective_config.setdefault("component_name", comp.name)
@@ -563,11 +568,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     db_err = DatabaseConnectorBuilder.validate_config(effective_config)
                 elif is_database_read_profile:
                     db_err = DatabaseReadProfileBuilder.validate_config(effective_config)
-                elif is_database_get_operation or is_database_unsupported_operation:
+                elif is_database_get_operation:
                     db_err = DatabaseGetOperationBuilder.validate_config(effective_config)
-                    # Cross-step dependency checks (only meaningful for the
-                    # supported Get path — Send fails on operation_mode first).
-                    if db_err is None and is_database_get_operation:
+                    # Cross-step dependency checks only apply to the
+                    # supported Get path — for unsupported modes (send,
+                    # upsert, missing), validate_config above returns first
+                    # with UNSUPPORTED_DB_OPERATION_MODE.
+                    if db_err is None:
                         db_err = _check_database_get_dependencies(comp, raw_config)
         if db_err is not None:
             planned_action = "error_database_validation"
