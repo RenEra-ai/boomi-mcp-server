@@ -378,13 +378,15 @@ if not LOCAL_MODE:
     from fastmcp.server.auth.providers.google import GoogleProvider
     from key_value.aio.stores.mongodb import MongoDBStore
     from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-    from cryptography.fernet import Fernet
+    from cryptography.fernet import Fernet, MultiFernet
     from verified_storage import VerifiedStorage
     from consent_csp_patch import apply_consent_csp_patch
     from loopback_redirect_patch import apply_loopback_redirect_patch
+    from refresh_token_grace_patch import apply_refresh_token_grace_patch
 
     apply_consent_csp_patch()
     apply_loopback_redirect_patch()
+    apply_refresh_token_grace_patch()
 
     # Create Google OAuth provider
     try:
@@ -415,10 +417,35 @@ if not LOCAL_MODE:
             coll_name="oauth_tokens"
         )
 
+        # Parse STORAGE_ENCRYPTION_KEY as a comma-separated list. Single
+        # value -> Fernet (unchanged). Multiple values -> MultiFernet, which
+        # accepts decryption under any listed key and writes under the
+        # first one. This enables zero-downtime key rotation.
+        _key_list = [
+            k.strip() for k in storage_encryption_key.split(",") if k.strip()
+        ]
+        if not _key_list:
+            raise ValueError(
+                "STORAGE_ENCRYPTION_KEY must contain at least one Fernet key"
+            )
+        try:
+            _fernets = [Fernet(k.encode()) for k in _key_list]
+        except Exception as exc:
+            raise ValueError(
+                "STORAGE_ENCRYPTION_KEY contains an invalid Fernet key "
+                "(comma-separated list expected, newest first): " + str(exc)
+            ) from exc
+        _fernet = _fernets[0] if len(_fernets) == 1 else MultiFernet(_fernets)
+        if len(_fernets) > 1:
+            print(
+                f"[INFO] STORAGE_ENCRYPTION_KEY rotation: {len(_fernets)} keys "
+                "loaded (writes use newest, reads accept any)"
+            )
+
         encrypted_storage = VerifiedStorage(
             FernetEncryptionWrapper(
                 key_value=mongodb_storage,
-                fernet=Fernet(storage_encryption_key.encode())
+                fernet=_fernet
             )
         )
 
@@ -450,12 +477,23 @@ if not LOCAL_MODE:
         print(f"       - OIDC_BASE_URL")
         sys.exit(1)
 
-    # Temporary diagnostic logging for post-migration OAuth cutover.
-    # Enable with BOOMI_OAUTH_DIAGNOSTICS=true; remove after refresh path is stable.
-    if os.getenv("BOOMI_OAUTH_DIAGNOSTICS", "").lower() in ("true", "1", "yes"):
+    # OAuth observability: log silent 401 paths in the FastMCP auth stack.
+    # Default ON; disable with BOOMI_OAUTH_DIAGNOSTICS_DISABLE=true, or
+    # explicitly opt out via BOOMI_OAUTH_DIAGNOSTICS=false (back-compat).
+    _diag_disable = os.getenv("BOOMI_OAUTH_DIAGNOSTICS_DISABLE", "").lower() in ("true", "1", "yes")
+    _diag_legacy_opt_in = os.getenv("BOOMI_OAUTH_DIAGNOSTICS", "true").lower() in ("true", "1", "yes")
+    if not _diag_disable and _diag_legacy_opt_in:
         from diagnostic_logging import apply_all_patches
         apply_all_patches(auth_provider=auth, encrypted_storage=encrypted_storage)
         print("[INFO] OAuth diagnostic logging ENABLED")
+    else:
+        print("[INFO] OAuth diagnostic logging DISABLED")
+
+    # Storage self-healing: evict corrupted client documents on decryption
+    # failure so a stale or bad-key row doesn't permanently 401 a client.
+    # Applied AFTER diagnostic logging so the inner logger fires first.
+    from storage_healing_patch import apply_storage_healing_patch
+    apply_storage_healing_patch(auth_provider=auth)
 
     # Create FastMCP server with auth
     mcp = FastMCP(

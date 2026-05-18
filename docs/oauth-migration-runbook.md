@@ -81,29 +81,33 @@ With diagnostics enabled (`BOOMI_OAUTH_DIAGNOSTICS=true`), also check for:
 - `get_client returned None` -- indicates client not found (legacy state)
 - `Token endpoint client auth FAILED` -- shows exact failure reason
 
-## Diagnostic Logging
+## Diagnostic Logging (now default-on)
 
-Temporary observability is available via `BOOMI_OAUTH_DIAGNOSTICS=true`.
+Diagnostic logging at the three silent 401 boundaries (token-endpoint
+client auth, client lookup, encrypted storage GET) is **enabled by
+default** in production mode as of 2026-05-18. No env var is needed.
 
-To enable on Cloud Run:
-
-```bash
-gcloud run services update boomi-mcp-server \
-  --region us-central1 \
-  --project boomimcp \
-  --set-env-vars BOOMI_OAUTH_DIAGNOSTICS=true
-```
-
-To disable after the cutover is stable:
+Disable (operators only — leaves a 401 path silent):
 
 ```bash
 gcloud run services update boomi-mcp-server \
   --region us-central1 \
   --project boomimcp \
-  --remove-env-vars BOOMI_OAUTH_DIAGNOSTICS
+  --set-env-vars BOOMI_OAUTH_DIAGNOSTICS_DISABLE=true
 ```
 
-Plan: Enable for the first 72 hours post-deploy, then disable.
+Re-enable (clear the disable):
+
+```bash
+gcloud run services update boomi-mcp-server \
+  --region us-central1 \
+  --project boomimcp \
+  --remove-env-vars BOOMI_OAUTH_DIAGNOSTICS_DISABLE
+```
+
+The legacy `BOOMI_OAUTH_DIAGNOSTICS=true` continues to be honored as a
+back-compat "on" signal (no-op since the default is already on).
+Setting `BOOMI_OAUTH_DIAGNOSTICS=false` explicitly opts out.
 
 ## MongoDB Diagnostic Script
 
@@ -118,5 +122,75 @@ STORAGE_ENCRYPTION_KEY=$(gcloud secrets versions access 2 --secret=storage-encry
 ## Cleanup (after 2026-04-25)
 
 1. Delete legacy collections from MongoDB Atlas
-2. Remove `BOOMI_OAUTH_DIAGNOSTICS` env var from Cloud Run
-3. Optionally remove `diagnostic_logging.py` and its import in `server.py`
+2. Diagnostic logging is now permanent — do NOT remove
+   `diagnostic_logging.py` or its server.py call site. The silent 401
+   paths it monitors are inherent to the upstream design, not a
+   transient migration symptom.
+
+## Token refresh hardening (2026-05-18)
+
+Four env vars introduced to harden the OAuth refresh path against the
+three root causes of "MCP becomes inaccessible after ~1h without
+session reload" (refresh-token rotation race, silent storage failures,
+encryption-key rotation pain).
+
+All four ship enabled by default with safe values. Override only when
+debugging or rolling out a key rotation.
+
+| Env var | Default | Purpose | Off-switch |
+|---|---|---|---|
+| `BOOMI_RT_GRACE_SECONDS` | `60` | Window during which a just-rotated refresh token still returns the same new tokens it produced on first use (defeats one-time-use replay race in clients). | Set to `0` |
+| `BOOMI_RT_GRACE_MAX_SIZE` | `512` | LRU capacity for the grace-window cache. | — |
+| `BOOMI_OAUTH_DIAGNOSTICS_DISABLE` | unset (= diagnostics ON) | Turn off all OAuth diagnostic logging (the three silent-401 patches in `diagnostic_logging.py`). | Set to `true` |
+| `BOOMI_AUTH_HEAL_CORRUPT_CLIENTS` | `true` | When `get_client` hits `DecryptionError`/`DeserializationError` (or the bare `InvalidToken`/`ValidationError` defensive cases), delete the corrupted MongoDB doc so the client can re-register cleanly. | Set to `false` (still logs ERROR, just leaves the row) |
+
+`STORAGE_ENCRYPTION_KEY` now also accepts a comma-separated list of
+Fernet keys, newest first. Single-value remains backward compatible.
+Multi-value wraps in `MultiFernet`: reads accept any listed key, writes
+use the first one.
+
+### Zero-downtime key rotation procedure
+
+**Important caveat.** `MultiFernet` rewraps on PUT, never on GET. The
+`mcp-upstream-tokens`, `mcp-jti-mappings`, and `mcp-refresh-tokens`
+collections naturally rotate to the new key because token refresh
+rewrites those rows on every refresh cycle. But the
+`mcp-oauth-proxy-clients` collection holds Dynamic Client Registration
+(DCR) documents that are written **once** at registration and never
+naturally rewritten by normal traffic. If you drop OLD_KEY before those
+docs are re-encrypted, every long-lived client will fail decryption on
+its next request and (with `BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=true`)
+have its registration deleted -- forcing every user to re-add the
+connector. To avoid that, run the rewrap helper before dropping the
+old key.
+
+```bash
+# 1. Add the new key, leaving the old one in place. Newest first.
+NEW_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+OLD_KEY=$(gcloud secrets versions access latest --secret=storage-encryption-key --project=boomimcp)
+gcloud secrets versions add storage-encryption-key \
+  --data-file=- --project=boomimcp <<< "${NEW_KEY},${OLD_KEY}"
+
+# 2. Redeploy the service. Writes now use NEW_KEY; reads accept either.
+#    Token-store rows re-encrypt naturally as refresh traffic flows.
+
+# 3. Re-encrypt the DCR client docs (they are NOT rewritten by refresh).
+#    Run with the same env vars the server uses:
+MONGODB_URI=$(gcloud secrets versions access latest --secret=mongodb-uri --project=boomimcp) \
+STORAGE_ENCRYPTION_KEY="${NEW_KEY},${OLD_KEY}" \
+.venv/bin/python scripts/rewrap_oauth_clients.py
+# Exit 0 with decrypt_failed=0 is required before step 4.
+# Optionally inspect first with `--dry-run`.
+
+# 4. Optional: wait ~30 days for transient token-store rows to roll over
+#    naturally (the longest TTL in those collections is the upstream
+#    refresh-token expiry). Skip if you trust step 3 + active traffic.
+
+# 5. Drop OLD_KEY: re-add the secret as just NEW_KEY.
+gcloud secrets versions add storage-encryption-key \
+  --data-file=- --project=boomimcp <<< "${NEW_KEY}"
+```
+
+If step 3 reports `decrypt_failed > 0`, do **not** drop the old key.
+Either restore the missing historical key, or accept that the listed
+clients will need to re-register, then re-run before dropping.
