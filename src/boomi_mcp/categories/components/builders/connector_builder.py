@@ -252,17 +252,17 @@ class DatabaseConnectorBuilder:
         return cls.DRIVERS.get(canonical)
 
     @classmethod
-    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
-        """Validate a database connector config without building XML.
+    def scan_forbidden_secret_fields(
+        cls, config: Dict[str, Any]
+    ) -> Optional[BuilderValidationError]:
+        """Detect plaintext secret-shaped keys.
 
-        Returns the first BuilderValidationError encountered, or None when the
-        config is acceptable. Stops on first error — matches the existing
-        builder convention and keeps the error envelope simple.
-
-        Used by both build() (which raises) and integration_builder._build_plan
-        (which surfaces the structured error in the plan step).
+        Independent of builder invocation — plaintext secrets are a hard
+        error regardless of which apply path the component takes (create /
+        clone / reuse / update / raw-XML). Callers (e.g. integration_builder
+        preflight) should run this on every database connector-settings
+        config to keep credentials out of plan output.
         """
-        # 1) Plaintext secret-shaped keys must never appear in caller config.
         for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
             if forbidden in config:
                 return BuilderValidationError(
@@ -280,6 +280,25 @@ class DatabaseConnectorBuilder:
                         "pre-encrypted XML via config.xml=..."
                     ),
                 )
+        return None
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate a database connector config without building XML.
+
+        Returns the first BuilderValidationError encountered, or None when the
+        config is acceptable. Stops on first error — matches the existing
+        builder convention and keeps the error envelope simple.
+
+        Used by both build() (which raises) and integration_builder._build_plan
+        (which surfaces the structured error in the plan step). Callers that
+        need ONLY the plaintext-secret check (independent of builder invocation)
+        should use scan_forbidden_secret_fields directly.
+        """
+        # 1) Plaintext secret-shaped keys must never appear in caller config.
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
 
         # 2) driver_id presence + recognized.
         driver_id = config.get("driver_id") or ""

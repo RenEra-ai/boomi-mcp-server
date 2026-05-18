@@ -281,6 +281,24 @@ def test_validate_config_returns_none_for_valid_config():
     assert DatabaseConnectorBuilder.validate_config(_minimal_config()) is None
 
 
+def test_scan_forbidden_secret_fields_returns_first_offender():
+    """Independent classmethod — callers (integration_builder preflight)
+    use this to reject plaintext secrets even when the builder won't run."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database", "password": "leak"}
+    )
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == "password"
+
+
+def test_scan_forbidden_secret_fields_returns_none_when_clean():
+    assert DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "credential_ref": "credential://opaque/ref"}
+    ) is None
+
+
 def test_builder_validation_error_carries_error_code_field_hint():
     err = BuilderValidationError(
         "boom",
