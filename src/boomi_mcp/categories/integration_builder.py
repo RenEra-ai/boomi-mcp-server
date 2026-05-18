@@ -468,10 +468,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # not just the one named in the error. scan_forbidden_secret_fields
             # stops on first match, but a single bad config can carry multiple
             # offenders — leaving the others as plaintext would still leak.
+            # Walks nested dicts (pooling, write_options, etc.) too — otherwise
+            # a secret stashed inside a sub-block would still appear in the
+            # plan's spec echo.
             if db_err.error_code == "PLAINTEXT_SECRET_REJECTED":
-                for forbidden in DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS:
-                    if forbidden in raw_config:
-                        raw_config[forbidden] = "[REDACTED]"
+                DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(
+                    raw_config
+                )
 
         step: Dict[str, Any] = {
             "key": comp.key,

@@ -495,7 +495,7 @@ def test_pooling_validation_query_is_xml_escaped():
     assert attrs["validationQuery"] == "SELECT a & b"
 
 
-@pytest.mark.parametrize("bad_key", ["bogus", "minActive", "password", "validationquery"])
+@pytest.mark.parametrize("bad_key", ["bogus", "minActive", "validationquery", "max_active_size"])
 def test_pooling_unknown_key_returns_database_pooling_validation_failed(bad_key):
     with pytest.raises(BuilderValidationError) as excinfo:
         DatabaseConnectorBuilder().build(**_minimal_config(pooling={bad_key: 1}))
@@ -599,7 +599,7 @@ def test_write_options_write_sql_to_file_true_with_blank_sql_file_path_returns_v
     assert err.field == "write_options.sql_file_path"
 
 
-@pytest.mark.parametrize("bad_key", ["bogus", "writeSQLToFile", "secret"])
+@pytest.mark.parametrize("bad_key", ["bogus", "writeSQLToFile", "sqlfile_path"])
 def test_write_options_unknown_key_returns_validation_failed(bad_key):
     with pytest.raises(BuilderValidationError) as excinfo:
         DatabaseConnectorBuilder().build(**_minimal_config(write_options={bad_key: "anything"}))
@@ -638,3 +638,102 @@ def test_validate_write_options_returns_none_for_omitted_and_clean_configs():
     assert DatabaseConnectorBuilder.validate_write_options(
         {"write_sql_to_file": True, "sql_file_path": "/tmp/x.txt"}
     ) is None
+
+
+# --- Nested secret rejection (Issue #31 Codex P1 follow-up) --------------
+# A forbidden secret-shaped key smuggled inside a sub-block (pooling /
+# write_options) must trip the plaintext-secret check, not the sub-block
+# validator. Otherwise the integration_builder redaction (which only fires
+# on PLAINTEXT_SECRET_REJECTED) is bypassed and the value leaks into plan
+# output.
+
+@pytest.mark.parametrize("forbidden", [
+    "password", "password_ref", "secret", "token", "access_token", "client_secret",
+])
+def test_pooling_with_forbidden_secret_key_returns_plaintext_secret_rejected(forbidden):
+    leaked = f"LEAK_{forbidden}_DEADBEEF"
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **_minimal_config(pooling={forbidden: leaked}),
+        )
+    err = excinfo.value
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == f"pooling.{forbidden}"
+    assert leaked not in str(err)
+    assert leaked not in (err.hint or "")
+
+
+@pytest.mark.parametrize("forbidden", [
+    "password", "password_ref", "secret", "token", "access_token", "client_secret",
+])
+def test_write_options_with_forbidden_secret_key_returns_plaintext_secret_rejected(forbidden):
+    leaked = f"LEAK_WO_{forbidden}_DEADBEEF"
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **_minimal_config(write_options={forbidden: leaked}),
+        )
+    err = excinfo.value
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == f"write_options.{forbidden}"
+    assert leaked not in str(err)
+
+
+def test_scan_forbidden_secret_fields_detects_nested_pooling_secret():
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "pooling": {"password": "LEAK_NESTED_DEADBEEF"}},
+    )
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == "pooling.password"
+
+
+def test_scan_forbidden_secret_fields_top_level_takes_priority_over_nested():
+    """When both a top-level and a nested secret exist, the top-level wins.
+    M2.2 compat: existing callers asserting field='password' at top-level
+    must keep working."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "password": "TOP_LEVEL_DEADBEEF",
+         "pooling": {"secret": "NESTED_DEADBEEF"}},
+    )
+    assert err.field == "password"  # no prefix — top-level
+
+
+def test_scan_forbidden_secret_fields_arbitrary_depth():
+    """Defensive: should walk past 1 level too."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "pooling": {"sub": {"token": "DEEP_DEADBEEF"}}},
+    )
+    assert err is not None
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == "pooling.sub.token"
+
+
+def test_redact_forbidden_secret_fields_in_place_scrubs_nested():
+    config = {
+        "connector_type": "database",
+        "password": "TOP_DEADBEEF",
+        "pooling": {"token": "POOL_DEADBEEF",
+                    "sub": {"secret": "DEEP_DEADBEEF"}},
+        "write_options": {"access_token": "WO_DEADBEEF"},
+        "credential_ref": "credential://safe/path",
+    }
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+    assert config["password"] == "[REDACTED]"
+    assert config["pooling"]["token"] == "[REDACTED]"
+    assert config["pooling"]["sub"]["secret"] == "[REDACTED]"
+    assert config["write_options"]["access_token"] == "[REDACTED]"
+    # Non-secret values untouched
+    assert config["connector_type"] == "database"
+    assert config["credential_ref"] == "credential://safe/path"
+
+
+def test_redact_forbidden_secret_fields_in_place_handles_non_dict_gracefully():
+    """The helper must no-op on None / scalars / lists rather than raise."""
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(None)
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place("not a dict")
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(42)
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place([{"password": "leak"}])
+    # No assertion needed — just must not throw.
