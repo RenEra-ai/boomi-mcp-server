@@ -142,22 +142,55 @@ debugging or rolling out a key rotation.
 | `BOOMI_RT_GRACE_SECONDS` | `60` | Window during which a just-rotated refresh token still returns the same new tokens it produced on first use (defeats one-time-use replay race in clients). | Set to `0` |
 | `BOOMI_RT_GRACE_MAX_SIZE` | `512` | LRU capacity for the grace-window cache. | — |
 | `BOOMI_OAUTH_DIAGNOSTICS_DISABLE` | unset (= diagnostics ON) | Turn off all OAuth diagnostic logging (the three silent-401 patches in `diagnostic_logging.py`). | Set to `true` |
-| `BOOMI_AUTH_HEAL_CORRUPT_CLIENTS` | `true` | When `get_client` hits `InvalidToken`/`ValidationError`, delete the corrupted MongoDB doc so the client can re-register cleanly. | Set to `false` (still logs ERROR, just leaves the row) |
+| `BOOMI_AUTH_HEAL_CORRUPT_CLIENTS` | `true` | When `get_client` hits `DecryptionError`/`DeserializationError` (or the bare `InvalidToken`/`ValidationError` defensive cases), delete the corrupted MongoDB doc so the client can re-register cleanly. | Set to `false` (still logs ERROR, just leaves the row) |
 
 `STORAGE_ENCRYPTION_KEY` now also accepts a comma-separated list of
 Fernet keys, newest first. Single-value remains backward compatible.
-Multi-value wraps in `MultiFernet` (writes use first; reads accept
-any) so key rotation no longer requires dropping any documents.
+Multi-value wraps in `MultiFernet`: reads accept any listed key, writes
+use the first one.
 
-Example zero-downtime rotation:
+### Zero-downtime key rotation procedure
+
+**Important caveat.** `MultiFernet` rewraps on PUT, never on GET. The
+`mcp-upstream-tokens`, `mcp-jti-mappings`, and `mcp-refresh-tokens`
+collections naturally rotate to the new key because token refresh
+rewrites those rows on every refresh cycle. But the
+`mcp-oauth-proxy-clients` collection holds Dynamic Client Registration
+(DCR) documents that are written **once** at registration and never
+naturally rewritten by normal traffic. If you drop OLD_KEY before those
+docs are re-encrypted, every long-lived client will fail decryption on
+its next request and (with `BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=true`)
+have its registration deleted -- forcing every user to re-add the
+connector. To avoid that, run the rewrap helper before dropping the
+old key.
 
 ```bash
-# 1. Generate a new key, then set both old+new on the service
+# 1. Add the new key, leaving the old one in place. Newest first.
 NEW_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 OLD_KEY=$(gcloud secrets versions access latest --secret=storage-encryption-key --project=boomimcp)
 gcloud secrets versions add storage-encryption-key \
   --data-file=- --project=boomimcp <<< "${NEW_KEY},${OLD_KEY}"
-# 2. Redeploy. Writes now use NEW_KEY, reads accept either.
-# 3. After 30 days (RT expiry window), all docs are re-encrypted.
-# 4. Drop OLD_KEY: re-add the secret as just NEW_KEY.
+
+# 2. Redeploy the service. Writes now use NEW_KEY; reads accept either.
+#    Token-store rows re-encrypt naturally as refresh traffic flows.
+
+# 3. Re-encrypt the DCR client docs (they are NOT rewritten by refresh).
+#    Run with the same env vars the server uses:
+MONGODB_URI=$(gcloud secrets versions access latest --secret=mongodb-uri --project=boomimcp) \
+STORAGE_ENCRYPTION_KEY="${NEW_KEY},${OLD_KEY}" \
+.venv/bin/python scripts/rewrap_oauth_clients.py
+# Exit 0 with decrypt_failed=0 is required before step 4.
+# Optionally inspect first with `--dry-run`.
+
+# 4. Optional: wait ~30 days for transient token-store rows to roll over
+#    naturally (the longest TTL in those collections is the upstream
+#    refresh-token expiry). Skip if you trust step 3 + active traffic.
+
+# 5. Drop OLD_KEY: re-add the secret as just NEW_KEY.
+gcloud secrets versions add storage-encryption-key \
+  --data-file=- --project=boomimcp <<< "${NEW_KEY}"
 ```
+
+If step 3 reports `decrypt_failed > 0`, do **not** drop the old key.
+Either restore the missing historical key, or accept that the listed
+clients will need to re-register, then re-run before dropping.
