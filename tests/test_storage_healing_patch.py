@@ -46,12 +46,13 @@ def test_passthrough_when_get_client_succeeds(monkeypatch):
     provider._client_store.delete.assert_not_called()
 
 
-def test_heals_on_invalid_token_decryption_failure(monkeypatch, caplog):
+def test_heals_on_real_decryption_error_from_keyvalue_wrapper(monkeypatch, caplog):
+    """Primary prod path: FernetEncryptionWrapper raises DecryptionError."""
     monkeypatch.setenv("BOOMI_AUTH_HEAL_CORRUPT_CLIENTS", "true")
-    from cryptography.fernet import InvalidToken
+    from key_value.aio.errors import DecryptionError
 
     async def boom(client_id):
-        raise InvalidToken("ciphertext can't be decrypted")
+        raise DecryptionError("Failed to decrypt value")
 
     provider = _make_provider(boom)
     _fresh_module().apply_storage_healing_patch(provider)
@@ -69,7 +70,40 @@ def test_heals_on_invalid_token_decryption_failure(monkeypatch, caplog):
     )
 
 
-def test_heals_on_pydantic_validation_error(monkeypatch):
+def test_heals_on_real_deserialization_error_from_pydantic_adapter(monkeypatch):
+    """Primary prod path: PydanticAdapter raises DeserializationError."""
+    monkeypatch.setenv("BOOMI_AUTH_HEAL_CORRUPT_CLIENTS", "true")
+    from key_value.aio.errors import DeserializationError
+
+    async def boom(client_id):
+        raise DeserializationError("Invalid ProxyDCRClient: [...]")
+
+    provider = _make_provider(boom)
+    _fresh_module().apply_storage_healing_patch(provider)
+
+    out = _run(provider.get_client("client-xyz"))
+    assert out is None
+    provider._client_store.delete.assert_awaited_once_with(key="client-xyz")
+
+
+def test_defense_in_depth_invalid_token(monkeypatch):
+    """Defensive catch: bare cryptography.InvalidToken (in case wrapper changes)."""
+    monkeypatch.setenv("BOOMI_AUTH_HEAL_CORRUPT_CLIENTS", "true")
+    from cryptography.fernet import InvalidToken
+
+    async def boom(client_id):
+        raise InvalidToken("ciphertext can't be decrypted")
+
+    provider = _make_provider(boom)
+    _fresh_module().apply_storage_healing_patch(provider)
+
+    out = _run(provider.get_client("client-xyz"))
+    assert out is None
+    provider._client_store.delete.assert_awaited_once_with(key="client-xyz")
+
+
+def test_defense_in_depth_pydantic_validation_error(monkeypatch):
+    """Defensive catch: bare pydantic.ValidationError."""
     monkeypatch.setenv("BOOMI_AUTH_HEAL_CORRUPT_CLIENTS", "true")
     from pydantic import BaseModel, ValidationError
 
@@ -94,10 +128,10 @@ def test_heals_on_pydantic_validation_error(monkeypatch):
 
 def test_heal_disabled_skips_delete_but_still_returns_none(monkeypatch, caplog):
     monkeypatch.setenv("BOOMI_AUTH_HEAL_CORRUPT_CLIENTS", "false")
-    from cryptography.fernet import InvalidToken
+    from key_value.aio.errors import DecryptionError
 
     async def boom(client_id):
-        raise InvalidToken("nope")
+        raise DecryptionError("nope")
 
     provider = _make_provider(boom)
     _fresh_module().apply_storage_healing_patch(provider)
