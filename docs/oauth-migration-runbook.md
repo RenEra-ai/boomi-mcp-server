@@ -392,30 +392,47 @@ real target.
 ### Why
 
 The first-pass cache hardening (PR #34) added the cross-instance
-shared grace cache and the per-process Google verifier cache, but
-`BOOMI_RT_GRACE_SHARED` was never wired on the Cloud Run service —
-so Fix D shipped dormant. Additionally, the four hardening patches
-(`refresh_token_grace_patch`, `token_cache_patch`,
-`storage_healing_patch`, `rt_grace_shared_backend`) log under the
-`boomi.*` logger tree, which inherited Python's default WARNING
-level — their `INFO` boot lines were silently dropped, so operators
-had no log-based way to confirm what was running.
+shared grace cache and the per-process Google verifier cache.
+`BOOMI_RT_GRACE_SHARED` defaults to `true` in
+`rt_grace_shared_backend.initialize_shared_grace_backend`, so Fix D
+has actually been active in production since PR #34 — but
+`BOOMI_RT_GRACE_DISTRIBUTED_LOCK` defaults to `false`, so the
+Fix D.2 singleflight was off, and the four hardening patches log
+under the `boomi.*` logger tree, which inherited Python's default
+WARNING level — their `INFO` boot lines were silently dropped, so
+operators had no log-based way to confirm what was running.
 
-This pass pins `BOOMI_RT_GRACE_SHARED=true` in both `cloudbuild.yaml`
-and `k8s/deployment.yaml`, and adds a scoped `boomi.*` stderr handler
-at INFO in `server.py` so the patches' boot lines reach Cloud Logging
-without flooding it with third-party chatter. Shared-cache read
-failures degrade to the local exchange path (no hard 401 on Mongo
-outage), making "on by default" safe.
+This pass:
+- Pins **`BOOMI_RT_GRACE_SHARED=true`** in `cloudbuild.yaml` and
+  `k8s/deployment.yaml`. The code default is already `true`; pinning
+  makes the manifest reflect the intended state and prevents a
+  future default flip from silently turning Fix D off.
+- Pins **`BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true`** alongside it.
+  This is a real activation — the code default is `false`, so
+  before this PR concurrent refreshes across replicas could each
+  call Google independently. Pinning engages the Mongo
+  upsert-as-lock singleflight so only one replica calls Google per
+  refresh-token rotation.
+- Adds a scoped `boomi.*` stderr handler at INFO in `server.py`
+  (with its handler level pinned to INFO so propagated DEBUG records
+  from `boomi.oauth_diagnostic` don't leak past the parent filter)
+  so the patches' boot lines reach Cloud Logging without flooding
+  it with third-party chatter.
+
+Shared-cache read failures degrade to the local exchange path
+(no hard 401 on Mongo outage), so leaving these features on is safe
+even with intermittent Mongo connectivity.
 
 ### One-shot enable on a running revision
 
-If you want Fix D on **before** the next Cloud Build deploy completes:
+If you want Fix D.2 (distributed lock) on **before** the next Cloud
+Build deploy completes, or you want to flip an unset
+`BOOMI_RT_GRACE_SHARED` explicitly:
 
 ```bash
 gcloud run services update boomi-mcp-server \
   --region us-central1 --project boomimcp \
-  --update-env-vars BOOMI_RT_GRACE_SHARED=true
+  --update-env-vars BOOMI_RT_GRACE_SHARED=true,BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true
 ```
 
 `--update-env-vars` is additive — other env vars (`MONGODB_URI`,
@@ -430,8 +447,8 @@ replica during boot (filter substring → expected line):
 |---|---|---|
 | `Token verifier cache ENABLED` | `token_cache_patch` | Always (Fix B is on by default) |
 | `Refresh-token grace window ENABLED` | `refresh_token_grace_patch` | Always (Fix A is on by default) |
-| `Shared grace cache backend ENABLED` | `rt_grace_shared_backend` | Only after Fix 1 pinning |
-| `Distributed grace lock ENABLED` | `rt_grace_shared_backend` | Only after Fix 1 pinning |
+| `Shared grace cache backend ENABLED` | `rt_grace_shared_backend` | Whenever `BOOMI_RT_GRACE_SHARED!=false` (now pinned true) |
+| `Distributed grace lock ENABLED` | `rt_grace_shared_backend` | Only when `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true` (now pinned true) |
 
 Tail a single boot:
 
@@ -447,9 +464,26 @@ gcloud logging read 'resource.type="cloud_run_revision"
 
 ### Rollback
 
-Per-fix off-switches: set `BOOMI_RT_GRACE_SHARED=false` (or
-`--remove-env-vars BOOMI_RT_GRACE_SHARED`) to drop back to
-per-process-only grace. The local grace + singleflight from PR #33
-still protects each replica individually. The logging change is
+Per-fix off-switches require setting the value **explicitly to
+`false`** — `--remove-env-vars` alone is not enough for
+`BOOMI_RT_GRACE_SHARED` because its code default is `true` (and so
+unsetting it leaves the feature on). `BOOMI_RT_GRACE_DISTRIBUTED_LOCK`
+defaults to `false`, so for that one either `--update-env-vars
+=false` or `--remove-env-vars` works.
+
+```bash
+# Disable Fix D entirely (drops the shared cache back to local-only).
+gcloud run services update boomi-mcp-server \
+  --region us-central1 --project boomimcp \
+  --update-env-vars BOOMI_RT_GRACE_SHARED=false
+
+# Disable Fix D.2 only (keep shared cache, drop the distributed lock).
+gcloud run services update boomi-mcp-server \
+  --region us-central1 --project boomimcp \
+  --update-env-vars BOOMI_RT_GRACE_DISTRIBUTED_LOCK=false
+```
+
+The local grace + singleflight from PR #33 still protects each
+replica individually after either rollback. The logging change is
 pure observability — revert by removing the `_boomi_log` block at
 the top of `server.py`.
