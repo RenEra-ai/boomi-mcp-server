@@ -1250,3 +1250,127 @@ class TestApplyPlanDatabaseProfileAndGetFailFast:
         third_call = mock_exec.call_args_list[2]
         resolved_config = third_call.kwargs["config"]
         assert resolved_config["read_profile_id"] == "profile-002"
+
+
+# ===========================================================================
+# Codex review f398b35 follow-up — regression tests for the 4 P2 items
+# ===========================================================================
+
+
+class TestCodexReviewF398b35Followup:
+    """Regression tests for the four Codex P2 items against commit f398b35.
+
+    Items 1+2: _execute_component must inject comp.type into payload so the
+    apply-time dispatcher predicates (config["component_type"]) align with
+    the plan-time predicates (comp.type).
+
+    Items 3+4: preflight gates must run the builder validator for every
+    profile.db component (regardless of profile_type) and every database
+    connector-action (regardless of operation_mode), so malformed shapes
+    can't plan as clean creates with un-redacted secret echoes.
+    """
+
+    # --- Items 1+2: component_type injection ---
+
+    @patch("src.boomi_mcp.categories.integration_builder.create_connector")
+    @patch("src.boomi_mcp.categories.integration_builder._resolve_existing_components")
+    @patch(_PATCH_TARGET)
+    def test_apply_injects_component_type_for_connector_action(
+        self, mock_pag, mock_resolve, mock_create_connector
+    ):
+        mock_pag.return_value = []
+        mock_resolve.return_value = []
+        mock_create_connector.side_effect = [
+            {"_success": True, "component_id": "conn-001", "type": "connector-settings"},
+            {"_success": True, "component_id": "op-003", "type": "connector-action"},
+        ]
+        op = _db_get_op_comp(depends_on=["db_connection"])
+        op.config.pop("component_type")  # Caller omitted the duplicate key
+        # Use a literal read_profile_id so we don't also need a profile step.
+        op.config["read_profile_id"] = "literal-profile-id"
+        config = _build_config([_db_comp(), op])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        # Second call is the operation — its payload must have component_type set.
+        op_call = mock_create_connector.call_args_list[1]
+        op_payload = op_call.args[2]  # create_connector(client, profile, config)
+        assert op_payload["component_type"] == "connector-action"
+
+    @patch("src.boomi_mcp.categories.integration_builder.create_component")
+    @patch("src.boomi_mcp.categories.integration_builder._resolve_existing_components")
+    @patch(_PATCH_TARGET)
+    def test_apply_injects_component_type_for_profile_db(
+        self, mock_pag, mock_resolve, mock_create_component
+    ):
+        mock_pag.return_value = []
+        mock_resolve.return_value = []
+        mock_create_component.return_value = {
+            "_success": True, "component_id": "profile-002", "type": "profile.db"
+        }
+        profile = _db_read_profile_comp()
+        profile.config.pop("component_type")  # Caller omitted the duplicate key
+        config = _build_config([profile])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        call = mock_create_component.call_args_list[0]
+        payload = call.args[2]  # create_component(client, profile, config)
+        assert payload["component_type"] == "profile.db"
+
+    # --- Items 3+4: widened preflight gates ---
+
+    @patch(_PATCH_TARGET)
+    def test_profile_db_without_profile_type_surfaces_unsupported_db_profile_mode(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_read_profile_comp()
+        comp.config.pop("profile_type")
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_PROFILE_MODE"
+
+    @patch(_PATCH_TARGET)
+    def test_profile_db_without_profile_type_redacts_plaintext_secrets(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_read_profile_comp()
+        comp.config.pop("profile_type")
+        comp.config["password"] = "leaked"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        # Spec echo must redact even though profile_type is missing.
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["password"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_connector_action_database_unknown_mode_surfaces_unsupported_db_operation_mode(self, mock_pag):
+        mock_pag.return_value = []
+        op = _db_get_op_comp(operation_mode="upsert")
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "UNSUPPORTED_DB_OPERATION_MODE"
+
+    @patch(_PATCH_TARGET)
+    def test_connector_action_database_blank_mode_redacts_plaintext_secrets(self, mock_pag):
+        mock_pag.return_value = []
+        op = _db_get_op_comp(operation_mode="")
+        op.config["token"] = "leaked"
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        # Spec echo must redact the token even though operation_mode is blank.
+        echoed_op = next(
+            c for c in plan["integration_spec"]["components"]
+            if c["key"] == "db_query_operation"
+        )
+        assert echoed_op["config"]["token"] == "[REDACTED]"
