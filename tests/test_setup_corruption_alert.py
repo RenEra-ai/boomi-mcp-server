@@ -46,6 +46,8 @@ def test_policy_json_basic_shape():
         policy_name="my-policy",
         metric_name="my-metric",
         project="my-project",
+        service="my-service",
+        region="us-central1",
         threshold=3,
         duration_seconds=300,
         notification_channels=[],
@@ -71,6 +73,8 @@ def test_policy_json_attaches_notification_channels():
         policy_name="x",
         metric_name="m",
         project="p",
+        service="s",
+        region="us-central1",
         threshold=5,
         duration_seconds=60,
         notification_channels=channels,
@@ -81,6 +85,7 @@ def test_policy_json_attaches_notification_channels():
 def test_policy_json_alignment_period_matches_duration_seconds():
     p = mod.build_policy_json(
         policy_name="x", metric_name="m", project="p",
+        service="s", region="us-central1",
         threshold=10, duration_seconds=120, notification_channels=[],
     )
     agg = p["conditions"][0]["conditionThreshold"]["aggregations"][0]
@@ -94,6 +99,7 @@ def test_policy_json_documentation_mentions_kill_switch():
     so the on-call sees it without leaving the alert UI."""
     p = mod.build_policy_json(
         policy_name="x", metric_name="m", project="p",
+        service="s", region="us-central1",
         threshold=3, duration_seconds=300, notification_channels=[],
     )
     doc = p["documentation"]["content"]
@@ -101,9 +107,49 @@ def test_policy_json_documentation_mentions_kill_switch():
     assert "gcloud run services update" in doc
 
 
+def test_policy_json_uses_non_destructive_update_env_vars():
+    """The kill-switch must use --update-env-vars (additive), not
+    --set-env-vars (which replaces the entire env-var set and would
+    drop OIDC/Mongo/session config, taking the service down during
+    an incident response)."""
+    p = mod.build_policy_json(
+        policy_name="x", metric_name="m", project="p",
+        service="s", region="us-central1",
+        threshold=3, duration_seconds=300, notification_channels=[],
+    )
+    doc = p["documentation"]["content"]
+    assert "--update-env-vars" in doc
+    assert "--set-env-vars" not in doc, (
+        "Destructive --set-env-vars would wipe other env vars on the service"
+    )
+
+
+def test_policy_json_documentation_uses_parsed_service_region_project():
+    """Non-default deployments (staging, alt region) must see their OWN
+    service/region/project in the alert response command, not the
+    boomimcp defaults."""
+    p = mod.build_policy_json(
+        policy_name="x", metric_name="m",
+        project="my-staging-project",
+        service="boomi-mcp-staging",
+        region="us-east1",
+        threshold=3, duration_seconds=300, notification_channels=[],
+    )
+    doc = p["documentation"]["content"]
+    assert "boomi-mcp-staging" in doc
+    assert "us-east1" in doc
+    assert "my-staging-project" in doc
+    # And the default values must NOT appear (otherwise the responder
+    # would page-update the wrong service).
+    assert "boomi-mcp-server" not in doc
+    assert "boomimcp" not in doc
+    assert "us-central1" not in doc
+
+
 def test_policy_json_is_serializable():
     p = mod.build_policy_json(
         policy_name="x", metric_name="m", project="p",
+        service="s", region="us-central1",
         threshold=3, duration_seconds=300, notification_channels=[],
     )
     # Must round-trip through JSON without losing structure.
@@ -218,6 +264,7 @@ def test_main_dry_run_exits_zero_and_prints_commands(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Project: boomimcp" in out
     assert "Service: boomi-mcp-server" in out
+    assert "Region:  us-central1" in out
     assert "Metric:  boomi-mcp-oauth-client-corruption" in out
     assert "Policy:  boomi-mcp-oauth-client-corruption-rate" in out
     assert "[DRY-RUN]" in out
@@ -225,6 +272,27 @@ def test_main_dry_run_exits_zero_and_prints_commands(monkeypatch, capsys):
     assert "gcloud alpha monitoring policies create" in out
     assert "Policy JSON that would be created" in out
     assert "DRY-RUN complete. No GCP changes were made." in out
+
+
+def test_main_dry_run_respects_service_region_overrides(capsys):
+    """--service and --region must flow into the generated policy doc."""
+    rc = mod.main([
+        "--dry-run",
+        "--project", "staging-proj",
+        "--service", "boomi-mcp-staging",
+        "--region", "europe-west1",
+    ])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Service: boomi-mcp-staging" in out
+    assert "Region:  europe-west1" in out
+    # The policy JSON block must contain the override values, not defaults.
+    assert "boomi-mcp-staging" in out
+    assert "europe-west1" in out
+    assert "staging-proj" in out
+    # --update-env-vars guard
+    assert "--update-env-vars BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=false" in out
+    assert "--set-env-vars BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=false" not in out
 
 
 def test_main_wet_run_fails_fast_when_unauthenticated(monkeypatch, capsys):
