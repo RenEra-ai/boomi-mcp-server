@@ -407,13 +407,26 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         # Database connector-settings preflight. Run the builder validator
-        # before routing so unsupported driver / auth / missing credential_ref /
-        # plaintext secret all fail during plan instead of at apply-time
-        # _create_component_raw. Does NOT mutate Boomi state.
+        # only when the apply path will actually invoke DatabaseConnectorBuilder.
+        # Reuse short-circuits (_apply_plan line ~547), update goes through
+        # update_connector (smart-merge / raw-XML), and raw-XML config.xml
+        # bypasses the builder in create_connector. Validating those paths
+        # would block legitimate plans. Mirror _execute_component's defaulting
+        # (component_name from comp.name) so the validated payload matches
+        # what the builder would actually see at apply time.
         validation_error: Optional[Dict[str, Any]] = None
-        if comp.type == "connector-settings" and \
-                (comp.config or {}).get("connector_type") == "database":
-            db_err = DatabaseConnectorBuilder.validate_config(comp.config or {})
+        raw_config = comp.config or {}
+        will_invoke_builder = (
+            comp.type == "connector-settings"
+            and raw_config.get("connector_type") == "database"
+            and not raw_config.get("xml")
+            and planned_action in ("create", "create_clone")
+        )
+        if will_invoke_builder:
+            effective_config = dict(raw_config)
+            if comp.name:
+                effective_config.setdefault("component_name", comp.name)
+            db_err = DatabaseConnectorBuilder.validate_config(effective_config)
             if db_err is not None:
                 planned_action = "error_database_validation"
                 validation_error = {
@@ -425,9 +438,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 # Scrub any plaintext secret value from the spec dump so the
                 # plan response never echoes credentials back to the caller.
                 if db_err.error_code == "PLAINTEXT_SECRET_REJECTED" \
-                        and db_err.field and comp.config \
-                        and db_err.field in comp.config:
-                    comp.config[db_err.field] = "[REDACTED]"
+                        and db_err.field and db_err.field in raw_config:
+                    raw_config[db_err.field] = "[REDACTED]"
 
         step: Dict[str, Any] = {
             "key": comp.key,
