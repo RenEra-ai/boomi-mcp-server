@@ -330,6 +330,143 @@ def test_singleflight_releases_slot_after_completion(monkeypatch, restore_oauth_
     assert call_count["n"] == 2
 
 
+class _FakeSharedBackend:
+    """In-memory stand-in for SharedGraceBackend used in unit tests."""
+
+    def __init__(self):
+        self.store: dict[str, dict] = {}
+        self.put_exc: Exception | None = None
+        self.get_calls = 0
+        self.put_calls = 0
+
+    async def get(self, key):
+        self.get_calls += 1
+        return self.store.get(key)
+
+    async def put(self, key, value, ttl_seconds):
+        self.put_calls += 1
+        if self.put_exc is not None:
+            return  # real backend swallows; mirror that here
+        self.store[key] = value
+
+    async def delete(self, key):
+        self.store.pop(key, None)
+
+
+def test_shared_backend_leader_writes_through(monkeypatch, restore_oauth_proxy):
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+    from mcp.shared.auth import OAuthToken
+
+    async def fake_exchange(self, client, refresh_token, scopes):
+        return OAuthToken(
+            access_token="AT-leader",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token="RT-leader",
+            scope=" ".join(scopes),
+        )
+
+    OAuthProxy.exchange_refresh_token = fake_exchange
+
+    shared = _FakeSharedBackend()
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch(shared_backend=shared)
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    rt = SimpleNamespace(token="rt-shared")
+    _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
+
+    from fastmcp.server.auth.oauth_proxy.models import _hash_token
+    h = _hash_token("rt-shared")
+    assert h in shared.store
+    payload = shared.store[h]
+    assert payload["access_token"] == "AT-leader"
+    assert payload["refresh_token"] == "RT-leader"
+    assert payload["client_id"] == "client-abc"
+    assert payload["scopes"] == ["openid"]
+
+
+def test_shared_backend_visible_to_second_instance(monkeypatch, restore_oauth_proxy):
+    """Simulates two Cloud Run replicas sharing one Mongo-backed grace.
+
+    Verifies the cross-replica visibility property: a rotation on
+    instance A is observed by instance B's load AND exchange without
+    re-running orig_exchange. This is the property that closes the
+    multi-instance gap left over from PR #33.
+    """
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+    from mcp.shared.auth import OAuthToken
+
+    exchange_calls = {"n": 0}
+
+    async def fake_exchange(self, client, refresh_token, scopes):
+        exchange_calls["n"] += 1
+        return OAuthToken(
+            access_token=f"AT-{exchange_calls['n']}",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token=f"RT-{exchange_calls['n']}",
+            scope=" ".join(scopes),
+        )
+
+    async def fake_load_returning_none(self, client, refresh_token):
+        return None
+
+    OAuthProxy.exchange_refresh_token = fake_exchange
+    OAuthProxy.load_refresh_token = fake_load_returning_none
+
+    shared = _FakeSharedBackend()
+
+    # "Instance 1": apply with the shared backend.
+    mod_a = _fresh_module()
+    mod_a.apply_refresh_token_grace_patch(shared_backend=shared)
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    rt = SimpleNamespace(token="rt-shared")
+    first_result = _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
+
+    # "Instance 2": re-apply with a fresh module load (= fresh local
+    # _TTLCache and inflight dict). Same shared backend.
+    mod_b = _fresh_module()
+    mod_b.apply_refresh_token_grace_patch(shared_backend=shared)
+
+    rt_from_b = _run(OAuthProxy.load_refresh_token(proxy, client, "rt-shared"))
+    assert rt_from_b is not None
+    assert rt_from_b.client_id == "client-abc"
+
+    second_result = _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
+    assert exchange_calls["n"] == 1, "second instance must NOT re-call orig_exchange"
+    assert second_result.access_token == first_result.access_token
+    assert second_result.refresh_token == first_result.refresh_token
+
+
+def test_shared_backend_put_failure_does_not_break_local_exchange(monkeypatch, restore_oauth_proxy):
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+    from mcp.shared.auth import OAuthToken
+
+    async def fake_exchange(self, client, refresh_token, scopes):
+        return OAuthToken(access_token="AT", token_type="Bearer", expires_in=3600)
+
+    OAuthProxy.exchange_refresh_token = fake_exchange
+
+    shared = _FakeSharedBackend()
+    shared.put_exc = RuntimeError("simulated mongo outage")
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch(shared_backend=shared)
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    rt = SimpleNamespace(token="rt-shared")
+    result = _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
+    # Local caller still gets the OAuthToken even though shared put "failed".
+    assert result.access_token == "AT"
+
+
 def test_grace_cache_rejects_cross_client_replay(monkeypatch, restore_oauth_proxy):
     """A cached entry must only be honored for the original client_id."""
     monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")

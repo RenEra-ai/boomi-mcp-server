@@ -60,7 +60,7 @@ class _TTLCache:
                 self._data.popitem(last=False)
 
 
-def apply_refresh_token_grace_patch() -> None:
+def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
     """Install the grace-window monkey-patches on OAuthProxy.
 
     Idempotent at import time: applies once per Python process. Calling
@@ -68,6 +68,14 @@ def apply_refresh_token_grace_patch() -> None:
     methods with functionally identical wrappers (the inner cache is
     re-created, which is acceptable -- there are no live tokens at
     server startup).
+
+    Args:
+        shared_backend: Optional rt_grace_shared_backend.SharedGraceBackend
+            instance. When provided, the leader's rotated tokens are
+            written through to the shared backend after orig_exchange
+            succeeds, and followers on the same OR other Cloud Run
+            replicas consult the shared backend on local cache miss.
+            When None, behavior matches PR #33 (per-process only).
     """
     grace_seconds = int(os.getenv("BOOMI_RT_GRACE_SECONDS", "60"))
     if grace_seconds <= 0:
@@ -93,9 +101,45 @@ def apply_refresh_token_grace_patch() -> None:
     from fastmcp.server.auth.oauth_proxy.models import _hash_token
     from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
     from mcp.server.auth.provider import RefreshToken
+    from mcp.shared.auth import OAuthToken
 
     orig_load_refresh_token = OAuthProxy.load_refresh_token
     orig_exchange_refresh_token = OAuthProxy.exchange_refresh_token
+
+    def _serialize(oauth_token, client_id, scopes_list):
+        """OAuthToken + identity -> JSON-friendly dict for the shared backend."""
+        return {
+            "access_token": oauth_token.access_token,
+            "token_type": oauth_token.token_type,
+            "expires_in": oauth_token.expires_in,
+            "refresh_token": oauth_token.refresh_token,
+            "scope": oauth_token.scope,
+            "client_id": client_id,
+            "scopes": list(scopes_list),
+        }
+
+    def _deserialize(payload):
+        """Shared-backend payload -> (OAuthToken, client_id, scopes_list)."""
+        return (
+            OAuthToken(
+                access_token=payload["access_token"],
+                token_type=payload.get("token_type", "Bearer"),
+                expires_in=payload.get("expires_in"),
+                refresh_token=payload.get("refresh_token"),
+                scope=payload.get("scope"),
+            ),
+            payload.get("client_id"),
+            payload.get("scopes") or [],
+        )
+
+    async def _shared_get(old_hash):
+        """Return (OAuthToken, client_id, scopes) from the shared backend, or None."""
+        if shared_backend is None:
+            return None
+        payload = await shared_backend.get(old_hash)
+        if not payload or "access_token" not in payload:
+            return None
+        return _deserialize(payload)
 
     async def patched_load_refresh_token(self, client, refresh_token):
         result = await orig_load_refresh_token(self, client, refresh_token)
@@ -122,7 +166,15 @@ def apply_refresh_token_grace_patch() -> None:
 
         cached = await cache.get(old_hash)
         if cached is None:
-            return None
+            # Local L1 miss. Consult the shared L2 (Fix D) -- a leader on
+            # ANOTHER Cloud Run replica may have already rotated this RT.
+            cached = await _shared_get(old_hash)
+            if cached is None:
+                return None
+            logger.info(
+                "Refresh-token grace SHARED HIT in load (client=%s)",
+                (client.client_id or "<none>")[:8],
+            )
 
         oauth_token, cached_client_id, cached_scopes = cached
         # Cross-client reuse defense: only honor the grace entry for the
@@ -162,14 +214,40 @@ def apply_refresh_token_grace_patch() -> None:
             )
             return oauth_token
 
+        # Shared L2 fast path: a leader on ANOTHER replica may have
+        # already rotated. If so, return their result and skip both the
+        # local singleflight and any upstream call.
+        shared_cached = await _shared_get(old_hash)
+        if shared_cached is not None:
+            oauth_token, _cid, _scp = shared_cached
+            # Warm the local L1 cache so subsequent calls on this replica
+            # don't pay the shared-get latency again.
+            await cache.set(
+                old_hash, shared_cached, time.time() + grace_seconds
+            )
+            logger.info(
+                "Refresh-token grace SHARED HIT in exchange (client=%s)",
+                client_id_repr,
+            )
+            return oauth_token
+
         # Singleflight: claim the slot or piggyback on the in-flight leader.
         is_leader = False
         async with inflight_lock:
-            # Re-check the cache under the lock to close the obvious
+            # Re-check the local cache under the lock to close the obvious
             # check-then-act race against a leader that just finished.
             cached = await cache.get(old_hash)
             if cached is not None:
                 return cached[0]
+            # Also re-check the shared cache under the lock so a write from
+            # another replica between the fast-path check and lock entry
+            # is observed before we needlessly claim a singleflight slot.
+            shared_cached = await _shared_get(old_hash)
+            if shared_cached is not None:
+                await cache.set(
+                    old_hash, shared_cached, time.time() + grace_seconds
+                )
+                return shared_cached[0]
             future = inflight.get(old_hash)
             if future is None:
                 future = asyncio.get_event_loop().create_future()
@@ -200,6 +278,15 @@ def apply_refresh_token_grace_patch() -> None:
             (result, client.client_id, list(scopes)),
             time.time() + grace_seconds,
         )
+        # Write through to the shared backend (Fix D). The backend
+        # swallows storage errors and logs WARNING, so the local caller
+        # is never blocked by a Mongo blip.
+        if shared_backend is not None:
+            await shared_backend.put(
+                old_hash,
+                _serialize(result, client.client_id, list(scopes)),
+                grace_seconds,
+            )
         async with inflight_lock:
             inflight.pop(old_hash, None)
         if not future.done():
@@ -209,7 +296,8 @@ def apply_refresh_token_grace_patch() -> None:
     OAuthProxy.load_refresh_token = patched_load_refresh_token
     OAuthProxy.exchange_refresh_token = patched_exchange_refresh_token
     logger.info(
-        "Refresh-token grace window ENABLED (%ds, max_size=%d, singleflight=on)",
+        "Refresh-token grace window ENABLED (%ds, max_size=%d, singleflight=on, shared_backend=%s)",
         grace_seconds,
         max_size,
+        "on" if shared_backend is not None else "off",
     )
