@@ -151,3 +151,70 @@ def test_initialize_missing_fernet_raises(monkeypatch):
     monkeypatch.setenv("BOOMI_RT_GRACE_SHARED", "true")
     with pytest.raises(ValueError, match="Fernet"):
         initialize_shared_grace_backend("mongodb://x", None)
+
+
+# ---------- Fix D.2 lock primitives ----------
+
+class _FakeLockCollection:
+    """In-memory motor-shaped collection used to test lock methods.
+
+    Mimics pymongo's DuplicateKeyError on insert_one for an existing _id.
+    """
+
+    def __init__(self):
+        self.docs: dict[str, dict] = {}
+        self.insert_calls = 0
+        self.delete_calls = 0
+
+    async def insert_one(self, doc):
+        self.insert_calls += 1
+        key = doc["_id"]
+        if key in self.docs:
+            from pymongo.errors import DuplicateKeyError
+            raise DuplicateKeyError("duplicate _id")
+        self.docs[key] = doc
+
+    async def delete_one(self, filt):
+        self.delete_calls += 1
+        self.docs.pop(filt["_id"], None)
+        return None
+
+
+def test_supports_locks_property():
+    backend_a = SharedGraceBackend(_StubStore())
+    assert backend_a.supports_locks is False
+    backend_b = SharedGraceBackend(_StubStore(), lock_collection=_FakeLockCollection())
+    assert backend_b.supports_locks is True
+
+
+def test_try_claim_lock_first_wins_second_loses():
+    lock_coll = _FakeLockCollection()
+    backend = SharedGraceBackend(_StubStore(), lock_collection=lock_coll)
+    first = _run(backend.try_claim_lock("k1", 30, "instance-A"))
+    second = _run(backend.try_claim_lock("k1", 30, "instance-B"))
+    assert first is True
+    assert second is False
+    assert lock_coll.docs["k1"]["instance"] == "instance-A"
+
+
+def test_release_lock_lets_next_claim_succeed():
+    lock_coll = _FakeLockCollection()
+    backend = SharedGraceBackend(_StubStore(), lock_collection=lock_coll)
+    assert _run(backend.try_claim_lock("k1", 30, "A")) is True
+    _run(backend.release_lock("k1"))
+    assert _run(backend.try_claim_lock("k1", 30, "B")) is True
+
+
+def test_try_claim_lock_raises_when_locks_unsupported():
+    backend = SharedGraceBackend(_StubStore())  # no lock_collection
+    with pytest.raises(RuntimeError, match="BOOMI_RT_GRACE_DISTRIBUTED_LOCK"):
+        _run(backend.try_claim_lock("k1", 30, "A"))
+
+
+def test_write_failure_marker_lands_in_shared_cache():
+    backing = MemoryStore()
+    wrapped = FernetEncryptionWrapper(key_value=backing, fernet=Fernet(_new_key()))
+    backend = SharedGraceBackend(wrapped)
+    _run(backend.write_failure_marker("k1", "RuntimeError"))
+    payload = _run(backend.get("k1"))
+    assert payload == {"error": "RuntimeError"}

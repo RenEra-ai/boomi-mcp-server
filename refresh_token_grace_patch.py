@@ -85,6 +85,19 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
     max_size = int(os.getenv("BOOMI_RT_GRACE_MAX_SIZE", "512"))
     cache = _TTLCache(max_size=max_size)
 
+    # Fix D.2: distributed singleflight settings (opt-in).
+    distributed_lock_enabled = (
+        shared_backend is not None
+        and getattr(shared_backend, "supports_locks", False)
+    )
+    lock_ttl_seconds = int(os.getenv("BOOMI_RT_GRACE_LOCK_TTL_SECONDS", "30"))
+    lock_poll_seconds = max(
+        0.01, int(os.getenv("BOOMI_RT_GRACE_LOCK_POLL_MS", "100")) / 1000.0
+    )
+
+    import socket
+    instance_id = os.getenv("HOSTNAME") or socket.gethostname() or "unknown"
+
     # Per-token singleflight: ensures only one call into the underlying
     # OAuthProxy.exchange_refresh_token runs for each old refresh-token
     # hash, even under concurrent (parallel-tab / network-retry) load.
@@ -133,13 +146,43 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
         )
 
     async def _shared_get(old_hash):
-        """Return (OAuthToken, client_id, scopes) from the shared backend, or None."""
+        """Return (OAuthToken, client_id, scopes) from the shared backend, or None.
+
+        Returns None for a payload missing the access_token field (e.g.,
+        a Fix-D.2 failure marker placeholder); the failure-marker case is
+        handled separately by `_poll_shared_for_result`.
+        """
         if shared_backend is None:
             return None
         payload = await shared_backend.get(old_hash)
         if not payload or "access_token" not in payload:
             return None
         return _deserialize(payload)
+
+    async def _poll_shared_for_result(old_hash, max_wait_seconds, poll_seconds):
+        """Fix D.2 follower: poll the shared backend until the leader
+        publishes a result, a failure marker, or we time out.
+
+        Returns:
+            (OAuthToken, client_id, scopes) on success.
+            Raises TokenError on a failure marker (so the framework returns
+            the same invalid_grant 401 the local leader would have).
+            None on timeout (caller falls through to best-effort orig).
+        """
+        from mcp.server.auth.provider import TokenError
+        deadline = time.time() + max_wait_seconds
+        while time.time() < deadline:
+            payload = await shared_backend.get(old_hash) if shared_backend else None
+            if payload:
+                if "error" in payload:
+                    raise TokenError(
+                        "invalid_grant",
+                        f"Refresh rotation failed on peer instance: {payload['error']}",
+                    )
+                if "access_token" in payload:
+                    return _deserialize(payload)
+            await asyncio.sleep(poll_seconds)
+        return None
 
     async def patched_load_refresh_token(self, client, refresh_token):
         result = await orig_load_refresh_token(self, client, refresh_token)
@@ -263,41 +306,110 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
             # same TokenError to all racing callers.
             return await future
 
-        # Leader path: run the real exchange, populate the cache, and
-        # release the singleflight slot regardless of outcome.
+        # Leader path: we hold the local singleflight slot. If Fix D.2
+        # is enabled, also try to claim the cross-instance lock. If we
+        # don't get the distributed lock, become a remote-follower:
+        # poll the shared backend for the result the OTHER replica is
+        # producing. If we time out, fall through to orig (best-effort
+        # degrade -- same outcome as if D.2 were disabled).
+        distributed_lock_held = False
         try:
-            result = await orig_exchange_refresh_token(self, client, refresh_token, scopes)
-        except BaseException as exc:
+            if distributed_lock_enabled:
+                distributed_lock_held = await shared_backend.try_claim_lock(
+                    old_hash, lock_ttl_seconds, instance_id
+                )
+                if not distributed_lock_held:
+                    logger.info(
+                        "Refresh-token grace DISTRIBUTED FOLLOWER (client=%s, instance=%s)",
+                        client_id_repr,
+                        instance_id,
+                    )
+                    remote_result = await _poll_shared_for_result(
+                        old_hash, lock_ttl_seconds, lock_poll_seconds
+                    )
+                    if remote_result is not None:
+                        oauth_token, _cid, _scp = remote_result
+                        await cache.set(
+                            old_hash, remote_result, time.time() + grace_seconds
+                        )
+                        # Release the local singleflight to local followers
+                        # waiting on our future.
+                        async with inflight_lock:
+                            inflight.pop(old_hash, None)
+                        if not future.done():
+                            future.set_result(oauth_token)
+                        return oauth_token
+                    # Timed out waiting on the remote leader -- best-effort
+                    # fall through to orig. Try again to claim the lock so
+                    # we don't double-rotate gratuitously; if we still fail,
+                    # proceed anyway.
+                    distributed_lock_held = await shared_backend.try_claim_lock(
+                        old_hash, lock_ttl_seconds, instance_id
+                    )
+                    logger.warning(
+                        "Refresh-token grace DISTRIBUTED FOLLOWER timed out "
+                        "for client=%s -- proceeding with orig_exchange",
+                        client_id_repr,
+                    )
+
+            try:
+                result = await orig_exchange_refresh_token(self, client, refresh_token, scopes)
+            except BaseException as exc:
+                # On leader exception, write a short-lived failure marker
+                # so remote followers see the failure within ~5s instead
+                # of waiting the full lock TTL.
+                if distributed_lock_held:
+                    try:
+                        await shared_backend.write_failure_marker(
+                            old_hash, type(exc).__name__
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                async with inflight_lock:
+                    inflight.pop(old_hash, None)
+                if not future.done():
+                    future.set_exception(exc)
+                    # Mark the exception as retrieved so Python doesn't warn
+                    # on GC when there are no local followers awaiting it.
+                    try:
+                        future.exception()
+                    except (asyncio.CancelledError, asyncio.InvalidStateError):
+                        pass
+                raise
+
+            await cache.set(
+                old_hash,
+                (result, client.client_id, list(scopes)),
+                time.time() + grace_seconds,
+            )
+            # Write through to the shared backend (Fix D). The backend
+            # swallows storage errors and logs WARNING, so the local caller
+            # is never blocked by a Mongo blip.
+            if shared_backend is not None:
+                await shared_backend.put(
+                    old_hash,
+                    _serialize(result, client.client_id, list(scopes)),
+                    grace_seconds,
+                )
             async with inflight_lock:
                 inflight.pop(old_hash, None)
             if not future.done():
-                future.set_exception(exc)
-            raise
-        await cache.set(
-            old_hash,
-            (result, client.client_id, list(scopes)),
-            time.time() + grace_seconds,
-        )
-        # Write through to the shared backend (Fix D). The backend
-        # swallows storage errors and logs WARNING, so the local caller
-        # is never blocked by a Mongo blip.
-        if shared_backend is not None:
-            await shared_backend.put(
-                old_hash,
-                _serialize(result, client.client_id, list(scopes)),
-                grace_seconds,
-            )
-        async with inflight_lock:
-            inflight.pop(old_hash, None)
-        if not future.done():
-            future.set_result(result)
-        return result
+                future.set_result(result)
+            return result
+        finally:
+            if distributed_lock_held:
+                try:
+                    await shared_backend.release_lock(old_hash)
+                except Exception:  # noqa: BLE001
+                    pass
 
     OAuthProxy.load_refresh_token = patched_load_refresh_token
     OAuthProxy.exchange_refresh_token = patched_exchange_refresh_token
     logger.info(
-        "Refresh-token grace window ENABLED (%ds, max_size=%d, singleflight=on, shared_backend=%s)",
+        "Refresh-token grace window ENABLED (%ds, max_size=%d, singleflight=on, "
+        "shared_backend=%s, distributed_lock=%s)",
         grace_seconds,
         max_size,
         "on" if shared_backend is not None else "off",
+        "on" if distributed_lock_enabled else "off",
     )
