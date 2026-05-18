@@ -383,10 +383,12 @@ if not LOCAL_MODE:
     from consent_csp_patch import apply_consent_csp_patch
     from loopback_redirect_patch import apply_loopback_redirect_patch
     from refresh_token_grace_patch import apply_refresh_token_grace_patch
+    from token_cache_patch import apply_token_verifier_cache_patch
 
     apply_consent_csp_patch()
     apply_loopback_redirect_patch()
     apply_refresh_token_grace_patch()
+    apply_token_verifier_cache_patch()
 
     # Create Google OAuth provider
     try:
