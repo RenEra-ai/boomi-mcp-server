@@ -708,6 +708,59 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert "LEAK_UPDATE_DEADBEEF" not in repr(plan_secret)
 
     @patch(_PATCH_TARGET)
+    def test_nested_secret_in_pooling_block_redacted_in_plan_output(self, mock_pag):
+        """Codex P1 (post-Issue #31): a forbidden secret-shaped key inside the
+        new pooling/write_options dicts must (a) trip the plaintext-secret
+        error (NOT the sub-block validator), and (b) be scrubbed from the
+        plan's spec echo at any depth."""
+        mock_pag.return_value = []
+        comp = _db_comp(pooling={"password": "LEAK_NESTED_POOLING_DEADBEEF"})
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "pooling.password"
+        # Spec echo must not contain the leaked value
+        echoed_pooling = plan["integration_spec"]["components"][0]["config"]["pooling"]
+        assert echoed_pooling["password"] == "[REDACTED]"
+        assert "LEAK_NESTED_POOLING_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
+    def test_nested_secret_in_write_options_block_redacted_in_plan_output(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp(write_options={"secret": "LEAK_NESTED_WO_DEADBEEF"})
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "write_options.secret"
+        echoed_wo = plan["integration_spec"]["components"][0]["config"]["write_options"]
+        assert echoed_wo["secret"] == "[REDACTED]"
+        assert "LEAK_NESTED_WO_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
+    def test_mixed_top_level_and_nested_secrets_all_redacted_in_plan_output(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp(
+            password="LEAK_TOP_DEADBEEF",  # top-level wins for error message
+            pooling={"token": "LEAK_NESTED_POOL_DEADBEEF"},
+            write_options={"access_token": "LEAK_NESTED_WO_DEADBEEF"},
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        # Top-level offender wins the error
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "password"
+        # But the echo redacts ALL three
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["password"] == "[REDACTED]"
+        assert echoed["pooling"]["token"] == "[REDACTED]"
+        assert echoed["write_options"]["access_token"] == "[REDACTED]"
+        plan_repr = repr(plan)
+        assert "LEAK_TOP_DEADBEEF" not in plan_repr
+        assert "LEAK_NESTED_POOL_DEADBEEF" not in plan_repr
+        assert "LEAK_NESTED_WO_DEADBEEF" not in plan_repr
+
+    @patch(_PATCH_TARGET)
     def test_raw_xml_path_skips_shape_validation_but_keeps_secret_scan(self, mock_pag):
         """Raw-XML create path bypasses full builder validation — custom driver
         XML CAN be supplied via raw XML (documented escape hatch). Plaintext

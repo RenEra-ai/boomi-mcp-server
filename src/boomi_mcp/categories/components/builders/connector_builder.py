@@ -329,9 +329,15 @@ class DatabaseConnectorBuilder:
 
     @classmethod
     def scan_forbidden_secret_fields(
-        cls, config: Dict[str, Any]
+        cls, config: Any, _path_prefix: str = ""
     ) -> Optional[BuilderValidationError]:
-        """Detect plaintext secret-shaped keys.
+        """Detect plaintext secret-shaped keys at any depth.
+
+        Walks the config dict tree depth-first. At each level, checks for
+        FORBIDDEN_SECRET_FIELDS in the iteration order of that tuple (so
+        'password' beats 'token' when both are present at the same depth —
+        matches M2.2 priority). Returns the first offender with a dotted-path
+        `field` (e.g. 'password', 'pooling.password', 'write_options.secret').
 
         Independent of builder invocation — plaintext secrets are a hard
         error regardless of which apply path the component takes (create /
@@ -339,16 +345,21 @@ class DatabaseConnectorBuilder:
         preflight) should run this on every database connector-settings
         config to keep credentials out of plan output.
         """
+        if not isinstance(config, dict):
+            return None
+        # Check forbidden keys at the current level first (preserves the
+        # M2.2 priority where 'password' wins over 'token' at the same depth).
         for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
             if forbidden in config:
+                field_path = f"{_path_prefix}{forbidden}"
                 return BuilderValidationError(
-                    f"{forbidden!r} cannot be supplied in database connector "
+                    f"{field_path!r} cannot be supplied in database connector "
                     "config — secrets must cross the wire as opaque "
                     "credential_ref strings only. Boomi stores passwords as "
                     "ciphertext produced by its own encryption; there is no "
                     "public API to encrypt a plaintext value.",
                     error_code="PLAINTEXT_SECRET_REJECTED",
-                    field=forbidden,
+                    field=field_path,
                     hint=(
                         "Remove the secret-shaped field and pass "
                         "credential_ref='credential://...' instead. Set the "
@@ -356,7 +367,34 @@ class DatabaseConnectorBuilder:
                         "pre-encrypted XML via config.xml=..."
                     ),
                 )
+        # Then recurse into nested dicts (e.g. pooling, write_options, or any
+        # future block). Insertion order preserved (Python 3.7+).
+        for key, value in config.items():
+            if isinstance(value, dict):
+                nested = cls.scan_forbidden_secret_fields(
+                    value, _path_prefix=f"{_path_prefix}{key}."
+                )
+                if nested is not None:
+                    return nested
         return None
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        """Recursively replace any forbidden-keyed values with '[REDACTED]'.
+
+        Mirrors scan_forbidden_secret_fields' traversal. Callers (e.g.
+        integration_builder _build_plan) use this to scrub the spec echo
+        before returning a plan response — otherwise nested secrets like
+        pooling.password would leak even after the error is raised.
+        """
+        if not isinstance(config, dict):
+            return
+        for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
+            if forbidden in config:
+                config[forbidden] = "[REDACTED]"
+        for value in config.values():
+            if isinstance(value, dict):
+                cls.redact_forbidden_secret_fields_in_place(value)
 
     @classmethod
     def validate_pooling(
