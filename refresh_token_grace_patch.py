@@ -417,7 +417,7 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
         finally:
             if distributed_lock_held:
                 try:
-                    await shared_backend.release_lock(old_hash)
+                    await shared_backend.release_lock(old_hash, instance_id)
                 except Exception:  # noqa: BLE001
                     pass
 
