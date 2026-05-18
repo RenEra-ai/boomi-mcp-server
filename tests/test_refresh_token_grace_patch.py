@@ -372,9 +372,11 @@ class _FakeSharedBackend:
         self.lock_holder[key] = instance
         return True
 
-    async def release_lock(self, key):
+    async def release_lock(self, key, instance):
         self.release_calls += 1
-        self.lock_holder.pop(key, None)
+        # Owner-scoped: only the original claimant can release.
+        if self.lock_holder.get(key) == instance:
+            self.lock_holder.pop(key, None)
 
     async def write_failure_marker(self, key, error_type, short_ttl=5):
         self.failure_marker_calls += 1

@@ -184,7 +184,15 @@ class _FakeLockCollection:
 
     async def delete_one(self, filt):
         self.delete_calls += 1
-        self.docs.pop(filt["_id"], None)
+        key = filt["_id"]
+        existing = self.docs.get(key)
+        if existing is None:
+            return None
+        # Match motor/pymongo semantics: only delete when every filter
+        # field matches the stored document. Owner-scoped release_lock
+        # passes both _id and instance, so the wrong instance is a no-op.
+        if all(existing.get(k) == v for k, v in filt.items() if k != "_id"):
+            del self.docs[key]
         return None
 
 
@@ -209,8 +217,45 @@ def test_release_lock_lets_next_claim_succeed():
     lock_coll = _FakeLockCollection()
     backend = SharedGraceBackend(_StubStore(), lock_collection=lock_coll)
     assert _run(backend.try_claim_lock("k1", 30, "A")) is True
-    _run(backend.release_lock("k1"))
+    _run(backend.release_lock("k1", "A"))
     assert _run(backend.try_claim_lock("k1", 30, "B")) is True
+
+
+def test_release_lock_wrong_instance_does_not_delete():
+    """A non-owner caller must not be able to delete another owner's lock.
+
+    This is the hazard when try_claim_lock returns True after an
+    ambiguous insert failure (the degrade-to-no-lock fallthrough):
+    the non-owner caller would otherwise unlock the real owner.
+    """
+    lock_coll = _FakeLockCollection()
+    backend = SharedGraceBackend(_StubStore(), lock_collection=lock_coll)
+    assert _run(backend.try_claim_lock("k1", 30, "A")) is True
+    _run(backend.release_lock("k1", "B"))  # wrong owner attempts release
+    # A's lock must survive — a fresh claim still loses.
+    assert _run(backend.try_claim_lock("k1", 30, "C")) is False
+    assert lock_coll.docs["k1"]["instance"] == "A"
+
+
+def test_stale_leader_release_does_not_evict_fresh_leader():
+    """The TTL-expiry race: a slow leader runs past the lock TTL,
+    Mongo's TTL sweep removes the lock, and a peer claims a fresh one.
+    The original leader's finally block must NOT delete the new
+    leader's lock — that would reopen the duplicate-refresh race the
+    lock exists to prevent.
+    """
+    lock_coll = _FakeLockCollection()
+    backend = SharedGraceBackend(_StubStore(), lock_collection=lock_coll)
+    # Stale leader claims, lock TTL-expires, peer claims fresh:
+    assert _run(backend.try_claim_lock("k1", 30, "stale-A")) is True
+    lock_coll.docs.pop("k1")  # simulate Mongo TTL eviction
+    assert _run(backend.try_claim_lock("k1", 30, "fresh-B")) is True
+    # Stale leader now returns from its slow exchange and releases:
+    _run(backend.release_lock("k1", "stale-A"))
+    # Fresh leader's lock must still be intact; a third peer still loses.
+    assert "k1" in lock_coll.docs
+    assert lock_coll.docs["k1"]["instance"] == "fresh-B"
+    assert _run(backend.try_claim_lock("k1", 30, "C")) is False
 
 
 def test_try_claim_lock_raises_when_locks_unsupported():
