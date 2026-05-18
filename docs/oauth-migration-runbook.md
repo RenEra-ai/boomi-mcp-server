@@ -273,3 +273,116 @@ Per-fix off-switches: set `BOOMI_TOKEN_CACHE_DISABLE=true`,
 `BOOMI_RT_GRACE_SHARED=false`, or `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=false`.
 Full rollback: `git revert <merge_commit>`. The two new MongoDB
 collections auto-evict via TTL; explicit cleanup is optional.
+
+## Self-heal circuit-breaker alert (Fix C.2 safety)
+
+### Why
+
+Fix C.2 (`storage_healing_patch.py`, default-on) deletes any
+`mcp-oauth-proxy-clients` document that fails decryption /
+deserialization so the affected client can re-register cleanly via
+DCR. The dangerous failure mode: a misconfigured
+`STORAGE_ENCRYPTION_KEY` rotation — e.g., the operator drops OLD_KEY
+before `scripts/rewrap_oauth_clients.py` finishes — makes EVERY
+long-lived DCR client doc fail decryption, and the heal path silently
+deletes them all as each user's client hits the server. The only
+operator-visible signal is the ERROR log line
+`Corrupted oauth client document detected` — which is only useful if
+someone is watching.
+
+This alert is the circuit-breaker: it fires when the deletion rate
+exceeds normal-operations baseline, so an operator can flip
+`BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=false` before the wave consumes the
+whole client registry.
+
+### One-time setup
+
+The alert is provisioned by an idempotent operator helper:
+
+```bash
+# Review what would be created without touching GCP:
+python scripts/setup_corruption_alert.py --dry-run
+
+# Run for real with a pre-existing notification channel:
+python scripts/setup_corruption_alert.py \
+  --notification-channel projects/boomimcp/notificationChannels/<channel-id>
+```
+
+Defaults: project `boomimcp`, service `boomi-mcp-server`, metric
+`boomi-mcp-oauth-client-corruption`, policy
+`boomi-mcp-oauth-client-corruption-rate`, threshold **more than 3
+deletions in any 300 s rolling window**. Override via
+`--threshold`/`--duration-seconds`. Re-runs skip existing resources;
+pass `--update` to delete and recreate.
+
+Prerequisite: `gcloud auth login` against an account with
+`logging.logMetrics.create`, `monitoring.alertPolicies.create` on
+project `boomimcp`. The script fails fast if no active account.
+
+### Response runbook (when the alert fires)
+
+1. **Stop the bleeding immediately.** Flip the kill switch with the
+   **additive** flag — `--update-env-vars` adds/overrides the named
+   variable while leaving every other env var (`OIDC_*`, `MONGODB_URI`,
+   `JWT_SIGNING_KEY`, `STORAGE_ENCRYPTION_KEY`, `SESSION_SECRET`, ...)
+   intact. Do **not** use `--set-env-vars` here — it replaces the entire
+   env-var set and would take the service down during the incident:
+   ```bash
+   gcloud run services update boomi-mcp-server \
+     --region us-central1 --project boomimcp \
+     --update-env-vars BOOMI_AUTH_HEAL_CORRUPT_CLIENTS=false
+   ```
+   Cloud Run rolls a new revision; further `get_client` failures still
+   log ERROR but no longer delete the document.
+
+2. **Identify scope.** Recent deletions:
+   ```bash
+   SINCE=$(python3 -c "from datetime import datetime,timedelta,timezone; \
+     print((datetime.now(timezone.utc)-timedelta(minutes=30)) \
+       .strftime('%Y-%m-%dT%H:%M:%SZ'))")
+   gcloud logging read \
+     "resource.type=\"cloud_run_revision\" \
+      AND resource.labels.service_name=\"boomi-mcp-server\" \
+      AND severity=ERROR \
+      AND textPayload:\"Corrupted oauth client document detected\" \
+      AND timestamp>=\"${SINCE}\"" \
+     --project boomimcp --limit 50 \
+     --format="table(timestamp,textPayload)"
+   ```
+
+3. **Inspect MongoDB.** Compare current row count in
+   `mcp-oauth-proxy-clients` against the diagnose script's prior
+   snapshot:
+   ```bash
+   MONGODB_URI=$(gcloud secrets versions access latest --secret=mongodb-uri --project=boomimcp) \
+   STORAGE_ENCRYPTION_KEY=$(gcloud secrets versions access latest --secret=storage-encryption-key --project=boomimcp) \
+     python scripts/diagnose_oauth_storage.py
+   ```
+
+4. **Root-cause.** Common triggers in order of likelihood:
+   - Key rotation: `STORAGE_ENCRYPTION_KEY` was just changed; the
+     rewrap step was skipped. Recover by restoring the old key as
+     part of the MultiFernet list and re-running
+     `scripts/rewrap_oauth_clients.py`.
+   - Bad migration: somebody manually edited the collection in
+     MongoDB Atlas, corrupting the BSON value.
+   - Single-user bit-rot: only one client_id appears in step 2;
+     this is the rare-but-real edge case and Fix C.2 handled it
+     correctly. Re-enable the heal in step 5.
+
+5. **Re-enable self-heal once root cause is verified fixed.** Remove
+   the kill-switch env var:
+   ```bash
+   gcloud run services update boomi-mcp-server \
+     --region us-central1 --project boomimcp \
+     --remove-env-vars BOOMI_AUTH_HEAL_CORRUPT_CLIENTS
+   ```
+
+### SLO note
+
+The metric also acts as a low-grade SLO: steady-state value is **zero**.
+Any non-zero rate over a 24-hour window indicates either real data
+corruption, a botched rotation, or a regression in the storage stack
+worth investigating. The alert's 300 s / >3 threshold is the
+*circuit-breaker* tier, not the *SLO* tier; long-term zero is the
+real target.
