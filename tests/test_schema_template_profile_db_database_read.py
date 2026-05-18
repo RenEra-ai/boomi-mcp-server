@@ -106,7 +106,9 @@ def test_template_documents_output_field_shape():
     shape = result["output_field_shape"]
     assert shape["name"]["required"] is True
     assert shape["data_type"]["default"] == "character"
-    assert shape["data_type"]["supported"] == ["character"]
+    # Issue #23 follow-up: character + number + datetime, all verified against
+    # live profile.db XML.
+    assert set(shape["data_type"]["supported"]) == {"character", "number", "datetime"}
 
 
 def test_template_documents_parameter_shape():
@@ -138,9 +140,18 @@ def test_template_documents_forbidden_secret_fields():
 def test_template_documents_out_of_scope_variants():
     result = _call(component_type="profile.db", protocol="database.read")
     out_of_scope = result["out_of_scope"]
-    assert "stored_procedure_read" in out_of_scope
+    # Stored Procedure Read moved into see_also (now in scope under a
+    # separate protocol). write_profile is still out of scope.
+    assert "stored_procedure_read" not in out_of_scope
     assert "write_profile" in out_of_scope
     assert "#32" in out_of_scope["write_profile"]
+
+
+def test_template_points_at_stored_procedure_variant_via_see_also():
+    result = _call(component_type="profile.db", protocol="database.read")
+    see_also = result.get("see_also", {})
+    assert "stored_procedure_read" in see_also
+    assert "database.stored_procedure_read" in see_also["stored_procedure_read"]
 
 
 # ----------------------------------------------------------------------------

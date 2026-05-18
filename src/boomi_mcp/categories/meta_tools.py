@@ -1093,13 +1093,15 @@ _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
 
 
 # ============================================================================
-# Issue #23 (M2.3) — Database Read Profile + Database Get Operation templates
+# Issue #23 (M2.3) — Database Read Profile (Select + Stored Procedure) +
+# Database Get Operation templates
 #
 # Examples MUST use angle-bracket placeholders (<<task-authored SQL>>,
-# <<field_name>>, $ref:<key>). No canned SQL, no table/column names, no CDS
-# wrapper snippets, no payload templates. Database Send/write is OUT OF
-# SCOPE — defer to issue #32 (DatabaseSendAction, WriteProfile, commit
-# semantics, JDBC batching, dynamic insert/update/delete).
+# <<field_name>>, <<schema.procedure>>, $ref:<key>). No canned SQL,
+# procedure names, table/column names, CDS wrapper snippets, or payload
+# templates. Database Send/write is OUT OF SCOPE — defer to issue #32
+# (DatabaseSendAction, WriteProfile, commit semantics, JDBC batching,
+# dynamic insert/update/delete).
 # ============================================================================
 
 _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
@@ -1155,10 +1157,11 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
         "data_type": {
             "type": "string",
             "default": "character",
-            "supported": ["character"],
+            "supported": ["character", "number", "datetime"],
             "note": (
-                "v1 supports character only; other Boomi profile types (date, "
-                "number, datetime) require live-XML shape verification."
+                "Each Boomi dataType maps to a <DataFormat> child: "
+                "character→ProfileCharacterFormat, number→ProfileNumberFormat, "
+                "datetime→ProfileDateFormat."
             ),
         },
         "mandatory": {"type": "boolean", "default": False},
@@ -1169,7 +1172,7 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
         "data_type": {
             "type": "string",
             "default": "character",
-            "supported": ["character"],
+            "supported": ["character", "number", "datetime"],
         },
         "mappable": {"type": "boolean", "default": False},
     },
@@ -1185,7 +1188,7 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
         "MISSING_DB_QUERY": "query is absent or blank",
         "MISSING_DB_OUTPUT_FIELDS": "output_fields list is missing or empty",
         "UNSUPPORTED_DB_PROFILE_MODE": "profile_type is not database.read",
-        "UNSUPPORTED_DB_PROFILE_FIELD_TYPE": "data_type other than character",
+        "UNSUPPORTED_DB_PROFILE_FIELD_TYPE": "data_type not in character/number/datetime",
         "DATABASE_OPERATION_VALIDATION_FAILED": "shape / type / cross-field issue",
         "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
     },
@@ -1231,13 +1234,200 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
         ),
     },
     "out_of_scope": {
+        "write_profile": (
+            "Database write profiles (Standard/Dynamic Insert/Update/Delete, "
+            "Stored Procedure Write) are tracked by issue #32."
+        ),
+    },
+    "see_also": {
         "stored_procedure_read": (
-            "Stored Procedure Read profile is a Boomi-supported variant not "
-            "yet implemented; deferred to a follow-up."
+            "For procedure-based Read profiles, use "
+            "protocol='database.stored_procedure_read' instead — that "
+            "template emits statementType='spread', accepts a procedure_name "
+            "config key, and supports parameters[].mode='in'/'out'/'inout'."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "profile.db",
+    "protocol": "database.stored_procedure_read",
+    "tool": "manage_component (action='create')",
+    "note": (
+        "Database (Legacy) Read profile that invokes a Stored Procedure. "
+        "Holds the procedure's fully-qualified name plus the result-set "
+        "output-field shape and any IN/OUT/INOUT parameters. The operation "
+        "step (connector-action database.get) references this profile by "
+        "profileId — keep them in the same integration plan so $ref "
+        "resolution wires the IDs together at apply time."
+    ),
+    "template": {
+        "component_type": "profile.db",
+        "profile_type": "database.stored_procedure_read",
+        "component_name": "<<read profile name>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "procedure_name": "<<fully-qualified procedure name>>",
+        "output_fields": [
+            {
+                "name": "<<column_name>>",
+                "data_type": "character",
+                "mandatory": False,
+                "enforce_unique": False,
+            },
+        ],
+        "parameters": [
+            {
+                "name": "<<parameter_name>>",
+                "data_type": "character",
+                "mode": "in",
+                "mappable": False,
+            },
+        ],
+    },
+    "required": [
+        "component_type",
+        "profile_type",
+        "component_name",
+        "procedure_name",
+        "output_fields",
+    ],
+    "defaults": {
+        "profile_type": "database.stored_procedure_read",
+        "folder_name": "Home",
+        "parameters": [],
+    },
+    "output_field_shape": {
+        "name": {"type": "string", "required": True},
+        "data_type": {
+            "type": "string",
+            "default": "character",
+            "supported": ["character", "number", "datetime"],
+            "note": (
+                "Each Boomi dataType maps to a <DataFormat> child: "
+                "character→ProfileCharacterFormat, number→ProfileNumberFormat, "
+                "datetime→ProfileDateFormat."
+            ),
+        },
+        "mandatory": {"type": "boolean", "default": False},
+        "enforce_unique": {"type": "boolean", "default": False},
+    },
+    "parameter_shape": {
+        "name": {"type": "string", "required": True},
+        "data_type": {
+            "type": "string",
+            "default": "character",
+            "supported": ["character", "number", "datetime"],
+        },
+        "mode": {
+            "type": "string",
+            "default": "in",
+            "supported": ["in", "out", "inout"],
+            "note": (
+                "Stored-procedure parameter direction. Default 'in' covers "
+                "input parameters; use 'out' or 'inout' for result/return "
+                "parameters."
+            ),
+        },
+        "mappable": {"type": "boolean", "default": False},
+    },
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    ],
+    "error_codes": {
+        "MISSING_DB_PROCEDURE_NAME": "procedure_name is absent or blank",
+        "MISSING_DB_OUTPUT_FIELDS": "output_fields list is missing or empty",
+        "INVALID_DB_PARAMETER_MODE": "parameters[i].mode not in in/out/inout",
+        "UNSUPPORTED_DB_PROFILE_MODE": "profile_type is not database.stored_procedure_read",
+        "UNSUPPORTED_DB_PROFILE_FIELD_TYPE": "data_type not in character/number/datetime",
+        "DATABASE_OPERATION_VALIDATION_FAILED": "shape / type / cross-field issue",
+        "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
+    },
+    "gotchas": [
+        (
+            "procedure_name is stored verbatim — include schema and any "
+            "vendor-specific syntax your database requires. The builder "
+            "does not parse, validate, or normalize the procedure name. "
+            "Vendor-specific examples (placeholders only): SQL Server "
+            "'<<schema>>.<<proc>>;<<version>>', Oracle "
+            "'<<package>>.<<proc>>', MySQL '<<db>>.<<proc>>', PostgreSQL "
+            "'<<schema>>.<<proc>>'."
+        ),
+        (
+            "parameters[].mode defaults to 'in'; use 'out' or 'inout' "
+            "for output or bidirectional parameters."
+        ),
+        (
+            "Stored procedures with no result set are not supported in "
+            "v1 — output_fields must have at least one entry describing "
+            "the procedure's result-set columns."
+        ),
+        (
+            "The XML <sql/> element is emitted self-closing for SP "
+            "profiles (the procedure dispatch comes from the storedProcedure "
+            "attribute, not from inline SQL text)."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Identify the fully-qualified procedure name as your database "
+        "vendor expects it.",
+        "2. Declare one output_fields entry per result-set column.",
+        "3. Declare parameters[] for each procedure parameter, choosing the "
+        "correct mode (in/out/inout) per the procedure signature.",
+        "4. Plan the read profile alongside the matching connector-action "
+        "(database.get) — depends_on the read profile key from the operation.",
+    ],
+    "update_note": (
+        "Field-level update is not yet supported for profile.db. To revise a "
+        "profile, recreate it or use the raw-XML escape hatch."
+    ),
+    "example": {
+        "key": "db_sp_read_profile",
+        "type": "profile.db",
+        "action": "create",
+        "name": "<<read profile name>>",
+        "config": {
+            "component_type": "profile.db",
+            "profile_type": "database.stored_procedure_read",
+            "component_name": "<<read profile name>>",
+            "procedure_name": "<<fully-qualified procedure name>>",
+            "output_fields": [
+                {"name": "<<column_name>>", "data_type": "character"},
+            ],
+            "parameters": [
+                {"name": "<<parameter_name>>", "mode": "in"},
+            ],
+        },
+        "_example_note": (
+            "Placeholder values only. Do not copy this example as a starting "
+            "template — supply procedure and parameter names that match the "
+            "actual stored procedure being invoked."
+        ),
+    },
+    "out_of_scope": {
+        "no_result_set": (
+            "Stored procedures that return no result set (pure-action procs) "
+            "are not supported in v1. The output_fields list must have at "
+            "least one entry."
         ),
         "write_profile": (
             "Database write profiles (Standard/Dynamic Insert/Update/Delete, "
             "Stored Procedure Write) are tracked by issue #32."
+        ),
+    },
+    "see_also": {
+        "select_statement_read": (
+            "For Select-statement Read profiles, use "
+            "protocol='database.read' instead — that template emits "
+            "statementType='select' with caller-authored SQL."
         ),
     },
 }
@@ -1249,15 +1439,20 @@ _COMPONENT_CREATE_PROFILE_DB_OVERVIEW = {
     "component_type": "profile.db",
     "tool": "manage_component (action='create')",
     "note": (
-        "Database (Legacy) profile builders. Currently only database.read is "
-        "implemented (issue #23). Database write profiles are tracked by "
-        "issue #32."
+        "Database (Legacy) Read profile builders. Two statement-type variants "
+        "are supported (issue #23): database.read (Select statement) and "
+        "database.stored_procedure_read (Stored Procedure). Database write "
+        "profiles are tracked by issue #32."
     ),
-    "available_protocols": ["database.read"],
+    "available_protocols": [
+        "database.read",
+        "database.stored_procedure_read",
+    ],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
-        "component_type='profile.db', protocol='database.read') for the read "
-        "profile JSON template."
+        "component_type='profile.db', protocol='database.read') for a "
+        "Select-statement Read profile, or protocol='database.stored_procedure_read' "
+        "for a Stored Procedure Read profile."
     ),
     "escape_hatch": (
         "For profile shapes without a builder, use query_components action='get' "
@@ -2147,6 +2342,11 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         if component_type == "profile.db":
             if protocol == "database.read":
                 return {"_success": True, **_COMPONENT_CREATE_PROFILE_DB_DATABASE_READ}
+            if protocol == "database.stored_procedure_read":
+                return {
+                    "_success": True,
+                    **_COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ,
+                }
             if protocol:
                 return {
                     "_success": False,

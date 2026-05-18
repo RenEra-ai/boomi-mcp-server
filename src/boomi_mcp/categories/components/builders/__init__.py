@@ -19,6 +19,7 @@ from .connector_builder import (
 )
 from .profile_builder import (
     DatabaseReadProfileBuilder,
+    DatabaseStoredProcedureReadProfileBuilder,
     PROFILE_BUILDERS,
     get_profile_builder,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "DatabaseConnectorBuilder",
     "DatabaseGetOperationBuilder",
     "DatabaseReadProfileBuilder",
+    "DatabaseStoredProcedureReadProfileBuilder",
     "HttpConnectorBuilder",
     "CONNECTOR_BUILDERS",
     "CONNECTOR_ACTION_BUILDERS",

@@ -877,6 +877,13 @@ class DatabaseGetOperationBuilder:
     integration_builder._resolve_dependency_tokens at apply time; the
     builder preserves whatever string the caller passes (UUID or $ref token).
 
+    The referenced profile may be either a Select-statement Read profile
+    (`profile_type="database.read"`) or a Stored Procedure Read profile
+    (`profile_type="database.stored_procedure_read"`) — the Get-op XML
+    envelope is identical in both cases. Live evidence: this builder's
+    output byte-matches both work-profile 949b3239 (Select) and reneraai
+    7a802447 (Stored Procedure) modulo identity attrs.
+
     Reference XML shape (work-profile c4b1f2b8 + 949b3239, fetched 2026-05-18):
 
         <bns:Component type="connector-action" subType="database" name="..." folderName="...">
