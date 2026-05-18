@@ -156,12 +156,25 @@ class SharedGraceBackend:
             )
             return True
 
-    async def release_lock(self, key: str) -> None:
-        """Best-effort lock release. Safe to call even if we never held it."""
+    async def release_lock(self, key: str, instance: str) -> None:
+        """Best-effort lock release. Safe to call even if we never held it.
+
+        Owner-scoped: the delete filter requires both the key AND the
+        instance label stamped into the lock at claim time. Without
+        that scoping, a stale leader that ran past `ttl_seconds`
+        (Mongo TTL-expired the lock, a peer claimed a fresh one) would
+        delete the new leader's lock in its `finally` block, re-opening
+        the duplicate-refresh race the lock is meant to prevent. The
+        same hazard exists when `try_claim_lock` returns True after an
+        ambiguous insert failure (the degrade-to-no-lock fallthrough):
+        the non-owner caller would otherwise unlock a real owner.
+        """
         if self._lock_collection is None:
             return
         try:
-            await self._lock_collection.delete_one({"_id": key})
+            await self._lock_collection.delete_one(
+                {"_id": key, "instance": instance}
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "release_lock failed for key=%s: %s: %s",
