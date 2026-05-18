@@ -77,6 +77,17 @@ def apply_refresh_token_grace_patch() -> None:
     max_size = int(os.getenv("BOOMI_RT_GRACE_MAX_SIZE", "512"))
     cache = _TTLCache(max_size=max_size)
 
+    # Per-token singleflight: ensures only one call into the underlying
+    # OAuthProxy.exchange_refresh_token runs for each old refresh-token
+    # hash, even under concurrent (parallel-tab / network-retry) load.
+    # Without this, two concurrent refreshes both observe a cache miss
+    # and both enter the original exchange path; the first deletes the
+    # FastMCP refresh-token row + JTI mapping (proxy.py:1333,1351), the
+    # second then fails with `invalid_grant` "Refresh token mapping not
+    # found" -- the exact 401 this patch advertises that it prevents.
+    inflight: dict[str, asyncio.Future] = {}
+    inflight_lock = asyncio.Lock()
+
     # Imports are deferred so this module can be imported in LOCAL_MODE
     # without pulling in the full FastMCP auth stack.
     from fastmcp.server.auth.oauth_proxy.models import _hash_token
@@ -91,11 +102,25 @@ def apply_refresh_token_grace_patch() -> None:
         if result is not None:
             return result
 
-        # Original lookup missed. Check the grace cache -- the same RT may
-        # have been rotated within the grace window and we still want the
-        # framework to proceed to exchange (which will short-circuit
-        # using the cached OAuthToken).
-        cached = await cache.get(_hash_token(refresh_token))
+        # Original lookup missed. There are two ways this can happen
+        # within the grace window:
+        #   (a) The exchange has already completed and the cache holds the
+        #       rotated tokens -- check cache and synthesize.
+        #   (b) A concurrent exchange is in flight and has already deleted
+        #       the storage row but hasn't populated the cache yet -- wait
+        #       on the in-flight Future, then re-check the cache.
+        old_hash = _hash_token(refresh_token)
+
+        async with inflight_lock:
+            future = inflight.get(old_hash)
+        if future is not None:
+            try:
+                await future  # Wait for the leader to finish.
+            except Exception:
+                # Leader failed; let the cache miss decide below.
+                pass
+
+        cached = await cache.get(old_hash)
         if cached is None:
             return None
 
@@ -124,33 +149,67 @@ def apply_refresh_token_grace_patch() -> None:
 
     async def patched_exchange_refresh_token(self, client, refresh_token, scopes):
         old_hash = _hash_token(refresh_token.token)
+        client_id_repr = (client.client_id or "<none>")[:8]
 
+        # Fast path: someone has already rotated this RT within the grace
+        # window. Skip both the singleflight and the upstream call.
         cached = await cache.get(old_hash)
         if cached is not None:
             oauth_token, _cached_client_id, _cached_scopes = cached
-            client_id_repr = (client.client_id or "<none>")[:8]
             logger.info(
                 "Refresh-token grace cache HIT (client=%s) -- returning cached rotated tokens",
                 client_id_repr,
             )
             return oauth_token
 
-        result = await orig_exchange_refresh_token(self, client, refresh_token, scopes)
-        # Store before returning so a concurrent retry on the same RT
-        # sees the same new tokens. The original has already deleted the
-        # old RT row and JTI; the grace cache fills the gap for
-        # `grace_seconds`.
+        # Singleflight: claim the slot or piggyback on the in-flight leader.
+        is_leader = False
+        async with inflight_lock:
+            # Re-check the cache under the lock to close the obvious
+            # check-then-act race against a leader that just finished.
+            cached = await cache.get(old_hash)
+            if cached is not None:
+                return cached[0]
+            future = inflight.get(old_hash)
+            if future is None:
+                future = asyncio.get_event_loop().create_future()
+                inflight[old_hash] = future
+                is_leader = True
+
+        if not is_leader:
+            logger.info(
+                "Refresh-token grace singleflight WAIT (client=%s) -- joining in-flight rotation",
+                client_id_repr,
+            )
+            # Re-raise the leader's exception so the framework returns the
+            # same TokenError to all racing callers.
+            return await future
+
+        # Leader path: run the real exchange, populate the cache, and
+        # release the singleflight slot regardless of outcome.
+        try:
+            result = await orig_exchange_refresh_token(self, client, refresh_token, scopes)
+        except BaseException as exc:
+            async with inflight_lock:
+                inflight.pop(old_hash, None)
+            if not future.done():
+                future.set_exception(exc)
+            raise
         await cache.set(
             old_hash,
             (result, client.client_id, list(scopes)),
             time.time() + grace_seconds,
         )
+        async with inflight_lock:
+            inflight.pop(old_hash, None)
+        if not future.done():
+            future.set_result(result)
         return result
 
     OAuthProxy.load_refresh_token = patched_load_refresh_token
     OAuthProxy.exchange_refresh_token = patched_exchange_refresh_token
     logger.info(
-        "Refresh-token grace window ENABLED (%ds, max_size=%d)",
+        "Refresh-token grace window ENABLED (%ds, max_size=%d, singleflight=on)",
         grace_seconds,
         max_size,
     )
