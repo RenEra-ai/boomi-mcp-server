@@ -340,6 +340,7 @@ class _FakeSharedBackend:
 
     def __init__(self, *, supports_locks: bool = False):
         self.store: dict[str, dict] = {}
+        self.get_exc: Exception | None = None
         self.put_exc: Exception | None = None
         self.get_calls = 0
         self.put_calls = 0
@@ -351,6 +352,8 @@ class _FakeSharedBackend:
 
     async def get(self, key):
         self.get_calls += 1
+        if self.get_exc is not None:
+            raise self.get_exc
         return self.store.get(key)
 
     async def put(self, key, value, ttl_seconds):
@@ -490,6 +493,34 @@ def test_shared_backend_put_failure_does_not_break_local_exchange(monkeypatch, r
     result = _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
     # Local caller still gets the OAuthToken even though shared put "failed".
     assert result.access_token == "AT"
+
+
+def test_shared_backend_get_failure_does_not_break_local_exchange(monkeypatch, restore_oauth_proxy):
+    """A shared-cache read outage must degrade to the normal local exchange."""
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+    from mcp.shared.auth import OAuthToken
+
+    call_count = {"n": 0}
+
+    async def fake_exchange(self, client, refresh_token, scopes):
+        call_count["n"] += 1
+        return OAuthToken(access_token="AT-local", token_type="Bearer", expires_in=3600)
+
+    OAuthProxy.exchange_refresh_token = fake_exchange
+
+    shared = _FakeSharedBackend()
+    shared.get_exc = RuntimeError("simulated mongo read outage")
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch(shared_backend=shared)
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    rt = SimpleNamespace(token="rt-shared")
+    result = _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
+
+    assert call_count["n"] == 1
+    assert result.access_token == "AT-local"
 
 
 def test_grace_cache_rejects_cross_client_replay(monkeypatch, restore_oauth_proxy):

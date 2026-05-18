@@ -118,10 +118,18 @@ def test_get_swallows_deserialization_error_returns_none(caplog):
     assert any("read swallowed" in rec.message for rec in caplog.records)
 
 
-def test_get_does_not_swallow_unrelated_errors():
-    """A non-storage exception (e.g., asyncio.CancelledError) must propagate."""
+def test_get_swallows_runtime_storage_errors_returns_none(caplog):
     backend = SharedGraceBackend(_StubStore(get_exc=RuntimeError("mongo down")))
-    with pytest.raises(RuntimeError, match="mongo down"):
+    with caplog.at_level(logging.WARNING, logger="boomi.rt_grace_shared"):
+        out = _run(backend.get("k1"))
+    assert out is None
+    assert any("GRACE_SHARED_GET_FAILED" in rec.message for rec in caplog.records)
+
+
+def test_get_does_not_swallow_cancelled_error():
+    """Task cancellation is control flow, not a storage cache miss."""
+    backend = SharedGraceBackend(_StubStore(get_exc=asyncio.CancelledError()))
+    with pytest.raises(asyncio.CancelledError):
         _run(backend.get("k1"))
 
 
