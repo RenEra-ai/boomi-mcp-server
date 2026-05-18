@@ -194,3 +194,82 @@ gcloud secrets versions add storage-encryption-key \
 If step 3 reports `decrypt_failed > 0`, do **not** drop the old key.
 Either restore the missing historical key, or accept that the listed
 clients will need to re-register, then re-run before dropping.
+
+## OAuth cache hardening (2026-05-18, second pass)
+
+Closes the two cache-shaped gaps the original hardening PR left open:
+
+- **Fix B — Google verifier cache.** Caches the `AccessToken` returned
+  by `GoogleTokenVerifier.verify_token` in-process so a burst of MCP
+  tool calls from one authed session triggers exactly one
+  `tokeninfo`+`userinfo` round trip per cache TTL (default 5 min)
+  instead of two Google calls per tool call. Transient Google
+  rate-limits become cache hits instead of silent 401 cascades.
+
+- **Fix D — Cross-instance grace cache.** Backs the per-process
+  refresh-token grace cache (from the first hardening pass) with a
+  Fernet-encrypted MongoDB collection so a rotation that lands on
+  Cloud Run replica A is visible to replica B during the grace window.
+  Closes the multi-instance `Refresh token mapping not found` 401 that
+  the per-process cache alone could not prevent.
+
+- **Fix D.2 — Distributed singleflight (opt-in, off by default).**
+  When two replicas start refreshing the same RT at exactly the same
+  millisecond, the per-replica leader claims a Mongo lock row; the
+  losing replica polls the shared cache for the result. Off by default
+  because the L2 cache (Fix D) closes most of the race; enable only if
+  you observe duplicate `orig_exchange` calls in the diagnostic logs.
+
+### New env vars
+
+All five ship with safe defaults. Override only when debugging or
+tuning Google call volume.
+
+| Env var | Default | Purpose | Off-switch |
+|---|---|---|---|
+| `BOOMI_TOKEN_CACHE_DISABLE` | unset (= cache ON) | Bypass Fix B entirely; every MCP tool call hits Google `tokeninfo`/`userinfo` as before. | Set to `true` |
+| `BOOMI_TOKEN_CACHE_TTL_SECONDS` | `300` | Upper bound on per-entry TTL. Caps the window in which a Google-side token revocation is not honored. | Lower to e.g. `60` |
+| `BOOMI_TOKEN_CACHE_MAX_SIZE` | `256` | LRU capacity for the verifier cache. | — |
+| `BOOMI_TOKEN_CACHE_SWR` | `false` | Opt-in stale-while-revalidate; serves stale within `BOOMI_TOKEN_CACHE_SWR_WINDOW` and refreshes in the background. | Set to `false` |
+| `BOOMI_TOKEN_CACHE_SWR_WINDOW` | `30` | Seconds before a cached entry's expiry at which SWR returns stale and schedules a refresh. | — |
+| `BOOMI_RT_GRACE_SHARED` | `true` (when `MONGODB_URI` is set) | Enables the Fix D shared MongoDB-backed grace cache (`mcp-rt-grace`). | Set to `false` |
+| `BOOMI_RT_GRACE_SHARED_COLLECTION` | `mcp-rt-grace` | Collection name override; unlikely to need outside tests. | — |
+| `BOOMI_RT_GRACE_DISTRIBUTED_LOCK` | `false` | Opt-in Fix D.2 cross-instance singleflight via the `mcp-rt-inflight-locks` collection. | Set to `false` |
+| `BOOMI_RT_GRACE_LOCK_TTL_SECONDS` | `30` | Safety bound on Fix D.2 lock rows. A crashed leader auto-releases via the collection's TTL index. | — |
+| `BOOMI_RT_GRACE_LOCK_POLL_MS` | `100` | Fix D.2 follower polling interval against the shared cache. | — |
+
+### New MongoDB collections
+
+- `mcp-rt-grace` — Fix D shared grace cache. Fernet-encrypted via the
+  same `STORAGE_ENCRYPTION_KEY` (MultiFernet-aware) as the rest of
+  OAuth state. One row per active old refresh-token hash, auto-evicted
+  by the underlying store's TTL handling (~60s default lifetime).
+- `mcp-rt-inflight-locks` — Fix D.2 only. One row per in-flight refresh
+  across the fleet, auto-evicted via a TTL index on `expires_at` so a
+  crashed leader instance does not deadlock subsequent refreshes
+  longer than `BOOMI_RT_GRACE_LOCK_TTL_SECONDS`.
+
+Both collections live in the same `boomi_mcp` database. Neither needs
+explicit cleanup — they grow proportional to refresh-token rotation
+volume and auto-evict via TTL.
+
+### Rollout
+
+Recommended phases (matching `docs/plans/oauth_token_verifier_cache_plan.json`):
+
+1. Merge with defaults (Fix B on, Fix D on, Fix D.2 off). Tail logs
+   for a week. Confirm Google `tokeninfo` call rate drops ~92 % and
+   the cross-replica `invalid_grant` rate from `mcp-rt-grace` is near
+   zero.
+2. If `Refresh-token grace SHARED HIT` lines from a replica that did
+   not perform the original rotation appear in the diagnostic logs,
+   Fix D is working. If duplicate `orig_exchange` calls for the same
+   hash within milliseconds appear, set
+   `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true` and redeploy (config-only).
+
+### Rollback
+
+Per-fix off-switches: set `BOOMI_TOKEN_CACHE_DISABLE=true`,
+`BOOMI_RT_GRACE_SHARED=false`, or `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=false`.
+Full rollback: `git revert <merge_commit>`. The two new MongoDB
+collections auto-evict via TTL; explicit cleanup is optional.
