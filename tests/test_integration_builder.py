@@ -375,6 +375,82 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert step["route"] == "connector_builder_or_xml"
         assert "validation_error" not in step
 
+    @patch(_PATCH_TARGET)
+    def test_reuse_path_skips_database_preflight(self, mock_pag):
+        """Reuse never invokes the builder — incomplete config must not block reuse."""
+        mock_pag.return_value = [_meta("existing-db-id", "Example SQL Server",
+                                       "Process Library", comp_type="connector-settings")]
+        comp = _db_comp()
+        comp.config.pop("credential_ref")  # would fail builder validation
+        config = _build_config([comp], conflict_policy="reuse")
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "reuse"
+        assert step["existing_component_id"] == "existing-db-id"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_update_path_skips_database_preflight(self, mock_pag):
+        """Update goes through update_connector, not the builder."""
+        comp = _db_comp(action="update")
+        comp.component_id = "explicit-id"  # bypass ambiguity lookup
+        comp.config.pop("credential_ref")
+        comp.config.pop("driver_id")
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "update"
+        assert "validation_error" not in step
+        mock_pag.assert_not_called()
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_config_skips_database_preflight(self, mock_pag):
+        """config.xml is the raw-XML escape hatch — builder is bypassed."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="db_raw",
+            type="connector-settings",
+            action="create",
+            name="Raw DB",
+            config={
+                "connector_type": "database",
+                "xml": "<bns:Component>...pre-built XML...</bns:Component>",
+            },
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step["route"] == "connector_builder_or_xml"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_component_name_defaults_from_comp_name_in_preflight(self, mock_pag):
+        """_execute_component fills component_name from comp.name — preflight
+        must mirror that defaulting so a valid spec doesn't get false-rejected."""
+        mock_pag.return_value = []
+        comp = _db_comp(name="My Default-Named SQL")
+        comp.config.pop("component_name")  # caller relies on comp.name fallback
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_create_clone_path_runs_database_preflight(self, mock_pag):
+        """Clone DOES call the builder — preflight must still catch bad config."""
+        mock_pag.return_value = [
+            _meta("id-1", "Example SQL Server", "A", comp_type="connector-settings"),
+            _meta("id-2", "Example SQL Server", "B", comp_type="connector-settings"),
+        ]
+        comp = _db_comp(driver_id="postgres")
+        config = _build_config([comp], conflict_policy="clone")
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER"
+
 
 # ---------------------------------------------------------------------------
 # M2.2 — _apply_plan fail-fast on database validation
