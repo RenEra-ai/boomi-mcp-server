@@ -36,7 +36,9 @@ from ._shared import (
 )
 from .builders.connector_builder import (
     BuilderValidationError,
+    DatabaseGetOperationBuilder,
     get_connector_builder, CONNECTOR_BUILDERS,
+    get_connector_action_builder, CONNECTOR_ACTION_BUILDERS,
     find_http_settings, update_http_settings_fields,
 )
 
@@ -335,6 +337,67 @@ def create_connector(
                 ),
             }
 
+        # 2a) connector-action dispatch (e.g. database Get operation).
+        # Keyed by (connector_type, operation_mode) so a single connector
+        # family can host multiple action shapes (get, send, etc.).
+        component_type = (config.get('component_type') or '').lower()
+        if component_type == 'connector-action':
+            operation_mode = config.get('operation_mode') or ''
+            action_builder = get_connector_action_builder(
+                connector_type, operation_mode
+            )
+            if not action_builder:
+                # For known connector families (e.g. database), let the
+                # family's validator surface the proper structured error —
+                # otherwise a deliberate `operation_mode="send"` ends up with
+                # a generic "no builder" message instead of the documented
+                # UNSUPPORTED_DB_OPERATION_MODE + #32 hint.
+                if connector_type.lower() == 'database':
+                    db_err = DatabaseGetOperationBuilder.validate_config(config)
+                    if db_err is not None:
+                        raise db_err
+                supported_pairs = ', '.join(
+                    f"{ct}.{om}" for (ct, om) in sorted(CONNECTOR_ACTION_BUILDERS.keys())
+                )
+                return {
+                    "_success": False,
+                    "error": (
+                        f"No connector-action builder for connector_type="
+                        f"{connector_type!r} operation_mode={operation_mode!r}"
+                    ),
+                    "hint": (
+                        f"Supported (connector_type, operation_mode) pairs: "
+                        f"{supported_pairs}. For unsupported pairs, use "
+                        "action='get' on an existing connector-action to "
+                        "export XML, then pass as config.xml."
+                    ),
+                }
+            if not config.get('component_name'):
+                return {
+                    "_success": False,
+                    "error": "component_name is required for builder-based creation",
+                    "hint": (
+                        f'Provide config: {{"component_type": "connector-action", '
+                        f'"connector_type": "{connector_type}", "operation_mode": '
+                        f'"{operation_mode}", "component_name": "My Operation", ...}}'
+                    ),
+                }
+            xml = action_builder.build(**config)
+            result = _create_component_raw(boomi_client, xml)
+            return {
+                "_success": True,
+                "message": (
+                    f"Created {connector_type} {operation_mode} operation "
+                    f"'{result['name']}'"
+                ),
+                "component_id": result['component_id'],
+                "name": result['name'],
+                "type": result['type'],
+                "sub_type": result['sub_type'],
+                "profile": profile,
+            }
+
+        # 2b) connector-settings dispatch (existing behavior).
         builder = get_connector_builder(connector_type)
         if not builder:
             supported = ', '.join(CONNECTOR_BUILDERS.keys())

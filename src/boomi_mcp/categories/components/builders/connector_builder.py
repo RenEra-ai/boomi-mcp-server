@@ -868,6 +868,202 @@ def update_http_settings_fields(http_settings_elem, config: Dict[str, Any]) -> b
     return changed
 
 
+class DatabaseGetOperationBuilder:
+    """Builder for connector-action subType="database" Get operations.
+
+    Issue #23 — M2.3. Emits a <DatabaseGetAction> envelope that references a
+    pre-existing database Read profile via <ReadProfile profileId="..."/>.
+    The profile ID is typically resolved upstream from a $ref:KEY token by
+    integration_builder._resolve_dependency_tokens at apply time; the
+    builder preserves whatever string the caller passes (UUID or $ref token).
+
+    Reference XML shape (work-profile c4b1f2b8 + 949b3239, fetched 2026-05-18):
+
+        <bns:Component type="connector-action" subType="database" name="..." folderName="...">
+          <bns:encryptedValues/>
+          <bns:description>...</bns:description>
+          <bns:object>
+            <Operation xmlns="">
+              <Archiving directory="" enabled="false"/>
+              <Configuration>
+                <DatabaseGetAction batchCount="0" maxRows="0">
+                  <ReadProfile profileId="..."/>
+                </DatabaseGetAction>
+              </Configuration>
+              <Tracking><TrackedFields/></Tracking>
+              <Caching/>
+            </Operation>
+          </bns:object>
+        </bns:Component>
+
+    Config keys:
+        component_name:    required for top-level component naming
+        operation_mode:    required, must be "get". "send" is rejected with
+                           UNSUPPORTED_DB_OPERATION_MODE (tracked by issue #32).
+        read_profile_id:   required, the Boomi profile component ID OR a
+                           "$ref:KEY" token (preserved verbatim — caller-side
+                           resolution happens before build()).
+        batch_count:       optional integer, defaults to 0 (no batching).
+                           CDS-style large extracts use 50000.
+        max_rows:          optional integer, defaults to 0 (no limit).
+        folder_name:       optional; defaults to "Home".
+        description:       optional.
+        connection_ref_key, connector_type, component_type: caller-supplied
+                           routing context not emitted into XML — Boomi binds
+                           the connection at the process connector step, not
+                           in the operation XML.
+        link_element:      not yet supported; UNSUPPORTED_DB_GET_FIELD until
+                           live XML shape is confirmed.
+    """
+
+    SUPPORTED_OPERATION_MODES = ("get",)
+    UNSUPPORTED_OPERATION_MODES = ("send",)
+    DEFAULT_BATCH_COUNT = 0
+    DEFAULT_MAX_ROWS = 0
+    # Defensive consistency — no secrets are expected in a Get op config, but
+    # mirror the scan so integration_builder preflight is uniform.
+    FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
+
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        """Reuse DatabaseConnectorBuilder's scan — same forbidden-key set."""
+        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+            config, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate a Get operation config without building XML."""
+        # 1) Plaintext secret-shaped keys (defensive).
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        # 2) operation_mode must be 'get'; 'send' is explicit issue-#32 deferral.
+        operation_mode = (config.get("operation_mode") or "").lower()
+        if operation_mode in cls.UNSUPPORTED_OPERATION_MODES:
+            return BuilderValidationError(
+                f"operation_mode={operation_mode!r} is not supported in issue #23",
+                error_code="UNSUPPORTED_DB_OPERATION_MODE",
+                field="operation_mode",
+                hint=(
+                    "Database Send/write operations require WriteProfile and "
+                    "DatabaseSendAction support, tracked separately by issue "
+                    "#32. Use operation_mode='get' for read extractions."
+                ),
+            )
+        if operation_mode not in cls.SUPPORTED_OPERATION_MODES:
+            supported = ", ".join(cls.SUPPORTED_OPERATION_MODES)
+            return BuilderValidationError(
+                f"operation_mode is required and must be one of: {supported}",
+                error_code="UNSUPPORTED_DB_OPERATION_MODE",
+                field="operation_mode",
+                hint=f"Supported operation_modes: {supported}.",
+            )
+
+        # 3) component_name required.
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required",
+                error_code="DATABASE_OPERATION_VALIDATION_FAILED",
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        # 4) read_profile_id required and non-empty.
+        read_profile_id = config.get("read_profile_id")
+        if read_profile_id is None or not str(read_profile_id).strip():
+            return BuilderValidationError(
+                "read_profile_id is required for database Get operations",
+                error_code="MISSING_DB_READ_PROFILE_REF",
+                field="read_profile_id",
+                hint=(
+                    "Provide either a Boomi profile component ID (UUID) or a "
+                    "'$ref:KEY' token that resolves to the read profile "
+                    "created earlier in the integration plan."
+                ),
+            )
+
+        # 5) batch_count and max_rows must be non-negative integers when present.
+        for key in ("batch_count", "max_rows"):
+            if key in config:
+                value = config[key]
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    return BuilderValidationError(
+                        f"{key} must be a non-negative integer",
+                        error_code="DATABASE_OPERATION_VALIDATION_FAILED",
+                        field=key,
+                        hint=(
+                            f"Use a JSON integer >= 0. Default for {key} is "
+                            f"{cls.DEFAULT_BATCH_COUNT if key == 'batch_count' else cls.DEFAULT_MAX_ROWS}."
+                        ),
+                    )
+
+        # 6) link_element rejected until live XML shape is confirmed (plan note).
+        if "link_element" in config:
+            return BuilderValidationError(
+                "link_element is not yet supported in the database Get operation builder",
+                error_code="UNSUPPORTED_DB_GET_FIELD",
+                field="link_element",
+                hint=(
+                    "Link Element splits/groups documents per Boomi docs, but "
+                    "its live XML attribute name has not been verified. Omit "
+                    "for now; the field will be added when a verified XML "
+                    "reference is available."
+                ),
+            )
+
+        return None
+
+    def build(self, **params) -> str:
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        component_name = params["component_name"]
+        read_profile_id = params["read_profile_id"]
+        batch_count = params.get("batch_count", self.DEFAULT_BATCH_COUNT)
+        max_rows = params.get("max_rows", self.DEFAULT_MAX_ROWS)
+        folder_name = params.get("folder_name", "Home")
+        description = params.get("description", "")
+
+        safe_name = _escape_xml(component_name)
+        safe_folder = _escape_xml(folder_name)
+        safe_desc = _escape_xml(description)
+        safe_profile_id = _escape_xml(str(read_profile_id))
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
+            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+            '               type="connector-action" subType="database"\n'
+            f'               name="{safe_name}"\n'
+            f'               folderName="{safe_folder}">\n'
+            '    <bns:encryptedValues/>\n'
+            f'    <bns:description>{safe_desc}</bns:description>\n'
+            '    <bns:object>\n'
+            '        <Operation xmlns="">\n'
+            '            <Archiving directory="" enabled="false"/>\n'
+            '            <Configuration>\n'
+            f'                <DatabaseGetAction batchCount="{batch_count}" maxRows="{max_rows}">\n'
+            f'                    <ReadProfile profileId="{safe_profile_id}"/>\n'
+            '                </DatabaseGetAction>\n'
+            '            </Configuration>\n'
+            '            <Tracking><TrackedFields/></Tracking>\n'
+            '            <Caching/>\n'
+            '        </Operation>\n'
+            '    </bns:object>\n'
+            '</bns:Component>'
+        )
+
+
 # ============================================================================
 # Registry
 # ============================================================================
@@ -881,6 +1077,25 @@ CONNECTOR_BUILDERS: Dict[str, type] = {
 def get_connector_builder(connector_type: str):
     """Get a connector builder instance for the given type, or None."""
     builder_class = CONNECTOR_BUILDERS.get(connector_type.lower())
+    if builder_class:
+        return builder_class()
+    return None
+
+
+# Connector-action builders are dispatched by (connector_type, operation_mode)
+# — separate registry from CONNECTOR_BUILDERS because connector-settings and
+# connector-action have different XML shapes and required-field sets.
+CONNECTOR_ACTION_BUILDERS: Dict[tuple, type] = {
+    ("database", "get"): DatabaseGetOperationBuilder,
+}
+
+
+def get_connector_action_builder(connector_type: str, operation_mode: str):
+    """Get a connector-action builder instance for (connector_type, operation_mode), or None."""
+    if not connector_type or not operation_mode:
+        return None
+    key = (connector_type.lower(), operation_mode.lower())
+    builder_class = CONNECTOR_ACTION_BUILDERS.get(key)
     if builder_class:
         return builder_class()
     return None

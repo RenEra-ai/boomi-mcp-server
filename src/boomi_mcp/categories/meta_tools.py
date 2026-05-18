@@ -1092,6 +1092,335 @@ _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
 }
 
 
+# ============================================================================
+# Issue #23 (M2.3) — Database Read Profile + Database Get Operation templates
+#
+# Examples MUST use angle-bracket placeholders (<<task-authored SQL>>,
+# <<field_name>>, $ref:<key>). No canned SQL, no table/column names, no CDS
+# wrapper snippets, no payload templates. Database Send/write is OUT OF
+# SCOPE — defer to issue #32 (DatabaseSendAction, WriteProfile, commit
+# semantics, JDBC batching, dynamic insert/update/delete).
+# ============================================================================
+
+_COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "profile.db",
+    "protocol": "database.read",
+    "tool": "manage_component (action='create')",
+    "note": (
+        "Database (Legacy) Read profile. Holds the Select SQL statement plus "
+        "the result-set output-field shape and any input parameters. The "
+        "operation step (connector-action database.get) references this "
+        "profile by profileId — keep them in the same integration plan so "
+        "$ref resolution wires the IDs together at apply time."
+    ),
+    "template": {
+        "component_type": "profile.db",
+        "profile_type": "database.read",
+        "component_name": "<<read profile name>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "query": "<<task-authored SQL>>",
+        "output_fields": [
+            {
+                "name": "<<column_name>>",
+                "data_type": "character",
+                "mandatory": False,
+                "enforce_unique": False,
+            },
+        ],
+        "parameters": [
+            {
+                "name": "<<parameter_name>>",
+                "data_type": "character",
+                "mappable": False,
+            },
+        ],
+    },
+    "required": [
+        "component_type",
+        "profile_type",
+        "component_name",
+        "query",
+        "output_fields",
+    ],
+    "defaults": {
+        "profile_type": "database.read",
+        "folder_name": "Home",
+        "parameters": [],
+    },
+    "output_field_shape": {
+        "name": {"type": "string", "required": True},
+        "data_type": {
+            "type": "string",
+            "default": "character",
+            "supported": ["character"],
+            "note": (
+                "v1 supports character only; other Boomi profile types (date, "
+                "number, datetime) require live-XML shape verification."
+            ),
+        },
+        "mandatory": {"type": "boolean", "default": False},
+        "enforce_unique": {"type": "boolean", "default": False},
+    },
+    "parameter_shape": {
+        "name": {"type": "string", "required": True},
+        "data_type": {
+            "type": "string",
+            "default": "character",
+            "supported": ["character"],
+        },
+        "mappable": {"type": "boolean", "default": False},
+    },
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    ],
+    "error_codes": {
+        "MISSING_DB_QUERY": "query is absent or blank",
+        "MISSING_DB_OUTPUT_FIELDS": "output_fields list is missing or empty",
+        "UNSUPPORTED_DB_PROFILE_MODE": "profile_type is not database.read",
+        "UNSUPPORTED_DB_PROFILE_FIELD_TYPE": "data_type other than character",
+        "DATABASE_OPERATION_VALIDATION_FAILED": "shape / type / cross-field issue",
+        "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
+    },
+    "gotchas": [
+        (
+            "SQL text is stored verbatim — the builder does not validate SQL "
+            "syntax or auto-generate queries. Task-authored SQL only."
+        ),
+        (
+            "Output fields must match the result-set column shape exactly. "
+            "Boomi will not auto-derive them — the LLM declares them."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Author the Select SQL for the extraction step.",
+        "2. Declare one output_fields entry per result-set column (name = column alias).",
+        "3. Declare parameters[] for any '?' bind variables in the SQL.",
+        "4. Plan the read profile alongside the matching connector-action "
+        "(database.get) — depends_on the read profile key from the operation.",
+    ],
+    "update_note": (
+        "Field-level update is not yet supported for profile.db. To revise a "
+        "profile, recreate it or use the raw-XML escape hatch."
+    ),
+    "example": {
+        "key": "db_read_profile",
+        "type": "profile.db",
+        "action": "create",
+        "name": "<<read profile name>>",
+        "config": {
+            "component_type": "profile.db",
+            "profile_type": "database.read",
+            "component_name": "<<read profile name>>",
+            "query": "<<task-authored SQL>>",
+            "output_fields": [
+                {"name": "<<column_name>>", "data_type": "character"},
+            ],
+            "parameters": [],
+        },
+        "_example_note": (
+            "Placeholder values only. Do not copy this example as a starting "
+            "SQL template — author the query based on task requirements."
+        ),
+    },
+    "out_of_scope": {
+        "stored_procedure_read": (
+            "Stored Procedure Read profile is a Boomi-supported variant not "
+            "yet implemented; deferred to a follow-up."
+        ),
+        "write_profile": (
+            "Database write profiles (Standard/Dynamic Insert/Update/Delete, "
+            "Stored Procedure Write) are tracked by issue #32."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_PROFILE_DB_OVERVIEW = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "profile.db",
+    "tool": "manage_component (action='create')",
+    "note": (
+        "Database (Legacy) profile builders. Currently only database.read is "
+        "implemented (issue #23). Database write profiles are tracked by "
+        "issue #32."
+    ),
+    "available_protocols": ["database.read"],
+    "hint": (
+        "Re-call get_schema_template(resource_type='component', operation='create', "
+        "component_type='profile.db', protocol='database.read') for the read "
+        "profile JSON template."
+    ),
+    "escape_hatch": (
+        "For profile shapes without a builder, use query_components action='get' "
+        "on an existing profile to export its XML, then pass as config.xml to "
+        "manage_component action='create'."
+    ),
+}
+
+
+_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-action",
+    "protocol": "database.get",
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "Database Get (read) operation. Wraps a previously-created database "
+        "Read profile (profile.db) in a DatabaseGetAction envelope. The "
+        "connection itself is bound at the process connector step, not in "
+        "the operation XML — connection_ref_key is a plan-only dependency."
+    ),
+    "template": {
+        "component_type": "connector-action",
+        "connector_type": "database",
+        "operation_mode": "get",
+        "component_name": "<<operation name>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "connection_ref_key": "<<db connection key>>",
+        "read_profile_id": "$ref:<<db read profile key>>",
+        "batch_count": 0,
+        "max_rows": 0,
+    },
+    "required": [
+        "component_type",
+        "connector_type",
+        "operation_mode",
+        "component_name",
+        "connection_ref_key",
+        "read_profile_id",
+    ],
+    "defaults": {
+        "component_type": "connector-action",
+        "connector_type": "database",
+        "operation_mode": "get",
+        "batch_count": 0,
+        "max_rows": 0,
+        "folder_name": "Home",
+    },
+    "supported_operation_modes": ["get"],
+    "unsupported_operation_modes": ["send"],
+    "unsupported_operation_modes_note": (
+        "Database Send/write operations require DatabaseSendAction + "
+        "WriteProfile and are tracked by issue #32 (M5.x). They will fail "
+        "with UNSUPPORTED_DB_OPERATION_MODE in plan preflight."
+    ),
+    "link_element_status": "unsupported_pending_shape_verification",
+    "link_element_note": (
+        "Link Element groups/splits documents per Boomi docs, but its live "
+        "XML attribute name has not been verified. Passing link_element "
+        "fails with UNSUPPORTED_DB_GET_FIELD until a verified reference is "
+        "available."
+    ),
+    "depends_on_requirements": [
+        "Include connection_ref_key in depends_on (so the connector-settings runs first).",
+        "When read_profile_id uses '$ref:KEY', include KEY in depends_on too.",
+    ],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    ],
+    "error_codes": {
+        "UNSUPPORTED_DB_OPERATION_MODE": "operation_mode is 'send' or anything other than 'get'",
+        "MISSING_DB_READ_PROFILE_REF": "read_profile_id absent or empty",
+        "MISSING_DB_DEPENDENCY": "connection_ref_key / $ref target missing from depends_on",
+        "UNSUPPORTED_DB_GET_FIELD": "link_element passed (deferred until shape confirmed)",
+        "DATABASE_OPERATION_VALIDATION_FAILED": "shape / type / cross-field issue",
+    },
+    "gotchas": [
+        (
+            "Boomi binds the connection at the process connector step, not in "
+            "the operation XML. The builder will NOT emit a connection ID — "
+            "connection_ref_key is plan-only metadata for dependency ordering."
+        ),
+        (
+            "batch_count=0 means no batching (one document per result-set row "
+            "is the Boomi default). CDS-style large extracts use 50000."
+        ),
+        (
+            "max_rows=0 means no limit."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Create the database connector-settings (manage_connector, connector_type=database).",
+        "2. Create the read profile (manage_component, component_type=profile.db, profile_type=database.read).",
+        "3. Plan this Get operation with depends_on=[<connection_key>, <read_profile_key>] and read_profile_id='$ref:<read_profile_key>'.",
+        "4. Apply — $ref is resolved to the read profile's component_id from the id_registry.",
+    ],
+    "update_note": (
+        "Field-level update is not yet supported for connector-action database "
+        "Get operations. To revise, recreate or use the raw-XML escape hatch."
+    ),
+    "example": {
+        "key": "db_query_operation",
+        "type": "connector-action",
+        "action": "create",
+        "name": "<<operation name>>",
+        "depends_on": ["db_connection", "db_read_profile"],
+        "config": {
+            "component_type": "connector-action",
+            "connector_type": "database",
+            "operation_mode": "get",
+            "component_name": "<<operation name>>",
+            "connection_ref_key": "db_connection",
+            "read_profile_id": "$ref:db_read_profile",
+            "batch_count": 0,
+            "max_rows": 0,
+        },
+        "_example_note": (
+            "Placeholder values only. The read_profile_id $ref is substituted "
+            "with the created profile's component_id during apply."
+        ),
+    },
+    "out_of_scope": {
+        "database_send": (
+            "Database Send/write (DatabaseSendAction) is tracked by issue #32."
+        ),
+        "stored_procedure_get": (
+            "Stored Procedure Read operation is a Boomi-supported variant not "
+            "yet implemented; deferred to a follow-up."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-action",
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "Connector-action (operation) builders. Currently only database.get "
+        "is implemented (issue #23). Database send/write is tracked by "
+        "issue #32."
+    ),
+    "available_protocols": ["database.get"],
+    "hint": (
+        "Re-call get_schema_template(resource_type='component', operation='create', "
+        "component_type='connector-action', protocol='database.get') for the "
+        "Get operation JSON template."
+    ),
+    "escape_hatch": (
+        "For operations without a builder, use manage_connector action='get' on "
+        "an existing connector-action to export its XML, then pass as config.xml "
+        "to manage_connector action='create'."
+    ),
+}
+
+
 _COMPONENT_SEARCH = {
     "resource_type": "component",
     "operation": "search",
@@ -1815,6 +2144,39 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
                     "valid_protocols": _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW["available_protocols"],
                 }
             return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW}
+        if component_type == "profile.db":
+            if protocol == "database.read":
+                return {"_success": True, **_COMPONENT_CREATE_PROFILE_DB_DATABASE_READ}
+            if protocol:
+                return {
+                    "_success": False,
+                    "error": f"Unknown profile.db protocol: {protocol}",
+                    "valid_protocols": _COMPONENT_CREATE_PROFILE_DB_OVERVIEW["available_protocols"],
+                }
+            return {"_success": True, **_COMPONENT_CREATE_PROFILE_DB_OVERVIEW}
+        if component_type == "connector-action":
+            if protocol == "database.get":
+                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}
+            if protocol == "database.send":
+                # Explicit out-of-scope marker — point callers at issue #32
+                # so they don't think this is a typo we'd accept later.
+                return {
+                    "_success": False,
+                    "error_code": "UNSUPPORTED_DB_OPERATION_MODE",
+                    "error": "Database Send/write operations are not implemented in issue #23",
+                    "hint": (
+                        "Database Send (DatabaseSendAction + WriteProfile + "
+                        "commit semantics) is tracked by issue #32 (M5.x). "
+                        "Use protocol='database.get' for read extractions."
+                    ),
+                }
+            if protocol:
+                return {
+                    "_success": False,
+                    "error": f"Unknown connector-action protocol: {protocol}",
+                    "valid_protocols": _COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW["available_protocols"],
+                }
+            return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW}
         result = {"_success": True, **_COMPONENT_CREATE}
         if component_type == "process":
             result["recommendation"] = "For processes, use manage_process with config (JSON object) instead of raw XML."

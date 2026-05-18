@@ -18,6 +18,11 @@ from ._shared import (
     component_get_xml, set_description_element, soft_delete_component,
     _create_component_raw, _extract_api_error_msg,
 )
+from .builders import (
+    BuilderValidationError,
+    PROFILE_BUILDERS,
+    get_profile_builder,
+)
 
 
 # ============================================================================
@@ -31,15 +36,38 @@ def create_component(
 ) -> Dict[str, Any]:
     """Create a new component.
 
-    Requires raw XML in config['xml'].
+    Two paths:
+    1. Builder — for known component_type + sub-type pairs (e.g. profile.db
+       database.read), dispatch through PROFILE_BUILDERS to emit XML from
+       structured caller config.
+    2. Raw XML — if config['xml'] is provided, POST directly (escape hatch).
 
-    Note: Boomi's Component API requires type-specific XML structures with proper
-    namespaces and object elements. Minimal XML without these is rejected with 400.
-    Use query_components get action on an existing component to obtain a valid XML
-    template.
+    Boomi's Component API requires type-specific XML with proper namespaces;
+    the builder path handles namespaces for the types it knows. For other
+    types, use query_components get action on an existing component to
+    obtain a valid XML template.
     """
     try:
-        # Create from raw XML
+        # Path 1: profile builder dispatch (when no raw XML override).
+        component_type = config.get('component_type')
+        profile_type = config.get('profile_type')
+        if not config.get('xml') and component_type and profile_type:
+            builder = get_profile_builder(component_type, profile_type)
+            if builder is not None:
+                xml = builder.build(**config)
+                result = _create_component_raw(boomi_client, xml)
+                return {
+                    "_success": True,
+                    "message": f"Created {component_type} '{result['name']}'",
+                    "component_id": result['component_id'],
+                    "name": result['name'],
+                    "type": result['type'],
+                    "profile": profile,
+                }
+            # Recognized component_type without a matching builder → fall
+            # through to the raw-XML escape-hatch error below.
+
+        # Path 2: raw XML
         if config.get('xml'):
             result = _create_component_raw(boomi_client, config['xml'])
             return {
@@ -60,11 +88,21 @@ def create_component(
                 "Use query_components get action on an existing component to obtain "
                 "a valid XML template, then modify and pass as config.xml. "
                 "For connectors (connector-settings, connector-action), use "
-                "manage_connector action='get' on a similar connector to obtain XML, "
-                "then modify and pass as config.xml."
+                "manage_connector action='create' with structured config. "
+                "For database read profiles, pass component_type='profile.db' + "
+                "profile_type='database.read' + query + output_fields."
             ),
         }
 
+    except BuilderValidationError as e:
+        return {
+            "_success": False,
+            "error_code": e.error_code,
+            "error": str(e),
+            "field": e.field,
+            "hint": e.hint,
+            "profile": profile,
+        }
     except ApiError as e:
         return {
             "_success": False,

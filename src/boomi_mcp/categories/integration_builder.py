@@ -32,7 +32,12 @@ from boomi.models import (
 
 from ..models.integration_models import IntegrationComponentSpec, IntegrationSpecV1
 from .components._shared import component_get_xml, paginate_metadata
-from .components.builders import BuilderValidationError, DatabaseConnectorBuilder
+from .components.builders import (
+    BuilderValidationError,
+    DatabaseConnectorBuilder,
+    DatabaseGetOperationBuilder,
+    DatabaseReadProfileBuilder,
+)
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.processes import create_process, update_process
@@ -53,6 +58,7 @@ _TYPE_ALIASES = {
     "tradingpartner": "trading_partner",
     "trading_partner": "trading_partner",
     "component": "component",
+    "profile.db": "profile.db",
 }
 
 _METADATA_TYPE_MAP = {
@@ -60,6 +66,7 @@ _METADATA_TYPE_MAP = {
     "connector-settings": "connector-settings",
     "connector-action": "connector-action",
     "trading_partner": "tradingpartner",
+    "profile.db": "profile.db",
 }
 
 
@@ -256,6 +263,71 @@ def _extract_component_id(result: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _check_database_get_dependencies(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+) -> Optional[BuilderValidationError]:
+    """Cross-step dependency checks specific to database Get operations.
+
+    Boomi binds a connection to an operation at the process connector step,
+    not in the operation XML — so the connection ID is never embedded. But
+    plan-time we still need the caller to declare both dependencies via
+    `connection_ref_key` + `depends_on` (for connection) and `read_profile_id`
+    + `depends_on` (when read_profile_id is a `$ref:KEY` token), otherwise
+    the apply ordering would be unsafe.
+    """
+    depends_on = set(comp.depends_on or [])
+
+    connection_ref_key = raw_config.get("connection_ref_key")
+    if not connection_ref_key or not str(connection_ref_key).strip():
+        return BuilderValidationError(
+            "connection_ref_key is required for database Get operations",
+            error_code="MISSING_DB_DEPENDENCY",
+            field="connection_ref_key",
+            hint=(
+                "Declare the database connector-settings key the operation "
+                "will bind to at process time, and add the same key to "
+                "depends_on so plan ordering is correct."
+            ),
+        )
+    if connection_ref_key not in depends_on:
+        return BuilderValidationError(
+            f"connection_ref_key {connection_ref_key!r} must also appear in depends_on",
+            error_code="MISSING_DB_DEPENDENCY",
+            field="depends_on",
+            hint=(
+                "Add the connector-settings key to depends_on so the "
+                "execution order creates the connection before the operation."
+            ),
+        )
+
+    read_profile_id = raw_config.get("read_profile_id")
+    if isinstance(read_profile_id, str) and read_profile_id.startswith("$ref:"):
+        ref_key = read_profile_id[5:]
+        if not ref_key:
+            return BuilderValidationError(
+                "read_profile_id $ref token is empty (expected '$ref:KEY')",
+                error_code="MISSING_DB_READ_PROFILE_REF",
+                field="read_profile_id",
+                hint=(
+                    "Use '$ref:db_read_profile' to reference a profile.db "
+                    "component created earlier in the same integration spec."
+                ),
+            )
+        if ref_key not in depends_on:
+            return BuilderValidationError(
+                f"read_profile_id $ref target {ref_key!r} must also appear in depends_on",
+                error_code="MISSING_DB_DEPENDENCY",
+                field="depends_on",
+                hint=(
+                    "Add the read profile key to depends_on so the execution "
+                    "order creates the profile before the operation."
+                ),
+            )
+
+    return None
+
+
 def _resolve_dependency_tokens(value: Any, id_registry: Dict[str, str]) -> Any:
     if isinstance(value, str):
         if value.startswith("$ref:"):
@@ -410,6 +482,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             if comp.type in ("connector-settings", "connector-action")
             else "trading_partner_json"
             if comp.type == "trading_partner"
+            else "profile_builder_or_xml"
+            if comp.type == "profile.db"
             else "generic_component_xml"
         )
 
@@ -443,19 +517,58 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 or xml_says_database
             )
         )
+        # Any profile.db component with a declared profile_type is a builder
+        # candidate. The builder itself decides whether the profile_type is
+        # supported (currently database.read only) — anything else returns
+        # UNSUPPORTED_DB_PROFILE_MODE rather than silently falling through.
+        is_database_read_profile = (
+            comp.type == "profile.db"
+            and bool(raw_config.get("profile_type"))
+        )
+        is_database_get_operation = (
+            comp.type == "connector-action"
+            and (raw_config.get("connector_type") or "").lower() == "database"
+            and (raw_config.get("operation_mode") or "").lower() == "get"
+        )
+        # An unsupported db operation_mode (e.g. "send") still needs to fail
+        # loudly at plan time even though there's no builder to dispatch.
+        is_database_unsupported_operation = (
+            comp.type == "connector-action"
+            and (raw_config.get("connector_type") or "").lower() == "database"
+            and (raw_config.get("operation_mode") or "").lower()
+                in DatabaseGetOperationBuilder.UNSUPPORTED_OPERATION_MODES
+        )
         will_invoke_builder = (
-            is_database_connector_settings
+            (is_database_connector_settings
+             or is_database_read_profile
+             or is_database_get_operation)
             and not xml_payload
             and planned_action in ("create", "create_clone")
         )
         db_err: Optional[BuilderValidationError] = None
+        secret_scanner_cls = None
         if is_database_connector_settings:
-            db_err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(raw_config)
-            if db_err is None and will_invoke_builder:
+            secret_scanner_cls = DatabaseConnectorBuilder
+        elif is_database_read_profile:
+            secret_scanner_cls = DatabaseReadProfileBuilder
+        elif is_database_get_operation or is_database_unsupported_operation:
+            secret_scanner_cls = DatabaseGetOperationBuilder
+        if secret_scanner_cls is not None:
+            db_err = secret_scanner_cls.scan_forbidden_secret_fields(raw_config)
+            if db_err is None and (will_invoke_builder or is_database_unsupported_operation):
                 effective_config = dict(raw_config)
                 if comp.name:
                     effective_config.setdefault("component_name", comp.name)
-                db_err = DatabaseConnectorBuilder.validate_config(effective_config)
+                if is_database_connector_settings:
+                    db_err = DatabaseConnectorBuilder.validate_config(effective_config)
+                elif is_database_read_profile:
+                    db_err = DatabaseReadProfileBuilder.validate_config(effective_config)
+                elif is_database_get_operation or is_database_unsupported_operation:
+                    db_err = DatabaseGetOperationBuilder.validate_config(effective_config)
+                    # Cross-step dependency checks (only meaningful for the
+                    # supported Get path — Send fails on operation_mode first).
+                    if db_err is None and is_database_get_operation:
+                        db_err = _check_database_get_dependencies(comp, raw_config)
         if db_err is not None:
             planned_action = "error_database_validation"
             validation_error = {
@@ -471,8 +584,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # Walks nested dicts (pooling, write_options, etc.) too — otherwise
             # a secret stashed inside a sub-block would still appear in the
             # plan's spec echo.
-            if db_err.error_code == "PLAINTEXT_SECRET_REJECTED":
-                DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(
+            if db_err.error_code == "PLAINTEXT_SECRET_REJECTED" and secret_scanner_cls is not None:
+                secret_scanner_cls.redact_forbidden_secret_fields_in_place(
                     raw_config
                 )
 
@@ -556,7 +669,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                 ve = step.get("validation_error") or {}
                 errors.append(
                     f"Component '{step.get('name') or step['key']}' failed "
-                    f"database connector validation: "
+                    f"database validation: "
                     f"{ve.get('error_code', 'DATABASE_CONNECTOR_VALIDATION_FAILED')} "
                     f"on field {ve.get('field')!r}."
                 )
