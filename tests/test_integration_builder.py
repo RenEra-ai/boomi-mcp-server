@@ -81,6 +81,63 @@ def _db_comp(key="db_connection", name="Example SQL Server",
     )
 
 
+def _db_read_profile_config(**overrides):
+    """A minimal-valid database read-profile config dict (Issue #23)."""
+    cfg = {
+        "component_type": "profile.db",
+        "profile_type": "database.read",
+        "component_name": "Example Read Profile",
+        "folder_name": "Process Library",
+        "query": "select 1 as one",
+        "output_fields": [{"name": "one"}],
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _db_read_profile_comp(key="db_read_profile", name="Example Read Profile",
+                          action="create", depends_on=None, **config_overrides):
+    return IntegrationComponentSpec(
+        key=key,
+        type="profile.db",
+        action=action,
+        name=name,
+        config=_db_read_profile_config(**config_overrides),
+        depends_on=depends_on or [],
+    )
+
+
+def _db_get_op_config(**overrides):
+    """A minimal-valid database Get-operation config dict (Issue #23)."""
+    cfg = {
+        "component_type": "connector-action",
+        "connector_type": "database",
+        "operation_mode": "get",
+        "component_name": "Example DB Query",
+        "folder_name": "Process Library",
+        "connection_ref_key": "db_connection",
+        "read_profile_id": "$ref:db_read_profile",
+        "batch_count": 0,
+        "max_rows": 0,
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _db_get_op_comp(key="db_query_operation", name="Example DB Query",
+                    action="create",
+                    depends_on=("db_connection", "db_read_profile"),
+                    **config_overrides):
+    return IntegrationComponentSpec(
+        key=key,
+        type="connector-action",
+        action=action,
+        name=name,
+        config=_db_get_op_config(**config_overrides),
+        depends_on=list(depends_on),
+    )
+
+
 def _build_config(components, conflict_policy="reuse"):
     """Minimal config dict accepted by _build_plan."""
     return {
@@ -923,3 +980,273 @@ class TestApplyPlanDatabaseValidationFailFast:
         bad = result["unresolvable_steps"][0]
         assert bad["validation_error"]["error_code"] == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
         mock_exec.assert_not_called()
+
+
+# ===========================================================================
+# Issue #23 — Database Read Profile + Get Operation preflight & apply
+# ===========================================================================
+
+
+class TestBuildPlanDatabaseReadProfilePreflight:
+    """Issue #23 — preflight contract for profile.db + database.read components."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_read_profile_plans_without_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        config = _build_config([_db_read_profile_comp()])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step.get("validation_error") is None
+        assert step["route"] == "profile_builder_or_xml"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_query_surfaces_missing_db_query(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_read_profile_comp()
+        comp.config["query"] = ""
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "MISSING_DB_QUERY"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_output_fields_surfaces_missing_db_output_fields(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_read_profile_comp()
+        comp.config["output_fields"] = []
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "MISSING_DB_OUTPUT_FIELDS"
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_profile_type_surfaces_unsupported_db_profile_mode(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_read_profile_comp()
+        comp.config["profile_type"] = "database.write"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_PROFILE_MODE"
+
+    @patch(_PATCH_TARGET)
+    def test_plaintext_secret_in_read_profile_is_scrubbed_in_plan_output(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_read_profile_comp()
+        comp.config["password"] = "leaked"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        # Spec echo must redact the plaintext value.
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["password"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_payload_skips_builder_validation(self, mock_pag):
+        # When the caller supplies raw XML, preflight must not run validate_config
+        # (the XML bypasses the builder). The scan still runs to catch leaked
+        # secrets in the spec dump, but field-level validation does not.
+        mock_pag.return_value = []
+        comp = _db_read_profile_comp()
+        comp.config["xml"] = "<bns:Component type='profile.db'/>"
+        # Strip required structured fields to confirm builder validation is skipped.
+        comp.config.pop("query")
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step.get("validation_error") is None
+
+
+class TestBuildPlanDatabaseGetOperationPreflight:
+    """Issue #23 — preflight contract for connector-action + database.get."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_get_op_with_full_deps_plans_without_error(self, mock_pag):
+        mock_pag.return_value = []
+        config = _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            _db_get_op_comp(),
+        ])
+        plan = _build_plan(MagicMock(), config)
+        # Execution order must place connection -> profile -> operation.
+        assert plan["execution_order"] == [
+            "db_connection",
+            "db_read_profile",
+            "db_query_operation",
+        ]
+        # Every step plans cleanly.
+        for step in plan["steps"]:
+            assert step.get("validation_error") is None
+        # Route assignments.
+        routes = {s["key"]: s["route"] for s in plan["steps"]}
+        assert routes["db_connection"] == "connector_builder_or_xml"
+        assert routes["db_read_profile"] == "profile_builder_or_xml"
+        assert routes["db_query_operation"] == "connector_builder_or_xml"
+
+    @patch(_PATCH_TARGET)
+    def test_operation_mode_send_is_rejected_with_issue32_hint(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_get_op_comp(operation_mode="send")
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "UNSUPPORTED_DB_OPERATION_MODE"
+        assert "#32" in (op_step["validation_error"]["hint"] or "")
+
+    @patch(_PATCH_TARGET)
+    def test_missing_read_profile_id_surfaces_missing_db_read_profile_ref(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_get_op_comp()
+        comp.config.pop("read_profile_id")
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "MISSING_DB_READ_PROFILE_REF"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_connection_ref_key_surfaces_missing_db_dependency(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_get_op_comp()
+        comp.config.pop("connection_ref_key")
+        comp.depends_on = ["db_read_profile"]
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_read_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "MISSING_DB_DEPENDENCY"
+        assert op_step["validation_error"]["field"] == "connection_ref_key"
+
+    @patch(_PATCH_TARGET)
+    def test_connection_ref_key_not_in_depends_on_surfaces_missing_db_dependency(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_get_op_comp()
+        comp.depends_on = ["db_read_profile"]  # forgot the connection
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "MISSING_DB_DEPENDENCY"
+
+    @patch(_PATCH_TARGET)
+    def test_ref_target_not_in_depends_on_surfaces_missing_db_dependency(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_get_op_comp()
+        comp.depends_on = ["db_connection"]  # forgot the profile
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "MISSING_DB_DEPENDENCY"
+
+    @patch(_PATCH_TARGET)
+    def test_uuid_read_profile_id_does_not_require_depends_on(self, mock_pag):
+        # When the caller passes a literal UUID instead of a $ref token, the
+        # profile is assumed to exist already — no $ref resolution and no
+        # depends_on cross-check is required for that field. (connection_ref_key
+        # is still mandatory.)
+        mock_pag.return_value = []
+        comp = _db_get_op_comp(read_profile_id="abc-123-def")
+        comp.depends_on = ["db_connection"]
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
+    def test_link_element_is_rejected_at_plan_time(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_get_op_comp(link_element="some_field")
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "UNSUPPORTED_DB_GET_FIELD"
+
+
+class TestApplyPlanDatabaseProfileAndGetFailFast:
+    """Issue #23 — apply must fail-fast on read-profile or Get-op errors."""
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_fails_before_execution_on_read_profile_validation_error(
+        self, mock_pag, mock_exec
+    ):
+        mock_pag.return_value = []
+        comp = _db_read_profile_comp()
+        comp.config["query"] = ""  # MISSING_DB_QUERY
+        config = _build_config([comp])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        bad = result["unresolvable_steps"][0]
+        assert bad["validation_error"]["error_code"] == "MISSING_DB_QUERY"
+        mock_exec.assert_not_called()
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_fails_before_execution_on_get_op_send_mode(
+        self, mock_pag, mock_exec
+    ):
+        mock_pag.return_value = []
+        comp = _db_get_op_comp(operation_mode="send")
+        config = _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            comp,
+        ])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        codes = {s["validation_error"]["error_code"] for s in result["unresolvable_steps"]}
+        assert "UNSUPPORTED_DB_OPERATION_MODE" in codes
+        mock_exec.assert_not_called()
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_resolves_ref_token_to_created_profile_id(
+        self, mock_pag, mock_exec
+    ):
+        # End-to-end-style: db_connection -> db_read_profile -> db_query_operation
+        # When the operation step executes, the $ref:db_read_profile in its
+        # config must have been substituted with the profile's component_id.
+        mock_pag.return_value = []
+        mock_exec.side_effect = [
+            {"_success": True, "component_id": "conn-001", "type": "connector-settings"},
+            {"_success": True, "component_id": "profile-002", "type": "profile.db"},
+            {"_success": True, "component_id": "op-003", "type": "connector-action"},
+        ]
+        config = _build_config([
+            _db_comp(),
+            _db_read_profile_comp(),
+            _db_get_op_comp(),
+        ])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        # Inspect the third call (db_query_operation) — its resolved config
+        # must contain the actual profile component_id, not the $ref token.
+        third_call = mock_exec.call_args_list[2]
+        resolved_config = third_call.kwargs["config"]
+        assert resolved_config["read_profile_id"] == "profile-002"
