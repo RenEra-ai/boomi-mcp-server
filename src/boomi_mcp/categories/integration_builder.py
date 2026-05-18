@@ -25,7 +25,7 @@ from boomi.models import (
 
 from ..models.integration_models import IntegrationComponentSpec, IntegrationSpecV1
 from .components._shared import component_get_xml, paginate_metadata
-from .components.builders import DatabaseConnectorBuilder
+from .components.builders import BuilderValidationError, DatabaseConnectorBuilder
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.processes import create_process, update_process
@@ -406,40 +406,53 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             else "generic_component_xml"
         )
 
-        # Database connector-settings preflight. Run the builder validator
-        # only when the apply path will actually invoke DatabaseConnectorBuilder.
-        # Reuse short-circuits (_apply_plan line ~547), update goes through
-        # update_connector (smart-merge / raw-XML), and raw-XML config.xml
-        # bypasses the builder in create_connector. Validating those paths
-        # would block legitimate plans. Mirror _execute_component's defaulting
-        # (component_name from comp.name) so the validated payload matches
-        # what the builder would actually see at apply time.
+        # Database connector-settings preflight. Two-tier validation:
+        #
+        # (a) scan_forbidden_secret_fields runs on EVERY database
+        #     connector-settings step regardless of apply path. Plan output
+        #     dumps comp.config verbatim, so a plaintext password in a
+        #     reuse/update/raw-XML config would leak into the response even
+        #     though apply itself wouldn't use it.
+        #
+        # (b) validate_config (driver, auth, credential_ref, required fields)
+        #     runs only when the apply path will actually invoke
+        #     DatabaseConnectorBuilder.build(). Reuse short-circuits
+        #     (_apply_plan line ~547), update goes through update_connector,
+        #     and config.xml bypasses the builder in create_connector.
+        #     Validating those paths would block legitimate plans. Mirror
+        #     _execute_component's defaulting (component_name from comp.name).
         validation_error: Optional[Dict[str, Any]] = None
         raw_config = comp.config or {}
-        will_invoke_builder = (
+        is_database_connector_settings = (
             comp.type == "connector-settings"
             and raw_config.get("connector_type") == "database"
+        )
+        will_invoke_builder = (
+            is_database_connector_settings
             and not raw_config.get("xml")
             and planned_action in ("create", "create_clone")
         )
-        if will_invoke_builder:
-            effective_config = dict(raw_config)
-            if comp.name:
-                effective_config.setdefault("component_name", comp.name)
-            db_err = DatabaseConnectorBuilder.validate_config(effective_config)
-            if db_err is not None:
-                planned_action = "error_database_validation"
-                validation_error = {
-                    "error_code": db_err.error_code,
-                    "error": str(db_err),
-                    "field": db_err.field,
-                    "hint": db_err.hint,
-                }
-                # Scrub any plaintext secret value from the spec dump so the
-                # plan response never echoes credentials back to the caller.
-                if db_err.error_code == "PLAINTEXT_SECRET_REJECTED" \
-                        and db_err.field and db_err.field in raw_config:
-                    raw_config[db_err.field] = "[REDACTED]"
+        db_err: Optional[BuilderValidationError] = None
+        if is_database_connector_settings:
+            db_err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(raw_config)
+            if db_err is None and will_invoke_builder:
+                effective_config = dict(raw_config)
+                if comp.name:
+                    effective_config.setdefault("component_name", comp.name)
+                db_err = DatabaseConnectorBuilder.validate_config(effective_config)
+        if db_err is not None:
+            planned_action = "error_database_validation"
+            validation_error = {
+                "error_code": db_err.error_code,
+                "error": str(db_err),
+                "field": db_err.field,
+                "hint": db_err.hint,
+            }
+            # Scrub any plaintext secret value from the spec dump so the
+            # plan response never echoes credentials back to the caller.
+            if db_err.error_code == "PLAINTEXT_SECRET_REJECTED" \
+                    and db_err.field and db_err.field in raw_config:
+                raw_config[db_err.field] = "[REDACTED]"
 
         step: Dict[str, Any] = {
             "key": comp.key,

@@ -451,6 +451,65 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert step["planned_action"] == "error_database_validation"
         assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER"
 
+    # ---- Forbidden-secret scan runs on EVERY db connector-settings step,
+    # ---- regardless of apply path (Codex round-2 P2 fix).
+
+    @patch(_PATCH_TARGET)
+    def test_update_path_still_rejects_plaintext_password(self, mock_pag):
+        """Update bypasses the builder, but plaintext secrets must still be
+        rejected and scrubbed so the plan response doesn't echo them."""
+        comp = IntegrationComponentSpec(
+            key="db_update", type="connector-settings", action="update",
+            name="Existing DB", component_id="existing-db-id",
+            config={"connector_type": "database",
+                    "password": "LEAK_UPDATE_DEADBEEF"},
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "password"
+        assert "LEAK_UPDATE_DEADBEEF" not in repr(plan)
+        # The scrub also reaches the integration_spec echo.
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["password"] == "[REDACTED]"
+        mock_pag.assert_not_called()
+
+    @patch(_PATCH_TARGET)
+    def test_reuse_path_still_rejects_plaintext_password(self, mock_pag):
+        mock_pag.return_value = [_meta("existing-db-id", "Example SQL Server",
+                                       "Process Library", comp_type="connector-settings")]
+        comp = _db_comp()
+        comp.config["client_secret"] = "LEAK_REUSE_DEADBEEF"
+        config = _build_config([comp], conflict_policy="reuse")
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "client_secret"
+        assert "LEAK_REUSE_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_path_still_rejects_plaintext_password(self, mock_pag):
+        """Even if the apply path is raw-XML (builder bypassed), plaintext
+        secrets in config must not leak into the plan response."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="db_raw_leak", type="connector-settings", action="create",
+            name="Raw DB",
+            config={"connector_type": "database",
+                    "xml": "<bns:Component>...</bns:Component>",
+                    "token": "LEAK_RAWXML_DEADBEEF"},
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "token"
+        assert "LEAK_RAWXML_DEADBEEF" not in repr(plan)
+
 
 # ---------------------------------------------------------------------------
 # M2.2 — _apply_plan fail-fast on database validation
