@@ -737,3 +737,84 @@ def test_redact_forbidden_secret_fields_in_place_handles_non_dict_gracefully():
     DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(42)
     DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place([{"password": "leak"}])
     # No assertion needed — just must not throw.
+
+
+# --- List-of-dicts traversal (Codex P2 follow-up) ------------------------
+# The builder ignores unknown top-level keys, so a caller can smuggle a
+# list-of-dicts past validate_config (e.g. `extra: [{"password": "..."}]`).
+# Without descent into list elements, the plan echo would still leak the
+# plaintext value. scan + redactor must both walk dict elements of lists.
+
+def test_scan_forbidden_secret_fields_detects_secret_in_list_of_dicts():
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "extra": [{"password": "LEAK_LIST_DEADBEEF"}]},
+    )
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == "extra[0].password"
+    assert "LEAK_LIST_DEADBEEF" not in str(err)
+
+
+def test_scan_forbidden_secret_fields_reports_correct_list_index():
+    """When the offender is at a non-zero index, the path reflects the index."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "extra": [{}, {"safe": "ok"}, {"token": "LEAK_IDX2_DEADBEEF"}]},
+    )
+    assert err.field == "extra[2].token"
+
+
+def test_scan_forbidden_secret_fields_walks_dict_inside_list_inside_dict():
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "wrapper": {"items": [{"secret": "LEAK_DEEP_DEADBEEF"}]}},
+    )
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == "wrapper.items[0].secret"
+
+
+def test_scan_forbidden_secret_fields_no_false_positive_on_list_of_scalars():
+    """A list of non-dict values has no keys to scan — must not trip the
+    secret check or raise."""
+    assert DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "tags": ["safe", "also-safe", 42, None]},
+    ) is None
+
+
+def test_scan_forbidden_secret_fields_top_level_takes_priority_over_list_nested():
+    """Top-level offender wins over a list-nested one (shallowest first)."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "password": "TOP_DEADBEEF",
+         "extra": [{"token": "NESTED_DEADBEEF"}]},
+    )
+    assert err.field == "password"  # no path prefix
+
+
+def test_redact_forbidden_secret_fields_in_place_scrubs_secrets_in_list_of_dicts():
+    config = {
+        "connector_type": "database",
+        "extra": [
+            {"password": "L1_DEADBEEF"},
+            {"safe": "ok", "token": "L2_DEADBEEF"},
+        ],
+        "wrapper": {"items": [{"secret": "L3_DEADBEEF"}]},
+        "credential_ref": "credential://safe/path",
+    }
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+    assert config["extra"][0]["password"] == "[REDACTED]"
+    assert config["extra"][1]["token"] == "[REDACTED]"
+    assert config["extra"][1]["safe"] == "ok"  # non-secret preserved
+    assert config["wrapper"]["items"][0]["secret"] == "[REDACTED]"
+    assert config["credential_ref"] == "credential://safe/path"
+    assert "L1_DEADBEEF" not in repr(config)
+    assert "L2_DEADBEEF" not in repr(config)
+    assert "L3_DEADBEEF" not in repr(config)
+
+
+def test_redact_forbidden_secret_fields_in_place_leaves_scalar_lists_alone():
+    config = {"connector_type": "database", "tags": ["a", "b", 3, None]}
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+    assert config["tags"] == ["a", "b", 3, None]

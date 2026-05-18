@@ -333,11 +333,13 @@ class DatabaseConnectorBuilder:
     ) -> Optional[BuilderValidationError]:
         """Detect plaintext secret-shaped keys at any depth.
 
-        Walks the config dict tree depth-first. At each level, checks for
+        Walks the config dict tree depth-first, descending into nested dicts
+        AND into dict elements of nested lists. At each level, checks for
         FORBIDDEN_SECRET_FIELDS in the iteration order of that tuple (so
         'password' beats 'token' when both are present at the same depth —
-        matches M2.2 priority). Returns the first offender with a dotted-path
-        `field` (e.g. 'password', 'pooling.password', 'write_options.secret').
+        matches M2.2 priority). Returns the first offender with a path-shaped
+        `field` (e.g. 'password', 'pooling.password', 'extra[0].secret',
+        'wrapper.items[2].token').
 
         Independent of builder invocation — plaintext secrets are a hard
         error regardless of which apply path the component takes (create /
@@ -348,7 +350,8 @@ class DatabaseConnectorBuilder:
         if not isinstance(config, dict):
             return None
         # Check forbidden keys at the current level first (preserves the
-        # M2.2 priority where 'password' wins over 'token' at the same depth).
+        # M2.2 priority where 'password' wins over 'token' at the same depth,
+        # and where the shallowest occurrence wins overall).
         for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
             if forbidden in config:
                 field_path = f"{_path_prefix}{forbidden}"
@@ -368,7 +371,11 @@ class DatabaseConnectorBuilder:
                     ),
                 )
         # Then recurse into nested dicts (e.g. pooling, write_options, or any
-        # future block). Insertion order preserved (Python 3.7+).
+        # future block) and into list-of-dict values (defense-in-depth: the
+        # builder ignores unknown top-level keys, so a caller could smuggle
+        # `extra: [{"password": "..."}]` past validate_config — and without
+        # this descent the plan echo would still leak the value).
+        # Insertion order preserved (Python 3.7+).
         for key, value in config.items():
             if isinstance(value, dict):
                 nested = cls.scan_forbidden_secret_fields(
@@ -376,16 +383,26 @@ class DatabaseConnectorBuilder:
                 )
                 if nested is not None:
                     return nested
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    if isinstance(item, dict):
+                        nested = cls.scan_forbidden_secret_fields(
+                            item, _path_prefix=f"{_path_prefix}{key}[{index}]."
+                        )
+                        if nested is not None:
+                            return nested
         return None
 
     @classmethod
     def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
         """Recursively replace any forbidden-keyed values with '[REDACTED]'.
 
-        Mirrors scan_forbidden_secret_fields' traversal. Callers (e.g.
+        Mirrors scan_forbidden_secret_fields' traversal — descends into both
+        nested dicts and dict elements of nested lists. Callers (e.g.
         integration_builder _build_plan) use this to scrub the spec echo
-        before returning a plan response — otherwise nested secrets like
-        pooling.password would leak even after the error is raised.
+        before returning a plan response. Without the list descent a config
+        like `extra: [{"password": "..."}]` would still echo the plaintext
+        value even after the error is raised.
         """
         if not isinstance(config, dict):
             return
@@ -395,6 +412,10 @@ class DatabaseConnectorBuilder:
         for value in config.values():
             if isinstance(value, dict):
                 cls.redact_forbidden_secret_fields_in_place(value)
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        cls.redact_forbidden_secret_fields_in_place(item)
 
     @classmethod
     def validate_pooling(
