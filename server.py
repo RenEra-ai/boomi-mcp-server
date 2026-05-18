@@ -16,11 +16,27 @@ When BOOMI_LOCAL is not set (production):
 """
 
 import json
+import logging
 import os
 import sys
 from enum import Enum
 from typing import Dict
 from pathlib import Path
+
+# Wire the `boomi.*` logger tree to stderr at INFO so the
+# refresh-token/cache/storage-healing patches' boot + runtime lines reach
+# Cloud Logging. Scoped to "boomi" only so uvicorn/fastmcp/motor INFO
+# chatter stays at their defaults. Done BEFORE importing any patch
+# module since each calls `logging.getLogger("boomi.<area>")` at import.
+# We deliberately leave propagate at its default (True) so pytest's caplog
+# (which attaches to root) still captures records — our own handler runs
+# first, and root has no configured handler so there's no double-emit.
+_boomi_log = logging.getLogger("boomi")
+if not _boomi_log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("[%(levelname)s] [%(name)s] %(message)s"))
+    _boomi_log.addHandler(_h)
+    _boomi_log.setLevel(logging.INFO)
 
 from fastmcp import FastMCP
 
