@@ -333,13 +333,18 @@ class DatabaseConnectorBuilder:
     ) -> Optional[BuilderValidationError]:
         """Detect plaintext secret-shaped keys at any depth.
 
-        Walks the config dict tree depth-first, descending into nested dicts
-        AND into dict elements of nested lists. At each level, checks for
-        FORBIDDEN_SECRET_FIELDS in the iteration order of that tuple (so
-        'password' beats 'token' when both are present at the same depth —
-        matches M2.2 priority). Returns the first offender with a path-shaped
-        `field` (e.g. 'password', 'pooling.password', 'extra[0].secret',
-        'wrapper.items[2].token').
+        Generic JSON walker — descends into every dict child AND every list
+        element (including lists nested inside lists, lists inside dicts
+        inside lists, etc.). At each dict level, checks FORBIDDEN_SECRET_FIELDS
+        in tuple order so 'password' beats 'token' at the same depth, and the
+        shallowest occurrence wins overall. Returns the first offender with a
+        path-shaped `field`:
+
+            - top-level:        'password'
+            - dict-in-dict:     'pooling.password'
+            - dict-in-list:     'extra[0].password'
+            - list-in-list:     'matrix[0][0].password'
+            - mixed:            'wrapper.items[2].secret'
 
         Independent of builder invocation — plaintext secrets are a hard
         error regardless of which apply path the component takes (create /
@@ -347,75 +352,72 @@ class DatabaseConnectorBuilder:
         preflight) should run this on every database connector-settings
         config to keep credentials out of plan output.
         """
-        if not isinstance(config, dict):
-            return None
-        # Check forbidden keys at the current level first (preserves the
-        # M2.2 priority where 'password' wins over 'token' at the same depth,
-        # and where the shallowest occurrence wins overall).
-        for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
-            if forbidden in config:
-                field_path = f"{_path_prefix}{forbidden}"
-                return BuilderValidationError(
-                    f"{field_path!r} cannot be supplied in database connector "
-                    "config — secrets must cross the wire as opaque "
-                    "credential_ref strings only. Boomi stores passwords as "
-                    "ciphertext produced by its own encryption; there is no "
-                    "public API to encrypt a plaintext value.",
-                    error_code="PLAINTEXT_SECRET_REJECTED",
-                    field=field_path,
-                    hint=(
-                        "Remove the secret-shaped field and pass "
-                        "credential_ref='credential://...' instead. Set the "
-                        "password in the Boomi UI after create, or supply a "
-                        "pre-encrypted XML via config.xml=..."
-                    ),
-                )
-        # Then recurse into nested dicts (e.g. pooling, write_options, or any
-        # future block) and into list-of-dict values (defense-in-depth: the
-        # builder ignores unknown top-level keys, so a caller could smuggle
-        # `extra: [{"password": "..."}]` past validate_config — and without
-        # this descent the plan echo would still leak the value).
-        # Insertion order preserved (Python 3.7+).
-        for key, value in config.items():
-            if isinstance(value, dict):
+        if isinstance(config, dict):
+            # Check forbidden keys at the current level first (preserves the
+            # M2.2 priority where 'password' wins over 'token' at the same
+            # depth, and where the shallowest occurrence wins overall).
+            for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
+                if forbidden in config:
+                    field_path = f"{_path_prefix}{forbidden}"
+                    return BuilderValidationError(
+                        f"{field_path!r} cannot be supplied in database connector "
+                        "config — secrets must cross the wire as opaque "
+                        "credential_ref strings only. Boomi stores passwords as "
+                        "ciphertext produced by its own encryption; there is no "
+                        "public API to encrypt a plaintext value.",
+                        error_code="PLAINTEXT_SECRET_REJECTED",
+                        field=field_path,
+                        hint=(
+                            "Remove the secret-shaped field and pass "
+                            "credential_ref='credential://...' instead. Set the "
+                            "password in the Boomi UI after create, or supply a "
+                            "pre-encrypted XML via config.xml=..."
+                        ),
+                    )
+            # Then recurse into every value (dict / list / scalar). Insertion
+            # order preserved (Python 3.7+).
+            for key, value in config.items():
                 nested = cls.scan_forbidden_secret_fields(
                     value, _path_prefix=f"{_path_prefix}{key}."
                 )
                 if nested is not None:
                     return nested
-            elif isinstance(value, list):
-                for index, item in enumerate(value):
-                    if isinstance(item, dict):
-                        nested = cls.scan_forbidden_secret_fields(
-                            item, _path_prefix=f"{_path_prefix}{key}[{index}]."
-                        )
-                        if nested is not None:
-                            return nested
+        elif isinstance(config, list):
+            # Recurse into every element with `[index]` path notation.
+            # Strip the trailing "." from the inbound prefix so the index
+            # attaches to the preceding key (e.g. `extra.` + `[0]` → `extra[0]`),
+            # then re-add "." for the next level's separator.
+            base = _path_prefix[:-1] if _path_prefix.endswith(".") else _path_prefix
+            for index, item in enumerate(config):
+                nested = cls.scan_forbidden_secret_fields(
+                    item, _path_prefix=f"{base}[{index}]."
+                )
+                if nested is not None:
+                    return nested
+        # Scalars / None: no keys to scan, return None.
         return None
 
     @classmethod
     def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
         """Recursively replace any forbidden-keyed values with '[REDACTED]'.
 
-        Mirrors scan_forbidden_secret_fields' traversal — descends into both
-        nested dicts and dict elements of nested lists. Callers (e.g.
+        Mirrors scan_forbidden_secret_fields' traversal — descends into every
+        dict child AND every list element at arbitrary depth. Callers (e.g.
         integration_builder _build_plan) use this to scrub the spec echo
-        before returning a plan response. Without the list descent a config
-        like `extra: [{"password": "..."}]` would still echo the plaintext
-        value even after the error is raised.
+        before returning a plan response. Without full container descent a
+        config like `matrix: [[{"password": "..."}]]` would still echo the
+        plaintext value even after the error is raised.
         """
-        if not isinstance(config, dict):
-            return
-        for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
-            if forbidden in config:
-                config[forbidden] = "[REDACTED]"
-        for value in config.values():
-            if isinstance(value, dict):
+        if isinstance(config, dict):
+            for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
+                if forbidden in config:
+                    config[forbidden] = "[REDACTED]"
+            for value in config.values():
                 cls.redact_forbidden_secret_fields_in_place(value)
-            elif isinstance(value, list):
-                for item in value:
-                    if isinstance(item, dict):
-                        cls.redact_forbidden_secret_fields_in_place(item)
+        elif isinstance(config, list):
+            for item in config:
+                cls.redact_forbidden_secret_fields_in_place(item)
+        # Scalars / None: no-op.
 
     @classmethod
     def validate_pooling(

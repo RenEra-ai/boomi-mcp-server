@@ -818,3 +818,101 @@ def test_redact_forbidden_secret_fields_in_place_leaves_scalar_lists_alone():
     config = {"connector_type": "database", "tags": ["a", "b", 3, None]}
     DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
     assert config["tags"] == ["a", "b", 3, None]
+
+
+# --- Arbitrary-depth container traversal (Codex P2 follow-up #2) ----------
+# Lists nested inside lists, dicts inside lists inside dicts inside lists,
+# etc. Defense-in-depth: any JSON container that can hold a dict-keyed value
+# must be walked.
+
+def test_scan_forbidden_secret_fields_detects_secret_in_list_of_lists():
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "matrix": [[{"password": "LEAK_LIST_OF_LIST_DEADBEEF"}]]},
+    )
+    assert err is not None
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == "matrix[0][0].password"
+    assert "LEAK_LIST_OF_LIST_DEADBEEF" not in str(err)
+
+
+def test_scan_forbidden_secret_fields_reports_indices_in_nested_lists():
+    """Outer index 1, inner index 1 → matrix[1][1]."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "matrix": [[{}, {}], [{}, {"token": "LEAK_GRID_DEADBEEF"}]]},
+    )
+    assert err.field == "matrix[1][1].token"
+
+
+def test_scan_forbidden_secret_fields_walks_dict_list_dict_list_dict_chain():
+    """Deep mixed chain: dict → list → dict → list → dict containing secret."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "a": {"b": [{"c": [{"secret": "LEAK_CHAIN_DEADBEEF"}]}]}},
+    )
+    assert err.field == "a.b[0].c[0].secret"
+
+
+def test_scan_forbidden_secret_fields_triple_nested_list():
+    """Three levels of list nesting (cube)."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "cube": [[[{"password": "LEAK_CUBE_DEADBEEF"}]]]},
+    )
+    assert err.field == "cube[0][0][0].password"
+
+
+def test_scan_forbidden_secret_fields_no_false_positive_on_nested_scalar_lists():
+    """Lists of lists of scalars — no dicts anywhere — must not trip."""
+    assert DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"connector_type": "database",
+         "matrix": [[1, 2, 3], ["a", "b"], [None, None]]},
+    ) is None
+
+
+def test_redact_forbidden_secret_fields_in_place_scrubs_secrets_in_nested_lists():
+    config = {
+        "connector_type": "database",
+        "matrix": [
+            [{"password": "L1_DEADBEEF"}, {"safe": "ok"}],
+            [{}, {"token": "L2_DEADBEEF"}],
+        ],
+        "cube": [[[{"secret": "L3_DEADBEEF"}]]],
+    }
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+    assert config["matrix"][0][0]["password"] == "[REDACTED]"
+    assert config["matrix"][0][1]["safe"] == "ok"  # non-secret preserved
+    assert config["matrix"][1][1]["token"] == "[REDACTED]"
+    assert config["cube"][0][0][0]["secret"] == "[REDACTED]"
+    for marker in ("L1_DEADBEEF", "L2_DEADBEEF", "L3_DEADBEEF"):
+        assert marker not in repr(config), marker
+
+
+def test_redact_forbidden_secret_fields_in_place_handles_arbitrary_nesting():
+    """Mixed scalars, dicts, and lists at irregular depths."""
+    config = {
+        "connector_type": "database",
+        "weird": [
+            42,
+            "scalar",
+            [None, {"token": "INNER_DEADBEEF"}],
+            {"deep": [[{"password": "DEEP_DEADBEEF"}]]},
+        ],
+    }
+    DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+    assert config["weird"][2][1]["token"] == "[REDACTED]"
+    assert config["weird"][3]["deep"][0][0]["password"] == "[REDACTED]"
+    assert config["weird"][0] == 42  # scalars preserved
+    assert config["weird"][1] == "scalar"
+    assert "INNER_DEADBEEF" not in repr(config)
+    assert "DEEP_DEADBEEF" not in repr(config)
+
+
+def test_scan_forbidden_secret_fields_top_level_still_beats_arbitrary_nesting():
+    """Even with deep nesting, top-level offender wins (no path prefix)."""
+    err = DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+        {"password": "TOP_DEADBEEF",
+         "matrix": [[{"secret": "DEEP_DEADBEEF"}]]},
+    )
+    assert err.field == "password"
