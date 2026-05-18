@@ -382,9 +382,11 @@ if not LOCAL_MODE:
     from verified_storage import VerifiedStorage
     from consent_csp_patch import apply_consent_csp_patch
     from loopback_redirect_patch import apply_loopback_redirect_patch
+    from refresh_token_grace_patch import apply_refresh_token_grace_patch
 
     apply_consent_csp_patch()
     apply_loopback_redirect_patch()
+    apply_refresh_token_grace_patch()
 
     # Create Google OAuth provider
     try:
