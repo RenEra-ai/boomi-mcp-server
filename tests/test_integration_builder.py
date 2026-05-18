@@ -537,6 +537,27 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert echoed["password"] == "[REDACTED]"
 
     @patch(_PATCH_TARGET)
+    def test_raw_xml_with_whitespace_around_subtype_equals_still_rejects(self, mock_pag):
+        """XML attribute syntax allows whitespace around the `=`. The
+        substring check `'subType="database"' in xml` misses that form;
+        the regex tolerates it."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="db_ws", type="connector-settings", action="create",
+            name="Raw Whitespace DB",
+            config={
+                "xml": '<bns:Component subType = "database"/>',
+                "password": "LEAK_WHITESPACE_DEADBEEF",
+            },
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert "LEAK_WHITESPACE_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
     def test_raw_xml_with_database_subtype_single_quote_form_also_rejects(self, mock_pag):
         """Match both attribute-quote variants."""
         mock_pag.return_value = []

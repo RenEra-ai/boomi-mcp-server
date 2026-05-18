@@ -9,10 +9,17 @@ This module provides a single action router that can:
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
+
+# Matches `subType="database"` and `subType='database'` with any (or no)
+# whitespace around the `=`. XML attribute syntax allows whitespace there,
+# so an exact substring check would miss valid raw XML and skip the
+# database secret scan.
+_XML_DATABASE_SUBTYPE_RE = re.compile(r'\bsubType\s*=\s*["\']database["\']')
 
 from boomi import Boomi
 from boomi.models import (
@@ -426,9 +433,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         validation_error: Optional[Dict[str, Any]] = None
         raw_config = comp.config or {}
         xml_payload = raw_config.get("xml") or ""
-        xml_says_database = (
-            'subType="database"' in xml_payload
-            or "subType='database'" in xml_payload
+        xml_says_database = bool(
+            xml_payload and _XML_DATABASE_SUBTYPE_RE.search(xml_payload)
         )
         is_database_connector_settings = (
             comp.type == "connector-settings"
