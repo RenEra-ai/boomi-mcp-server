@@ -878,6 +878,47 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
     ],
     "defaults": {"connector_type": "database", "driver_id": "sqlserver", "auth_mode": "username_password", "port": 1433, "additional": ""},
     "supported_driver_ids": ["sqlserver", "microsoft_jdbc", "jtds"],
+    "recognized_driver_ids": ["sqlserver", "microsoft_jdbc", "jtds", "custom"],
+    "driver_variants": {
+        "sqlserver": {
+            "shape": "host_port_db",
+            "buildable": True,
+            "emits_driver_id": "sqlserver",
+            "class_name": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+            "url_format": "jdbc:sqlserver://{0}:{1};database={2}{3}",
+            "default_port": 1433,
+            "required": ["component_name", "host", "dbname", "username", "credential_ref"],
+            "recommended_additional": ";encrypt=true;trustServerCertificate=true",
+            "note": (
+                "Microsoft JDBC. Driver 12+ defaults to encrypt=true; the "
+                "recommended_additional clause adds trustServerCertificate=true "
+                "for Docker SQL Server with a self-signed cert. Caller decides — "
+                "the builder does not auto-inject or warn."
+            ),
+        },
+        "microsoft_jdbc": {"alias_of": "sqlserver"},
+        "jtds": {
+            "shape": "host_port_db",
+            "buildable": True,
+            "emits_driver_id": "jtds",
+            "class_name": "net.sourceforge.jtds.jdbc.Driver",
+            "url_format": "jdbc:jtds:sqlserver://{0}:{1}/{2}{3}",
+            "default_port": 1433,
+            "required": ["component_name", "host", "dbname", "username", "credential_ref"],
+            "note": "Legacy jTDS driver. Pre-loaded in Boomi runtime; no TLS by default.",
+        },
+        "custom": {
+            "shape": "custom_url",
+            "buildable": False,
+            "unsupported_error_code": "UNSUPPORTED_DB_DRIVER_SHAPE",
+            "unsupported_reason": (
+                "Custom driver XML emission is deferred until a verified live "
+                "Boomi Custom connection export is available. Use reuse mode "
+                "on an existing Boomi component or the raw-XML escape hatch "
+                "(config.xml=...) in the meantime."
+            ),
+        },
+    },
     "supported_auth_modes": ["username_password"],
     "unsupported_future_auth_modes": ["windows_integrated"],
     "forbidden_secret_fields": [
@@ -888,6 +929,75 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
         "access_token",
         "client_secret",
     ],
+    "pooling": {
+        "description": (
+            "Optional. Omit (or pass enabled=false) to keep the M2.2 default of "
+            "pooling disabled. Set enabled=true to use Boomi's connection pool; "
+            "max_active=-1 / max_idle=-1 mean unbounded (matches the CDS reference)."
+        ),
+        "fields": {
+            "enabled":           {"type": "boolean", "default_when_disabled": False, "default_when_enabled": True},
+            "exhausted_action":  {"type": "integer", "default_when_disabled": 1,     "default_when_enabled": 1},
+            "max_active":        {"type": "integer", "default_when_disabled": 0,     "default_when_enabled": -1},
+            "max_idle":          {"type": "integer", "default_when_disabled": 0,     "default_when_enabled": -1},
+            "max_idle_time":     {"type": "integer", "default_when_disabled": 0,     "default_when_enabled": 0},
+            "max_wait":          {"type": "integer", "default_when_disabled": 0,     "default_when_enabled": 0},
+            "min_idle":          {"type": "integer", "default_when_disabled": 0,     "default_when_enabled": 0},
+            "number_of_tests":   {"type": "integer", "default_when_disabled": 0,     "default_when_enabled": 0},
+            "test_idle":         {"type": "boolean", "default_when_disabled": False, "default_when_enabled": False},
+            "test_on_borrow":    {"type": "boolean", "default_when_disabled": False, "default_when_enabled": False},
+            "test_on_return":    {"type": "boolean", "default_when_disabled": False, "default_when_enabled": False},
+            "time_between_runs": {"type": "integer", "default_when_disabled": 0,     "default_when_enabled": 0},
+            "validation_query":  {"type": "string",  "default_when_disabled": "",    "default_when_enabled": ""},
+        },
+        "defaults_when_omitted": {
+            "enabled": False,
+            "exhausted_action": 1,
+            "max_active": 0,
+            "max_idle": 0,
+            "max_idle_time": 0,
+            "max_wait": 0,
+            "min_idle": 0,
+            "number_of_tests": 0,
+            "test_idle": False,
+            "test_on_borrow": False,
+            "test_on_return": False,
+            "time_between_runs": 0,
+            "validation_query": "",
+        },
+        "defaults_when_enabled": {
+            "enabled": True,
+            "exhausted_action": 1,
+            "max_active": -1,
+            "max_idle": -1,
+            "max_idle_time": 0,
+            "max_wait": 0,
+            "min_idle": 0,
+            "number_of_tests": 0,
+            "test_idle": False,
+            "test_on_borrow": False,
+            "test_on_return": False,
+            "time_between_runs": 0,
+            "validation_query": "",
+        },
+        "error_code": "DATABASE_POOLING_VALIDATION_FAILED",
+    },
+    "write_options": {
+        "description": (
+            "Optional. Omit to keep the M2.2 default "
+            "(writeSQLToFile=false, sqlFilePath=tmp/sqldebug.txt)."
+        ),
+        "fields": {
+            "write_sql_to_file": {
+                "type": "boolean",
+                "default": False,
+                "note": "When True, sql_file_path is required.",
+            },
+            "sql_file_path": {"type": "string", "default": "tmp/sqldebug.txt"},
+        },
+        "defaults": {"write_sql_to_file": False, "sql_file_path": "tmp/sqldebug.txt"},
+        "error_code": "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED",
+    },
     "password_note": (
         "Plaintext secrets are rejected before any mutation. Pass credential_ref="
         "'credential://...' as an opaque placeholder — the builder never writes it "
@@ -949,6 +1059,10 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
         "username": "sa",
         "credential_ref": "credential://prod/sqlserver/password",
         "additional": ";encrypt=true;trustServerCertificate=true",
+        # pooling and write_options are shown explicitly at their omitted-defaults
+        # for discoverability — both keys may be omitted entirely with no XML diff.
+        "pooling": {"enabled": False},
+        "write_options": {"write_sql_to_file": False, "sql_file_path": "tmp/sqldebug.txt"},
     },
 }
 
