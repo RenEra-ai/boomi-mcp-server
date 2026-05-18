@@ -43,6 +43,52 @@ def _escape_xml(text: str) -> str:
     return text
 
 
+# Canonical attribute order + defaults for <AdapterPoolInfo>. Two-default-column
+# form: when pooling is omitted entirely (or enabled=false), use the
+# default_when_disabled value; when pooling.enabled=true and a key is omitted,
+# use default_when_enabled. The (max_active, max_idle) flip from 0 → -1 mirrors
+# the CDS reference (work-account 273d1741) where pooling-enabled connections
+# default to unbounded.
+POOLING_ATTR_ORDER = (
+    # (snake_case config key,  Boomi XML attribute,  default_when_disabled, default_when_enabled)
+    ("exhausted_action",       "exhaustedAction",    1,     1),
+    ("max_active",             "maxActive",          0,    -1),
+    ("max_idle",               "maxIdle",            0,    -1),
+    ("max_idle_time",          "maxIdleTime",        0,     0),
+    ("max_wait",               "maxWait",            0,     0),
+    ("min_idle",               "minIdle",            0,     0),
+    ("number_of_tests",        "numberOfTests",      0,     0),
+    ("test_idle",              "testIdle",           False, False),
+    ("test_on_borrow",         "testOnBorrow",       False, False),
+    ("test_on_return",         "testOnReturn",       False, False),
+    ("time_between_runs",      "timeBetweenRuns",    0,     0),
+    ("validation_query",       "validationQuery",    "",    ""),
+)
+POOLING_ALLOWED_KEYS = frozenset({"enabled", *(k for k, *_ in POOLING_ATTR_ORDER)})
+
+# Canonical attribute order + defaults for <WriteOptions>.
+WRITE_OPTIONS_ATTR_ORDER = (
+    # (snake_case, XML attribute, default)
+    ("sql_file_path",     "sqlFilePath",    "tmp/sqldebug.txt"),
+    ("write_sql_to_file", "writeSQLToFile", False),
+)
+WRITE_OPTIONS_ALLOWED_KEYS = frozenset(k for k, *_ in WRITE_OPTIONS_ATTR_ORDER)
+
+
+def _format_xml_value(value: Any) -> str:
+    """Format a Python scalar for an XML attribute value.
+
+    bool → "true"/"false" (Boomi's lowercase convention).
+    int  → str(int) (preserves negative values like -1 for unbounded pool).
+    str  → XML-escaped string.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    return _escape_xml(str(value))
+
+
 class HttpConnectorBuilder:
     """Builder for HTTP/HTTPS connector-settings components.
 
@@ -202,16 +248,37 @@ class DatabaseConnectorBuilder:
 
     DRIVERS: Dict[str, Dict[str, Any]] = {
         "sqlserver": {
+            "shape":       "host_port_db",
+            "buildable":   True,
             "driver_id":   "sqlserver",
             "class_name":  "com.microsoft.sqlserver.jdbc.SQLServerDriver",
             "url_format":  "jdbc:sqlserver://{0}:{1};database={2}{3}",
             "default_port": 1433,
+            # Microsoft JDBC ≥12 defaults to encrypt=true; against the
+            # mcr.microsoft.com/mssql/server self-signed cert the driver
+            # rejects the TLS handshake unless trustServerCertificate=true
+            # is set. Surfaced as schema-template metadata only — the
+            # builder does not auto-inject or warn (caller's choice).
+            "recommended_additional": ";encrypt=true;trustServerCertificate=true",
         },
         "jtds": {
+            "shape":       "host_port_db",
+            "buildable":   True,
             "driver_id":   "jtds",
             "class_name":  "net.sourceforge.jtds.jdbc.Driver",
             "url_format":  "jdbc:jtds:sqlserver://{0}:{1}/{2}{3}",
             "default_port": 1433,
+        },
+        "custom": {
+            "shape":       "custom_url",
+            "buildable":   False,
+            "driver_id":   "custom",
+            "unsupported_reason": (
+                "Custom driver XML emission is deferred until a verified live "
+                "Boomi Custom connection export is available. Use reuse mode "
+                "on an existing Boomi component or the raw-XML escape hatch "
+                "(config.xml=...) in the meantime."
+            ),
         },
     }
     # "microsoft_jdbc" is a caller-facing alias for the Microsoft JDBC driver.
@@ -221,6 +288,9 @@ class DatabaseConnectorBuilder:
         "microsoft_jdbc": "sqlserver",
     }
 
+    # Recognized = entries in DRIVERS + DRIVER_ALIASES (includes custom).
+    # Supported = subset that is actually buildable today (excludes custom).
+    RECOGNIZED_DRIVER_IDS = ("sqlserver", "microsoft_jdbc", "jtds", "custom")
     SUPPORTED_DRIVER_IDS = ("sqlserver", "microsoft_jdbc", "jtds")
     SUPPORTED_AUTH_MODES = ("username_password",)
     UNSUPPORTED_FUTURE_AUTH_MODES = ("windows_integrated",)
@@ -232,19 +302,25 @@ class DatabaseConnectorBuilder:
         "access_token",
         "client_secret",
     )
-    # Required keys at the builder-input level. `connector_type` is consumed
-    # one layer up by create_connector to pick the builder and never reaches
-    # build(), so it's not in this list even though the public config contract
-    # requires it.
-    REQUIRED_FIELDS = (
-        "driver_id",
-        "auth_mode",
-        "component_name",
-        "host",
-        "dbname",
-        "username",
-        "credential_ref",
-    )
+    # Required keys at the builder-input level, keyed by driver shape.
+    # `connector_type` is consumed one layer up by create_connector to pick the
+    # builder and never reaches build(). The "custom_url" shape is not
+    # buildable yet — validate_config rejects it with UNSUPPORTED_DB_DRIVER_SHAPE
+    # before this table is consulted.
+    REQUIRED_FIELDS_BY_SHAPE: Dict[str, tuple] = {
+        "host_port_db": (
+            "driver_id",
+            "auth_mode",
+            "component_name",
+            "host",
+            "dbname",
+            "username",
+            "credential_ref",
+        ),
+    }
+    # Back-compat alias: any external caller importing REQUIRED_FIELDS still
+    # gets the host_port_db tuple (the only shape we built in M2.2).
+    REQUIRED_FIELDS = REQUIRED_FIELDS_BY_SHAPE["host_port_db"]
 
     @classmethod
     def _resolve_driver(cls, driver_id: str) -> Optional[Dict[str, Any]]:
@@ -283,6 +359,185 @@ class DatabaseConnectorBuilder:
         return None
 
     @classmethod
+    def validate_pooling(
+        cls, pooling: Any
+    ) -> Optional[BuilderValidationError]:
+        """Validate the optional `pooling` config block.
+
+        None is treated as "omitted" → None (clean). Anything else must be a
+        dict whose keys are subset of POOLING_ALLOWED_KEYS and whose values
+        match the type of the corresponding default (bool / int / str). The
+        `enabled` flag must be a bool when present.
+
+        Returns the first error encountered, or None.
+        """
+        if pooling is None:
+            return None
+        if not isinstance(pooling, dict):
+            return BuilderValidationError(
+                "pooling must be an object/dict, got "
+                f"{type(pooling).__name__}",
+                error_code="DATABASE_POOLING_VALIDATION_FAILED",
+                field="pooling",
+                hint=(
+                    "Pass pooling as a JSON object with keys: "
+                    f"{', '.join(sorted(POOLING_ALLOWED_KEYS))}."
+                ),
+            )
+        unknown = set(pooling.keys()) - POOLING_ALLOWED_KEYS
+        if unknown:
+            offender = sorted(unknown)[0]
+            return BuilderValidationError(
+                f"pooling has unknown key {offender!r}",
+                error_code="DATABASE_POOLING_VALIDATION_FAILED",
+                field=f"pooling.{offender}",
+                hint=(
+                    "Allowed pooling keys: "
+                    f"{', '.join(sorted(POOLING_ALLOWED_KEYS))}."
+                ),
+            )
+        if "enabled" in pooling and not isinstance(pooling["enabled"], bool):
+            return BuilderValidationError(
+                "pooling.enabled must be a bool",
+                error_code="DATABASE_POOLING_VALIDATION_FAILED",
+                field="pooling.enabled",
+                hint="Use true or false.",
+            )
+        for snake, _camel, default_disabled, _default_enabled in POOLING_ATTR_ORDER:
+            if snake not in pooling:
+                continue
+            value = pooling[snake]
+            # bool must be checked before int (bool is subclass of int).
+            if isinstance(default_disabled, bool):
+                if not isinstance(value, bool):
+                    return BuilderValidationError(
+                        f"pooling.{snake} must be a bool",
+                        error_code="DATABASE_POOLING_VALIDATION_FAILED",
+                        field=f"pooling.{snake}",
+                        hint="Use true or false.",
+                    )
+            elif isinstance(default_disabled, int):
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return BuilderValidationError(
+                        f"pooling.{snake} must be an integer",
+                        error_code="DATABASE_POOLING_VALIDATION_FAILED",
+                        field=f"pooling.{snake}",
+                        hint="Use a JSON integer (negative values allowed where unbounded).",
+                    )
+            else:  # str
+                if not isinstance(value, str):
+                    return BuilderValidationError(
+                        f"pooling.{snake} must be a string",
+                        error_code="DATABASE_POOLING_VALIDATION_FAILED",
+                        field=f"pooling.{snake}",
+                        hint="Use a JSON string (may be empty).",
+                    )
+        return None
+
+    @classmethod
+    def validate_write_options(
+        cls, write_options: Any
+    ) -> Optional[BuilderValidationError]:
+        """Validate the optional `write_options` config block.
+
+        None → None (clean). Otherwise must be a dict whose keys are subset of
+        WRITE_OPTIONS_ALLOWED_KEYS and whose values are correctly typed. Cross
+        field: write_sql_to_file=True requires a non-empty sql_file_path.
+        """
+        if write_options is None:
+            return None
+        if not isinstance(write_options, dict):
+            return BuilderValidationError(
+                "write_options must be an object/dict, got "
+                f"{type(write_options).__name__}",
+                error_code="DATABASE_WRITE_OPTIONS_VALIDATION_FAILED",
+                field="write_options",
+                hint=(
+                    "Pass write_options as a JSON object with keys: "
+                    f"{', '.join(sorted(WRITE_OPTIONS_ALLOWED_KEYS))}."
+                ),
+            )
+        unknown = set(write_options.keys()) - WRITE_OPTIONS_ALLOWED_KEYS
+        if unknown:
+            offender = sorted(unknown)[0]
+            return BuilderValidationError(
+                f"write_options has unknown key {offender!r}",
+                error_code="DATABASE_WRITE_OPTIONS_VALIDATION_FAILED",
+                field=f"write_options.{offender}",
+                hint=(
+                    "Allowed write_options keys: "
+                    f"{', '.join(sorted(WRITE_OPTIONS_ALLOWED_KEYS))}."
+                ),
+            )
+        for snake, _camel, default in WRITE_OPTIONS_ATTR_ORDER:
+            if snake not in write_options:
+                continue
+            value = write_options[snake]
+            if isinstance(default, bool):
+                if not isinstance(value, bool):
+                    return BuilderValidationError(
+                        f"write_options.{snake} must be a bool",
+                        error_code="DATABASE_WRITE_OPTIONS_VALIDATION_FAILED",
+                        field=f"write_options.{snake}",
+                        hint="Use true or false.",
+                    )
+            else:  # str
+                if not isinstance(value, str):
+                    return BuilderValidationError(
+                        f"write_options.{snake} must be a string",
+                        error_code="DATABASE_WRITE_OPTIONS_VALIDATION_FAILED",
+                        field=f"write_options.{snake}",
+                        hint="Use a JSON string.",
+                    )
+        # Cross-field: writeSQLToFile=true needs a non-empty path.
+        if write_options.get("write_sql_to_file") is True:
+            path = write_options.get("sql_file_path")
+            if path is None or not str(path).strip():
+                return BuilderValidationError(
+                    "write_options.sql_file_path is required when "
+                    "write_sql_to_file=True",
+                    error_code="DATABASE_WRITE_OPTIONS_VALIDATION_FAILED",
+                    field="write_options.sql_file_path",
+                    hint=(
+                        "Provide a non-empty sql_file_path when "
+                        "write_sql_to_file=True (e.g. 'tmp/sqldebug.txt')."
+                    ),
+                )
+        return None
+
+    @classmethod
+    def _resolve_pooling(
+        cls, pooling: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Return a fully-populated pooling dict, applying shape-appropriate defaults.
+
+        When pooling is omitted or enabled=false, the defaults match issue #22
+        XML byte-for-byte. When enabled=true and a key is omitted, falls back
+        to the CDS reference defaults (max_active=-1, max_idle=-1, others
+        unchanged).
+        """
+        config = pooling or {}
+        enabled = bool(config.get("enabled", False))
+        resolved: Dict[str, Any] = {"enabled": enabled}
+        for snake, _camel, default_disabled, default_enabled in POOLING_ATTR_ORDER:
+            if snake in config:
+                resolved[snake] = config[snake]
+            else:
+                resolved[snake] = default_enabled if enabled else default_disabled
+        return resolved
+
+    @classmethod
+    def _resolve_write_options(
+        cls, write_options: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Return a fully-populated write_options dict with M2.2 defaults applied."""
+        config = write_options or {}
+        resolved: Dict[str, Any] = {}
+        for snake, _camel, default in WRITE_OPTIONS_ATTR_ORDER:
+            resolved[snake] = config[snake] if snake in config else default
+        return resolved
+
+    @classmethod
     def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
         """Validate a database connector config without building XML.
 
@@ -310,15 +565,33 @@ class DatabaseConnectorBuilder:
                 field="driver_id",
                 hint=f"Supported driver_ids: {supported_drivers}.",
             )
-        if cls._resolve_driver(driver_id) is None:
+        driver = cls._resolve_driver(driver_id)
+        if driver is None:
             return BuilderValidationError(
                 f"Unsupported driver_id {driver_id!r} "
                 f"(supported: {supported_drivers})",
                 error_code="UNSUPPORTED_DB_DRIVER",
                 field="driver_id",
                 hint=(
-                    f"M2.2 supports SQL Server only ({supported_drivers}). "
-                    "Postgres/Oracle/MySQL are deferred to later milestones."
+                    f"SQL Server is the only DB family supported today "
+                    f"({supported_drivers}). Postgres/Oracle/MySQL are "
+                    "deferred to later milestones."
+                ),
+            )
+
+        # 2b) Driver recognized but not buildable yet (e.g. custom).
+        # Distinct error code (UNSUPPORTED_DB_DRIVER_SHAPE) so callers can
+        # branch: an unrecognized driver_id needs a typo-fix; a non-buildable
+        # one needs reuse / raw-XML escape hatch.
+        if not driver.get("buildable", False):
+            return BuilderValidationError(
+                f"driver_id {driver_id!r} is recognized but not buildable yet",
+                error_code="UNSUPPORTED_DB_DRIVER_SHAPE",
+                field="driver_id",
+                hint=driver.get(
+                    "unsupported_reason",
+                    "This driver shape is not yet implemented; use reuse "
+                    "mode or raw-XML escape hatch.",
                 ),
             )
 
@@ -368,8 +641,12 @@ class DatabaseConnectorBuilder:
                     ),
                 )
 
-        # 5) Remaining required fields.
-        for required in cls.REQUIRED_FIELDS:
+        # 5) Remaining required fields, keyed by driver shape.
+        # The buildable check above guarantees driver["shape"] is in
+        # REQUIRED_FIELDS_BY_SHAPE — callers can only reach here on a
+        # buildable shape we model.
+        required_fields = cls.REQUIRED_FIELDS_BY_SHAPE[driver["shape"]]
+        for required in required_fields:
             if required in ("driver_id", "auth_mode", "credential_ref"):
                 continue  # already handled above
             value = config.get(required)
@@ -381,6 +658,18 @@ class DatabaseConnectorBuilder:
                     hint=f"Provide a non-empty value for {required}.",
                 )
 
+        # 6) Optional pooling block.
+        if "pooling" in config:
+            pooling_err = cls.validate_pooling(config["pooling"])
+            if pooling_err is not None:
+                return pooling_err
+
+        # 7) Optional write_options block.
+        if "write_options" in config:
+            write_err = cls.validate_write_options(config["write_options"])
+            if write_err is not None:
+                return write_err
+
         return None
 
     def build(self, **params) -> str:
@@ -388,7 +677,8 @@ class DatabaseConnectorBuilder:
         if error is not None:
             raise error
 
-        # validate_config guarantees these are present and resolvable.
+        # validate_config guarantees driver is present, recognized, and
+        # buildable (only the host_port_db shape reaches this point).
         driver = self._resolve_driver(params["driver_id"])
         assert driver is not None  # narrowing for type checkers
 
@@ -410,6 +700,22 @@ class DatabaseConnectorBuilder:
         safe_username = _escape_xml(username)
         safe_additional = _escape_xml(additional)
 
+        # Resolve optional pooling/write_options. Defaults preserve M2.2 XML
+        # byte-for-byte when caller omits both keys.
+        resolved_pooling = self._resolve_pooling(params.get("pooling"))
+        resolved_write_options = self._resolve_write_options(
+            params.get("write_options")
+        )
+        is_pool_enabled = _format_xml_value(resolved_pooling["enabled"])
+        write_options_attrs = " ".join(
+            f'{xml_attr}="{_format_xml_value(resolved_write_options[snake])}"'
+            for snake, xml_attr, _default in WRITE_OPTIONS_ATTR_ORDER
+        )
+        adapter_pool_info_attrs = " ".join(
+            f'{xml_attr}="{_format_xml_value(resolved_pooling[snake])}"'
+            for snake, xml_attr, _d, _e in POOLING_ATTR_ORDER
+        )
+
         return (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
@@ -427,15 +733,12 @@ class DatabaseConnectorBuilder:
             f' dbname="{safe_dbname}"'
             f' driverId="{driver["driver_id"]}"'
             f' host="{safe_host}"'
-            f' isPoolEnabled="false"'
+            f' isPoolEnabled="{is_pool_enabled}"'
             f' port="{port}"'
             f' urlFormat="{driver["url_format"]}"'
             f' username="{safe_username}">\n'
-            '            <WriteOptions sqlFilePath="tmp/sqldebug.txt" writeSQLToFile="false"/>\n'
-            '            <AdapterPoolInfo exhaustedAction="1" maxActive="0" maxIdle="0"'
-            ' maxIdleTime="0" maxWait="0" minIdle="0" numberOfTests="0"'
-            ' testIdle="false" testOnBorrow="false" testOnReturn="false"'
-            ' timeBetweenRuns="0" validationQuery=""/>\n'
+            f'            <WriteOptions {write_options_attrs}/>\n'
+            f'            <AdapterPoolInfo {adapter_pool_info_attrs}/>\n'
             '        </DatabaseConnectionSettings>\n'
             '    </bns:object>\n'
             '</bns:Component>'

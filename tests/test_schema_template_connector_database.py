@@ -139,3 +139,151 @@ def test_existing_paths_still_resolve():
     default = _call()
     assert default["_success"] is True
     assert "xml_template" in default
+
+
+# ---------------------------------------------------------------------------
+# Issue #31 — driver_variants, recognized_driver_ids, pooling, write_options
+# ---------------------------------------------------------------------------
+
+_RECOGNIZED = ("sqlserver", "microsoft_jdbc", "jtds", "custom")
+_SUPPORTED = ("sqlserver", "microsoft_jdbc", "jtds")
+
+
+def test_template_exposes_recognized_driver_ids_including_custom():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    assert tuple(result["recognized_driver_ids"]) == _RECOGNIZED
+
+
+def test_template_supported_driver_ids_excludes_custom():
+    """Explicit asymmetry: custom is recognized (so callers can discover it)
+    but NOT supported (the builder cannot emit it yet)."""
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    assert "custom" in result["recognized_driver_ids"]
+    assert "custom" not in result["supported_driver_ids"]
+    assert tuple(result["supported_driver_ids"]) == _SUPPORTED
+
+
+def test_template_exposes_driver_variants_for_every_recognized_driver():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    assert set(result["driver_variants"]) == set(_RECOGNIZED)
+
+
+def test_template_driver_variants_sqlserver_carries_shape_buildable_class_url_port():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    sqlserver = result["driver_variants"]["sqlserver"]
+    assert sqlserver["shape"] == "host_port_db"
+    assert sqlserver["buildable"] is True
+    assert sqlserver["emits_driver_id"] == "sqlserver"
+    assert sqlserver["class_name"] == "com.microsoft.sqlserver.jdbc.SQLServerDriver"
+    assert sqlserver["url_format"] == "jdbc:sqlserver://{0}:{1};database={2}{3}"
+    assert sqlserver["default_port"] == 1433
+    assert "credential_ref" in sqlserver["required"]
+    assert "component_name" in sqlserver["required"]
+
+
+def test_template_driver_variants_jtds_shape_and_class():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    jtds = result["driver_variants"]["jtds"]
+    assert jtds["shape"] == "host_port_db"
+    assert jtds["buildable"] is True
+    assert jtds["emits_driver_id"] == "jtds"
+    assert jtds["class_name"] == "net.sourceforge.jtds.jdbc.Driver"
+    assert jtds["url_format"] == "jdbc:jtds:sqlserver://{0}:{1}/{2}{3}"
+
+
+def test_template_driver_variants_microsoft_jdbc_is_alias_of_sqlserver():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    assert result["driver_variants"]["microsoft_jdbc"] == {"alias_of": "sqlserver"}
+
+
+def test_template_driver_variants_custom_is_unsupported_with_shape_error_code():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    custom = result["driver_variants"]["custom"]
+    assert custom["shape"] == "custom_url"
+    assert custom["buildable"] is False
+    assert custom["unsupported_error_code"] == "UNSUPPORTED_DB_DRIVER_SHAPE"
+    reason = custom["unsupported_reason"].lower()
+    assert "custom" in reason
+    assert "raw-xml" in reason or "raw xml" in reason or "reuse" in reason
+
+
+def test_template_recommended_additional_present_for_sqlserver_not_jtds():
+    """Microsoft JDBC ≥12 TLS workaround surface — discoverable on sqlserver,
+    not on jtds (jTDS has no TLS by default, doesn't need the clause)."""
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    assert "recommended_additional" in result["driver_variants"]["sqlserver"]
+    assert "encrypt=true" in result["driver_variants"]["sqlserver"]["recommended_additional"]
+    assert "recommended_additional" not in result["driver_variants"]["jtds"]
+
+
+# --- pooling schema sub-tree ---------------------------------------------
+
+_POOLING_KEYS = (
+    "enabled", "exhausted_action", "max_active", "max_idle", "max_idle_time",
+    "max_wait", "min_idle", "number_of_tests", "test_idle", "test_on_borrow",
+    "test_on_return", "time_between_runs", "validation_query",
+)
+
+
+def test_template_exposes_pooling_schema_with_defaults():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    pooling = result["pooling"]
+    assert "description" in pooling
+    assert pooling["error_code"] == "DATABASE_POOLING_VALIDATION_FAILED"
+    assert pooling["defaults_when_omitted"] == {
+        "enabled": False,
+        "exhausted_action": 1,
+        "max_active": 0,
+        "max_idle": 0,
+        "max_idle_time": 0,
+        "max_wait": 0,
+        "min_idle": 0,
+        "number_of_tests": 0,
+        "test_idle": False,
+        "test_on_borrow": False,
+        "test_on_return": False,
+        "time_between_runs": 0,
+        "validation_query": "",
+    }
+    assert pooling["defaults_when_enabled"] == {
+        "enabled": True,
+        "exhausted_action": 1,
+        "max_active": -1,
+        "max_idle": -1,
+        "max_idle_time": 0,
+        "max_wait": 0,
+        "min_idle": 0,
+        "number_of_tests": 0,
+        "test_idle": False,
+        "test_on_borrow": False,
+        "test_on_return": False,
+        "time_between_runs": 0,
+        "validation_query": "",
+    }
+
+
+def test_template_pooling_schema_includes_all_thirteen_keys():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    pooling_fields = result["pooling"]["fields"]
+    assert set(pooling_fields) == set(_POOLING_KEYS)
+
+
+# --- write_options schema sub-tree ---------------------------------------
+
+def test_template_exposes_write_options_schema_with_defaults():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    wo = result["write_options"]
+    assert "description" in wo
+    assert wo["error_code"] == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
+    assert wo["defaults"] == {"write_sql_to_file": False, "sql_file_path": "tmp/sqldebug.txt"}
+    assert set(wo["fields"]) == {"write_sql_to_file", "sql_file_path"}
+
+
+def test_template_example_pooling_and_write_options_show_explicit_defaults():
+    result = _call(component_type="connector-settings", protocol="database.sqlserver")
+    example = result["example"]
+    assert example["pooling"] == {"enabled": False}
+    assert example["write_options"] == {
+        "write_sql_to_file": False,
+        "sql_file_path": "tmp/sqldebug.txt",
+    }

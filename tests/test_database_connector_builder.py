@@ -362,3 +362,279 @@ def test_create_connector_http_value_error_path_unchanged():
     assert result["_success"] is False
     assert "error" in result
     assert "error_code" not in result  # flat envelope, no structured fields
+
+
+# ---------------------------------------------------------------------------
+# Issue #31 — driver shape discriminator, pooling, write_options
+# ---------------------------------------------------------------------------
+
+def _adapter_pool_info_attrs(xml: str) -> dict:
+    root = ET.fromstring(xml)
+    api = root.find("bns:object/DatabaseConnectionSettings/AdapterPoolInfo", NS)
+    assert api is not None
+    return dict(api.attrib)
+
+
+def _write_options_attrs(xml: str) -> dict:
+    root = ET.fromstring(xml)
+    wo = root.find("bns:object/DatabaseConnectionSettings/WriteOptions", NS)
+    assert wo is not None
+    return dict(wo.attrib)
+
+
+def _is_pool_enabled(xml: str) -> str:
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    return dcs.attrib["isPoolEnabled"]
+
+
+def test_recognized_driver_ids_includes_custom_but_supported_does_not():
+    assert "custom" in DatabaseConnectorBuilder.RECOGNIZED_DRIVER_IDS
+    assert "custom" not in DatabaseConnectorBuilder.SUPPORTED_DRIVER_IDS
+
+
+def test_driver_registry_carries_shape_and_buildable_metadata():
+    for driver_id in ("sqlserver", "jtds", "custom"):
+        entry = DatabaseConnectorBuilder.DRIVERS[driver_id]
+        assert "shape" in entry, driver_id
+        assert "buildable" in entry, driver_id
+    assert DatabaseConnectorBuilder.DRIVERS["sqlserver"]["buildable"] is True
+    assert DatabaseConnectorBuilder.DRIVERS["jtds"]["buildable"] is True
+    assert DatabaseConnectorBuilder.DRIVERS["custom"]["buildable"] is False
+    assert DatabaseConnectorBuilder.DRIVERS["custom"]["shape"] == "custom_url"
+
+
+def test_custom_driver_id_returns_unsupported_db_driver_shape():
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(driver_id="custom"))
+    err = excinfo.value
+    assert err.error_code == "UNSUPPORTED_DB_DRIVER_SHAPE"
+    assert err.field == "driver_id"
+    hint = (err.hint or "").lower()
+    assert "custom" in hint or "reuse" in hint or "raw-xml" in hint or "raw xml" in hint
+
+
+def test_recommended_additional_is_metadata_not_enforcement():
+    """The sqlserver driver's recommended_additional appears in DRIVERS metadata
+    but the builder does NOT inject it or warn when omitted. Caller chooses."""
+    sqlserver = DatabaseConnectorBuilder.DRIVERS["sqlserver"]
+    assert "encrypt=true" in sqlserver["recommended_additional"]
+    # build() with no additional clause succeeds silently
+    xml = _build_minimal()  # additional defaults to ""
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["additional"] == ""
+
+
+# --- Pooling --------------------------------------------------------------
+
+def test_omitted_pooling_preserves_default_adapter_pool_info_xml_exactly():
+    xml = _build_minimal()  # no pooling key
+    attrs = _adapter_pool_info_attrs(xml)
+    expected = {
+        "exhaustedAction": "1",
+        "maxActive": "0", "maxIdle": "0", "maxIdleTime": "0", "maxWait": "0",
+        "minIdle": "0", "numberOfTests": "0",
+        "testIdle": "false", "testOnBorrow": "false", "testOnReturn": "false",
+        "timeBetweenRuns": "0",
+        "validationQuery": "",
+    }
+    assert attrs == expected
+    assert _is_pool_enabled(xml) == "false"
+
+
+def test_pooling_explicitly_disabled_emits_same_xml_as_omitted():
+    a = _build_minimal()
+    b = _build_minimal(pooling={"enabled": False})
+    assert _adapter_pool_info_attrs(a) == _adapter_pool_info_attrs(b)
+    assert _is_pool_enabled(a) == _is_pool_enabled(b) == "false"
+
+
+def test_pooling_enabled_true_defaults_emit_max_active_minus_one_and_max_idle_minus_one():
+    xml = _build_minimal(pooling={"enabled": True})
+    attrs = _adapter_pool_info_attrs(xml)
+    assert _is_pool_enabled(xml) == "true"
+    assert attrs["maxActive"] == "-1"
+    assert attrs["maxIdle"] == "-1"
+    # Everything else stays at omitted-default values
+    assert attrs["exhaustedAction"] == "1"
+    assert attrs["maxIdleTime"] == "0"
+    assert attrs["maxWait"] == "0"
+    assert attrs["minIdle"] == "0"
+    assert attrs["numberOfTests"] == "0"
+    assert attrs["testIdle"] == "false"
+    assert attrs["testOnBorrow"] == "false"
+    assert attrs["testOnReturn"] == "false"
+    assert attrs["timeBetweenRuns"] == "0"
+    assert attrs["validationQuery"] == ""
+
+
+@pytest.mark.parametrize("snake,xml_attr,value,expected_xml", [
+    ("exhausted_action", "exhaustedAction", 3, "3"),
+    ("max_active", "maxActive", 50, "50"),
+    ("max_idle", "maxIdle", 10, "10"),
+    ("max_idle_time", "maxIdleTime", 60000, "60000"),
+    ("max_wait", "maxWait", 5000, "5000"),
+    ("min_idle", "minIdle", 5, "5"),
+    ("number_of_tests", "numberOfTests", 7, "7"),
+    ("test_idle", "testIdle", True, "true"),
+    ("test_on_borrow", "testOnBorrow", True, "true"),
+    ("test_on_return", "testOnReturn", True, "true"),
+    ("time_between_runs", "timeBetweenRuns", 30000, "30000"),
+    ("validation_query", "validationQuery", "SELECT 1", "SELECT 1"),
+])
+def test_pooling_explicit_values_map_to_xml_attributes(snake, xml_attr, value, expected_xml):
+    xml = _build_minimal(pooling={"enabled": True, snake: value})
+    attrs = _adapter_pool_info_attrs(xml)
+    assert attrs[xml_attr] == expected_xml
+
+
+def test_pooling_validation_query_is_xml_escaped():
+    xml = _build_minimal(pooling={"enabled": True, "validation_query": "SELECT a & b"})
+    attrs = _adapter_pool_info_attrs(xml)
+    assert attrs["validationQuery"] == "SELECT a & b"
+
+
+@pytest.mark.parametrize("bad_key", ["bogus", "minActive", "password", "validationquery"])
+def test_pooling_unknown_key_returns_database_pooling_validation_failed(bad_key):
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(pooling={bad_key: 1}))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_POOLING_VALIDATION_FAILED"
+    assert err.field == f"pooling.{bad_key}"
+
+
+@pytest.mark.parametrize("not_dict", [["enabled"], "enabled", 5, True])
+def test_pooling_non_dict_returns_database_pooling_validation_failed(not_dict):
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(pooling=not_dict))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_POOLING_VALIDATION_FAILED"
+    assert err.field == "pooling"
+
+
+@pytest.mark.parametrize("key,bad_value", [
+    ("max_active", "oops"),
+    ("max_active", True),               # bool not accepted as int
+    ("validation_query", 123),
+    ("test_idle", "yes"),
+    ("test_idle", 1),                   # int not accepted as bool
+])
+def test_pooling_invalid_scalar_type_returns_database_pooling_validation_failed(key, bad_value):
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(pooling={key: bad_value}))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_POOLING_VALIDATION_FAILED"
+    assert err.field == f"pooling.{key}"
+
+
+@pytest.mark.parametrize("bad_enabled", ["true", 1, 0, "yes"])
+def test_pooling_enabled_non_bool_returns_database_pooling_validation_failed(bad_enabled):
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(pooling={"enabled": bad_enabled}))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_POOLING_VALIDATION_FAILED"
+    assert err.field == "pooling.enabled"
+
+
+def test_validate_pooling_returns_none_for_omitted_and_clean_configs():
+    assert DatabaseConnectorBuilder.validate_pooling(None) is None
+    assert DatabaseConnectorBuilder.validate_pooling({}) is None
+    assert DatabaseConnectorBuilder.validate_pooling({"enabled": True}) is None
+    assert DatabaseConnectorBuilder.validate_pooling(
+        {"enabled": True, "max_active": 100, "validation_query": "SELECT 1"}
+    ) is None
+
+
+# --- write_options --------------------------------------------------------
+
+def test_omitted_write_options_preserves_default_write_options_xml_exactly():
+    xml = _build_minimal()  # no write_options key
+    assert _write_options_attrs(xml) == {
+        "sqlFilePath": "tmp/sqldebug.txt",
+        "writeSQLToFile": "false",
+    }
+
+
+def test_write_options_explicit_defaults_match_omitted():
+    a = _build_minimal()
+    b = _build_minimal(write_options={"write_sql_to_file": False, "sql_file_path": "tmp/sqldebug.txt"})
+    assert _write_options_attrs(a) == _write_options_attrs(b)
+
+
+def test_write_options_write_sql_to_file_true_emits_attrs():
+    xml = _build_minimal(
+        write_options={"write_sql_to_file": True, "sql_file_path": "/var/log/sql.txt"},
+    )
+    attrs = _write_options_attrs(xml)
+    assert attrs["writeSQLToFile"] == "true"
+    assert attrs["sqlFilePath"] == "/var/log/sql.txt"
+
+
+def test_write_options_sql_file_path_is_xml_escaped():
+    xml = _build_minimal(
+        write_options={"write_sql_to_file": True, "sql_file_path": "/tmp/<sql>&debug.txt"},
+    )
+    attrs = _write_options_attrs(xml)
+    assert attrs["sqlFilePath"] == "/tmp/<sql>&debug.txt"
+
+
+def test_write_options_write_sql_to_file_true_without_sql_file_path_returns_validation_failed():
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **_minimal_config(write_options={"write_sql_to_file": True}),
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
+    assert err.field == "write_options.sql_file_path"
+
+
+def test_write_options_write_sql_to_file_true_with_blank_sql_file_path_returns_validation_failed():
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **_minimal_config(write_options={"write_sql_to_file": True, "sql_file_path": "   "}),
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
+    assert err.field == "write_options.sql_file_path"
+
+
+@pytest.mark.parametrize("bad_key", ["bogus", "writeSQLToFile", "secret"])
+def test_write_options_unknown_key_returns_validation_failed(bad_key):
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(write_options={bad_key: "anything"}))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
+    assert err.field == f"write_options.{bad_key}"
+
+
+@pytest.mark.parametrize("key,bad_value", [
+    ("write_sql_to_file", "yes"),
+    ("write_sql_to_file", 1),
+    ("sql_file_path", 123),
+    ("sql_file_path", False),
+])
+def test_write_options_invalid_scalar_type_returns_validation_failed(key, bad_value):
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(write_options={key: bad_value}))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
+    assert err.field == f"write_options.{key}"
+
+
+@pytest.mark.parametrize("not_dict", [["a"], "x", 7])
+def test_write_options_non_dict_returns_validation_failed(not_dict):
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(write_options=not_dict))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
+    assert err.field == "write_options"
+
+
+def test_validate_write_options_returns_none_for_omitted_and_clean_configs():
+    assert DatabaseConnectorBuilder.validate_write_options(None) is None
+    assert DatabaseConnectorBuilder.validate_write_options({}) is None
+    assert DatabaseConnectorBuilder.validate_write_options({"write_sql_to_file": False}) is None
+    assert DatabaseConnectorBuilder.validate_write_options(
+        {"write_sql_to_file": True, "sql_file_path": "/tmp/x.txt"}
+    ) is None

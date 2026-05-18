@@ -628,6 +628,120 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert "LEAK_MULTI_B_DEADBEEF" not in plan_repr
         assert "LEAK_MULTI_C_DEADBEEF" not in plan_repr
 
+    # -------------------------------------------------------------------
+    # Issue #31 — shape discriminator, pooling, write_options
+    # -------------------------------------------------------------------
+
+    @patch(_PATCH_TARGET)
+    def test_pooling_enabled_plans_successfully(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp(pooling={"enabled": True, "max_active": 50})
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        assert plan["_success"]
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step["route"] == "connector_builder_or_xml"
+        assert step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
+    def test_custom_driver_id_marks_plan_as_database_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp(driver_id="custom")
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER_SHAPE"
+        assert step["validation_error"]["field"] == "driver_id"
+
+    @patch(_PATCH_TARGET)
+    def test_invalid_pooling_marks_plan_as_database_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp(pooling={"bogus_key": 1})
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "DATABASE_POOLING_VALIDATION_FAILED"
+        assert step["validation_error"]["field"] == "pooling.bogus_key"
+
+    @patch(_PATCH_TARGET)
+    def test_invalid_write_options_marks_plan_as_database_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp(write_options={"write_sql_to_file": True})  # missing sql_file_path
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
+        assert step["validation_error"]["field"] == "write_options.sql_file_path"
+
+    @patch(_PATCH_TARGET)
+    def test_update_path_skips_pooling_validation_but_keeps_secret_scan(self, mock_pag):
+        """Update mode (component_id supplied) bypasses full builder validation
+        — bogus pooling key does NOT block update, but plaintext secrets still do.
+        Same boundary applies to reuse — the will_invoke_builder gate only fires
+        for create/create_clone in _build_plan."""
+        mock_pag.return_value = []
+        # Bogus pooling on update path: should NOT trip shape/pooling validation.
+        comp_update = IntegrationComponentSpec(
+            key="db_update", type="connector-settings", action="update",
+            name="Existing DB", component_id="existing-db-id",
+            config={"connector_type": "database",
+                    "pooling": {"totally_bogus_key": True}},
+        )
+        plan_update = _build_plan(MagicMock(), _build_config([comp_update]))
+        step_update = plan_update["steps"][0]
+        assert step_update["planned_action"] != "error_database_validation"
+
+        # But plaintext secret on update path is STILL caught by the secret scan.
+        comp_secret = IntegrationComponentSpec(
+            key="db_secret", type="connector-settings", action="update",
+            name="Existing DB", component_id="existing-db-id",
+            config={"connector_type": "database", "password": "LEAK_UPDATE_DEADBEEF"},
+        )
+        plan_secret = _build_plan(MagicMock(), _build_config([comp_secret]))
+        step_secret = plan_secret["steps"][0]
+        assert step_secret["planned_action"] == "error_database_validation"
+        assert step_secret["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert "LEAK_UPDATE_DEADBEEF" not in repr(plan_secret)
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_path_skips_shape_validation_but_keeps_secret_scan(self, mock_pag):
+        """Raw-XML create path bypasses full builder validation — custom driver
+        XML CAN be supplied via raw XML (documented escape hatch). Plaintext
+        secrets are still rejected by the secret scan."""
+        mock_pag.return_value = []
+        # Raw XML for what would be a custom driver — must NOT trip shape check
+        comp_custom_xml = IntegrationComponentSpec(
+            key="db_custom_xml", type="connector-settings", action="create",
+            name="Custom Via Raw XML",
+            config={
+                "xml": ('<bns:Component subType="database">'
+                        '<DatabaseConnectionSettings driverId="custom"/></bns:Component>'),
+            },
+        )
+        plan_xml = _build_plan(MagicMock(), _build_config([comp_custom_xml]))
+        step_xml = plan_xml["steps"][0]
+        # Plan resolves to create (no shape preflight on raw-XML path)
+        assert step_xml["planned_action"] == "create"
+        assert step_xml.get("validation_error") is None
+
+        # But raw XML with plaintext secret is still caught
+        comp_secret_xml = IntegrationComponentSpec(
+            key="db_leak_xml", type="connector-settings", action="create",
+            name="Leaky DB",
+            config={
+                "xml": '<bns:Component subType="database"/>',
+                "password": "LEAK_RAWXML_DEADBEEF",
+            },
+        )
+        plan_secret = _build_plan(MagicMock(), _build_config([comp_secret_xml]))
+        step_secret = plan_secret["steps"][0]
+        assert step_secret["planned_action"] == "error_database_validation"
+        assert step_secret["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+
 
 # ---------------------------------------------------------------------------
 # M2.2 — _apply_plan fail-fast on database validation
@@ -662,3 +776,47 @@ class TestApplyPlanDatabaseValidationFailFast:
         step = result["steps"][0]
         assert step["planned_action"] == "error_database_validation"
         assert step["validation_error"]["error_code"] == "MISSING_CREDENTIAL_REF"
+
+    # Issue #31
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_fails_before_execution_on_unsupported_db_driver_shape(self, mock_pag, mock_exec):
+        mock_pag.return_value = []
+        config = _build_config([_db_comp(driver_id="custom")])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        assert len(result["unresolvable_steps"]) == 1
+        bad = result["unresolvable_steps"][0]
+        assert bad["planned_action"] == "error_database_validation"
+        assert bad["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER_SHAPE"
+        mock_exec.assert_not_called()
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_fails_before_execution_on_pooling_validation_error(self, mock_pag, mock_exec):
+        mock_pag.return_value = []
+        config = _build_config([_db_comp(pooling={"bogus": 1})])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        assert len(result["unresolvable_steps"]) == 1
+        bad = result["unresolvable_steps"][0]
+        assert bad["validation_error"]["error_code"] == "DATABASE_POOLING_VALIDATION_FAILED"
+        mock_exec.assert_not_called()
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_fails_before_execution_on_write_options_validation_error(self, mock_pag, mock_exec):
+        mock_pag.return_value = []
+        config = _build_config(
+            [_db_comp(write_options={"write_sql_to_file": True})],  # missing sql_file_path
+        )
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        assert len(result["unresolvable_steps"]) == 1
+        bad = result["unresolvable_steps"][0]
+        assert bad["validation_error"]["error_code"] == "DATABASE_WRITE_OPTIONS_VALIDATION_FAILED"
+        mock_exec.assert_not_called()
