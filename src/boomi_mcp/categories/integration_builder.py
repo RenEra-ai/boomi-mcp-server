@@ -25,6 +25,7 @@ from boomi.models import (
 
 from ..models.integration_models import IntegrationComponentSpec, IntegrationSpecV1
 from .components._shared import component_get_xml, paginate_metadata
+from .components.builders import DatabaseConnectorBuilder
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.processes import create_process, update_process
@@ -405,6 +406,29 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             else "generic_component_xml"
         )
 
+        # Database connector-settings preflight. Run the builder validator
+        # before routing so unsupported driver / auth / missing credential_ref /
+        # plaintext secret all fail during plan instead of at apply-time
+        # _create_component_raw. Does NOT mutate Boomi state.
+        validation_error: Optional[Dict[str, Any]] = None
+        if comp.type == "connector-settings" and \
+                (comp.config or {}).get("connector_type") == "database":
+            db_err = DatabaseConnectorBuilder.validate_config(comp.config or {})
+            if db_err is not None:
+                planned_action = "error_database_validation"
+                validation_error = {
+                    "error_code": db_err.error_code,
+                    "error": str(db_err),
+                    "field": db_err.field,
+                    "hint": db_err.hint,
+                }
+                # Scrub any plaintext secret value from the spec dump so the
+                # plan response never echoes credentials back to the caller.
+                if db_err.error_code == "PLAINTEXT_SECRET_REJECTED" \
+                        and db_err.field and comp.config \
+                        and db_err.field in comp.config:
+                    comp.config[db_err.field] = "[REDACTED]"
+
         step: Dict[str, Any] = {
             "key": comp.key,
             "type": comp.type,
@@ -425,6 +449,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 }
                 for c in candidates
             ]
+
+        if validation_error is not None:
+            step["validation_error"] = validation_error
 
         steps.append(step)
 
@@ -454,13 +481,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         return planned
 
     # Fail-fast: reject plans with unresolvable steps before executing anything
-    ambiguous_steps = [
+    unresolvable_steps = [
         step for step in planned["steps"]
-        if step["planned_action"] in ("error_ambiguous_match", "error_missing_target")
+        if step["planned_action"] in (
+            "error_ambiguous_match",
+            "error_missing_target",
+            "error_database_validation",
+        )
     ]
-    if ambiguous_steps:
+    if unresolvable_steps:
         errors = []
-        for step in ambiguous_steps:
+        for step in unresolvable_steps:
             if step["planned_action"] == "error_ambiguous_match":
                 candidate_info = step.get("candidates", [])
                 ids = [c["component_id"] for c in candidate_info]
@@ -474,6 +505,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' has action=update "
                     f"but no matching component was found and no component_id was provided."
                 )
+            elif step["planned_action"] == "error_database_validation":
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed "
+                    f"database connector validation: "
+                    f"{ve.get('error_code', 'DATABASE_CONNECTOR_VALIDATION_FAILED')} "
+                    f"on field {ve.get('field')!r}."
+                )
         return {
             "_success": False,
             "error": "Plan contains unresolvable steps. No operations were executed.",
@@ -482,8 +521,9 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     "key": s["key"],
                     "planned_action": s["planned_action"],
                     "candidates": s.get("candidates", []),
+                    "validation_error": s.get("validation_error"),
                 }
-                for s in ambiguous_steps
+                for s in unresolvable_steps
             ],
             "details": errors,
         }

@@ -11,6 +11,28 @@ so creation uses raw Serializer POST (see connectors.py _create_component_raw).
 from typing import Dict, Any, Optional
 
 
+class BuilderValidationError(ValueError):
+    """Structured connector-builder validation failure.
+
+    Subclasses ValueError so existing `except ValueError` catches still fire,
+    but carries machine-readable fields (error_code, field, hint) so the MCP
+    layer can return a structured envelope instead of an opaque message.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str,
+        field: Optional[str] = None,
+        hint: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.field = field
+        self.hint = hint
+
+
 def _escape_xml(text: str) -> str:
     """Escape special XML characters in attribute values."""
     if not text:
@@ -147,72 +169,214 @@ class DatabaseConnectorBuilder:
     """Builder for Database (Legacy) connector-settings components.
 
     Generates <DatabaseConnectionSettings> XML matching Boomi UI export structure.
-    V1 supports driver_id="sqlserver" (Microsoft JDBC). Architected for additional
-    drivers (mysql, oracle, postgres) — add an entry to DRIVERS.
+    M2.2 supports SQL Server (Microsoft JDBC and jTDS). Postgres/Oracle/MySQL are
+    deliberately not yet supported and return a structured UNSUPPORTED_DB_DRIVER.
 
     Config keys:
         component_name:     required
-        driver_id:          sqlserver (required; one of DRIVERS keys)
+        driver_id:          required; one of SUPPORTED_DRIVER_IDS
+                            ("sqlserver", "microsoft_jdbc", "jtds").
+                            "microsoft_jdbc" is an alias for the Microsoft JDBC
+                            driver and emits Boomi driverId="sqlserver".
+        auth_mode:          required; one of SUPPORTED_AUTH_MODES
+                            ("username_password"). "windows_integrated" is
+                            recognized but deliberately deferred.
         host:               required
         dbname:             required (database name)
         username:           required
-        port:               optional, falls back to DRIVERS[driver_id]['default_port']
-        folder_name:        optional, defaults to "Home"
+        credential_ref:     required when auth_mode="username_password".
+                            Opaque caller-side reference (e.g.
+                            "credential://vault/sqlserver/password"); the
+                            builder never writes it to the emitted XML —
+                            secrets must be set in the Boomi UI after create
+                            or supplied via the raw-XML escape hatch.
+        port:               optional; falls back to DRIVERS[driver_id]['default_port']
+        folder_name:        optional; defaults to "Home"
         description:        optional
         additional:         optional JDBC URL suffix appended verbatim into urlFormat {3}
                             (e.g. ";encrypt=true;trustServerCertificate=true").
 
-    Password is intentionally NOT accepted on create — Boomi expects ciphertext, not
-    plaintext, and the password ciphertext is only obtainable via the UI's encryption
-    or by copying from an existing component. Created components have
-    <encryptedValue ... isSet="false"/>; set the password via the UI after create.
+    Plaintext secret-shaped keys (see FORBIDDEN_SECRET_FIELDS) are rejected
+    loudly with PLAINTEXT_SECRET_REJECTED before any XML is emitted.
     """
 
-    DRIVERS = {
+    DRIVERS: Dict[str, Dict[str, Any]] = {
         "sqlserver": {
             "driver_id":   "sqlserver",
             "class_name":  "com.microsoft.sqlserver.jdbc.SQLServerDriver",
             "url_format":  "jdbc:sqlserver://{0}:{1};database={2}{3}",
             "default_port": 1433,
         },
+        "jtds": {
+            "driver_id":   "jtds",
+            "class_name":  "net.sourceforge.jtds.jdbc.Driver",
+            "url_format":  "jdbc:jtds:sqlserver://{0}:{1}/{2}{3}",
+            "default_port": 1433,
+        },
+    }
+    # "microsoft_jdbc" is a caller-facing alias for the Microsoft JDBC driver.
+    # The emitted Boomi driverId stays "sqlserver" — Boomi has no separate
+    # "microsoft_jdbc" registration; the alias just makes the config self-documenting.
+    DRIVER_ALIASES: Dict[str, str] = {
+        "microsoft_jdbc": "sqlserver",
     }
 
-    def build(self, **params) -> str:
-        if 'password' in params:
-            raise ValueError(
-                "password cannot be set via the builder — Boomi stores passwords "
-                "as ciphertext and there is no public API to encrypt a plaintext "
-                "value. Omit 'password' from config and either set it in the Boomi "
-                "UI after create, or supply a complete component with pre-encrypted "
-                "ciphertext via the raw-XML escape hatch (config.xml=...)."
-            )
+    SUPPORTED_DRIVER_IDS = ("sqlserver", "microsoft_jdbc", "jtds")
+    SUPPORTED_AUTH_MODES = ("username_password",)
+    UNSUPPORTED_FUTURE_AUTH_MODES = ("windows_integrated",)
+    FORBIDDEN_SECRET_FIELDS = (
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    )
+    # Required keys at the builder-input level. `connector_type` is consumed
+    # one layer up by create_connector to pick the builder and never reaches
+    # build(), so it's not in this list even though the public config contract
+    # requires it.
+    REQUIRED_FIELDS = (
+        "driver_id",
+        "auth_mode",
+        "component_name",
+        "host",
+        "dbname",
+        "username",
+        "credential_ref",
+    )
 
-        component_name = params.get('component_name', '')
-        if not component_name:
-            raise ValueError("component_name is required")
+    @classmethod
+    def _resolve_driver(cls, driver_id: str) -> Optional[Dict[str, Any]]:
+        canonical = cls.DRIVER_ALIASES.get(driver_id, driver_id)
+        return cls.DRIVERS.get(canonical)
 
-        driver_id = params.get('driver_id', '')
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate a database connector config without building XML.
+
+        Returns the first BuilderValidationError encountered, or None when the
+        config is acceptable. Stops on first error — matches the existing
+        builder convention and keeps the error envelope simple.
+
+        Used by both build() (which raises) and integration_builder._build_plan
+        (which surfaces the structured error in the plan step).
+        """
+        # 1) Plaintext secret-shaped keys must never appear in caller config.
+        for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
+            if forbidden in config:
+                return BuilderValidationError(
+                    f"{forbidden!r} cannot be supplied in database connector "
+                    "config — secrets must cross the wire as opaque "
+                    "credential_ref strings only. Boomi stores passwords as "
+                    "ciphertext produced by its own encryption; there is no "
+                    "public API to encrypt a plaintext value.",
+                    error_code="PLAINTEXT_SECRET_REJECTED",
+                    field=forbidden,
+                    hint=(
+                        "Remove the secret-shaped field and pass "
+                        "credential_ref='credential://...' instead. Set the "
+                        "password in the Boomi UI after create, or supply a "
+                        "pre-encrypted XML via config.xml=..."
+                    ),
+                )
+
+        # 2) driver_id presence + recognized.
+        driver_id = config.get("driver_id") or ""
+        supported_drivers = ", ".join(cls.SUPPORTED_DRIVER_IDS)
         if not driver_id:
-            raise ValueError(
-                f"driver_id is required for database connectors "
-                f"(supported: {', '.join(self.DRIVERS.keys())})"
+            return BuilderValidationError(
+                f"driver_id is required (supported: {supported_drivers})",
+                error_code="UNSUPPORTED_DB_DRIVER",
+                field="driver_id",
+                hint=f"Supported driver_ids: {supported_drivers}.",
             )
-        driver = self.DRIVERS.get(driver_id)
-        if not driver:
-            raise ValueError(
-                f"Unsupported driver_id '{driver_id}' "
-                f"(supported: {', '.join(self.DRIVERS.keys())})"
+        if cls._resolve_driver(driver_id) is None:
+            return BuilderValidationError(
+                f"Unsupported driver_id {driver_id!r} "
+                f"(supported: {supported_drivers})",
+                error_code="UNSUPPORTED_DB_DRIVER",
+                field="driver_id",
+                hint=(
+                    f"M2.2 supports SQL Server only ({supported_drivers}). "
+                    "Postgres/Oracle/MySQL are deferred to later milestones."
+                ),
             )
 
-        host = params.get('host', '')
-        if not host:
-            raise ValueError("host is required for database connectors")
-        dbname = params.get('dbname', '')
-        if not dbname:
-            raise ValueError("dbname is required for database connectors")
-        username = params.get('username', '')
-        if not username:
-            raise ValueError("username is required for database connectors")
+        # 3) auth_mode presence + recognized.
+        auth_mode = config.get("auth_mode") or ""
+        supported_auth = ", ".join(cls.SUPPORTED_AUTH_MODES)
+        if not auth_mode:
+            return BuilderValidationError(
+                f"auth_mode is required (supported: {supported_auth})",
+                error_code="UNSUPPORTED_DB_AUTH_MODE",
+                field="auth_mode",
+                hint=f"Supported auth_modes: {supported_auth}.",
+            )
+        if auth_mode in cls.UNSUPPORTED_FUTURE_AUTH_MODES:
+            return BuilderValidationError(
+                f"auth_mode {auth_mode!r} is reserved for a future M2 iteration "
+                "and not yet implemented",
+                error_code="UNSUPPORTED_DB_AUTH_MODE",
+                field="auth_mode",
+                hint=(
+                    f"Use auth_mode='username_password' for M2.2. "
+                    f"{auth_mode!r} is reserved for a future iteration — it "
+                    "requires a real Boomi XML reference and is deferred."
+                ),
+            )
+        if auth_mode not in cls.SUPPORTED_AUTH_MODES:
+            return BuilderValidationError(
+                f"Unknown auth_mode {auth_mode!r} (supported: {supported_auth})",
+                error_code="UNSUPPORTED_DB_AUTH_MODE",
+                field="auth_mode",
+                hint=f"Supported auth_modes: {supported_auth}.",
+            )
+
+        # 4) credential_ref required for username_password.
+        if auth_mode == "username_password":
+            credential_ref = config.get("credential_ref")
+            if not credential_ref or not str(credential_ref).strip():
+                return BuilderValidationError(
+                    "credential_ref is required when auth_mode='username_password'",
+                    error_code="MISSING_CREDENTIAL_REF",
+                    field="credential_ref",
+                    hint=(
+                        "Pass credential_ref='credential://...' as an opaque "
+                        "placeholder. The builder never writes it into XML — "
+                        "Boomi password ciphertext is set via the UI after "
+                        "create."
+                    ),
+                )
+
+        # 5) Remaining required fields.
+        for required in cls.REQUIRED_FIELDS:
+            if required in ("driver_id", "auth_mode", "credential_ref"):
+                continue  # already handled above
+            value = config.get(required)
+            if value is None or (isinstance(value, str) and not value.strip()):
+                return BuilderValidationError(
+                    f"{required} is required for database connectors",
+                    error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                    field=required,
+                    hint=f"Provide a non-empty value for {required}.",
+                )
+
+        return None
+
+    def build(self, **params) -> str:
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        # validate_config guarantees these are present and resolvable.
+        driver = self._resolve_driver(params["driver_id"])
+        assert driver is not None  # narrowing for type checkers
+
+        component_name = params["component_name"]
+        host = params["host"]
+        dbname = params["dbname"]
+        username = params["username"]
 
         port = params.get('port', driver['default_port'])
         folder_name = params.get('folder_name', 'Home')

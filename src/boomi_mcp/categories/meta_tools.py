@@ -855,6 +855,7 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
     "template": {
         "connector_type": "database",
         "driver_id": "sqlserver",
+        "auth_mode": "username_password",
         "component_name": "My SQL Server Connection",
         "folder_name": "Home",
         "description": "(optional) free-text description",
@@ -862,16 +863,50 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
         "port": 1433,
         "dbname": "MyDatabase",
         "username": "sa",
+        "credential_ref": "credential://your-vault/sqlserver/password",
         "additional": "(optional) JDBC URL suffix appended to urlFormat {3}, e.g. ';encrypt=true;trustServerCertificate=true'",
     },
-    "required": ["connector_type", "driver_id", "component_name", "host", "dbname", "username"],
-    "defaults": {"connector_type": "database", "driver_id": "sqlserver", "port": 1433, "additional": ""},
+    "required": [
+        "connector_type",
+        "driver_id",
+        "auth_mode",
+        "component_name",
+        "host",
+        "dbname",
+        "username",
+        "credential_ref",
+    ],
+    "defaults": {"connector_type": "database", "driver_id": "sqlserver", "auth_mode": "username_password", "port": 1433, "additional": ""},
+    "supported_driver_ids": ["sqlserver", "microsoft_jdbc", "jtds"],
+    "supported_auth_modes": ["username_password"],
+    "unsupported_future_auth_modes": ["windows_integrated"],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    ],
     "password_note": (
-        "Password is not accepted on create. Boomi stores passwords as ciphertext "
-        "produced by its own encryption; there is no public API to encrypt a plaintext "
-        "value. New components are created with <encryptedValue ... isSet=\"false\"/>. "
-        "Set the password in the Boomi UI after create, or supply an existing "
-        "ciphertext via the raw-XML escape hatch (config.xml=...)."
+        "Plaintext secrets are rejected before any mutation. Pass credential_ref="
+        "'credential://...' as an opaque placeholder — the builder never writes it "
+        "into the emitted XML. Boomi stores passwords as ciphertext produced by its "
+        "own encryption; there is no public API to encrypt a plaintext value. New "
+        "components are created with <encryptedValue ... isSet=\"false\"/>. Set the "
+        "password in the Boomi UI after create, or supply an existing ciphertext "
+        "via the raw-XML escape hatch (config.xml=...). Forbidden secret-shaped "
+        "keys (password, password_ref, secret, token, access_token, client_secret) "
+        "fail validation with error_code=PLAINTEXT_SECRET_REJECTED."
+    ),
+    "driver_note": (
+        "driver_id='sqlserver' and driver_id='microsoft_jdbc' both emit Boomi's "
+        "Microsoft JDBC driver (className=com.microsoft.sqlserver.jdbc.SQLServerDriver, "
+        "urlFormat=jdbc:sqlserver://{0}:{1};database={2}{3}); the alias is a caller "
+        "convenience. driver_id='jtds' emits the legacy jTDS driver "
+        "(className=net.sourceforge.jtds.jdbc.Driver, "
+        "urlFormat=jdbc:jtds:sqlserver://{0}:{1}/{2}{3}). Postgres/Oracle/MySQL are "
+        "deliberately unsupported in M2.2 and return error_code=UNSUPPORTED_DB_DRIVER."
     ),
     "gotchas": [
         (
@@ -890,7 +925,7 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
     ],
     "recommended_workflow": [
         "1. manage_connector list_types — confirm 'database' appears.",
-        "2. manage_connector create with the JSON config above.",
+        "2. manage_connector create with the JSON config above (credential_ref is opaque; no password).",
         "3. Set the password in the Boomi UI (or update via raw XML with pre-encrypted ciphertext).",
         "4. Test the connection from the UI (Connection Test) against an online runtime.",
         "5. Deploy via manage_deployment.",
@@ -898,11 +933,13 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
     "update_note": (
         "Field-level update via JSON config is not yet supported for database "
         "connectors (HTTP only). Use manage_connector update with config.xml=... "
-        "to replace the XML, or edit in the UI."
+        "to replace the XML, or edit in the UI. Raw-XML escape hatch remains "
+        "unchanged in M2.2."
     ),
     "example": {
         "connector_type": "database",
-        "driver_id": "sqlserver",
+        "driver_id": "microsoft_jdbc",
+        "auth_mode": "username_password",
         "component_name": "MS SQL Server Microsoft",
         "folder_name": "Process Library",
         "description": "Connection to the MS SQL Server order entry database.",
@@ -910,6 +947,7 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
         "port": 11433,
         "dbname": "Expert",
         "username": "sa",
+        "credential_ref": "credential://prod/sqlserver/password",
         "additional": ";encrypt=true;trustServerCertificate=true",
     },
 }

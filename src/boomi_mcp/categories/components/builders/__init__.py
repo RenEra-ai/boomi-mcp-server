@@ -5,6 +5,8 @@ Only connector builders remain in this package for runtime use.
 """
 
 from .connector_builder import (
+    BuilderValidationError,
+    DatabaseConnectorBuilder,
     HttpConnectorBuilder,
     CONNECTOR_BUILDERS,
     get_connector_builder,
@@ -13,6 +15,8 @@ from .connector_builder import (
 )
 
 __all__ = [
+    "BuilderValidationError",
+    "DatabaseConnectorBuilder",
     "HttpConnectorBuilder",
     "CONNECTOR_BUILDERS",
     "get_connector_builder",

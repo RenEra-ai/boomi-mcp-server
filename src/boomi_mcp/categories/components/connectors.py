@@ -35,6 +35,7 @@ from ._shared import (
     paginate_metadata, _create_component_raw, _extract_api_error_msg,
 )
 from .builders.connector_builder import (
+    BuilderValidationError,
     get_connector_builder, CONNECTOR_BUILDERS,
     find_http_settings, update_http_settings_fields,
 )
@@ -367,6 +368,15 @@ def create_connector(
             "profile": profile,
         }
 
+    except BuilderValidationError as e:
+        return {
+            "_success": False,
+            "error_code": e.error_code,
+            "error": str(e),
+            "field": e.field,
+            "hint": e.hint,
+            "profile": profile,
+        }
     except ValueError as e:
         return {
             "_success": False,
