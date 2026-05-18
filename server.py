@@ -464,6 +464,12 @@ if not LOCAL_MODE:
     else:
         print("[INFO] OAuth diagnostic logging DISABLED")
 
+    # Storage self-healing: evict corrupted client documents on decryption
+    # failure so a stale or bad-key row doesn't permanently 401 a client.
+    # Applied AFTER diagnostic logging so the inner logger fires first.
+    from storage_healing_patch import apply_storage_healing_patch
+    apply_storage_healing_patch(auth_provider=auth)
+
     # Create FastMCP server with auth
     mcp = FastMCP(
         name="Boomi MCP Server",
