@@ -127,12 +127,23 @@ spec:
           value: "true"
 
         # Cross-instance shared refresh-token grace cache (Fix D from
-        # PR #34). Defaults to off in the patch; we pin it on here so
-        # multi-replica refresh rotations share the grace window via
-        # Mongo and survive race conditions across pods. Shared reads
-        # degrade to local exchange on Mongo outage (no hard 401), so
-        # turning this on is safe even with intermittent Mongo issues.
+        # PR #34). The code default in
+        # rt_grace_shared_backend.initialize_shared_grace_backend is
+        # already "true"; we pin it here so the manifest reflects the
+        # intended state and a future default flip can't silently turn
+        # it off. Shared reads degrade to local exchange on Mongo outage
+        # (no hard 401), so leaving this on is safe.
         - name: BOOMI_RT_GRACE_SHARED
+          value: "true"
+
+        # Distributed grace lock (Fix D.2 from PR #34). Defaults to off
+        # in initialize_shared_grace_backend, so the shared cache alone
+        # still races on concurrent refreshes across replicas. Pinning
+        # this on engages the Mongo upsert-as-lock singleflight so only
+        # one replica calls Google per refresh-token rotation, even
+        # under simultaneous client retries. Adds one Mongo collection
+        # (`mcp-rt-inflight-locks`) and one upsert per refresh.
+        - name: BOOMI_RT_GRACE_DISTRIBUTED_LOCK
           value: "true"
 
         # Boomi Docs Knowledge Base (optional retrieval layer)
