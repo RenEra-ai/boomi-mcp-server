@@ -1484,6 +1484,9 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
     "note": (
         "Database Get (read) operation. Wraps a previously-created database "
         "Read profile (profile.db) in a DatabaseGetAction envelope. The "
+        "read profile may be a Select-statement Read (profile_type="
+        "'database.read') or a Stored Procedure Read (profile_type="
+        "'database.stored_procedure_read') — both are supported. The "
         "connection itself is bound at the process connector step, not in "
         "the operation XML — connection_ref_key is a plan-only dependency."
     ),
@@ -1564,7 +1567,7 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
     ],
     "recommended_workflow": [
         "1. Create the database connector-settings (manage_connector, connector_type=database).",
-        "2. Create the read profile (manage_component, component_type=profile.db, profile_type=database.read).",
+        "2. Create the read profile (manage_component, component_type=profile.db, profile_type=database.read OR database.stored_procedure_read).",
         "3. Plan this Get operation with depends_on=[<connection_key>, <read_profile_key>] and read_profile_id='$ref:<read_profile_key>'.",
         "4. Apply — $ref is resolved to the read profile's component_id from the id_registry.",
     ],
@@ -1596,10 +1599,6 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
     "out_of_scope": {
         "database_send": (
             "Database Send/write (DatabaseSendAction) is tracked by issue #32."
-        ),
-        "stored_procedure_get": (
-            "Stored Procedure Read operation is a Boomi-supported variant not "
-            "yet implemented; deferred to a follow-up."
         ),
     },
 }
