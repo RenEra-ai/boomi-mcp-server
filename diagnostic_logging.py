@@ -1,17 +1,27 @@
 """
-Temporary diagnostic logging for OAuth token refresh debugging.
+OAuth observability patches: log silent 401 paths in the FastMCP auth stack.
 
-Enabled by setting BOOMI_OAUTH_DIAGNOSTICS=true in the environment.
-Patches the upstream FastMCP/MCP SDK to log structured causes when:
-- Client authentication fails on the /token endpoint (the silent 401)
-- Client lookup returns None (storage miss or decryption failure)
-- Fernet decryption fails on stored OAuth data
+These patches are enabled by default in production mode. They emit one
+structured log line per failure at three boundaries that are silent in
+upstream FastMCP/MCP SDK today:
 
-These patches do not change behavior -- they only add logging
-at failure points that are currently silent.
+- Client authentication on the /token endpoint
+  (the silent `unauthorized_client` 401 cause is logged)
+- OAuthProxy.get_client lookup misses
+  (distinguishes storage miss vs decryption/deserialization failure)
+- Encrypted storage GET errors
+  (Fernet InvalidToken, ValidationError, etc.)
 
-Added 2026-04-11 for post-FastMCP-v3-migration cutover observability.
-Remove after the new refresh path is proven stable (~72h post-deploy).
+The patches do not change behavior — they only add logging at failure
+points that would otherwise produce a 401 with no log line.
+
+Disable with BOOMI_OAUTH_DIAGNOSTICS_DISABLE=true. The legacy
+BOOMI_OAUTH_DIAGNOSTICS=false also opts out for backward compatibility.
+
+Originally added 2026-04-11 as a 72-hour post-migration cutover hack;
+promoted to permanent default-on observability on 2026-05-18 because the
+silent 401 paths it monitors are inherent to the upstream design, not a
+transient migration symptom.
 """
 
 import logging

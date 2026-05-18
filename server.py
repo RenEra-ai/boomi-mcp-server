@@ -450,12 +450,17 @@ if not LOCAL_MODE:
         print(f"       - OIDC_BASE_URL")
         sys.exit(1)
 
-    # Temporary diagnostic logging for post-migration OAuth cutover.
-    # Enable with BOOMI_OAUTH_DIAGNOSTICS=true; remove after refresh path is stable.
-    if os.getenv("BOOMI_OAUTH_DIAGNOSTICS", "").lower() in ("true", "1", "yes"):
+    # OAuth observability: log silent 401 paths in the FastMCP auth stack.
+    # Default ON; disable with BOOMI_OAUTH_DIAGNOSTICS_DISABLE=true, or
+    # explicitly opt out via BOOMI_OAUTH_DIAGNOSTICS=false (back-compat).
+    _diag_disable = os.getenv("BOOMI_OAUTH_DIAGNOSTICS_DISABLE", "").lower() in ("true", "1", "yes")
+    _diag_legacy_opt_in = os.getenv("BOOMI_OAUTH_DIAGNOSTICS", "true").lower() in ("true", "1", "yes")
+    if not _diag_disable and _diag_legacy_opt_in:
         from diagnostic_logging import apply_all_patches
         apply_all_patches(auth_provider=auth, encrypted_storage=encrypted_storage)
         print("[INFO] OAuth diagnostic logging ENABLED")
+    else:
+        print("[INFO] OAuth diagnostic logging DISABLED")
 
     # Create FastMCP server with auth
     mcp = FastMCP(
