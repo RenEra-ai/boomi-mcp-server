@@ -364,6 +364,16 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
             cloned["component_name"] = f"{base}{suffix}"
         return cloned
 
+    if comp.type == "profile.db":
+        # profile.db participates in metadata lookup since Issue #23 added it
+        # to _METADATA_TYPE_MAP, so conflict_policy=clone is reachable. Without
+        # the suffix, create_clone would produce an indistinguishable duplicate
+        # that the next plan would see as ambiguous.
+        base = cloned.get("component_name") or comp.name
+        if base:
+            cloned["component_name"] = f"{base}{suffix}"
+        return cloned
+
     return cloned
 
 
@@ -391,6 +401,13 @@ def _execute_component(
             payload.setdefault("component_name", comp.name)
             payload.setdefault("name", comp.name)
         elif comp.type == "trading_partner":
+            payload.setdefault("component_name", comp.name)
+        elif comp.type == "profile.db":
+            # Mirror plan-time validation, which injects comp.name into
+            # effective_config["component_name"] before calling validate_config.
+            # Without this, a spec with top-level name="..." but no
+            # config.component_name plans clean and then fails at apply with
+            # DATABASE_OPERATION_VALIDATION_FAILED: component_name is required.
             payload.setdefault("component_name", comp.name)
 
     if comp.type == "process":
