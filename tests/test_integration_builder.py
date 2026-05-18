@@ -1420,3 +1420,243 @@ class TestCodexReviewF398b35Followup:
         cloned = _apply_clone_suffix(comp, cfg)
         # Falls back to comp.name when config has no component_name.
         assert cloned["component_name"] == "Example Read Profile-clone"
+
+
+# ===========================================================================
+# M2.3 follow-up — Stored Procedure Read profile preflight & apply
+#
+# Mirrors TestBuildPlanDatabaseReadProfilePreflight + apply tests but with
+# profile_type="database.stored_procedure_read" and procedure_name in place
+# of query. The Get-op layer is unchanged — it references the SP profile by
+# ID via the same $ref:db_sp_read_profile mechanism.
+# ===========================================================================
+
+
+def _db_sp_read_profile_config(**overrides):
+    """Minimal valid Stored Procedure Read profile config."""
+    cfg = {
+        "component_type": "profile.db",
+        "profile_type": "database.stored_procedure_read",
+        "component_name": "Example SP Read Profile",
+        "folder_name": "Process Library",
+        "procedure_name": "schema.proc",
+        "output_fields": [{"name": "col_a"}],
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _db_sp_read_profile_comp(key="db_sp_read_profile",
+                              name="Example SP Read Profile",
+                              action="create", depends_on=None,
+                              **config_overrides):
+    return IntegrationComponentSpec(
+        key=key,
+        type="profile.db",
+        action=action,
+        name=name,
+        config=_db_sp_read_profile_config(**config_overrides),
+        depends_on=depends_on or [],
+    )
+
+
+def _db_get_op_for_sp_comp(key="db_query_operation", name="Example DB Query",
+                            action="create",
+                            depends_on=("db_connection", "db_sp_read_profile"),
+                            **config_overrides):
+    """A Get operation that references the SP profile via $ref."""
+    defaults = {
+        "component_type": "connector-action",
+        "connector_type": "database",
+        "operation_mode": "get",
+        "component_name": "Example DB Query",
+        "folder_name": "Process Library",
+        "connection_ref_key": "db_connection",
+        "read_profile_id": "$ref:db_sp_read_profile",
+        "batch_count": 0,
+        "max_rows": 0,
+    }
+    defaults.update(config_overrides)
+    return IntegrationComponentSpec(
+        key=key,
+        type="connector-action",
+        action=action,
+        name=name,
+        config=defaults,
+        depends_on=list(depends_on),
+    )
+
+
+class TestBuildPlanDatabaseStoredProcedureReadProfilePreflight:
+    """Preflight contract for profile.db + database.stored_procedure_read."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_sp_profile_plans_without_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([_db_sp_read_profile_comp()]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step.get("validation_error") is None
+        assert step["route"] == "profile_builder_or_xml"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_procedure_name_surfaces_structured_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_sp_read_profile_comp()
+        comp.config["procedure_name"] = ""
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "MISSING_DB_PROCEDURE_NAME"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_output_fields_surfaces_missing_db_output_fields(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_sp_read_profile_comp()
+        comp.config["output_fields"] = []
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "MISSING_DB_OUTPUT_FIELDS"
+
+    @patch(_PATCH_TARGET)
+    def test_invalid_parameter_mode_surfaces_structured_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_sp_read_profile_comp()
+        comp.config["parameters"] = [{"name": "p", "mode": "return"}]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "INVALID_DB_PARAMETER_MODE"
+
+    @patch(_PATCH_TARGET)
+    def test_plaintext_secret_in_parameter_dict_is_scrubbed_in_plan_output(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_sp_read_profile_comp()
+        comp.config["parameters"] = [{"name": "p", "password": "leak"}]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["parameters"][0]["password"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_sp_profile_routes_via_profile_builder(self, mock_pag):
+        # Sanity: the preflight gate must dispatch to the SP builder via the
+        # registry, not silently default to the Select builder.
+        mock_pag.return_value = []
+        comp = _db_sp_read_profile_comp()
+        # If we accidentally used DatabaseReadProfileBuilder.validate_config,
+        # we'd get UNSUPPORTED_DB_PROFILE_MODE because that builder rejects
+        # any profile_type other than database.read.
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
+    def test_unknown_profile_type_lists_both_supported_protocols(self, mock_pag):
+        # Bad/unknown profile_type should surface UNSUPPORTED_DB_PROFILE_MODE
+        # with a hint that mentions both supported protocols.
+        mock_pag.return_value = []
+        comp = _db_sp_read_profile_comp()
+        comp.config["profile_type"] = "database.bogus"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_PROFILE_MODE"
+        hint = step["validation_error"].get("hint") or ""
+        assert "database.read" in hint
+        assert "database.stored_procedure_read" in hint
+
+
+class TestBuildPlanDatabaseGetOperationWithSpProfile:
+    """Get-op referencing an SP profile must plan + execute identically to one
+    referencing a Select profile."""
+
+    @patch(_PATCH_TARGET)
+    def test_get_op_with_sp_profile_dep_plans_cleanly(self, mock_pag):
+        mock_pag.return_value = []
+        config = _build_config([
+            _db_comp(),
+            _db_sp_read_profile_comp(),
+            _db_get_op_for_sp_comp(),
+        ])
+        plan = _build_plan(MagicMock(), config)
+        assert plan["execution_order"] == [
+            "db_connection",
+            "db_sp_read_profile",
+            "db_query_operation",
+        ]
+        for step in plan["steps"]:
+            assert step.get("validation_error") is None
+
+
+class TestApplyPlanStoredProcedureProfileAndGet:
+    """Apply path for SP profile + Get-op."""
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_fails_before_execution_on_missing_procedure_name(
+        self, mock_pag, mock_exec
+    ):
+        mock_pag.return_value = []
+        comp = _db_sp_read_profile_comp()
+        comp.config["procedure_name"] = ""
+        config = _build_config([comp])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        bad = result["unresolvable_steps"][0]
+        assert bad["validation_error"]["error_code"] == "MISSING_DB_PROCEDURE_NAME"
+        mock_exec.assert_not_called()
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_resolves_ref_token_from_sp_profile_to_get_op(
+        self, mock_pag, mock_exec
+    ):
+        mock_pag.return_value = []
+        mock_exec.side_effect = [
+            {"_success": True, "component_id": "conn-001", "type": "connector-settings"},
+            {"_success": True, "component_id": "sp-profile-002", "type": "profile.db"},
+            {"_success": True, "component_id": "op-003", "type": "connector-action"},
+        ]
+        config = _build_config([
+            _db_comp(),
+            _db_sp_read_profile_comp(),
+            _db_get_op_for_sp_comp(),
+        ])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        # The Get operation's resolved config must reference the SP profile's
+        # component_id (substituted from $ref:db_sp_read_profile).
+        third_call = mock_exec.call_args_list[2]
+        resolved_config = third_call.kwargs["config"]
+        assert resolved_config["read_profile_id"] == "sp-profile-002"
+
+    def test_apply_clone_suffix_renames_sp_profile_component(self):
+        from src.boomi_mcp.categories.integration_builder import _apply_clone_suffix
+        comp = _db_sp_read_profile_comp(name="Example SP Read Profile")
+        cloned = _apply_clone_suffix(comp, dict(comp.config))
+        assert cloned["component_name"] == "Example SP Read Profile-clone"
+
+    @patch("src.boomi_mcp.categories.integration_builder.create_component")
+    @patch("src.boomi_mcp.categories.integration_builder._resolve_existing_components")
+    @patch(_PATCH_TARGET)
+    def test_apply_injects_component_type_for_sp_profile_db(
+        self, mock_pag, mock_resolve, mock_create_component
+    ):
+        mock_pag.return_value = []
+        mock_resolve.return_value = []
+        mock_create_component.return_value = {
+            "_success": True, "component_id": "sp-profile-002", "type": "profile.db"
+        }
+        profile = _db_sp_read_profile_comp()
+        profile.config.pop("component_type")
+        config = _build_config([profile])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        payload = mock_create_component.call_args_list[0].args[2]
+        assert payload["component_type"] == "profile.db"
+        assert payload["component_name"] == "Example SP Read Profile"

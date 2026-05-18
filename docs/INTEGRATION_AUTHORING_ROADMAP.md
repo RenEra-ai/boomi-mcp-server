@@ -87,6 +87,8 @@ Implementation focus:
 
 - Add database connector/settings builder support needed for SQL Server first, with extension points for Postgres and Oracle.
 - Add database operation/action builder support sufficient to run a task-authored query.
+  - M2.3 (Issue #23, shipped 2026-05-18): `DatabaseReadProfileBuilder` for Select-statement Read profiles (`profile_type="database.read"`) + `DatabaseGetOperationBuilder` for Get operations.
+  - M2.3 follow-up (shipped 2026-05-18): `DatabaseStoredProcedureReadProfileBuilder` for Stored Procedure Read profiles (`profile_type="database.stored_procedure_read"`). Same Get operation builder references either profile flavor by ID. Extended supported field/parameter types from `character`-only to `character`+`number`+`datetime` (verified against live SP profile XML).
 - Add minimum process-shape support required for facade, retry, error handling, and subprocess calls.
 - Add profile/map support required by the vertical slice:
   - source result normalization

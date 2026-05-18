@@ -199,6 +199,17 @@ Initial target protocol: REST.
 
 Later adapters: SOAP and OData targets where required.
 
+DB extract supports two `profile.db` Read profile variants (M2.3, Issue #23):
+
+- `profile_type="database.read"` — caller-authored Select SQL via `query`.
+- `profile_type="database.stored_procedure_read"` — invoke a stored procedure
+  via `procedure_name`. Parameters carry `mode` direction (`in` / `out` /
+  `inout`).
+
+Both variants are referenced by the same `connector-action database.get`
+operation via `read_profile_id` (UUID or `$ref:KEY` token), so an archetype
+can swap one for the other without changing the rest of the spec.
+
 ### `api_to_database_sync`
 
 Scheduled API extraction into a database target.

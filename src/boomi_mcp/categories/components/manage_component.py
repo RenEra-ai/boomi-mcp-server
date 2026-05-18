@@ -37,9 +37,11 @@ def create_component(
     """Create a new component.
 
     Two paths:
-    1. Builder — for known component_type + sub-type pairs (e.g. profile.db
-       database.read), dispatch through PROFILE_BUILDERS to emit XML from
-       structured caller config.
+    1. Builder — for known component_type + profile_type pairs (e.g. profile.db
+       database.read for Select-statement Read profiles, profile.db
+       database.stored_procedure_read for Stored Procedure Read profiles),
+       dispatch through PROFILE_BUILDERS to emit XML from structured caller
+       config.
     2. Raw XML — if config['xml'] is provided, POST directly (escape hatch).
 
     Boomi's Component API requires type-specific XML with proper namespaces;
@@ -51,8 +53,8 @@ def create_component(
         # Path 1: profile builder dispatch (when no raw XML override).
         component_type = config.get('component_type')
         profile_type = config.get('profile_type')
-        if not config.get('xml') and component_type and profile_type:
-            builder = get_profile_builder(component_type, profile_type)
+        if not config.get('xml') and component_type:
+            builder = get_profile_builder(component_type, profile_type or "")
             if builder is not None:
                 xml = builder.build(**config)
                 result = _create_component_raw(boomi_client, xml)
@@ -64,8 +66,36 @@ def create_component(
                     "type": result['type'],
                     "profile": profile,
                 }
-            # Recognized component_type without a matching builder → fall
-            # through to the raw-XML escape-hatch error below.
+            # No builder matched. For component_types that have a registered
+            # builder family (e.g. profile.db), surface a structured
+            # UNSUPPORTED_DB_PROFILE_MODE envelope listing the supported
+            # protocols — matches the dispatch contract that
+            # integration_builder._build_plan uses for the same payload.
+            valid_profile_types = sorted({
+                pt for (ct, pt) in PROFILE_BUILDERS if ct == component_type.lower()
+            })
+            if valid_profile_types:
+                return {
+                    "_success": False,
+                    "error_code": "UNSUPPORTED_DB_PROFILE_MODE",
+                    "error": (
+                        f"profile_type {profile_type!r} is not supported "
+                        f"for {component_type}. Supported: "
+                        f"{', '.join(valid_profile_types)}."
+                    ),
+                    "field": "profile_type",
+                    "hint": (
+                        f"Pass profile_type as one of {valid_profile_types} "
+                        f"and supply the matching structured config "
+                        "(query+output_fields for database.read, "
+                        "procedure_name+output_fields for "
+                        "database.stored_procedure_read). Write profiles "
+                        "are tracked by issue #32."
+                    ),
+                    "profile": profile,
+                }
+            # No registered builder family for this component_type at all →
+            # fall through to the raw-XML escape-hatch error.
 
         # Path 2: raw XML
         if config.get('xml'):
@@ -89,8 +119,11 @@ def create_component(
                 "a valid XML template, then modify and pass as config.xml. "
                 "For connectors (connector-settings, connector-action), use "
                 "manage_connector action='create' with structured config. "
-                "For database read profiles, pass component_type='profile.db' + "
-                "profile_type='database.read' + query + output_fields."
+                "For Select-statement database read profiles, pass "
+                "component_type='profile.db' + profile_type='database.read' + "
+                "query + output_fields. For Stored Procedure Read profiles, "
+                "use profile_type='database.stored_procedure_read' + "
+                "procedure_name + output_fields."
             ),
         }
 

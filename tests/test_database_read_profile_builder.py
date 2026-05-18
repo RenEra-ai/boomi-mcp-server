@@ -277,21 +277,57 @@ def test_missing_component_name_raises_structured_error(missing_value):
 
 
 def test_unsupported_field_data_type_raises_structured_error():
+    # "blob" is not in _SUPPORTED_FIELD_TYPES — only character/number/datetime are.
     with pytest.raises(BuilderValidationError) as excinfo:
         DatabaseReadProfileBuilder().build(
-            **_minimal_config(output_fields=[{"name": "ts", "data_type": "date"}])
+            **_minimal_config(output_fields=[{"name": "payload", "data_type": "blob"}])
         )
     assert excinfo.value.error_code == "UNSUPPORTED_DB_PROFILE_FIELD_TYPE"
     assert excinfo.value.field == "output_fields[0].data_type"
 
 
 def test_unsupported_parameter_data_type_raises_structured_error():
+    # "blob" is not in _SUPPORTED_FIELD_TYPES — only character/number/datetime are.
     cfg = _minimal_config()
-    cfg["parameters"] = [{"name": "p", "data_type": "number"}]
+    cfg["parameters"] = [{"name": "p", "data_type": "blob"}]
     with pytest.raises(BuilderValidationError) as excinfo:
         DatabaseReadProfileBuilder().build(**cfg)
     assert excinfo.value.error_code == "UNSUPPORTED_DB_PROFILE_FIELD_TYPE"
     assert excinfo.value.field == "parameters[0].data_type"
+
+
+@pytest.mark.parametrize("data_type,format_tag", [
+    ("character", "ProfileCharacterFormat"),
+    ("number", "ProfileNumberFormat"),
+    ("datetime", "ProfileDateFormat"),
+])
+def test_extended_field_data_types_accepted(data_type, format_tag):
+    """Issue #23 follow-up: number and datetime are accepted alongside character.
+
+    Verified against live SP profile 439fd4ae which uses all three types.
+    """
+    xml = DatabaseReadProfileBuilder().build(
+        **_minimal_config(
+            output_fields=[{"name": "col", "data_type": data_type}]
+        )
+    )
+    assert f'dataType="{data_type}"' in xml
+    assert f'<{format_tag}/>' in xml
+
+
+@pytest.mark.parametrize("data_type,format_tag", [
+    ("character", "ProfileCharacterFormat"),
+    ("number", "ProfileNumberFormat"),
+    ("datetime", "ProfileDateFormat"),
+])
+def test_extended_parameter_data_types_accepted(data_type, format_tag):
+    """Extended types are also accepted on parameters."""
+    cfg = _minimal_config()
+    cfg["parameters"] = [{"name": "p", "data_type": data_type}]
+    xml = DatabaseReadProfileBuilder().build(**cfg)
+    # Select builder omits the dataType attribute on DBParameter (per the
+    # live CDS Select reference), but the DataFormat child reflects the type.
+    assert f'<{format_tag}/>' in xml
 
 
 def test_output_field_missing_name_raises_structured_error():

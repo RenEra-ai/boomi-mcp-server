@@ -37,6 +37,9 @@ from .components.builders import (
     DatabaseConnectorBuilder,
     DatabaseGetOperationBuilder,
     DatabaseReadProfileBuilder,
+    DatabaseStoredProcedureReadProfileBuilder,
+    PROFILE_BUILDERS,
+    get_profile_builder,
 )
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
@@ -584,7 +587,34 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 if is_database_connector_settings:
                     db_err = DatabaseConnectorBuilder.validate_config(effective_config)
                 elif is_database_read_profile:
-                    db_err = DatabaseReadProfileBuilder.validate_config(effective_config)
+                    # Dispatch to the right profile builder via the registry.
+                    # Select (database.read) and Stored Procedure
+                    # (database.stored_procedure_read) share the same secret-
+                    # scan contract but have statement-specific validation
+                    # rules. If profile_type is missing/unknown, surface a
+                    # unified UNSUPPORTED_DB_PROFILE_MODE error that lists
+                    # all supported protocols.
+                    profile_type = (effective_config.get("profile_type") or "").lower()
+                    builder_instance = get_profile_builder("profile.db", profile_type)
+                    if builder_instance is None:
+                        valid = sorted({
+                            pt for (ct, pt) in PROFILE_BUILDERS if ct == "profile.db"
+                        })
+                        db_err = BuilderValidationError(
+                            f"profile_type {profile_type!r} is not supported "
+                            f"for profile.db. Supported: {', '.join(valid)}.",
+                            error_code="UNSUPPORTED_DB_PROFILE_MODE",
+                            field="profile_type",
+                            hint=(
+                                "Use one of the supported profile_type values "
+                                "(database.read for Select-statement profiles, "
+                                "database.stored_procedure_read for Stored "
+                                "Procedure profiles). Write profiles are "
+                                "tracked by issue #32."
+                            ),
+                        )
+                    else:
+                        db_err = type(builder_instance).validate_config(effective_config)
                 elif is_database_get_operation:
                     db_err = DatabaseGetOperationBuilder.validate_config(effective_config)
                     # Cross-step dependency checks only apply to the
