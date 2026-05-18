@@ -1374,3 +1374,49 @@ class TestCodexReviewF398b35Followup:
             if c["key"] == "db_query_operation"
         )
         assert echoed_op["config"]["token"] == "[REDACTED]"
+
+    # --- Follow-up review items (post-d48c30e):
+    # P1 — _execute_component must inject comp.name into payload["component_name"]
+    #      for profile.db so plan and apply agree on what gets validated.
+    # P2 — _apply_clone_suffix must rename profile.db too (it now participates
+    #      in metadata lookup, so conflict_policy=clone is reachable).
+
+    @patch("src.boomi_mcp.categories.integration_builder.create_component")
+    @patch("src.boomi_mcp.categories.integration_builder._resolve_existing_components")
+    @patch(_PATCH_TARGET)
+    def test_apply_injects_component_name_for_profile_db_when_config_omits_it(
+        self, mock_pag, mock_resolve, mock_create_component
+    ):
+        # Plan-time validation (line ~565 in _build_plan) seeds
+        # effective_config["component_name"] from comp.name before calling
+        # validate_config, so a spec like this plans cleanly. _execute_component
+        # must mirror that so apply doesn't fail with
+        # DATABASE_OPERATION_VALIDATION_FAILED: component_name is required.
+        mock_pag.return_value = []
+        mock_resolve.return_value = []
+        mock_create_component.return_value = {
+            "_success": True, "component_id": "profile-002", "type": "profile.db"
+        }
+        profile = _db_read_profile_comp(name="Example Read Profile")
+        profile.config.pop("component_name")  # Caller omitted the duplicate key
+        config = _build_config([profile])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        payload = mock_create_component.call_args_list[0].args[2]
+        assert payload["component_name"] == "Example Read Profile"
+
+    def test_apply_clone_suffix_renames_profile_db_component(self):
+        from src.boomi_mcp.categories.integration_builder import _apply_clone_suffix
+        comp = _db_read_profile_comp(name="Example Read Profile")
+        cloned = _apply_clone_suffix(comp, dict(comp.config))
+        assert cloned["component_name"] == "Example Read Profile-clone"
+
+    def test_apply_clone_suffix_renames_profile_db_using_comp_name_when_config_omits_it(self):
+        from src.boomi_mcp.categories.integration_builder import _apply_clone_suffix
+        comp = _db_read_profile_comp(name="Example Read Profile")
+        cfg = dict(comp.config)
+        cfg.pop("component_name", None)
+        cloned = _apply_clone_suffix(comp, cfg)
+        # Falls back to comp.name when config has no component_name.
+        assert cloned["component_name"] == "Example Read Profile-clone"
