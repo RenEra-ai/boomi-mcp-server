@@ -111,7 +111,7 @@ steps:
           --labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=$_TRIGGER_ID \
           --region=$_DEPLOY_REGION \
           --memory=2Gi \
-          --update-env-vars="BOOMI_DOCS_ENABLED=true,BOOMI_DOCS_DB_PATH=/app/kb/boomi_knowledge_db,BOOMI_DOCS_RELEASE_TAG=$$TAG,BOOMI_RT_GRACE_SHARED=true" \
+          --update-env-vars="BOOMI_DOCS_ENABLED=true,BOOMI_DOCS_DB_PATH=/app/kb/boomi_knowledge_db,BOOMI_DOCS_RELEASE_TAG=$$TAG,BOOMI_RT_GRACE_SHARED=true,BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true" \
           --quiet
 
 images:
