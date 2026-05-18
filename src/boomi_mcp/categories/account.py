@@ -262,7 +262,8 @@ def _sso_config_to_dict(sso) -> Dict[str, Any]:
     for field in ('account_id', 'enabled', 'idp_url', 'cert_info',
                   'assertion_encryption', 'authn_context',
                   'authn_context_comparison', 'fed_id_from_name_id',
-                  'name_id_policy', 'signout_redirect_url'):
+                  'name_id_policy', 'signout_redirect_url',
+                  'case_insensitive_federation_id'):
         val = getattr(sso, field, None)
         if val is not None:
             result[field] = val
