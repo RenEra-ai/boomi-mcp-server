@@ -78,12 +78,18 @@ _SUPPORTED_FIELD_TYPES: Dict[str, str] = {
     "datetime": "ProfileDateFormat",
 }
 
-# Stored-procedure parameter direction modes. The live SP reference uses only
-# "in", but "out" and "inout" are Boomi-documented values for DBParameter@mode
-# (Boomi KB chunk 6664e27758_technology_connectors_085 on stored-procedure
-# parameter handling).
-_SUPPORTED_PARAMETER_MODES: Tuple[str, ...] = ("in", "out", "inout")
+# Stored-procedure parameter direction modes. Authoritative source: Boomi
+# Database (Legacy) profile reference page "Database profile's Data Elements
+# tab → Parameters", which documents exactly four DBParameter@mode values:
+#   in       — input parameter
+#   out      — output parameter
+#   in_out   — input/output parameter (Boomi uses underscore, not "inout")
+#   return   — procedure return value (at most one per statement; should be
+#              first in the list per Boomi UI guidance but Boomi does not
+#              hard-enforce position)
+_SUPPORTED_PARAMETER_MODES: Tuple[str, ...] = ("in", "out", "in_out", "return")
 _DEFAULT_PARAMETER_MODE: str = "in"
+_AT_MOST_ONE_PARAMETER_MODE: str = "return"
 
 
 class _DatabaseReadProfileBuilderBase:
@@ -598,7 +604,14 @@ class DatabaseStoredProcedureReadProfileBuilder(_DatabaseReadProfileBuilderBase)
                          mandatory?, enforce_unique?} describing the
                          procedure's result-set shape
         parameters:      optional, list of {name, data_type?, mappable?, mode?}
-                         where mode ∈ {"in", "out", "inout"} (default "in")
+                         where mode is one of:
+                           "in"      — input parameter (default)
+                           "out"     — output parameter
+                           "in_out"  — input/output parameter
+                           "return"  — procedure return value
+                                       (at most one per statement; Boomi UI
+                                       guidance is to place it first in the
+                                       list but the builder does not reorder)
         component_name:  required for top-level component naming
         folder_name:     optional; defaults to "Home"
         description:     optional
@@ -643,6 +656,31 @@ class DatabaseStoredProcedureReadProfileBuilder(_DatabaseReadProfileBuilderBase)
                     "Provide the fully-qualified stored-procedure name as your "
                     "database vendor expects it. The builder stores the value "
                     "verbatim and does not parse or normalize it."
+                ),
+            )
+
+        # SP-specific: at most one "return" parameter per statement. Boomi's
+        # reference doc for Database (Legacy) profile parameters states
+        # "Only one Return parameter can be defined per statement."
+        parameters = config.get("parameters") or []
+        return_indices = [
+            i for i, p in enumerate(parameters)
+            if isinstance(p, dict)
+            and p.get("mode") == _AT_MOST_ONE_PARAMETER_MODE
+        ]
+        if len(return_indices) > 1:
+            return BuilderValidationError(
+                f"At most one parameter with mode='return' is allowed per "
+                f"statement (found {len(return_indices)} at indices "
+                f"{return_indices})",
+                error_code="MULTIPLE_DB_RETURN_PARAMETERS",
+                field=f"parameters[{return_indices[1]}].mode",
+                hint=(
+                    "Boomi stored-procedure Read profiles accept at most one "
+                    "return-direction parameter per statement. Combine the "
+                    "extras into output parameters (mode='out') or split into "
+                    "separate profiles if the procedure exposes multiple "
+                    "logical returns."
                 ),
             )
         return None

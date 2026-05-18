@@ -1244,7 +1244,7 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
             "For procedure-based Read profiles, use "
             "protocol='database.stored_procedure_read' instead — that "
             "template emits statementType='spread', accepts a procedure_name "
-            "config key, and supports parameters[].mode='in'/'out'/'inout'."
+            "config key, and supports parameters[].mode='in'/'out'/'in_out'/'return'."
         ),
     },
 }
@@ -1259,7 +1259,7 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ = {
     "note": (
         "Database (Legacy) Read profile that invokes a Stored Procedure. "
         "Holds the procedure's fully-qualified name plus the result-set "
-        "output-field shape and any IN/OUT/INOUT parameters. The operation "
+        "output-field shape and any IN/OUT/IN_OUT/RETURN parameters. The operation "
         "step (connector-action database.get) references this profile by "
         "profileId — keep them in the same integration plan so $ref "
         "resolution wires the IDs together at apply time."
@@ -1325,11 +1325,14 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ = {
         "mode": {
             "type": "string",
             "default": "in",
-            "supported": ["in", "out", "inout"],
+            "supported": ["in", "out", "in_out", "return"],
             "note": (
                 "Stored-procedure parameter direction. Default 'in' covers "
-                "input parameters; use 'out' or 'inout' for result/return "
-                "parameters."
+                "input parameters; 'out' for output parameters; 'in_out' "
+                "(note underscore — Boomi's exact XML attribute value) for "
+                "bidirectional parameters; 'return' for the procedure return "
+                "value. At most one 'return' parameter is allowed per "
+                "statement."
             ),
         },
         "mappable": {"type": "boolean", "default": False},
@@ -1345,7 +1348,8 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ = {
     "error_codes": {
         "MISSING_DB_PROCEDURE_NAME": "procedure_name is absent or blank",
         "MISSING_DB_OUTPUT_FIELDS": "output_fields list is missing or empty",
-        "INVALID_DB_PARAMETER_MODE": "parameters[i].mode not in in/out/inout",
+        "INVALID_DB_PARAMETER_MODE": "parameters[i].mode not in in/out/in_out/return",
+        "MULTIPLE_DB_RETURN_PARAMETERS": "more than one parameter has mode='return' (Boomi allows at most one per statement)",
         "UNSUPPORTED_DB_PROFILE_MODE": "profile_type is not database.stored_procedure_read",
         "UNSUPPORTED_DB_PROFILE_FIELD_TYPE": "data_type not in character/number/datetime",
         "DATABASE_OPERATION_VALIDATION_FAILED": "shape / type / cross-field issue",
@@ -1362,8 +1366,15 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ = {
             "'<<schema>>.<<proc>>'."
         ),
         (
-            "parameters[].mode defaults to 'in'; use 'out' or 'inout' "
-            "for output or bidirectional parameters."
+            "parameters[].mode defaults to 'in'. Other valid values are "
+            "'out', 'in_out' (note underscore — matches Boomi's XML "
+            "attribute value exactly, NOT 'inout'), and 'return'."
+        ),
+        (
+            "Only ONE parameter may have mode='return' per statement "
+            "(Boomi platform constraint). Boomi UI guidance is to place "
+            "the return parameter first in the list, but the builder "
+            "preserves caller order and Boomi does not hard-enforce position."
         ),
         (
             "Stored procedures with no result set are not supported in "
@@ -1381,7 +1392,9 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ = {
         "vendor expects it.",
         "2. Declare one output_fields entry per result-set column.",
         "3. Declare parameters[] for each procedure parameter, choosing the "
-        "correct mode (in/out/inout) per the procedure signature.",
+        "correct mode ('in', 'out', 'in_out', or 'return') per the "
+        "procedure signature. If the procedure exposes a return value, "
+        "place the 'return' parameter first.",
         "4. Plan the read profile alongside the matching connector-action "
         "(database.get) — depends_on the read profile key from the operation.",
     ],

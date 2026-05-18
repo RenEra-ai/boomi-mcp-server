@@ -132,7 +132,7 @@ def test_template_documents_parameter_shape_with_mode():
     # SP-specific: mode field documented
     assert "mode" in shape
     assert shape["mode"]["default"] == "in"
-    assert set(shape["mode"]["supported"]) == {"in", "out", "inout"}
+    assert set(shape["mode"]["supported"]) == {"in", "out", "in_out", "return"}
 
 
 def test_template_documents_error_codes():
@@ -175,12 +175,25 @@ def test_template_points_at_select_variant_via_see_also():
 def test_template_documents_gotchas_for_mode_and_vendor_syntax():
     result = _call(component_type="profile.db", protocol="database.stored_procedure_read")
     gotchas = " ".join(result["gotchas"]).lower()
-    # IN/OUT/INOUT mentioned
-    assert "in" in gotchas and "out" in gotchas and "inout" in gotchas
+    # All four modes mentioned, including the explicit "in_out underscore" call-out
+    # and the return-direction.
+    assert "'in'" in gotchas
+    assert "'out'" in gotchas
+    assert "'in_out'" in gotchas
+    assert "'return'" in gotchas
+    assert "underscore" in gotchas  # explicit warning that it's in_out, not inout
+    # One-return constraint must be documented.
+    assert "only one" in gotchas or "at most one" in gotchas
     # Procedure-name-is-verbatim warning present
     assert "verbatim" in gotchas
     # Self-closing sql noted
     assert "self-closing" in gotchas or "<sql/>" in " ".join(result["gotchas"])
+
+
+def test_template_documents_multiple_return_error_code():
+    result = _call(component_type="profile.db", protocol="database.stored_procedure_read")
+    codes = result["error_codes"]
+    assert "MULTIPLE_DB_RETURN_PARAMETERS" in codes
 
 
 # ----------------------------------------------------------------------------
