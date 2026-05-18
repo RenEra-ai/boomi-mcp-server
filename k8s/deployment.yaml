@@ -119,6 +119,13 @@ spec:
               name: boomi-mcp-config
               key: cors_origins
 
+        # OAuth observability (default ON since 2026-05-18; pinned here
+        # so the manifest reflects the intended state and a future
+        # default flip can't silently turn it off). Disable with
+        # BOOMI_OAUTH_DIAGNOSTICS_DISABLE=true instead of removing this.
+        - name: BOOMI_OAUTH_DIAGNOSTICS
+          value: "true"
+
         # Boomi Docs Knowledge Base (optional retrieval layer)
         - name: BOOMI_DOCS_ENABLED
           valueFrom:

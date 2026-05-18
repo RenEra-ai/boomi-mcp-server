@@ -234,7 +234,31 @@ OIDC_BASE_URL           # https://boomi.renera.ai
 SESSION_SECRET          # Session signing key for web UI
 MONGODB_URI             # MongoDB Atlas connection string for OAuth state
 JWT_SIGNING_KEY         # Stable key for signing MCP JWT tokens
-STORAGE_ENCRYPTION_KEY  # Fernet key for encrypting OAuth tokens at rest
+STORAGE_ENCRYPTION_KEY  # Fernet key(s) for encrypting OAuth tokens at rest.
+                        # Single value or comma-separated list (newest first)
+                        # to enable zero-downtime key rotation via MultiFernet.
+```
+
+#### Authentication hardening (optional)
+
+All four ship with safe defaults; override only when debugging or
+performing a key rotation. See `docs/oauth-migration-runbook.md` for the
+full rollback procedure.
+
+```bash
+BOOMI_RT_GRACE_SECONDS          # default 60. Window during which a just-
+                                # rotated refresh token still returns the
+                                # same new tokens (defeats one-time-use
+                                # replay race). Set 0 to disable.
+BOOMI_RT_GRACE_MAX_SIZE         # default 512. LRU capacity for the grace cache.
+BOOMI_OAUTH_DIAGNOSTICS_DISABLE # default off (diagnostics ON). Set true to
+                                # silence the three OAuth diagnostic log
+                                # patches. BOOMI_OAUTH_DIAGNOSTICS=false
+                                # also works as a back-compat opt-out.
+BOOMI_AUTH_HEAL_CORRUPT_CLIENTS # default true. When get_client raises
+                                # InvalidToken/ValidationError, delete the
+                                # corrupted MongoDB doc so the client can
+                                # re-register cleanly.
 ```
 
 #### User Credentials Storage
