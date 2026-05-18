@@ -412,7 +412,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         #     connector-settings step regardless of apply path. Plan output
         #     dumps comp.config verbatim, so a plaintext password in a
         #     reuse/update/raw-XML config would leak into the response even
-        #     though apply itself wouldn't use it.
+        #     though apply itself wouldn't use it. We also infer "database"
+        #     from raw XML subType when connector_type is omitted —
+        #     create_connector's raw-XML path doesn't require connector_type.
         #
         # (b) validate_config (driver, auth, credential_ref, required fields)
         #     runs only when the apply path will actually invoke
@@ -423,13 +425,21 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         #     _execute_component's defaulting (component_name from comp.name).
         validation_error: Optional[Dict[str, Any]] = None
         raw_config = comp.config or {}
+        xml_payload = raw_config.get("xml") or ""
+        xml_says_database = (
+            'subType="database"' in xml_payload
+            or "subType='database'" in xml_payload
+        )
         is_database_connector_settings = (
             comp.type == "connector-settings"
-            and raw_config.get("connector_type") == "database"
+            and (
+                raw_config.get("connector_type") == "database"
+                or xml_says_database
+            )
         )
         will_invoke_builder = (
             is_database_connector_settings
-            and not raw_config.get("xml")
+            and not xml_payload
             and planned_action in ("create", "create_clone")
         )
         db_err: Optional[BuilderValidationError] = None
@@ -448,11 +458,14 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 "field": db_err.field,
                 "hint": db_err.hint,
             }
-            # Scrub any plaintext secret value from the spec dump so the
-            # plan response never echoes credentials back to the caller.
-            if db_err.error_code == "PLAINTEXT_SECRET_REJECTED" \
-                    and db_err.field and db_err.field in raw_config:
-                raw_config[db_err.field] = "[REDACTED]"
+            # Scrub EVERY plaintext secret-shaped field from the spec dump,
+            # not just the one named in the error. scan_forbidden_secret_fields
+            # stops on first match, but a single bad config can carry multiple
+            # offenders — leaving the others as plaintext would still leak.
+            if db_err.error_code == "PLAINTEXT_SECRET_REJECTED":
+                for forbidden in DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS:
+                    if forbidden in raw_config:
+                        raw_config[forbidden] = "[REDACTED]"
 
         step: Dict[str, Any] = {
             "key": comp.key,
