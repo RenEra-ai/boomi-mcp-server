@@ -59,16 +59,29 @@ def apply_storage_healing_patch(auth_provider) -> None:
     ).lower() in ("true", "1", "yes")
 
     # Imports deferred so this module can be imported in LOCAL_MODE without
-    # pulling in cryptography/pydantic.
+    # pulling in cryptography/pydantic/key_value.
+    #
+    # What the storage stack actually raises (verified against
+    # py-key-value-aio==0.4.4 + pydantic==2.12.3):
+    #   - FernetEncryptionWrapper.get() wraps cryptography.InvalidToken as
+    #     key_value.aio.errors.DecryptionError before it ever reaches us.
+    #   - PydanticAdapter.get() with raise_on_validation_error=True (the
+    #     setting OAuthProxy uses for _client_store at proxy.py:476) wraps
+    #     pydantic.ValidationError as key_value.aio.errors.DeserializationError.
+    # The bare cryptography/pydantic exceptions are kept as defense-in-depth
+    # in case a future upstream change short-circuits the wrappers.
     from cryptography.fernet import InvalidToken
+    from key_value.aio.errors import DecryptionError, DeserializationError
     from pydantic import ValidationError
+
+    _heal_triggers = (DecryptionError, DeserializationError, InvalidToken, ValidationError)
 
     original_get_client = auth_provider.get_client
 
     async def patched_get_client(self, client_id):
         try:
             return await original_get_client(client_id)
-        except (InvalidToken, ValidationError) as exc:
+        except _heal_triggers as exc:
             client_id_repr = (
                 client_id[:16] + "..."
                 if client_id and len(client_id) > 16
