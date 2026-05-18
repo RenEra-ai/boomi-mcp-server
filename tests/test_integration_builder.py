@@ -1523,11 +1523,25 @@ class TestBuildPlanDatabaseStoredProcedureReadProfilePreflight:
     def test_invalid_parameter_mode_surfaces_structured_error(self, mock_pag):
         mock_pag.return_value = []
         comp = _db_sp_read_profile_comp()
-        comp.config["parameters"] = [{"name": "p", "mode": "return"}]
+        comp.config["parameters"] = [{"name": "p", "mode": "garbage"}]
         plan = _build_plan(MagicMock(), _build_config([comp]))
         step = plan["steps"][0]
         assert step["planned_action"] == "error_database_validation"
         assert step["validation_error"]["error_code"] == "INVALID_DB_PARAMETER_MODE"
+
+    @patch(_PATCH_TARGET)
+    def test_multiple_return_parameters_surface_structured_error(self, mock_pag):
+        # Boomi reference doc: only one return parameter allowed per statement.
+        mock_pag.return_value = []
+        comp = _db_sp_read_profile_comp()
+        comp.config["parameters"] = [
+            {"name": "r1", "mode": "return"},
+            {"name": "r2", "mode": "return"},
+        ]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "MULTIPLE_DB_RETURN_PARAMETERS"
 
     @patch(_PATCH_TARGET)
     def test_plaintext_secret_in_parameter_dict_is_scrubbed_in_plan_output(self, mock_pag):

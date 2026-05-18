@@ -4,7 +4,7 @@ M2.3 follow-up to Issue #23. Verifies the emitted XML matches the structure
 of a real exported Boomi Stored Procedure Read profile (reneraai-5RO3DD
 component 439fd4ae-7990-4a5b-9453-fbb9d7fe458e "Test SP Profile", fetched
 2026-05-18) and that SP-specific validation (procedure_name required,
-parameter mode in/out/inout) behaves correctly.
+parameter mode in/out/in_out/return) behaves correctly.
 
 The builder must:
 - Emit a deterministic key sequence (DBStatement=2, DBFields=3,
@@ -194,7 +194,7 @@ class TestProcedureNameValidation:
 
 class TestParameterModeValidation:
 
-    @pytest.mark.parametrize("mode", ["in", "out", "inout"])
+    @pytest.mark.parametrize("mode", ["in", "out", "in_out", "return"])
     def test_valid_modes_accepted(self, mode):
         cfg = _minimal_config()
         cfg["parameters"] = [{"name": "p", "mode": mode}]
@@ -209,9 +209,26 @@ class TestParameterModeValidation:
         xml = DatabaseStoredProcedureReadProfileBuilder().build(**cfg)
         assert 'mode="in"' in xml
 
+    def test_inout_with_underscore_is_valid(self):
+        # Regression: Boomi's XML attribute value is "in_out" (with underscore),
+        # NOT "inout". Verified against Boomi's reference doc for
+        # Database (Legacy) profile parameters.
+        cfg = _minimal_config()
+        cfg["parameters"] = [{"name": "p", "mode": "in_out"}]
+        err = DatabaseStoredProcedureReadProfileBuilder.validate_config(cfg)
+        assert err is None
+
+    def test_inout_without_underscore_is_rejected(self):
+        # The old (incorrect) "inout" value must NOT be accepted.
+        cfg = _minimal_config()
+        cfg["parameters"] = [{"name": "p", "mode": "inout"}]
+        err = DatabaseStoredProcedureReadProfileBuilder.validate_config(cfg)
+        assert err is not None
+        assert err.error_code == "INVALID_DB_PARAMETER_MODE"
+
     def test_unknown_mode_rejected(self):
         cfg = _minimal_config()
-        cfg["parameters"] = [{"name": "p", "mode": "return"}]
+        cfg["parameters"] = [{"name": "p", "mode": "garbage"}]
         err = DatabaseStoredProcedureReadProfileBuilder.validate_config(cfg)
         assert err is not None
         assert err.error_code == "INVALID_DB_PARAMETER_MODE"
@@ -227,6 +244,36 @@ class TestParameterModeValidation:
         err = DatabaseStoredProcedureReadProfileBuilder.validate_config(cfg)
         assert err is not None
         assert err.field == "parameters[2].mode"
+
+    def test_single_return_parameter_accepted(self):
+        cfg = _minimal_config()
+        cfg["parameters"] = [
+            {"name": "r", "mode": "return"},
+            {"name": "p", "mode": "in"},
+        ]
+        err = DatabaseStoredProcedureReadProfileBuilder.validate_config(cfg)
+        assert err is None
+
+    def test_multiple_return_parameters_rejected(self):
+        # Boomi reference doc: "Only one Return parameter can be defined per
+        # statement."
+        cfg = _minimal_config()
+        cfg["parameters"] = [
+            {"name": "r1", "mode": "return"},
+            {"name": "p", "mode": "in"},
+            {"name": "r2", "mode": "return"},
+        ]
+        err = DatabaseStoredProcedureReadProfileBuilder.validate_config(cfg)
+        assert err is not None
+        assert err.error_code == "MULTIPLE_DB_RETURN_PARAMETERS"
+        # Field points at the SECOND return parameter (the one that violates).
+        assert err.field == "parameters[2].mode"
+
+    def test_return_parameter_xml_emission(self):
+        cfg = _minimal_config()
+        cfg["parameters"] = [{"name": "ret", "mode": "return"}]
+        xml = DatabaseStoredProcedureReadProfileBuilder().build(**cfg)
+        assert 'mode="return"' in xml
 
 
 # ----------------------------------------------------------------------------
@@ -260,9 +307,9 @@ class TestXmlEmission:
 
     def test_dbparameter_emits_mode_attribute(self):
         cfg = _minimal_config()
-        cfg["parameters"] = [{"name": "p", "mode": "inout"}]
+        cfg["parameters"] = [{"name": "p", "mode": "in_out"}]
         xml = DatabaseStoredProcedureReadProfileBuilder().build(**cfg)
-        assert 'mode="inout"' in xml
+        assert 'mode="in_out"' in xml
 
     def test_dbparameter_omits_dataformat_for_supported_types(self):
         # All three supported types must produce a matching DataFormat child.
