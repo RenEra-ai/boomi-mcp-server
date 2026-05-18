@@ -131,8 +131,9 @@ class DbCreateSettings(BaseModel):
     username: Optional[str] = Field(
         default=None,
         description=(
-            "Database username for 'username_password' auth. Omit when "
-            "auth_mode is 'windows_integrated'."
+            "Database username for 'username_password' auth. Required when "
+            "auth_mode='username_password'; must be omitted when "
+            "auth_mode='windows_integrated'."
         ),
     )
     credential_ref: Optional[str] = Field(
@@ -140,7 +141,8 @@ class DbCreateSettings(BaseModel):
         description=(
             "Opaque reference to a secret-store entry that resolves to the "
             "database password at execution time. Required when "
-            "auth_mode='username_password'. The contract never resolves, "
+            "auth_mode='username_password'; must be omitted when "
+            "auth_mode='windows_integrated'. The contract never resolves, "
             "validates, or transmits the underlying secret."
         ),
     )
@@ -166,7 +168,7 @@ class DbCreateSettings(BaseModel):
         return _stripped_nonblank(value)
 
     @model_validator(mode="after")
-    def _enforce_username_password_auth(self) -> "DbCreateSettings":
+    def _enforce_auth_mode_consistency(self) -> "DbCreateSettings":
         if self.auth_mode == "username_password":
             missing: List[str] = []
             if not self.username:
@@ -177,6 +179,17 @@ class DbCreateSettings(BaseModel):
                 raise ValueError(
                     "auth_mode='username_password' requires "
                     + " and ".join(missing)
+                )
+        else:  # windows_integrated
+            unused: List[str] = []
+            if self.username is not None:
+                unused.append("username")
+            if self.credential_ref is not None:
+                unused.append("credential_ref")
+            if unused:
+                raise ValueError(
+                    "auth_mode='windows_integrated' must not supply "
+                    + " or ".join(unused)
                 )
         return self
 
@@ -396,8 +409,8 @@ class RestCreateSettings(BaseModel):
         description=(
             "Opaque reference to a secret-store entry that resolves to the "
             "REST credential at execution time. Required when auth_mode is "
-            "not 'none'. The contract never resolves, validates, or transmits "
-            "the underlying secret."
+            "not 'none'; must be omitted when auth_mode='none'. The contract "
+            "never resolves, validates, or transmits the underlying secret."
         ),
     )
     default_headers: Dict[str, str] = Field(
@@ -425,11 +438,17 @@ class RestCreateSettings(BaseModel):
         return _stripped_nonblank(value)
 
     @model_validator(mode="after")
-    def _enforce_credential_ref_when_auth(self) -> "RestCreateSettings":
-        if self.auth_mode != "none" and not self.credential_ref:
-            raise ValueError(
-                "credential_ref is required when auth_mode is not 'none'"
-            )
+    def _enforce_auth_mode_consistency(self) -> "RestCreateSettings":
+        if self.auth_mode == "none":
+            if self.credential_ref is not None:
+                raise ValueError(
+                    "auth_mode='none' must not supply credential_ref"
+                )
+        else:
+            if not self.credential_ref:
+                raise ValueError(
+                    "credential_ref is required when auth_mode is not 'none'"
+                )
         return self
 
 
@@ -501,12 +520,14 @@ class RestQueryParameter(BaseModel):
         ...,
         description="Query-string parameter name as it appears on the request URL.",
     )
-    value_source: Literal["literal", "mapping", "watermark"] = Field(
+    value_source: Literal["literal", "watermark"] = Field(
         ...,
         description=(
             "Where the value comes from at execution time: 'literal' uses "
-            "literal_value; 'mapping' takes the value from a field mapping; "
-            "'watermark' takes the value from the configured watermark."
+            "literal_value; 'watermark' takes the value from the configured "
+            "execution.watermark. A future increment may add a 'mapping' "
+            "source once the field-reference shape is designed; it is "
+            "intentionally omitted here to keep payloads compileable."
         ),
     )
     literal_value: Optional[str] = Field(

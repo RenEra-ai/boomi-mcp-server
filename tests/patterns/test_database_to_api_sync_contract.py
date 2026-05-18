@@ -377,6 +377,72 @@ def test_watermark_query_param_without_watermark_returns_field_error():
     assert paths, "expected at least one field_error entry"
 
 
+def test_windows_integrated_auth_rejects_unused_username():
+    payload = _valid_minimal()
+    payload["source"]["binding"]["settings"]["auth_mode"] = "windows_integrated"
+    payload["source"]["binding"]["settings"].pop("credential_ref")
+    # Leave 'username' populated — should be rejected as unused.
+    result = _build(payload)
+    paths = _field_paths(result)
+    _assert_path_match(paths, "source.binding.settings")
+    assert any("windows_integrated" in fe["message"] for fe in result["field_errors"]), (
+        f"expected windows_integrated to surface in error message, got {result['field_errors']!r}"
+    )
+
+
+def test_windows_integrated_auth_rejects_unused_credential_ref():
+    payload = _valid_minimal()
+    payload["source"]["binding"]["settings"]["auth_mode"] = "windows_integrated"
+    payload["source"]["binding"]["settings"].pop("username")
+    # Leave 'credential_ref' populated — should be rejected as unused.
+    result = _build(payload)
+    paths = _field_paths(result)
+    _assert_path_match(paths, "source.binding.settings")
+    assert any("windows_integrated" in fe["message"] for fe in result["field_errors"]), (
+        f"expected windows_integrated to surface in error message, got {result['field_errors']!r}"
+    )
+
+
+def test_windows_integrated_auth_validates_when_unused_fields_omitted():
+    payload = _valid_minimal()
+    payload["source"]["binding"]["settings"]["auth_mode"] = "windows_integrated"
+    payload["source"]["binding"]["settings"].pop("username")
+    payload["source"]["binding"]["settings"].pop("credential_ref")
+    result = _build(payload)
+    assert result["_success"] is True, result
+
+
+def test_rest_auth_none_rejects_unused_credential_ref():
+    payload = _valid_minimal()
+    payload["target"]["binding"]["settings"]["credential_ref"] = "secrets/rest/unused"
+    # auth_mode is already "none" in the minimal fixture; credential_ref must be rejected.
+    result = _build(payload)
+    paths = _field_paths(result)
+    _assert_path_match(paths, "target.binding.settings")
+    assert any("auth_mode='none'" in fe["message"] for fe in result["field_errors"]), (
+        f"expected auth_mode='none' to surface in error message, got {result['field_errors']!r}"
+    )
+
+
+def test_rest_query_parameter_value_source_mapping_is_rejected():
+    payload = _valid_minimal()
+    payload["target"]["send_request"]["query_parameters"] = [
+        {"name": "id", "value_source": "mapping"},
+    ]
+    result = _build(payload)
+    paths = _field_paths(result)
+    # Literal[...] rejection surfaces with the index in the loc tuple.
+    _assert_path_match(paths, "target.send_request.query_parameters")
+    # Also assert the schema enum no longer advertises 'mapping' so callers
+    # discover the new surface from get_integration_archetype alone.
+    schema = DatabaseToApiSyncArchetype.parameter_schema()
+    defs = schema.get("$defs") or schema.get("definitions") or {}
+    rqp = defs.get("RestQueryParameter")
+    assert rqp is not None, "RestQueryParameter must appear in $defs"
+    value_source = rqp["properties"]["value_source"]
+    assert set(value_source.get("enum", [])) == {"literal", "watermark"}
+
+
 def test_watermark_consistency_error_does_not_echo_query_param_names():
     """The watermark validator must not echo caller-supplied query parameter
     names back through the error envelope. Mirrors the no-echo policy enforced
