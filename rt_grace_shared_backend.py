@@ -46,10 +46,11 @@ class SharedGraceBackend:
     lock primitives for Fix D.2 (cross-instance singleflight).
 
     The wrapped store is expected to encrypt at rest (production wires
-    FernetEncryptionWrapper). All exceptions on read are converted to
-    `None` (corrupted grace entry is best-effort, never a hard 401).
-    All exceptions on write are logged WARNING and swallowed (the
-    in-process L1 cache still serves the local caller).
+    FernetEncryptionWrapper). Store failures on read are converted to
+    `None` (corrupted/unavailable grace entry is best-effort, never a hard
+    401). Task cancellation is still allowed to propagate. All exceptions
+    on write are logged WARNING and swallowed (the in-process L1 cache still
+    serves the local caller).
 
     The optional `lock_collection` argument is a motor collection (raw
     MongoDB client) used by `try_claim_lock`/`release_lock` for atomic
@@ -77,6 +78,14 @@ class SharedGraceBackend:
         except self._read_swallowed as exc:
             logger.warning(
                 "Shared grace cache read swallowed for key=%s: %s: %s",
+                key[:16] + "..." if key and len(key) > 16 else key,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+        except Exception as exc:  # noqa: BLE001 — best-effort cache read
+            logger.warning(
+                "GRACE_SHARED_GET_FAILED key=%s: %s: %s",
                 key[:16] + "..." if key and len(key) > 16 else key,
                 type(exc).__name__,
                 exc,
