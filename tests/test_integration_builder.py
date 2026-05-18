@@ -50,6 +50,37 @@ def _comp(key="p1", name="MyProcess", action="create", comp_type="process",
     )
 
 
+def _db_config(**overrides):
+    """A minimal-valid database connector-settings config dict."""
+    cfg = {
+        "connector_type": "database",
+        "driver_id": "sqlserver",
+        "auth_mode": "username_password",
+        "component_name": "Example SQL Server",
+        "folder_name": "Process Library",
+        "host": "host.docker.internal",
+        "port": 1433,
+        "dbname": "ExampleDB",
+        "username": "example_user",
+        "credential_ref": "credential://example/sqlserver/password",
+        "additional": ";encrypt=true;trustServerCertificate=true",
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _db_comp(key="db_connection", name="Example SQL Server",
+             action="create", depends_on=None, **config_overrides):
+    return IntegrationComponentSpec(
+        key=key,
+        type="connector-settings",
+        action=action,
+        name=name,
+        config=_db_config(**config_overrides),
+        depends_on=depends_on or [],
+    )
+
+
 def _build_config(components, conflict_policy="reuse"):
     """Minimal config dict accepted by _build_plan."""
     return {
@@ -226,3 +257,155 @@ class TestApplyPlanAmbiguity:
         call_kwargs = mock_exec.call_args
         resolved_config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
         assert resolved_config["name"].endswith("-clone")
+
+
+# ---------------------------------------------------------------------------
+# M2.2 — database connector-settings preflight in _build_plan
+# ---------------------------------------------------------------------------
+class TestBuildPlanDatabaseConnectorPreflight:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_db_connector_settings_plans_successfully(self, mock_pag):
+        mock_pag.return_value = []
+        config = _build_config([_db_comp()])
+        plan = _build_plan(MagicMock(), config)
+        assert plan["_success"] is True
+        assert plan["execution_order"] == ["db_connection"]
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step["route"] == "connector_builder_or_xml"
+        assert step.get("validation_error") in (None, {})
+        assert "validation_error" not in step or step["validation_error"] is None
+
+    @patch(_PATCH_TARGET)
+    def test_plan_preserves_name_folder_key_action_depends_on(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp(
+            key="db_main",
+            name="Main SQL Conn",
+            depends_on=[],
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["key"] == "db_main"
+        assert step["name"] == "Main SQL Conn"
+        assert step["type"] == "connector-settings"
+        assert step["declared_action"] == "create"
+        assert step["depends_on"] == []
+        # folder_name lives in config, not on the step — verify it survived
+        # through to integration_spec.
+        spec_dump = plan["integration_spec"]
+        assert spec_dump["components"][0]["config"]["folder_name"] == "Process Library"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_credential_ref_marks_plan_as_database_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp()
+        comp.config.pop("credential_ref")
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "MISSING_CREDENTIAL_REF"
+        assert step["validation_error"]["field"] == "credential_ref"
+        assert step["validation_error"]["hint"]
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_driver_marks_plan_as_database_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        config = _build_config([_db_comp(driver_id="postgres")])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER"
+        assert step["validation_error"]["field"] == "driver_id"
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_auth_mode_marks_plan_as_database_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        config = _build_config([_db_comp(auth_mode="windows_integrated")])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_AUTH_MODE"
+        assert step["validation_error"]["field"] == "auth_mode"
+
+    @patch(_PATCH_TARGET)
+    def test_plaintext_secret_field_marks_plan_as_database_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        config = _build_config([_db_comp(password="hunter2")])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "password"
+        # secret value must not leak into the plan output
+        plan_repr = repr(plan)
+        assert "hunter2" not in plan_repr
+
+    @patch(_PATCH_TARGET)
+    def test_invalid_db_component_does_not_short_circuit_other_components(self, mock_pag):
+        mock_pag.return_value = []
+        bad_db = _db_comp(key="bad_db", name="Bad DB", driver_id="postgres")
+        good_proc = _comp(key="good_proc", name="GoodProc")
+        config = _build_config([bad_db, good_proc])
+        plan = _build_plan(MagicMock(), config)
+        assert set(plan["execution_order"]) == {"bad_db", "good_proc"}
+        steps_by_key = {s["key"]: s for s in plan["steps"]}
+        assert steps_by_key["bad_db"]["planned_action"] == "error_database_validation"
+        assert steps_by_key["good_proc"]["planned_action"] == "create"
+        assert "validation_error" not in steps_by_key["good_proc"]
+
+    @patch(_PATCH_TARGET)
+    def test_http_connector_settings_skips_database_preflight(self, mock_pag):
+        mock_pag.return_value = []
+        http_comp = IntegrationComponentSpec(
+            key="http_conn",
+            type="connector-settings",
+            action="create",
+            name="HTTP Conn",
+            config={"connector_type": "http", "component_name": "HTTP Conn",
+                    "url": "https://api.example.com"},
+        )
+        config = _build_config([http_comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step["route"] == "connector_builder_or_xml"
+        assert "validation_error" not in step
+
+
+# ---------------------------------------------------------------------------
+# M2.2 — _apply_plan fail-fast on database validation
+# ---------------------------------------------------------------------------
+class TestApplyPlanDatabaseValidationFailFast:
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_fails_before_execution_on_database_validation_error(self, mock_pag, mock_exec):
+        mock_pag.return_value = []
+        config = _build_config([_db_comp(driver_id="postgres")])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        assert "unresolvable_steps" in result
+        assert len(result["unresolvable_steps"]) == 1
+        bad = result["unresolvable_steps"][0]
+        assert bad["planned_action"] == "error_database_validation"
+        assert bad["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER"
+        # No mutation occurred — _execute_component must not have been called.
+        mock_exec.assert_not_called()
+
+    @patch(_PATCH_TARGET)
+    def test_dry_run_surfaces_database_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_comp()
+        comp.config.pop("credential_ref")
+        config = _build_config([comp])
+        config["dry_run"] = True
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["dry_run"] is True
+        step = result["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "MISSING_CREDENTIAL_REF"
