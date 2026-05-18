@@ -757,6 +757,22 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert "LEAK_LIST_PLAN_DEADBEEF" not in repr(plan)
 
     @patch(_PATCH_TARGET)
+    def test_secret_in_list_of_lists_redacted_in_plan_output(self, mock_pag):
+        """Codex P2 follow-up #2: lists nested inside lists must also be
+        walked. Before the generalized walker, `matrix=[[{password:...}]]`
+        slipped past — planned_action='create', plan echoed the leak."""
+        mock_pag.return_value = []
+        comp = _db_comp(matrix=[[{"password": "LEAK_LIST_OF_LIST_PLAN_DEADBEEF"}]])
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "matrix[0][0].password"
+        echoed = plan["integration_spec"]["components"][0]["config"]["matrix"]
+        assert echoed == [[{"password": "[REDACTED]"}]]
+        assert "LEAK_LIST_OF_LIST_PLAN_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
     def test_secret_at_list_index_two_redacted_in_plan_output(self, mock_pag):
         mock_pag.return_value = []
         comp = _db_comp(
