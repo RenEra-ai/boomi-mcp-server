@@ -575,6 +575,6 @@ For issues, questions, or feature requests:
 
 ---
 
-**Last Updated**: 2026-05-15
+**Last Updated**: 2026-05-18
 **Status**: ✅ Production (Stable)
 **Version**: FastMCP 3.1.1
