@@ -16,11 +16,33 @@ When BOOMI_LOCAL is not set (production):
 """
 
 import json
+import logging
 import os
 import sys
 from enum import Enum
 from typing import Dict
 from pathlib import Path
+
+# Wire the `boomi.*` logger tree to stderr at INFO so the
+# refresh-token/cache/storage-healing patches' boot + runtime lines reach
+# Cloud Logging. Scoped to "boomi" only so uvicorn/fastmcp/motor INFO
+# chatter stays at their defaults. Done BEFORE importing any patch
+# module since each calls `logging.getLogger("boomi.<area>")` at import.
+# We deliberately leave propagate at its default (True) so pytest's caplog
+# (which attaches to root) still captures records — our own handler runs
+# first, and root has no configured handler so there's no double-emit.
+# The handler level is also pinned to INFO so DEBUG records propagated up
+# from a deliberately-verbose child (e.g. diagnostic_logging sets
+# boomi.oauth_diagnostic to DEBUG) do not leak past the parent filter:
+# logger.setLevel only filters records *originating* from that logger,
+# but propagated records bypass it and are filtered only by handler level.
+_boomi_log = logging.getLogger("boomi")
+if not _boomi_log.handlers:
+    _h = logging.StreamHandler()
+    _h.setLevel(logging.INFO)
+    _h.setFormatter(logging.Formatter("[%(levelname)s] [%(name)s] %(message)s"))
+    _boomi_log.addHandler(_h)
+    _boomi_log.setLevel(logging.INFO)
 
 from fastmcp import FastMCP
 
@@ -392,13 +414,20 @@ if not LOCAL_MODE:
     from fastmcp.server.auth.providers.google import GoogleProvider
     from key_value.aio.stores.mongodb import MongoDBStore
     from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
-    from cryptography.fernet import Fernet
+    from cryptography.fernet import Fernet, MultiFernet
     from verified_storage import VerifiedStorage
     from consent_csp_patch import apply_consent_csp_patch
     from loopback_redirect_patch import apply_loopback_redirect_patch
+    from refresh_token_grace_patch import apply_refresh_token_grace_patch
+    from rt_grace_shared_backend import initialize_shared_grace_backend
+    from token_cache_patch import apply_token_verifier_cache_patch
 
     apply_consent_csp_patch()
     apply_loopback_redirect_patch()
+    apply_token_verifier_cache_patch()
+    # Note: apply_refresh_token_grace_patch is called BELOW after _fernet
+    # is built, so the (optional) shared backend can be constructed with
+    # the same MultiFernet instance used for OAuth state.
 
     # Create Google OAuth provider
     try:
@@ -429,15 +458,60 @@ if not LOCAL_MODE:
             coll_name="oauth_tokens"
         )
 
+        # Parse STORAGE_ENCRYPTION_KEY as a comma-separated list. Single
+        # value -> Fernet (unchanged). Multiple values -> MultiFernet, which
+        # accepts decryption under any listed key and writes under the
+        # first one. This enables zero-downtime key rotation.
+        _key_list = [
+            k.strip() for k in storage_encryption_key.split(",") if k.strip()
+        ]
+        if not _key_list:
+            raise ValueError(
+                "STORAGE_ENCRYPTION_KEY must contain at least one Fernet key"
+            )
+        try:
+            _fernets = [Fernet(k.encode()) for k in _key_list]
+        except Exception as exc:
+            raise ValueError(
+                "STORAGE_ENCRYPTION_KEY contains an invalid Fernet key "
+                "(comma-separated list expected, newest first): " + str(exc)
+            ) from exc
+        _fernet = _fernets[0] if len(_fernets) == 1 else MultiFernet(_fernets)
+        if len(_fernets) > 1:
+            print(
+                f"[INFO] STORAGE_ENCRYPTION_KEY rotation: {len(_fernets)} keys "
+                "loaded (writes use newest, reads accept any)"
+            )
+
         encrypted_storage = VerifiedStorage(
             FernetEncryptionWrapper(
                 key_value=mongodb_storage,
-                fernet=Fernet(storage_encryption_key.encode())
+                fernet=_fernet
             )
         )
 
         print(f"[INFO] OAuth tokens will be stored in MongoDB Atlas")
         print(f"[INFO] Token storage encrypted with Fernet (write-verified)")
+
+        # Fix D: build the cross-instance shared grace backend (MongoDB +
+        # the same MultiFernet used for OAuth state). If initialization
+        # fails for any reason, log WARNING and fall back to PR #33's
+        # per-process-only grace cache rather than crashing startup.
+        shared_grace_backend = None
+        try:
+            shared_grace_backend = initialize_shared_grace_backend(
+                mongodb_uri=mongodb_uri,
+                fernet=_fernet,
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade gracefully
+            print(
+                f"[WARNING] GRACE_BACKEND_INIT_FAILED: {type(exc).__name__}: {exc} "
+                "-- falling back to per-process-only refresh-token grace"
+            )
+
+        # Apply the refresh-token grace patch now that _fernet (and thus
+        # the optional shared backend) is ready.
+        apply_refresh_token_grace_patch(shared_backend=shared_grace_backend)
 
         # Create GoogleProvider with encrypted MongoDB storage
         # Upstream v3.1.1 defaults to access_type=offline + prompt=consent
@@ -464,12 +538,23 @@ if not LOCAL_MODE:
         print(f"       - OIDC_BASE_URL")
         sys.exit(1)
 
-    # Temporary diagnostic logging for post-migration OAuth cutover.
-    # Enable with BOOMI_OAUTH_DIAGNOSTICS=true; remove after refresh path is stable.
-    if os.getenv("BOOMI_OAUTH_DIAGNOSTICS", "").lower() in ("true", "1", "yes"):
+    # OAuth observability: log silent 401 paths in the FastMCP auth stack.
+    # Default ON; disable with BOOMI_OAUTH_DIAGNOSTICS_DISABLE=true, or
+    # explicitly opt out via BOOMI_OAUTH_DIAGNOSTICS=false (back-compat).
+    _diag_disable = os.getenv("BOOMI_OAUTH_DIAGNOSTICS_DISABLE", "").lower() in ("true", "1", "yes")
+    _diag_legacy_opt_in = os.getenv("BOOMI_OAUTH_DIAGNOSTICS", "true").lower() in ("true", "1", "yes")
+    if not _diag_disable and _diag_legacy_opt_in:
         from diagnostic_logging import apply_all_patches
         apply_all_patches(auth_provider=auth, encrypted_storage=encrypted_storage)
         print("[INFO] OAuth diagnostic logging ENABLED")
+    else:
+        print("[INFO] OAuth diagnostic logging DISABLED")
+
+    # Storage self-healing: evict corrupted client documents on decryption
+    # failure so a stale or bad-key row doesn't permanently 401 a client.
+    # Applied AFTER diagnostic logging so the inner logger fires first.
+    from storage_healing_patch import apply_storage_healing_patch
+    apply_storage_healing_patch(auth_provider=auth)
 
     # Create FastMCP server with auth
     mcp = FastMCP(
