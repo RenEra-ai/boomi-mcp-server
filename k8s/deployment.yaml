@@ -136,15 +136,15 @@ spec:
         - name: BOOMI_RT_GRACE_SHARED
           value: "true"
 
-        # Distributed grace lock (Fix D.2 from PR #34). Defaults to off
-        # in initialize_shared_grace_backend, so the shared cache alone
-        # still races on concurrent refreshes across replicas. Pinning
-        # this on engages the Mongo upsert-as-lock singleflight so only
-        # one replica calls Google per refresh-token rotation, even
-        # under simultaneous client retries. Adds one Mongo collection
-        # (`mcp-rt-inflight-locks`) and one upsert per refresh.
+        # Distributed grace lock (Fix D.2 from PR #34). DISABLED: the
+        # raw-motor lock has an event-loop binding bug -- AsyncIOMotorClient
+        # is created at startup and then used on the request loop, which
+        # degrades every try_claim_lock to "leader" in production. The
+        # shared grace cache (Fix D, above) still provides cross-instance
+        # correctness on its own. Re-enable only after the Motor client is
+        # created lazily on the serving event loop (Stage 2).
         - name: BOOMI_RT_GRACE_DISTRIBUTED_LOCK
-          value: "true"
+          value: "false"
 
         # Boomi Docs Knowledge Base (optional retrieval layer)
         - name: BOOMI_DOCS_ENABLED

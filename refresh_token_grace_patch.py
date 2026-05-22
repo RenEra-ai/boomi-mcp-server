@@ -227,6 +227,18 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
     async def patched_load_refresh_token(self, client, refresh_token):
         result = await orig_load_refresh_token(self, client, refresh_token)
         if result is not None:
+            # Diagnostic: the row exists but has aged out. The MCP SDK token
+            # handler rejects this with invalid_grant "refresh token has
+            # expired" *before* exchange_refresh_token is reached, so without
+            # this it is a silent invalid_grant. Behavior is unchanged --
+            # the (expired) token is still returned to the handler.
+            if result.expires_at and result.expires_at < time.time():
+                _log_rt_event(
+                    "rt_metadata_expired",
+                    client=client.client_id or "<none>",
+                    rt_hash=_hash_token(refresh_token),
+                    reason="refresh-token row found but expires_at is in the past",
+                )
             return result
 
         # Original lookup missed. There are two ways this can happen

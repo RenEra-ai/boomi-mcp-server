@@ -850,3 +850,40 @@ def test_diag_logs_rt_client_mismatch(monkeypatch, restore_oauth_proxy, caplog):
     assert out is None
     diag = [r.message for r in caplog.records if "RT_DIAG" in r.message]
     assert any("event=rt_client_mismatch" in m for m in diag)
+
+
+def test_diag_logs_rt_metadata_expired_when_row_aged_out(
+    monkeypatch, restore_oauth_proxy, caplog
+):
+    """An expired-but-still-present refresh-token row emits rt_metadata_expired
+    — the SDK handler rejects that with invalid_grant before
+    exchange_refresh_token is ever reached, so it is otherwise unlogged."""
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+
+    from mcp.server.auth.provider import RefreshToken
+
+    async def fake_load_expired(self, client, refresh_token):
+        return RefreshToken(
+            token=refresh_token,
+            client_id="client-abc",
+            scopes=["openid"],
+            expires_at=int(time.time()) - 60,  # already past
+        )
+
+    OAuthProxy.load_refresh_token = fake_load_expired
+
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch()
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+
+    with caplog.at_level(logging.WARNING, logger="boomi.refresh_token_grace"):
+        out = _run(OAuthProxy.load_refresh_token(proxy, client, "rt-aged-out"))
+
+    # behavior is unchanged — the (expired) RefreshToken is still returned;
+    # only a diagnostic event is added.
+    assert out is not None
+    diag = [r.message for r in caplog.records if "RT_DIAG" in r.message]
+    assert any("event=rt_metadata_expired" in m for m in diag)
