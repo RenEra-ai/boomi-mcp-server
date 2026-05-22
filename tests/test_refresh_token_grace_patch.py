@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 import sys
 import time
 from types import SimpleNamespace
@@ -722,3 +723,130 @@ def test_d2_disabled_when_backend_does_not_support_locks(monkeypatch, restore_oa
     # Locks were NOT consulted.
     assert shared.claim_calls == 0
     assert shared.release_calls == 0
+
+
+# ---------- structured /token diagnostics (Stage 1) ----------
+
+def test_diag_logs_rt_metadata_missing_without_raw_token(
+    monkeypatch, restore_oauth_proxy, caplog
+):
+    """A genuine load miss emits a structured rt_metadata_missing event and
+    never logs the raw refresh-token string."""
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+
+    async def fake_load_returning_none(self, client, refresh_token):
+        return None
+
+    OAuthProxy.load_refresh_token = fake_load_returning_none
+
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch()
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    secret_rt = "rt-super-secret-value"
+
+    with caplog.at_level(logging.WARNING, logger="boomi.refresh_token_grace"):
+        out = _run(OAuthProxy.load_refresh_token(proxy, client, secret_rt))
+
+    assert out is None
+    diag = [r.message for r in caplog.records if "RT_DIAG" in r.message]
+    assert any("event=rt_metadata_missing" in m for m in diag)
+    assert any("client=client-abc" in m for m in diag)
+    # the raw refresh token must never appear anywhere in the logs
+    assert secret_rt not in caplog.text
+
+
+def test_diag_logs_rt_exchange_failed_on_leader_exception(
+    monkeypatch, restore_oauth_proxy, caplog
+):
+    """A leader exchange exception emits a structured rt_exchange_failed event."""
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+
+    async def boom_exchange(self, client, refresh_token, scopes):
+        raise RuntimeError("upstream blew up")
+
+    OAuthProxy.exchange_refresh_token = boom_exchange
+
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch()
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-xyz")
+    rt = SimpleNamespace(token="rt-secret")
+
+    with caplog.at_level(logging.WARNING, logger="boomi.refresh_token_grace"):
+        with pytest.raises(RuntimeError, match="upstream blew up"):
+            _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
+
+    diag = [r.message for r in caplog.records if "RT_DIAG" in r.message]
+    assert any("event=rt_exchange_failed" in m for m in diag)
+    assert any("RuntimeError" in m for m in diag)
+    assert "rt-secret" not in caplog.text
+
+
+def test_diag_logs_rt_replay_hit_on_cache_hit(
+    monkeypatch, restore_oauth_proxy, caplog
+):
+    """A grace-cache replay emits a structured rt_replay_hit event (source=L1)."""
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+
+    from mcp.shared.auth import OAuthToken
+
+    async def fake_exchange(self, client, refresh_token, scopes):
+        return OAuthToken(access_token="AT", token_type="Bearer", expires_in=3600)
+
+    OAuthProxy.exchange_refresh_token = fake_exchange
+
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch()
+
+    proxy = SimpleNamespace()
+    client = SimpleNamespace(client_id="client-abc")
+    rt = SimpleNamespace(token="rt-original")
+
+    with caplog.at_level(logging.INFO, logger="boomi.refresh_token_grace"):
+        _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
+        _run(OAuthProxy.exchange_refresh_token(proxy, client, rt, ["openid"]))
+
+    diag = [r.message for r in caplog.records if "RT_DIAG" in r.message]
+    assert any("event=rt_replay_hit" in m and "source=L1" in m for m in diag)
+
+
+def test_diag_logs_rt_client_mismatch(monkeypatch, restore_oauth_proxy, caplog):
+    """A cross-client grace-cache reuse emits a structured rt_client_mismatch event."""
+    monkeypatch.setenv("BOOMI_RT_GRACE_SECONDS", "60")
+    OAuthProxy = restore_oauth_proxy
+
+    from mcp.shared.auth import OAuthToken
+
+    async def fake_exchange(self, client, refresh_token, scopes):
+        return OAuthToken(access_token="AT", token_type="Bearer", expires_in=3600)
+
+    async def fake_load_returning_none(self, client, refresh_token):
+        return None
+
+    OAuthProxy.exchange_refresh_token = fake_exchange
+    OAuthProxy.load_refresh_token = fake_load_returning_none
+
+    mod = _fresh_module()
+    mod.apply_refresh_token_grace_patch()
+
+    proxy = SimpleNamespace()
+    rt = SimpleNamespace(token="rt-shared")
+
+    # client-A populates the grace cache for this refresh token
+    _run(OAuthProxy.exchange_refresh_token(
+        proxy, SimpleNamespace(client_id="client-A"), rt, ["openid"]))
+
+    # client-B presents the same RT string -> mismatch, returns None, logs event
+    with caplog.at_level(logging.WARNING, logger="boomi.refresh_token_grace"):
+        out = _run(OAuthProxy.load_refresh_token(
+            proxy, SimpleNamespace(client_id="client-B"), "rt-shared"))
+
+    assert out is None
+    diag = [r.message for r in caplog.records if "RT_DIAG" in r.message]
+    assert any("event=rt_client_mismatch" in m for m in diag)

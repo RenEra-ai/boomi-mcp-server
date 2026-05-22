@@ -32,6 +32,28 @@ from typing import Any
 logger = logging.getLogger("boomi.refresh_token_grace")
 
 
+def _log_rt_event(event: str, *, level: str = "warning", **fields: Any) -> None:
+    """Emit one structured refresh-token diagnostic line.
+
+    Renders as ``RT_DIAG event=<name> key=value ...`` on the
+    ``boomi.refresh_token_grace`` logger (already surfaced to Cloud Run), so
+    refresh outcomes that are otherwise silent become queryable. NEVER pass
+    raw token material: ``rt_hash`` must already be a token hash and is
+    truncated, and every value is length-capped.
+    """
+    parts = [f"event={event}"]
+    for key, value in fields.items():
+        if value is None:
+            continue
+        text = str(value)
+        if key == "rt_hash":
+            text = text[:16]
+        elif len(text) > 200:
+            text = text[:200] + "…"
+        parts.append(f"{key}={text}")
+    getattr(logger, level, logger.warning)("RT_DIAG " + " ".join(parts))
+
+
 class _TTLCache:
     """Bounded LRU dict with per-entry expiry. Single asyncio.Lock; O(1)."""
 
@@ -231,6 +253,12 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
             # ANOTHER Cloud Run replica may have already rotated this RT.
             cached = await _shared_get(old_hash)
             if cached is None:
+                _log_rt_event(
+                    "rt_metadata_missing",
+                    client=client.client_id or "<none>",
+                    rt_hash=old_hash,
+                    reason="not in FastMCP store, L1, or L2 grace cache",
+                )
                 return None
             logger.info(
                 "Refresh-token grace SHARED HIT in load (client=%s)",
@@ -245,6 +273,12 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
                 "Refresh-token grace cache client_id mismatch: expected %s, got %s",
                 cached_client_id,
                 client.client_id,
+            )
+            _log_rt_event(
+                "rt_client_mismatch",
+                client=client.client_id or "<none>",
+                expected=cached_client_id or "<none>",
+                rt_hash=old_hash,
             )
             return None
 
@@ -273,6 +307,10 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
                 "Refresh-token grace cache HIT (client=%s) -- returning cached rotated tokens",
                 client_id_repr,
             )
+            _log_rt_event(
+                "rt_replay_hit", level="info", source="L1",
+                client=client.client_id or "<none>", rt_hash=old_hash,
+            )
             return oauth_token
 
         # Shared L2 fast path: a leader on ANOTHER replica may have
@@ -289,6 +327,10 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
             logger.info(
                 "Refresh-token grace SHARED HIT in exchange (client=%s)",
                 client_id_repr,
+            )
+            _log_rt_event(
+                "rt_replay_hit", level="info", source="L2",
+                client=client.client_id or "<none>", rt_hash=old_hash,
             )
             return oauth_token
 
@@ -373,6 +415,13 @@ def apply_refresh_token_grace_patch(*, shared_backend=None) -> None:
             try:
                 result = await orig_exchange_refresh_token(self, client, refresh_token, scopes)
             except BaseException as exc:
+                if not isinstance(exc, asyncio.CancelledError):
+                    _log_rt_event(
+                        "rt_exchange_failed",
+                        client=client.client_id or "<none>",
+                        rt_hash=old_hash,
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
                 # On leader exception, write a short-lived failure marker
                 # so remote followers see the failure within ~5s instead
                 # of waiting the full lock TTL.

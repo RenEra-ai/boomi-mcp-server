@@ -161,6 +161,37 @@ def test_initialize_missing_fernet_raises(monkeypatch):
         initialize_shared_grace_backend("mongodb://x", None)
 
 
+def test_initialize_routes_grace_records_to_mcp_rt_grace(monkeypatch):
+    """initialize_shared_grace_backend must build the MongoDB store so that
+    collection-less get/put/delete land in `mcp-rt-grace` -- not the fallback
+    `default_collection`. SharedGraceBackend passes no per-call collection, so
+    the store's `default_collection` IS the grace collection.
+    """
+    monkeypatch.setenv("BOOMI_RT_GRACE_SHARED", "true")
+    monkeypatch.setenv("BOOMI_RT_GRACE_DISTRIBUTED_LOCK", "false")
+    monkeypatch.delenv("BOOMI_RT_GRACE_SHARED_COLLECTION", raising=False)
+
+    recorded: dict = {}
+
+    class _RecordingStore(MemoryStore):
+        """A real AsyncKeyValue store that also records its constructor kwargs."""
+
+        def __init__(self, **kwargs):
+            recorded.update(kwargs)
+            super().__init__()
+
+    monkeypatch.setattr(
+        "key_value.aio.stores.mongodb.MongoDBStore", _RecordingStore
+    )
+
+    backend = initialize_shared_grace_backend("mongodb://x", Fernet(_new_key()))
+
+    assert backend is not None
+    assert recorded.get("default_collection") == "mcp-rt-grace"
+    # The inert `coll_name` arg must not be used to carry the collection name.
+    assert recorded.get("coll_name") != "mcp-rt-grace"
+
+
 # ---------- Fix D.2 lock primitives ----------
 
 class _FakeLockCollection:
