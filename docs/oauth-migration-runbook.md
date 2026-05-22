@@ -263,9 +263,13 @@ Recommended phases (matching `docs/plans/oauth_token_verifier_cache_plan.json`):
    zero.
 2. If `Refresh-token grace SHARED HIT` lines from a replica that did
    not perform the original rotation appear in the diagnostic logs,
-   Fix D is working. If duplicate `orig_exchange` calls for the same
-   hash within milliseconds appear, set
-   `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true` and redeploy (config-only).
+   Fix D is working. **Do not enable `BOOMI_RT_GRACE_DISTRIBUTED_LOCK`
+   here** — that switch turns on Fix D.2, which has a Motor event-loop
+   binding bug that degrades every lock claim to "leader" in production
+   (see the *Stage 1 of OAuth-disconnect fix (2026-05-22)* section at
+   the end of this runbook). Duplicate `orig_exchange` calls should be
+   tracked via the `RT_DIAG` structured events and addressed in Stage 2
+   (durable reuse window + lazy loop-local Motor client).
 
 ### Rollback
 
@@ -408,7 +412,15 @@ This pass:
   makes the manifest reflect the intended state and prevents a
   future default flip from silently turning Fix D off.
 - Pins **`BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true`** alongside it.
-  This is a real activation — the code default is `false`, so
+
+  > ⚠️ **REVERSED on 2026-05-22** (Stage 1 of the OAuth-disconnect
+  > work). The raw-motor lock has an event-loop binding bug that
+  > degrades every claim to "leader" in production. Both
+  > `cloudbuild.yaml` and `k8s/deployment.yaml` now pin
+  > `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=false`. See the Stage 1 section
+  > at the end of this runbook.
+
+  This was a real activation — the code default is `false`, so
   before this PR concurrent refreshes across replicas could each
   call Google independently. Pinning engages the Mongo
   upsert-as-lock singleflight so only one replica calls Google per
@@ -425,14 +437,20 @@ even with intermittent Mongo connectivity.
 
 ### One-shot enable on a running revision
 
-If you want Fix D.2 (distributed lock) on **before** the next Cloud
-Build deploy completes, or you want to flip an unset
-`BOOMI_RT_GRACE_SHARED` explicitly:
+> ⚠️ The `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true` half of the original
+> example here is **superseded** by Stage 1 (2026-05-22). Do not
+> one-shot enable Fix D.2 — the raw-motor lock has a known event-loop
+> binding bug; the deploy configs now pin it `=false`, and the next
+> deploy reverts any runtime enable anyway. The
+> `BOOMI_RT_GRACE_SHARED=true` half is still safe.
+
+If you only need to flip an unset `BOOMI_RT_GRACE_SHARED` explicitly
+(Fix D, the shared grace cache — separate from the broken lock):
 
 ```bash
 gcloud run services update boomi-mcp-server \
   --region us-central1 --project boomimcp \
-  --update-env-vars BOOMI_RT_GRACE_SHARED=true,BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true
+  --update-env-vars BOOMI_RT_GRACE_SHARED=true
 ```
 
 `--update-env-vars` is additive — other env vars (`MONGODB_URI`,
@@ -448,7 +466,7 @@ replica during boot (filter substring → expected line):
 | `Token verifier cache ENABLED` | `token_cache_patch` | Always (Fix B is on by default) |
 | `Refresh-token grace window ENABLED` | `refresh_token_grace_patch` | Always (Fix A is on by default) |
 | `Shared grace cache backend ENABLED` | `rt_grace_shared_backend` | Whenever `BOOMI_RT_GRACE_SHARED!=false` (now pinned true) |
-| `Distributed grace lock ENABLED` | `rt_grace_shared_backend` | Only when `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true` (now pinned true) |
+| `Distributed grace lock ENABLED` | `rt_grace_shared_backend` | Only when `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true`. **Currently pinned `false`** in deploy configs (2026-05-22 Stage 1) due to a Motor event-loop binding bug, so this line is NOT expected. |
 
 Tail a single boot:
 
@@ -487,3 +505,43 @@ The local grace + singleflight from PR #33 still protects each
 replica individually after either rollback. The logging change is
 pure observability — revert by removing the `_boomi_log` block at
 the top of `server.py`.
+
+## Stage 1 of OAuth-disconnect fix: distributed lock disabled (2026-05-22)
+
+### Why
+
+The Fix D.2 distributed lock (`BOOMI_RT_GRACE_DISTRIBUTED_LOCK`) — pinned
+`=true` in the 2026-05-18 third pass — was confirmed broken in production.
+`rt_grace_shared_backend.initialize_shared_grace_backend` constructs the
+`AsyncIOMotorClient` at server startup, binding it to the startup event
+loop, but the lock calls run later inside uvicorn's request loop. Every
+`try_claim_lock` therefore raises `RuntimeError: ... Future attached to a
+different loop`, which the backend swallows and degrades to "no lock held
+/ this replica is leader" — Fix D.2 is functionally inert and only adds
+WARNING-log spam. The shared grace cache (Fix D, separate) is unaffected
+and continues to provide cross-instance correctness on its own.
+
+### What changed
+
+Both deploy configs now pin the lock OFF:
+
+- `cloudbuild.yaml` — `--update-env-vars=...,BOOMI_RT_GRACE_DISTRIBUTED_LOCK=false`
+- `k8s/deployment.yaml` — `value: "false"` (with the previously-wrong
+  "Pinning this on engages…" comment corrected)
+- `.env.example` — commented example updated to `=false`
+
+With the lock off, `initialize_shared_grace_backend` skips the entire
+`if distributed_lock_enabled:` block and never constructs the buggy Motor
+client at all. The Stage 1 commit also added structured `RT_DIAG`
+diagnostics (`rt_metadata_missing`, `rt_replay_hit`, `rt_client_mismatch`,
+`rt_exchange_failed`, `rt_metadata_expired`) and fixed the shared grace
+cache collection routing (`MongoDBStore(default_collection="mcp-rt-grace")`).
+
+### Re-enabling Fix D.2
+
+Do **not** re-enable until the Motor client is created lazily on the
+serving event loop (Stage 2 of the OAuth-disconnect fix). Operator
+instructions earlier in this runbook that direct you to set
+`BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true` — the 2026-05-18 third-pass
+section, its rollout step, and its one-shot-enable example — are
+**superseded by this entry**.
