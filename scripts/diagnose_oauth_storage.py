@@ -19,7 +19,7 @@ import base64
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Load .env if available
@@ -41,12 +41,18 @@ COLLECTIONS = [
     "mcp-authorization-codes",
     "mcp-oauth-transactions",
     "mcp-refresh-tokens",
+    # Refresh-token grace cache + distributed lock (Fix D / D.2)
+    "mcp-rt-grace",
+    "mcp-rt-inflight-locks",
     # Old vendored FastMCP collection names (underscore + hash suffix)
     "mcp_oauth_proxy_clients-4db71f6a",
     "mcp_upstream_tokens-064b3cac",
     "mcp_jti_mappings-a0131f3f",
     "mcp_authorization_codes-62ca573a",
     "mcp_oauth_transactions-6f3deda7",
+    # Catch-all collection a key_value op falls back to when given no
+    # collection -- should stay empty once grace-cache routing is fixed.
+    "default_collection",
 ]
 
 
@@ -68,6 +74,29 @@ def try_decrypt(encrypted_data_b64: str, fernet) -> tuple[bool, str]:
         return True, json.dumps(sanitized, indent=2, default=str)
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
+
+
+async def expiry_spread(db, coll_name, now):
+    """Aggregate TTL summary for one collection (read-only)."""
+    expiries = []
+    async for doc in db[coll_name].find({}, {"expires_at": 1}):
+        ea = doc.get("expires_at")
+        if isinstance(ea, datetime):
+            if ea.tzinfo is None:
+                ea = ea.replace(tzinfo=timezone.utc)
+            expiries.append(ea)
+    if not expiries:
+        print(f"  {coll_name}: no expires_at timestamps")
+        return
+    expiries.sort()
+    past = sum(1 for e in expiries if e < now)
+    soon24 = sum(1 for e in expiries if now <= e < now + timedelta(hours=24))
+    soon72 = sum(1 for e in expiries if now <= e < now + timedelta(hours=72))
+    print(
+        f"  {coll_name}: {len(expiries)} docs | "
+        f"earliest={expiries[0].isoformat()} latest={expiries[-1].isoformat()} | "
+        f"expired={past} <24h={soon24} <72h={soon72}"
+    )
 
 
 async def main():
@@ -170,6 +199,26 @@ async def main():
                     print(f"    {json.dumps(sanitized, default=str)[:200]}")
 
         print()
+
+    # --- Aggregate TTL health + grace-cache routing check (read-only) ---
+    print("=== Expiry spread (TTL health) ===")
+    for summary_coll in ("mcp-refresh-tokens", "mcp-upstream-tokens", "mcp-jti-mappings"):
+        if summary_coll in existing_collections:
+            await expiry_spread(db, summary_coll, now)
+    print()
+
+    # `default_collection` should stay empty once grace-cache routing is fixed
+    # (rt_grace_shared_backend now passes default_collection=mcp-rt-grace).
+    if "default_collection" in existing_collections:
+        dc_count = await db["default_collection"].count_documents({})
+        if dc_count:
+            print(
+                f"NOTE: 'default_collection' has {dc_count} doc(s) -- pre-fix "
+                "grace-cache records, or another collection-less writer."
+            )
+        else:
+            print("OK: 'default_collection' is empty.")
+    print()
 
     client.close()
     print("Done.")

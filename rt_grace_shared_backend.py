@@ -239,7 +239,16 @@ def initialize_shared_grace_backend(
     from key_value.aio.stores.mongodb import MongoDBStore
     from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 
-    mongo_store = MongoDBStore(url=mongodb_uri, db_name=db_name, coll_name=collection)
+    # Route every grace record to `collection` (mcp-rt-grace). MongoDBStore
+    # selects the physical Mongo collection from the per-operation `collection`
+    # argument, falling back to `default_collection` when none is supplied --
+    # and SharedGraceBackend.get/put/delete deliberately pass none. The
+    # `coll_name` constructor arg is inert in this key_value version, so
+    # passing the name there silently routed every grace record into a
+    # collection literally named "default_collection" instead of mcp-rt-grace.
+    mongo_store = MongoDBStore(
+        url=mongodb_uri, db_name=db_name, default_collection=collection
+    )
     encrypted = FernetEncryptionWrapper(key_value=mongo_store, fernet=fernet)
 
     lock_collection = None
