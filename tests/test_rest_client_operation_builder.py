@@ -447,24 +447,6 @@ def test_empty_query_parameters_accepted():
     assert list(field.find("customProperties")) == []
 
 
-def test_non_empty_query_parameters_rejected():
-    cfg = _minimal_get_config(query_parameters={"q": "search"})
-    with pytest.raises(BuilderValidationError) as excinfo:
-        RestClientOperationBuilder().build(**cfg)
-    err = excinfo.value
-    assert err.error_code == "NEEDS_REST_EXAMPLE"
-    assert err.field == "query_parameters"
-
-
-def test_non_empty_request_headers_rejected():
-    cfg = _minimal_get_config(request_headers={"Authorization": "Bearer x"})
-    with pytest.raises(BuilderValidationError) as excinfo:
-        RestClientOperationBuilder().build(**cfg)
-    err = excinfo.value
-    assert err.error_code == "NEEDS_REST_EXAMPLE"
-    assert err.field == "request_headers"
-
-
 def test_empty_request_headers_accepted():
     xml = _build_get(request_headers={})
     field = _find_field(xml, "requestHeaders")
@@ -477,6 +459,210 @@ def test_query_parameters_must_be_dict():
     err = excinfo.value
     assert err.error_code == "REST_OPERATION_VALIDATION_FAILED"
     assert err.field == "query_parameters"
+
+
+# ----------------------------------------------------------------------------
+# customProperties — plain entries (Phase 6 of issue #24 follow-up).
+# Live shape verified against:
+#   - 9ede2c08 (REST Query Param GET) — queryParameters with plain + encrypted
+#     entries (we accept plain; reject encrypted)
+#   - 4986d5eb (REST Headers GET) — requestHeaders same shape
+# ----------------------------------------------------------------------------
+
+
+def _properties_children(xml: str, field_id: str):
+    """Return the list of <properties .../> children for queryParameters or
+    requestHeaders, preserving insertion order."""
+    f = _find_field(xml, field_id)
+    assert f is not None
+    cp = f.find("customProperties")
+    assert cp is not None
+    return list(cp)
+
+
+def test_phase6_query_parameters_plain_entry_emitted_as_properties_element():
+    """Single plain query_parameters entry emits the verified properties
+    shape: `<properties key="..." value="..."/>`."""
+    xml = _build_get(query_parameters={"limit": "100"})
+    props = _properties_children(xml, "queryParameters")
+    assert len(props) == 1
+    assert props[0].tag == "properties"
+    assert props[0].attrib["key"] == "limit"
+    assert props[0].attrib["value"] == "100"
+    # Plain entries must NOT carry the encrypted marker.
+    assert "encrypted" not in props[0].attrib
+
+
+def test_phase6_request_headers_plain_entry_emitted_as_properties_element():
+    xml = _build_get(request_headers={"Accept": "application/json"})
+    props = _properties_children(xml, "requestHeaders")
+    assert len(props) == 1
+    assert props[0].attrib["key"] == "Accept"
+    assert props[0].attrib["value"] == "application/json"
+    assert "encrypted" not in props[0].attrib
+
+
+def test_phase6_multiple_plain_entries_preserve_insertion_order():
+    """Python dict preserves insertion order (3.7+); builder must too."""
+    xml = _build_get(query_parameters={
+        "limit": "100",
+        "offset": "0",
+        "filter": "active=true",
+    })
+    props = _properties_children(xml, "queryParameters")
+    keys = [p.attrib["key"] for p in props]
+    assert keys == ["limit", "offset", "filter"]
+
+
+def test_phase6_xml_value_special_chars_in_properties_are_escaped():
+    """Verify XML escaping for both key and value of properties."""
+    xml = _build_get(query_parameters={
+        "search": "a & b <c>",
+        "url": 'https://x?q="quoted"',
+    })
+    props = _properties_children(xml, "queryParameters")
+    assert props[0].attrib["value"] == "a & b <c>"
+    assert props[1].attrib["value"] == 'https://x?q="quoted"'
+
+
+def test_phase6_empty_dict_still_emits_empty_customproperties():
+    """Sanity: the empty-dict shape (the only path supported pre-Phase-6)
+    still works — `<customProperties/>` with no children."""
+    xml = _build_get(query_parameters={})
+    props = _properties_children(xml, "queryParameters")
+    assert props == []
+
+
+# ----------------------------------------------------------------------------
+# customProperties — secret rejection (Phase 6).
+# Plain values are accepted; encrypted markers, secret-shaped keys, and
+# secret-shaped values are rejected with structured errors.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "secret_key",
+    [
+        "Authorization",
+        "authorization",
+        "X-API-Key",
+        "x-api-key",
+        "X-Auth-Token",
+        "Bearer",
+        "api-key",
+        "API_KEY",
+        "Token",
+        "Password",
+        "Secret",
+        "Client-Secret",
+        "Credential",
+    ],
+)
+def test_phase6_secret_shaped_keys_rejected_in_query_parameters(secret_key):
+    cfg = _minimal_get_config(query_parameters={secret_key: "anyvalue"})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN"
+    assert err.field == "query_parameters"
+
+
+@pytest.mark.parametrize(
+    "secret_key",
+    ["Authorization", "X-API-Key", "Bearer", "Token", "Password"],
+)
+def test_phase6_secret_shaped_keys_rejected_in_request_headers(secret_key):
+    cfg = _minimal_get_config(request_headers={secret_key: "anyvalue"})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN"
+    assert err.field == "request_headers"
+
+
+@pytest.mark.parametrize(
+    "secret_value",
+    [
+        # JWT shape (eyJ prefix is JSON base64).
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturepart",
+        # Long base64-shaped ciphertext (Boomi-style encrypted-marker value).
+        "TnaM0aAr9aWr/r7gzxyB8Babcdefghijklmnopqrstuvwxyz0123456789",
+        # Explicit Boomi encrypted-value marker prefix.
+        "[encrypted]somerandomciphertext",
+    ],
+)
+def test_phase6_secret_shaped_values_rejected(secret_value):
+    cfg = _minimal_get_config(query_parameters={"Filter": secret_value})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN"
+    assert err.field == "query_parameters"
+
+
+def test_phase6_encrypted_marker_dict_rejected():
+    """If caller forwards a Boomi-style `{"encrypted": True, "key": ...,
+    "value": ...}` dict shape (e.g. copied from a live encrypted-entry
+    export), reject it. We do not support encrypted custom properties
+    until a secret-safe encryption/write path exists."""
+    cfg = _minimal_get_config(query_parameters={
+        "encrypted": True,
+        "key": "secret",
+        "value": "abc",
+    })
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "UNSUPPORTED_REST_ENCRYPTED_CUSTOM_PROPERTY"
+    assert err.field == "query_parameters"
+
+
+def test_phase6_non_string_property_key_rejected():
+    cfg = _minimal_get_config(query_parameters={42: "value"})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CUSTOM_PROPERTY_INVALID"
+    assert err.field == "query_parameters"
+
+
+def test_phase6_non_string_property_value_rejected():
+    cfg = _minimal_get_config(query_parameters={"key": 12345})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CUSTOM_PROPERTY_INVALID"
+    assert err.field == "query_parameters"
+
+
+def test_phase6_safe_headers_accepted():
+    """Sanity: common safe headers must NOT trip the secret-detection
+    heuristic — Accept, Content-Type, User-Agent, Cache-Control, etc."""
+    xml = _build_get(request_headers={
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "boomi-test/1.0",
+        "Cache-Control": "no-cache",
+        "Accept-Language": "en-US",
+        "X-Request-Id": "abc-123-def",
+    })
+    props = _properties_children(xml, "requestHeaders")
+    assert len(props) == 6
+    keys = [p.attrib["key"] for p in props]
+    assert "Accept" in keys
+    assert "Content-Type" in keys
+
+
+def test_phase6_safe_query_parameters_accepted():
+    xml = _build_get(query_parameters={
+        "limit": "100",
+        "offset": "0",
+        "filter": "active=true",
+        "sort": "-created_at",
+        "include": "metadata",
+    })
+    props = _properties_children(xml, "queryParameters")
+    assert len(props) == 5
 
 
 # ----------------------------------------------------------------------------

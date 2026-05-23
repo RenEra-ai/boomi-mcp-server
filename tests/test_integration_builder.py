@@ -2032,18 +2032,18 @@ class TestBuildPlanRestPreflight:
         assert echoed["oauth2"]["client_secret_ref"] == "[REDACTED]"
 
     @patch(_PATCH_TARGET)
-    def test_non_empty_request_headers_value_redacted_in_plan_echo(self, mock_pag):
-        """NEEDS_REST_EXAMPLE fires when request_headers is non-empty (no
-        verified live export). Header values frequently carry secrets
-        (Authorization, X-API-Key, etc.) — the entire offending map must
-        not leak through the plan echo."""
+    def test_secret_shaped_request_header_redacted_in_plan_echo(self, mock_pag):
+        """Phase 6: REST_SECRET_VALUE_FORBIDDEN fires for secret-shaped
+        header keys (Authorization, X-API-Key, Bearer, etc.). The entire
+        offending map must not leak through the plan echo — values may
+        carry secrets even if the key itself triggered the rejection."""
         mock_pag.return_value = []
         op = _rest_op_comp(request_headers={"Authorization": "Bearer DEADBEEF_HDR"})
         components = [_rest_conn_comp(), *_rest_supporting_components(), op]
         plan = _build_plan(MagicMock(), _build_config(components))
         step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
         assert step["planned_action"] == "error_rest_validation"
-        assert step["validation_error"]["error_code"] == "NEEDS_REST_EXAMPLE"
+        assert step["validation_error"]["error_code"] == "REST_SECRET_VALUE_FORBIDDEN"
         assert step["validation_error"]["field"] == "request_headers"
         assert "DEADBEEF_HDR" not in repr(plan)
         echoed = next(
@@ -2137,16 +2137,18 @@ class TestBuildPlanRestPreflight:
         assert echoed["query_parameters"] == "[REDACTED]"
 
     @patch(_PATCH_TARGET)
-    def test_non_empty_query_parameters_value_redacted_in_plan_echo(self, mock_pag):
-        """NEEDS_REST_EXAMPLE on query_parameters — same risk class as
-        request_headers (API keys, tokens, PII in query strings)."""
+    def test_secret_shaped_query_parameter_redacted_in_plan_echo(self, mock_pag):
+        """Phase 6: secret-shaped query parameter keys (api_key, token,
+        password, etc.) fire REST_SECRET_VALUE_FORBIDDEN. The map is
+        redacted from the plan echo so the offending value never reaches
+        the caller's screen."""
         mock_pag.return_value = []
         op = _rest_op_comp(query_parameters={"api_key": "DEADBEEF_QP"})
         components = [_rest_conn_comp(), *_rest_supporting_components(), op]
         plan = _build_plan(MagicMock(), _build_config(components))
         step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
         assert step["planned_action"] == "error_rest_validation"
-        assert step["validation_error"]["error_code"] == "NEEDS_REST_EXAMPLE"
+        assert step["validation_error"]["error_code"] == "REST_SECRET_VALUE_FORBIDDEN"
         assert step["validation_error"]["field"] == "query_parameters"
         assert "DEADBEEF_QP" not in repr(plan)
         echoed = next(

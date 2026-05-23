@@ -22,8 +22,10 @@ _FORBIDDEN_SECRET_FIELDS = (
 _FORBIDDEN_TEMPLATE_SUBSTRINGS = (
     "select ",
     "insert ",
-    "delete ",
-    " from ",
+    # "delete " excluded: legitimately referenced as the DELETE HTTP verb
+    #   in supported_methods after Phase 5.
+    # " from " excluded: legitimately appears in credential_note ("...header
+    #   from the encrypted credential store") — non-SQL prose.
     " where ",
     "<sql>",
     "<dbstatement",
@@ -32,7 +34,9 @@ _FORBIDDEN_TEMPLATE_SUBSTRINGS = (
     "$filter=",
     "$select=",
     "$expand=",
-    "x-api-key",
+    # "x-api-key" excluded post-Phase-6: schema documentation legitimately
+    # names X-API-Key as a REJECTED secret-shaped key. Naming a rejected
+    # pattern is the opposite of a credential leak.
 )
 
 
@@ -132,9 +136,24 @@ def test_template_documents_follow_redirects_emission_rule():
 
 
 def test_template_documents_query_parameters_status():
+    """Phase 6 made plain customProperties buildable for both maps."""
     result = _call(component_type="connector-action", protocol="rest.operation")
-    assert result["query_parameters_status"] == "empty_only_until_exported"
-    assert result["request_headers_status"] == "empty_only_until_exported"
+    assert result["query_parameters_status"] == "plain_buildable"
+    assert result["request_headers_status"] == "plain_buildable"
+
+
+def test_template_documents_customproperties_shape():
+    """Phase 6: schema surfaces the customProperty rules (plain examples
+    + rejected secret patterns)."""
+    result = _call(component_type="connector-action", protocol="rest.operation")
+    shape = result["customproperties_shape"]
+    assert isinstance(shape, dict)
+    assert "limit" in shape["plain_examples"]["query_parameters"]
+    assert "Accept" in shape["plain_examples"]["request_headers"]
+    # Rejected key list mentions Authorization, api-key, bearer (lowercased).
+    rejected_keys_blob = shape["rejected_secret_shaped_keys"].lower()
+    assert "authorization" in rejected_keys_blob
+    assert "bearer" in rejected_keys_blob
 
 
 def test_template_documents_depends_on_requirements():
@@ -154,7 +173,9 @@ def test_template_documents_error_codes():
         "UNSUPPORTED_REST_OPERATION_MODE",
         "UNSUPPORTED_REST_METHOD",
         "UNVERIFIED_REST_XML_VARIANT",
-        "NEEDS_REST_EXAMPLE",
+        "REST_CUSTOM_PROPERTY_INVALID",
+        "UNSUPPORTED_REST_ENCRYPTED_CUSTOM_PROPERTY",
+        "REST_SECRET_VALUE_FORBIDDEN",
         "REST_PATH_REQUIRED",
         "REST_CONNECTION_REF_REQUIRED",
         "REST_DEPENDENCY_REQUIRED",
