@@ -1546,6 +1546,29 @@ class RestClientConnectionBuilder:
                         field=f"connection_pooling.{int_field}",
                         hint="Use a JSON integer (Boomi default: 20 for max_total, 30 for idle_timeout_seconds).",
                     )
+        # Pooling-dependent gate: max_total and idle_timeout_seconds only
+        # take effect when enabled=True. Live disabled exports emit
+        # `maxTotal`/`idleTimeout` with empty values — so a caller-supplied
+        # number for either field with enabled missing or False is a
+        # stale-config mistake (the number never reaches Boomi's pool).
+        pool_on = pooling.get("enabled") is True
+        if not pool_on:
+            for dep_field in ("max_total", "idle_timeout_seconds"):
+                if dep_field in pooling:
+                    return BuilderValidationError(
+                        f"connection_pooling.{dep_field} is only valid "
+                        "when connection_pooling.enabled=True",
+                        error_code="REST_POOLING_INVALID",
+                        field=f"connection_pooling.{dep_field}",
+                        hint=(
+                            f"Remove {dep_field} or set "
+                            "connection_pooling.enabled=True. Live "
+                            "disabled-pool exports emit maxTotal and "
+                            "idleTimeout with empty values — supplying "
+                            "a number while pooling is off would never "
+                            "take effect."
+                        ),
+                    )
         return None
 
     @staticmethod

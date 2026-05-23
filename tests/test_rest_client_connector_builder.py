@@ -515,6 +515,60 @@ def test_connection_pooling_unknown_key_rejected():
     assert "bogus_pool_key" in (err.field or "")
 
 
+# ----------------------------------------------------------------------------
+# Codex round 2 — pooling-dependent fields must be gated on enabled=True.
+# Before the fix, max_total / idle_timeout_seconds supplied with
+# enabled=False (or enabled omitted) were silently emitted in the XML
+# where Boomi ignored them. Reject up front so caller intent matches
+# the emitted shape.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pool_field", ["max_total", "idle_timeout_seconds"])
+def test_pooling_max_total_or_idle_timeout_rejected_when_enabled_false(pool_field):
+    """When enabled=False, max_total/idle_timeout_seconds is a stale
+    config — the pool is disabled so the value never takes effect."""
+    cfg = _minimal_oauth2_config(
+        connection_pooling={"enabled": False, pool_field: 20},
+    )
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_POOLING_INVALID"
+    assert err.field == f"connection_pooling.{pool_field}"
+
+
+@pytest.mark.parametrize("pool_field", ["max_total", "idle_timeout_seconds"])
+def test_pooling_field_rejected_when_enabled_omitted(pool_field):
+    """When enabled key is omitted, the default is disabled (False) — so
+    supplying max_total/idle_timeout_seconds without an enabled=True flag
+    is also stale."""
+    cfg = _minimal_oauth2_config(
+        connection_pooling={pool_field: 20},
+    )
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_POOLING_INVALID"
+    assert err.field == f"connection_pooling.{pool_field}"
+
+
+def test_pooling_disabled_with_no_dependent_fields_accepted():
+    """Bare enabled=False (no max_total / idle_timeout_seconds) is the
+    common "pooling off" shape — must still validate clean."""
+    cfg = _minimal_oauth2_config(connection_pooling={"enabled": False})
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+def test_pooling_enabled_with_both_dependent_fields_accepted():
+    """Positive case: when enabled=True is supplied, max_total and
+    idle_timeout_seconds are accepted."""
+    cfg = _minimal_oauth2_config(
+        connection_pooling={"enabled": True, "max_total": 20, "idle_timeout_seconds": 30},
+    )
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
 def test_connection_pooling_dict_with_valid_values_accepted():
     """Sanity: a well-formed pooling block builds without error."""
     cfg = _minimal_oauth2_config(
