@@ -439,11 +439,13 @@ def _check_rest_operation_dependencies(
 # data unredacted (codex review item P1, round-6). Paths are dotted to match
 # `_redact_dotted_field_path`'s contract.
 _REST_SENSITIVE_FIELD_PATHS = (
-    "oauth2.client_secret",       # also caught by FORBIDDEN_SECRET_FIELDS
-    "oauth2.client_secret_ref",   # raw value when it should be credential://
-    "credential_ref",             # raw value when it should be credential://
-    "request_headers",            # whole dict — Authorization / X-API-Key etc.
-    "query_parameters",           # whole dict — api_key / token in querystring
+    "oauth2.client_secret",         # also caught by FORBIDDEN_SECRET_FIELDS
+    "oauth2.client_secret_ref",     # raw value when it should be credential://
+    "credential_ref",               # raw value when it should be credential://
+    "request_headers",              # whole dict — Authorization / X-API-Key etc.
+    "query_parameters",             # whole dict — api_key / token in querystring
+    "private_certificate_ref",      # PEM/key content when it should be a GUID
+    "public_certificate_ref",       # PEM content when it should be a GUID
 )
 
 

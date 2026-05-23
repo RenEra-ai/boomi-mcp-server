@@ -2190,6 +2190,52 @@ class TestBuildPlanRestPreflight:
         assert "raw-LEAK_KEEP_DICT_PATH" not in repr(plan)
 
     @patch(_PATCH_TARGET)
+    def test_codex_round4_pem_cert_ref_redacted_in_plan_echo(self, mock_pag):
+        """Codex round-4 P1: when the GUID validator rejects PEM/key
+        material supplied as a `private_certificate_ref`, the integration
+        plan echo MUST scrub the field — otherwise the key material
+        survives in `integration_spec.components[].config.private_certificate_ref`.
+        Closes the round-4 leak path."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["auth"] = "NONE"
+        comp.config.pop("oauth2", None)
+        comp.config["private_certificate_ref"] = (
+            "-----BEGIN PRIVATE KEY-----\n"
+            "PEMCANARY_R4_PRIVATE_KEY_MATERIAL_DEADBEEF\n"
+            "-----END PRIVATE KEY-----"
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_CONNECTOR_VALIDATION_FAILED"
+        assert step["validation_error"]["field"] == "private_certificate_ref"
+        # Canary key material MUST NOT appear anywhere in the plan repr.
+        assert "PEMCANARY_R4_PRIVATE_KEY_MATERIAL_DEADBEEF" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["private_certificate_ref"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_codex_round4_pem_public_cert_ref_redacted_in_plan_echo(self, mock_pag):
+        """Same defense for `public_certificate_ref`."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["auth"] = "NONE"
+        comp.config.pop("oauth2", None)
+        comp.config["public_certificate_ref"] = (
+            "-----BEGIN CERTIFICATE-----\n"
+            "PEMCANARY_R4_PUBLIC_CERT_MATERIAL_DEADBEEF\n"
+            "-----END CERTIFICATE-----"
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["field"] == "public_certificate_ref"
+        assert "PEMCANARY_R4_PUBLIC_CERT_MATERIAL_DEADBEEF" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["public_certificate_ref"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
     def test_credential_ref_redacted_when_earlier_error_wins(self, mock_pag):
         """Codex round-6 P1: credential_ref should be `credential://...`
         per design, but callers can mistakenly put a raw secret there.
