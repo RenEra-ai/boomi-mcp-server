@@ -208,6 +208,26 @@ def test_template_client_secret_ref_uses_credential_scheme():
     assert example_oauth2["client_secret_ref"].startswith("credential://")
 
 
+def test_gotchas_do_not_claim_oauth2_client_credentials_is_only_supported_auth():
+    """Codex round-2 P2 #3: a stale gotcha said "OAuth2 client_credentials is
+    the only auth shape" and "Other auth modes are recognized but rejected"
+    — both contradict the post-Phase-1-4 implementation that now supports
+    NONE, BASIC, NTLM, OAuth2 client_credentials, and OAuth2
+    authorization_code (token-not-set). The gotcha must match reality."""
+    result = _call(component_type="connector-settings", protocol="rest.client")
+    gotchas_blob = repr(result.get("gotchas", []))
+    stale_phrases = (
+        "is the only auth shape",
+        "Other auth modes are recognized but rejected",
+        "only auth shape with a verified live XML export",
+    )
+    for phrase in stale_phrases:
+        assert phrase not in gotchas_blob, (
+            f"REST connection gotcha still contains stale phrase "
+            f"{phrase!r}; update to reflect supported auths."
+        )
+
+
 def test_field_auth_dependency_map_independent_fields_present():
     """The schema must declare which connection fields are independent of
     auth (i.e. work with any selected auth mode). Callers use this to

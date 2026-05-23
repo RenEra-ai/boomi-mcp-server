@@ -1233,10 +1233,14 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
             "for target sends."
         ),
         (
-            "OAuth2 client_credentials is the only auth shape with a "
-            "verified live XML export. Other auth modes are recognized but "
-            "rejected; create the desired connection in Boomi first and "
-            "open a follow-up issue to lock its XML shape."
+            "Buildable auth modes: NONE, BASIC, NTLM, OAuth2 "
+            "client_credentials, and OAuth2 authorization_code "
+            "(token-not-set — no cached access token emitted). "
+            "CUSTOM, PASSWORD_DIGEST, AWS_SIGNATURE, and "
+            "AWS_IAM_ROLES_ANYWHERE remain UNSUPPORTED_REST_AUTH_MODE "
+            "until a verified live export exists for each; "
+            "resource_owner_credentials and jwt_bearer OAuth2 grants "
+            "are likewise deferred."
         ),
         (
             "OAuth2 client secret is stored as Boomi ciphertext. The builder "
