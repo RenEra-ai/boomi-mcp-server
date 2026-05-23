@@ -450,13 +450,22 @@ _REST_SENSITIVE_FIELD_PATHS = (
 def _redact_dotted_field_path(config: Any, dotted_path: Optional[str]) -> None:
     """Replace the value at a dotted path inside `config` with '[REDACTED]'.
 
-    Best-effort: silently no-ops if the path doesn't resolve cleanly. Targeted
-    at the field names returned by REST validation when the offending value
-    isn't a forbidden-key (which `redact_forbidden_secret_fields_in_place`
+    Targeted at field names returned by REST validation when the offending
+    value isn't a forbidden-key (which `redact_forbidden_secret_fields_in_place`
     handles): e.g. `oauth2.client_secret_ref` (raw value where a
-    `credential://...` ref was expected) or `request_headers` / `query_parameters`
-    (entire dict carries unverified non-empty values that may include
-    Authorization / X-API-Key entries).
+    `credential://...` ref was expected) or `request_headers` /
+    `query_parameters` (entire dict carries unverified non-empty values
+    that may include Authorization / X-API-Key entries).
+
+    Defense-in-depth: if walking the dotted path finds a non-dict at an
+    intermediate step (e.g. caller passed `oauth2="raw-secret"` instead
+    of a sub-dict), the deep leaf can't be located but the top-level
+    segment IS still leaking. Redact the top-level segment in that case
+    so the raw value never echoes into the plan output. This case was
+    found in codex round-2 QA (Bug #126): widening the stale-oauth2 gate
+    to reject non-dict values exposed a residual redaction gap because
+    the original walk-down logic silently no-op'd on non-dict
+    intermediates.
     """
     if not isinstance(dotted_path, str) or not dotted_path:
         return
@@ -467,7 +476,16 @@ def _redact_dotted_field_path(config: Any, dotted_path: Optional[str]) -> None:
     for part in parts[:-1]:
         if not isinstance(cursor, dict):
             return
-        cursor = cursor.get(part)
+        next_cursor = cursor.get(part)
+        # Malformed intermediate (non-None, non-dict) — the deep leaf
+        # can't be reached but the top-level segment carries the raw
+        # value. Redact at the top level and return.
+        if next_cursor is not None and not isinstance(next_cursor, dict):
+            top = parts[0]
+            if top in config:
+                config[top] = "[REDACTED]"
+            return
+        cursor = next_cursor
     if not isinstance(cursor, dict):
         return
     leaf = parts[-1]
