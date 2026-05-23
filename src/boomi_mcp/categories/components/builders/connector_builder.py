@@ -13,6 +13,7 @@ The SDK's create_component() cannot parse the XML response for connectors,
 so creation uses raw Serializer POST (see connectors.py _create_component_raw).
 """
 
+import re
 from typing import Dict, Any, Optional
 
 
@@ -1597,10 +1598,72 @@ class RestClientOperationBuilder:
     def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
         DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
 
+    # Secret-shaped key pattern for customProperties (Phase 6). Matches the
+    # well-known header/query-param key shapes that callers must NOT put
+    # plaintext secrets behind. Case-insensitive whole-string match.
+    _SECRET_PROPERTY_KEY_RE = re.compile(
+        r"^("
+        r"authorization"
+        r"|x[-_]?(api|auth)[-_]?(key|token)?"
+        r"|api[-_]?(key|token)"
+        r"|bearer"
+        r"|token"
+        r"|password"
+        r"|secret"
+        r"|credential(s)?"
+        r"|client[-_]?secret"
+        r")$",
+        re.IGNORECASE,
+    )
+
+    # Secret-shaped value patterns (Phase 6). Conservative — only fires for
+    # clearly-secret-looking values to avoid false-positives on normal URL
+    # query/header values like "application/json" or "en-US".
+    _SECRET_PROPERTY_VALUE_PATTERNS = (
+        # Boomi explicit encrypted-marker literal prefix.
+        re.compile(r"^\[encrypted\]", re.IGNORECASE),
+        # JWT 3-part shape (eyJ + base64.base64.base64).
+        re.compile(r"^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_+/=-]+$"),
+        # Long base64-shaped ciphertext (40+ chars, no whitespace, no
+        # protocol scheme, no @ — distinguishes from URLs / emails / human
+        # values). 40-char threshold tuned for Boomi-style encrypted-value
+        # markers; legitimate Content-Type / User-Agent / etc are far
+        # shorter.
+        re.compile(r"^[A-Za-z0-9+/=]{40,}$"),
+    )
+
+    @classmethod
+    def _value_looks_secret(cls, value: str) -> bool:
+        for pattern in cls._SECRET_PROPERTY_VALUE_PATTERNS:
+            if pattern.match(value):
+                return True
+        return False
+
     @classmethod
     def _validate_dict_param(
         cls, value: Any, field: str
     ) -> Optional[BuilderValidationError]:
+        """Validate an optional customProperties-shaped dict (Phase 6).
+
+        Behavior:
+            - None / empty dict: accepted (the prior empty-only path).
+            - Non-dict: rejected with REST_OPERATION_VALIDATION_FAILED.
+            - `{"encrypted": True, ...}` shape (Boomi ciphertext-marker
+              forwarded by a confused caller): rejected with
+              UNSUPPORTED_REST_ENCRYPTED_CUSTOM_PROPERTY.
+            - Non-string key or non-string value: rejected with
+              REST_CUSTOM_PROPERTY_INVALID.
+            - Key matches secret-shaped pattern (Authorization, X-API-Key,
+              Bearer, etc.): rejected with REST_SECRET_VALUE_FORBIDDEN.
+            - Value matches secret-shaped pattern (JWT, long base64,
+              [encrypted] prefix): rejected with REST_SECRET_VALUE_FORBIDDEN.
+            - Otherwise: accepted (plain custom property entries).
+
+        Verified against live REST Query Param GET (9ede2c08) and REST
+        Headers GET (4986d5eb) — those examples carry mixed plain +
+        encrypted entries; the builder emits plain entries and rejects
+        encrypted ones until a secret-safe write path exists.
+        """
         if value is None:
             return None
         if not isinstance(value, dict):
@@ -1610,20 +1673,110 @@ class RestClientOperationBuilder:
                 field=field,
                 hint=f"Pass {field} as a JSON object.",
             )
-        if value:  # non-empty
+        if not value:  # empty dict — accepted as before
+            return None
+
+        # `{"encrypted": True, ...}` Boomi-export-shape forwarded by a
+        # confused caller — reject before per-entry checks so the error
+        # code is specific.
+        if value.get("encrypted") is True:
             return BuilderValidationError(
-                f"Non-empty {field} are not yet supported — the live Boomi "
-                "XML shape for populated customProperties has not been "
-                "verified",
-                error_code="NEEDS_REST_EXAMPLE",
+                f"{field} contains an `encrypted=True` marker — Boomi "
+                "encrypted custom properties are not yet supported by this "
+                "builder",
+                error_code="UNSUPPORTED_REST_ENCRYPTED_CUSTOM_PROPERTY",
                 field=field,
                 hint=(
-                    f"Pass an empty object for {field} and add the entries "
-                    "after a live Boomi export is available to lock the "
-                    "customProperty XML shape."
+                    "Remove the encrypted entry. Encrypted customProperty "
+                    "emission requires a secret-safe encryption/write "
+                    "path that does not exist yet. Open a follow-up "
+                    "issue once a verified secret-safe flow lands."
                 ),
             )
+
+        for key, val in value.items():
+            # Type checks first — secret detection assumes both are strings.
+            if not isinstance(key, str):
+                return BuilderValidationError(
+                    f"{field} entries must use string keys, got "
+                    f"{type(key).__name__}",
+                    error_code="REST_CUSTOM_PROPERTY_INVALID",
+                    field=field,
+                    hint=(
+                        f"Each {field} entry must be a JSON object with "
+                        "string key and string value."
+                    ),
+                )
+            if not isinstance(val, str):
+                return BuilderValidationError(
+                    f"{field} entry {key!r} value must be a string, got "
+                    f"{type(val).__name__}",
+                    error_code="REST_CUSTOM_PROPERTY_INVALID",
+                    field=field,
+                    hint=(
+                        "Boomi customProperties only carry string values; "
+                        "stringify the value first (e.g. str(int_value))."
+                    ),
+                )
+            if cls._SECRET_PROPERTY_KEY_RE.match(key):
+                return BuilderValidationError(
+                    f"{field} key {key!r} matches a secret-shaped header/"
+                    "param name (Authorization, X-API-Key, Bearer, etc.) — "
+                    "secret credentials must not be passed as plaintext "
+                    "customProperty entries",
+                    error_code="REST_SECRET_VALUE_FORBIDDEN",
+                    field=field,
+                    hint=(
+                        "Model token-based authentication on the CONNECTION "
+                        "(auth='OAUTH2') and let Boomi inject the "
+                        "Authorization header from the encrypted credential "
+                        "store. Do not put plaintext bearer tokens or API "
+                        "keys into customProperty entries."
+                    ),
+                )
+            if cls._value_looks_secret(val):
+                return BuilderValidationError(
+                    f"{field} value for key {key!r} looks like a secret "
+                    "(JWT / long base64 / encrypted-marker prefix). Plain "
+                    "non-secret values only",
+                    error_code="REST_SECRET_VALUE_FORBIDDEN",
+                    field=field,
+                    hint=(
+                        "Do not pass JWTs, encrypted ciphertext, or "
+                        "long-base64-shaped values as customProperty "
+                        "entries. Model the credential on the connection "
+                        "auth instead."
+                    ),
+                )
         return None
+
+    @staticmethod
+    def _build_customproperties_field(field_id: str, entries: Dict[str, str]) -> str:
+        """Emit a `<field id=... type="customproperties">` block.
+
+        Empty dict → `<customProperties/>` (self-closing, matches the
+        verified empty live shape).
+        Non-empty dict → `<customProperties><properties key="..." value="..."/>
+        ...</customProperties>` with one element per entry in insertion order.
+        Both key and value are XML-escaped. Verified shape from live REST
+        Query Param GET (9ede2c08) and REST Headers GET (4986d5eb) — only
+        the plain entries; encrypted entries are rejected upstream.
+        """
+        if not entries:
+            return (
+                f'                    <field id="{field_id}"'
+                f' type="customproperties"><customProperties/></field>\n'
+            )
+        rows = [
+            f'<properties key="{_escape_xml(str(k))}"'
+            f' value="{_escape_xml(str(v))}"/>'
+            for k, v in entries.items()
+        ]
+        return (
+            f'                    <field id="{field_id}" type="customproperties">'
+            f'<customProperties>{"".join(rows)}</customProperties>'
+            f'</field>\n'
+        )
 
     @classmethod
     def _validate_profile_ref(
@@ -1845,6 +1998,13 @@ class RestClientOperationBuilder:
                 f' value="{_escape_xml(str(follow_redirects))}"/>\n'
             )
 
+        query_params_field = self._build_customproperties_field(
+            "queryParameters", params.get("query_parameters") or {}
+        )
+        request_headers_field = self._build_customproperties_field(
+            "requestHeaders", params.get("request_headers") or {}
+        )
+
         body_inner = (
             f'                <GenericOperationConfig customOperationType="{method}"'
             f' operationType="EXECUTE"'
@@ -1854,8 +2014,8 @@ class RestClientOperationBuilder:
             f' responseProfileType="{safe_resp_profile_type}">\n'
             f'{follow_redirects_field}'
             f'                    <field id="path" type="string" value="{safe_path}"/>\n'
-            '                    <field id="queryParameters" type="customproperties"><customProperties/></field>\n'
-            '                    <field id="requestHeaders" type="customproperties"><customProperties/></field>\n'
+            f'{query_params_field}'
+            f'{request_headers_field}'
             '                    <Options/>\n'
             '                </GenericOperationConfig>\n'
         )

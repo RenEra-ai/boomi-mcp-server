@@ -2015,14 +2015,40 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
             "method. Verified per-method against live RenEra exports."
         ),
     },
-    "query_parameters_status": "empty_only_until_exported",
-    "request_headers_status": "empty_only_until_exported",
-    "query_headers_note": (
-        "Empty dicts emit the verified customProperties shape: "
-        "<customProperties/> with no children. Non-empty values return "
-        "NEEDS_REST_EXAMPLE until a live Boomi REST Client operation with "
-        "populated custom properties is exported and its XML shape locked."
-    ),
+    "query_parameters_status": "plain_buildable",
+    "request_headers_status": "plain_buildable",
+    "customproperties_shape": {
+        "summary": (
+            "Both query_parameters and request_headers accept a flat JSON "
+            "object whose keys and values are non-secret strings. The "
+            "builder emits one `<properties key=... value=.../>` child per "
+            "entry inside the `<customProperties>` container. Insertion "
+            "order is preserved. Verified against live REST Query Param "
+            "GET (9ede2c08) and REST Headers GET (4986d5eb) — only the "
+            "plain entries are emitted; encrypted entries are rejected."
+        ),
+        "plain_examples": {
+            "query_parameters": {"limit": "100", "offset": "0", "filter": "active=true"},
+            "request_headers": {"Accept": "application/json", "Cache-Control": "no-cache"},
+        },
+        "rejected_secret_shaped_keys": (
+            "authorization, x-api-key, x-auth-token, api-key, api_key, "
+            "bearer, token, password, secret, credential, client-secret. "
+            "Case-insensitive whole-key match — rejected with "
+            "REST_SECRET_VALUE_FORBIDDEN."
+        ),
+        "rejected_secret_shaped_values": (
+            "JWT-shaped strings (eyJ... prefix), long base64-shaped values "
+            "(40+ chars of [A-Za-z0-9+/=] with no whitespace), and any "
+            "value starting with the literal `[encrypted]` marker."
+        ),
+        "rejected_encrypted_marker": (
+            "A dict whose 'encrypted' key is True triggers "
+            "UNSUPPORTED_REST_ENCRYPTED_CUSTOM_PROPERTY. Encrypted "
+            "customProperty emission requires a secret-safe write path "
+            "that does not exist yet."
+        ),
+    },
     "depends_on_requirements": [
         "Include connection_ref_key in depends_on so the REST connector-settings runs first.",
         "When request_profile_id uses '$ref:KEY', include KEY in depends_on too.",
@@ -2038,19 +2064,22 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         "client_secret",
     ],
     "credential_note": (
-        "Bearer-style and API-key-style headers belong on the OPERATION "
-        "as request_headers entries — but issue #24 does not yet support "
-        "populated request_headers (no verified live export exists for "
-        "non-empty customProperties). For now, model token-based "
-        "authentication on the CONNECTION (auth='OAUTH2') and supply the "
-        "client secret via the encrypted Boomi UI field. Plaintext header "
-        "values are rejected with PLAINTEXT_SECRET_REJECTED."
+        "Bearer-style and API-key-style headers MUST NOT be placed in "
+        "request_headers entries. The builder rejects secret-shaped keys "
+        "(Authorization, X-API-Key, Bearer, Token, Password, etc.) with "
+        "REST_SECRET_VALUE_FORBIDDEN. Model token-based authentication on "
+        "the CONNECTION (auth='OAUTH2') and let Boomi inject the "
+        "Authorization header using the encrypted credential store. "
+        "Plain non-secret customProperty values (Accept, Content-Type, "
+        "User-Agent, limit, filter, etc.) are accepted via Phase 6."
     ),
     "error_codes": {
         "UNSUPPORTED_REST_OPERATION_MODE": "operation_mode is not 'execute'",
         "UNSUPPORTED_REST_METHOD": "method is not one of the 8 buildable REST verbs",
         "UNVERIFIED_REST_XML_VARIANT": "reserved for future methods recognized but not yet buildable (currently no such methods — Phase 5 made all 8 verbs buildable)",
-        "NEEDS_REST_EXAMPLE": "query_parameters or request_headers is non-empty",
+        "REST_CUSTOM_PROPERTY_INVALID": "query_parameters or request_headers entry has non-string key or non-string value",
+        "UNSUPPORTED_REST_ENCRYPTED_CUSTOM_PROPERTY": "query_parameters or request_headers contains an `encrypted=True` marker (Boomi-export-shape forwarded as JSON config)",
+        "REST_SECRET_VALUE_FORBIDDEN": "secret-shaped customProperty key (Authorization, X-API-Key, Bearer, etc.) or value (JWT, long base64, [encrypted] prefix)",
         "REST_PATH_REQUIRED": "path absent or empty",
         "REST_CONNECTION_REF_REQUIRED": "connection_ref_key absent or empty",
         "REST_DEPENDENCY_REQUIRED": "connection_ref_key / $ref target / payload_source_ref_key not declared in depends_on",
