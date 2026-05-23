@@ -1685,3 +1685,72 @@ def test_stale_credential_ref_none_value_still_accepted():
     cfg = _minimal_none_config()
     cfg["credential_ref"] = None
     assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+# ----------------------------------------------------------------------------
+# Field-dependency audit — stale `username` for non-password-backed auth.
+# username is required for BASIC/NTLM; supplying it with NONE/OAUTH2 is a
+# stale-field config mistake (caller's intent silently emitted into XML
+# where it has no semantic effect). Reject up front.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("non_password_auth", ["NONE", "OAUTH2"])
+def test_stale_username_rejected_for_non_password_auth(non_password_auth):
+    """`username` is BASIC/NTLM-only. With NONE/OAUTH2 supplying a non-empty
+    username is a config mistake — caller's value would otherwise be emitted
+    in the XML where Boomi ignores it at runtime."""
+    if non_password_auth == "OAUTH2":
+        cfg = _minimal_oauth2_config()
+        cfg["username"] = "alice-stale"
+    else:
+        cfg = _minimal_none_config(username="alice-stale")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "username"
+
+
+def test_empty_username_accepted_for_non_password_auth():
+    """Empty-string username on a non-password auth is treated as
+    "not supplied" — accept it (edge case for callers that always include
+    the key)."""
+    cfg = _minimal_none_config(username="")
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+def test_whitespace_username_accepted_for_non_password_auth():
+    """Whitespace-only username on non-password auth is treated as
+    "not supplied" — accept it."""
+    cfg = _minimal_none_config(username="   ")
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+def test_none_username_accepted_for_non_password_auth():
+    """Regression sanity: `username=None` for non-password auth still passes."""
+    cfg = _minimal_none_config()
+    cfg["username"] = None
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+@pytest.mark.parametrize(
+    "stale_value",
+    [
+        ["alice-stale"],
+        {"value": "alice-stale"},
+        12345,
+        True,
+    ],
+)
+def test_stale_username_non_string_value_rejected_for_non_password_auth(stale_value):
+    """Non-string truthy `username` with non-password auth must also be
+    rejected — mirrors the round-2 fix for `credential_ref`. Malformed
+    payloads should never validate clean and emit into the XML."""
+    cfg = _minimal_none_config()
+    cfg["username"] = stale_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "username"
