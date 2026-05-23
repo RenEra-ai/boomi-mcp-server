@@ -243,7 +243,7 @@ class DatabaseConnectorBuilder:
                 if forbidden in config:
                     field_path = f"{_path_prefix}{forbidden}"
                     return BuilderValidationError(
-                        f"{field_path!r} cannot be supplied in database connector "
+                        f"{field_path!r} cannot be supplied in connector "
                         "config — secrets must cross the wire as opaque "
                         "credential_ref strings only. Boomi stores passwords as "
                         "ciphertext produced by its own encryption; there is no "
@@ -978,7 +978,8 @@ class RestClientConnectionBuilder:
         folder_name / description: optional component-level fields.
     """
 
-    SUPPORTED_AUTH_MODES = ("NONE", "OAUTH2")
+    SUPPORTED_AUTH_MODES = ("NONE", "BASIC", "OAUTH2")
+    _PASSWORD_BACKED_AUTH_MODES = ("BASIC",)
     RECOGNIZED_AUTH_MODES = (
         "NONE",
         "AWS_SIGNATURE",
@@ -1127,6 +1128,49 @@ class RestClientConnectionBuilder:
                     hint=(
                         "Pass an opaque credential_ref string; the builder "
                         "never writes raw secret values into XML."
+                    ),
+                )
+
+        # 5b) Password-backed auth modes (BASIC) require username + credential_ref.
+        # credential_ref carries the Boomi credential URL (the actual password
+        # is stored as ciphertext via the UI after create or via a
+        # pre-encrypted raw-XML payload).
+        if auth in cls._PASSWORD_BACKED_AUTH_MODES:
+            username = config.get("username")
+            if not isinstance(username, str) or not username.strip():
+                return BuilderValidationError(
+                    f"username is required (non-empty string) when auth={auth!r}",
+                    error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                    field="username",
+                    hint=(
+                        f"Provide username as a non-empty string. {auth} auth "
+                        "sends `<username>:<password>` in the Authorization "
+                        "header; the password is supplied via the Boomi UI "
+                        "after create."
+                    ),
+                )
+            credential_ref = config.get("credential_ref")
+            if not credential_ref or not str(credential_ref).strip():
+                return BuilderValidationError(
+                    f"credential_ref is required when auth={auth!r}",
+                    error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                    field="credential_ref",
+                    hint=(
+                        "Pass credential_ref='credential://<vendor>/<role>' "
+                        "as an opaque credential reference. Boomi stores the "
+                        "actual password as ciphertext."
+                    ),
+                )
+            cred_ref_str = str(credential_ref).strip()
+            if not cred_ref_str.startswith("credential://"):
+                return BuilderValidationError(
+                    "credential_ref must begin with 'credential://'",
+                    error_code="REST_SECRET_VALUE_FORBIDDEN",
+                    field="credential_ref",
+                    hint=(
+                        "Pass an opaque credential_ref string starting with "
+                        "'credential://'; the builder never writes raw "
+                        "secret values into XML."
                     ),
                 )
 
@@ -1283,15 +1327,20 @@ class RestClientConnectionBuilder:
         """Auth-mode-driven `<bns:encryptedValues>` header.
 
         - NONE: empty `<bns:encryptedValues/>` — no secrets stored.
-        - OAUTH2: client-secret xpath marker, isSet=false (Boomi fills the
-          secret on save).
-
-        Future auth modes (BASIC / NTLM in subsequent phases) use the
-        password-field xpath marker — added when those auths land."""
+        - BASIC (and other password-backed auths): xpath marker at the
+          `password` field. Boomi flips isSet=true when the value is saved.
+        - OAUTH2: client-secret xpath marker inside OAuth2Config.
+        """
         if auth == "OAUTH2":
             return (
                 '    <bns:encryptedValues>\n'
                 '        <bns:encryptedValue path="//GenericConnectionConfig/field/OAuth2Config/credentials/@clientSecret" isSet="false"/>\n'
+                '    </bns:encryptedValues>\n'
+            )
+        if auth in RestClientConnectionBuilder._PASSWORD_BACKED_AUTH_MODES:
+            return (
+                '    <bns:encryptedValues>\n'
+                '        <bns:encryptedValue path="//GenericConnectionConfig/field[@type=\'password\']" isSet="false"/>\n'
                 '    </bns:encryptedValues>\n'
             )
         # NONE (and other non-secret modes in the skeleton).

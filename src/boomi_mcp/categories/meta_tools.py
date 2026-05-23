@@ -1086,14 +1086,15 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
     "note": (
         "Boomi REST Client connector-settings (connection). Models the API "
         "base URL plus authentication settings. Buildable auth modes: NONE "
-        "(no auth, optionally with client-cert refs or connection pooling) "
-        "and OAUTH2 client_credentials. Remaining REST Client auth modes "
-        "(BASIC, NTLM, CUSTOM, PASSWORD_DIGEST, AWS_SIGNATURE, "
-        "AWS_IAM_ROLES_ANYWHERE) return UNSUPPORTED_REST_AUTH_MODE until a "
-        "verified live export exists. Cert refs (private_certificate_ref / "
-        "public_certificate_ref) are an INDEPENDENT client-cert option — "
-        "they may co-occur with any auth selection. REST is the canonical "
-        "target API connector — use connector_type='rest'."
+        "(no auth, optionally with client-cert refs or connection pooling), "
+        "BASIC (username + credential_ref), and OAUTH2 client_credentials. "
+        "Remaining REST Client auth modes (NTLM, CUSTOM, PASSWORD_DIGEST, "
+        "AWS_SIGNATURE, AWS_IAM_ROLES_ANYWHERE) return "
+        "UNSUPPORTED_REST_AUTH_MODE until a verified live export exists. "
+        "Cert refs (private_certificate_ref / public_certificate_ref) are "
+        "an INDEPENDENT client-cert option — they may co-occur with any "
+        "auth selection. REST is the canonical target API connector — use "
+        "connector_type='rest'."
     ),
     "template": {
         "connector_type": "rest",
@@ -1132,9 +1133,8 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         "cookie_scope": "GLOBAL",
         "connection_pooling": {"enabled": False},
     },
-    "supported_auth_modes": ["NONE", "OAUTH2"],
+    "supported_auth_modes": ["NONE", "BASIC", "OAUTH2"],
     "unsupported_future_auth_modes": [
-        "BASIC",
         "PASSWORD_DIGEST",
         "NTLM",
         "CUSTOM",
@@ -1316,6 +1316,28 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
                 "Connection pooling reduces handshake cost for high-RPS "
                 "targets. Boomi defaults: max_total=20, "
                 "idle_timeout_seconds=30."
+            ),
+        },
+        "basic_auth_minimal": {
+            "key": "target_rest_basic_connection",
+            "type": "connector-settings",
+            "action": "create",
+            "name": "<<target REST BASIC connection>>",
+            "config": {
+                "connector_type": "rest",
+                "component_name": "<<target REST BASIC connection>>",
+                "base_url": "https://<<host>>",
+                "auth": "BASIC",
+                "username": "<<username>>",
+                "credential_ref": "credential://<<vendor>>/<<role>>",
+                "preemptive": False,
+            },
+            "_example_note": (
+                "BASIC auth: username + opaque credential_ref. The actual "
+                "password is supplied via the Boomi UI after create (or via "
+                "a pre-encrypted raw-XML payload). preemptive=true sends "
+                "the Authorization header on the first request without "
+                "waiting for a 401 challenge — Boomi default is false."
             ),
         },
     },

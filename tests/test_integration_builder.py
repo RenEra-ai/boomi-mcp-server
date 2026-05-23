@@ -1925,8 +1925,11 @@ class TestBuildPlanRestPreflight:
 
     @patch(_PATCH_TARGET)
     def test_unsupported_auth_marks_rest_connection_unresolvable(self, mock_pag):
+        """CUSTOM / PASSWORD_DIGEST / AWS_SIGNATURE / AWS_IAM_ROLES_ANYWHERE
+        remain unbuildable post-Phase 2. Verify the preflight catches one
+        of them and surfaces UNSUPPORTED_REST_AUTH_MODE."""
         mock_pag.return_value = []
-        cfg_overrides = {"auth": "BASIC"}
+        cfg_overrides = {"auth": "PASSWORD_DIGEST"}
         comp = _rest_conn_comp(**cfg_overrides)
         comp.config.pop("oauth2", None)
         plan = _build_plan(MagicMock(), _build_config([comp]))
