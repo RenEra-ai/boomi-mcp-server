@@ -822,6 +822,111 @@ def test_public_certificate_ref_must_be_string():
     assert err.field == "public_certificate_ref"
 
 
+# ----------------------------------------------------------------------------
+# Codex review round 3 P2 #2: cert refs must match Boomi UUID component-id
+# shape. The previous validator only checked `isinstance(value, str)`, so a
+# caller accidentally passing PEM/private-key content as a string would
+# emit the key material into the XML and the plan echo.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "pem_or_key_value",
+    [
+        "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG...",
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...",
+        "-----BEGIN CERTIFICATE-----\nMIIDXTCCAkWgAwIBAgIJ...",
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjE...",
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ user@host",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 user@host",
+    ],
+)
+def test_codex_round3_cert_ref_pem_content_rejected(pem_or_key_value):
+    """PEM-headed or SSH-key content must NOT be accepted as a Boomi
+    certificate component id. Reject before emission."""
+    cfg = _minimal_none_config(private_certificate_ref=pem_or_key_value)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "private_certificate_ref"
+
+
+@pytest.mark.parametrize(
+    "non_guid_string",
+    [
+        "not-a-guid",
+        "abc",
+        "21f598a6",  # truncated GUID
+        "21f598a6-1d90-4578-a35a",  # truncated GUID
+        "21f598a6_1d90_4578_a35a_d0350c50b747",  # underscores not hyphens
+        "21f598a6-1d90-4578-a35a-d0350c50b747-extra",  # extra trailing
+        "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",  # non-hex chars
+    ],
+)
+def test_codex_round3_cert_ref_non_guid_string_rejected(non_guid_string):
+    """Boomi certificate component IDs are UUIDs. Anything that doesn't
+    match the canonical 8-4-4-4-12 hex shape must be rejected."""
+    cfg = _minimal_none_config(private_certificate_ref=non_guid_string)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "private_certificate_ref"
+
+
+@pytest.mark.parametrize(
+    "valid_guid",
+    [
+        "21f598a6-1d90-4578-a35a-d0350c50b747",
+        "ea82aa0c-484b-40b1-890c-f142ab8fecad",
+        # Uppercase hex should also be accepted (UUIDs are case-insensitive).
+        "21F598A6-1D90-4578-A35A-D0350C50B747",
+    ],
+)
+def test_codex_round3_cert_ref_valid_guid_still_accepted(valid_guid):
+    """Regression sanity: valid Boomi component-id GUIDs must continue to
+    pass cert ref validation."""
+    xml = _build_minimal_none(private_certificate_ref=valid_guid)
+    root = ET.fromstring(xml)
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") == "privateCertificate":
+            assert field.attrib.get("value") == valid_guid
+            return
+    raise AssertionError("privateCertificate field not found")
+
+
+def test_codex_round3_public_cert_ref_also_validated():
+    """Public-cert ref must enforce the same shape as private-cert ref."""
+    cfg = _minimal_none_config(
+        public_certificate_ref="-----BEGIN CERTIFICATE-----\nMIIDXTCCAkWgAwIBAgIJ...",
+    )
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "public_certificate_ref"
+
+
+def test_codex_round3_cert_ref_pem_canary_does_not_leak():
+    """If the caller pastes PEM content (often containing the literal key
+    material), the rejection MUST NOT echo the key bytes into the error
+    envelope. The hint may reference what shape is expected but not
+    repeat the offending value."""
+    cfg = _minimal_none_config(
+        private_certificate_ref=(
+            "-----BEGIN PRIVATE KEY-----\n"
+            "PEMCANARY_THIS_IS_PRIVATE_KEY_MATERIAL_DEADBEEF\n"
+            "-----END PRIVATE KEY-----"
+        ),
+    )
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert "PEMCANARY_THIS_IS_PRIVATE_KEY_MATERIAL_DEADBEEF" not in str(err)
+    assert "PEMCANARY_THIS_IS_PRIVATE_KEY_MATERIAL_DEADBEEF" not in (err.hint or "")
+
+
 def test_empty_certificate_refs_treated_as_omitted():
     """Empty string refs == not supplied → emit self-closing cert fields
     (matching live REST None shape)."""

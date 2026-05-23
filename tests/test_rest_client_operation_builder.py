@@ -994,3 +994,110 @@ def test_phase5_methods_emit_empty_customproperty_containers(method):
     assert rh_field is not None and rh_field.attrib["type"] == "customproperties"
     assert qp_field.find("customProperties") is not None
     assert rh_field.find("customProperties") is not None
+
+
+# ----------------------------------------------------------------------------
+# Codex review round 3 — extended secret-key + secret-value detection
+# (P1 #1). Previously the secret-shaped-key regex only matched the exact
+# `Authorization` header, leaving `Proxy-Authorization` and other variants
+# wide open. The value-pattern set missed the canonical HTTP authorization
+# scheme prefixes (Bearer/Basic/Digest/Negotiate/NTLM + token) which is
+# what `Proxy-Authorization` values typically carry.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "secret_key",
+    [
+        "Proxy-Authorization",
+        "proxy-authorization",
+        "proxy_authorization",
+        "Cookie",
+        "Set-Cookie",
+        "WWW-Authenticate",
+        "X-CSRF-Token",
+        "X-Session-Token",
+        "X-Auth-Password",
+    ],
+)
+def test_codex_round3_extended_secret_keys_rejected(secret_key):
+    """Codex review round-3 P1 #1: extend secret-shaped key detection to
+    catch Proxy-Authorization and similar credential-bearing headers."""
+    cfg = _minimal_get_config(request_headers={secret_key: "anyvalue"})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN", (
+        f"key {secret_key!r} should match the secret-key pattern"
+    )
+    assert err.field == "request_headers"
+
+
+@pytest.mark.parametrize(
+    "auth_scheme_value",
+    [
+        # RFC 7617 Basic auth value shape.
+        "Basic dXNlcjpwYXNzd29yZA==",
+        # RFC 6750 Bearer.
+        "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
+        # RFC 7616 Digest.
+        "Digest username=\"admin\", realm=\"x\"",
+        # RFC 4559 SPNEGO/Negotiate.
+        "Negotiate YHsGBisGAQUFAqBxMG+gMDAuB...",
+        # Microsoft NTLM challenge token.
+        "NTLM TlRMTVNTUAACAAA...",
+        # Case-insensitive variants.
+        "basic SGVsbG86V29ybGQ=",
+        "bearer abcdef",
+    ],
+)
+def test_codex_round3_authorization_scheme_values_rejected(auth_scheme_value):
+    """Codex review round-3 P1 #1: the value-pattern set should catch HTTP
+    Authorization scheme prefixes (Bearer/Basic/Digest/Negotiate/NTLM)
+    even when the KEY isn't named Authorization — e.g. a caller using
+    `X-Custom-Header: Basic dXNlcjpwYXNz` would slip past key detection."""
+    # Use a non-secret-shaped key so we exercise the VALUE path specifically.
+    cfg = _minimal_get_config(request_headers={"X-Custom-Header": auth_scheme_value})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN"
+    assert err.field == "request_headers"
+
+
+def test_codex_round3_proxy_authorization_with_basic_value_full_path():
+    """End-to-end: `Proxy-Authorization: Basic dXNlcjpwYXNz` was the
+    specific example called out in the codex review. Verify the rejection
+    happens AND the credential canary doesn't leak into the error payload."""
+    cfg = _minimal_get_config(request_headers={
+        "Proxy-Authorization": "Basic dXNlcjpwYXNzd29yZF9DQU5BUlk=",  # canary in base64
+    })
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN"
+    assert "dXNlcjpwYXNzd29yZF9DQU5BUlk" not in str(err)
+    assert "dXNlcjpwYXNzd29yZF9DQU5BUlk" not in (err.hint or "")
+
+
+# Regression: the existing safe-headers test must still pass after extending
+# the secret pattern. Make sure common headers don't false-positive.
+def test_codex_round3_common_safe_headers_still_pass():
+    """Defense: extended secret detection must not flag normal headers."""
+    xml = RestClientOperationBuilder().build(
+        **_minimal_get_config(request_headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "boomi-test/1.0",
+            "Cache-Control": "no-cache",
+            "Accept-Language": "en-US",
+            "X-Request-Id": "abc-123-def",
+            "X-Trace-Id": "trace-001",
+            "If-None-Match": '"etag-value"',
+            "Accept-Encoding": "gzip, deflate",
+        })
+    )
+    # Builder succeeded — all 9 headers emitted.
+    qp_field = _find_field(xml, "requestHeaders")
+    cp = qp_field.find("customProperties")
+    assert len(list(cp)) == 9
