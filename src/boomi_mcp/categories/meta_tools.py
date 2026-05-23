@@ -1085,13 +1085,15 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
     "tool": "manage_connector (action='create')",
     "note": (
         "Boomi REST Client connector-settings (connection). Models the API "
-        "base URL plus authentication settings. Issue #24 ships only the "
-        "OAUTH2 client_credentials shape that has a verified live Boomi "
-        "XML reference; every other auth mode listed in the REST Client "
-        "docs (NONE, BASIC, NTLM, CUSTOM, PASSWORD_DIGEST, AWS_SIGNATURE, "
-        "AWS_IAM_ROLES_ANYWHERE) returns UNSUPPORTED_REST_AUTH_MODE until "
-        "a verified live export exists. REST is the canonical target API "
-        "connector — use connector_type='rest'."
+        "base URL plus authentication settings. Buildable auth modes: NONE "
+        "(no auth, optionally with client-cert refs or connection pooling) "
+        "and OAUTH2 client_credentials. Remaining REST Client auth modes "
+        "(BASIC, NTLM, CUSTOM, PASSWORD_DIGEST, AWS_SIGNATURE, "
+        "AWS_IAM_ROLES_ANYWHERE) return UNSUPPORTED_REST_AUTH_MODE until a "
+        "verified live export exists. Cert refs (private_certificate_ref / "
+        "public_certificate_ref) are an INDEPENDENT client-cert option — "
+        "they may co-occur with any auth selection. REST is the canonical "
+        "target API connector — use connector_type='rest'."
     ),
     "template": {
         "connector_type": "rest",
@@ -1130,9 +1132,8 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         "cookie_scope": "GLOBAL",
         "connection_pooling": {"enabled": False},
     },
-    "supported_auth_modes": ["OAUTH2"],
+    "supported_auth_modes": ["NONE", "OAUTH2"],
     "unsupported_future_auth_modes": [
-        "NONE",
         "BASIC",
         "PASSWORD_DIGEST",
         "NTLM",
@@ -1140,6 +1141,21 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         "AWS_SIGNATURE",
         "AWS_IAM_ROLES_ANYWHERE",
     ],
+    "independent_options": {
+        "private_certificate_ref": (
+            "Optional X509 private-key Boomi certificate component id "
+            "(GUID). Works with ANY auth mode (NONE or OAUTH2) — not tied "
+            "to a specific auth selection."
+        ),
+        "public_certificate_ref": (
+            "Optional X509 public-cert Boomi certificate component id "
+            "(GUID). Works with ANY auth mode."
+        ),
+        "connection_pooling": (
+            "Optional pooling block {enabled: bool, max_total: int, "
+            "idle_timeout_seconds: int}. Works with ANY auth mode."
+        ),
+    },
     "buildable_oauth2_grant_types": ["client_credentials"],
     "unsupported_future_oauth2_grant_types": [
         "authorization_code",
@@ -1232,16 +1248,76 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         ),
     },
     "out_of_scope": {
-        "non_oauth2_auth_emission": (
-            "Connection emission for NONE / BASIC / NTLM / CUSTOM / "
-            "PASSWORD_DIGEST / AWS_SIGNATURE / AWS_IAM_ROLES_ANYWHERE is "
-            "deferred until a verified live Boomi XML reference is "
-            "available for each."
+        "non_emitted_auth_modes": (
+            "Connection emission for BASIC / NTLM / CUSTOM / PASSWORD_DIGEST "
+            "/ AWS_SIGNATURE / AWS_IAM_ROLES_ANYWHERE is deferred until a "
+            "verified live Boomi XML reference is available for each."
         ),
         "non_client_credentials_oauth2_grants": (
             "authorization_code, resource_owner_credentials, and jwt_bearer "
             "grant types are deferred until verified live exports exist."
         ),
+    },
+    "alternative_examples": {
+        "none_auth_minimal": {
+            "key": "target_rest_none_connection",
+            "type": "connector-settings",
+            "action": "create",
+            "name": "<<target REST connection>>",
+            "config": {
+                "connector_type": "rest",
+                "component_name": "<<target REST connection>>",
+                "base_url": "https://<<host>>",
+                "auth": "NONE",
+            },
+            "_example_note": (
+                "NONE auth: no credentials required. Use for public APIs or "
+                "APIs behind a network ACL. Add private_certificate_ref / "
+                "public_certificate_ref if the upstream requires mTLS — "
+                "those refs are independent of auth selection."
+            ),
+        },
+        "none_auth_with_cert_refs": {
+            "key": "target_rest_mtls_connection",
+            "type": "connector-settings",
+            "action": "create",
+            "name": "<<target REST mTLS connection>>",
+            "config": {
+                "connector_type": "rest",
+                "component_name": "<<target REST mTLS connection>>",
+                "base_url": "https://<<host>>",
+                "auth": "NONE",
+                "private_certificate_ref": "<<Boomi private cert component id>>",
+                "public_certificate_ref": "<<Boomi public cert component id>>",
+            },
+            "_example_note": (
+                "Cert refs accept Boomi certificate component IDs (GUIDs). "
+                "Refs work with any auth — auth='NONE' is the typical mTLS "
+                "shape but BASIC/OAUTH2 can also carry cert refs."
+            ),
+        },
+        "none_auth_with_pooling": {
+            "key": "target_rest_pooled_connection",
+            "type": "connector-settings",
+            "action": "create",
+            "name": "<<target REST pooled connection>>",
+            "config": {
+                "connector_type": "rest",
+                "component_name": "<<target REST pooled connection>>",
+                "base_url": "https://<<host>>",
+                "auth": "NONE",
+                "connection_pooling": {
+                    "enabled": True,
+                    "max_total": 20,
+                    "idle_timeout_seconds": 30,
+                },
+            },
+            "_example_note": (
+                "Connection pooling reduces handshake cost for high-RPS "
+                "targets. Boomi defaults: max_total=20, "
+                "idle_timeout_seconds=30."
+            ),
+        },
     },
 }
 

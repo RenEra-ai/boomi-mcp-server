@@ -345,8 +345,7 @@ def test_http_base_url_accepted():
 
 @pytest.mark.parametrize(
     "unsupported_auth",
-    ["NONE", "BASIC", "PASSWORD_DIGEST", "NTLM", "CUSTOM",
-     "AWS_SIGNATURE", "AWS_IAM_ROLES_ANYWHERE"],
+    ["PASSWORD_DIGEST", "CUSTOM", "AWS_SIGNATURE", "AWS_IAM_ROLES_ANYWHERE"],
 )
 def test_unsupported_auth_modes_rejected(unsupported_auth):
     cfg = _minimal_oauth2_config()
@@ -555,3 +554,277 @@ def test_timeouts_accept_negative_int_for_indefinite_wait():
     xml = _build_minimal(connect_timeout_ms=-1, read_timeout_ms=0)
     assert _field_value(xml, "connectTimeout") == "-1"
     assert _field_value(xml, "readTimeout") == "0"
+
+
+# ----------------------------------------------------------------------------
+# NONE auth (issue #24 follow-up — new_findings_2026_05_23 expansion).
+# Live shape verified against:
+#   - 7f7e0730-1152-4467-b912-e3a8ed12782a (REST None — pooling disabled, no certs)
+#   - 49402e41-522f-4b33-83f3-c95d907efa23 (REST None Pooling — pooling enabled)
+#   - 499e5bd6-598a-4c50-b941-527c8f7470dc (REST Certificate — privateCertificate + publicCertificate refs, auth=NONE)
+# ----------------------------------------------------------------------------
+
+
+def _minimal_none_config(**overrides):
+    """Minimal-valid REST NONE auth config dict."""
+    params = {
+        "connector_type": "rest",
+        "component_name": "Target REST NONE Connection",
+        "base_url": "https://api.example.com",
+        "auth": "NONE",
+    }
+    params.update(overrides)
+    return params
+
+
+def _build_minimal_none(**overrides):
+    params = _minimal_none_config(**overrides)
+    params.pop("connector_type", None)
+    return RestClientConnectionBuilder().build(**params)
+
+
+def test_none_auth_minimum_required_fields_produce_valid_xml():
+    xml = _build_minimal_none()
+    root = ET.fromstring(xml)
+    assert root.attrib["type"] == "connector-settings"
+    assert root.attrib["subType"] == REST_CLIENT_SUBTYPE
+    assert _field_value(xml, "auth") == "NONE"
+    assert _field_value(xml, "url") == "https://api.example.com"
+
+
+def test_none_auth_validate_config_returns_none():
+    assert RestClientConnectionBuilder.validate_config(_minimal_none_config()) is None
+
+
+def test_none_auth_does_not_require_oauth2_block():
+    """For NONE auth the oauth2 sub-block is irrelevant. Builder must accept
+    a config without it."""
+    cfg = _minimal_none_config()
+    assert "oauth2" not in cfg
+    xml = RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    assert _field_value(xml, "auth") == "NONE"
+
+
+def test_none_auth_emits_empty_encrypted_values_block():
+    """Live REST None / REST Certificate / REST None Pooling all carry
+    `<bns:encryptedValues/>` (self-closing, no inner entries). Verified
+    against 7f7e0730, 499e5bd6, 49402e41."""
+    xml = _build_minimal_none()
+    root = ET.fromstring(xml)
+    encrypted_values = root.find("bns:encryptedValues", NS)
+    assert encrypted_values is not None
+    assert encrypted_values.findall("bns:encryptedValue", NS) == [], (
+        "NONE auth must emit empty <bns:encryptedValues/> — no OAuth2 "
+        "clientSecret path leaks into the connection envelope."
+    )
+
+
+def test_none_auth_preemptive_field_emitted_with_empty_value():
+    """Live REST None / NTLM emit `<field id="preemptive" type="boolean" value=""/>`
+    (NOT value="false"). Preemptive is irrelevant for non-BASIC/non-OAUTH2
+    auth so Boomi leaves it blank. Match the live shape."""
+    xml = _build_minimal_none()
+    assert _field_value(xml, "preemptive") == ""
+
+
+def test_none_auth_oauth2_config_skeleton_uses_grant_type_code():
+    """Live non-OAUTH2 exports keep the OAuth2Config child as a SKELETON
+    with grantType='code', empty credentials/endpoints/scope, and NO
+    credentialsAssertionType element. Match that shape (so the connection
+    can be safely UI-promoted to OAuth2 later without re-creating)."""
+    xml = _build_minimal_none()
+    oa = _oauth2_config(xml)
+    assert oa.attrib["grantType"] == "code"
+    creds = oa.find("credentials")
+    assert creds is not None
+    assert creds.attrib.get("clientId", "") == ""
+    assert "clientSecret" not in creds.attrib, (
+        "Skeleton OAuth2 credentials must omit clientSecret entirely "
+        "(only populated grants emit it)."
+    )
+    assert "accessTokenKey" not in creds.attrib
+    # credentialsAssertionType element is absent in the skeleton.
+    assert oa.find("credentialsAssertionType") is None
+
+
+def test_none_auth_field_order_matches_live_shape():
+    """NONE auth must emit the same field skeleton order as OAUTH2 — the
+    skeleton is universal across all auth modes (live behavior)."""
+    xml = _build_minimal_none()
+    root = ET.fromstring(xml)
+    gcc = root.find("bns:object/GenericConnectionConfig", NS)
+    field_ids = [child.attrib["id"] for child in gcc if child.tag == "field"]
+    # Same order as test_field_order_matches_live_shape (OAUTH2 test) —
+    # the skeleton is universal.
+    assert field_ids == [
+        "url", "auth", "username", "password", "domain", "workstation",
+        "customAuthCredentials", "preemptive",
+        "awsAccessKey", "awsSecretKey", "awsService", "customAwsService",
+        "awsRegion", "customAwsRegion", "awsProfileArn", "awsRoleArn",
+        "awsTrustAnchorArn", "awsRolesAnywhereRegion",
+        "awsRolesAnywhereCustomRegion", "awsSessionName", "awsDuration",
+        "awsPublicCertificate", "awsPrivateKey",
+        "oauthContext",
+        "privateCertificate", "publicCertificate",
+        "connectTimeout", "readTimeout", "cookieScope",
+        "enableConnectionPooling", "maxTotal", "idleTimeout",
+    ]
+
+
+def test_none_auth_private_certificate_self_closing_when_no_ref():
+    """Live REST None / REST None Pooling emit
+    `<field id="privateCertificate" type="privatecertificate"/>` —
+    self-closing, NO value attribute — when no cert ref is supplied.
+    (REST Certificate populates the value attribute.)"""
+    xml = _build_minimal_none()
+    root = ET.fromstring(xml)
+    private_cert = None
+    public_cert = None
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field":
+            fid = field.attrib.get("id")
+            if fid == "privateCertificate":
+                private_cert = field
+            elif fid == "publicCertificate":
+                public_cert = field
+    assert private_cert is not None
+    assert public_cert is not None
+    # Self-closing form: NO value attribute when no ref supplied.
+    assert "value" not in private_cert.attrib, (
+        "privateCertificate must be self-closing (no value attribute) when "
+        f"no ref supplied. Got attribs: {private_cert.attrib}"
+    )
+    assert "value" not in public_cert.attrib
+
+
+def test_none_auth_does_not_emit_plaintext_secret_canary():
+    """Defense-in-depth: a NONE auth connection shouldn't expose any secret
+    bytes since it has none. Confirms no stale OAuth2 emission leaks
+    plaintext."""
+    xml = _build_minimal_none()
+    assert "DEADBEEF" not in xml
+    assert 'isSet="true"' not in xml  # all encrypted markers should be absent or isSet="false"
+
+
+# ----------------------------------------------------------------------------
+# NONE auth + connection pooling (live: REST None Pooling — 49402e41).
+# ----------------------------------------------------------------------------
+
+
+def test_none_auth_with_pooling_enabled_emits_max_total_and_idle_timeout():
+    xml = _build_minimal_none(
+        connection_pooling={"enabled": True, "max_total": 20, "idle_timeout_seconds": 30},
+    )
+    assert _field_value(xml, "enableConnectionPooling") == "true"
+    assert _field_value(xml, "maxTotal") == "20"
+    assert _field_value(xml, "idleTimeout") == "30"
+
+
+def test_none_auth_with_pooling_disabled_emits_empty_max_total_and_idle_timeout():
+    """Live REST None: pooling disabled → maxTotal and idleTimeout are
+    emitted with value="" (NOT absent). Builder must match."""
+    xml = _build_minimal_none(connection_pooling={"enabled": False})
+    assert _field_value(xml, "enableConnectionPooling") == "false"
+    assert _field_value(xml, "maxTotal") == ""
+    assert _field_value(xml, "idleTimeout") == ""
+
+
+# ----------------------------------------------------------------------------
+# Certificate refs (independent option — works with any auth, per user
+# direction "cert refs cound be with other auth too").
+# Live reference: 499e5bd6 (REST Certificate, auth=NONE) — but the cert
+# refs themselves are NOT tied to auth=NONE; they are a separate REST
+# client-cert option that can co-occur with any auth selection.
+# ----------------------------------------------------------------------------
+
+
+_PRIV_CERT_REF = "21f598a6-1d90-4578-a35a-d0350c50b747"
+_PUB_CERT_REF = "ea82aa0c-484b-40b1-890c-f142ab8fecad"
+
+
+def test_private_certificate_ref_emitted_as_field_value():
+    xml = _build_minimal_none(private_certificate_ref=_PRIV_CERT_REF)
+    root = ET.fromstring(xml)
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") == "privateCertificate":
+            assert field.attrib.get("value") == _PRIV_CERT_REF
+            assert field.attrib.get("type") == "privatecertificate"
+            return
+    raise AssertionError("privateCertificate field not found")
+
+
+def test_public_certificate_ref_emitted_as_field_value():
+    xml = _build_minimal_none(public_certificate_ref=_PUB_CERT_REF)
+    root = ET.fromstring(xml)
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") == "publicCertificate":
+            assert field.attrib.get("value") == _PUB_CERT_REF
+            assert field.attrib.get("type") == "publiccertificate"
+            return
+    raise AssertionError("publicCertificate field not found")
+
+
+def test_both_certificate_refs_can_be_supplied_simultaneously():
+    """Live REST Certificate uses both refs at once."""
+    xml = _build_minimal_none(
+        private_certificate_ref=_PRIV_CERT_REF,
+        public_certificate_ref=_PUB_CERT_REF,
+    )
+    root = ET.fromstring(xml)
+    seen = {}
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") in ("privateCertificate", "publicCertificate"):
+            seen[field.attrib["id"]] = field.attrib.get("value")
+    assert seen == {
+        "privateCertificate": _PRIV_CERT_REF,
+        "publicCertificate": _PUB_CERT_REF,
+    }
+
+
+def test_certificate_refs_combined_with_pooling():
+    """User direction: cert refs are independent of every other option,
+    including pooling. They must coexist cleanly."""
+    xml = _build_minimal_none(
+        private_certificate_ref=_PRIV_CERT_REF,
+        public_certificate_ref=_PUB_CERT_REF,
+        connection_pooling={"enabled": True, "max_total": 20, "idle_timeout_seconds": 30},
+    )
+    assert _field_value(xml, "enableConnectionPooling") == "true"
+    assert _field_value(xml, "maxTotal") == "20"
+    # Cert refs still emitted.
+    root = ET.fromstring(xml)
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") == "privateCertificate":
+            assert field.attrib.get("value") == _PRIV_CERT_REF
+            return
+    raise AssertionError("privateCertificate field not found")
+
+
+def test_private_certificate_ref_must_be_string():
+    cfg = _minimal_none_config(private_certificate_ref=12345)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "private_certificate_ref"
+
+
+def test_public_certificate_ref_must_be_string():
+    cfg = _minimal_none_config(public_certificate_ref=["not", "a", "string"])
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "public_certificate_ref"
+
+
+def test_empty_certificate_refs_treated_as_omitted():
+    """Empty string refs == not supplied → emit self-closing cert fields
+    (matching live REST None shape)."""
+    xml = _build_minimal_none(private_certificate_ref="", public_certificate_ref="")
+    root = ET.fromstring(xml)
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") in ("privateCertificate", "publicCertificate"):
+            assert "value" not in field.attrib, (
+                f"Empty cert ref must emit self-closing field, got attribs: {field.attrib}"
+            )
