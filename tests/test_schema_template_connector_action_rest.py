@@ -268,8 +268,8 @@ def test_field_method_dependency_map_independent_fields_present():
         "path",
         "query_parameters",
         "request_headers",
-        "request_profile_ref",
-        "response_profile_ref",
+        "request_profile_id",
+        "response_profile_id",
         "request_profile_type",
         "response_profile_type",
         "return_application_errors",
@@ -278,6 +278,16 @@ def test_field_method_dependency_map_independent_fields_present():
         assert field in independent, (
             f"field {field!r} must be listed as method-independent in "
             "field_method_dependency_map.independent"
+        )
+    # Regression: the `_ref` suffix variants must NOT appear — they are
+    # not accepted input keys. The operation builder reads
+    # `request_profile_id` / `response_profile_id` (which may carry a
+    # `$ref:KEY` token for late binding via the id registry).
+    for wrong_name in ("request_profile_ref", "response_profile_ref"):
+        assert wrong_name not in independent, (
+            f"field_method_dependency_map.independent lists "
+            f"{wrong_name!r} but the operation builder accepts only "
+            f"{wrong_name.replace('_ref', '_id')!r}"
         )
 
 

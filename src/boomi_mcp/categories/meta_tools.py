@@ -1166,7 +1166,7 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
             "rule. Use this map to drive caller-side validation."
         ),
         "independent": [
-            "url",
+            "base_url",
             "connect_timeout_ms",
             "read_timeout_ms",
             "cookie_scope",
@@ -2064,8 +2064,8 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
             "path",
             "query_parameters",
             "request_headers",
-            "request_profile_ref",
-            "response_profile_ref",
+            "request_profile_id",
+            "response_profile_id",
             "request_profile_type",
             "response_profile_type",
             "return_application_errors",
