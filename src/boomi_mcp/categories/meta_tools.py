@@ -1253,13 +1253,15 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
     },
     "out_of_scope": {
         "non_emitted_auth_modes": (
-            "Connection emission for BASIC / NTLM / CUSTOM / PASSWORD_DIGEST "
-            "/ AWS_SIGNATURE / AWS_IAM_ROLES_ANYWHERE is deferred until a "
-            "verified live Boomi XML reference is available for each."
+            "Connection emission for CUSTOM / PASSWORD_DIGEST / AWS_SIGNATURE "
+            "/ AWS_IAM_ROLES_ANYWHERE is deferred until a verified live "
+            "Boomi XML reference is available for each."
         ),
         "non_client_credentials_oauth2_grants": (
-            "authorization_code, resource_owner_credentials, and jwt_bearer "
-            "grant types are deferred until verified live exports exist."
+            "resource_owner_credentials and jwt_bearer grant types are "
+            "deferred until verified live exports exist. The token-not-set "
+            "authorization_code grant IS buildable; only authorization_code "
+            "with cached access-token emission remains out of scope."
         ),
     },
     "alternative_examples": {
@@ -2159,20 +2161,17 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         ),
     },
     "out_of_scope": {
-        "unverified_methods": (
-            "POST/PUT/DELETE/HEAD/OPTIONS/TRACE are recognized "
-            "but deferred (UNVERIFIED_REST_XML_VARIANT). Create a minimal "
-            "live REST Client operation for the desired method to lock its "
-            "XML shape, then open a follow-up issue."
-        ),
-        "non_empty_query_parameters_and_headers": (
-            "Populated query_parameters and request_headers are deferred "
-            "(NEEDS_REST_EXAMPLE) until a verified live REST Client "
-            "operation with populated customProperties exists."
-        ),
         "process_emission": (
             "Wiring the connection + operation into a runnable process "
             "(retry, DLQ, schedule) is tracked by later M2 issues."
+        ),
+        "encrypted_custom_properties": (
+            "Encrypted query_parameter / request_header entries (Boomi's "
+            "`<properties encrypted=\"true\" .../>` shape) remain out of "
+            "scope. Caller-supplied configs with the `encrypted=True` "
+            "marker return UNSUPPORTED_REST_ENCRYPTED_CUSTOM_PROPERTY. "
+            "Lifting this requires a secret-safe write path that does "
+            "not exist yet."
         ),
     },
 }

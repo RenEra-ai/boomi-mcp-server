@@ -252,3 +252,25 @@ def test_template_contains_no_canned_payloads_or_sql():
         assert forbidden not in blob, (
             f"Template leaks forbidden substring: {forbidden!r}"
         )
+
+
+def test_out_of_scope_does_not_list_supported_methods_or_customproperties():
+    """Codex round-1 P2 #5: out_of_scope must NOT advertise the Phase-5
+    methods (POST/PUT/DELETE/HEAD/OPTIONS/TRACE) as deferred, and must NOT
+    say populated customProperties return NEEDS_REST_EXAMPLE — those paths
+    are now buildable."""
+    result = _call(component_type="connector-action", protocol="rest.operation")
+    oos = result.get("out_of_scope", {})
+    oos_blob = repr(oos)
+    # No supported method should appear as deferred.
+    import re
+    for method in ("POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE"):
+        assert not re.search(rf"\b{method}\b", oos_blob), (
+            f"out_of_scope still names supported method {method!r} as "
+            "deferred; remove from the unverified_methods entry."
+        )
+    # The deferred-customProperty key must be gone.
+    assert "non_empty_query_parameters_and_headers" not in oos
+    # And neither code should appear in the deferred docs.
+    assert "UNVERIFIED_REST_XML_VARIANT" not in oos_blob
+    assert "NEEDS_REST_EXAMPLE" not in oos_blob
