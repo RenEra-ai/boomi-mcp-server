@@ -1307,6 +1307,94 @@ class RestClientConnectionBuilder:
                     ),
                 )
 
+        # 6) Optional preemptive flag must be a bool when supplied.
+        if "preemptive" in config and not isinstance(config["preemptive"], bool):
+            return BuilderValidationError(
+                "preemptive must be a bool",
+                error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                field="preemptive",
+                hint="Use true or false (Python True/False).",
+            )
+
+        # 7) Optional timeouts must be integers (negative or zero means
+        # "wait indefinitely" per Boomi docs).
+        for timeout_field in ("connect_timeout_ms", "read_timeout_ms"):
+            if timeout_field in config:
+                value = config[timeout_field]
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return BuilderValidationError(
+                        f"{timeout_field} must be an integer (negative or zero "
+                        "means wait indefinitely)",
+                        error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                        field=timeout_field,
+                        hint="Use a JSON integer (e.g. -1 for unbounded wait).",
+                    )
+
+        # 8) Optional connection_pooling block.
+        pooling_err = cls._validate_connection_pooling(config.get("connection_pooling"))
+        if pooling_err is not None:
+            return pooling_err
+
+        return None
+
+    _POOLING_ALLOWED_KEYS = frozenset({
+        "enabled",
+        "max_total",
+        "idle_timeout_seconds",
+    })
+
+    @classmethod
+    def _validate_connection_pooling(
+        cls, pooling: Any
+    ) -> Optional[BuilderValidationError]:
+        """Validate the optional `connection_pooling` block.
+
+        None is treated as omitted. Otherwise must be a dict whose keys are
+        subset of {enabled, max_total, idle_timeout_seconds}, with the right
+        value types. Returns the first error encountered, or None.
+        """
+        if pooling is None:
+            return None
+        if not isinstance(pooling, dict):
+            return BuilderValidationError(
+                f"connection_pooling must be an object/dict, got "
+                f"{type(pooling).__name__}",
+                error_code="REST_POOLING_INVALID",
+                field="connection_pooling",
+                hint=(
+                    "Pass connection_pooling as a JSON object with keys: "
+                    "enabled (bool), max_total (int), idle_timeout_seconds (int)."
+                ),
+            )
+        unknown = set(pooling.keys()) - cls._POOLING_ALLOWED_KEYS
+        if unknown:
+            offender = sorted(unknown)[0]
+            return BuilderValidationError(
+                f"connection_pooling has unknown key {offender!r}",
+                error_code="REST_POOLING_INVALID",
+                field=f"connection_pooling.{offender}",
+                hint=(
+                    "Allowed connection_pooling keys: "
+                    f"{', '.join(sorted(cls._POOLING_ALLOWED_KEYS))}."
+                ),
+            )
+        if "enabled" in pooling and not isinstance(pooling["enabled"], bool):
+            return BuilderValidationError(
+                "connection_pooling.enabled must be a bool",
+                error_code="REST_POOLING_INVALID",
+                field="connection_pooling.enabled",
+                hint="Use true or false.",
+            )
+        for int_field in ("max_total", "idle_timeout_seconds"):
+            if int_field in pooling:
+                value = pooling[int_field]
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return BuilderValidationError(
+                        f"connection_pooling.{int_field} must be an integer",
+                        error_code="REST_POOLING_INVALID",
+                        field=f"connection_pooling.{int_field}",
+                        hint="Use a JSON integer (Boomi default: 20 for max_total, 30 for idle_timeout_seconds).",
+                    )
         return None
 
     @staticmethod
@@ -1448,6 +1536,8 @@ class RestClientOperationBuilder:
     SUPPORTED_OPERATION_MODES = ("execute",)
     SUPPORTED_METHODS = ("GET", "PATCH")
     VERIFIED_PENDING_METHODS = ("POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE")
+    SUPPORTED_FOLLOW_REDIRECTS_VALUES = ("NONE", "STRICT", "LAX")
+    SUPPORTED_PROFILE_TYPES = ("none", "xml", "json")
     FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
 
     @classmethod
@@ -1609,6 +1699,41 @@ class RestClientOperationBuilder:
             if err is not None:
                 return err
 
+        # 9) follow_redirects (when supplied) must be NONE / STRICT / LAX.
+        if "follow_redirects" in config:
+            fr = config["follow_redirects"]
+            if not isinstance(fr, str) or fr not in cls.SUPPORTED_FOLLOW_REDIRECTS_VALUES:
+                supported = ", ".join(cls.SUPPORTED_FOLLOW_REDIRECTS_VALUES)
+                return BuilderValidationError(
+                    f"follow_redirects must be one of: {supported}",
+                    error_code="REST_OPERATION_VALIDATION_FAILED",
+                    field="follow_redirects",
+                    hint=(
+                        f"Use one of: {supported}. The verified GET live "
+                        "export uses 'NONE' as the default."
+                    ),
+                )
+
+        # 10) request_profile_type / response_profile_type — accept any
+        # casing of the documented enum and normalize to lowercase at build
+        # time. Boomi's REST Client emits lowercase ('xml') per the live
+        # exports.
+        for pt_field in ("request_profile_type", "response_profile_type"):
+            if pt_field in config:
+                value = config[pt_field]
+                if not isinstance(value, str) or value.lower() not in cls.SUPPORTED_PROFILE_TYPES:
+                    supported = ", ".join(cls.SUPPORTED_PROFILE_TYPES)
+                    return BuilderValidationError(
+                        f"{pt_field} must be one of (case-insensitive): {supported}",
+                        error_code="REST_OPERATION_VALIDATION_FAILED",
+                        field=pt_field,
+                        hint=(
+                            f"Use one of: {supported}. Boomi's REST Client "
+                            "emits lowercase in XML; the builder normalizes "
+                            "uppercase/mixed-case input."
+                        ),
+                    )
+
         return None
 
     def build(self, **params) -> str:
@@ -1622,8 +1747,11 @@ class RestClientOperationBuilder:
         folder_name = params.get("folder_name", "Home")
         description = params.get("description", "")
 
-        request_profile_type = params.get("request_profile_type", "xml")
-        response_profile_type = params.get("response_profile_type", "xml")
+        # Normalize profile types to Boomi's expected lowercase form. The
+        # validator accepts any casing of {none, xml, json}; XML emission
+        # must always be lowercase to match the live REST Client export.
+        request_profile_type = str(params.get("request_profile_type", "xml")).lower()
+        response_profile_type = str(params.get("response_profile_type", "xml")).lower()
         return_application_errors = bool(params.get("return_application_errors", True))
         track_response = bool(params.get("track_response", True))
 
