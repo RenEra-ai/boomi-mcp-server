@@ -1101,3 +1101,74 @@ def test_codex_round3_common_safe_headers_still_pass():
     qp_field = _find_field(xml, "requestHeaders")
     cp = qp_field.find("customProperties")
     assert len(list(cp)) == 9
+
+
+# ----------------------------------------------------------------------------
+# Codex round 2 — strict bool validation for return_application_errors and
+# track_response. Before the fix the build path used bool(...) coercion, so
+# `"false"` (string) became True (Python truthy) and `0` became False
+# silently, corrupting the emitted XML attribute. The validator must reject
+# non-bool values up front.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bool_field", ["return_application_errors", "track_response"])
+@pytest.mark.parametrize("non_bool_value", ["true", "false", "False", "True", 0, 1, "yes", []])
+def test_non_bool_operation_flag_rejected(bool_field, non_bool_value):
+    """Non-bool values for return_application_errors / track_response must
+    be rejected, not silently coerced to True/False by bool()."""
+    cfg = _minimal_get_config(**{bool_field: non_bool_value})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_OPERATION_VALIDATION_FAILED"
+    assert err.field == bool_field
+
+
+@pytest.mark.parametrize("bool_field", ["return_application_errors", "track_response"])
+@pytest.mark.parametrize("bool_value", [True, False])
+def test_bool_operation_flag_accepted_and_emitted_verbatim(bool_field, bool_value):
+    """Bool True/False must pass validation AND emit the corresponding
+    attribute value in the XML envelope. No coercion — caller's choice
+    flows through."""
+    xml = _build_get(**{bool_field: bool_value})
+    root = ET.fromstring(xml)
+    op = root.find("bns:object/Operation", NS)
+    attr_name = {
+        "return_application_errors": "returnApplicationErrors",
+        "track_response": "trackResponse",
+    }[bool_field]
+    expected = "true" if bool_value else "false"
+    assert op.attrib[attr_name] == expected
+
+
+@pytest.mark.parametrize("bool_field", ["return_application_errors", "track_response"])
+def test_missing_operation_flag_defaults_to_true(bool_field):
+    """When the caller omits the flag entirely, the default is True
+    (matches existing live-export behavior)."""
+    cfg = _minimal_get_config()
+    cfg.pop(bool_field, None)
+    xml = RestClientOperationBuilder().build(**cfg)
+    root = ET.fromstring(xml)
+    op = root.find("bns:object/Operation", NS)
+    attr_name = {
+        "return_application_errors": "returnApplicationErrors",
+        "track_response": "trackResponse",
+    }[bool_field]
+    assert op.attrib[attr_name] == "true"
+
+
+@pytest.mark.parametrize("bool_field", ["return_application_errors", "track_response"])
+def test_none_operation_flag_accepted_as_default(bool_field):
+    """Caller passes the key explicitly with value None — treat as
+    "not supplied" (default True) for consistency with the other
+    optional-field gates."""
+    cfg = _minimal_get_config(**{bool_field: None})
+    xml = RestClientOperationBuilder().build(**cfg)
+    root = ET.fromstring(xml)
+    op = root.find("bns:object/Operation", NS)
+    attr_name = {
+        "return_application_errors": "returnApplicationErrors",
+        "track_response": "trackResponse",
+    }[bool_field]
+    assert op.attrib[attr_name] == "true"
