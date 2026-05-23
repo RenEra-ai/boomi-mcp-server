@@ -2184,6 +2184,28 @@ class RestClientOperationBuilder:
                         ),
                     )
 
+        # 11) Bool operation flags. Reject non-bool callers up front —
+        # before the fix, build() applied `bool(...)` coercion so
+        # `"false"` (string) became True (Python truthy) and silently
+        # corrupted the emitted XML attribute. None is treated as
+        # "not supplied" (default True at build) for consistency.
+        for bool_field in ("return_application_errors", "track_response"):
+            if bool_field in config and config[bool_field] is not None:
+                value = config[bool_field]
+                if not isinstance(value, bool):
+                    return BuilderValidationError(
+                        f"{bool_field} must be a boolean (got "
+                        f"{type(value).__name__})",
+                        error_code="REST_OPERATION_VALIDATION_FAILED",
+                        field=bool_field,
+                        hint=(
+                            f"Pass {bool_field}=True or False. String "
+                            "'true'/'false' and numeric 0/1 are rejected "
+                            "to prevent silent truthy-coercion that "
+                            "would mis-emit the XML attribute."
+                        ),
+                    )
+
         return None
 
     def build(self, **params) -> str:
@@ -2202,8 +2224,13 @@ class RestClientOperationBuilder:
         # must always be lowercase to match the live REST Client export.
         request_profile_type = str(params.get("request_profile_type", "xml")).lower()
         response_profile_type = str(params.get("response_profile_type", "xml")).lower()
-        return_application_errors = bool(params.get("return_application_errors", True))
-        track_response = bool(params.get("track_response", True))
+        # validate_config (step 11) has already enforced that these are
+        # bool (or None / omitted). Resolve None → default True without
+        # truthy-coercing arbitrary values.
+        rae_raw = params.get("return_application_errors")
+        return_application_errors = True if rae_raw is None else rae_raw
+        tr_raw = params.get("track_response")
+        track_response = True if tr_raw is None else tr_raw
 
         safe_name = _escape_xml(component_name)
         safe_folder = _escape_xml(folder_name)
