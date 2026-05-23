@@ -92,24 +92,48 @@ def _format_xml_value(value: Any) -> str:
 class HttpConnectorBuilder:
     """Builder for HTTP/HTTPS connector-settings components.
 
-    Generates <HttpSettings> XML matching the real Boomi UI export structure.
-    Supports NONE, BASIC, and OAUTH2 authentication types.
+    Issue #24 hardens the previous M1 builder: validation upgrades from
+    `ValueError` to structured `BuilderValidationError`, plaintext secret
+    keys are rejected before XML emission, and only `auth_type='NONE'` is
+    buildable today. BASIC / OAUTH2 etc. are recognized but rejected with
+    `UNSUPPORTED_HTTP_AUTH_MODE` until verified live Boomi exports exist
+    for those shapes. The emitted XML for `auth_type='NONE'` is unchanged
+    from the pre-issue-#24 output (locked by integration_builder tests).
 
-    Config keys (all optional except url):
-        url:                    Connection URL (required)
-        auth_type:              NONE, BASIC, PASSWORD_DIGEST, CUSTOM, OAUTH, OAUTH2
-        username:               Username for BASIC auth
-        connect_timeout:        Connection timeout in ms (not in HttpSettings attrs)
-        read_timeout:           Read timeout in ms (not in HttpSettings attrs)
-        trust_all_certs:        Trust all SSL certificates (true/false)
-        client_ssl_alias:       Client SSL certificate alias
-        oauth2_grant_type:      OAuth2 grant type (e.g., client_credentials)
-        oauth2_client_id:       OAuth2 client ID
-        oauth2_client_secret:   OAuth2 client secret
-        oauth2_scope:           OAuth2 scope
-        oauth2_token_url:       OAuth2 access token endpoint URL
-        oauth2_auth_url:        OAuth2 authorization endpoint URL
+    Config keys (all optional except component_name + url):
+        component_name:         Required; top-level component name.
+        url:                    Required; connection URL.
+        auth_type:              NONE (only buildable mode in issue #24).
+        folder_name:            Optional; defaults to "Home".
+        description:            Optional.
+        username:               Optional username for AuthSettings.
+        trust_all_certs:        Optional; SSLOptions trustServerCert.
+        client_ssl_alias:       Optional; SSLOptions clientauth.
+        credential_ref:         Optional opaque caller-side credential
+                                reference (e.g.
+                                "credential://vendor/role"); the builder
+                                never writes it into XML.
     """
+
+    SUPPORTED_AUTH_MODES = ("NONE",)
+    RECOGNIZED_BUT_UNSUPPORTED_AUTH_MODES = (
+        "BASIC",
+        "OAUTH2",
+        "PASSWORD_DIGEST",
+        "CUSTOM",
+        "OAUTH",
+    )
+    # Same set as the database builders — secrets cross the wire as opaque
+    # credential_ref strings only. Boomi password ciphertext is set via the
+    # UI after create, or supplied via the raw-XML escape hatch.
+    FORBIDDEN_SECRET_FIELDS = (
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    )
 
     # Attributes on <HttpSettings> element
     HTTP_SETTINGS_ATTRS = {
@@ -128,14 +152,86 @@ class HttpConnectorBuilder:
         'client_ssl_alias': 'clientauth',
     }
 
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        """Reuse DatabaseConnectorBuilder's scan — same forbidden-key set."""
+        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+            config, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate an HTTP connector-settings config without building XML."""
+        # 1) Plaintext secret-shaped keys must never appear in caller config.
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        # 2) component_name required.
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required for HTTP connectors",
+                error_code="HTTP_CONNECTOR_VALIDATION_FAILED",
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        # 3) url required.
+        url = config.get("url")
+        if not url or not str(url).strip():
+            return BuilderValidationError(
+                "url is required for HTTP connectors",
+                error_code="MISSING_HTTP_ENDPOINT",
+                field="url",
+                hint=(
+                    "Provide the connection base URL (e.g. "
+                    "'https://api.example.com'). The operation's path is "
+                    "set on the connector-action, not here."
+                ),
+            )
+
+        # 4) auth_type gating — only NONE is buildable in issue #24.
+        auth_type = config.get("auth_type")
+        if auth_type is not None and auth_type not in cls.SUPPORTED_AUTH_MODES:
+            supported = ", ".join(cls.SUPPORTED_AUTH_MODES)
+            if auth_type in cls.RECOGNIZED_BUT_UNSUPPORTED_AUTH_MODES:
+                return BuilderValidationError(
+                    f"auth_type {auth_type!r} is recognized but not buildable "
+                    "yet — no verified live Boomi XML reference is available",
+                    error_code="UNSUPPORTED_HTTP_AUTH_MODE",
+                    field="auth_type",
+                    hint=(
+                        f"Supported auth_modes: {supported}. For "
+                        f"{auth_type}, model bearer/API-key target auth as "
+                        "variable headers on the operation plus an opaque "
+                        "credential_ref, or use the raw-XML escape hatch "
+                        "(config.xml=...) with a verified export."
+                    ),
+                )
+            return BuilderValidationError(
+                f"Unknown auth_type {auth_type!r} (supported: {supported})",
+                error_code="UNSUPPORTED_HTTP_AUTH_MODE",
+                field="auth_type",
+                hint=f"Supported auth_modes: {supported}.",
+            )
+
+        return None
+
     def build(self, **params) -> str:
         """Build complete component XML for an HTTP connector-settings component."""
-        component_name = params.get('component_name', '')
-        if not component_name:
-            raise ValueError("component_name is required")
-        url = params.get('url', '')
-        if not url:
-            raise ValueError("url is required for HTTP connectors")
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        component_name = params["component_name"]
+        url = params["url"]
 
         folder_name = params.get('folder_name', 'Home')
         description = params.get('description', '')
