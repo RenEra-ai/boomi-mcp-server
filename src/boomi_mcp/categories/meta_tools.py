@@ -1067,6 +1067,178 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
 }
 
 
+_COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-settings",
+    "protocol": "rest.client",
+    "boomi_subtype": "officialboomi-X3979C-rest-prod",
+    "public_aliases": ["rest", "rest_client", "officialboomi-X3979C-rest-prod"],
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "Boomi REST Client connector-settings (connection). Models the API "
+        "base URL plus authentication settings. Issue #24 ships only the "
+        "OAUTH2 client_credentials shape that has a verified live Boomi "
+        "XML reference; every other auth mode listed in the REST Client "
+        "docs (NONE, BASIC, NTLM, CUSTOM, PASSWORD_DIGEST, AWS_SIGNATURE, "
+        "AWS_IAM_ROLES_ANYWHERE) returns UNSUPPORTED_REST_AUTH_MODE until "
+        "a verified live export exists. The HTTP Client connector is NOT "
+        "the issue #24 target — use connector_type='rest'."
+    ),
+    "template": {
+        "connector_type": "rest",
+        "component_name": "<<target REST connection>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "base_url": "https://<<host>>",
+        "auth": "OAUTH2",
+        "oauth2": {
+            "grant_type": "client_credentials",
+            "client_id": "<<client id>>",
+            "client_secret_ref": "credential://<<vendor>>/<<role>>",
+            "access_token_url": "https://<<host>>/oauth/token",
+            "scope": "",
+            "credentials_assertion_type": "client_secret",
+        },
+        "preemptive": False,
+        "connect_timeout_ms": -1,
+        "read_timeout_ms": -1,
+        "cookie_scope": "GLOBAL",
+        "connection_pooling": {"enabled": False},
+    },
+    "required": [
+        "connector_type",
+        "component_name",
+        "base_url",
+        "auth",
+    ],
+    "defaults": {
+        "connector_type": "rest",
+        "auth": "OAUTH2",
+        "folder_name": "Home",
+        "preemptive": False,
+        "connect_timeout_ms": -1,
+        "read_timeout_ms": -1,
+        "cookie_scope": "GLOBAL",
+        "connection_pooling": {"enabled": False},
+    },
+    "supported_auth_modes": ["OAUTH2"],
+    "unsupported_future_auth_modes": [
+        "NONE",
+        "BASIC",
+        "PASSWORD_DIGEST",
+        "NTLM",
+        "CUSTOM",
+        "AWS_SIGNATURE",
+        "AWS_IAM_ROLES_ANYWHERE",
+    ],
+    "buildable_oauth2_grant_types": ["client_credentials"],
+    "unsupported_future_oauth2_grant_types": [
+        "authorization_code",
+        "resource_owner_credentials",
+        "jwt_bearer",
+    ],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    ],
+    "password_note": (
+        "Plaintext secret-shaped fields are rejected with "
+        "PLAINTEXT_SECRET_REJECTED (top-level) or REST_SECRET_VALUE_FORBIDDEN "
+        "(under oauth2). Pass an opaque oauth2.client_secret_ref starting "
+        "with 'credential://'; the builder never writes the actual secret "
+        "into XML. Boomi stores the OAuth2 client secret as ciphertext set "
+        "via the UI after create (or via a pre-encrypted XML payload)."
+    ),
+    "error_codes": {
+        "REST_CONNECTOR_VALIDATION_FAILED": "shape / type / required-field issue",
+        "REST_BASE_URL_REQUIRED": "base_url absent or empty",
+        "REST_BASE_URL_INVALID": "base_url scheme is not http:// or https://",
+        "UNSUPPORTED_REST_AUTH_MODE": "auth or oauth2.grant_type is not buildable in issue #24",
+        "REST_SECRET_VALUE_FORBIDDEN": "raw secret value under oauth2.client_secret_ref or oauth2.client_secret",
+        "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
+    },
+    "gotchas": [
+        (
+            "REST Client is a different connector than HTTP Client. The "
+            "Boomi subtype is officialboomi-X3979C-rest-prod and the "
+            "operation step uses GenericOperationConfig, not "
+            "HttpSendAction. Always pass connector_type='rest' for "
+            "M2 target sends."
+        ),
+        (
+            "OAuth2 client_credentials is the only auth shape with a "
+            "verified live XML export. Other auth modes are recognized but "
+            "rejected; create the desired connection in Boomi first and "
+            "open a follow-up issue to lock its XML shape."
+        ),
+        (
+            "OAuth2 client secret is stored as Boomi ciphertext. The builder "
+            "emits an empty clientSecret attribute and an encryptedValues "
+            "header marking the path isSet=false. After create, the value "
+            "is supplied via the Boomi UI (or a pre-encrypted raw-XML "
+            "payload via config.xml=...)."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Resolve the API base URL and OAuth2 access token endpoint.",
+        "2. Create the REST connector-settings with auth='OAUTH2' and the "
+        "oauth2 sub-block populated with placeholder client_id / "
+        "client_secret_ref / access_token_url.",
+        "3. Supply the real client_secret via the Boomi UI after create "
+        "(builder never writes it into XML).",
+        "4. Create the operation (connector-action rest.operation) and "
+        "add this connection's key to depends_on plus connection_ref_key.",
+    ],
+    "update_note": (
+        "manage_connector action='update' supports a smart-merge of "
+        "name/description/folder_name. Field-level edits inside "
+        "GenericConnectionConfig require the raw-XML escape hatch."
+    ),
+    "example": {
+        "key": "target_rest_connection",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "<<target REST connection>>",
+        "config": {
+            "connector_type": "rest",
+            "component_name": "<<target REST connection>>",
+            "base_url": "https://<<host>>",
+            "auth": "OAUTH2",
+            "oauth2": {
+                "grant_type": "client_credentials",
+                "client_id": "<<client id>>",
+                "client_secret_ref": "credential://<<vendor>>/<<role>>",
+                "access_token_url": "https://<<host>>/oauth/token",
+                "scope": "",
+                "credentials_assertion_type": "client_secret",
+            },
+        },
+        "_example_note": (
+            "Placeholder values only. Fill in the API base URL, OAuth2 "
+            "client id, token endpoint, and credential reference using the "
+            "deployment context."
+        ),
+    },
+    "out_of_scope": {
+        "non_oauth2_auth_emission": (
+            "Connection emission for NONE / BASIC / NTLM / CUSTOM / "
+            "PASSWORD_DIGEST / AWS_SIGNATURE / AWS_IAM_ROLES_ANYWHERE is "
+            "deferred until a verified live Boomi XML reference is "
+            "available for each."
+        ),
+        "non_client_credentials_oauth2_grants": (
+            "authorization_code, resource_owner_credentials, and jwt_bearer "
+            "grant types are deferred until verified live exports exist."
+        ),
+    },
+}
+
+
 _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
     "resource_type": "component",
     "operation": "create",
@@ -1078,7 +1250,7 @@ _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
         "for a fully-shaped template, or use the raw-XML escape hatch for unsupported "
         "connector types."
     ),
-    "available_protocols": ["database.sqlserver"],
+    "available_protocols": ["database.sqlserver", "rest.client"],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
         "component_type='connector-settings', protocol='<protocol>') for the chosen "
@@ -1604,21 +1776,225 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
 }
 
 
+_COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-action",
+    "protocol": "rest.operation",
+    "boomi_subtype": "officialboomi-X3979C-rest-prod",
+    "public_aliases": ["rest", "rest_client", "officialboomi-X3979C-rest-prod"],
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "Boomi REST Client operation. Wraps a single REST call (GET or "
+        "PATCH in issue #24) in an Operation envelope with "
+        "GenericOperationConfig customOperationType=<method> and "
+        "operationType=EXECUTE. The connection is bound at the process "
+        "connector step, not in the operation XML — connection_ref_key is "
+        "plan-only metadata for dependency ordering."
+    ),
+    "template": {
+        "component_type": "connector-action",
+        "connector_type": "rest",
+        "operation_mode": "execute",
+        "component_name": "<<operation name>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "connection_ref_key": "<<rest connection key>>",
+        "method": "PATCH",
+        "path": "/<<endpoint path>>",
+        "query_parameters": {},
+        "request_headers": {},
+        "request_profile_type": "json",
+        "request_profile_id": "$ref:<<request profile key>>",
+        "response_profile_type": "json",
+        "response_profile_id": "$ref:<<response profile key>>",
+        "return_application_errors": True,
+        "track_response": True,
+        "follow_redirects": "NONE",
+        "payload_source_ref_key": "<<payload source key>>",
+        "credential_ref": "credential://<<vendor>>/<<role>>",
+    },
+    "required": [
+        "component_type",
+        "connector_type",
+        "operation_mode",
+        "component_name",
+        "connection_ref_key",
+        "method",
+        "path",
+    ],
+    "defaults": {
+        "component_type": "connector-action",
+        "connector_type": "rest",
+        "operation_mode": "execute",
+        "folder_name": "Home",
+        "request_profile_type": "xml",
+        "response_profile_type": "xml",
+        "return_application_errors": True,
+        "track_response": True,
+        "follow_redirects_default_when_method_is_get": "NONE",
+    },
+    "supported_operation_modes": ["execute"],
+    "supported_methods": ["GET", "PATCH"],
+    "unverified_pending_methods": [
+        "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE",
+    ],
+    "follow_redirects_values": ["NONE", "STRICT", "LAX"],
+    "follow_redirects_emission_rule": (
+        "GET emits a followRedirects field by default (value='NONE'). "
+        "PATCH and other methods only emit the field when the caller passes "
+        "follow_redirects explicitly. Verified against the Renera "
+        "[Rest Test GET] and [Rest Test PATCH] live exports."
+    ),
+    "query_parameters_status": "empty_only_until_exported",
+    "request_headers_status": "empty_only_until_exported",
+    "query_headers_note": (
+        "Empty dicts emit the verified customProperties shape: "
+        "<customProperties/> with no children. Non-empty values return "
+        "NEEDS_REST_EXAMPLE until a live Boomi REST Client operation with "
+        "populated custom properties is exported and its XML shape locked."
+    ),
+    "depends_on_requirements": [
+        "Include connection_ref_key in depends_on so the REST connector-settings runs first.",
+        "When request_profile_id uses '$ref:KEY', include KEY in depends_on too.",
+        "When response_profile_id uses '$ref:KEY', include KEY in depends_on too.",
+        "When payload_source_ref_key is supplied, include that key in depends_on.",
+    ],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    ],
+    "credential_note": (
+        "Bearer-style and API-key-style headers belong on the OPERATION "
+        "as request_headers entries — but issue #24 does not yet support "
+        "populated request_headers (no verified live export exists for "
+        "non-empty customProperties). For now, model token-based "
+        "authentication on the CONNECTION (auth='OAUTH2') and supply the "
+        "client secret via the encrypted Boomi UI field. Plaintext header "
+        "values are rejected with PLAINTEXT_SECRET_REJECTED."
+    ),
+    "error_codes": {
+        "UNSUPPORTED_REST_OPERATION_MODE": "operation_mode is not 'execute'",
+        "UNSUPPORTED_REST_METHOD": "method is neither buildable nor recognized",
+        "UNVERIFIED_REST_XML_VARIANT": "method is recognized but not yet buildable (POST/PUT/DELETE/HEAD/OPTIONS/TRACE)",
+        "NEEDS_REST_EXAMPLE": "query_parameters or request_headers is non-empty",
+        "REST_PATH_REQUIRED": "path absent or empty",
+        "REST_CONNECTION_REF_REQUIRED": "connection_ref_key absent or empty",
+        "REST_DEPENDENCY_REQUIRED": "connection_ref_key / $ref target / payload_source_ref_key not declared in depends_on",
+        "REST_PROFILE_REF_UNRESOLVED": "request_profile_id or response_profile_id $ref token is empty",
+        "REST_OPERATION_VALIDATION_FAILED": "shape / type / required-field issue",
+        "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
+    },
+    "gotchas": [
+        (
+            "Boomi binds the connection at the process connector step, not "
+            "in the operation XML. The builder will NOT emit a connection "
+            "ID — connection_ref_key is plan-only metadata for dependency "
+            "ordering."
+        ),
+        (
+            "REST Client preserves the path value verbatim in emitted XML, "
+            "including any leading slash. (HTTP Client stripped one leading "
+            "slash; REST Client does not.) Pass the path exactly as it "
+            "should appear after the connection's base_url."
+        ),
+        (
+            "GET emits a followRedirects field with value='NONE' by default. "
+            "PATCH and other methods omit the field unless follow_redirects "
+            "is explicitly supplied. This matches the live RenEra exports."
+        ),
+        (
+            "connection_ref_key, payload_source_ref_key, credential_ref, "
+            "and any request body content are plan-only metadata. They "
+            "never appear in the emitted operation XML."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Create the REST connector-settings (manage_connector, connector_type=rest).",
+        "2. Create the request profile and response profile components (e.g. profile.json) "
+        "upstream so the operation can $ref them.",
+        "3. Plan this operation with depends_on=[<connection_key>, "
+        "<request_profile_key>, <response_profile_key>, <payload_source_key>], "
+        "connection_ref_key set, and request_profile_id='$ref:<request_profile_key>'.",
+        "4. Apply — $ref tokens are substituted with the created component "
+        "IDs via the id_registry.",
+    ],
+    "update_note": (
+        "Field-level edits are not yet supported for connector-action "
+        "rest.operation components. To revise an operation, recreate it "
+        "or use the raw-XML escape hatch."
+    ),
+    "example": {
+        "key": "target_rest_operation",
+        "type": "connector-action",
+        "action": "create",
+        "name": "<<operation name>>",
+        "depends_on": [
+            "target_rest_connection",
+            "target_json_profile",
+            "payload_map",
+        ],
+        "config": {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "<<operation name>>",
+            "connection_ref_key": "target_rest_connection",
+            "method": "PATCH",
+            "path": "/<<endpoint path>>",
+            "query_parameters": {},
+            "request_headers": {},
+            "request_profile_type": "json",
+            "request_profile_id": "$ref:target_json_profile",
+            "response_profile_type": "json",
+            "payload_source_ref_key": "payload_map",
+            "credential_ref": "credential://<<vendor>>/<<role>>",
+        },
+        "_example_note": (
+            "Placeholder values only. $ref tokens are substituted with "
+            "the matching component_id at apply time."
+        ),
+    },
+    "out_of_scope": {
+        "unverified_methods": (
+            "POST/PUT/DELETE/HEAD/OPTIONS/TRACE are recognized "
+            "but deferred (UNVERIFIED_REST_XML_VARIANT). Create a minimal "
+            "live REST Client operation for the desired method to lock its "
+            "XML shape, then open a follow-up issue."
+        ),
+        "non_empty_query_parameters_and_headers": (
+            "Populated query_parameters and request_headers are deferred "
+            "(NEEDS_REST_EXAMPLE) until a verified live REST Client "
+            "operation with populated customProperties exists."
+        ),
+        "process_emission": (
+            "Wiring the connection + operation into a runnable process "
+            "(retry, DLQ, schedule) is tracked by later M2 issues."
+        ),
+    },
+}
+
+
 _COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW = {
     "resource_type": "component",
     "operation": "create",
     "component_type": "connector-action",
     "tool": "manage_connector (action='create')",
     "note": (
-        "Connector-action (operation) builders. Currently only database.get "
-        "is implemented (issue #23). Database send/write is tracked by "
-        "issue #32."
+        "Connector-action (operation) builders. Available: database.get "
+        "(issue #23) and rest.operation (issue #24). Database send/write is "
+        "tracked by issue #32. HTTP Client is NOT the issue #24 target — "
+        "use connector_type='rest'."
     ),
-    "available_protocols": ["database.get"],
+    "available_protocols": ["database.get", "rest.operation"],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
-        "component_type='connector-action', protocol='database.get') for the "
-        "Get operation JSON template."
+        "component_type='connector-action', protocol='<protocol>') for the chosen "
+        "protocol's full JSON template."
     ),
     "escape_hatch": (
         "For operations without a builder, use manage_connector action='get' on "
@@ -2344,6 +2720,8 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         if component_type == "connector-settings":
             if protocol == "database.sqlserver":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER}
+            if protocol == "rest.client":
+                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_REST_CLIENT}
             if protocol:
                 return {
                     "_success": False,
@@ -2369,6 +2747,8 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         if component_type == "connector-action":
             if protocol == "database.get":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}
+            if protocol == "rest.operation":
+                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION}
             if protocol == "database.send":
                 # Explicit out-of-scope marker — point callers at issue #32
                 # so they don't think this is a typo we'd accept later.
