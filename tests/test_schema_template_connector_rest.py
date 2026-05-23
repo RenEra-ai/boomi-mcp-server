@@ -219,7 +219,7 @@ def test_field_auth_dependency_map_independent_fields_present():
     independent = dep_map.get("independent")
     assert isinstance(independent, list)
     for field in (
-        "url",
+        "base_url",
         "connect_timeout_ms",
         "read_timeout_ms",
         "cookie_scope",
@@ -231,6 +231,12 @@ def test_field_auth_dependency_map_independent_fields_present():
             f"field {field!r} must be listed as auth-independent in "
             "field_auth_dependency_map.independent"
         )
+    # Regression: the XML field id `url` must NOT appear in the public-key
+    # map. Callers pass `base_url` — `url` is the internal XML attribute.
+    assert "url" not in independent, (
+        "field_auth_dependency_map.independent uses XML field id 'url' "
+        "instead of the public config key 'base_url'"
+    )
 
 
 def test_field_auth_dependency_map_auth_tied_fields_match_validation():
