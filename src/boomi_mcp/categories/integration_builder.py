@@ -444,9 +444,48 @@ _REST_SENSITIVE_FIELD_PATHS = (
     "credential_ref",               # raw value when it should be credential://
     "request_headers",              # whole dict — Authorization / X-API-Key etc.
     "query_parameters",             # whole dict — api_key / token in querystring
-    "private_certificate_ref",      # PEM/key content when it should be a GUID
-    "public_certificate_ref",       # PEM content when it should be a GUID
 )
+
+# Cert refs are handled separately by `_redact_malformed_cert_refs` (below)
+# because their redaction is conditional on shape: PEM/key/garbage gets
+# scrubbed, but a valid GUID cert ref MUST survive so the caller can fix
+# an unrelated error from the plan output without losing the cert binding.
+# Codex review round-5 P2.
+_REST_CERT_REF_FIELDS = ("private_certificate_ref", "public_certificate_ref")
+
+
+def _redact_malformed_cert_refs(config: Any) -> None:
+    """Conditional redaction for `private_certificate_ref` /
+    `public_certificate_ref`.
+
+    Cert refs are NOT a uniformly-secret field like `credential_ref`: the
+    expected value is a Boomi component-id GUID, which is itself not a
+    secret. We only need to scrub the field when the caller has put
+    PEM/SSH-key/garbage there instead — that material IS secret-bearing.
+
+    Codex round-5 P2: previously the cert refs were added to
+    `_REST_SENSITIVE_FIELD_PATHS` so the always-on sweep scrubbed them
+    unconditionally. That over-redacted valid GUIDs when an unrelated
+    field failed validation (e.g. missing base_url), making the returned
+    spec unusable for correction. This helper redacts only when the
+    value isn't already in the documented GUID shape.
+    """
+    if not isinstance(config, dict):
+        return
+    for field in _REST_CERT_REF_FIELDS:
+        value = config.get(field)
+        if value in (None, ""):
+            continue
+        # Valid GUID — preserve (the caller can correct other errors and
+        # resubmit without re-entering the cert binding).
+        if (
+            isinstance(value, str)
+            and RestClientConnectionBuilder._BOOMI_COMPONENT_ID_RE.match(value.strip())
+        ):
+            continue
+        # Anything else (PEM, SSH key, non-string, malformed) is treated
+        # as potential secret material and scrubbed.
+        config[field] = "[REDACTED]"
 
 
 def _redact_dotted_field_path(config: Any, dotted_path: Optional[str]) -> None:
@@ -890,6 +929,10 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # fires first. Codex review item P1 round-6.
             for sensitive_path in _REST_SENSITIVE_FIELD_PATHS:
                 _redact_dotted_field_path(raw_config, sensitive_path)
+            # Cert refs: conditional redaction — scrub PEM/key material but
+            # preserve valid GUIDs so the caller can correct unrelated
+            # errors without losing the cert binding. Codex review round-5 P2.
+            _redact_malformed_cert_refs(raw_config)
 
         step: Dict[str, Any] = {
             "key": comp.key,

@@ -2190,6 +2190,53 @@ class TestBuildPlanRestPreflight:
         assert "raw-LEAK_KEEP_DICT_PATH" not in repr(plan)
 
     @patch(_PATCH_TARGET)
+    def test_codex_round5_valid_cert_ref_preserved_on_unrelated_error(self, mock_pag):
+        """Codex round-5 P2: when an UNRELATED REST validation error fires
+        (e.g. missing base_url), a valid GUID-shaped cert ref must be
+        preserved in the plan echo — otherwise the caller can't correct
+        the spec from the returned output. Round-4 added cert refs to the
+        always-redact list, which over-redacted valid GUIDs."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["auth"] = "NONE"
+        comp.config.pop("oauth2", None)
+        comp.config["base_url"] = ""  # forces REST_BASE_URL_REQUIRED
+        comp.config["private_certificate_ref"] = "21f598a6-1d90-4578-a35a-d0350c50b747"
+        comp.config["public_certificate_ref"] = "ea82aa0c-484b-40b1-890c-f142ab8fecad"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        # Different field fails — base_url, not the cert refs.
+        assert step["validation_error"]["error_code"] == "REST_BASE_URL_REQUIRED"
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        # Valid GUIDs MUST survive intact so the caller can fix base_url
+        # and resubmit without re-entering the certificate binding.
+        assert echoed["private_certificate_ref"] == "21f598a6-1d90-4578-a35a-d0350c50b747"
+        assert echoed["public_certificate_ref"] == "ea82aa0c-484b-40b1-890c-f142ab8fecad"
+
+    @patch(_PATCH_TARGET)
+    def test_codex_round5_pem_cert_ref_still_redacted_on_unrelated_error(self, mock_pag):
+        """Inverse sanity: if the cert ref carries PEM content (not GUID)
+        AND an unrelated field fails first, the PEM material must STILL
+        be scrubbed — shape-conditional redaction is asymmetric."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["auth"] = "NONE"
+        comp.config.pop("oauth2", None)
+        comp.config["base_url"] = ""  # earlier error wins
+        comp.config["private_certificate_ref"] = (
+            "-----BEGIN PRIVATE KEY-----\n"
+            "PEMCANARY_R5_LEAK_TEST_DEADBEEF\n"
+            "-----END PRIVATE KEY-----"
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["error_code"] == "REST_BASE_URL_REQUIRED"
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        # Non-GUID cert ref still redacted defensively.
+        assert echoed["private_certificate_ref"] == "[REDACTED]"
+        assert "PEMCANARY_R5_LEAK_TEST_DEADBEEF" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
     def test_codex_round4_pem_cert_ref_redacted_in_plan_echo(self, mock_pag):
         """Codex round-4 P1: when the GUID validator rejects PEM/key
         material supplied as a `private_certificate_ref`, the integration
