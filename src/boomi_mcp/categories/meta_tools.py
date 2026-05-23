@@ -1067,145 +1067,6 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
 }
 
 
-_COMPONENT_CREATE_CONNECTOR_HTTP_CLIENT = {
-    "resource_type": "component",
-    "operation": "create",
-    "component_type": "connector-settings",
-    "protocol": "http.client",
-    "tool": "manage_connector (action='create')",
-    "note": (
-        "HTTP Client connector-settings (connection). Models the connection "
-        "base URL plus authentication settings. Issue #24 only emits "
-        "auth_type='NONE' connections deterministically — other auth modes "
-        "(BASIC, OAUTH2, etc.) are recognized but rejected with "
-        "UNSUPPORTED_HTTP_AUTH_MODE until a verified live XML reference "
-        "for each shape is available. The operation step (connector-action "
-        "http.send) binds to this connection at the process connector step "
-        "via connection_ref_key — Boomi does not embed the connection ID "
-        "inside the operation XML."
-    ),
-    "template": {
-        "connector_type": "http",
-        "component_name": "<<target API connection>>",
-        "folder_name": "<<folder>>",
-        "description": "<<optional description>>",
-        "url": "https://<<host>>",
-        "auth_type": "NONE",
-        "credential_ref": "credential://<<vendor>>/<<role>>",
-    },
-    "required": [
-        "connector_type",
-        "component_name",
-        "url",
-    ],
-    "defaults": {
-        "connector_type": "http",
-        "auth_type": "NONE",
-        "folder_name": "Home",
-    },
-    "supported_auth_modes": ["NONE"],
-    "unsupported_future_auth_modes": [
-        "BASIC",
-        "OAUTH2",
-        "PASSWORD_DIGEST",
-        "CUSTOM",
-        "OAUTH",
-    ],
-    "unsupported_future_auth_modes_note": (
-        "BASIC / OAUTH2 / PASSWORD_DIGEST / CUSTOM / OAUTH require verified "
-        "live Boomi XML exports before the builder can emit them safely. "
-        "Until then, target authentication must be modeled at the operation "
-        "step as a variable header (is_variable=true) paired with an opaque "
-        "credential_ref. For one-off targets needing one of these modes, use "
-        "the raw-XML escape hatch (config.xml=...) populated by a verified "
-        "live export."
-    ),
-    "forbidden_secret_fields": [
-        "password",
-        "password_ref",
-        "secret",
-        "token",
-        "access_token",
-        "client_secret",
-    ],
-    "password_note": (
-        "Plaintext secret-shaped fields (password, password_ref, secret, "
-        "token, access_token, client_secret) are rejected with "
-        "PLAINTEXT_SECRET_REJECTED before any XML is emitted. Pass an "
-        "opaque credential_ref string instead; the builder never writes it "
-        "into XML. Boomi password ciphertext is set via the UI after create."
-    ),
-    "error_codes": {
-        "HTTP_CONNECTOR_VALIDATION_FAILED": "shape / type issue (e.g. missing component_name)",
-        "MISSING_HTTP_ENDPOINT": "url absent or empty",
-        "UNSUPPORTED_HTTP_AUTH_MODE": "auth_type is not NONE (the only buildable mode in issue #24)",
-        "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
-    },
-    "gotchas": [
-        (
-            "The connection's url is the base endpoint only — the path "
-            "lives on the operation (connector-action http.send) as a "
-            "'path' field. Do not append a path here."
-        ),
-        (
-            "Boomi binds the connection to the operation at the process "
-            "connector step, not in the operation XML. connection_ref_key "
-            "on the operation is plan-only metadata for dependency ordering."
-        ),
-        (
-            "Target authentication that needs a runtime token value should "
-            "be expressed as a variable header on the operation "
-            "(is_variable=true) with an opaque credential_ref. The "
-            "connection itself stays at auth_type='NONE'."
-        ),
-    ],
-    "recommended_workflow": [
-        "1. Resolve the target API base URL and any required header names.",
-        "2. Create the HTTP connector-settings with auth_type='NONE'.",
-        "3. Create the operation (connector-action http.send) and add this "
-        "connection's key to depends_on plus connection_ref_key.",
-        "4. Wire the connection + operation into a process at the process "
-        "connector step (out of scope for issue #24).",
-    ],
-    "update_note": (
-        "manage_connector action='update' supports a smart-merge of "
-        "name/description/folder_name plus the HttpSettings attributes "
-        "url/auth_type/username/trust_all_certs/client_ssl_alias. Other "
-        "fields require the raw-XML escape hatch."
-    ),
-    "example": {
-        "key": "rest_connection",
-        "type": "connector-settings",
-        "action": "create",
-        "name": "<<target API connection>>",
-        "config": {
-            "connector_type": "http",
-            "component_name": "<<target API connection>>",
-            "url": "https://<<host>>",
-            "auth_type": "NONE",
-            "credential_ref": "credential://<<vendor>>/<<role>>",
-        },
-        "_example_note": (
-            "Placeholder values only. Do not copy this example as a "
-            "starting template — fill in the target API base URL and "
-            "credential reference using the deployment context."
-        ),
-    },
-    "out_of_scope": {
-        "rest_client_connector": (
-            "The separate Boomi REST Client connector (different subType) "
-            "is not implemented in issue #24. Use http.client and model "
-            "headers/payloads on the http.send operation, or fall back to "
-            "the raw-XML escape hatch."
-        ),
-        "basic_oauth2_emission": (
-            "BASIC and OAUTH2 connection emission is deferred until a "
-            "verified live Boomi XML reference is available for each."
-        ),
-    },
-}
-
-
 _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
     "resource_type": "component",
     "operation": "create",
@@ -1217,7 +1078,7 @@ _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
         "for a fully-shaped template, or use the raw-XML escape hatch for unsupported "
         "connector types."
     ),
-    "available_protocols": ["database.sqlserver", "http.client"],
+    "available_protocols": ["database.sqlserver"],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
         "component_type='connector-settings', protocol='<protocol>') for the chosen "
@@ -1743,213 +1604,21 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
 }
 
 
-_COMPONENT_CREATE_CONNECTOR_ACTION_HTTP_SEND = {
-    "resource_type": "component",
-    "operation": "create",
-    "component_type": "connector-action",
-    "protocol": "http.send",
-    "tool": "manage_connector (action='create')",
-    "note": (
-        "HTTP Client send operation. Wraps a verb (GET, POST, PUT, PATCH, "
-        "DELETE) plus an endpoint path in an Operation envelope. The "
-        "single public operation_mode is 'send' — the GET/SEND XML split "
-        "lives inside the builder (method='GET' emits HttpGetAction; "
-        "POST/PUT/PATCH/DELETE-method calls emit HttpSendAction). The "
-        "connection is bound at the process connector step, not in the "
-        "operation XML — connection_ref_key is plan-only metadata for "
-        "dependency ordering."
-    ),
-    "template": {
-        "component_type": "connector-action",
-        "connector_type": "http",
-        "operation_mode": "send",
-        "component_name": "<<operation name>>",
-        "folder_name": "<<folder>>",
-        "description": "<<optional description>>",
-        "connection_ref_key": "<<http connection key>>",
-        "method": "POST",
-        "path": "/<<endpoint path>>",
-        "content_type": "application/json",
-        "request_profile_type": "JSON",
-        "request_profile_id": "$ref:<<request profile key>>",
-        "payload_source_ref_key": "<<payload source key>>",
-        "credential_ref": "credential://<<vendor>>/<<role>>",
-        "headers": [
-            {"name": "Accept", "value": "application/json"},
-            {"name": "Authorization", "is_variable": True},
-        ],
-    },
-    "required": [
-        "component_type",
-        "connector_type",
-        "operation_mode",
-        "component_name",
-        "connection_ref_key",
-        "method",
-        "path",
-    ],
-    "defaults": {
-        "component_type": "connector-action",
-        "connector_type": "http",
-        "operation_mode": "send",
-        "content_type": "application/json",
-        "folder_name": "Home",
-        "follow_redirects": False,
-        "mime_passthrough": False,
-        "request_profile_type": "NONE",
-        "response_profile_type": "NONE",
-        "return_errors_for_send_methods": True,
-        "return_errors_for_get_method": False,
-        "return_mime_response": False,
-        "return_responses_for_send_methods": True,
-    },
-    "supported_operation_modes": ["send"],
-    "supported_methods": ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    "methods_to_action_mapping": {
-        "GET": "HttpGetAction",
-        "POST": "HttpSendAction",
-        "PUT": "HttpSendAction",
-        "PATCH": "HttpSendAction",
-        "DELETE": "HttpSendAction",
-    },
-    "depends_on_requirements": [
-        "Include connection_ref_key in depends_on so the connector-settings runs first.",
-        "When request_profile_id uses '$ref:KEY', include KEY in depends_on too.",
-        "When payload_source_ref_key is supplied, include that key in depends_on.",
-    ],
-    "forbidden_secret_fields": [
-        "password",
-        "password_ref",
-        "secret",
-        "token",
-        "access_token",
-        "client_secret",
-    ],
-    "credential_note": (
-        "Token-style target authentication (Authorization header with a "
-        "runtime value) should be modeled as a header entry with "
-        "is_variable=true plus an opaque credential_ref. The builder "
-        "emits an empty headerValue and isVariable='true' for variable "
-        "headers, never the credential value itself. Plaintext "
-        "secret-shaped fields are rejected with PLAINTEXT_SECRET_REJECTED."
-    ),
-    "error_codes": {
-        "UNSUPPORTED_HTTP_OPERATION_MODE": "operation_mode is not 'send'",
-        "UNSUPPORTED_HTTP_METHOD": "method is not GET/POST/PUT/PATCH/DELETE",
-        "MISSING_HTTP_DEPENDENCY": "connection_ref_key / $ref target / payload_source_ref_key not declared in depends_on",
-        "MISSING_HTTP_REQUEST_PROFILE_REF": "request_profile_id $ref token is empty (e.g. '$ref:')",
-        "MISSING_CREDENTIAL_REF": "credential_ref required but absent (when applicable)",
-        "HTTP_OPERATION_VALIDATION_FAILED": "shape / type / required-field issue",
-        "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
-    },
-    "gotchas": [
-        (
-            "Boomi binds the connection at the process connector step, not "
-            "in the operation XML. The builder will NOT emit the "
-            "connection's component ID — connection_ref_key is plan-only "
-            "metadata for dependency ordering."
-        ),
-        (
-            "Exactly one leading slash is stripped off the 'path' value "
-            "before XML emission. '/v1/items' becomes the pathElements "
-            "element name 'v1/items'; '//v1/items' becomes '/v1/items'. "
-            "Multi-slash prefixes are intentional."
-        ),
-        (
-            "Header keys start at 1000000 and increment in caller-supplied "
-            "order. Path element keys start at 2000000. These ranges are "
-            "fixed by the live Boomi XML reference shape and should not be "
-            "treated as configurable."
-        ),
-        (
-            "GET emits HttpGetAction (no returnResponses attribute); "
-            "POST/PUT/PATCH/DELETE-method calls emit HttpSendAction with "
-            "returnResponses present. The default for returnErrors flips "
-            "between GET (false) and the send methods (true), matching "
-            "the live shape."
-        ),
-        (
-            "connection_ref_key, payload_source_ref_key, credential_ref, "
-            "and raw request bodies are plan-only metadata. They never "
-            "appear in the emitted operation XML."
-        ),
-    ],
-    "recommended_workflow": [
-        "1. Create the HTTP connector-settings (manage_connector, connector_type=http).",
-        "2. Create the request profile (e.g. profile.json) and any payload-source "
-        "transform map upstream so the operation can $ref them.",
-        "3. Plan this send operation with depends_on=[<connection_key>, "
-        "<request_profile_key>, <payload_source_key>], connection_ref_key set, "
-        "and request_profile_id='$ref:<request_profile_key>'.",
-        "4. Apply — $ref tokens are substituted with the created component "
-        "IDs via the id_registry.",
-        "5. Wire the connection + operation into a process at the process "
-        "connector step (out of scope for issue #24).",
-    ],
-    "update_note": (
-        "Field-level edits are not yet supported for connector-action "
-        "http.send operations. To revise an operation, recreate it or use "
-        "the raw-XML escape hatch."
-    ),
-    "example": {
-        "key": "rest_send_operation",
-        "type": "connector-action",
-        "action": "create",
-        "name": "<<operation name>>",
-        "depends_on": ["rest_connection", "target_json_profile", "payload_map"],
-        "config": {
-            "component_type": "connector-action",
-            "connector_type": "http",
-            "operation_mode": "send",
-            "component_name": "<<operation name>>",
-            "connection_ref_key": "rest_connection",
-            "method": "POST",
-            "path": "/<<endpoint path>>",
-            "content_type": "application/json",
-            "request_profile_type": "JSON",
-            "request_profile_id": "$ref:target_json_profile",
-            "payload_source_ref_key": "payload_map",
-            "credential_ref": "credential://<<vendor>>/<<role>>",
-            "headers": [
-                {"name": "Accept", "value": "application/json"},
-                {"name": "Authorization", "is_variable": True},
-            ],
-        },
-        "_example_note": (
-            "Placeholder values only. $ref tokens are substituted with "
-            "the matching component_id at apply time."
-        ),
-    },
-    "out_of_scope": {
-        "process_emission": (
-            "Issue #24 builds the operation component only. Wiring the "
-            "connection + operation into a runnable process (process "
-            "connector step, retry, DLQ) is tracked by later M2 issues."
-        ),
-        "raw_payload_bodies": (
-            "Raw request payload bodies are upstream concerns. The operation "
-            "carries no payload XML; it references the payload source via "
-            "payload_source_ref_key (plan-only metadata)."
-        ),
-    },
-}
-
-
 _COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW = {
     "resource_type": "component",
     "operation": "create",
     "component_type": "connector-action",
     "tool": "manage_connector (action='create')",
     "note": (
-        "Connector-action (operation) builders. Available: database.get "
-        "(issue #23) and http.send (issue #24). Database send/write is "
-        "tracked by issue #32."
+        "Connector-action (operation) builders. Currently only database.get "
+        "is implemented (issue #23). Database send/write is tracked by "
+        "issue #32."
     ),
-    "available_protocols": ["database.get", "http.send"],
+    "available_protocols": ["database.get"],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
-        "component_type='connector-action', protocol='<protocol>') for the chosen "
-        "protocol's full JSON template."
+        "component_type='connector-action', protocol='database.get') for the "
+        "Get operation JSON template."
     ),
     "escape_hatch": (
         "For operations without a builder, use manage_connector action='get' on "
@@ -2675,8 +2344,6 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         if component_type == "connector-settings":
             if protocol == "database.sqlserver":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER}
-            if protocol == "http.client":
-                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_HTTP_CLIENT}
             if protocol:
                 return {
                     "_success": False,
@@ -2702,8 +2369,6 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         if component_type == "connector-action":
             if protocol == "database.get":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}
-            if protocol == "http.send":
-                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_HTTP_SEND}
             if protocol == "database.send":
                 # Explicit out-of-scope marker — point callers at issue #32
                 # so they don't think this is a typo we'd accept later.

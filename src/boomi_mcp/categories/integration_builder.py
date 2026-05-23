@@ -38,8 +38,6 @@ from .components.builders import (
     DatabaseGetOperationBuilder,
     DatabaseReadProfileBuilder,
     DatabaseStoredProcedureReadProfileBuilder,
-    HttpClientOperationBuilder,
-    HttpConnectorBuilder,
     PROFILE_BUILDERS,
     get_profile_builder,
 )
@@ -329,87 +327,6 @@ def _check_database_get_dependencies(
                     "order creates the profile before the operation."
                 ),
             )
-
-    return None
-
-
-def _check_http_send_dependencies(
-    comp: IntegrationComponentSpec,
-    raw_config: Dict[str, Any],
-) -> Optional[BuilderValidationError]:
-    """Cross-step dependency checks specific to HTTP send operations (issue #24).
-
-    Boomi binds an HTTP connection to an operation at the process connector
-    step, not in the operation XML. Plan-time we still need the caller to
-    declare both the connection (`connection_ref_key`) and any referenced
-    profile/payload-source via `depends_on`, otherwise the apply ordering
-    would be unsafe and the operation could execute before its inputs exist.
-    """
-    depends_on = set(comp.depends_on or [])
-
-    connection_ref_key = raw_config.get("connection_ref_key")
-    if not connection_ref_key or not str(connection_ref_key).strip():
-        return BuilderValidationError(
-            "connection_ref_key is required for HTTP send operations",
-            error_code="MISSING_HTTP_DEPENDENCY",
-            field="connection_ref_key",
-            hint=(
-                "Declare the HTTP connector-settings key the operation "
-                "will bind to at process time, and add the same key to "
-                "depends_on so plan ordering is correct."
-            ),
-        )
-    if connection_ref_key not in depends_on:
-        return BuilderValidationError(
-            f"connection_ref_key {connection_ref_key!r} must also appear in depends_on",
-            error_code="MISSING_HTTP_DEPENDENCY",
-            field="depends_on",
-            hint=(
-                "Add the HTTP connector-settings key to depends_on so the "
-                "execution order creates the connection before the operation."
-            ),
-        )
-
-    request_profile_id = raw_config.get("request_profile_id")
-    if isinstance(request_profile_id, str) and request_profile_id.startswith("$ref:"):
-        ref_key = request_profile_id[5:]
-        if not ref_key:
-            return BuilderValidationError(
-                "request_profile_id $ref token is empty (expected '$ref:KEY')",
-                error_code="MISSING_HTTP_REQUEST_PROFILE_REF",
-                field="request_profile_id",
-                hint=(
-                    "Use '$ref:target_json_profile' to reference a profile "
-                    "component declared earlier in the same integration spec."
-                ),
-            )
-        if ref_key not in depends_on:
-            return BuilderValidationError(
-                f"request_profile_id $ref target {ref_key!r} must also appear in depends_on",
-                error_code="MISSING_HTTP_DEPENDENCY",
-                field="depends_on",
-                hint=(
-                    "Add the request profile key to depends_on so the execution "
-                    "order creates the profile before the operation."
-                ),
-            )
-
-    payload_source_ref_key = raw_config.get("payload_source_ref_key")
-    if (
-        payload_source_ref_key
-        and isinstance(payload_source_ref_key, str)
-        and payload_source_ref_key.strip()
-        and payload_source_ref_key not in depends_on
-    ):
-        return BuilderValidationError(
-            f"payload_source_ref_key {payload_source_ref_key!r} must also appear in depends_on",
-            error_code="MISSING_HTTP_DEPENDENCY",
-            field="depends_on",
-            hint=(
-                "Add the payload source key to depends_on so the execution "
-                "order creates the payload-producing step before the operation."
-            ),
-        )
 
     return None
 
@@ -726,64 +643,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     raw_config
                 )
 
-        # HTTP connector-settings / connector-action preflight (issue #24).
-        # Mirrors the database block above:
-        #   (a) scan_forbidden_secret_fields runs on EVERY http step regardless
-        #       of apply path (plan echo would otherwise leak plaintext secrets
-        #       on reuse/update/raw-XML configs).
-        #   (b) validate_config + dependency check run only when the apply path
-        #       will actually invoke the builder (create / create_clone, no raw
-        #       XML). Reuse short-circuits; update goes through update_connector.
-        is_http_connector_settings = (
-            comp.type == "connector-settings"
-            and (raw_config.get("connector_type") or "").lower() == "http"
-        )
-        is_http_send_operation = (
-            comp.type == "connector-action"
-            and (raw_config.get("connector_type") or "").lower() == "http"
-        )
-        will_invoke_http_builder = (
-            (is_http_connector_settings or is_http_send_operation)
-            and not xml_payload
-            and planned_action in ("create", "create_clone")
-        )
-        http_err: Optional[BuilderValidationError] = None
-        http_scanner_cls = None
-        if is_http_connector_settings:
-            http_scanner_cls = HttpConnectorBuilder
-        elif is_http_send_operation:
-            http_scanner_cls = HttpClientOperationBuilder
-
-        # Only run the HTTP block if the database block didn't already produce
-        # an error for this component — otherwise we'd overwrite the database
-        # error envelope. (In practice, a single component can't be both, so
-        # the guard is defensive.)
-        if http_scanner_cls is not None and db_err is None:
-            http_err = http_scanner_cls.scan_forbidden_secret_fields(raw_config)
-            if http_err is None and will_invoke_http_builder:
-                effective_config = dict(raw_config)
-                if comp.name:
-                    effective_config.setdefault("component_name", comp.name)
-                if is_http_connector_settings:
-                    http_err = HttpConnectorBuilder.validate_config(effective_config)
-                else:  # is_http_send_operation
-                    http_err = HttpClientOperationBuilder.validate_config(effective_config)
-                    if http_err is None:
-                        http_err = _check_http_send_dependencies(comp, raw_config)
-
-        if http_err is not None:
-            planned_action = "error_http_validation"
-            validation_error = {
-                "error_code": http_err.error_code,
-                "error": str(http_err),
-                "field": http_err.field,
-                "hint": http_err.hint,
-            }
-            if http_err.error_code == "PLAINTEXT_SECRET_REJECTED" and http_scanner_cls is not None:
-                http_scanner_cls.redact_forbidden_secret_fields_in_place(
-                    raw_config
-                )
-
         step: Dict[str, Any] = {
             "key": comp.key,
             "type": comp.type,
@@ -842,7 +701,6 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             "error_ambiguous_match",
             "error_missing_target",
             "error_database_validation",
-            "error_http_validation",
         )
     ]
     if unresolvable_steps:
@@ -867,14 +725,6 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' failed "
                     f"database validation: "
                     f"{ve.get('error_code', 'DATABASE_CONNECTOR_VALIDATION_FAILED')} "
-                    f"on field {ve.get('field')!r}."
-                )
-            elif step["planned_action"] == "error_http_validation":
-                ve = step.get("validation_error") or {}
-                errors.append(
-                    f"Component '{step.get('name') or step['key']}' failed "
-                    f"HTTP validation: "
-                    f"{ve.get('error_code', 'HTTP_CONNECTOR_VALIDATION_FAILED')} "
                     f"on field {ve.get('field')!r}."
                 )
         return {

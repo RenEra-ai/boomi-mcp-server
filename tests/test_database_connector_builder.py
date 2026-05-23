@@ -352,16 +352,16 @@ def test_create_connector_secret_value_not_echoed_in_structured_error():
             assert "SENTINEL_VALUE_DEADBEEF" not in v
 
 
-def test_create_connector_http_missing_url_returns_structured_error():
-    """Issue #24: HTTP builder now raises BuilderValidationError with
-    structured error_code (MISSING_HTTP_ENDPOINT) when url is absent — the
-    pre-#24 plain-ValueError flat envelope is gone on purpose."""
+def test_create_connector_http_value_error_path_unchanged():
+    """HTTP builder raises plain ValueError (no error_code); the legacy
+    flat envelope must still surface for non-BuilderValidationError ValueErrors."""
     client = MagicMock()
     client.connector.get_connector.return_value = MagicMock()
     result = create_connector(client, "test", {"connector_type": "http", "component_name": "X"})
+    # Missing url → HttpConnectorBuilder raises ValueError (not BuilderValidationError)
     assert result["_success"] is False
-    assert result["error_code"] == "MISSING_HTTP_ENDPOINT"
-    assert result["field"] == "url"
+    assert "error" in result
+    assert "error_code" not in result  # flat envelope, no structured fields
 
 
 # ---------------------------------------------------------------------------
