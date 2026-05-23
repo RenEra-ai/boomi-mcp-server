@@ -45,6 +45,37 @@ from .builders.connector_builder import (
 )
 
 
+def _missing_component_name_hint(connector_type: str) -> str:
+    """Build a connector_type-aware 'config example' hint for the
+    component_name-missing error path. Steers REST callers toward the
+    base_url/auth/oauth2 shape (not the legacy HTTP url/auth_type shape)."""
+    if _resolve_rest_connector_type(connector_type) is not None:
+        return (
+            f'Provide config: {{"connector_type": "{connector_type}", '
+            '"component_name": "My REST Connection", '
+            '"base_url": "https://api.example.com", '
+            '"auth": "OAUTH2", "oauth2": {"grant_type": "client_credentials", '
+            '"client_id": "<<client id>>", '
+            '"client_secret_ref": "credential://<<vendor>>/oauth-client-secret", '
+            '"access_token_url": "https://api.example.com/oauth/token"}}'
+        )
+    if connector_type and connector_type.lower() == "database":
+        return (
+            f'Provide config: {{"connector_type": "{connector_type}", '
+            '"component_name": "My DB Connection", '
+            '"driver_id": "sqlserver", "auth_mode": "username_password", '
+            '"host": "host.docker.internal", "dbname": "MyDB", '
+            '"username": "sa", '
+            '"credential_ref": "credential://<<vendor>>/sqlserver/password"}}'
+        )
+    return (
+        f'Provide config with connector_type and required fields. '
+        f'connector_type="{connector_type}" — call '
+        'get_schema_template(resource_type="component", operation="create", '
+        f'component_type="connector-settings") for the protocol-specific shape.'
+    )
+
+
 # ============================================================================
 # Read Actions
 # ============================================================================
@@ -107,8 +138,14 @@ def get_connector_type(
 ) -> Dict[str, Any]:
     """Get field definitions for a specific connector type.
 
-    Uses sdk.connector.get_connector(connector_type).
+    Uses sdk.connector.get_connector(connector_type). REST Client aliases
+    ('rest' / 'rest_client') are normalized to the canonical Boomi subtype
+    `officialboomi-X3979C-rest-prod` before the SDK call — Boomi's
+    catalog doesn't know our local aliases.
     """
+    rest_canonical = _resolve_rest_connector_type(connector_type)
+    if rest_canonical is not None:
+        connector_type = rest_canonical
     try:
         result = boomi_client.connector.get_connector(connector_type)
 
@@ -225,12 +262,19 @@ def list_connectors(
                 ],
             ))
 
-        # Sub-type filter for connector_type (e.g., "http")
+        # Sub-type filter for connector_type. REST Client aliases ('rest' /
+        # 'rest_client') resolve to the canonical Boomi subtype before the
+        # query is built — Boomi components carry the canonical subType
+        # value, not our local alias.
         if filters and filters.get('connector_type'):
+            connector_type_filter = filters['connector_type']
+            rest_canonical = _resolve_rest_connector_type(connector_type_filter)
+            if rest_canonical is not None:
+                connector_type_filter = rest_canonical
             expressions.append(ComponentMetadataSimpleExpression(
                 operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
                 property=ComponentMetadataSimpleExpressionProperty.SUBTYPE,
-                argument=[filters['connector_type']],
+                argument=[connector_type_filter],
             ))
 
         # Combine expressions
@@ -421,7 +465,7 @@ def create_connector(
             return {
                 "_success": False,
                 "error": "component_name is required for builder-based creation",
-                "hint": f'Provide config: {{"connector_type": "{connector_type}", "component_name": "My Connection", "url": "https://..."}}',
+                "hint": _missing_component_name_hint(connector_type),
             }
 
         xml = builder.build(**config)
@@ -602,8 +646,13 @@ def manage_connector_action(
                 return {
                     "_success": False,
                     "error": "connector_type is required for 'get_type' action",
-                    "hint": 'Provide config=\'{"connector_type": "http"}\'. '
-                            "Use action='list_types' to see available types.",
+                    "hint": (
+                        'Provide config=\'{"connector_type": "rest"}\' '
+                        "(REST Client, the M2 target) or "
+                        'config=\'{"connector_type": "officialboomi-X3979C-rest-prod"}\' '
+                        "for the canonical subtype. Use action='list_types' "
+                        "to see all available connector types in this account."
+                    ),
                 }
             return get_connector_type(boomi_client, connector_type)
 
@@ -629,9 +678,16 @@ def manage_connector_action(
                     "_success": False,
                     "error": "config is required for 'create' action",
                     "hint": (
-                        f'Provide config with connector_type and fields: '
-                        f'{{"connector_type": "http", "component_name": "My Connection", "url": "https://..."}}'
-                        f' Supported builder types: {supported}. Or provide raw XML as config.xml.'
+                        'Provide config with connector_type and fields. '
+                        'Example (REST Client, the M2 target): '
+                        '{"connector_type": "rest", "component_name": "Target REST Connection", '
+                        '"base_url": "https://api.example.com", "auth": "OAUTH2", '
+                        '"oauth2": {"grant_type": "client_credentials", '
+                        '"client_id": "<<client id>>", '
+                        '"client_secret_ref": "credential://<<vendor>>/oauth-client-secret", '
+                        '"access_token_url": "https://api.example.com/oauth/token"}}. '
+                        f'Supported builder types: {supported}. '
+                        'Or provide raw XML as config.xml.'
                     ),
                 }
             return create_connector(boomi_client, profile, config)
