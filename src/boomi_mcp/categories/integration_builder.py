@@ -432,6 +432,34 @@ def _check_rest_operation_dependencies(
     return None
 
 
+def _redact_dotted_field_path(config: Any, dotted_path: Optional[str]) -> None:
+    """Replace the value at a dotted path inside `config` with '[REDACTED]'.
+
+    Best-effort: silently no-ops if the path doesn't resolve cleanly. Targeted
+    at the field names returned by REST validation when the offending value
+    isn't a forbidden-key (which `redact_forbidden_secret_fields_in_place`
+    handles): e.g. `oauth2.client_secret_ref` (raw value where a
+    `credential://...` ref was expected) or `request_headers` / `query_parameters`
+    (entire dict carries unverified non-empty values that may include
+    Authorization / X-API-Key entries).
+    """
+    if not isinstance(dotted_path, str) or not dotted_path:
+        return
+    if not isinstance(config, dict):
+        return
+    parts = dotted_path.split(".")
+    cursor: Any = config
+    for part in parts[:-1]:
+        if not isinstance(cursor, dict):
+            return
+        cursor = cursor.get(part)
+    if not isinstance(cursor, dict):
+        return
+    leaf = parts[-1]
+    if leaf in cursor:
+        cursor[leaf] = "[REDACTED]"
+
+
 def _resolve_dependency_tokens(value: Any, id_registry: Dict[str, str]) -> Any:
     if isinstance(value, str):
         if value.startswith("$ref:"):
@@ -522,6 +550,15 @@ def _execute_component(
         return update_process(boomi_client, profile, target_id, payload)
 
     if comp.type in ("connector-settings", "connector-action"):
+        # Normalize local-alias connector_types to their canonical Boomi form
+        # BEFORE the get_connector sanity check, so Boomi's catalog lookup
+        # recognizes the type. `rest` and `rest_client` are MCP-local aliases
+        # for the canonical REST Client subtype `officialboomi-X3979C-rest-prod`;
+        # Boomi's API only knows the canonical. Codex review item P2 against
+        # the issue-#24 REST landing.
+        rest_canonical = _resolve_rest_connector_type(payload.get("connector_type"))
+        if rest_canonical is not None:
+            payload["connector_type"] = rest_canonical
         connector_type = payload.get("connector_type")
         if connector_type:
             try:
@@ -809,6 +846,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 rest_scanner_cls.redact_forbidden_secret_fields_in_place(
                     raw_config
                 )
+            elif rest_err.error_code in (
+                "REST_SECRET_VALUE_FORBIDDEN",
+                "NEEDS_REST_EXAMPLE",
+            ):
+                # The offender isn't in FORBIDDEN_SECRET_FIELDS so the generic
+                # walker can't redact it. Target the specific dotted-path
+                # field named by the validator (oauth2.client_secret_ref,
+                # request_headers, query_parameters). Codex review item P1
+                # against the issue-#24 REST landing.
+                _redact_dotted_field_path(raw_config, rest_err.field)
 
         step: Dict[str, Any] = {
             "key": comp.key,

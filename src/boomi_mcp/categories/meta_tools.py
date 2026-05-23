@@ -1810,7 +1810,11 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         "response_profile_id": "$ref:<<response profile key>>",
         "return_application_errors": True,
         "track_response": True,
-        "follow_redirects": "NONE",
+        # follow_redirects intentionally omitted: the template defaults
+        # method=PATCH, and the verified PATCH live export does NOT carry a
+        # followRedirects field. Document the field via
+        # follow_redirects_values / follow_redirects_emission_rule below
+        # instead. GET callers may set it explicitly.
         "payload_source_ref_key": "<<payload source key>>",
         "credential_ref": "credential://<<vendor>>/<<role>>",
     },

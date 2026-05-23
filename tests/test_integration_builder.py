@@ -2003,6 +2003,68 @@ class TestBuildPlanRestPreflight:
         assert step["validation_error"]["field"] == "token"
         assert "DEADBEEF_REST_OP" not in repr(plan)
 
+    # ---- Codex review fix: REST_SECRET_VALUE_FORBIDDEN / NEEDS_REST_EXAMPLE
+    # ---- must also redact the offending field in the plan echo, not just
+    # ---- PLAINTEXT_SECRET_REJECTED.
+
+    @patch(_PATCH_TARGET)
+    def test_raw_value_in_client_secret_ref_is_redacted_in_plan_echo(self, mock_pag):
+        """REST_SECRET_VALUE_FORBIDDEN fires when oauth2.client_secret_ref
+        carries a raw secret instead of a 'credential://...' opaque ref.
+        The raw value must not appear in the plan response (integration_spec
+        echo)."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["oauth2"]["client_secret_ref"] = "raw-leak-DEADBEEF_REF"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_SECRET_VALUE_FORBIDDEN"
+        assert step["validation_error"]["field"] == "oauth2.client_secret_ref"
+        assert "raw-leak-DEADBEEF_REF" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["oauth2"]["client_secret_ref"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_non_empty_request_headers_value_redacted_in_plan_echo(self, mock_pag):
+        """NEEDS_REST_EXAMPLE fires when request_headers is non-empty (no
+        verified live export). Header values frequently carry secrets
+        (Authorization, X-API-Key, etc.) — the entire offending map must
+        not leak through the plan echo."""
+        mock_pag.return_value = []
+        op = _rest_op_comp(request_headers={"Authorization": "Bearer DEADBEEF_HDR"})
+        components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "NEEDS_REST_EXAMPLE"
+        assert step["validation_error"]["field"] == "request_headers"
+        assert "DEADBEEF_HDR" not in repr(plan)
+        echoed = next(
+            c for c in plan["integration_spec"]["components"]
+            if c["key"] == "target_rest_operation"
+        )["config"]
+        assert echoed["request_headers"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_non_empty_query_parameters_value_redacted_in_plan_echo(self, mock_pag):
+        """NEEDS_REST_EXAMPLE on query_parameters — same risk class as
+        request_headers (API keys, tokens, PII in query strings)."""
+        mock_pag.return_value = []
+        op = _rest_op_comp(query_parameters={"api_key": "DEADBEEF_QP"})
+        components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "NEEDS_REST_EXAMPLE"
+        assert step["validation_error"]["field"] == "query_parameters"
+        assert "DEADBEEF_QP" not in repr(plan)
+        echoed = next(
+            c for c in plan["integration_spec"]["components"]
+            if c["key"] == "target_rest_operation"
+        )["config"]
+        assert echoed["query_parameters"] == "[REDACTED]"
+
 
 class TestApplyRestPreflight:
     """Issue #24 — error_rest_validation steps must block apply."""
@@ -2020,6 +2082,49 @@ class TestApplyRestPreflight:
         assert "unresolvable_steps" in result
         unresolvable_keys = [s["key"] for s in result["unresolvable_steps"]]
         assert "target_rest_operation" in unresolvable_keys
+
+    @patch("src.boomi_mcp.categories.integration_builder.create_connector")
+    @patch("src.boomi_mcp.categories.integration_builder._resolve_existing_components")
+    @patch(_PATCH_TARGET)
+    def test_apply_normalizes_rest_alias_for_boomi_get_connector_check(
+        self, mock_pag, mock_resolve, mock_create_connector,
+    ):
+        """Regression for codex review P2: planning accepts the local alias
+        connector_type='rest_client', but Boomi's get_connector API only
+        knows the canonical subtype 'officialboomi-X3979C-rest-prod'. The
+        apply path must normalize the alias before the sanity check so the
+        connector type validation doesn't fail on a clean plan."""
+        mock_pag.return_value = []
+        mock_resolve.return_value = []
+        mock_create_connector.return_value = {
+            "_success": True,
+            "component_id": "rest-conn-aliased-001",
+            "type": "connector-settings",
+            "sub_type": "officialboomi-X3979C-rest-prod",
+        }
+
+        boomi_client = MagicMock()
+        # If the alias leaked through to get_connector, this mock would still
+        # accept it — but the assertion below checks the exact call argument.
+        boomi_client.connector.get_connector.return_value = MagicMock()
+
+        comp = _rest_conn_comp(connector_type="rest_client")
+        config = _build_config([comp])
+        config["dry_run"] = False
+        result = _apply_plan(boomi_client, "dev", config)
+
+        assert result["_success"] is True
+        # get_connector must be called with the canonical Boomi subtype, not
+        # the local alias.
+        get_connector_args = [
+            call.args for call in boomi_client.connector.get_connector.call_args_list
+        ]
+        assert ("officialboomi-X3979C-rest-prod",) in get_connector_args
+        assert ("rest_client",) not in get_connector_args
+        # The payload handed to create_connector must also carry the canonical.
+        create_call = mock_create_connector.call_args_list[0]
+        applied_payload = create_call.args[2]
+        assert applied_payload["connector_type"] == "officialboomi-X3979C-rest-prod"
 
     @patch("src.boomi_mcp.categories.integration_builder._execute_component")
     @patch("src.boomi_mcp.categories.integration_builder._resolve_existing_components")
