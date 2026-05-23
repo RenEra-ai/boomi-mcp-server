@@ -107,6 +107,76 @@ def _db_read_profile_comp(key="db_read_profile", name="Example Read Profile",
     )
 
 
+def _rest_conn_config(**overrides):
+    """A minimal-valid REST Client OAuth2 connector-settings config (Issue #24)."""
+    cfg = {
+        "component_type": "connector-settings",
+        "connector_type": "rest",
+        "component_name": "Target REST OAuth2 Connection",
+        "base_url": "https://api.example.com",
+        "auth": "OAUTH2",
+        "oauth2": {
+            "grant_type": "client_credentials",
+            "client_id": "client-id-from-user-or-discovery",
+            "client_secret_ref": "credential://target-api/oauth-client-secret",
+            "access_token_url": "https://api.example.com/oauth/token",
+            "scope": "",
+            "credentials_assertion_type": "client_secret",
+        },
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _rest_conn_comp(key="target_rest_connection", name="Target REST OAuth2 Connection",
+                    action="create", depends_on=None, **config_overrides):
+    return IntegrationComponentSpec(
+        key=key,
+        type="connector-settings",
+        action=action,
+        name=name,
+        config=_rest_conn_config(**config_overrides),
+        depends_on=depends_on or [],
+    )
+
+
+def _rest_op_config(**overrides):
+    """A minimal-valid REST Client GET/PATCH operation config (Issue #24)."""
+    cfg = {
+        "component_type": "connector-action",
+        "connector_type": "rest",
+        "operation_mode": "execute",
+        "component_name": "Send Target Record",
+        "folder_name": "Process Library",
+        "connection_ref_key": "target_rest_connection",
+        "method": "PATCH",
+        "path": "/v1/items/{id}",
+        "request_profile_type": "json",
+        "request_profile_id": "$ref:target_json_profile",
+        "response_profile_type": "json",
+        "payload_source_ref_key": "payload_map",
+        "credential_ref": "credential://target-api/headers",
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _rest_op_comp(key="target_rest_operation", name="Send Target Record",
+                  action="create",
+                  depends_on=("target_rest_connection",
+                              "target_json_profile",
+                              "payload_map"),
+                  **config_overrides):
+    return IntegrationComponentSpec(
+        key=key,
+        type="connector-action",
+        action=action,
+        name=name,
+        config=_rest_op_config(**config_overrides),
+        depends_on=list(depends_on),
+    )
+
+
 def _db_get_op_config(**overrides):
     """A minimal-valid database Get-operation config dict (Issue #23)."""
     cfg = {
@@ -1674,3 +1744,321 @@ class TestApplyPlanStoredProcedureProfileAndGet:
         payload = mock_create_component.call_args_list[0].args[2]
         assert payload["component_type"] == "profile.db"
         assert payload["component_name"] == "Example SP Read Profile"
+
+
+# ---------------------------------------------------------------------------
+# Issue #24 — REST Client connector-settings + connector-action preflight
+# ---------------------------------------------------------------------------
+
+
+def _rest_supporting_components():
+    """Stub `target_json_profile` and `payload_map` placeholders so they
+    satisfy depends_on without dragging in real profile/map builders."""
+    profile = IntegrationComponentSpec(
+        key="target_json_profile",
+        type="component",
+        action="create",
+        name="Target JSON Profile",
+        config={"name": "Target JSON Profile", "type": "profile.json"},
+    )
+    payload_map = IntegrationComponentSpec(
+        key="payload_map",
+        type="component",
+        action="create",
+        name="Payload Map",
+        config={"name": "Payload Map", "type": "transform.map"},
+    )
+    return [profile, payload_map]
+
+
+class TestBuildPlanRestPreflight:
+    """Issue #24 — REST Client connector-settings + REST operation preflight."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_rest_connection_plus_operation_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        components = [
+            _rest_conn_comp(),
+            *_rest_supporting_components(),
+            _rest_op_comp(),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        assert plan["_success"] is True
+        order = plan["execution_order"]
+        assert order.index("target_rest_connection") < order.index("target_rest_operation")
+        steps_by_key = {s["key"]: s for s in plan["steps"]}
+        for key in ("target_rest_connection", "target_rest_operation"):
+            step = steps_by_key[key]
+            assert step["planned_action"] == "create"
+            assert step["route"] == "connector_builder_or_xml"
+            assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_missing_connection_ref_key_marks_step_unresolvable(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(depends_on=("target_json_profile", "payload_map"))
+        op.config.pop("connection_ref_key")
+        components = [*_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_CONNECTION_REF_REQUIRED"
+        assert step["validation_error"]["field"] == "connection_ref_key"
+
+    @patch(_PATCH_TARGET)
+    def test_connection_ref_key_not_in_depends_on_marks_unresolvable(self, mock_pag):
+        mock_pag.return_value = []
+        # connection_ref_key present in config but not in depends_on.
+        op = _rest_op_comp(depends_on=("target_json_profile", "payload_map"))
+        components = [
+            _rest_conn_comp(),
+            *_rest_supporting_components(),
+            op,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_DEPENDENCY_REQUIRED"
+        assert step["validation_error"]["field"] == "depends_on"
+
+    @patch(_PATCH_TARGET)
+    def test_request_profile_ref_missing_from_depends_on_marks_unresolvable(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(
+            depends_on=("target_rest_connection", "payload_map"),
+            request_profile_id="$ref:missing_profile",
+        )
+        components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_DEPENDENCY_REQUIRED"
+        assert step["validation_error"]["field"] == "depends_on"
+
+    @patch(_PATCH_TARGET)
+    def test_response_profile_ref_missing_from_depends_on_marks_unresolvable(self, mock_pag):
+        """Regression: response_profile_id $ref must be checked the same way
+        request_profile_id is (codex review item #3 from the superseded HTTP
+        implementation)."""
+        mock_pag.return_value = []
+        op = _rest_op_comp(
+            depends_on=("target_rest_connection", "target_json_profile", "payload_map"),
+            response_profile_id="$ref:missing_response_profile",
+        )
+        components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_DEPENDENCY_REQUIRED"
+        assert step["validation_error"]["field"] == "depends_on"
+
+    @patch(_PATCH_TARGET)
+    def test_empty_ref_in_request_profile_id_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(request_profile_id="$ref:")
+        components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_PROFILE_REF_UNRESOLVED"
+
+    @patch(_PATCH_TARGET)
+    def test_payload_source_ref_missing_from_depends_on_marks_unresolvable(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(
+            depends_on=("target_rest_connection", "target_json_profile"),
+            payload_source_ref_key="missing_map",
+        )
+        components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_DEPENDENCY_REQUIRED"
+        assert step["validation_error"]["field"] == "depends_on"
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_rest_skips_builder_preflight(self, mock_pag):
+        """config.xml is the raw-XML escape hatch — builder validation is bypassed."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="rest_raw", type="connector-settings", action="create",
+            name="Raw REST",
+            config={
+                "connector_type": "rest",
+                "xml": "<bns:Component>...pre-built XML...</bns:Component>",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_with_rest_subtype_and_no_connector_type_rejects_secret(self, mock_pag):
+        """Regression: raw-XML REST components without connector_type still
+        trigger the secret scan via subType inference (codex review item #2
+        from the superseded HTTP implementation)."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="rest_raw_leak", type="connector-settings", action="create",
+            name="Raw REST",
+            config={
+                "xml": (
+                    '<bns:Component type="connector-settings" '
+                    'subType="officialboomi-X3979C-rest-prod">...</bns:Component>'
+                ),
+                "password": "DEADBEEF_RAW_REST",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "password"
+        assert "DEADBEEF_RAW_REST" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
+    def test_reuse_path_skips_rest_builder_preflight(self, mock_pag):
+        mock_pag.return_value = [_meta(
+            "existing-rest-id", "Target REST OAuth2 Connection", "Process Library",
+            comp_type="connector-settings",
+        )]
+        comp = _rest_conn_comp()
+        comp.config.pop("base_url")  # would fail builder validation
+        plan = _build_plan(MagicMock(), _build_config([comp], conflict_policy="reuse"))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "reuse"
+        assert step["existing_component_id"] == "existing-rest-id"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_update_path_skips_rest_builder_preflight(self, mock_pag):
+        comp = _rest_conn_comp(action="update")
+        comp.component_id = "explicit-rest-id"
+        comp.config.pop("base_url")
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "update"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_auth_marks_rest_connection_unresolvable(self, mock_pag):
+        mock_pag.return_value = []
+        cfg_overrides = {"auth": "BASIC"}
+        comp = _rest_conn_comp(**cfg_overrides)
+        comp.config.pop("oauth2", None)
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_REST_AUTH_MODE"
+
+    @patch(_PATCH_TARGET)
+    def test_unverified_method_marks_rest_operation_unresolvable(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(method="POST")
+        components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "UNVERIFIED_REST_XML_VARIANT"
+
+    # ---- Plaintext-secret scan runs on EVERY REST step regardless of apply path.
+
+    @patch(_PATCH_TARGET)
+    def test_plaintext_secret_on_rest_connection_marks_unresolvable(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _rest_conn_comp(password="DEADBEEF_REST_CONN")
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "password"
+        assert "DEADBEEF_REST_CONN" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["password"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_plaintext_oauth2_client_secret_marks_unresolvable(self, mock_pag):
+        """Regression: oauth2.client_secret must be rejected even though it's
+        nested (codex review item #1 from the superseded HTTP implementation)."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["oauth2"]["client_secret"] = "DEADBEEF_OAUTH2_NESTED"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "oauth2.client_secret"
+        assert "DEADBEEF_OAUTH2_NESTED" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
+    def test_plaintext_secret_on_rest_operation_marks_unresolvable(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(token="DEADBEEF_REST_OP")
+        components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        assert step["validation_error"]["field"] == "token"
+        assert "DEADBEEF_REST_OP" not in repr(plan)
+
+
+class TestApplyRestPreflight:
+    """Issue #24 — error_rest_validation steps must block apply."""
+
+    @patch(_PATCH_TARGET)
+    def test_apply_bails_on_rest_validation_error(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(depends_on=("target_json_profile", "payload_map"))
+        op.config.pop("connection_ref_key")
+        components = [*_rest_supporting_components(), op]
+        config = _build_config(components)
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        assert "unresolvable_steps" in result
+        unresolvable_keys = [s["key"] for s in result["unresolvable_steps"]]
+        assert "target_rest_operation" in unresolvable_keys
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch("src.boomi_mcp.categories.integration_builder._resolve_existing_components")
+    @patch(_PATCH_TARGET)
+    def test_apply_resolves_request_profile_id_ref_at_apply_time(
+        self, mock_pag, mock_resolve, mock_exec,
+    ):
+        """$ref:target_json_profile in request_profile_id must be substituted
+        with the resolved component_id by _resolve_dependency_tokens before
+        the REST operation is executed."""
+        mock_pag.return_value = []
+        mock_resolve.return_value = []
+        component_ids = {
+            "target_rest_connection": "conn-r001",
+            "target_json_profile": "prof-r001",
+            "payload_map": "map-r001",
+            "target_rest_operation": "op-r001",
+        }
+
+        def _mock_exec(*, comp, **_):
+            return {
+                "_success": True,
+                "component_id": component_ids[comp.key],
+                "type": comp.type,
+            }
+
+        mock_exec.side_effect = _mock_exec
+        components = [
+            _rest_conn_comp(),
+            *_rest_supporting_components(),
+            _rest_op_comp(),
+        ]
+        config = _build_config(components)
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        send_call = next(
+            call for call in mock_exec.call_args_list
+            if call.kwargs["comp"].key == "target_rest_operation"
+        )
+        resolved_config = send_call.kwargs["config"]
+        assert resolved_config["request_profile_id"] == "prof-r001"
