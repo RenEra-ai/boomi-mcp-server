@@ -640,7 +640,7 @@ _INTEGRATION_PLAN = {
                                 "type": "connector",
                                 "name": "get_orders",
                                 "config": {
-                                    "connector_id": "$ref:http_connection",
+                                    "connector_id": "$ref:rest_connection",
                                     "operation": "Get",
                                     "object_type": "orders",
                                 },
