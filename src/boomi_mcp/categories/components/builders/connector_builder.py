@@ -1204,6 +1204,34 @@ class RestClientConnectionBuilder:
                         "never writes raw secret values into XML."
                     ),
                 )
+            # 5c) Stale `oauth2.authorization_url` gate. The authorization URL
+            # is the end-user consent endpoint used during the OAuth 2.0
+            # authorization-code flow. For client_credentials (machine-to-
+            # machine, no user) the field is meaningless — supplying it would
+            # otherwise be silently dropped at build time, where the
+            # client_credentials emission branch ignores it.
+            #
+            # Truthy + non-blank-string check so empty / None / whitespace
+            # are treated as "not supplied" and malformed payloads
+            # (`authorization_url=["url"]`) are still rejected.
+            if canonical_grant == "client_credentials":
+                auth_url = oauth2.get("authorization_url")
+                is_blank_str = isinstance(auth_url, str) and not auth_url.strip()
+                if auth_url and not is_blank_str:
+                    return BuilderValidationError(
+                        "oauth2.authorization_url is only valid with "
+                        "grant_type='authorization_code', not "
+                        "grant_type='client_credentials'",
+                        error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                        field="oauth2.authorization_url",
+                        hint=(
+                            "Remove oauth2.authorization_url or switch "
+                            "to grant_type='authorization_code'. The "
+                            "authorization endpoint is the end-user "
+                            "consent URL — client_credentials is a "
+                            "machine-to-machine flow with no user."
+                        ),
+                    )
 
         # 5b) Password-backed auth modes (BASIC) require username + credential_ref.
         # credential_ref carries the Boomi credential URL (the actual password

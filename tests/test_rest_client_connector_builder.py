@@ -1916,3 +1916,72 @@ def test_stale_preemptive_non_bool_value_rejected_for_non_applicable_auth(stale_
     err = excinfo.value
     assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
     assert err.field == "preemptive"
+
+
+# ----------------------------------------------------------------------------
+# Field-dependency audit — stale `oauth2.authorization_url` for grant
+# `client_credentials`. The authorization_url is the user-consent endpoint
+# used during the OAuth 2.0 authorization-code flow. For client_credentials
+# (machine-to-machine, no user) the field is meaningless — supplying it
+# would otherwise be silently dropped at build time.
+# ----------------------------------------------------------------------------
+
+
+def test_stale_authorization_url_rejected_for_client_credentials_grant():
+    """authorization_url is grant_type='authorization_code' only. Supplying
+    it with client_credentials is a config mistake — Boomi doesn't use it
+    for the m2m flow."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"]["authorization_url"] = "https://api.example.com/oauth/authorize"
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "oauth2.authorization_url"
+
+
+def test_empty_authorization_url_accepted_for_client_credentials_grant():
+    """Empty-string / whitespace authorization_url is treated as "not
+    supplied" — accept it for client_credentials (edge case for callers
+    that always include the key)."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"]["authorization_url"] = ""
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+    cfg["oauth2"]["authorization_url"] = "   "
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+def test_none_authorization_url_accepted_for_client_credentials_grant():
+    """Regression sanity: `authorization_url=None` for client_credentials
+    grant still passes."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"]["authorization_url"] = None
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+def test_authorization_url_accepted_for_authorization_code_grant():
+    """Positive case: with grant='authorization_code' the authorization_url
+    is REQUIRED — and a populated value validates clean."""
+    cfg = _minimal_oauth2_authcode_config()
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+@pytest.mark.parametrize(
+    "stale_value",
+    [
+        ["https://api.example.com/oauth/authorize"],
+        {"url": "https://api.example.com/oauth/authorize"},
+        12345,
+        True,
+    ],
+)
+def test_stale_authorization_url_non_string_value_rejected_for_client_credentials_grant(stale_value):
+    """Non-string truthy `oauth2.authorization_url` with client_credentials
+    grant must also be rejected. Mirrors round-2 stale-gate patterns."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"]["authorization_url"] = stale_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "oauth2.authorization_url"
