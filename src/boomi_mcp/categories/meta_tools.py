@@ -1090,8 +1090,8 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         "XML reference; every other auth mode listed in the REST Client "
         "docs (NONE, BASIC, NTLM, CUSTOM, PASSWORD_DIGEST, AWS_SIGNATURE, "
         "AWS_IAM_ROLES_ANYWHERE) returns UNSUPPORTED_REST_AUTH_MODE until "
-        "a verified live export exists. The HTTP Client connector is NOT "
-        "the issue #24 target — use connector_type='rest'."
+        "a verified live export exists. REST is the canonical target API "
+        "connector — use connector_type='rest'."
     ),
     "template": {
         "connector_type": "rest",
@@ -1172,11 +1172,10 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
     },
     "gotchas": [
         (
-            "REST Client is a different connector than HTTP Client. The "
             "Boomi subtype is officialboomi-X3979C-rest-prod and the "
-            "operation step uses GenericOperationConfig, not "
-            "HttpSendAction. Always pass connector_type='rest' for "
-            "M2 target sends."
+            "operation step uses GenericOperationConfig. Always pass "
+            "connector_type='rest' (or one of the documented aliases) "
+            "for target sends."
         ),
         (
             "OAuth2 client_credentials is the only auth shape with a "
@@ -1910,8 +1909,7 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         ),
         (
             "REST Client preserves the path value verbatim in emitted XML, "
-            "including any leading slash. (HTTP Client stripped one leading "
-            "slash; REST Client does not.) Pass the path exactly as it "
+            "including any leading slash. Pass the path exactly as it "
             "should appear after the connection's base_url."
         ),
         (
@@ -1998,9 +1996,8 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW = {
     "tool": "manage_connector (action='create')",
     "note": (
         "Connector-action (operation) builders. Available: database.get "
-        "(issue #23) and rest.operation (issue #24). Database send/write is "
-        "tracked by issue #32. HTTP Client is NOT the issue #24 target — "
-        "use connector_type='rest'."
+        "(issue #23) and rest.operation (issue #24). Database send/write "
+        "is tracked by issue #32."
     ),
     "available_protocols": ["database.get", "rest.operation"],
     "hint": (

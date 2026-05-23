@@ -80,6 +80,61 @@ def test_integration_plan_template_steers_dependents_to_rest_connection_key():
             )
 
 
+def test_no_residual_http_client_references_in_capability_or_plan():
+    """Issue #24 follow-up: the legacy HTTP Client connector has been
+    removed entirely. The integration plan template, manage_connector
+    capability examples, and REST schema templates must carry zero
+    residual HTTP Client steering — no 'connector_type: http' configs,
+    no HttpSettings emission, no 'HTTP Client' name-drops in the REST
+    docs that compared the two connectors. (Trading-partner protocol
+    'http' is unrelated — this test does not look at trading-partner
+    templates.)"""
+    integration_plan_blob = repr(get_schema_template_action(
+        resource_type="integration", operation="plan",
+    ))
+    rest_client_blob = repr(get_schema_template_action(
+        resource_type="component", operation="create",
+        component_type="connector-settings", protocol="rest.client",
+    ))
+    rest_operation_blob = repr(get_schema_template_action(
+        resource_type="component", operation="create",
+        component_type="connector-action", protocol="rest.operation",
+    ))
+    capability_blob = repr(
+        list_capabilities_action().get("tools", {}).get("manage_connector", {})
+    )
+
+    blobs = {
+        "integration_plan": integration_plan_blob,
+        "rest_client_template": rest_client_blob,
+        "rest_operation_template": rest_operation_blob,
+        "manage_connector_capability": capability_blob,
+    }
+
+    # Substrings that signal HTTP-Client-shaped content. These must not
+    # appear anywhere in the schema/capability text. (Free-form text
+    # 'http://example.com' inside URLs is fine — we only forbid the
+    # HTTP-connector field shape and the HTTP Client connector name.)
+    forbidden_substrings = [
+        "'connector_type': 'http'",
+        '"connector_type": "http"',
+        "'auth_type':",
+        '"auth_type":',
+        "HttpSettings",
+        "HTTP Client",
+        "http.client",
+        "http.send",
+    ]
+
+    for blob_name, blob in blobs.items():
+        for forbidden in forbidden_substrings:
+            assert forbidden not in blob, (
+                f"{blob_name!r} carries residual HTTP Client steering: "
+                f"substring {forbidden!r} found. Remove this leftover after "
+                "deleting HttpConnectorBuilder."
+            )
+
+
 def test_integration_plan_template_has_no_dangling_http_connection_refs():
     """Regression for codex round-3: after renaming the connector key from
     'http_connection' to 'rest_connection', any `$ref:http_connection` token

@@ -9,7 +9,6 @@ from .connector_builder import (
     BuilderValidationError,
     DatabaseConnectorBuilder,
     DatabaseGetOperationBuilder,
-    HttpConnectorBuilder,
     REST_CLIENT_SUBTYPE,
     RestClientConnectionBuilder,
     RestClientOperationBuilder,
@@ -17,8 +16,6 @@ from .connector_builder import (
     CONNECTOR_ACTION_BUILDERS,
     get_connector_builder,
     get_connector_action_builder,
-    find_http_settings,
-    update_http_settings_fields,
 )
 from .profile_builder import (
     DatabaseReadProfileBuilder,
@@ -33,7 +30,6 @@ __all__ = [
     "DatabaseGetOperationBuilder",
     "DatabaseReadProfileBuilder",
     "DatabaseStoredProcedureReadProfileBuilder",
-    "HttpConnectorBuilder",
     "REST_CLIENT_SUBTYPE",
     "RestClientConnectionBuilder",
     "RestClientOperationBuilder",
@@ -43,6 +39,4 @@ __all__ = [
     "get_connector_builder",
     "get_connector_action_builder",
     "get_profile_builder",
-    "find_http_settings",
-    "update_http_settings_fields",
 ]

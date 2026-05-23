@@ -352,18 +352,6 @@ def test_create_connector_secret_value_not_echoed_in_structured_error():
             assert "SENTINEL_VALUE_DEADBEEF" not in v
 
 
-def test_create_connector_http_value_error_path_unchanged():
-    """HTTP builder raises plain ValueError (no error_code); the legacy
-    flat envelope must still surface for non-BuilderValidationError ValueErrors."""
-    client = MagicMock()
-    client.connector.get_connector.return_value = MagicMock()
-    result = create_connector(client, "test", {"connector_type": "http", "component_name": "X"})
-    # Missing url → HttpConnectorBuilder raises ValueError (not BuilderValidationError)
-    assert result["_success"] is False
-    assert "error" in result
-    assert "error_code" not in result  # flat envelope, no structured fields
-
-
 # ---------------------------------------------------------------------------
 # Issue #31 — driver shape discriminator, pooling, write_options
 # ---------------------------------------------------------------------------

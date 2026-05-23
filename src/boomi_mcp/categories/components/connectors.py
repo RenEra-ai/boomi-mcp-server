@@ -41,14 +41,14 @@ from .builders.connector_builder import (
     _resolve_rest_connector_type,
     get_connector_builder, CONNECTOR_BUILDERS,
     get_connector_action_builder, CONNECTOR_ACTION_BUILDERS,
-    find_http_settings, update_http_settings_fields,
 )
 
 
 def _missing_component_name_hint(connector_type: str) -> str:
     """Build a connector_type-aware 'config example' hint for the
     component_name-missing error path. Steers REST callers toward the
-    base_url/auth/oauth2 shape (not the legacy HTTP url/auth_type shape)."""
+    base_url/auth/oauth2 shape; database callers get the database shape;
+    other connector types get a generic pointer to get_schema_template."""
     if _resolve_rest_connector_type(connector_type) is not None:
         return (
             f'Provide config: {{"connector_type": "{connector_type}", '
@@ -211,7 +211,7 @@ def list_connectors(
 
     Filters:
         component_type: "connection" (connector-settings) or "operation" (connector-action)
-        connector_type: sub-type filter (e.g., "http", "database", "sftp")
+        connector_type: sub-type filter (e.g., "rest", "database", "sftp")
         folder_name: client-side folder filter
         show_all: include deleted/non-current versions
     """
@@ -353,7 +353,7 @@ def create_connector(
 
     Two paths:
     1. Raw XML — if config["xml"] provided, POST directly (any connector type)
-    2. Builder — if config["connector_type"] provided (e.g., "http"), use builder
+    2. Builder — if config["connector_type"] provided (e.g., "rest", "database"), use builder
     """
     try:
         # Path 1: raw XML
@@ -512,10 +512,10 @@ def update_connector(
     """Update an existing connector component.
 
     Two paths:
-    1. Raw XML — if config["xml"] provided, full replacement
-    2. Smart merge — update specific fields in existing XML
-       - Component-level: name, description, folder_name
-       - Connector-specific: HttpSettings attributes (url, auth_type, etc.)
+    1. Raw XML — if config["xml"] provided, full replacement.
+    2. Smart merge — component-level metadata only (name, description,
+       folder_name, folder_id). Connector-body field-level edits (e.g.
+       REST base_url, database host) require the raw-XML escape hatch.
     """
     try:
         # Path 1: raw XML replacement
@@ -528,14 +528,13 @@ def update_connector(
                 "profile": profile,
             }
 
-        # Path 2: smart merge
+        # Path 2: smart merge — component-level metadata only.
         current = component_get_xml(boomi_client, component_id)
         raw_xml = current['xml']
         root = ET.fromstring(raw_xml)
 
         changed = False
 
-        # Component-level updates
         if config.get('name') or config.get('component_name'):
             root.set('name', config.get('name') or config['component_name'])
             changed = True
@@ -549,23 +548,17 @@ def update_connector(
             set_description_element(root, config['description'])
             changed = True
 
-        # Connector-specific field updates (HttpSettings)
-        ns = {'bns': 'http://api.platform.boomi.com/'}
-        obj_elem = root.find('bns:object', ns)
-        if obj_elem is None:
-            obj_elem = root.find('object')
-
-        if obj_elem is not None:
-            http_settings = find_http_settings(obj_elem)
-            if http_settings is not None:
-                if update_http_settings_fields(http_settings, config):
-                    changed = True
-
         if not changed:
             return {
                 "_success": False,
                 "error": "No updatable fields provided in config",
-                "hint": "Provide name, description, folder_name, url, auth_type, username, trust_all_certs, or xml",
+                "hint": (
+                    "Smart-merge supports component-level metadata only: "
+                    "name, description, folder_name, folder_id. For "
+                    "field-level connector-body edits, supply the full "
+                    "replacement XML via config={\"xml\": \"<bns:Component "
+                    "...>...</bns:Component>\"}."
+                ),
             }
 
         modified_xml = ET.tostring(root, encoding='unicode', xml_declaration=True)
@@ -706,14 +699,12 @@ def manage_connector_action(
                     "_success": False,
                     "error": "config is required for 'update' action",
                     "hint": (
-                        "Provide config with fields to update. Universally "
-                        "supported component-level fields: name, description, "
-                        "folder_name, folder_id. For HTTP Client connections, "
-                        "smart-merge also handles HttpSettings attributes "
-                        "(url, auth_type, username, trust_all_certs, "
-                        "client_ssl_alias). For REST Client / database / "
-                        "other field-level edits, use the raw-XML escape "
-                        "hatch: config={\"xml\": \"<bns:Component ...full XML...>\"}."
+                        "Provide config with fields to update. Smart-merge "
+                        "supports component-level metadata only: name, "
+                        "description, folder_name, folder_id. For "
+                        "field-level connector-body edits (REST base_url, "
+                        "database host, etc.), supply the full replacement "
+                        "XML via config={\"xml\": \"<bns:Component ...full XML...>\"}."
                     ),
                 }
             return update_connector(boomi_client, profile, component_id, config)
