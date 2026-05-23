@@ -95,15 +95,28 @@ def test_template_documents_defaults():
 
 def test_template_lists_supported_auth_modes():
     result = _call(component_type="connector-settings", protocol="rest.client")
-    assert result["supported_auth_modes"] == ["OAUTH2"]
+    supported = set(result["supported_auth_modes"])
+    assert "NONE" in supported
+    assert "OAUTH2" in supported
 
 
 def test_template_lists_unsupported_future_auth_modes():
     result = _call(component_type="connector-settings", protocol="rest.client")
     unsupported = set(result["unsupported_future_auth_modes"])
-    for mode in ("NONE", "BASIC", "PASSWORD_DIGEST", "NTLM", "CUSTOM",
-                 "AWS_SIGNATURE", "AWS_IAM_ROLES_ANYWHERE"):
+    for mode in ("PASSWORD_DIGEST", "CUSTOM", "AWS_SIGNATURE", "AWS_IAM_ROLES_ANYWHERE"):
         assert mode in unsupported
+    # Sanity: NONE is no longer in the deferred list.
+    assert "NONE" not in unsupported
+
+
+def test_template_documents_cert_ref_fields():
+    """Cert refs (privateCertificate / publicCertificate) are an independent
+    client-cert option — they may be supplied with any auth mode. Schema must
+    surface this so callers know the fields are accepted."""
+    result = _call(component_type="connector-settings", protocol="rest.client")
+    blob = repr(result)
+    assert "private_certificate_ref" in blob
+    assert "public_certificate_ref" in blob
 
 
 def test_template_documents_oauth2_buildable_grant_types():

@@ -978,7 +978,7 @@ class RestClientConnectionBuilder:
         folder_name / description: optional component-level fields.
     """
 
-    SUPPORTED_AUTH_MODES = ("OAUTH2",)
+    SUPPORTED_AUTH_MODES = ("NONE", "OAUTH2")
     RECOGNIZED_AUTH_MODES = (
         "NONE",
         "AWS_SIGNATURE",
@@ -990,6 +990,7 @@ class RestClientConnectionBuilder:
         "AWS_IAM_ROLES_ANYWHERE",
     )
     BUILDABLE_OAUTH2_GRANT_TYPES = ("client_credentials",)
+    _CERT_REF_FIELDS = ("private_certificate_ref", "public_certificate_ref")
     FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
 
     @classmethod
@@ -1157,6 +1158,27 @@ class RestClientConnectionBuilder:
         if pooling_err is not None:
             return pooling_err
 
+        # 9) Optional client-cert reference fields. Independent of auth mode
+        # (per the live REST Certificate export, which carries auth=NONE plus
+        # populated privateCertificate/publicCertificate refs — but cert refs
+        # may co-occur with any auth selection).
+        for cert_field in cls._CERT_REF_FIELDS:
+            if cert_field in config and config[cert_field] not in (None, ""):
+                value = config[cert_field]
+                if not isinstance(value, str):
+                    return BuilderValidationError(
+                        f"{cert_field} must be a string (Boomi certificate "
+                        f"component id), got {type(value).__name__}",
+                        error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                        field=cert_field,
+                        hint=(
+                            "Pass the Boomi certificate component id (GUID "
+                            "string) for the X509 client cert. Cert refs work "
+                            "with any auth mode — they are an independent "
+                            "client-cert option, not tied to auth=NONE."
+                        ),
+                    )
+
         return None
 
     _POOLING_ALLOWED_KEYS = frozenset({
@@ -1224,6 +1246,82 @@ class RestClientConnectionBuilder:
         formatted = _format_xml_value(value) if value not in (None, "") else ""
         return f'            <field id="{field_id}" type="{field_type}" value="{formatted}"/>\n'
 
+    @staticmethod
+    def _field_self_closing_when_empty(
+        field_id: str, value: Any, field_type: str
+    ) -> str:
+        """Like ``_field`` but emits the self-closing form
+        ``<field id="..." type="..."/>`` when ``value`` is empty/None, and the
+        attribute form ``<field ... value="..."/>`` when populated.
+
+        Matches the live REST connection shape for ``privateCertificate`` and
+        ``publicCertificate``: those fields drop the ``value`` attribute
+        entirely when no cert ref is assigned (verified against the
+        REST None / REST None Pooling / REST Certificate live exports)."""
+        if value in (None, ""):
+            return f'            <field id="{field_id}" type="{field_type}"/>\n'
+        formatted = _escape_xml(str(value))
+        return (
+            f'            <field id="{field_id}" type="{field_type}" '
+            f'value="{formatted}"/>\n'
+        )
+
+    @staticmethod
+    def _emit_preemptive(auth: str, preemptive_value: Any) -> str:
+        """Match live: BASIC and OAUTH2 emit an explicit boolean (true/false);
+        NONE and NTLM emit value="" (Boomi treats preemptive as irrelevant
+        for those modes, per docs). Verified against d6ee8b5b (OAUTH2 false),
+        587b5fe0 (BASIC false), 7f7e0730 (NONE empty), 1de43085 (NTLM empty)."""
+        if auth in ("BASIC", "OAUTH2"):
+            return RestClientConnectionBuilder._field(
+                "preemptive", bool(preemptive_value), "boolean"
+            )
+        return '            <field id="preemptive" type="boolean" value=""/>\n'
+
+    @staticmethod
+    def _build_encrypted_values_block(auth: str) -> str:
+        """Auth-mode-driven `<bns:encryptedValues>` header.
+
+        - NONE: empty `<bns:encryptedValues/>` — no secrets stored.
+        - OAUTH2: client-secret xpath marker, isSet=false (Boomi fills the
+          secret on save).
+
+        Future auth modes (BASIC / NTLM in subsequent phases) use the
+        password-field xpath marker — added when those auths land."""
+        if auth == "OAUTH2":
+            return (
+                '    <bns:encryptedValues>\n'
+                '        <bns:encryptedValue path="//GenericConnectionConfig/field/OAuth2Config/credentials/@clientSecret" isSet="false"/>\n'
+                '    </bns:encryptedValues>\n'
+            )
+        # NONE (and other non-secret modes in the skeleton).
+        return '    <bns:encryptedValues/>\n'
+
+    @staticmethod
+    def _build_oauth2_skeleton_field() -> str:
+        """Empty OAuth2Config child emitted for non-OAUTH2 auth modes.
+
+        Matches live REST None / REST Certificate / REST None Pooling /
+        REST Basic / REST NTLM: every connection still carries the
+        OAuth2Config element with ``grantType="code"``, empty credentials,
+        empty endpoints, empty scope. ``credentialsAssertionType`` is
+        deliberately absent in the skeleton (only populated grants emit
+        it).
+        """
+        return (
+            '            <field id="oauthContext" type="oauth">\n'
+            '                <OAuth2Config grantType="code">\n'
+            '                    <credentials clientId=""/>\n'
+            '                    <authorizationTokenEndpoint url=""><sslOptions/></authorizationTokenEndpoint>\n'
+            '                    <authorizationParameters/>\n'
+            '                    <accessTokenEndpoint url=""><sslOptions/></accessTokenEndpoint>\n'
+            '                    <accessTokenParameters/>\n'
+            '                    <scope/>\n'
+            '                    <jwtParameters><expiration>0</expiration></jwtParameters>\n'
+            '                </OAuth2Config>\n'
+            '            </field>\n'
+        )
+
     def _build_oauth2_field(self, oauth2: Dict[str, Any]) -> str:
         client_id = _escape_xml(str(oauth2.get("client_id", "")))
         access_token_url = _escape_xml(str(oauth2.get("access_token_url", "")))
@@ -1261,7 +1359,6 @@ class RestClientConnectionBuilder:
         folder_name = params.get("folder_name", "Home")
         description = params.get("description", "")
 
-        preemptive = bool(params.get("preemptive", False))
         connect_timeout = params.get("connect_timeout_ms", -1)
         read_timeout = params.get("read_timeout_ms", -1)
         cookie_scope = params.get("cookie_scope", "GLOBAL")
@@ -1273,6 +1370,8 @@ class RestClientConnectionBuilder:
         username = params.get("username", "")
         domain = params.get("domain", "")
         workstation = params.get("workstation", "")
+        private_cert_ref = params.get("private_certificate_ref", "")
+        public_cert_ref = params.get("public_certificate_ref", "")
 
         safe_name = _escape_xml(component_name)
         safe_folder = _escape_xml(folder_name)
@@ -1286,7 +1385,7 @@ class RestClientConnectionBuilder:
         fields.append(self._field("domain", domain))
         fields.append(self._field("workstation", workstation))
         fields.append(self._field("customAuthCredentials", "", "password"))
-        fields.append(self._field("preemptive", preemptive, "boolean"))
+        fields.append(self._emit_preemptive(auth, params.get("preemptive", False)))
         for aws_field_id, aws_field_type in _REST_CLIENT_AWS_FIELDS:
             fields.append(self._field(aws_field_id, "", aws_field_type))
         fields.append(self._field("awsPublicCertificate", "", "publiccertificate"))
@@ -1294,16 +1393,19 @@ class RestClientConnectionBuilder:
         if auth == "OAUTH2":
             fields.append(self._build_oauth2_field(params["oauth2"]))
         else:
-            # No verified non-OAUTH2 shape ships in issue #24, so this branch
-            # is unreachable from validate_config. Kept as defensive scaffolding.
-            fields.append(
-                '            <field id="oauthContext" type="oauth"/>\n'
-            )
+            # Non-OAUTH2 modes keep the OAuth2Config child as a skeleton so
+            # the connection can be UI-promoted later. Matches live shape of
+            # REST None / REST Certificate / REST None Pooling exports.
+            fields.append(self._build_oauth2_skeleton_field())
         fields.append(
-            '            <field id="privateCertificate" type="privatecertificate"/>\n'
+            self._field_self_closing_when_empty(
+                "privateCertificate", private_cert_ref, "privatecertificate"
+            )
         )
         fields.append(
-            '            <field id="publicCertificate" type="publiccertificate"/>\n'
+            self._field_self_closing_when_empty(
+                "publicCertificate", public_cert_ref, "publiccertificate"
+            )
         )
         fields.append(self._field("connectTimeout", connect_timeout, "integer"))
         fields.append(self._field("readTimeout", read_timeout, "integer"))
@@ -1312,11 +1414,7 @@ class RestClientConnectionBuilder:
         fields.append(self._field("maxTotal", max_total, "integer"))
         fields.append(self._field("idleTimeout", idle_timeout, "integer"))
 
-        encrypted_values_block = (
-            '    <bns:encryptedValues>\n'
-            '        <bns:encryptedValue path="//GenericConnectionConfig/field/OAuth2Config/credentials/@clientSecret" isSet="false"/>\n'
-            '    </bns:encryptedValues>\n'
-        )
+        encrypted_values_block = self._build_encrypted_values_block(auth)
 
         return (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
