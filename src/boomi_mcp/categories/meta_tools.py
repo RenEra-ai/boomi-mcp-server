@@ -3114,7 +3114,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'manage_connector(profile="prod", action="list", config=\'{"component_type": "connection", "connector_type": "officialboomi-X3979C-rest-prod"}\')',
                 'manage_connector(profile="prod", action="get", component_id="abc-123")',
                 'manage_connector(profile="prod", action="create", config=\'{"connector_type": "rest", "component_name": "Target REST OAuth2 Connection", "base_url": "https://api.example.com", "auth": "OAUTH2", "oauth2": {"grant_type": "client_credentials", "client_id": "<<client id>>", "client_secret_ref": "credential://<<vendor>>/oauth-client-secret", "access_token_url": "https://api.example.com/oauth/token"}}\')',
-                'manage_connector(profile="prod", action="update", component_id="abc-123", config=\'{"base_url": "https://api.example.com/v2"}\')',
+                'manage_connector(profile="prod", action="update", component_id="abc-123", config=\'{"description": "Updated description", "folder_name": "Process Library"}\')',
                 'manage_connector(profile="prod", action="delete", component_id="abc-123")',
             ],
             "sdk_examples_covered": [

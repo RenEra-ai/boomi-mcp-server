@@ -432,6 +432,21 @@ def _check_rest_operation_dependencies(
     return None
 
 
+# REST config fields known to carry secret/credential-like values. When ANY
+# REST validation error fires, these paths are scrubbed from the plan echo
+# regardless of which validator won — otherwise an earlier failing check
+# (missing connection_ref_key, missing base_url, etc.) leaves the sensitive
+# data unredacted (codex review item P1, round-6). Paths are dotted to match
+# `_redact_dotted_field_path`'s contract.
+_REST_SENSITIVE_FIELD_PATHS = (
+    "oauth2.client_secret",       # also caught by FORBIDDEN_SECRET_FIELDS
+    "oauth2.client_secret_ref",   # raw value when it should be credential://
+    "credential_ref",             # raw value when it should be credential://
+    "request_headers",            # whole dict — Authorization / X-API-Key etc.
+    "query_parameters",           # whole dict — api_key / token in querystring
+)
+
+
 def _redact_dotted_field_path(config: Any, dotted_path: Optional[str]) -> None:
     """Replace the value at a dotted path inside `config` with '[REDACTED]'.
 
@@ -846,16 +861,15 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 rest_scanner_cls.redact_forbidden_secret_fields_in_place(
                     raw_config
                 )
-            elif rest_err.error_code in (
-                "REST_SECRET_VALUE_FORBIDDEN",
-                "NEEDS_REST_EXAMPLE",
-            ):
-                # The offender isn't in FORBIDDEN_SECRET_FIELDS so the generic
-                # walker can't redact it. Target the specific dotted-path
-                # field named by the validator (oauth2.client_secret_ref,
-                # request_headers, query_parameters). Codex review item P1
-                # against the issue-#24 REST landing.
-                _redact_dotted_field_path(raw_config, rest_err.field)
+            # Any REST validation error must scrub the documented sensitive
+            # fields, not just the one named in the winning error. Without
+            # this, a sensitive value (Authorization header, raw
+            # client_secret_ref, raw credential_ref, populated
+            # query_parameters) leaks into the plan echo when an EARLIER
+            # validator (e.g. missing connection_ref_key, missing base_url)
+            # fires first. Codex review item P1 round-6.
+            for sensitive_path in _REST_SENSITIVE_FIELD_PATHS:
+                _redact_dotted_field_path(raw_config, sensitive_path)
 
         step: Dict[str, Any] = {
             "key": comp.key,
