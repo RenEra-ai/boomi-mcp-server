@@ -981,6 +981,14 @@ class RestClientConnectionBuilder:
 
     SUPPORTED_AUTH_MODES = ("NONE", "BASIC", "NTLM", "OAUTH2")
     _PASSWORD_BACKED_AUTH_MODES = ("BASIC", "NTLM")
+
+    # Auth modes for which the `preemptive` flag is meaningful. Per Boomi docs
+    # ("Applicable for Basic and OAuth 2.0 authentication"), the field only
+    # controls behavior for BASIC and OAUTH2 — for NONE / NTLM / CUSTOM /
+    # PASSWORD_DIGEST / AWS_* it is silently ignored at runtime, so a
+    # caller-supplied value for those auths is treated as a stale-config
+    # mistake (validation rejects it up front).
+    _PREEMPTIVE_AUTH_MODES = ("BASIC", "OAUTH2")
     RECOGNIZED_AUTH_MODES = (
         "NONE",
         "AWS_SIGNATURE",
@@ -1344,8 +1352,42 @@ class RestClientConnectionBuilder:
                         ),
                     )
 
-        # 6) Optional preemptive flag must be a bool when supplied.
-        if "preemptive" in config and not isinstance(config["preemptive"], bool):
+        # 5g) Stale `preemptive` gate. Per Boomi docs the flag is
+        # "applicable for Basic and OAuth 2.0 authentication" — for any
+        # other auth mode it has no semantic effect. Supplying it with
+        # NONE / NTLM (or any future non-applicable auth) is a config
+        # mistake.
+        #
+        # Presence-check (not truthy) because False is also a
+        # caller-supplied value with intent (Boomi docs distinguish
+        # "selected" vs "cleared"). None is treated as "not supplied"
+        # for consistency with the other stale gates.
+        if (
+            "preemptive" in config
+            and config["preemptive"] is not None
+            and auth not in cls._PREEMPTIVE_AUTH_MODES
+        ):
+            return BuilderValidationError(
+                f"`preemptive` is only valid with auth='BASIC' or "
+                f"auth='OAUTH2', not auth={auth!r}",
+                error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                field="preemptive",
+                hint=(
+                    "Remove preemptive or switch to BASIC / OAUTH2. Per "
+                    "Boomi docs the flag is applicable only for Basic "
+                    "and OAuth 2.0 authentication — for any other auth "
+                    "mode it has no semantic effect."
+                ),
+            )
+
+        # 6) Optional preemptive flag must be a bool when supplied. None
+        # is treated as "not supplied" (consistent with the other
+        # optional-field gates).
+        if (
+            "preemptive" in config
+            and config["preemptive"] is not None
+            and not isinstance(config["preemptive"], bool)
+        ):
             return BuilderValidationError(
                 "preemptive must be a bool",
                 error_code="REST_CONNECTOR_VALIDATION_FAILED",
