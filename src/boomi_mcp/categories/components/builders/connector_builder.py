@@ -1320,6 +1320,30 @@ class RestClientConnectionBuilder:
                 ),
             )
 
+        # 5f) Stale `domain` / `workstation` gate. Both fields are NTLM-only
+        # per Boomi docs and live exports (verified against 1de43085).
+        # Supplying either with NONE / BASIC / OAUTH2 is always a config
+        # mistake — Boomi ignores them at runtime but they would otherwise
+        # be emitted in the XML.
+        if auth != "NTLM":
+            for ntlm_field in ("domain", "workstation"):
+                value = config.get(ntlm_field)
+                is_blank_str = isinstance(value, str) and not value.strip()
+                if value and not is_blank_str:
+                    return BuilderValidationError(
+                        f"`{ntlm_field}` is only valid with auth='NTLM', "
+                        f"not auth={auth!r}",
+                        error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                        field=ntlm_field,
+                        hint=(
+                            f"Remove {ntlm_field} or switch auth='NTLM'. "
+                            "domain + workstation are NTLM-only fields "
+                            "used during the challenge-response handshake; "
+                            "they have no semantic effect for any other "
+                            "auth mode."
+                        ),
+                    )
+
         # 6) Optional preemptive flag must be a bool when supplied.
         if "preemptive" in config and not isinstance(config["preemptive"], bool):
             return BuilderValidationError(

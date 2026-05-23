@@ -1754,3 +1754,89 @@ def test_stale_username_non_string_value_rejected_for_non_password_auth(stale_va
     err = excinfo.value
     assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
     assert err.field == "username"
+
+
+# ----------------------------------------------------------------------------
+# Field-dependency audit — stale `domain` / `workstation` for non-NTLM auth.
+# Both fields are NTLM-only per Boomi docs and live exports. Supplying them
+# with any other auth is a config mistake — Boomi ignores them at runtime,
+# but they would otherwise be emitted in the XML.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("non_ntlm_auth", ["NONE", "BASIC", "OAUTH2"])
+def test_stale_domain_rejected_for_non_ntlm_auth(non_ntlm_auth):
+    """`domain` is NTLM-only — supplying it with NONE/BASIC/OAUTH2 is
+    always a config mistake. Reject up front so it doesn't get emitted."""
+    if non_ntlm_auth == "OAUTH2":
+        cfg = _minimal_oauth2_config()
+    elif non_ntlm_auth == "BASIC":
+        cfg = _minimal_basic_config()
+    else:
+        cfg = _minimal_none_config()
+    cfg["domain"] = "MYCORP"
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "domain"
+
+
+@pytest.mark.parametrize("non_ntlm_auth", ["NONE", "BASIC", "OAUTH2"])
+def test_stale_workstation_rejected_for_non_ntlm_auth(non_ntlm_auth):
+    """`workstation` is NTLM-only — same rule as `domain`."""
+    if non_ntlm_auth == "OAUTH2":
+        cfg = _minimal_oauth2_config()
+    elif non_ntlm_auth == "BASIC":
+        cfg = _minimal_basic_config()
+    else:
+        cfg = _minimal_none_config()
+    cfg["workstation"] = "WS-01"
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "workstation"
+
+
+@pytest.mark.parametrize("stale_field", ["domain", "workstation"])
+def test_stale_ntlm_field_empty_value_accepted_for_non_ntlm_auth(stale_field):
+    """Empty-string / whitespace `domain` / `workstation` is treated as
+    "not supplied" — accept it (edge case for callers that always include
+    the key with an empty value regardless of auth)."""
+    cfg = _minimal_none_config()
+    cfg[stale_field] = ""
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+    cfg[stale_field] = "   "
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+@pytest.mark.parametrize("stale_field", ["domain", "workstation"])
+def test_stale_ntlm_field_none_value_accepted_for_non_ntlm_auth(stale_field):
+    """Regression sanity: `domain=None` / `workstation=None` for non-NTLM
+    auth still passes."""
+    cfg = _minimal_none_config()
+    cfg[stale_field] = None
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+@pytest.mark.parametrize("stale_field", ["domain", "workstation"])
+@pytest.mark.parametrize(
+    "stale_value",
+    [
+        ["MYCORP"],
+        {"value": "MYCORP"},
+        12345,
+        True,
+    ],
+)
+def test_stale_ntlm_field_non_string_value_rejected_for_non_ntlm_auth(stale_field, stale_value):
+    """Non-string truthy `domain` / `workstation` with non-NTLM auth must
+    also be rejected. Mirrors the round-2 pattern for credential_ref."""
+    cfg = _minimal_none_config()
+    cfg[stale_field] = stale_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == stale_field
