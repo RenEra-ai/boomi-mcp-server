@@ -254,6 +254,46 @@ def test_template_contains_no_canned_payloads_or_sql():
         )
 
 
+def test_field_method_dependency_map_independent_fields_present():
+    """The schema must declare which operation fields are independent of
+    method (work with any of the 8 supported verbs). Most REST operation
+    fields are method-orthogonal — only follow_redirects has a method-tied
+    default-emission rule."""
+    result = _call(component_type="connector-action", protocol="rest.operation")
+    dep_map = result.get("field_method_dependency_map")
+    assert dep_map is not None, "field_method_dependency_map must be present"
+    independent = dep_map.get("independent")
+    assert isinstance(independent, list)
+    for field in (
+        "path",
+        "query_parameters",
+        "request_headers",
+        "request_profile_ref",
+        "response_profile_ref",
+        "request_profile_type",
+        "response_profile_type",
+        "return_application_errors",
+        "track_response",
+    ):
+        assert field in independent, (
+            f"field {field!r} must be listed as method-independent in "
+            "field_method_dependency_map.independent"
+        )
+
+
+def test_field_method_dependency_map_follow_redirects_default():
+    """The schema must declare the per-method default-emission split for
+    follow_redirects so callers know which methods auto-emit NONE and which
+    omit the field when the caller doesn't supply a value."""
+    result = _call(component_type="connector-action", protocol="rest.operation")
+    method_tied = result["field_method_dependency_map"].get("method_tied")
+    assert isinstance(method_tied, dict)
+    follow = method_tied.get("follow_redirects_default")
+    assert isinstance(follow, dict)
+    assert sorted(follow.get("emit_NONE", [])) == sorted(["GET", "POST", "HEAD", "DELETE"])
+    assert sorted(follow.get("omit", [])) == sorted(["PATCH", "PUT", "OPTIONS", "TRACE"])
+
+
 def test_out_of_scope_does_not_list_supported_methods_or_customproperties():
     """Codex round-1 P2 #5: out_of_scope must NOT advertise the Phase-5
     methods (POST/PUT/DELETE/HEAD/OPTIONS/TRACE) as deferred, and must NOT

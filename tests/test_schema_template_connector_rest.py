@@ -208,6 +208,55 @@ def test_template_client_secret_ref_uses_credential_scheme():
     assert example_oauth2["client_secret_ref"].startswith("credential://")
 
 
+def test_field_auth_dependency_map_independent_fields_present():
+    """The schema must declare which connection fields are independent of
+    auth (i.e. work with any selected auth mode). Callers use this to
+    avoid wrongly assuming a field is auth-tied just because a single
+    live example happened to pair it with a particular auth."""
+    result = _call(component_type="connector-settings", protocol="rest.client")
+    dep_map = result.get("field_auth_dependency_map")
+    assert dep_map is not None, "field_auth_dependency_map must be present"
+    independent = dep_map.get("independent")
+    assert isinstance(independent, list)
+    for field in (
+        "url",
+        "connect_timeout_ms",
+        "read_timeout_ms",
+        "cookie_scope",
+        "private_certificate_ref",
+        "public_certificate_ref",
+        "connection_pooling",
+    ):
+        assert field in independent, (
+            f"field {field!r} must be listed as auth-independent in "
+            "field_auth_dependency_map.independent"
+        )
+
+
+def test_field_auth_dependency_map_auth_tied_fields_match_validation():
+    """The auth-tied section must match what the validator actually
+    enforces. If the schema says username is BASIC/NTLM-only but the
+    validator accepts username with OAUTH2, callers get misled."""
+    result = _call(component_type="connector-settings", protocol="rest.client")
+    auth_tied = result["field_auth_dependency_map"].get("auth_tied")
+    assert isinstance(auth_tied, dict)
+    assert auth_tied.get("username") == ["BASIC", "NTLM"]
+    assert auth_tied.get("credential_ref") == ["BASIC", "NTLM"]
+    assert auth_tied.get("domain") == ["NTLM"]
+    assert auth_tied.get("workstation") == ["NTLM"]
+    assert auth_tied.get("preemptive") == ["BASIC", "OAUTH2"]
+    assert auth_tied.get("oauth2") == ["OAUTH2"]
+
+
+def test_field_auth_dependency_map_grant_tied_authorization_url():
+    """Inside oauth2, authorization_url is grant-tied to authorization_code
+    only — client_credentials must reject it."""
+    result = _call(component_type="connector-settings", protocol="rest.client")
+    grant_tied = result["field_auth_dependency_map"].get("grant_tied")
+    assert isinstance(grant_tied, dict)
+    assert grant_tied.get("oauth2.authorization_url") == ["authorization_code"]
+
+
 def test_out_of_scope_does_not_list_supported_auth_modes_or_grants():
     """Codex round-1 P2 #4: the out_of_scope block must NOT list BASIC,
     NTLM, or plain authorization_code as deferred — those are all
