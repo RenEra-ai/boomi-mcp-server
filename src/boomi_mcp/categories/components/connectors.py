@@ -705,7 +705,16 @@ def manage_connector_action(
                 return {
                     "_success": False,
                     "error": "config is required for 'update' action",
-                    "hint": 'Provide config with fields to update: {"url": "https://new-url.com"}',
+                    "hint": (
+                        "Provide config with fields to update. Universally "
+                        "supported component-level fields: name, description, "
+                        "folder_name, folder_id. For HTTP Client connections, "
+                        "smart-merge also handles HttpSettings attributes "
+                        "(url, auth_type, username, trust_all_certs, "
+                        "client_ssl_alias). For REST Client / database / "
+                        "other field-level edits, use the raw-XML escape "
+                        "hatch: config={\"xml\": \"<bns:Component ...full XML...>\"}."
+                    ),
                 }
             return update_connector(boomi_client, profile, component_id, config)
 

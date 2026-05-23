@@ -175,3 +175,32 @@ def test_create_missing_component_name_hint_does_not_show_http_url():
     # REST connections use base_url, not url; never auth_type.
     assert '"url": "https://...' not in hint
     assert '"auth_type"' not in hint
+
+
+def test_update_missing_config_hint_does_not_show_http_url():
+    """The update-missing-config hint must be connector-type-agnostic. The
+    pre-fix hint suggested {"url": "https://new-url.com"}, which is the
+    HTTP Client shape — REST Client does not accept field-level url
+    updates and most universal updates are component-level (name,
+    description, folder_name)."""
+    result = manage_connector_action(
+        MagicMock(), "test", "update", component_id="abc-123",
+    )
+    assert result["_success"] is False
+    hint = result.get("hint", "")
+    # Must NOT show the HTTP-shape example.
+    assert '"url": "https://new-url.com"' not in hint
+    # Should mention at least one of the universally-updatable fields.
+    has_universal_field = any(
+        field in hint for field in ("name", "description", "folder_name")
+    )
+    assert has_universal_field, (
+        "update hint should mention name/description/folder_name as the "
+        "universally-updatable fields across connector types."
+    )
+    # Should point at the raw-XML escape hatch for field-level edits on
+    # non-HTTP connectors.
+    assert "xml" in hint.lower(), (
+        "update hint should mention the raw-XML escape hatch (config.xml=...) "
+        "for field-level edits on REST / database / other connectors."
+    )
