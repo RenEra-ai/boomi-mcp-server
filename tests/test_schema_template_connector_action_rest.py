@@ -167,6 +167,28 @@ def test_template_example_uses_ref_tokens():
     assert cfg["request_profile_id"].startswith("$ref:")
 
 
+def test_patch_template_omits_follow_redirects():
+    """Codex review P3 regression: the template defaults method to PATCH,
+    and the verified PATCH live export (64c4eafd) omits the followRedirects
+    field entirely. Including follow_redirects in the template would cause
+    users who copy the template verbatim to emit an unverified PATCH XML
+    variant."""
+    result = _call(component_type="connector-action", protocol="rest.operation")
+    template = result["template"]
+    assert template["method"] == "PATCH"
+    assert "follow_redirects" not in template, (
+        "rest.operation template must NOT include follow_redirects when its "
+        "default method is PATCH — the verified PATCH live export omits the "
+        "field. Document follow_redirects via follow_redirects_values / "
+        "follow_redirects_emission_rule instead."
+    )
+    example_cfg = result["example"]["config"]
+    assert "follow_redirects" not in example_cfg, (
+        "rest.operation example must NOT include follow_redirects for the "
+        "same reason."
+    )
+
+
 # ----------------------------------------------------------------------------
 # Anti-leak hygiene
 # ----------------------------------------------------------------------------
