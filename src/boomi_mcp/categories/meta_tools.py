@@ -1943,12 +1943,13 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
     "public_aliases": ["rest", "rest_client", "officialboomi-X3979C-rest-prod"],
     "tool": "manage_connector (action='create')",
     "note": (
-        "Boomi REST Client operation. Wraps a single REST call (GET or "
-        "PATCH in issue #24) in an Operation envelope with "
-        "GenericOperationConfig customOperationType=<method> and "
-        "operationType=EXECUTE. The connection is bound at the process "
-        "connector step, not in the operation XML — connection_ref_key is "
-        "plan-only metadata for dependency ordering."
+        "Boomi REST Client operation. Wraps a single REST call in an "
+        "Operation envelope with GenericOperationConfig "
+        "customOperationType=<method> and operationType=EXECUTE. All 8 "
+        "REST methods are buildable: GET, PATCH, PUT, POST, DELETE, HEAD, "
+        "OPTIONS, TRACE. The connection is bound at the process connector "
+        "step, not in the operation XML — connection_ref_key is plan-only "
+        "metadata for dependency ordering."
     ),
     "template": {
         "component_type": "connector-action",
@@ -1994,20 +1995,26 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         "response_profile_type": "xml",
         "return_application_errors": True,
         "track_response": True,
-        "follow_redirects_default_when_method_is_get": "NONE",
     },
     "supported_operation_modes": ["execute"],
-    "supported_methods": ["GET", "PATCH"],
-    "unverified_pending_methods": [
-        "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE",
+    "supported_methods": [
+        "GET", "PATCH", "PUT", "POST", "DELETE", "HEAD", "OPTIONS", "TRACE",
     ],
+    "unverified_pending_methods": [],
     "follow_redirects_values": ["NONE", "STRICT", "LAX"],
-    "follow_redirects_emission_rule": (
-        "GET emits a followRedirects field by default (value='NONE'). "
-        "PATCH and other methods only emit the field when the caller passes "
-        "follow_redirects explicitly. Verified against the Renera "
-        "[Rest Test GET] and [Rest Test PATCH] live exports."
-    ),
+    "follow_redirects_emission_rule": {
+        "default_none_methods": ["GET", "POST", "HEAD", "DELETE"],
+        "omit_methods": ["PATCH", "PUT", "OPTIONS", "TRACE"],
+        "explicit_values_always_emit": True,
+        "summary": (
+            "Four verbs (GET/POST/HEAD/DELETE) emit a followRedirects "
+            "field with value='NONE' by default. Four verbs "
+            "(PATCH/PUT/OPTIONS/TRACE) OMIT the field entirely when the "
+            "caller doesn't supply follow_redirects. Explicit "
+            "NONE/STRICT/LAX values are always emitted regardless of "
+            "method. Verified per-method against live RenEra exports."
+        ),
+    },
     "query_parameters_status": "empty_only_until_exported",
     "request_headers_status": "empty_only_until_exported",
     "query_headers_note": (
@@ -2041,8 +2048,8 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
     ),
     "error_codes": {
         "UNSUPPORTED_REST_OPERATION_MODE": "operation_mode is not 'execute'",
-        "UNSUPPORTED_REST_METHOD": "method is neither buildable nor recognized",
-        "UNVERIFIED_REST_XML_VARIANT": "method is recognized but not yet buildable (POST/PUT/DELETE/HEAD/OPTIONS/TRACE)",
+        "UNSUPPORTED_REST_METHOD": "method is not one of the 8 buildable REST verbs",
+        "UNVERIFIED_REST_XML_VARIANT": "reserved for future methods recognized but not yet buildable (currently no such methods — Phase 5 made all 8 verbs buildable)",
         "NEEDS_REST_EXAMPLE": "query_parameters or request_headers is non-empty",
         "REST_PATH_REQUIRED": "path absent or empty",
         "REST_CONNECTION_REF_REQUIRED": "connection_ref_key absent or empty",
@@ -2064,9 +2071,11 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
             "should appear after the connection's base_url."
         ),
         (
-            "GET emits a followRedirects field with value='NONE' by default. "
-            "PATCH and other methods omit the field unless follow_redirects "
-            "is explicitly supplied. This matches the live RenEra exports."
+            "followRedirects emission is per-method (Phase 5): four verbs "
+            "(GET/POST/HEAD/DELETE) emit value='NONE' by default; four "
+            "(PATCH/PUT/OPTIONS/TRACE) omit the field unless "
+            "follow_redirects is explicitly supplied. Explicit "
+            "NONE/STRICT/LAX values always emit regardless of method."
         ),
         (
             "connection_ref_key, payload_source_ref_key, credential_ref, "

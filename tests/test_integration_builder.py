@@ -1938,14 +1938,35 @@ class TestBuildPlanRestPreflight:
         assert step["validation_error"]["error_code"] == "UNSUPPORTED_REST_AUTH_MODE"
 
     @patch(_PATCH_TARGET)
-    def test_unverified_method_marks_rest_operation_unresolvable(self, mock_pag):
+    def test_unknown_method_marks_rest_operation_unresolvable(self, mock_pag):
+        """Phase 5 made all 8 REST verbs buildable, so the prior
+        UNVERIFIED_REST_XML_VARIANT path no longer fires for POST/PUT/etc.
+        Replace it with a truly unknown method check — preflight must still
+        catch garbage methods at plan time."""
         mock_pag.return_value = []
-        op = _rest_op_comp(method="POST")
+        op = _rest_op_comp(method="MAGIC")
         components = [_rest_conn_comp(), *_rest_supporting_components(), op]
         plan = _build_plan(MagicMock(), _build_config(components))
         step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
         assert step["planned_action"] == "error_rest_validation"
-        assert step["validation_error"]["error_code"] == "UNVERIFIED_REST_XML_VARIANT"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_REST_METHOD"
+
+
+    @patch(_PATCH_TARGET)
+    def test_all_eight_rest_methods_plan_clean(self, mock_pag):
+        """Phase 5 sanity: each of the 8 buildable REST methods plans clean
+        through preflight with otherwise-valid config."""
+        mock_pag.return_value = []
+        for method in ("GET", "PATCH", "PUT", "POST", "DELETE", "HEAD", "OPTIONS", "TRACE"):
+            op = _rest_op_comp(method=method)
+            components = [_rest_conn_comp(), *_rest_supporting_components(), op]
+            plan = _build_plan(MagicMock(), _build_config(components))
+            step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+            assert step["planned_action"] == "create", (
+                f"Method {method} should plan as 'create' (no validation error). "
+                f"Got planned_action={step.get('planned_action')!r}, "
+                f"error={step.get('validation_error')}."
+            )
 
     # ---- Plaintext-secret scan runs on EVERY REST step regardless of apply path.
 
