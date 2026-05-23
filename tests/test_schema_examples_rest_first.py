@@ -80,6 +80,21 @@ def test_integration_plan_template_steers_dependents_to_rest_connection_key():
             )
 
 
+def test_integration_plan_template_has_no_dangling_http_connection_refs():
+    """Regression for codex round-3: after renaming the connector key from
+    'http_connection' to 'rest_connection', any `$ref:http_connection` token
+    anywhere inside the template (e.g. process shapes' connector_id) would
+    point at a non-existent component and apply would silently leave the
+    binding unresolved."""
+    result = get_schema_template_action(resource_type="integration", operation="plan")
+    blob = repr(result)
+    assert "$ref:http_connection" not in blob, (
+        "Integration plan template still carries '$ref:http_connection' "
+        "somewhere (process shape config?). Update to '$ref:rest_connection' "
+        "so the apply path resolves the REST connector binding correctly."
+    )
+
+
 def test_manage_connector_capability_create_example_uses_rest():
     """list_capabilities surfaces example invocations. The create example
     must demonstrate REST Client, not HTTP Client (post-#24)."""
