@@ -92,48 +92,24 @@ def _format_xml_value(value: Any) -> str:
 class HttpConnectorBuilder:
     """Builder for HTTP/HTTPS connector-settings components.
 
-    Issue #24 hardens the previous M1 builder: validation upgrades from
-    `ValueError` to structured `BuilderValidationError`, plaintext secret
-    keys are rejected before XML emission, and only `auth_type='NONE'` is
-    buildable today. BASIC / OAUTH2 etc. are recognized but rejected with
-    `UNSUPPORTED_HTTP_AUTH_MODE` until verified live Boomi exports exist
-    for those shapes. The emitted XML for `auth_type='NONE'` is unchanged
-    from the pre-issue-#24 output (locked by integration_builder tests).
+    Generates <HttpSettings> XML matching the real Boomi UI export structure.
+    Supports NONE, BASIC, and OAUTH2 authentication types.
 
-    Config keys (all optional except component_name + url):
-        component_name:         Required; top-level component name.
-        url:                    Required; connection URL.
-        auth_type:              NONE (only buildable mode in issue #24).
-        folder_name:            Optional; defaults to "Home".
-        description:            Optional.
-        username:               Optional username for AuthSettings.
-        trust_all_certs:        Optional; SSLOptions trustServerCert.
-        client_ssl_alias:       Optional; SSLOptions clientauth.
-        credential_ref:         Optional opaque caller-side credential
-                                reference (e.g.
-                                "credential://vendor/role"); the builder
-                                never writes it into XML.
+    Config keys (all optional except url):
+        url:                    Connection URL (required)
+        auth_type:              NONE, BASIC, PASSWORD_DIGEST, CUSTOM, OAUTH, OAUTH2
+        username:               Username for BASIC auth
+        connect_timeout:        Connection timeout in ms (not in HttpSettings attrs)
+        read_timeout:           Read timeout in ms (not in HttpSettings attrs)
+        trust_all_certs:        Trust all SSL certificates (true/false)
+        client_ssl_alias:       Client SSL certificate alias
+        oauth2_grant_type:      OAuth2 grant type (e.g., client_credentials)
+        oauth2_client_id:       OAuth2 client ID
+        oauth2_client_secret:   OAuth2 client secret
+        oauth2_scope:           OAuth2 scope
+        oauth2_token_url:       OAuth2 access token endpoint URL
+        oauth2_auth_url:        OAuth2 authorization endpoint URL
     """
-
-    SUPPORTED_AUTH_MODES = ("NONE",)
-    RECOGNIZED_BUT_UNSUPPORTED_AUTH_MODES = (
-        "BASIC",
-        "OAUTH2",
-        "PASSWORD_DIGEST",
-        "CUSTOM",
-        "OAUTH",
-    )
-    # Same set as the database builders — secrets cross the wire as opaque
-    # credential_ref strings only. Boomi password ciphertext is set via the
-    # UI after create, or supplied via the raw-XML escape hatch.
-    FORBIDDEN_SECRET_FIELDS = (
-        "password",
-        "password_ref",
-        "secret",
-        "token",
-        "access_token",
-        "client_secret",
-    )
 
     # Attributes on <HttpSettings> element
     HTTP_SETTINGS_ATTRS = {
@@ -152,86 +128,14 @@ class HttpConnectorBuilder:
         'client_ssl_alias': 'clientauth',
     }
 
-    @classmethod
-    def scan_forbidden_secret_fields(
-        cls, config: Any, _path_prefix: str = ""
-    ) -> Optional[BuilderValidationError]:
-        """Reuse DatabaseConnectorBuilder's scan — same forbidden-key set."""
-        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
-            config, _path_prefix=_path_prefix
-        )
-
-    @classmethod
-    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
-        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
-
-    @classmethod
-    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
-        """Validate an HTTP connector-settings config without building XML."""
-        # 1) Plaintext secret-shaped keys must never appear in caller config.
-        secret_err = cls.scan_forbidden_secret_fields(config)
-        if secret_err is not None:
-            return secret_err
-
-        # 2) component_name required.
-        component_name = config.get("component_name")
-        if not component_name or not str(component_name).strip():
-            return BuilderValidationError(
-                "component_name is required for HTTP connectors",
-                error_code="HTTP_CONNECTOR_VALIDATION_FAILED",
-                field="component_name",
-                hint="Provide a non-empty component_name string.",
-            )
-
-        # 3) url required.
-        url = config.get("url")
-        if not url or not str(url).strip():
-            return BuilderValidationError(
-                "url is required for HTTP connectors",
-                error_code="MISSING_HTTP_ENDPOINT",
-                field="url",
-                hint=(
-                    "Provide the connection base URL (e.g. "
-                    "'https://api.example.com'). The operation's path is "
-                    "set on the connector-action, not here."
-                ),
-            )
-
-        # 4) auth_type gating — only NONE is buildable in issue #24.
-        auth_type = config.get("auth_type")
-        if auth_type is not None and auth_type not in cls.SUPPORTED_AUTH_MODES:
-            supported = ", ".join(cls.SUPPORTED_AUTH_MODES)
-            if auth_type in cls.RECOGNIZED_BUT_UNSUPPORTED_AUTH_MODES:
-                return BuilderValidationError(
-                    f"auth_type {auth_type!r} is recognized but not buildable "
-                    "yet — no verified live Boomi XML reference is available",
-                    error_code="UNSUPPORTED_HTTP_AUTH_MODE",
-                    field="auth_type",
-                    hint=(
-                        f"Supported auth_modes: {supported}. For "
-                        f"{auth_type}, model bearer/API-key target auth as "
-                        "variable headers on the operation plus an opaque "
-                        "credential_ref, or use the raw-XML escape hatch "
-                        "(config.xml=...) with a verified export."
-                    ),
-                )
-            return BuilderValidationError(
-                f"Unknown auth_type {auth_type!r} (supported: {supported})",
-                error_code="UNSUPPORTED_HTTP_AUTH_MODE",
-                field="auth_type",
-                hint=f"Supported auth_modes: {supported}.",
-            )
-
-        return None
-
     def build(self, **params) -> str:
         """Build complete component XML for an HTTP connector-settings component."""
-        error = self.validate_config(params)
-        if error is not None:
-            raise error
-
-        component_name = params["component_name"]
-        url = params["url"]
+        component_name = params.get('component_name', '')
+        if not component_name:
+            raise ValueError("component_name is required")
+        url = params.get('url', '')
+        if not url:
+            raise ValueError("url is required for HTTP connectors")
 
         folder_name = params.get('folder_name', 'Home')
         description = params.get('description', '')
@@ -455,17 +359,12 @@ class DatabaseConnectorBuilder:
             for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
                 if forbidden in config:
                     field_path = f"{_path_prefix}{forbidden}"
-                    # The wording is intentionally generic ("in this config")
-                    # because HttpConnectorBuilder and HttpClientOperationBuilder
-                    # both delegate to this scan via classmethod forwarding —
-                    # saying "database connector config" would leak the wrong
-                    # taxonomy into HTTP errors (QA bug #124, issue #24).
                     return BuilderValidationError(
-                        f"{field_path!r} cannot be supplied in this config — "
-                        "secrets must cross the wire as opaque credential_ref "
-                        "strings only. Boomi stores passwords as ciphertext "
-                        "produced by its own encryption; there is no public "
-                        "API to encrypt a plaintext value.",
+                        f"{field_path!r} cannot be supplied in database connector "
+                        "config — secrets must cross the wire as opaque "
+                        "credential_ref strings only. Boomi stores passwords as "
+                        "ciphertext produced by its own encryption; there is no "
+                        "public API to encrypt a plaintext value.",
                         error_code="PLAINTEXT_SECRET_REJECTED",
                         field=field_path,
                         hint=(
@@ -1172,405 +1071,6 @@ class DatabaseGetOperationBuilder:
         )
 
 
-class HttpClientOperationBuilder:
-    """Builder for connector-action subType="http" send operations.
-
-    Issue #24 — M2.4. Emits the Boomi <Operation> envelope wrapping either
-    a <HttpSendAction> (POST/PUT/PATCH/DELETE) or a <HttpGetAction> (GET).
-    The single public `operation_mode` is "send" — the GET/SEND split lives
-    inside the builder, not in the caller-facing API, because Boomi's HTTP
-    Client connector treats both shapes as one operation type.
-
-    Live reference XML (POST, work profile 1428893f, fetched 2026-05-23):
-
-        <Operation xmlns="">
-          <Archiving directory="" enabled="false"/>
-          <Configuration>
-            <HttpSendAction dataContentType="application/json"
-                            followRedirects="false" methodType="POST"
-                            mimePassthrough="false" requestProfileType="NONE"
-                            responseProfileType="NONE" returnErrors="true"
-                            returnMimeResponse="false" returnResponses="true">
-              <requestHeaders>
-                <header headerName="Authorization" headerValue=""
-                        isVariable="true" key="1000000"/>
-                <header headerName="Accept" headerValue="*/*" key="1000001"/>
-              </requestHeaders>
-              <pathElements><element key="2000000" name="v3/mail/send"/></pathElements>
-              <responseHeaderMapping/>
-              <reflectHeaders/>
-            </HttpSendAction>
-          </Configuration>
-          <Tracking><TrackedFields/></Tracking>
-          <Caching/>
-        </Operation>
-
-    Live reference XML (GET, reneraai-5RO3DD profile 03ec828a, same date):
-    identical envelope but <HttpGetAction> with NO `returnResponses`
-    attribute and `returnErrors="false"` by default.
-
-    Config keys:
-        component_type:           connector-action (consumed by dispatcher).
-        connector_type:           "http" (consumed by dispatcher).
-        operation_mode:           "send" (only mode in issue #24).
-        component_name:           required for top-level naming.
-        connection_ref_key:       required; plan-only dependency on the HTTP
-                                  connector-settings. Boomi binds the
-                                  connection at the process connector step,
-                                  not in the operation XML — this key never
-                                  appears in emitted XML.
-        method:                   required; one of SUPPORTED_METHODS.
-        path:                     required; emitted as a single
-                                  <pathElements/element/> with the leading
-                                  '/' stripped (exactly one).
-        content_type:             optional; emitted as dataContentType.
-                                  Defaults to "application/json".
-        request_profile_type:     optional; defaults to "NONE". When set
-                                  to "JSON"/"XML" the caller should also
-                                  supply request_profile_id.
-        request_profile_id:       optional Boomi profile UUID OR
-                                  "$ref:KEY" token (preserved verbatim —
-                                  resolution happens upstream in
-                                  integration_builder._resolve_dependency_tokens).
-        response_profile_type:    optional; defaults to "NONE".
-        response_profile_id:      optional UUID or $ref token.
-        headers:                  optional list of {name, value?, is_variable?}.
-                                  Keys start at 1000000 and increment.
-        follow_redirects:         optional bool, defaults to False.
-        mime_passthrough:         optional bool, defaults to False.
-        return_errors:            optional bool. Defaults to True for send
-                                  methods, False for GET (matches live samples).
-        return_mime_response:     optional bool, defaults to False.
-        return_responses:         optional bool, defaults to True. SEND only;
-                                  ignored for GET (the attribute is omitted
-                                  on HttpGetAction per the live reference).
-        folder_name:              optional, defaults to "Home".
-        description:              optional.
-        payload_source_ref_key:   plan-only metadata for upstream payload
-                                  mapping/transformation. Never appears in
-                                  emitted XML.
-        credential_ref:           plan-only opaque credential reference.
-                                  Never appears in emitted XML.
-    """
-
-    SUPPORTED_OPERATION_MODES = ("send",)
-    SUPPORTED_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
-    GET_METHODS = ("GET",)
-    SEND_METHODS = ("POST", "PUT", "PATCH", "DELETE")
-    HEADER_KEY_START = 1000000
-    PATH_KEY_START = 2000000
-
-    # Shared with the database builders — secrets must cross the wire as
-    # opaque credential_ref strings only.
-    FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
-
-    @classmethod
-    def scan_forbidden_secret_fields(
-        cls, config: Any, _path_prefix: str = ""
-    ) -> Optional[BuilderValidationError]:
-        """Reuse DatabaseConnectorBuilder's scan — same forbidden-key set."""
-        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
-            config, _path_prefix=_path_prefix
-        )
-
-    @classmethod
-    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
-        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
-
-    @classmethod
-    def _validate_headers(cls, headers: Any) -> Optional[BuilderValidationError]:
-        if headers is None:
-            return None
-        if not isinstance(headers, list):
-            return BuilderValidationError(
-                f"headers must be a list of objects, got {type(headers).__name__}",
-                error_code="HTTP_OPERATION_VALIDATION_FAILED",
-                field="headers",
-                hint=(
-                    "Pass headers as a JSON list: "
-                    "[{'name': 'Accept', 'value': 'application/json'}, ...]."
-                ),
-            )
-        for index, entry in enumerate(headers):
-            if not isinstance(entry, dict):
-                return BuilderValidationError(
-                    f"headers[{index}] must be an object, "
-                    f"got {type(entry).__name__}",
-                    error_code="HTTP_OPERATION_VALIDATION_FAILED",
-                    field=f"headers[{index}]",
-                    hint=(
-                        "Each header entry is "
-                        "{'name': str, 'value': str?, 'is_variable': bool?}."
-                    ),
-                )
-            name = entry.get("name")
-            if not name or not str(name).strip():
-                return BuilderValidationError(
-                    f"headers[{index}].name is required",
-                    error_code="HTTP_OPERATION_VALIDATION_FAILED",
-                    field=f"headers[{index}].name",
-                    hint="Provide a non-empty header name (e.g. 'Authorization').",
-                )
-            if "is_variable" in entry and not isinstance(entry["is_variable"], bool):
-                return BuilderValidationError(
-                    f"headers[{index}].is_variable must be a bool",
-                    error_code="HTTP_OPERATION_VALIDATION_FAILED",
-                    field=f"headers[{index}].is_variable",
-                    hint="Use true or false.",
-                )
-            if "value" in entry and entry["value"] is not None and not isinstance(entry["value"], str):
-                return BuilderValidationError(
-                    f"headers[{index}].value must be a string",
-                    error_code="HTTP_OPERATION_VALIDATION_FAILED",
-                    field=f"headers[{index}].value",
-                    hint="Use a JSON string (may be empty).",
-                )
-        return None
-
-    @classmethod
-    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
-        """Validate an HTTP send-op config without building XML."""
-        # 1) Plaintext secret-shaped keys (defensive).
-        secret_err = cls.scan_forbidden_secret_fields(config)
-        if secret_err is not None:
-            return secret_err
-
-        # 2) operation_mode must be 'send' (only buildable mode in issue #24).
-        operation_mode = (config.get("operation_mode") or "").lower()
-        if operation_mode not in cls.SUPPORTED_OPERATION_MODES:
-            supported = ", ".join(cls.SUPPORTED_OPERATION_MODES)
-            return BuilderValidationError(
-                f"operation_mode is required and must be one of: {supported}",
-                error_code="UNSUPPORTED_HTTP_OPERATION_MODE",
-                field="operation_mode",
-                hint=(
-                    f"Supported operation_modes: {supported}. The GET/SEND "
-                    "split lives inside the builder (method='GET' → "
-                    "HttpGetAction; POST/PUT/PATCH/DELETE → HttpSendAction)."
-                ),
-            )
-
-        # 3) component_name required.
-        component_name = config.get("component_name")
-        if not component_name or not str(component_name).strip():
-            return BuilderValidationError(
-                "component_name is required",
-                error_code="HTTP_OPERATION_VALIDATION_FAILED",
-                field="component_name",
-                hint="Provide a non-empty component_name string.",
-            )
-
-        # 4) connection_ref_key required (cross-step depends_on check lives
-        # in integration_builder._check_http_send_dependencies).
-        connection_ref_key = config.get("connection_ref_key")
-        if not connection_ref_key or not str(connection_ref_key).strip():
-            return BuilderValidationError(
-                "connection_ref_key is required for HTTP send operations",
-                error_code="MISSING_HTTP_DEPENDENCY",
-                field="connection_ref_key",
-                hint=(
-                    "Declare the HTTP connector-settings key the operation "
-                    "will bind to at process time, and add the same key to "
-                    "depends_on so plan ordering is correct."
-                ),
-            )
-
-        # 5) method must be one of SUPPORTED_METHODS (case-insensitive input).
-        raw_method = config.get("method")
-        method = (raw_method or "").upper() if isinstance(raw_method, str) else ""
-        if not method or method not in cls.SUPPORTED_METHODS:
-            supported_methods = ", ".join(cls.SUPPORTED_METHODS)
-            return BuilderValidationError(
-                f"method {raw_method!r} is not supported (supported: {supported_methods})",
-                error_code="UNSUPPORTED_HTTP_METHOD",
-                field="method",
-                hint=f"Supported methods: {supported_methods}.",
-            )
-
-        # 6) path required.
-        path = config.get("path")
-        if path is None or not str(path).strip():
-            return BuilderValidationError(
-                "path is required for HTTP send operations",
-                error_code="HTTP_OPERATION_VALIDATION_FAILED",
-                field="path",
-                hint=(
-                    "Provide the endpoint path (e.g. '/v1/items'). Exactly "
-                    "one leading '/' is stripped on emission."
-                ),
-            )
-
-        # 7) request_profile_id (when supplied): bare '$ref:' is meaningless.
-        request_profile_id = config.get("request_profile_id")
-        if isinstance(request_profile_id, str) and request_profile_id.startswith("$ref:"):
-            if not request_profile_id[5:]:
-                return BuilderValidationError(
-                    "request_profile_id $ref token is empty (expected '$ref:KEY')",
-                    error_code="MISSING_HTTP_REQUEST_PROFILE_REF",
-                    field="request_profile_id",
-                    hint=(
-                        "Use '$ref:target_json_profile' to reference a "
-                        "profile component declared earlier in the same "
-                        "integration spec."
-                    ),
-                )
-
-        # 8) headers (when supplied): shape check.
-        header_err = cls._validate_headers(config.get("headers"))
-        if header_err is not None:
-            return header_err
-
-        return None
-
-    @staticmethod
-    def _strip_leading_slash(path: str) -> str:
-        return path[1:] if path.startswith("/") else path
-
-    @classmethod
-    def _header_xml(cls, headers: Optional[list]) -> str:
-        if not headers:
-            return "                <requestHeaders/>\n"
-        lines = ["                <requestHeaders>"]
-        for index, entry in enumerate(headers):
-            key = cls.HEADER_KEY_START + index
-            name = _escape_xml(str(entry.get("name", "")))
-            is_variable = bool(entry.get("is_variable", False))
-            if is_variable:
-                lines.append(
-                    f'                    <header headerName="{name}" '
-                    f'headerValue="" isVariable="true" key="{key}"/>'
-                )
-            else:
-                value = _escape_xml(str(entry.get("value", "")))
-                lines.append(
-                    f'                    <header headerName="{name}" '
-                    f'headerValue="{value}" key="{key}"/>'
-                )
-        lines.append("                </requestHeaders>")
-        return "\n".join(lines) + "\n"
-
-    def build(self, **params) -> str:
-        error = self.validate_config(params)
-        if error is not None:
-            raise error
-
-        component_name = params["component_name"]
-        method = params["method"].upper()
-        path_raw = str(params["path"])
-        path_name = _escape_xml(self._strip_leading_slash(path_raw))
-
-        folder_name = params.get("folder_name", "Home")
-        description = params.get("description", "")
-
-        data_content_type = _escape_xml(
-            str(params.get("content_type", "application/json"))
-        )
-        follow_redirects = _format_xml_value(params.get("follow_redirects", False))
-        mime_passthrough = _format_xml_value(params.get("mime_passthrough", False))
-        request_profile_type = _escape_xml(
-            str(params.get("request_profile_type", "NONE"))
-        )
-        response_profile_type = _escape_xml(
-            str(params.get("response_profile_type", "NONE"))
-        )
-        return_mime_response = _format_xml_value(
-            params.get("return_mime_response", False)
-        )
-
-        is_get = method in self.GET_METHODS
-        return_errors_default = False if is_get else True
-        return_errors = _format_xml_value(
-            params.get("return_errors", return_errors_default)
-        )
-
-        request_profile_attr = ""
-        if params.get("request_profile_id"):
-            request_profile_attr = (
-                f' requestProfile="{_escape_xml(str(params["request_profile_id"]))}"'
-            )
-        response_profile_attr = ""
-        if params.get("response_profile_id"):
-            response_profile_attr = (
-                f' responseProfile="{_escape_xml(str(params["response_profile_id"]))}"'
-            )
-
-        headers_xml = self._header_xml(params.get("headers"))
-
-        if is_get:
-            action_open = (
-                f'<HttpGetAction dataContentType="{data_content_type}"'
-                f' followRedirects="{follow_redirects}"'
-                f' methodType="{method}"'
-                f' mimePassthrough="{mime_passthrough}"'
-                f'{request_profile_attr}'
-                f' requestProfileType="{request_profile_type}"'
-                f'{response_profile_attr}'
-                f' responseProfileType="{response_profile_type}"'
-                f' returnErrors="{return_errors}"'
-                f' returnMimeResponse="{return_mime_response}">'
-            )
-            action_close = "</HttpGetAction>"
-        else:
-            return_responses = _format_xml_value(
-                params.get("return_responses", True)
-            )
-            action_open = (
-                f'<HttpSendAction dataContentType="{data_content_type}"'
-                f' followRedirects="{follow_redirects}"'
-                f' methodType="{method}"'
-                f' mimePassthrough="{mime_passthrough}"'
-                f'{request_profile_attr}'
-                f' requestProfileType="{request_profile_type}"'
-                f'{response_profile_attr}'
-                f' responseProfileType="{response_profile_type}"'
-                f' returnErrors="{return_errors}"'
-                f' returnMimeResponse="{return_mime_response}"'
-                f' returnResponses="{return_responses}">'
-            )
-            action_close = "</HttpSendAction>"
-
-        path_element_xml = (
-            f'                <pathElements>'
-            f'<element key="{self.PATH_KEY_START}" name="{path_name}"/>'
-            f'</pathElements>\n'
-        )
-
-        action_xml = (
-            f"            {action_open}\n"
-            f"{headers_xml}"
-            f"{path_element_xml}"
-            f"                <responseHeaderMapping/>\n"
-            f"                <reflectHeaders/>\n"
-            f"            {action_close}"
-        )
-
-        safe_name = _escape_xml(component_name)
-        safe_folder = _escape_xml(folder_name)
-        safe_desc = _escape_xml(description)
-
-        return (
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
-            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
-            '               type="connector-action" subType="http"\n'
-            f'               name="{safe_name}"\n'
-            f'               folderName="{safe_folder}">\n'
-            '    <bns:encryptedValues/>\n'
-            f'    <bns:description>{safe_desc}</bns:description>\n'
-            '    <bns:object>\n'
-            '        <Operation xmlns="">\n'
-            '            <Archiving directory="" enabled="false"/>\n'
-            '            <Configuration>\n'
-            f"{action_xml}\n"
-            '            </Configuration>\n'
-            '            <Tracking><TrackedFields/></Tracking>\n'
-            '            <Caching/>\n'
-            '        </Operation>\n'
-            '    </bns:object>\n'
-            '</bns:Component>'
-        )
-
-
 # ============================================================================
 # Registry
 # ============================================================================
@@ -1594,7 +1094,6 @@ def get_connector_builder(connector_type: str):
 # connector-action have different XML shapes and required-field sets.
 CONNECTOR_ACTION_BUILDERS: Dict[tuple, type] = {
     ("database", "get"): DatabaseGetOperationBuilder,
-    ("http", "send"): HttpClientOperationBuilder,
 }
 
 
