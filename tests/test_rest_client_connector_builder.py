@@ -828,3 +828,168 @@ def test_empty_certificate_refs_treated_as_omitted():
             assert "value" not in field.attrib, (
                 f"Empty cert ref must emit self-closing field, got attribs: {field.attrib}"
             )
+
+
+# ----------------------------------------------------------------------------
+# BASIC auth (Phase 2 — issue #24 follow-up).
+# Live shape verified against:
+#   - 587b5fe0-eafc-48fa-9ccf-05dd70855f80 (REST Basic — username + encrypted
+#     password + preemptive=false; auth=BASIC)
+# ----------------------------------------------------------------------------
+
+
+def _minimal_basic_config(**overrides):
+    """Minimal-valid REST BASIC auth config dict."""
+    params = {
+        "connector_type": "rest",
+        "component_name": "Target REST BASIC Connection",
+        "base_url": "https://api.example.com",
+        "auth": "BASIC",
+        "username": "boomi-user",
+        "credential_ref": "credential://target-api/basic-password",
+    }
+    params.update(overrides)
+    return params
+
+
+def _build_minimal_basic(**overrides):
+    params = _minimal_basic_config(**overrides)
+    params.pop("connector_type", None)
+    return RestClientConnectionBuilder().build(**params)
+
+
+def test_basic_auth_minimum_required_fields_produce_valid_xml():
+    xml = _build_minimal_basic()
+    assert _field_value(xml, "auth") == "BASIC"
+    assert _field_value(xml, "username") == "boomi-user"
+
+
+def test_basic_auth_validate_config_returns_none():
+    assert RestClientConnectionBuilder.validate_config(_minimal_basic_config()) is None
+
+
+def test_basic_auth_password_field_emitted_empty():
+    """Builder never writes plaintext password into XML. The password field
+    is emitted with value='' and the secret is supplied later via the
+    Boomi UI (or pre-encrypted raw-XML payload)."""
+    xml = _build_minimal_basic()
+    assert _field_value(xml, "password") == ""
+
+
+def test_basic_auth_emits_password_encrypted_values_marker():
+    """Live REST Basic: `<bns:encryptedValues><bns:encryptedValue
+    path="//GenericConnectionConfig/field[@type='password']" isSet="true"/></bns:encryptedValues>`.
+    Builder emits the same xpath but with isSet=false (a brand-new component
+    has no secret stored yet — Boomi flips isSet to true when the value is
+    saved in the UI)."""
+    xml = _build_minimal_basic()
+    root = ET.fromstring(xml)
+    encrypted_values = root.find("bns:encryptedValues", NS)
+    assert encrypted_values is not None
+    entries = encrypted_values.findall("bns:encryptedValue", NS)
+    assert len(entries) == 1
+    assert entries[0].attrib["path"] == "//GenericConnectionConfig/field[@type='password']"
+    assert entries[0].attrib["isSet"] == "false"
+
+
+def test_basic_auth_preemptive_defaults_to_explicit_false():
+    """Live REST Basic emits preemptive value='false' (NOT empty). For BASIC,
+    the default is explicit false — preemptive is relevant for BASIC auth
+    per Boomi docs."""
+    xml = _build_minimal_basic()
+    assert _field_value(xml, "preemptive") == "false"
+
+
+def test_basic_auth_preemptive_can_be_overridden_true():
+    xml = _build_minimal_basic(preemptive=True)
+    assert _field_value(xml, "preemptive") == "true"
+
+
+def test_basic_auth_oauth2_skeleton_with_grant_type_code():
+    """Non-OAUTH2 modes (BASIC) emit the OAuth2Config skeleton with
+    grantType='code', same as NONE."""
+    oa = _oauth2_config(_build_minimal_basic())
+    assert oa.attrib["grantType"] == "code"
+    assert oa.find("credentialsAssertionType") is None
+
+
+def test_basic_auth_domain_and_workstation_emitted_empty():
+    """Live REST Basic: domain and workstation fields are emitted with
+    value='' (NTLM-only fields stay empty for BASIC)."""
+    xml = _build_minimal_basic()
+    assert _field_value(xml, "domain") == ""
+    assert _field_value(xml, "workstation") == ""
+
+
+def test_basic_auth_with_cert_refs():
+    """Cert refs work with BASIC auth too (independent option per user
+    direction 'cert refs cound be with other auth too')."""
+    xml = _build_minimal_basic(
+        private_certificate_ref=_PRIV_CERT_REF,
+        public_certificate_ref=_PUB_CERT_REF,
+    )
+    root = ET.fromstring(xml)
+    seen = {}
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") in ("privateCertificate", "publicCertificate"):
+            seen[field.attrib["id"]] = field.attrib.get("value")
+    assert seen == {
+        "privateCertificate": _PRIV_CERT_REF,
+        "publicCertificate": _PUB_CERT_REF,
+    }
+
+
+def test_basic_auth_missing_username_rejected():
+    cfg = _minimal_basic_config()
+    cfg["username"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "username"
+
+
+def test_basic_auth_username_must_be_string():
+    cfg = _minimal_basic_config(username=12345)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "username"
+
+
+def test_basic_auth_missing_credential_ref_rejected():
+    """BASIC password is supplied as an opaque credential_ref (consistent
+    with database connector convention). Missing/empty credential_ref must
+    fail validation explicitly."""
+    cfg = _minimal_basic_config()
+    cfg["credential_ref"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "credential_ref"
+
+
+def test_basic_auth_credential_ref_must_use_credential_scheme():
+    """A raw secret value passed as credential_ref must be rejected — the
+    builder never accepts plaintext secrets, only opaque credential://
+    references."""
+    cfg = _minimal_basic_config(credential_ref="raw-password-value")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN"
+    assert err.field == "credential_ref"
+
+
+def test_basic_auth_rejects_plaintext_password_field():
+    """The forbidden-secret-fields scan already catches top-level `password`,
+    but cover the BASIC path explicitly — verify the canary doesn't leak."""
+    cfg = _minimal_basic_config(password="DEADBEEF_BASIC_PASSWORD")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code in ("PLAINTEXT_SECRET_REJECTED", "REST_SECRET_VALUE_FORBIDDEN")
+    assert "DEADBEEF_BASIC_PASSWORD" not in str(err)
+    assert "DEADBEEF_BASIC_PASSWORD" not in (err.hint or "")
