@@ -1573,10 +1573,16 @@ class RestClientOperationBuilder:
     """
 
     SUPPORTED_OPERATION_MODES = ("execute",)
-    SUPPORTED_METHODS = ("GET", "PATCH")
-    VERIFIED_PENDING_METHODS = ("POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE")
+    SUPPORTED_METHODS = ("GET", "PATCH", "PUT", "POST", "DELETE", "HEAD", "OPTIONS", "TRACE")
+    VERIFIED_PENDING_METHODS = ()
     SUPPORTED_FOLLOW_REDIRECTS_VALUES = ("NONE", "STRICT", "LAX")
     SUPPORTED_PROFILE_TYPES = ("none", "xml", "json")
+    # followRedirects emission rule per Phase 5 (verified against live exports
+    # f7d08bdb, 7524cfae, 3d843e38, 0c1e7528, 63f63c32, 64c4eafd, 868e3b5d,
+    # e268ea19). Methods that default to emitting `NONE` vs methods that omit
+    # the field entirely when caller doesn't supply follow_redirects:
+    _FOLLOW_REDIRECTS_DEFAULT_NONE_METHODS = frozenset({"GET", "POST", "HEAD", "DELETE"})
+    _FOLLOW_REDIRECTS_OMIT_METHODS = frozenset({"PATCH", "PUT", "OPTIONS", "TRACE"})
     FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
 
     @classmethod
@@ -1684,7 +1690,10 @@ class RestClientOperationBuilder:
                 ),
             )
 
-        # 5) method gating.
+        # 5) method gating. Post-Phase-5, all 8 REST methods are buildable;
+        # the VERIFIED_PENDING_METHODS branch is therefore unreachable from
+        # the supported list but kept defensively for any future
+        # not-yet-buildable variant.
         raw_method = config.get("method")
         method = (raw_method or "").upper() if isinstance(raw_method, str) else ""
         if method in cls.SUPPORTED_METHODS:
@@ -1697,10 +1706,10 @@ class RestClientOperationBuilder:
                 error_code="UNVERIFIED_REST_XML_VARIANT",
                 field="method",
                 hint=(
-                    f"Supported methods in issue #24: {supported}. To add "
-                    f"{method} support, create a minimal REST Client {method} "
-                    "operation in Boomi, then a follow-up issue locks the "
-                    "shape against that export."
+                    f"Supported methods: {supported}. To add {method} "
+                    "support, create a minimal REST Client operation in "
+                    "Boomi, then a follow-up issue locks the shape against "
+                    "that export."
                 ),
             )
         else:
@@ -1820,12 +1829,15 @@ class RestClientOperationBuilder:
                 f' responseProfile="{_escape_xml(str(params["response_profile_id"]))}"'
             )
 
-        # followRedirects field — GET emits by default (value "NONE" per the
-        # live shape); PATCH (and other methods) only emit when the caller
-        # supplies follow_redirects explicitly.
+        # followRedirects emission rule (Phase 5):
+        #   - GET/POST/HEAD/DELETE: emit value="NONE" by default
+        #   - PATCH/PUT/OPTIONS/TRACE: omit the field when caller doesn't
+        #     supply follow_redirects
+        #   - Explicit caller value (NONE/STRICT/LAX) always emits regardless
+        # Verified against live exports per method.
         follow_redirects_field = ""
         follow_redirects = params.get("follow_redirects")
-        if follow_redirects is None and method == "GET":
+        if follow_redirects is None and method in self._FOLLOW_REDIRECTS_DEFAULT_NONE_METHODS:
             follow_redirects = "NONE"
         if follow_redirects is not None:
             follow_redirects_field = (

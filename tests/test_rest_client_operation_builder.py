@@ -341,14 +341,29 @@ def test_method_patch_buildable():
     _build_patch()  # smoke
 
 
-@pytest.mark.parametrize("verified_pending", ["POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE"])
-def test_other_recognized_methods_return_unverified_variant(verified_pending):
-    cfg = _minimal_get_config(method=verified_pending)
-    with pytest.raises(BuilderValidationError) as excinfo:
-        RestClientOperationBuilder().build(**cfg)
-    err = excinfo.value
-    assert err.error_code == "UNVERIFIED_REST_XML_VARIANT"
-    assert err.field == "method"
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE"])
+def test_phase5_methods_buildable(method):
+    """Phase 5 of issue #24 follow-up: PUT/POST/DELETE/HEAD/OPTIONS/TRACE
+    are now buildable alongside GET/PATCH. Verified against live exports:
+      - 7524cfae (REST Create Matter POST)
+      - 868e3b5d (REST Update matter PUT)
+      - 3d843e38 (REST Delete Matter DELETE)
+      - f7d08bdb (REST Check matter HEAD)
+      - 0c1e7528 (REST Matter OPTIONS)
+      - 63f63c32 (REST Matter TRACE)
+    """
+    cfg = _minimal_get_config(method=method)
+    xml = RestClientOperationBuilder().build(**cfg)
+    config = _find_generic_op_config(xml)
+    assert config.attrib["customOperationType"] == method
+    assert config.attrib["operationType"] == "EXECUTE"
+
+
+def test_verified_pending_methods_emptied():
+    """Phase 5: every previously-pending method is now buildable. Confirm
+    the registry is empty (canary against accidentally re-introducing
+    pending-method gating)."""
+    assert RestClientOperationBuilder.VERIFIED_PENDING_METHODS == ()
 
 
 @pytest.mark.parametrize("bad_method", ["FOO", "BAR", "X-CUSTOM"])
@@ -662,3 +677,134 @@ def test_dispatcher_uses_rest_builder_when_operation_mode_is_execute():
         })
     assert result["_success"] is True
     assert result["component_id"] == "op-id-001"
+
+
+# ----------------------------------------------------------------------------
+# followRedirects emission rule (Phase 5 — issue #24 follow-up).
+# Verified per-method against live exports:
+#   - GET (e268ea19): emits value="NONE" by default
+#   - POST (7524cfae): emits value="NONE" by default
+#   - HEAD (f7d08bdb): emits value="NONE" by default
+#   - DELETE (3d843e38): emits value="NONE" by default
+#   - PATCH (64c4eafd): field absent entirely by default
+#   - PUT (868e3b5d): field absent entirely by default
+#   - OPTIONS (0c1e7528): field absent entirely by default
+#   - TRACE (63f63c32): field absent entirely by default
+# Explicit values (STRICT/LAX/NONE) always emit regardless of method.
+# ----------------------------------------------------------------------------
+
+
+_FOLLOW_REDIRECTS_DEFAULT_NONE_METHODS = ("GET", "POST", "HEAD", "DELETE")
+_FOLLOW_REDIRECTS_OMIT_METHODS = ("PATCH", "PUT", "OPTIONS", "TRACE")
+
+
+@pytest.mark.parametrize("method", _FOLLOW_REDIRECTS_DEFAULT_NONE_METHODS)
+def test_follow_redirects_default_none_methods(method):
+    """GET/POST/HEAD/DELETE emit `<field id="followRedirects" type="string"
+    value="NONE"/>` when caller omits follow_redirects (matches live shape)."""
+    cfg = _minimal_get_config(method=method)
+    xml = RestClientOperationBuilder().build(**cfg)
+    fr = _find_field(xml, "followRedirects")
+    assert fr is not None, (
+        f"{method} must emit a followRedirects field by default (value=NONE)"
+    )
+    assert fr.attrib.get("value") == "NONE"
+
+
+@pytest.mark.parametrize("method", _FOLLOW_REDIRECTS_OMIT_METHODS)
+def test_follow_redirects_omitted_methods(method):
+    """PATCH/PUT/OPTIONS/TRACE OMIT the followRedirects field when caller
+    doesn't supply it (matches live shape — Boomi treats these methods as
+    redirect-irrelevant)."""
+    cfg = _minimal_get_config(method=method)
+    xml = RestClientOperationBuilder().build(**cfg)
+    fr = _find_field(xml, "followRedirects")
+    assert fr is None, (
+        f"{method} must omit followRedirects when not explicitly supplied; "
+        f"got {fr.attrib if fr is not None else None}"
+    )
+
+
+@pytest.mark.parametrize(
+    "method,follow_value",
+    [
+        (m, v)
+        for m in (
+            "GET", "POST", "HEAD", "DELETE",
+            "PATCH", "PUT", "OPTIONS", "TRACE",
+        )
+        for v in ("NONE", "STRICT", "LAX")
+    ],
+)
+def test_follow_redirects_explicit_values_always_emit(method, follow_value):
+    """Explicit NONE/STRICT/LAX values are always emitted regardless of
+    method. Verified against the live Lax/Strict GET examples
+    (0407d35d, 6dd23a22) which carry explicit followRedirects values."""
+    cfg = _minimal_get_config(method=method, follow_redirects=follow_value)
+    xml = RestClientOperationBuilder().build(**cfg)
+    fr = _find_field(xml, "followRedirects")
+    assert fr is not None
+    assert fr.attrib.get("value") == follow_value
+
+
+@pytest.mark.parametrize("method", ("PATCH", "PUT", "OPTIONS", "TRACE"))
+def test_follow_redirects_explicit_overrides_omit_default(method):
+    """Sanity: PATCH/PUT/OPTIONS/TRACE omit by default, but if the caller
+    explicitly supplies followRedirects, the field is emitted."""
+    xml = RestClientOperationBuilder().build(
+        **_minimal_get_config(method=method, follow_redirects="STRICT")
+    )
+    fr = _find_field(xml, "followRedirects")
+    assert fr is not None
+    assert fr.attrib.get("value") == "STRICT"
+
+
+@pytest.mark.parametrize("bad_value", ["MAYBE", "true", "auto", "none"])
+def test_follow_redirects_invalid_value_rejected(bad_value):
+    cfg = _minimal_get_config(follow_redirects=bad_value)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_OPERATION_VALIDATION_FAILED"
+    assert err.field == "follow_redirects"
+
+
+# ----------------------------------------------------------------------------
+# Per-method XML shape regression tests (Phase 5).
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "method,expected_path",
+    [
+        ("POST", "/v1/items"),
+        ("PUT", "/v1/items/42"),
+        ("DELETE", "/v1/items/42"),
+        ("HEAD", "/v1/items/42"),
+        ("OPTIONS", "/v1/items"),
+        ("TRACE", "/v1/items/42"),
+    ],
+)
+def test_phase5_methods_emit_path_field(method, expected_path):
+    """Path field emission is method-agnostic — verify each new method
+    plumbs `path` through to the XML."""
+    xml = RestClientOperationBuilder().build(
+        **_minimal_get_config(method=method, path=expected_path)
+    )
+    assert _field_value(xml, "path") == expected_path
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE"])
+def test_phase5_methods_emit_empty_customproperty_containers(method):
+    """All methods emit empty customProperties containers for queryParameters
+    and requestHeaders when none are supplied (Phase 5 — non-empty support
+    lands in Phase 6)."""
+    xml = RestClientOperationBuilder().build(
+        **_minimal_get_config(method=method)
+    )
+    qp_field = _find_field(xml, "queryParameters")
+    rh_field = _find_field(xml, "requestHeaders")
+    assert qp_field is not None and qp_field.attrib["type"] == "customproperties"
+    assert rh_field is not None and rh_field.attrib["type"] == "customproperties"
+    assert qp_field.find("customProperties") is not None
+    assert rh_field.find("customProperties") is not None

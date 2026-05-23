@@ -108,14 +108,27 @@ def test_template_lists_supported_operation_modes():
 
 def test_template_lists_supported_methods():
     result = _call(component_type="connector-action", protocol="rest.operation")
-    assert set(result["supported_methods"]) == {"GET", "PATCH"}
+    assert set(result["supported_methods"]) == {
+        "GET", "PATCH", "PUT", "POST", "DELETE", "HEAD", "OPTIONS", "TRACE",
+    }
 
 
-def test_template_lists_unverified_pending_methods():
+def test_template_unverified_pending_methods_empty():
+    """Phase 5 made all 8 REST methods buildable. The unverified-pending
+    list must be empty (no method recognized-but-not-buildable)."""
     result = _call(component_type="connector-action", protocol="rest.operation")
-    pending = set(result["unverified_pending_methods"])
-    for m in ("POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE"):
-        assert m in pending
+    assert result["unverified_pending_methods"] == []
+
+
+def test_template_documents_follow_redirects_emission_rule():
+    """Phase 5: per-method followRedirects emission rule must be advertised
+    so callers know which methods default to NONE vs which omit the field."""
+    result = _call(component_type="connector-action", protocol="rest.operation")
+    rule = result["follow_redirects_emission_rule"]
+    assert isinstance(rule, dict)
+    assert set(rule["default_none_methods"]) == {"GET", "POST", "HEAD", "DELETE"}
+    assert set(rule["omit_methods"]) == {"PATCH", "PUT", "OPTIONS", "TRACE"}
+    assert rule["explicit_values_always_emit"] is True
 
 
 def test_template_documents_query_parameters_status():
