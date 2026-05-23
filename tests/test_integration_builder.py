@@ -2029,6 +2029,90 @@ class TestBuildPlanRestPreflight:
         assert echoed["request_headers"] == "[REDACTED]"
 
     @patch(_PATCH_TARGET)
+    def test_request_headers_redacted_when_earlier_validation_error_wins(self, mock_pag):
+        """Codex round-6 P1: sensitive request_headers must be redacted
+        from the plan echo even when an EARLIER validation error
+        (REST_CONNECTION_REF_REQUIRED) wins over NEEDS_REST_EXAMPLE.
+        Pre-fix, redaction only fired for the field named in the winning
+        error code, so the operation's request_headers leaked when the
+        connection check fired first."""
+        mock_pag.return_value = []
+        op = _rest_op_comp(
+            depends_on=("target_json_profile", "payload_map"),
+            request_headers={"Authorization": "Bearer LEAK_EARLIER_ERROR"},
+        )
+        op.config.pop("connection_ref_key")  # earlier error fires first
+        components = [*_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        # connection-ref error wins (earliest in validate_config order).
+        assert step["validation_error"]["error_code"] == "REST_CONNECTION_REF_REQUIRED"
+        # But the sensitive header value MUST still be scrubbed from the echo.
+        assert "LEAK_EARLIER_ERROR" not in repr(plan)
+        echoed = next(
+            c for c in plan["integration_spec"]["components"]
+            if c["key"] == "target_rest_operation"
+        )["config"]
+        assert echoed["request_headers"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_oauth2_client_secret_ref_raw_value_redacted_when_earlier_error_wins(self, mock_pag):
+        """Codex round-6 P1: a raw value in oauth2.client_secret_ref must
+        be scrubbed even when an earlier validator (e.g. missing base_url)
+        wins over the REST_SECRET_VALUE_FORBIDDEN check."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["base_url"] = ""  # forces earlier REST_BASE_URL_REQUIRED
+        comp.config["oauth2"]["client_secret_ref"] = "raw-LEAK_BEFORE_BASE_URL_CHECK"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["error_code"] == "REST_BASE_URL_REQUIRED"
+        assert "raw-LEAK_BEFORE_BASE_URL_CHECK" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["oauth2"]["client_secret_ref"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_credential_ref_redacted_when_earlier_error_wins(self, mock_pag):
+        """Codex round-6 P1: credential_ref should be `credential://...`
+        per design, but callers can mistakenly put a raw secret there.
+        It must be scrubbed when any rest_err fires."""
+        mock_pag.return_value = []
+        op = _rest_op_comp(
+            depends_on=("target_json_profile", "payload_map"),
+            credential_ref="raw-LEAK_IN_CRED_REF",
+        )
+        op.config.pop("connection_ref_key")
+        components = [*_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["planned_action"] == "error_rest_validation"
+        assert "raw-LEAK_IN_CRED_REF" not in repr(plan)
+        echoed = next(
+            c for c in plan["integration_spec"]["components"]
+            if c["key"] == "target_rest_operation"
+        )["config"]
+        assert echoed["credential_ref"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_query_parameters_redacted_when_earlier_error_wins(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(
+            depends_on=("target_json_profile", "payload_map"),
+            query_parameters={"api_key": "LEAK_QP_EARLIER"},
+        )
+        op.config.pop("connection_ref_key")
+        components = [*_rest_supporting_components(), op]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert step["validation_error"]["error_code"] == "REST_CONNECTION_REF_REQUIRED"
+        assert "LEAK_QP_EARLIER" not in repr(plan)
+        echoed = next(
+            c for c in plan["integration_spec"]["components"]
+            if c["key"] == "target_rest_operation"
+        )["config"]
+        assert echoed["query_parameters"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
     def test_non_empty_query_parameters_value_redacted_in_plan_echo(self, mock_pag):
         """NEEDS_REST_EXAMPLE on query_parameters — same risk class as
         request_headers (API keys, tokens, PII in query strings)."""

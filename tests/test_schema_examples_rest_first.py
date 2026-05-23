@@ -150,6 +150,33 @@ def test_integration_plan_template_has_no_dangling_http_connection_refs():
     )
 
 
+def test_manage_connector_capability_update_example_is_runnable():
+    """Codex round-6 P3: with the HTTP smart-merge gone, update only
+    supports component-level metadata. The capability example must
+    use a field the dispatcher actually accepts — name, description,
+    folder_name, folder_id — or the raw-XML escape hatch. The old
+    example used `base_url`, which would return 'No updatable fields
+    provided' on every invocation."""
+    catalog = list_capabilities_action()
+    examples = catalog.get("tools", {}).get("manage_connector", {}).get("examples", [])
+    update_examples = [ex for ex in examples if 'action="update"' in ex]
+    assert update_examples, (
+        "manage_connector capability should include an action=\"update\" example."
+    )
+    accepted_fields = ('"name"', '"description"', '"folder_name"', '"folder_id"', '"xml"')
+    for example in update_examples:
+        assert any(field in example for field in accepted_fields), (
+            f"Update example must use a smart-merge-supported field "
+            f"({', '.join(accepted_fields)}) or the raw-XML escape "
+            f"hatch ('xml'). Found: {example}"
+        )
+        # Specifically the post-removal regression case:
+        assert '"base_url"' not in example, (
+            "Update example must NOT use 'base_url' — the HTTP smart-merge "
+            "is gone and base_url is not in the component-metadata set."
+        )
+
+
 def test_manage_connector_capability_create_example_uses_rest():
     """list_capabilities surfaces example invocations. The create example
     must demonstrate REST Client, not HTTP Client (post-#24)."""
