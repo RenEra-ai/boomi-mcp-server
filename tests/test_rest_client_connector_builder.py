@@ -1840,3 +1840,79 @@ def test_stale_ntlm_field_non_string_value_rejected_for_non_ntlm_auth(stale_fiel
     err = excinfo.value
     assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
     assert err.field == stale_field
+
+
+# ----------------------------------------------------------------------------
+# Field-dependency audit — stale `preemptive` for auth outside (BASIC, OAUTH2).
+# Boomi docs: "Applicable for Basic and OAuth 2.0 authentication." So the
+# field is meaningful only when auth in (BASIC, OAUTH2). Supplying it with
+# NONE / NTLM is a config mistake — Boomi ignores it at runtime.
+# Note: detection uses presence-check (not truthy) because False is a
+# caller-supplied value with intent (docs distinguish "selected" vs "cleared").
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("non_applicable_auth", ["NONE", "NTLM"])
+@pytest.mark.parametrize("preemptive_value", [True, False])
+def test_stale_preemptive_rejected_for_non_applicable_auth(non_applicable_auth, preemptive_value):
+    """preemptive=True OR preemptive=False with auth not in (BASIC, OAUTH2)
+    is a config mistake. Both boolean values count as caller intent — only
+    the absence of the key is "not supplied"."""
+    if non_applicable_auth == "NTLM":
+        cfg = _minimal_ntlm_config()
+    else:
+        cfg = _minimal_none_config()
+    cfg["preemptive"] = preemptive_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "preemptive"
+
+
+@pytest.mark.parametrize("applicable_auth", ["BASIC", "OAUTH2"])
+@pytest.mark.parametrize("preemptive_value", [True, False])
+def test_preemptive_accepted_for_applicable_auth(applicable_auth, preemptive_value):
+    """preemptive is accepted with any boolean value when auth is BASIC or
+    OAUTH2 — both are listed as "applicable" by Boomi docs."""
+    if applicable_auth == "OAUTH2":
+        cfg = _minimal_oauth2_config()
+    else:
+        cfg = _minimal_basic_config()
+    cfg["preemptive"] = preemptive_value
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+def test_preemptive_absent_accepted_for_any_auth():
+    """When the caller omits the preemptive key entirely, validation passes
+    for any auth (no stale-field intent to flag)."""
+    for cfg_factory in (
+        _minimal_none_config,
+        _minimal_basic_config,
+        _minimal_ntlm_config,
+        _minimal_oauth2_config,
+    ):
+        cfg = cfg_factory()
+        cfg.pop("preemptive", None)
+        assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+def test_preemptive_none_accepted_for_non_applicable_auth():
+    """`preemptive=None` (caller passes the key with a null value) is
+    treated as "not supplied" — accept it for non-applicable auths too."""
+    cfg = _minimal_none_config()
+    cfg["preemptive"] = None
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+@pytest.mark.parametrize("stale_value", ["true", 1, ["true"], {"value": True}])
+def test_stale_preemptive_non_bool_value_rejected_for_non_applicable_auth(stale_value):
+    """Non-bool preemptive value with non-applicable auth is rejected by
+    the stale gate before the type check runs. Field is still 'preemptive'."""
+    cfg = _minimal_none_config()
+    cfg["preemptive"] = stale_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "preemptive"
