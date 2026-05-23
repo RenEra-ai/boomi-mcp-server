@@ -511,6 +511,81 @@ def test_validate_config_returns_none_for_valid_patch():
 # XML escaping
 # ----------------------------------------------------------------------------
 
+# ----------------------------------------------------------------------------
+# Enum validation + case normalization (codex round-2 P2 #C)
+# ----------------------------------------------------------------------------
+
+@pytest.mark.parametrize("bogus", ["BOGUS", "always", "follow", "true", "1"])
+def test_follow_redirects_must_be_in_supported_enum(bogus):
+    cfg = _minimal_get_config(follow_redirects=bogus)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_OPERATION_VALIDATION_FAILED"
+    assert err.field == "follow_redirects"
+
+
+@pytest.mark.parametrize("value", ["NONE", "STRICT", "LAX"])
+def test_follow_redirects_accepts_documented_values(value):
+    xml = _build_get(follow_redirects=value)
+    field = _find_field(xml, "followRedirects")
+    assert field is not None
+    assert field.attrib["value"] == value
+
+
+@pytest.mark.parametrize(
+    "input_value,expected_xml",
+    [
+        ("JSON", "json"),
+        ("json", "json"),
+        ("XML", "xml"),
+        ("xml", "xml"),
+        ("NONE", "none"),
+        ("none", "none"),
+    ],
+)
+def test_request_profile_type_is_normalized_to_lowercase(input_value, expected_xml):
+    """Live exports use lowercase ('xml'); the schema template accepts both
+    casings as input and normalizes on the way to XML."""
+    xml = _build_get(request_profile_type=input_value)
+    config = _find_generic_op_config(xml)
+    assert config.attrib["requestProfileType"] == expected_xml
+
+
+@pytest.mark.parametrize(
+    "input_value,expected_xml",
+    [
+        ("JSON", "json"),
+        ("xml", "xml"),
+        ("None", "none"),
+    ],
+)
+def test_response_profile_type_is_normalized_to_lowercase(input_value, expected_xml):
+    xml = _build_get(response_profile_type=input_value)
+    config = _find_generic_op_config(xml)
+    assert config.attrib["responseProfileType"] == expected_xml
+
+
+@pytest.mark.parametrize("bogus", ["text", "yaml", "csv", "JSON5", ""])
+def test_request_profile_type_rejects_unsupported_values(bogus):
+    cfg = _minimal_get_config(request_profile_type=bogus)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_OPERATION_VALIDATION_FAILED"
+    assert err.field == "request_profile_type"
+
+
+@pytest.mark.parametrize("bogus", ["text", "yaml"])
+def test_response_profile_type_rejects_unsupported_values(bogus):
+    cfg = _minimal_get_config(response_profile_type=bogus)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientOperationBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_OPERATION_VALIDATION_FAILED"
+    assert err.field == "response_profile_type"
+
+
 def test_special_characters_in_path_and_name_round_trip():
     xml = _build_get(
         component_name='REST "Prod" & <op>',

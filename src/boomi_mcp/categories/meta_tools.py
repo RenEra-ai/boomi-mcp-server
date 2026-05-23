@@ -607,15 +607,23 @@ _INTEGRATION_PLAN = {
             "goals": ["Receive orders", "Transform payloads", "Deliver to ERP"],
             "components": [
                 {
-                    "key": "http_connection",
+                    "key": "rest_connection",
                     "type": "connector-settings",
                     "action": "create",
                     "name": "Order API Connection",
                     "config": {
-                        "connector_type": "http",
+                        "connector_type": "rest",
                         "component_name": "Order API Connection",
-                        "url": "https://api.example.com/orders",
-                        "auth_type": "NONE",
+                        "base_url": "https://api.example.com",
+                        "auth": "OAUTH2",
+                        "oauth2": {
+                            "grant_type": "client_credentials",
+                            "client_id": "<<client id>>",
+                            "client_secret_ref": "credential://<<vendor>>/oauth-client-secret",
+                            "access_token_url": "https://api.example.com/oauth/token",
+                            "scope": "",
+                            "credentials_assertion_type": "client_secret",
+                        },
                     },
                 },
                 {
@@ -623,7 +631,7 @@ _INTEGRATION_PLAN = {
                     "type": "process",
                     "action": "create",
                     "name": "Order Sync Process",
-                    "depends_on": ["http_connection"],
+                    "depends_on": ["rest_connection"],
                     "config": {
                         "name": "Order Sync Process",
                         "shapes": [
@@ -3105,11 +3113,11 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             },
             "examples": [
                 'manage_connector(profile="prod", action="list_types")',
-                'manage_connector(profile="prod", action="get_type", config=\'{"connector_type": "http"}\')',
-                'manage_connector(profile="prod", action="list", config=\'{"component_type": "connection", "connector_type": "http"}\')',
+                'manage_connector(profile="prod", action="get_type", config=\'{"connector_type": "officialboomi-X3979C-rest-prod"}\')',
+                'manage_connector(profile="prod", action="list", config=\'{"component_type": "connection", "connector_type": "officialboomi-X3979C-rest-prod"}\')',
                 'manage_connector(profile="prod", action="get", component_id="abc-123")',
-                'manage_connector(profile="prod", action="create", config=\'{"connector_type": "http", "component_name": "My HTTP", "url": "https://api.example.com", "auth_type": "NONE"}\')',
-                'manage_connector(profile="prod", action="update", component_id="abc-123", config=\'{"url": "https://new-url.com"}\')',
+                'manage_connector(profile="prod", action="create", config=\'{"connector_type": "rest", "component_name": "Target REST OAuth2 Connection", "base_url": "https://api.example.com", "auth": "OAUTH2", "oauth2": {"grant_type": "client_credentials", "client_id": "<<client id>>", "client_secret_ref": "credential://<<vendor>>/oauth-client-secret", "access_token_url": "https://api.example.com/oauth/token"}}\')',
+                'manage_connector(profile="prod", action="update", component_id="abc-123", config=\'{"base_url": "https://api.example.com/v2"}\')',
                 'manage_connector(profile="prod", action="delete", component_id="abc-123")',
             ],
             "sdk_examples_covered": [

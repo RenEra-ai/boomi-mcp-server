@@ -458,3 +458,100 @@ def test_scan_forbidden_secret_fields_descends_into_oauth2():
     assert isinstance(err, BuilderValidationError)
     assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
     assert err.field == "oauth2.password"
+
+
+# ----------------------------------------------------------------------------
+# Pooling + timeout type validation (codex round-2 P2 #B)
+# ----------------------------------------------------------------------------
+
+def test_connection_pooling_must_be_dict():
+    """A string in place of the connection_pooling dict used to crash with
+    AttributeError when build() called pooling.get(...). Now rejected
+    cleanly with REST_POOLING_INVALID."""
+    cfg = _minimal_oauth2_config(connection_pooling="not-a-dict")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_POOLING_INVALID"
+    assert err.field == "connection_pooling"
+
+
+def test_connection_pooling_enabled_must_be_bool():
+    cfg = _minimal_oauth2_config(connection_pooling={"enabled": "yes"})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_POOLING_INVALID"
+    assert err.field == "connection_pooling.enabled"
+
+
+def test_connection_pooling_max_total_must_be_int():
+    cfg = _minimal_oauth2_config(connection_pooling={"enabled": True, "max_total": "abc"})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_POOLING_INVALID"
+    assert err.field == "connection_pooling.max_total"
+
+
+def test_connection_pooling_idle_timeout_must_be_int():
+    cfg = _minimal_oauth2_config(connection_pooling={"enabled": True, "idle_timeout_seconds": 3.14})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_POOLING_INVALID"
+    assert err.field == "connection_pooling.idle_timeout_seconds"
+
+
+def test_connection_pooling_unknown_key_rejected():
+    cfg = _minimal_oauth2_config(connection_pooling={"enabled": False, "bogus_pool_key": 1})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_POOLING_INVALID"
+    assert "bogus_pool_key" in (err.field or "")
+
+
+def test_connection_pooling_dict_with_valid_values_accepted():
+    """Sanity: a well-formed pooling block builds without error."""
+    cfg = _minimal_oauth2_config(
+        connection_pooling={"enabled": True, "max_total": 20, "idle_timeout_seconds": 30},
+    )
+    xml = RestClientConnectionBuilder().build(**cfg)
+    assert _field_value(xml, "enableConnectionPooling") == "true"
+    assert _field_value(xml, "maxTotal") == "20"
+    assert _field_value(xml, "idleTimeout") == "30"
+
+
+def test_connect_timeout_ms_must_be_int():
+    cfg = _minimal_oauth2_config(connect_timeout_ms="abc")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "connect_timeout_ms"
+
+
+def test_read_timeout_ms_must_be_int():
+    cfg = _minimal_oauth2_config(read_timeout_ms=3.14)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "read_timeout_ms"
+
+
+def test_preemptive_must_be_bool():
+    cfg = _minimal_oauth2_config(preemptive="false")  # string, not bool
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "preemptive"
+
+
+def test_timeouts_accept_negative_int_for_indefinite_wait():
+    """Boomi docs: timeout values ≤ 0 mean wait indefinitely."""
+    xml = _build_minimal(connect_timeout_ms=-1, read_timeout_ms=0)
+    assert _field_value(xml, "connectTimeout") == "-1"
+    assert _field_value(xml, "readTimeout") == "0"
