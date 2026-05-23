@@ -98,6 +98,7 @@ def test_template_lists_supported_auth_modes():
     supported = set(result["supported_auth_modes"])
     assert "NONE" in supported
     assert "BASIC" in supported
+    assert "NTLM" in supported
     assert "OAUTH2" in supported
 
 
@@ -106,9 +107,10 @@ def test_template_lists_unsupported_future_auth_modes():
     unsupported = set(result["unsupported_future_auth_modes"])
     for mode in ("PASSWORD_DIGEST", "CUSTOM", "AWS_SIGNATURE", "AWS_IAM_ROLES_ANYWHERE"):
         assert mode in unsupported
-    # Sanity: NONE / BASIC are no longer in the deferred list.
+    # Sanity: NONE / BASIC / NTLM are no longer in the deferred list.
     assert "NONE" not in unsupported
     assert "BASIC" not in unsupported
+    assert "NTLM" not in unsupported
 
 
 def test_template_documents_cert_ref_fields():

@@ -1087,14 +1087,14 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         "Boomi REST Client connector-settings (connection). Models the API "
         "base URL plus authentication settings. Buildable auth modes: NONE "
         "(no auth, optionally with client-cert refs or connection pooling), "
-        "BASIC (username + credential_ref), and OAUTH2 client_credentials. "
-        "Remaining REST Client auth modes (NTLM, CUSTOM, PASSWORD_DIGEST, "
-        "AWS_SIGNATURE, AWS_IAM_ROLES_ANYWHERE) return "
-        "UNSUPPORTED_REST_AUTH_MODE until a verified live export exists. "
-        "Cert refs (private_certificate_ref / public_certificate_ref) are "
-        "an INDEPENDENT client-cert option — they may co-occur with any "
-        "auth selection. REST is the canonical target API connector — use "
-        "connector_type='rest'."
+        "BASIC (username + credential_ref), NTLM (username + credential_ref "
+        "+ domain + workstation), and OAUTH2 client_credentials. Remaining "
+        "REST Client auth modes (CUSTOM, PASSWORD_DIGEST, AWS_SIGNATURE, "
+        "AWS_IAM_ROLES_ANYWHERE) return UNSUPPORTED_REST_AUTH_MODE until a "
+        "verified live export exists. Cert refs (private_certificate_ref / "
+        "public_certificate_ref) are an INDEPENDENT client-cert option — "
+        "they may co-occur with any auth selection. REST is the canonical "
+        "target API connector — use connector_type='rest'."
     ),
     "template": {
         "connector_type": "rest",
@@ -1133,10 +1133,9 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         "cookie_scope": "GLOBAL",
         "connection_pooling": {"enabled": False},
     },
-    "supported_auth_modes": ["NONE", "BASIC", "OAUTH2"],
+    "supported_auth_modes": ["NONE", "BASIC", "NTLM", "OAUTH2"],
     "unsupported_future_auth_modes": [
         "PASSWORD_DIGEST",
-        "NTLM",
         "CUSTOM",
         "AWS_SIGNATURE",
         "AWS_IAM_ROLES_ANYWHERE",
@@ -1338,6 +1337,28 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
                 "a pre-encrypted raw-XML payload). preemptive=true sends "
                 "the Authorization header on the first request without "
                 "waiting for a 401 challenge — Boomi default is false."
+            ),
+        },
+        "ntlm_auth_minimal": {
+            "key": "target_rest_ntlm_connection",
+            "type": "connector-settings",
+            "action": "create",
+            "name": "<<target REST NTLM connection>>",
+            "config": {
+                "connector_type": "rest",
+                "component_name": "<<target REST NTLM connection>>",
+                "base_url": "https://<<host>>",
+                "auth": "NTLM",
+                "username": "<<username>>",
+                "credential_ref": "credential://<<vendor>>/<<role>>",
+                "domain": "<<AD domain, e.g. corp.example.com>>",
+                "workstation": "<<client workstation identity>>",
+            },
+            "_example_note": (
+                "NTLM auth: username + opaque credential_ref + domain + "
+                "workstation (all required). Used for Windows-integrated "
+                "REST endpoints behind IIS or similar. preemptive is "
+                "irrelevant for NTLM; Boomi emits an empty value."
             ),
         },
     },

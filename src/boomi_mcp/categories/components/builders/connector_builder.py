@@ -978,8 +978,8 @@ class RestClientConnectionBuilder:
         folder_name / description: optional component-level fields.
     """
 
-    SUPPORTED_AUTH_MODES = ("NONE", "BASIC", "OAUTH2")
-    _PASSWORD_BACKED_AUTH_MODES = ("BASIC",)
+    SUPPORTED_AUTH_MODES = ("NONE", "BASIC", "NTLM", "OAUTH2")
+    _PASSWORD_BACKED_AUTH_MODES = ("BASIC", "NTLM")
     RECOGNIZED_AUTH_MODES = (
         "NONE",
         "AWS_SIGNATURE",
@@ -1173,6 +1173,26 @@ class RestClientConnectionBuilder:
                         "secret values into XML."
                     ),
                 )
+
+        # 5c) NTLM-specific fields. NTLM uses domain + workstation alongside
+        # the BASIC-style username + credential_ref. Verified against live
+        # REST NTLM (1de43085).
+        if auth == "NTLM":
+            for ntlm_field in ("domain", "workstation"):
+                value = config.get(ntlm_field)
+                if not isinstance(value, str) or not value.strip():
+                    return BuilderValidationError(
+                        f"{ntlm_field} is required (non-empty string) "
+                        f"when auth='NTLM'",
+                        error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                        field=ntlm_field,
+                        hint=(
+                            f"NTLM requires {ntlm_field}. domain is the AD "
+                            "domain (e.g. corp.example.com); workstation is "
+                            "the client machine identity sent during the "
+                            "challenge-response handshake."
+                        ),
+                    )
 
         # 6) Optional preemptive flag must be a bool when supplied.
         if "preemptive" in config and not isinstance(config["preemptive"], bool):

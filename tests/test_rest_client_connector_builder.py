@@ -993,3 +993,175 @@ def test_basic_auth_rejects_plaintext_password_field():
     assert err.error_code in ("PLAINTEXT_SECRET_REJECTED", "REST_SECRET_VALUE_FORBIDDEN")
     assert "DEADBEEF_BASIC_PASSWORD" not in str(err)
     assert "DEADBEEF_BASIC_PASSWORD" not in (err.hint or "")
+
+
+# ----------------------------------------------------------------------------
+# NTLM auth (Phase 3 — issue #24 follow-up).
+# Live shape verified against:
+#   - 1de43085-6d58-41dc-8d3c-03504df86b91 (REST NTLM — username + encrypted
+#     password + domain + workstation; preemptive empty, NOT explicit false)
+# ----------------------------------------------------------------------------
+
+
+def _minimal_ntlm_config(**overrides):
+    """Minimal-valid REST NTLM auth config dict."""
+    params = {
+        "connector_type": "rest",
+        "component_name": "Target REST NTLM Connection",
+        "base_url": "https://api.example.com",
+        "auth": "NTLM",
+        "username": "login",
+        "credential_ref": "credential://target-api/ntlm-password",
+        "domain": "corp.example.com",
+        "workstation": "WORKSTATION1",
+    }
+    params.update(overrides)
+    return params
+
+
+def _build_minimal_ntlm(**overrides):
+    params = _minimal_ntlm_config(**overrides)
+    params.pop("connector_type", None)
+    return RestClientConnectionBuilder().build(**params)
+
+
+def test_ntlm_auth_minimum_required_fields_produce_valid_xml():
+    xml = _build_minimal_ntlm()
+    assert _field_value(xml, "auth") == "NTLM"
+    assert _field_value(xml, "username") == "login"
+    assert _field_value(xml, "domain") == "corp.example.com"
+    assert _field_value(xml, "workstation") == "WORKSTATION1"
+
+
+def test_ntlm_auth_validate_config_returns_none():
+    assert RestClientConnectionBuilder.validate_config(_minimal_ntlm_config()) is None
+
+
+def test_ntlm_auth_password_field_emitted_empty():
+    xml = _build_minimal_ntlm()
+    assert _field_value(xml, "password") == ""
+
+
+def test_ntlm_auth_emits_password_encrypted_values_marker():
+    """NTLM uses the same `//GenericConnectionConfig/field[@type='password']`
+    xpath as BASIC. Verified against live REST NTLM (1de43085)."""
+    xml = _build_minimal_ntlm()
+    root = ET.fromstring(xml)
+    encrypted_values = root.find("bns:encryptedValues", NS)
+    assert encrypted_values is not None
+    entries = encrypted_values.findall("bns:encryptedValue", NS)
+    assert len(entries) == 1
+    assert entries[0].attrib["path"] == "//GenericConnectionConfig/field[@type='password']"
+    assert entries[0].attrib["isSet"] == "false"
+
+
+def test_ntlm_auth_preemptive_emitted_empty():
+    """Live REST NTLM (1de43085) emits preemptive value='' (empty), NOT
+    value='false'. Preemptive is irrelevant for NTLM per Boomi docs. Match
+    the live shape rather than emitting an inert false."""
+    xml = _build_minimal_ntlm()
+    assert _field_value(xml, "preemptive") == ""
+
+
+def test_ntlm_auth_oauth2_skeleton_with_grant_type_code():
+    """Non-OAUTH2 modes (NTLM) emit the OAuth2Config skeleton with
+    grantType='code', same as NONE and BASIC."""
+    oa = _oauth2_config(_build_minimal_ntlm())
+    assert oa.attrib["grantType"] == "code"
+    assert oa.find("credentialsAssertionType") is None
+
+
+def test_ntlm_auth_missing_domain_rejected():
+    cfg = _minimal_ntlm_config()
+    cfg["domain"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "domain"
+
+
+def test_ntlm_auth_missing_workstation_rejected():
+    cfg = _minimal_ntlm_config()
+    cfg["workstation"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "workstation"
+
+
+def test_ntlm_auth_domain_must_be_string():
+    cfg = _minimal_ntlm_config(domain=12345)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "domain"
+
+
+def test_ntlm_auth_workstation_must_be_string():
+    cfg = _minimal_ntlm_config(workstation=["nope"])
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "workstation"
+
+
+def test_ntlm_auth_missing_username_rejected():
+    """NTLM, like BASIC, requires username via the shared password-backed
+    auth gate. Confirm the gate fires for NTLM too."""
+    cfg = _minimal_ntlm_config()
+    cfg["username"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "username"
+
+
+def test_ntlm_auth_missing_credential_ref_rejected():
+    cfg = _minimal_ntlm_config()
+    cfg["credential_ref"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "credential_ref"
+
+
+def test_ntlm_auth_credential_ref_must_use_credential_scheme():
+    cfg = _minimal_ntlm_config(credential_ref="raw-secret")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN"
+    assert err.field == "credential_ref"
+
+
+def test_ntlm_auth_with_cert_refs():
+    """Cert refs work with NTLM too."""
+    xml = _build_minimal_ntlm(
+        private_certificate_ref=_PRIV_CERT_REF,
+        public_certificate_ref=_PUB_CERT_REF,
+    )
+    root = ET.fromstring(xml)
+    seen = {}
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") in ("privateCertificate", "publicCertificate"):
+            seen[field.attrib["id"]] = field.attrib.get("value")
+    assert seen == {
+        "privateCertificate": _PRIV_CERT_REF,
+        "publicCertificate": _PUB_CERT_REF,
+    }
+
+
+def test_ntlm_auth_rejects_plaintext_password_field():
+    cfg = _minimal_ntlm_config(password="DEADBEEF_NTLM_PASSWORD")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code in ("PLAINTEXT_SECRET_REJECTED", "REST_SECRET_VALUE_FORBIDDEN")
+    assert "DEADBEEF_NTLM_PASSWORD" not in str(err)
+    assert "DEADBEEF_NTLM_PASSWORD" not in (err.hint or "")
