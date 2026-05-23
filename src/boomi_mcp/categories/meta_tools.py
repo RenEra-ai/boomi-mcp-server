@@ -1155,11 +1155,16 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
             "idle_timeout_seconds: int}. Works with ANY auth mode."
         ),
     },
-    "buildable_oauth2_grant_types": ["client_credentials"],
+    "buildable_oauth2_grant_types": ["client_credentials", "authorization_code"],
+    "oauth2_grant_type_aliases": {
+        "code": "authorization_code",
+        "authorization_code": "authorization_code",
+        "client_credentials": "client_credentials",
+    },
     "unsupported_future_oauth2_grant_types": [
-        "authorization_code",
         "resource_owner_credentials",
         "jwt_bearer",
+        "authorization_code_with_cached_access_token",
     ],
     "forbidden_secret_fields": [
         "password",
@@ -1359,6 +1364,33 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
                 "workstation (all required). Used for Windows-integrated "
                 "REST endpoints behind IIS or similar. preemptive is "
                 "irrelevant for NTLM; Boomi emits an empty value."
+            ),
+        },
+        "oauth2_authorization_code_token_not_set": {
+            "key": "target_rest_oauth2_authcode_connection",
+            "type": "connector-settings",
+            "action": "create",
+            "name": "<<target REST OAuth2 AuthCode connection>>",
+            "config": {
+                "connector_type": "rest",
+                "component_name": "<<target REST OAuth2 AuthCode connection>>",
+                "base_url": "https://<<host>>",
+                "auth": "OAUTH2",
+                "oauth2": {
+                    "grant_type": "authorization_code",
+                    "client_id": "<<client id>>",
+                    "client_secret_ref": "credential://<<vendor>>/<<role>>",
+                    "authorization_url": "https://<<host>>/oauth/authorize",
+                    "access_token_url": "https://<<host>>/oauth/token",
+                    "scope": "<<space-separated scopes>>",
+                },
+            },
+            "_example_note": (
+                "OAuth2 authorization_code (token-not-set) shape. The user "
+                "completes the authorization handshake in the Boomi UI "
+                "after create — the builder NEVER emits cached access "
+                "tokens. Pass 'code' or 'authorization_code' as aliases "
+                "for grant_type."
             ),
         },
     },

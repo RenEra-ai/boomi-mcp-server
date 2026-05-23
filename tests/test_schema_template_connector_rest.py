@@ -125,7 +125,18 @@ def test_template_documents_cert_ref_fields():
 
 def test_template_documents_oauth2_buildable_grant_types():
     result = _call(component_type="connector-settings", protocol="rest.client")
-    assert result["buildable_oauth2_grant_types"] == ["client_credentials"]
+    buildable = set(result["buildable_oauth2_grant_types"])
+    assert "client_credentials" in buildable
+    assert "authorization_code" in buildable
+
+
+def test_template_documents_oauth2_grant_type_aliases():
+    """`code` is an XML-side alias for `authorization_code` — surfaced so
+    callers know either input works."""
+    result = _call(component_type="connector-settings", protocol="rest.client")
+    aliases = result.get("oauth2_grant_type_aliases", {})
+    assert aliases.get("code") == "authorization_code"
+    assert aliases.get("authorization_code") == "authorization_code"
 
 
 def test_template_documents_subtype_constant():

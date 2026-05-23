@@ -990,7 +990,16 @@ class RestClientConnectionBuilder:
         "OAUTH2",
         "AWS_IAM_ROLES_ANYWHERE",
     )
-    BUILDABLE_OAUTH2_GRANT_TYPES = ("client_credentials",)
+    BUILDABLE_OAUTH2_GRANT_TYPES = ("client_credentials", "authorization_code")
+    # Public-facing aliases for grant_type — caller may pass either "code"
+    # (the live XML grantType attribute value) or "authorization_code" (the
+    # canonical public name). Both normalize to "authorization_code" for
+    # builder bookkeeping and emit grantType="code" in XML.
+    _OAUTH2_GRANT_TYPE_ALIASES = {
+        "code": "authorization_code",
+        "authorization_code": "authorization_code",
+        "client_credentials": "client_credentials",
+    }
     _CERT_REF_FIELDS = ("private_certificate_ref", "public_certificate_ref")
     FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
 
@@ -1089,34 +1098,41 @@ class RestClientConnectionBuilder:
                         "access_token_url, scope?, credentials_assertion_type?}."
                     ),
                 )
-            grant_type = oauth2.get("grant_type")
-            if grant_type not in cls.BUILDABLE_OAUTH2_GRANT_TYPES:
+            grant_input = oauth2.get("grant_type")
+            canonical_grant = cls._OAUTH2_GRANT_TYPE_ALIASES.get(grant_input)
+            if canonical_grant not in cls.BUILDABLE_OAUTH2_GRANT_TYPES:
                 supported = ", ".join(cls.BUILDABLE_OAUTH2_GRANT_TYPES)
                 return BuilderValidationError(
-                    f"oauth2.grant_type {grant_type!r} is not buildable "
-                    f"in issue #24 (supported: {supported})",
+                    f"oauth2.grant_type {grant_input!r} is not buildable "
+                    f"(supported: {supported})",
                     error_code="UNSUPPORTED_REST_AUTH_MODE",
                     field="oauth2.grant_type",
                     hint=(
-                        f"Supported OAuth2 grant types: {supported}. "
-                        "Other grants (authorization_code, "
-                        "resource_owner_credentials, jwt_bearer) are "
-                        "deferred until verified live exports exist."
+                        f"Supported OAuth2 grant types: {supported}. Other "
+                        "grants (resource_owner_credentials, jwt_bearer, and "
+                        "authorization_code with cached access-token "
+                        "emission) are deferred until verified live exports "
+                        "exist. Pass 'code' or 'authorization_code' as "
+                        "aliases for the authorization_code grant."
                     ),
                 )
-            for required_subfield in ("client_id", "client_secret_ref", "access_token_url"):
+            # Common required subfields across both grants.
+            required_subfields = ["client_id", "client_secret_ref", "access_token_url"]
+            if canonical_grant == "authorization_code":
+                required_subfields.append("authorization_url")
+            for required_subfield in required_subfields:
                 value = oauth2.get(required_subfield)
                 if value is None or not str(value).strip():
                     return BuilderValidationError(
                         f"oauth2.{required_subfield} is required when "
-                        "auth='OAUTH2' / grant_type='client_credentials'",
+                        f"auth='OAUTH2' / grant_type={canonical_grant!r}",
                         error_code="REST_CONNECTOR_VALIDATION_FAILED",
                         field=f"oauth2.{required_subfield}",
                         hint=(
-                            f"Provide a non-empty oauth2.{required_subfield}."
-                            if required_subfield != "client_secret_ref"
-                            else "Provide an opaque credential reference: "
-                                 "'credential://<vendor>/<role>'."
+                            "Provide an opaque credential reference: "
+                            "'credential://<vendor>/<role>'."
+                            if required_subfield == "client_secret_ref"
+                            else f"Provide a non-empty oauth2.{required_subfield}."
                         ),
                     )
             secret_ref = str(oauth2.get("client_secret_ref", "")).strip()
@@ -1392,16 +1408,50 @@ class RestClientConnectionBuilder:
         )
 
     def _build_oauth2_field(self, oauth2: Dict[str, Any]) -> str:
+        """Emit the OAuth2Config child for OAUTH2 auth. Dispatches on the
+        normalized grant type so both client_credentials and
+        authorization_code (token-not-set) round-trip through the same entry
+        point. Cached `accessToken` ciphertext is NEVER emitted — that path
+        is left for the user to authorize via the Boomi UI after create."""
+        canonical_grant = self._OAUTH2_GRANT_TYPE_ALIASES.get(
+            oauth2.get("grant_type"), "client_credentials"
+        )
         client_id = _escape_xml(str(oauth2.get("client_id", "")))
         access_token_url = _escape_xml(str(oauth2.get("access_token_url", "")))
         scope = _escape_xml(str(oauth2.get("scope", "")))
+        if canonical_grant == "authorization_code":
+            authorization_url = _escape_xml(str(oauth2.get("authorization_url", "")))
+            # Live REST Auth Code Token Not Set (7abf0ad2) shape:
+            #   - grantType="code" (XML attribute value for authorization_code)
+            #   - credentials has clientId + clientSecret only (no
+            #     accessTokenKey, no accessToken — cached tokens NEVER emitted)
+            #   - authorizationTokenEndpoint url populated
+            #   - accessTokenEndpoint url populated
+            #   - scope populated (optional but emitted)
+            #   - NO credentialsAssertionType element
+            return (
+                '            <field id="oauthContext" type="oauth">\n'
+                '                <OAuth2Config grantType="code">\n'
+                f'                    <credentials clientId="{client_id}" clientSecret=""/>\n'
+                f'                    <authorizationTokenEndpoint url="{authorization_url}"><sslOptions/></authorizationTokenEndpoint>\n'
+                '                    <authorizationParameters/>\n'
+                f'                    <accessTokenEndpoint url="{access_token_url}"><sslOptions/></accessTokenEndpoint>\n'
+                '                    <accessTokenParameters/>\n'
+                f'                    <scope>{scope}</scope>\n'
+                '                    <jwtParameters><expiration>0</expiration></jwtParameters>\n'
+                '                </OAuth2Config>\n'
+                '            </field>\n'
+            )
+        # client_credentials shape (Local REST Connection d6ee8b5b):
+        #   - grantType="client_credentials"
+        #   - credentials has accessTokenKey (Boomi-generated, emit empty),
+        #     clientId, clientSecret (encrypted, emit empty)
+        #   - authorizationTokenEndpoint url empty
+        #   - accessTokenEndpoint url populated
+        #   - credentialsAssertionType element populated
         assertion_type = _escape_xml(
             str(oauth2.get("credentials_assertion_type", "client_secret"))
         )
-        # accessTokenKey is Boomi-generated; the builder emits an empty value
-        # and the platform fills it in on save. clientSecret is encrypted —
-        # also emitted empty, with the encryptedValues header marking the
-        # path as `isSet=false`.
         return (
             '            <field id="oauthContext" type="oauth">\n'
             '                <OAuth2Config grantType="client_credentials">\n'

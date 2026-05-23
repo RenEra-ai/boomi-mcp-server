@@ -380,9 +380,13 @@ def test_oauth2_block_required_when_auth_is_oauth2():
     assert err.field == "oauth2"
 
 
-def test_oauth2_grant_type_only_client_credentials():
+def test_oauth2_grant_type_unsupported_grants_rejected():
+    """resource_owner_credentials and jwt_bearer remain deferred until
+    verified live exports exist. authorization_code is now supported
+    (Phase 4) and is exercised by the OAuth2 authorization_code test
+    section below."""
     cfg = _minimal_oauth2_config()
-    cfg["oauth2"]["grant_type"] = "authorization_code"
+    cfg["oauth2"]["grant_type"] = "resource_owner_credentials"
     with pytest.raises(BuilderValidationError) as excinfo:
         RestClientConnectionBuilder().build(**cfg)
     err = excinfo.value
@@ -1165,3 +1169,224 @@ def test_ntlm_auth_rejects_plaintext_password_field():
     assert err.error_code in ("PLAINTEXT_SECRET_REJECTED", "REST_SECRET_VALUE_FORBIDDEN")
     assert "DEADBEEF_NTLM_PASSWORD" not in str(err)
     assert "DEADBEEF_NTLM_PASSWORD" not in (err.hint or "")
+
+
+# ----------------------------------------------------------------------------
+# OAuth2 authorization_code (token-not-set) — Phase 4 of issue #24 follow-up.
+# Live shape verified against:
+#   - 7abf0ad2-ed87-4226-bdc9-a19fd59d8967 (REST Auth Code Token Not Set —
+#     auth=OAUTH2, grantType=code, populated authorizationTokenEndpoint and
+#     accessTokenEndpoint, scope populated, NO cached accessToken attribute,
+#     NO credentialsAssertionType element)
+# ----------------------------------------------------------------------------
+
+
+def _minimal_oauth2_authcode_config(**overrides):
+    """Minimal-valid REST OAUTH2 authorization_code (token-not-set) config."""
+    params = {
+        "connector_type": "rest",
+        "component_name": "Target REST OAuth2 AuthCode Connection",
+        "base_url": "https://api.example.com",
+        "auth": "OAUTH2",
+        "oauth2": {
+            "grant_type": "authorization_code",
+            "client_id": "boomi-client",
+            "client_secret_ref": "credential://target-api/oauth-client-secret",
+            "authorization_url": "https://api.example.com/oauth/authorize",
+            "access_token_url": "https://api.example.com/oauth/token",
+            "scope": "cds.read cds.write",
+        },
+    }
+    params.update(overrides)
+    return params
+
+
+def _build_minimal_oauth2_authcode(**overrides):
+    params = _minimal_oauth2_authcode_config(**overrides)
+    params.pop("connector_type", None)
+    return RestClientConnectionBuilder().build(**params)
+
+
+def test_oauth2_authcode_minimum_required_fields_produce_valid_xml():
+    xml = _build_minimal_oauth2_authcode()
+    assert _field_value(xml, "auth") == "OAUTH2"
+    oa = _oauth2_config(xml)
+    assert oa.attrib["grantType"] == "code"
+
+
+def test_oauth2_authcode_validate_config_returns_none():
+    assert RestClientConnectionBuilder.validate_config(
+        _minimal_oauth2_authcode_config()
+    ) is None
+
+
+def test_oauth2_authcode_grant_type_alias_code_accepted():
+    """`code` and `authorization_code` are equivalent input aliases for the
+    same grant — both must validate and emit grantType='code'."""
+    cfg = _minimal_oauth2_authcode_config()
+    cfg["oauth2"]["grant_type"] = "code"
+    xml = RestClientConnectionBuilder().build(
+        **{k: v for k, v in cfg.items() if k != "connector_type"}
+    )
+    oa = _oauth2_config(xml)
+    assert oa.attrib["grantType"] == "code"
+
+
+def test_oauth2_authcode_authorization_endpoint_url_populated():
+    """authorization_code grant populates the authorizationTokenEndpoint url
+    (vs client_credentials which emits it empty). Verified against live
+    REST Auth Code Token Not Set."""
+    oa = _oauth2_config(_build_minimal_oauth2_authcode())
+    ate = oa.find("authorizationTokenEndpoint")
+    assert ate is not None
+    assert ate.attrib["url"] == "https://api.example.com/oauth/authorize"
+    assert ate.find("sslOptions") is not None
+
+
+def test_oauth2_authcode_access_token_endpoint_url_populated():
+    oa = _oauth2_config(_build_minimal_oauth2_authcode())
+    ate = oa.find("accessTokenEndpoint")
+    assert ate is not None
+    assert ate.attrib["url"] == "https://api.example.com/oauth/token"
+
+
+def test_oauth2_authcode_scope_populated():
+    oa = _oauth2_config(_build_minimal_oauth2_authcode())
+    scope = oa.find("scope")
+    assert scope is not None
+    assert (scope.text or "") == "cds.read cds.write"
+
+
+def test_oauth2_authcode_credentials_no_access_token_key():
+    """Live REST Auth Code Token Not Set: credentials element has clientId +
+    clientSecret only — NO accessTokenKey attribute (that's client_credentials
+    only)."""
+    oa = _oauth2_config(_build_minimal_oauth2_authcode())
+    creds = oa.find("credentials")
+    assert creds is not None
+    assert "accessTokenKey" not in creds.attrib
+
+
+def test_oauth2_authcode_credentials_no_cached_access_token():
+    """Builder must NEVER emit the cached `accessToken` attribute on
+    credentials, even if the live source export carried one. Live
+    'REST Auth Code Token Not Set' has none; live 'REST Auth Code' DOES
+    have it — but neither path should ever leak from the builder."""
+    oa = _oauth2_config(_build_minimal_oauth2_authcode())
+    creds = oa.find("credentials")
+    assert creds is not None
+    assert "accessToken" not in creds.attrib
+
+
+def test_oauth2_authcode_no_credentials_assertion_type_element():
+    """Live REST Auth Code Token Not Set has NO credentialsAssertionType
+    element (that's client_credentials only)."""
+    oa = _oauth2_config(_build_minimal_oauth2_authcode())
+    assert oa.find("credentialsAssertionType") is None
+
+
+def test_oauth2_authcode_emits_clientsecret_encrypted_values_marker():
+    """OAuth2 authorization_code uses the same client-secret xpath as
+    client_credentials."""
+    xml = _build_minimal_oauth2_authcode()
+    root = ET.fromstring(xml)
+    encrypted_values = root.find("bns:encryptedValues", NS)
+    assert encrypted_values is not None
+    entries = encrypted_values.findall("bns:encryptedValue", NS)
+    assert len(entries) == 1
+    assert entries[0].attrib["path"] == "//GenericConnectionConfig/field/OAuth2Config/credentials/@clientSecret"
+
+
+def test_oauth2_authcode_preemptive_default_false():
+    """Like client_credentials, OAUTH2 authorization_code emits an explicit
+    preemptive value (default false). Verified against live REST Auth Code
+    Token Not Set (preemptive='false' explicit)."""
+    xml = _build_minimal_oauth2_authcode()
+    assert _field_value(xml, "preemptive") == "false"
+
+
+def test_oauth2_authcode_missing_authorization_url_rejected():
+    cfg = _minimal_oauth2_authcode_config()
+    cfg["oauth2"]["authorization_url"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "oauth2.authorization_url"
+
+
+def test_oauth2_authcode_missing_access_token_url_rejected():
+    cfg = _minimal_oauth2_authcode_config()
+    cfg["oauth2"]["access_token_url"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "oauth2.access_token_url"
+
+
+def test_oauth2_authcode_missing_client_id_rejected():
+    cfg = _minimal_oauth2_authcode_config()
+    cfg["oauth2"]["client_id"] = ""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "oauth2.client_id"
+
+
+def test_oauth2_authcode_client_secret_ref_must_use_credential_scheme():
+    cfg = _minimal_oauth2_authcode_config()
+    cfg["oauth2"]["client_secret_ref"] = "raw-secret"
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    assert err.error_code == "REST_SECRET_VALUE_FORBIDDEN"
+    assert err.field == "oauth2.client_secret_ref"
+
+
+def test_oauth2_authcode_cached_access_token_field_rejected():
+    """If the caller forwards a cached `oauth2.access_token` value (e.g.
+    copied from a Boomi export), reject it. We do NOT accept or emit
+    cached OAuth tokens — users must authorize in the Boomi UI after create."""
+    cfg = _minimal_oauth2_authcode_config()
+    cfg["oauth2"]["access_token"] = "DEADBEEF_CACHED_TOKEN"
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**cfg)
+    err = excinfo.value
+    # The forbidden-secret scan catches `access_token` as a top-level
+    # forbidden key (it's in FORBIDDEN_SECRET_FIELDS, scanned recursively
+    # under the oauth2 sub-dict).
+    assert err.error_code in ("PLAINTEXT_SECRET_REJECTED", "REST_SECRET_VALUE_FORBIDDEN")
+    assert "DEADBEEF_CACHED_TOKEN" not in str(err)
+    assert "DEADBEEF_CACHED_TOKEN" not in (err.hint or "")
+
+
+def test_oauth2_authcode_client_credentials_path_still_works():
+    """Regression: adding authorization_code must not break the existing
+    client_credentials path (which still emits credentialsAssertionType
+    and a populated accessTokenEndpoint with empty authorizationTokenEndpoint)."""
+    xml = _build_minimal()  # client_credentials happy path
+    oa = _oauth2_config(xml)
+    assert oa.attrib["grantType"] == "client_credentials"
+    assert oa.find("credentialsAssertionType") is not None
+    # authorizationTokenEndpoint url is empty for client_credentials.
+    ate = oa.find("authorizationTokenEndpoint")
+    assert ate.attrib["url"] == ""
+
+
+def test_oauth2_authcode_with_cert_refs():
+    """Cert refs work with OAUTH2 authorization_code too."""
+    xml = _build_minimal_oauth2_authcode(
+        private_certificate_ref=_PRIV_CERT_REF,
+        public_certificate_ref=_PUB_CERT_REF,
+    )
+    root = ET.fromstring(xml)
+    seen = {}
+    for field in root.find("bns:object/GenericConnectionConfig", NS):
+        if field.tag == "field" and field.attrib.get("id") in ("privateCertificate", "publicCertificate"):
+            seen[field.attrib["id"]] = field.attrib.get("value")
+    assert seen == {
+        "privateCertificate": _PRIV_CERT_REF,
+        "publicCertificate": _PUB_CERT_REF,
+    }
