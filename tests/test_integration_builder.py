@@ -2138,6 +2138,58 @@ class TestBuildPlanRestPreflight:
         assert echoed["credential_ref"] == "[REDACTED]"
 
     @patch(_PATCH_TARGET)
+    def test_non_dict_oauth2_string_value_redacted_in_plan_echo(self, mock_pag):
+        """QA Bug #126: `_redact_dotted_field_path` walks dotted paths and
+        no-ops if an intermediate value is non-dict. A stale `oauth2="raw"`
+        (string) would echo into the plan output because the existing
+        sensitive paths assume a dict shape. Defense in depth: the redact
+        helper should detect the non-dict intermediate and clear the
+        top-level value instead."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["auth"] = "NONE"
+        comp.config["oauth2"] = "raw-LEAK_BUG126_STRING_OAUTH2"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["field"] == "oauth2"
+        assert "LEAK_BUG126_STRING_OAUTH2" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["oauth2"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_non_dict_oauth2_list_value_redacted_in_plan_echo(self, mock_pag):
+        """QA Bug #126 list variant — same defense as the string case."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["auth"] = "NONE"
+        comp.config["oauth2"] = ["raw-LEAK_BUG126_LIST_OAUTH2"]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert "LEAK_BUG126_LIST_OAUTH2" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["oauth2"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_dict_oauth2_redaction_preserves_non_secret_fields(self, mock_pag):
+        """Regression sanity: for the existing dict-shaped oauth2 case
+        (which DOES support per-field redaction), `_redact_dotted_field_path`
+        must still leave non-secret fields visible. Only `client_secret_ref`
+        gets `[REDACTED]`; `grant_type` etc. survive."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["base_url"] = ""  # earlier validator wins
+        comp.config["oauth2"]["client_secret_ref"] = "raw-LEAK_KEEP_DICT_PATH"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        # client_secret_ref redacted, but the surrounding oauth2 stays a dict
+        # with grant_type / client_id / access_token_url still visible.
+        assert echoed["oauth2"]["client_secret_ref"] == "[REDACTED]"
+        assert echoed["oauth2"]["grant_type"] == "client_credentials"
+        assert "raw-LEAK_KEEP_DICT_PATH" not in repr(plan)
+
+    @patch(_PATCH_TARGET)
     def test_credential_ref_redacted_when_earlier_error_wins(self, mock_pag):
         """Codex round-6 P1: credential_ref should be `credential://...`
         per design, but callers can mistakenly put a raw secret there.

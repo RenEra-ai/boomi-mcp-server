@@ -1092,8 +1092,13 @@ class RestClientConnectionBuilder:
         # OAuth2 validator below is gated on auth=='OAUTH2' and the
         # _REST_SENSITIVE_FIELD_PATHS sweep only fires after a REST
         # validation error. (5b) the standard OAuth2 sub-block validation.
+        #
+        # The stale-block check uses a truthy test (not isinstance(dict)) so
+        # malformed payloads — `oauth2="raw"`, `oauth2=["raw"]`, `oauth2=42` —
+        # are also rejected. Empty dict / None / "" remain treated as "not
+        # supplied" because Python's truthy semantics already exclude them.
         oauth2 = config.get("oauth2")
-        if auth != "OAUTH2" and isinstance(oauth2, dict) and oauth2:
+        if auth != "OAUTH2" and oauth2:
             return BuilderValidationError(
                 f"`oauth2` sub-block is only valid with auth='OAUTH2', not "
                 f"auth={auth!r}",
@@ -1252,11 +1257,17 @@ class RestClientConnectionBuilder:
         # a non-empty credential_ref is always a config mistake — and like
         # the stale oauth2 block, the raw value would otherwise leak into
         # the plan echo before _REST_SENSITIVE_FIELD_PATHS could redact it.
+        #
+        # Truthy check (not isinstance(str)) so malformed payloads like
+        # `credential_ref=["raw"]` or `credential_ref={"value":"raw"}` are
+        # also rejected. None / "" / empty container remain treated as
+        # "not supplied" via Python's truthy semantics.
         cred_ref = config.get("credential_ref")
+        is_blank_string = isinstance(cred_ref, str) and not cred_ref.strip()
         if (
             auth not in cls._PASSWORD_BACKED_AUTH_MODES
-            and isinstance(cred_ref, str)
-            and cred_ref.strip()
+            and cred_ref
+            and not is_blank_string
         ):
             return BuilderValidationError(
                 f"`credential_ref` is only valid with auth='BASIC' or "

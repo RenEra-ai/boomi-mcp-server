@@ -1501,3 +1501,82 @@ def test_grant_type_integer_value_returns_structured_error():
     err = excinfo.value
     assert err.error_code == "UNSUPPORTED_REST_AUTH_MODE"
     assert err.field == "oauth2.grant_type"
+
+
+# ----------------------------------------------------------------------------
+# Codex review round 2 — non-dict/non-string stale value gaps.
+# Round-1 gates only fired for `oauth2` being a non-empty DICT and for
+# `credential_ref` being a non-empty STRING. A malformed config that
+# leaves `oauth2` as a string/list, or `credential_ref` as a dict/list,
+# bypassed validation and the raw value would echo through the plan
+# output. Round-2: reject ANY truthy stale value for those auths,
+# regardless of type.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "stale_value",
+    [
+        "raw-secret-LEAK_CANARY_R2_OAUTH2",
+        ["raw-secret-LEAK_CANARY_R2_OAUTH2"],
+        12345,
+        True,
+    ],
+)
+def test_stale_oauth2_non_dict_value_rejected_for_non_oauth2_auth(stale_value):
+    """Round-2 P2 #1: a non-dict `oauth2` value with a non-OAUTH2 auth
+    must also be rejected. Previously only non-empty DICT triggered the
+    gate; non-dict truthy values slipped through and could echo their
+    raw payload in the plan output."""
+    cfg = _minimal_none_config()
+    cfg["oauth2"] = stale_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "oauth2"
+    # Canary must NOT leak into the error envelope.
+    assert "LEAK_CANARY_R2_OAUTH2" not in str(err)
+    assert "LEAK_CANARY_R2_OAUTH2" not in (err.hint or "")
+
+
+@pytest.mark.parametrize(
+    "stale_value",
+    [
+        ["raw-secret-LEAK_CANARY_R2_CREDREF"],
+        {"value": "raw-secret-LEAK_CANARY_R2_CREDREF"},
+        12345,
+        True,
+    ],
+)
+def test_stale_credential_ref_non_string_value_rejected_for_non_password_auth(stale_value):
+    """Round-2 P2 #2: a non-string `credential_ref` value with a
+    non-password auth (NONE/OAUTH2) must also be rejected. Previously
+    only non-empty STRING triggered the gate; non-string truthy values
+    slipped through and could echo their raw payload via the plan
+    redaction sweep, which only runs after a REST validation error."""
+    cfg = _minimal_none_config()
+    cfg["credential_ref"] = stale_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "credential_ref"
+    assert "LEAK_CANARY_R2_CREDREF" not in str(err)
+    assert "LEAK_CANARY_R2_CREDREF" not in (err.hint or "")
+
+
+def test_stale_oauth2_none_value_still_accepted():
+    """Regression sanity: `oauth2=None` for non-OAUTH2 auth still passes
+    (treated as "not supplied", same as missing key)."""
+    cfg = _minimal_none_config()
+    cfg["oauth2"] = None
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+def test_stale_credential_ref_none_value_still_accepted():
+    """Regression sanity: `credential_ref=None` for non-password auth
+    still passes."""
+    cfg = _minimal_none_config()
+    cfg["credential_ref"] = None
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
