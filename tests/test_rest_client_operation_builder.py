@@ -11,6 +11,7 @@ UNVERIFIED_REST_XML_VARIANT until a live export proves their XML shape.
 """
 
 import xml.etree.ElementTree as ET
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -20,6 +21,7 @@ from boomi_mcp.categories.components.builders.connector_builder import (
     REST_CLIENT_SUBTYPE,
     get_connector_action_builder,
 )
+from boomi_mcp.categories.components.connectors import create_connector
 
 
 NS = {"bns": "http://api.platform.boomi.com/"}
@@ -517,3 +519,71 @@ def test_special_characters_in_path_and_name_round_trip():
     root = ET.fromstring(xml)
     assert root.attrib["name"] == 'REST "Prod" & <op>'
     assert _field_value(xml, "path") == "/v1/items?q=a&b=<c>"
+
+
+# ----------------------------------------------------------------------------
+# Dispatcher fallback in connectors.py — wrong operation_mode on REST
+# connector_type should surface UNSUPPORTED_REST_OPERATION_MODE instead of
+# a generic "no builder available" message.
+# ----------------------------------------------------------------------------
+
+def _make_mock_client():
+    client = MagicMock()
+    client.connector.get_connector.return_value = MagicMock()
+    return client
+
+
+def test_dispatcher_surfaces_unsupported_rest_operation_mode_for_wrong_mode():
+    """Caller passes connector_type='rest' with operation_mode='get' (typo
+    for 'execute'). The dispatcher must fall through to
+    RestClientOperationBuilder.validate_config and return the structured
+    UNSUPPORTED_REST_OPERATION_MODE envelope."""
+    client = _make_mock_client()
+    result = create_connector(client, "test", {
+        "component_type": "connector-action",
+        "connector_type": "rest",
+        "operation_mode": "get",
+        "component_name": "Bad Op",
+        "connection_ref_key": "x",
+        "method": "GET",
+        "path": "/x",
+    })
+    assert result["_success"] is False
+    assert result["error_code"] == "UNSUPPORTED_REST_OPERATION_MODE"
+    assert result["field"] == "operation_mode"
+
+
+def test_dispatcher_uses_rest_builder_when_operation_mode_is_execute():
+    """Sanity: the canonical (rest, execute) pair routes through
+    RestClientOperationBuilder.build (no fallback path)."""
+    client = _make_mock_client()
+    # Make _create_component_raw return a stub success — we only care that
+    # the dispatcher reached the builder and produced XML.
+    client.component.create_component_raw.return_value = MagicMock(
+        component_id="op-id-001", name="Dispatch Op",
+        type_="connector-action", sub_type="officialboomi-X3979C-rest-prod",
+    )
+    # Bypass _create_component_raw by patching at module level since it's
+    # imported into connectors.py — keep this test focused on validation
+    # passing through, not on the Boomi API call.
+    from unittest.mock import patch
+    with patch(
+        "boomi_mcp.categories.components.connectors._create_component_raw",
+        return_value={
+            "component_id": "op-id-001",
+            "name": "Dispatch Op",
+            "type": "connector-action",
+            "sub_type": "officialboomi-X3979C-rest-prod",
+        },
+    ):
+        result = create_connector(client, "test", {
+            "component_type": "connector-action",
+            "connector_type": "rest",
+            "operation_mode": "execute",
+            "component_name": "Dispatch Op",
+            "connection_ref_key": "x",
+            "method": "GET",
+            "path": "/v1/x",
+        })
+    assert result["_success"] is True
+    assert result["component_id"] == "op-id-001"
