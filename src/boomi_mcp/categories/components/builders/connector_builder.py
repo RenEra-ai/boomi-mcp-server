@@ -1290,6 +1290,36 @@ class RestClientConnectionBuilder:
                 ),
             )
 
+        # 5e) Stale `username` gate. username is BASIC/NTLM-only (the
+        # password-backed branch above consumes it). For NONE / OAUTH2,
+        # supplying a non-empty username is a config mistake — Boomi
+        # ignores the field at runtime, but the value would otherwise be
+        # emitted in the XML where it misleads downstream consumers and
+        # confuses callers.
+        #
+        # Truthy check (not isinstance(str)) so malformed payloads like
+        # `username=["alice"]` are also rejected. None / "" / whitespace-only
+        # / empty container remain treated as "not supplied".
+        uname = config.get("username")
+        is_blank_string_uname = isinstance(uname, str) and not uname.strip()
+        if (
+            auth not in cls._PASSWORD_BACKED_AUTH_MODES
+            and uname
+            and not is_blank_string_uname
+        ):
+            return BuilderValidationError(
+                f"`username` is only valid with auth='BASIC' or "
+                f"auth='NTLM', not auth={auth!r}",
+                error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                field="username",
+                hint=(
+                    "Remove username or switch to a password-backed auth "
+                    "mode (BASIC or NTLM). For NONE / OAUTH2 the username "
+                    "field has no semantic effect — supplying it leaks "
+                    "caller intent into the XML without changing behavior."
+                ),
+            )
+
         # 6) Optional preemptive flag must be a bool when supplied.
         if "preemptive" in config and not isinstance(config["preemptive"], bool):
             return BuilderValidationError(
