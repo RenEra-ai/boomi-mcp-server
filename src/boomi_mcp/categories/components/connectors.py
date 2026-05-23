@@ -37,6 +37,8 @@ from ._shared import (
 from .builders.connector_builder import (
     BuilderValidationError,
     DatabaseGetOperationBuilder,
+    RestClientOperationBuilder,
+    _resolve_rest_connector_type,
     get_connector_builder, CONNECTOR_BUILDERS,
     get_connector_action_builder, CONNECTOR_ACTION_BUILDERS,
     find_http_settings, update_http_settings_fields,
@@ -347,15 +349,19 @@ def create_connector(
                 connector_type, operation_mode
             )
             if not action_builder:
-                # For known connector families (e.g. database), let the
+                # For known connector families (e.g. database, rest), let the
                 # family's validator surface the proper structured error —
-                # otherwise a deliberate `operation_mode="send"` ends up with
-                # a generic "no builder" message instead of the documented
-                # UNSUPPORTED_DB_OPERATION_MODE + #32 hint.
+                # otherwise a deliberate `operation_mode="get"` on a REST
+                # action ends up with a generic "no builder" message instead
+                # of the documented UNSUPPORTED_REST_OPERATION_MODE hint.
                 if connector_type.lower() == 'database':
                     db_err = DatabaseGetOperationBuilder.validate_config(config)
                     if db_err is not None:
                         raise db_err
+                if _resolve_rest_connector_type(connector_type) is not None:
+                    rest_err = RestClientOperationBuilder.validate_config(config)
+                    if rest_err is not None:
+                        raise rest_err
                 supported_pairs = ', '.join(
                     f"{ct}.{om}" for (ct, om) in sorted(CONNECTOR_ACTION_BUILDERS.keys())
                 )
