@@ -455,12 +455,17 @@ class DatabaseConnectorBuilder:
             for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
                 if forbidden in config:
                     field_path = f"{_path_prefix}{forbidden}"
+                    # The wording is intentionally generic ("in this config")
+                    # because HttpConnectorBuilder and HttpClientOperationBuilder
+                    # both delegate to this scan via classmethod forwarding —
+                    # saying "database connector config" would leak the wrong
+                    # taxonomy into HTTP errors (QA bug #124, issue #24).
                     return BuilderValidationError(
-                        f"{field_path!r} cannot be supplied in database connector "
-                        "config — secrets must cross the wire as opaque "
-                        "credential_ref strings only. Boomi stores passwords as "
-                        "ciphertext produced by its own encryption; there is no "
-                        "public API to encrypt a plaintext value.",
+                        f"{field_path!r} cannot be supplied in this config — "
+                        "secrets must cross the wire as opaque credential_ref "
+                        "strings only. Boomi stores passwords as ciphertext "
+                        "produced by its own encryption; there is no public "
+                        "API to encrypt a plaintext value.",
                         error_code="PLAINTEXT_SECRET_REJECTED",
                         field=field_path,
                         hint=(
