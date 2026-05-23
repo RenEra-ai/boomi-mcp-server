@@ -37,6 +37,7 @@ from ._shared import (
 from .builders.connector_builder import (
     BuilderValidationError,
     DatabaseGetOperationBuilder,
+    HttpClientOperationBuilder,
     get_connector_builder, CONNECTOR_BUILDERS,
     get_connector_action_builder, CONNECTOR_ACTION_BUILDERS,
     find_http_settings, update_http_settings_fields,
@@ -347,15 +348,19 @@ def create_connector(
                 connector_type, operation_mode
             )
             if not action_builder:
-                # For known connector families (e.g. database), let the
+                # For known connector families (e.g. database, http), let the
                 # family's validator surface the proper structured error —
-                # otherwise a deliberate `operation_mode="send"` ends up with
-                # a generic "no builder" message instead of the documented
-                # UNSUPPORTED_DB_OPERATION_MODE + #32 hint.
+                # otherwise a deliberate `operation_mode="get"` on http ends
+                # up with a generic "no builder" message instead of the
+                # documented UNSUPPORTED_HTTP_OPERATION_MODE hint.
                 if connector_type.lower() == 'database':
                     db_err = DatabaseGetOperationBuilder.validate_config(config)
                     if db_err is not None:
                         raise db_err
+                if connector_type.lower() == 'http':
+                    http_err = HttpClientOperationBuilder.validate_config(config)
+                    if http_err is not None:
+                        raise http_err
                 supported_pairs = ', '.join(
                     f"{ct}.{om}" for (ct, om) in sorted(CONNECTOR_ACTION_BUILDERS.keys())
                 )
