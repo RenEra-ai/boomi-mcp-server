@@ -1155,6 +1155,41 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
             "idle_timeout_seconds: int}. Works with ANY auth mode."
         ),
     },
+    "field_auth_dependency_map": {
+        "summary": (
+            "Machine-readable map of which connection fields are "
+            "independent of auth selection (work with any auth) vs "
+            "auth-tied (rejected with REST_CONNECTOR_VALIDATION_FAILED "
+            "when paired with the wrong auth). Live exports often pair "
+            "independent fields with a particular auth in their "
+            "example — but that pairing is incidental, not a binding "
+            "rule. Use this map to drive caller-side validation."
+        ),
+        "independent": [
+            "url",
+            "connect_timeout_ms",
+            "read_timeout_ms",
+            "cookie_scope",
+            "private_certificate_ref",
+            "public_certificate_ref",
+            "connection_pooling",
+        ],
+        "auth_tied": {
+            "username": ["BASIC", "NTLM"],
+            "credential_ref": ["BASIC", "NTLM"],
+            "domain": ["NTLM"],
+            "workstation": ["NTLM"],
+            "preemptive": ["BASIC", "OAUTH2"],
+            "oauth2": ["OAUTH2"],
+        },
+        "grant_tied": {
+            "oauth2.authorization_url": ["authorization_code"],
+        },
+        "always_rejected": {
+            "oauth2.access_token": "ciphertext emission is token-not-set only",
+            "oauth2.cached_token": "ciphertext emission is token-not-set only",
+        },
+    },
     "buildable_oauth2_grant_types": ["client_credentials", "authorization_code"],
     "oauth2_grant_type_aliases": {
         "code": "authorization_code",
@@ -2016,6 +2051,33 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
             "NONE/STRICT/LAX values are always emitted regardless of "
             "method. Verified per-method against live RenEra exports."
         ),
+    },
+    "field_method_dependency_map": {
+        "summary": (
+            "Machine-readable map of which operation fields are "
+            "independent of method (work with any of the 8 supported "
+            "verbs) vs method-tied. The only method-tied behavior is "
+            "the default-emission rule for follow_redirects; every "
+            "other input field is method-orthogonal."
+        ),
+        "independent": [
+            "path",
+            "query_parameters",
+            "request_headers",
+            "request_profile_ref",
+            "response_profile_ref",
+            "request_profile_type",
+            "response_profile_type",
+            "return_application_errors",
+            "track_response",
+        ],
+        "method_tied": {
+            "follow_redirects_default": {
+                "emit_NONE": ["GET", "POST", "HEAD", "DELETE"],
+                "omit": ["PATCH", "PUT", "OPTIONS", "TRACE"],
+                "explicit_values_always_emit": True,
+            },
+        },
     },
     "query_parameters_status": "plain_buildable",
     "request_headers_status": "plain_buildable",
