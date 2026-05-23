@@ -1085,9 +1085,29 @@ class RestClientConnectionBuilder:
                 ),
             )
 
-        # 5) OAuth2 sub-block — required when auth="OAUTH2".
+        # 5) OAuth2 handling. Two gates: (5a) reject a stale oauth2 block
+        # supplied with a non-OAUTH2 auth mode — without this gate, a typo
+        # like `auth='NONE'` + `oauth2={"client_secret_ref": "raw-secret"}`
+        # would leak the raw value through the plan echo because the
+        # OAuth2 validator below is gated on auth=='OAUTH2' and the
+        # _REST_SENSITIVE_FIELD_PATHS sweep only fires after a REST
+        # validation error. (5b) the standard OAuth2 sub-block validation.
+        oauth2 = config.get("oauth2")
+        if auth != "OAUTH2" and isinstance(oauth2, dict) and oauth2:
+            return BuilderValidationError(
+                f"`oauth2` sub-block is only valid with auth='OAUTH2', not "
+                f"auth={auth!r}",
+                error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                field="oauth2",
+                hint=(
+                    "Remove the oauth2 block or switch auth='OAUTH2'. A "
+                    "stale oauth2 block with auth='NONE'/'BASIC'/'NTLM' "
+                    "is always a config mistake — Boomi ignores it but "
+                    "the raw client_secret_ref would otherwise echo into "
+                    "the plan output."
+                ),
+            )
         if auth == "OAUTH2":
-            oauth2 = config.get("oauth2")
             if not isinstance(oauth2, dict):
                 return BuilderValidationError(
                     "oauth2 sub-block is required when auth='OAUTH2'",
@@ -1100,6 +1120,22 @@ class RestClientConnectionBuilder:
                     ),
                 )
             grant_input = oauth2.get("grant_type")
+            # Guard the alias-dict lookup: dict.get(unhashable) raises
+            # TypeError. A non-string grant_type is always invalid — surface
+            # it as UNSUPPORTED_REST_AUTH_MODE instead of crashing.
+            if not isinstance(grant_input, str):
+                supported = ", ".join(cls.BUILDABLE_OAUTH2_GRANT_TYPES)
+                return BuilderValidationError(
+                    f"oauth2.grant_type must be a string (got "
+                    f"{type(grant_input).__name__}); supported: {supported}",
+                    error_code="UNSUPPORTED_REST_AUTH_MODE",
+                    field="oauth2.grant_type",
+                    hint=(
+                        f"Supported OAuth2 grant types: {supported}. Pass "
+                        "'code' or 'authorization_code' as aliases for the "
+                        "authorization_code grant."
+                    ),
+                )
             canonical_grant = cls._OAUTH2_GRANT_TYPE_ALIASES.get(grant_input)
             if canonical_grant not in cls.BUILDABLE_OAUTH2_GRANT_TYPES:
                 supported = ", ".join(cls.BUILDABLE_OAUTH2_GRANT_TYPES)
@@ -1210,6 +1246,30 @@ class RestClientConnectionBuilder:
                             "challenge-response handshake."
                         ),
                     )
+
+        # 5d) Stale `credential_ref` gate. credential_ref is BASIC/NTLM only
+        # (the password-backed branch above consumes it). For NONE / OAUTH2,
+        # a non-empty credential_ref is always a config mistake — and like
+        # the stale oauth2 block, the raw value would otherwise leak into
+        # the plan echo before _REST_SENSITIVE_FIELD_PATHS could redact it.
+        cred_ref = config.get("credential_ref")
+        if (
+            auth not in cls._PASSWORD_BACKED_AUTH_MODES
+            and isinstance(cred_ref, str)
+            and cred_ref.strip()
+        ):
+            return BuilderValidationError(
+                f"`credential_ref` is only valid with auth='BASIC' or "
+                f"auth='NTLM', not auth={auth!r}",
+                error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                field="credential_ref",
+                hint=(
+                    "Remove credential_ref or switch to a password-backed "
+                    "auth mode. credential_ref carries the BASIC/NTLM "
+                    "password — OAUTH2 uses oauth2.client_secret_ref "
+                    "instead, and NONE/cert auth modes need no password."
+                ),
+            )
 
         # 6) Optional preemptive flag must be a bool when supplied.
         if "preemptive" in config and not isinstance(config["preemptive"], bool):

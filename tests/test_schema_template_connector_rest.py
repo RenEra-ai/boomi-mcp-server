@@ -206,3 +206,32 @@ def test_template_client_secret_ref_uses_credential_scheme():
     assert template_oauth2["client_secret_ref"].startswith("credential://")
     example_oauth2 = result["example"]["config"]["oauth2"]
     assert example_oauth2["client_secret_ref"].startswith("credential://")
+
+
+def test_out_of_scope_does_not_list_supported_auth_modes_or_grants():
+    """Codex round-1 P2 #4: the out_of_scope block must NOT list BASIC,
+    NTLM, or plain authorization_code as deferred — those are all
+    buildable post-Phases 2/3/4. Only truly-unsupported variants should
+    remain (CUSTOM, PASSWORD_DIGEST, AWS_*, resource_owner, jwt_bearer,
+    authorization_code-with-cached-token)."""
+    result = _call(component_type="connector-settings", protocol="rest.client")
+    oos_blob = repr(result.get("out_of_scope", {}))
+    # The deferred-emission text must NOT name supported modes.
+    # Using whole-word patterns: drop literal "BASIC " / "NTLM " etc.
+    import re
+    for supported in ("BASIC", "NTLM"):
+        assert not re.search(rf"\b{supported}\b", oos_blob), (
+            f"out_of_scope still names supported auth mode {supported!r} as "
+            f"deferred; remove it from the non_emitted_auth_modes entry."
+        )
+    # Plain authorization_code is supported (Phase 4); only the
+    # cached-token variant remains out of scope. The string
+    # "authorization_code" may still appear inside the qualified phrase
+    # "authorization_code with cached" — but it must not appear by itself
+    # as a fully-deferred grant.
+    if "authorization_code" in oos_blob:
+        assert "cached" in oos_blob, (
+            "out_of_scope mentions authorization_code but doesn't qualify "
+            "with 'cached' — implies the whole grant is deferred when "
+            "only the cached-token variant is."
+        )

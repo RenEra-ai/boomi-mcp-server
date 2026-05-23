@@ -1390,3 +1390,114 @@ def test_oauth2_authcode_with_cert_refs():
         "privateCertificate": _PRIV_CERT_REF,
         "publicCertificate": _PUB_CERT_REF,
     }
+
+
+# ----------------------------------------------------------------------------
+# Codex review round 1 — stale-block validation gates.
+# Before the round-1 fix, a stale `oauth2` block or `credential_ref` could
+# survive validation when the auth mode no longer used it, and the raw value
+# would echo through the plan output (the redaction sweep only fires AFTER
+# a REST validation error). These tests lock the post-fix behavior.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("non_oauth2_auth", ["NONE", "BASIC", "NTLM"])
+def test_stale_oauth2_block_rejected_for_non_oauth2_auth(non_oauth2_auth):
+    """`auth='NONE'` plus a stale `oauth2={...}` block is always a config
+    mistake (typo'd auth, or stale field left over from an OAUTH2 → other
+    transition). Reject before the raw secret reaches the plan echo."""
+    cfg = {
+        "connector_type": "rest",
+        "component_name": "Stale OAuth2 block",
+        "base_url": "https://api.example.com",
+        "auth": non_oauth2_auth,
+        # BASIC/NTLM require username + credential_ref — supply them so
+        # the validator doesn't bail on the password-backed gate before
+        # reaching the oauth2 check.
+        "username": "u",
+        "credential_ref": "credential://x/y",
+        "domain": "d",
+        "workstation": "w",
+        "oauth2": {
+            "grant_type": "client_credentials",
+            "client_id": "id",
+            # Raw secret value (must NOT leak via plan echo).
+            "client_secret_ref": "raw-secret-LEAK-CANARY-DEADBEEF",
+            "access_token_url": "https://api.example.com/token",
+        },
+    }
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "oauth2"
+    assert "LEAK-CANARY-DEADBEEF" not in str(err)
+    assert "LEAK-CANARY-DEADBEEF" not in (err.hint or "")
+
+
+def test_empty_oauth2_block_accepted_for_non_oauth2_auth():
+    """An EMPTY oauth2 dict for a non-OAUTH2 auth is treated as
+    "no oauth2 block supplied" — accept it. Only non-empty stale blocks
+    are rejected. Edge case for callers that always emit the key with `{}`
+    regardless of auth."""
+    cfg = _minimal_none_config()
+    cfg["oauth2"] = {}
+    err = RestClientConnectionBuilder.validate_config(cfg)
+    assert err is None
+
+
+@pytest.mark.parametrize("non_password_auth", ["NONE", "OAUTH2"])
+def test_stale_credential_ref_rejected_for_non_password_auth(non_password_auth):
+    """`credential_ref` is BASIC/NTLM-only. With NONE/OAUTH2 supplying a
+    `credential_ref` is a config mistake — reject before the raw value
+    reaches the plan echo."""
+    if non_password_auth == "OAUTH2":
+        cfg = _minimal_oauth2_config()
+        cfg["credential_ref"] = "raw-secret-LEAK-CANARY-DEADBEEF"
+    else:
+        cfg = _minimal_none_config(credential_ref="raw-secret-LEAK-CANARY-DEADBEEF")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "credential_ref"
+    assert "LEAK-CANARY-DEADBEEF" not in str(err)
+    assert "LEAK-CANARY-DEADBEEF" not in (err.hint or "")
+
+
+def test_empty_credential_ref_accepted_for_non_password_auth():
+    """Empty-string credential_ref on a non-password auth is treated as
+    "not supplied" — accept it (edge case)."""
+    cfg = _minimal_none_config(credential_ref="")
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+@pytest.mark.parametrize(
+    "unhashable_grant",
+    [[], {}, ["client_credentials"], {"key": "value"}],
+)
+def test_grant_type_unhashable_value_returns_structured_error(unhashable_grant):
+    """Codex review P2 #3: unhashable grant_type (list, dict, etc.) used to
+    crash `cls._OAUTH2_GRANT_TYPE_ALIASES.get(grant_input)` with TypeError
+    because dict lookups require hashable keys. Must return a structured
+    UNSUPPORTED_REST_AUTH_MODE error instead of crashing."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"]["grant_type"] = unhashable_grant
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "UNSUPPORTED_REST_AUTH_MODE"
+    assert err.field == "oauth2.grant_type"
+
+
+def test_grant_type_integer_value_returns_structured_error():
+    """Scalar non-string flavor. 123 IS hashable (so wouldn't TypeError),
+    but it's still not a valid grant_type — must surface as
+    UNSUPPORTED_REST_AUTH_MODE."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"]["grant_type"] = 12345
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "UNSUPPORTED_REST_AUTH_MODE"
+    assert err.field == "oauth2.grant_type"

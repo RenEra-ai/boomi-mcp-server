@@ -2096,6 +2096,48 @@ class TestBuildPlanRestPreflight:
         assert echoed["oauth2"]["client_secret_ref"] == "[REDACTED]"
 
     @patch(_PATCH_TARGET)
+    def test_stale_oauth2_block_on_non_oauth2_auth_redacts_secret(self, mock_pag):
+        """Codex round-1 P1 #1: a non-OAUTH2 connection with a stale
+        `oauth2` block carrying a raw client_secret_ref must (a) fail
+        validation with REST_CONNECTOR_VALIDATION_FAILED field='oauth2',
+        and (b) scrub the raw secret value from the plan echo via the
+        existing _REST_SENSITIVE_FIELD_PATHS sweep."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["auth"] = "NONE"
+        comp.config["oauth2"]["client_secret_ref"] = "raw-LEAK_CODEX_ROUND1_OAUTH2"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_CONNECTOR_VALIDATION_FAILED"
+        assert step["validation_error"]["field"] == "oauth2"
+        assert "raw-LEAK_CODEX_ROUND1_OAUTH2" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["oauth2"]["client_secret_ref"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_stale_credential_ref_on_non_password_auth_redacts_secret(self, mock_pag):
+        """Codex round-1 P1 #2: a non-password connection (auth=NONE)
+        with a stale `credential_ref` carrying a raw secret must (a) fail
+        validation with REST_CONNECTOR_VALIDATION_FAILED field='credential_ref',
+        and (b) scrub the raw value from the plan echo. The default fixture
+        carries an oauth2 block; remove it so the credential_ref gate fires
+        instead of the stale-oauth2 gate (which runs first by design)."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["auth"] = "NONE"
+        comp.config.pop("oauth2", None)
+        comp.config["credential_ref"] = "raw-LEAK_CODEX_ROUND1_CREDREF"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "REST_CONNECTOR_VALIDATION_FAILED"
+        assert step["validation_error"]["field"] == "credential_ref"
+        assert "raw-LEAK_CODEX_ROUND1_CREDREF" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["credential_ref"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
     def test_credential_ref_redacted_when_earlier_error_wins(self, mock_pag):
         """Codex round-6 P1: credential_ref should be `credential://...`
         per design, but callers can mistakenly put a raw secret there.
