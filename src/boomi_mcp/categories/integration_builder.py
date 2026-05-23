@@ -21,6 +21,14 @@ from uuid import uuid4
 # database secret scan.
 _XML_DATABASE_SUBTYPE_RE = re.compile(r'\bsubType\s*=\s*["\']database["\']')
 
+# Same idea for REST Client raw XML — a connector_type-less raw payload that
+# carries `subType="officialboomi-X3979C-rest-prod"` should still trigger the
+# REST secret scan so plaintext credentials cannot leak through the plan echo
+# (codex review item #2 against the superseded HTTP-issue-#24 implementation).
+_XML_REST_SUBTYPE_RE = re.compile(
+    r'\bsubType\s*=\s*["\']officialboomi-X3979C-rest-prod["\']'
+)
+
 from boomi import Boomi
 from boomi.models import (
     ComponentMetadataQueryConfig,
@@ -38,9 +46,13 @@ from .components.builders import (
     DatabaseGetOperationBuilder,
     DatabaseReadProfileBuilder,
     DatabaseStoredProcedureReadProfileBuilder,
+    REST_CLIENT_SUBTYPE,
+    RestClientConnectionBuilder,
+    RestClientOperationBuilder,
     PROFILE_BUILDERS,
     get_profile_builder,
 )
+from .components.builders.connector_builder import _resolve_rest_connector_type
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.processes import create_process, update_process
@@ -327,6 +339,95 @@ def _check_database_get_dependencies(
                     "order creates the profile before the operation."
                 ),
             )
+
+    return None
+
+
+def _check_rest_operation_dependencies(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+) -> Optional[BuilderValidationError]:
+    """Cross-step dependency checks specific to REST Client operations (issue #24).
+
+    Boomi binds a REST connection to an operation at the process connector
+    step, not in the operation XML — so the connection ID is never embedded.
+    Plan-time we still need the caller to declare:
+      * the connection (`connection_ref_key` + `depends_on`),
+      * any referenced profiles via `$ref:KEY` tokens
+        (`request_profile_id` AND `response_profile_id` — codex review item
+        #3 against the superseded HTTP implementation),
+      * any payload-source upstream step (`payload_source_ref_key`).
+
+    Without these, apply-time ordering would be unsafe (operation runs before
+    its inputs exist or before `_resolve_dependency_tokens` can substitute
+    the `$ref` into a real component_id).
+    """
+    depends_on = set(comp.depends_on or [])
+
+    connection_ref_key = raw_config.get("connection_ref_key")
+    if not connection_ref_key or not str(connection_ref_key).strip():
+        return BuilderValidationError(
+            "connection_ref_key is required for REST operations",
+            error_code="REST_CONNECTION_REF_REQUIRED",
+            field="connection_ref_key",
+            hint=(
+                "Declare the REST connector-settings key the operation will "
+                "bind to at process time, and add the same key to depends_on "
+                "so plan ordering is correct."
+            ),
+        )
+    if connection_ref_key not in depends_on:
+        return BuilderValidationError(
+            f"connection_ref_key {connection_ref_key!r} must also appear in depends_on",
+            error_code="REST_DEPENDENCY_REQUIRED",
+            field="depends_on",
+            hint=(
+                "Add the connector-settings key to depends_on so the execution "
+                "order creates the connection before the operation."
+            ),
+        )
+
+    for ref_field in ("request_profile_id", "response_profile_id"):
+        value = raw_config.get(ref_field)
+        if isinstance(value, str) and value.startswith("$ref:"):
+            ref_key = value[5:]
+            if not ref_key:
+                return BuilderValidationError(
+                    f"{ref_field} $ref token is empty (expected '$ref:KEY')",
+                    error_code="REST_PROFILE_REF_UNRESOLVED",
+                    field=ref_field,
+                    hint=(
+                        f"Use '$ref:<profile key>' to reference a profile "
+                        "component declared earlier in the same integration spec."
+                    ),
+                )
+            if ref_key not in depends_on:
+                return BuilderValidationError(
+                    f"{ref_field} $ref target {ref_key!r} must also appear in depends_on",
+                    error_code="REST_DEPENDENCY_REQUIRED",
+                    field="depends_on",
+                    hint=(
+                        "Add the profile key to depends_on so the execution "
+                        "order creates the profile before the operation."
+                    ),
+                )
+
+    payload_source_ref_key = raw_config.get("payload_source_ref_key")
+    if (
+        payload_source_ref_key
+        and isinstance(payload_source_ref_key, str)
+        and payload_source_ref_key.strip()
+        and payload_source_ref_key not in depends_on
+    ):
+        return BuilderValidationError(
+            f"payload_source_ref_key {payload_source_ref_key!r} must also appear in depends_on",
+            error_code="REST_DEPENDENCY_REQUIRED",
+            field="depends_on",
+            hint=(
+                "Add the payload source key to depends_on so the execution "
+                "order creates the payload-producing step before the operation."
+            ),
+        )
 
     return None
 
@@ -643,6 +744,72 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     raw_config
                 )
 
+        # REST Client connector-settings / connector-action preflight (issue #24).
+        # Mirrors the database block above:
+        #   (a) scan_forbidden_secret_fields runs on EVERY REST step regardless
+        #       of apply path — so reuse/update/raw-XML configs cannot leak
+        #       plaintext secrets into the plan echo (including nested
+        #       oauth2.client_secret via the recursive walker, codex item #1).
+        #   (b) validate_config + dependency check run only when the apply
+        #       path will actually invoke the builder (create / create_clone,
+        #       no raw XML).
+        #   (c) Raw XML without connector_type still triggers (a) when the
+        #       payload carries the REST Client subType (codex item #2).
+        xml_says_rest = bool(
+            xml_payload and _XML_REST_SUBTYPE_RE.search(xml_payload)
+        )
+        is_rest_connector_settings = (
+            comp.type == "connector-settings"
+            and (
+                _resolve_rest_connector_type(raw_config.get("connector_type")) is not None
+                or xml_says_rest
+            )
+        )
+        is_rest_send_operation = (
+            comp.type == "connector-action"
+            and (
+                _resolve_rest_connector_type(raw_config.get("connector_type")) is not None
+                or xml_says_rest
+            )
+        )
+        will_invoke_rest_builder = (
+            (is_rest_connector_settings or is_rest_send_operation)
+            and not xml_payload
+            and planned_action in ("create", "create_clone")
+        )
+        rest_err: Optional[BuilderValidationError] = None
+        rest_scanner_cls = None
+        if is_rest_connector_settings:
+            rest_scanner_cls = RestClientConnectionBuilder
+        elif is_rest_send_operation:
+            rest_scanner_cls = RestClientOperationBuilder
+
+        if rest_scanner_cls is not None and db_err is None:
+            rest_err = rest_scanner_cls.scan_forbidden_secret_fields(raw_config)
+            if rest_err is None and will_invoke_rest_builder:
+                effective_config = dict(raw_config)
+                if comp.name:
+                    effective_config.setdefault("component_name", comp.name)
+                if is_rest_connector_settings:
+                    rest_err = RestClientConnectionBuilder.validate_config(effective_config)
+                else:  # is_rest_send_operation
+                    rest_err = RestClientOperationBuilder.validate_config(effective_config)
+                    if rest_err is None:
+                        rest_err = _check_rest_operation_dependencies(comp, raw_config)
+
+        if rest_err is not None:
+            planned_action = "error_rest_validation"
+            validation_error = {
+                "error_code": rest_err.error_code,
+                "error": str(rest_err),
+                "field": rest_err.field,
+                "hint": rest_err.hint,
+            }
+            if rest_err.error_code == "PLAINTEXT_SECRET_REJECTED" and rest_scanner_cls is not None:
+                rest_scanner_cls.redact_forbidden_secret_fields_in_place(
+                    raw_config
+                )
+
         step: Dict[str, Any] = {
             "key": comp.key,
             "type": comp.type,
@@ -701,6 +868,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             "error_ambiguous_match",
             "error_missing_target",
             "error_database_validation",
+            "error_rest_validation",
         )
     ]
     if unresolvable_steps:
@@ -725,6 +893,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' failed "
                     f"database validation: "
                     f"{ve.get('error_code', 'DATABASE_CONNECTOR_VALIDATION_FAILED')} "
+                    f"on field {ve.get('field')!r}."
+                )
+            elif step["planned_action"] == "error_rest_validation":
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed "
+                    f"REST validation: "
+                    f"{ve.get('error_code', 'REST_CONNECTOR_VALIDATION_FAILED')} "
                     f"on field {ve.get('field')!r}."
                 )
         return {
