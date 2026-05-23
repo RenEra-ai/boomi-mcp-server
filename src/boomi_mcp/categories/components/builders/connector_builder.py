@@ -1072,12 +1072,648 @@ class DatabaseGetOperationBuilder:
 
 
 # ============================================================================
+# REST Client connector (issue #24, M2.4)
+#
+# Subtype: officialboomi-X3979C-rest-prod (mixed-case is the Boomi canonical
+# form; registry keys are lowercased so caller aliases "rest" / "rest_client"
+# / the literal subtype all resolve correctly).
+#
+# Live reference exports (RenEra account, fetched 2026-05-23):
+#   - d6ee8b5b-6d83-44c0-9e77-216a60adb452 ([OAuth2 client_credentials] connection)
+#   - e268ea19-bbbe-4e1f-b406-b5129358575a ([Rest Test GET] operation)
+#   - 64c4eafd-f2e7-49e2-b128-c9b1c50f81b9 ([Rest Test PATCH] operation)
+# ============================================================================
+
+REST_CLIENT_SUBTYPE = "officialboomi-X3979C-rest-prod"
+_REST_CLIENT_ALIASES = ("rest", "rest_client", REST_CLIENT_SUBTYPE.lower())
+
+# AWS skeleton fields emitted verbatim with empty values when AWS auth is
+# unused — matches the live OAuth2 export which still carries the empty
+# AWS slot. Order is the verified live-XML order.
+_REST_CLIENT_AWS_FIELDS = (
+    ("awsAccessKey", "string"),
+    ("awsSecretKey", "password"),
+    ("awsService", "string"),
+    ("customAwsService", "string"),
+    ("awsRegion", "string"),
+    ("customAwsRegion", "string"),
+    ("awsProfileArn", "string"),
+    ("awsRoleArn", "string"),
+    ("awsTrustAnchorArn", "string"),
+    ("awsRolesAnywhereRegion", "string"),
+    ("awsRolesAnywhereCustomRegion", "string"),
+    ("awsSessionName", "string"),
+    ("awsDuration", "integer"),
+)
+
+
+def _resolve_rest_connector_type(value: Any) -> Optional[str]:
+    """Map any of `rest`, `rest_client`, or the canonical REST Client subtype
+    (case-insensitive) to the canonical mixed-case subtype. Returns None for
+    anything else."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in _REST_CLIENT_ALIASES:
+        return REST_CLIENT_SUBTYPE
+    return None
+
+
+class RestClientConnectionBuilder:
+    """Builder for Boomi REST Client connector-settings (issue #24, M2.4).
+
+    Issue #24 only ships OAUTH2 client_credentials. Every other auth mode
+    listed in the REST Client docs (NONE, BASIC, PASSWORD_DIGEST, NTLM,
+    CUSTOM, AWS_SIGNATURE, AWS_IAM_ROLES_ANYWHERE) returns
+    UNSUPPORTED_REST_AUTH_MODE — no verified live XML reference exists yet
+    for those shapes. The emitted XML for the supported shape matches the
+    live RenEra export at d6ee8b5b byte-for-byte modulo identity attrs and
+    secret-bearing fields.
+
+    Config keys:
+        connector_type:           "rest" | "rest_client" | the subtype.
+                                  Consumed by the dispatcher; the builder
+                                  itself does not require it.
+        component_name:           required.
+        base_url:                 required; must begin with http:// or https://.
+        auth:                     required; only "OAUTH2" buildable.
+        oauth2:                   required when auth="OAUTH2".
+            grant_type:           required; only "client_credentials" buildable.
+            client_id:            required.
+            client_secret_ref:    required; must start with "credential://".
+                                  Builder NEVER emits the actual secret —
+                                  it goes into the Boomi UI after create.
+            access_token_url:     required; endpoint for token issuance.
+            scope:                optional string.
+            credentials_assertion_type: optional, defaults "client_secret".
+        preemptive:               optional bool, defaults False.
+        connect_timeout_ms:       optional int, defaults -1 (wait forever).
+        read_timeout_ms:          optional int, defaults -1.
+        cookie_scope:             optional, defaults "GLOBAL".
+        connection_pooling:       optional dict {enabled?, max_total?,
+                                  idle_timeout_seconds?}; defaults
+                                  enabled=False, others empty.
+        folder_name / description: optional component-level fields.
+    """
+
+    SUPPORTED_AUTH_MODES = ("OAUTH2",)
+    RECOGNIZED_AUTH_MODES = (
+        "NONE",
+        "AWS_SIGNATURE",
+        "BASIC",
+        "CUSTOM",
+        "PASSWORD_DIGEST",
+        "NTLM",
+        "OAUTH2",
+        "AWS_IAM_ROLES_ANYWHERE",
+    )
+    BUILDABLE_OAUTH2_GRANT_TYPES = ("client_credentials",)
+    FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
+
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        """Reuse DatabaseConnectorBuilder's recursive scan — same forbidden
+        key set, and it descends into nested dicts (e.g. ``oauth2``)."""
+        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+            config, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate a REST Client connector config without building XML."""
+        # 1) Plaintext secret-shaped keys (including nested oauth2.password etc.).
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        # 2) component_name required.
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required for REST Client connectors",
+                error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        # 3) base_url required and well-formed.
+        base_url = config.get("base_url")
+        if not base_url or not str(base_url).strip():
+            return BuilderValidationError(
+                "base_url is required for REST Client connectors",
+                error_code="REST_BASE_URL_REQUIRED",
+                field="base_url",
+                hint=(
+                    "Provide the REST API base URL beginning with http:// "
+                    "or https://. The operation step appends the path."
+                ),
+            )
+        base_url_str = str(base_url).strip()
+        if not (base_url_str.startswith("http://") or base_url_str.startswith("https://")):
+            return BuilderValidationError(
+                f"base_url {base_url_str!r} must begin with http:// or https://",
+                error_code="REST_BASE_URL_INVALID",
+                field="base_url",
+                hint="REST Client requires http or https schemes only.",
+            )
+
+        # 4) auth mode gating.
+        auth = config.get("auth")
+        if not auth:
+            return BuilderValidationError(
+                "auth is required for REST Client connectors",
+                error_code="UNSUPPORTED_REST_AUTH_MODE",
+                field="auth",
+                hint=(
+                    f"Supported auth modes: {', '.join(cls.SUPPORTED_AUTH_MODES)}. "
+                    "REST Client recognizes other modes "
+                    f"({', '.join(m for m in cls.RECOGNIZED_AUTH_MODES if m not in cls.SUPPORTED_AUTH_MODES)}) "
+                    "but they are deferred until verified live exports exist."
+                ),
+            )
+        if auth not in cls.SUPPORTED_AUTH_MODES:
+            return BuilderValidationError(
+                f"auth_type {auth!r} is not buildable in issue #24",
+                error_code="UNSUPPORTED_REST_AUTH_MODE",
+                field="auth",
+                hint=(
+                    f"Supported auth modes: {', '.join(cls.SUPPORTED_AUTH_MODES)}. "
+                    "Recognized but deferred: "
+                    f"{', '.join(m for m in cls.RECOGNIZED_AUTH_MODES if m not in cls.SUPPORTED_AUTH_MODES)}. "
+                    "Use the raw-XML escape hatch (config.xml=...) sourced "
+                    "from a verified live export for unsupported modes."
+                ),
+            )
+
+        # 5) OAuth2 sub-block — required when auth="OAUTH2".
+        if auth == "OAUTH2":
+            oauth2 = config.get("oauth2")
+            if not isinstance(oauth2, dict):
+                return BuilderValidationError(
+                    "oauth2 sub-block is required when auth='OAUTH2'",
+                    error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                    field="oauth2",
+                    hint=(
+                        "Provide oauth2 as an object: "
+                        "{grant_type, client_id, client_secret_ref, "
+                        "access_token_url, scope?, credentials_assertion_type?}."
+                    ),
+                )
+            grant_type = oauth2.get("grant_type")
+            if grant_type not in cls.BUILDABLE_OAUTH2_GRANT_TYPES:
+                supported = ", ".join(cls.BUILDABLE_OAUTH2_GRANT_TYPES)
+                return BuilderValidationError(
+                    f"oauth2.grant_type {grant_type!r} is not buildable "
+                    f"in issue #24 (supported: {supported})",
+                    error_code="UNSUPPORTED_REST_AUTH_MODE",
+                    field="oauth2.grant_type",
+                    hint=(
+                        f"Supported OAuth2 grant types: {supported}. "
+                        "Other grants (authorization_code, "
+                        "resource_owner_credentials, jwt_bearer) are "
+                        "deferred until verified live exports exist."
+                    ),
+                )
+            for required_subfield in ("client_id", "client_secret_ref", "access_token_url"):
+                value = oauth2.get(required_subfield)
+                if value is None or not str(value).strip():
+                    return BuilderValidationError(
+                        f"oauth2.{required_subfield} is required when "
+                        "auth='OAUTH2' / grant_type='client_credentials'",
+                        error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                        field=f"oauth2.{required_subfield}",
+                        hint=(
+                            f"Provide a non-empty oauth2.{required_subfield}."
+                            if required_subfield != "client_secret_ref"
+                            else "Provide an opaque credential reference: "
+                                 "'credential://<vendor>/<role>'."
+                        ),
+                    )
+            secret_ref = str(oauth2.get("client_secret_ref", "")).strip()
+            if not secret_ref.startswith("credential://"):
+                return BuilderValidationError(
+                    "oauth2.client_secret_ref must begin with 'credential://'",
+                    error_code="REST_SECRET_VALUE_FORBIDDEN",
+                    field="oauth2.client_secret_ref",
+                    hint=(
+                        "Pass an opaque credential_ref string; the builder "
+                        "never writes raw secret values into XML."
+                    ),
+                )
+
+        return None
+
+    @staticmethod
+    def _field(field_id: str, value: Any, field_type: str = "string") -> str:
+        formatted = _format_xml_value(value) if value not in (None, "") else ""
+        return f'            <field id="{field_id}" type="{field_type}" value="{formatted}"/>\n'
+
+    def _build_oauth2_field(self, oauth2: Dict[str, Any]) -> str:
+        client_id = _escape_xml(str(oauth2.get("client_id", "")))
+        access_token_url = _escape_xml(str(oauth2.get("access_token_url", "")))
+        scope = _escape_xml(str(oauth2.get("scope", "")))
+        assertion_type = _escape_xml(
+            str(oauth2.get("credentials_assertion_type", "client_secret"))
+        )
+        # accessTokenKey is Boomi-generated; the builder emits an empty value
+        # and the platform fills it in on save. clientSecret is encrypted —
+        # also emitted empty, with the encryptedValues header marking the
+        # path as `isSet=false`.
+        return (
+            '            <field id="oauthContext" type="oauth">\n'
+            '                <OAuth2Config grantType="client_credentials">\n'
+            f'                    <credentials accessTokenKey="" clientId="{client_id}" clientSecret=""/>\n'
+            '                    <authorizationTokenEndpoint url=""><sslOptions/></authorizationTokenEndpoint>\n'
+            '                    <authorizationParameters/>\n'
+            f'                    <accessTokenEndpoint url="{access_token_url}"><sslOptions/></accessTokenEndpoint>\n'
+            '                    <accessTokenParameters/>\n'
+            f'                    <scope>{scope}</scope>\n'
+            '                    <jwtParameters><expiration>0</expiration></jwtParameters>\n'
+            f'                    <credentialsAssertionType>{assertion_type}</credentialsAssertionType>\n'
+            '                </OAuth2Config>\n'
+            '            </field>\n'
+        )
+
+    def build(self, **params) -> str:
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        component_name = params["component_name"]
+        base_url = params["base_url"]
+        auth = params["auth"]
+        folder_name = params.get("folder_name", "Home")
+        description = params.get("description", "")
+
+        preemptive = bool(params.get("preemptive", False))
+        connect_timeout = params.get("connect_timeout_ms", -1)
+        read_timeout = params.get("read_timeout_ms", -1)
+        cookie_scope = params.get("cookie_scope", "GLOBAL")
+        pooling = params.get("connection_pooling") or {}
+        pool_enabled = bool(pooling.get("enabled", False))
+        max_total = pooling.get("max_total", "")
+        idle_timeout = pooling.get("idle_timeout_seconds", "")
+
+        username = params.get("username", "")
+        domain = params.get("domain", "")
+        workstation = params.get("workstation", "")
+
+        safe_name = _escape_xml(component_name)
+        safe_folder = _escape_xml(folder_name)
+        safe_desc = _escape_xml(description)
+
+        fields = []
+        fields.append(self._field("url", base_url))
+        fields.append(self._field("auth", auth))
+        fields.append(self._field("username", username))
+        fields.append(self._field("password", "", "password"))
+        fields.append(self._field("domain", domain))
+        fields.append(self._field("workstation", workstation))
+        fields.append(self._field("customAuthCredentials", "", "password"))
+        fields.append(self._field("preemptive", preemptive, "boolean"))
+        for aws_field_id, aws_field_type in _REST_CLIENT_AWS_FIELDS:
+            fields.append(self._field(aws_field_id, "", aws_field_type))
+        fields.append(self._field("awsPublicCertificate", "", "publiccertificate"))
+        fields.append(self._field("awsPrivateKey", "", "privatecertificate"))
+        if auth == "OAUTH2":
+            fields.append(self._build_oauth2_field(params["oauth2"]))
+        else:
+            # No verified non-OAUTH2 shape ships in issue #24, so this branch
+            # is unreachable from validate_config. Kept as defensive scaffolding.
+            fields.append(
+                '            <field id="oauthContext" type="oauth"/>\n'
+            )
+        fields.append(
+            '            <field id="privateCertificate" type="privatecertificate"/>\n'
+        )
+        fields.append(
+            '            <field id="publicCertificate" type="publiccertificate"/>\n'
+        )
+        fields.append(self._field("connectTimeout", connect_timeout, "integer"))
+        fields.append(self._field("readTimeout", read_timeout, "integer"))
+        fields.append(self._field("cookieScope", cookie_scope))
+        fields.append(self._field("enableConnectionPooling", pool_enabled, "boolean"))
+        fields.append(self._field("maxTotal", max_total, "integer"))
+        fields.append(self._field("idleTimeout", idle_timeout, "integer"))
+
+        encrypted_values_block = (
+            '    <bns:encryptedValues>\n'
+            '        <bns:encryptedValue path="//GenericConnectionConfig/field/OAuth2Config/credentials/@clientSecret" isSet="false"/>\n'
+            '    </bns:encryptedValues>\n'
+        )
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
+            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+            f'               type="connector-settings" subType="{REST_CLIENT_SUBTYPE}"\n'
+            f'               name="{safe_name}"\n'
+            f'               folderName="{safe_folder}">\n'
+            f'{encrypted_values_block}'
+            f'    <bns:description>{safe_desc}</bns:description>\n'
+            '    <bns:object>\n'
+            '        <GenericConnectionConfig xmlns="">\n'
+            f'{"".join(fields)}'
+            '        </GenericConnectionConfig>\n'
+            '    </bns:object>\n'
+            '</bns:Component>'
+        )
+
+
+class RestClientOperationBuilder:
+    """Builder for Boomi REST Client connector-action (issue #24, M2.4).
+
+    Issue #24 ships GET and PATCH only — these are the two verified live
+    exports (e268ea19, 64c4eafd). POST/PUT/DELETE/HEAD/OPTIONS/TRACE return
+    UNVERIFIED_REST_XML_VARIANT until a matching live export is created.
+
+    Important shape differences observed in the live exports:
+      * GET emits a <field id="followRedirects" type="string" value="NONE"/>
+        BEFORE the path field.
+      * PATCH does NOT emit a followRedirects field at all.
+      * Both emit queryParameters and requestHeaders as customproperties
+        containers with empty <customProperties/> children.
+      * Operation envelope: returnApplicationErrors="true" trackResponse="true".
+      * GenericOperationConfig: customOperationType=<METHOD>,
+        operationType="EXECUTE", requestProfileType="xml",
+        responseProfileType="xml" (lowercase — Boomi's XML form).
+    """
+
+    SUPPORTED_OPERATION_MODES = ("execute",)
+    SUPPORTED_METHODS = ("GET", "PATCH")
+    VERIFIED_PENDING_METHODS = ("POST", "PUT", "DELETE", "HEAD", "OPTIONS", "TRACE")
+    FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
+
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+            config, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+
+    @classmethod
+    def _validate_dict_param(
+        cls, value: Any, field: str
+    ) -> Optional[BuilderValidationError]:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return BuilderValidationError(
+                f"{field} must be an object/dict, got {type(value).__name__}",
+                error_code="REST_OPERATION_VALIDATION_FAILED",
+                field=field,
+                hint=f"Pass {field} as a JSON object.",
+            )
+        if value:  # non-empty
+            return BuilderValidationError(
+                f"Non-empty {field} are not yet supported — the live Boomi "
+                "XML shape for populated customProperties has not been "
+                "verified",
+                error_code="NEEDS_REST_EXAMPLE",
+                field=field,
+                hint=(
+                    f"Pass an empty object for {field} and add the entries "
+                    "after a live Boomi export is available to lock the "
+                    "customProperty XML shape."
+                ),
+            )
+        return None
+
+    @classmethod
+    def _validate_profile_ref(
+        cls, value: Any, field: str
+    ) -> Optional[BuilderValidationError]:
+        if not isinstance(value, str):
+            return None
+        if value.startswith("$ref:") and not value[5:]:
+            return BuilderValidationError(
+                f"{field} $ref token is empty (expected '$ref:KEY')",
+                error_code="REST_PROFILE_REF_UNRESOLVED",
+                field=field,
+                hint=(
+                    "Use '$ref:<profile key>' to reference a profile "
+                    "component declared earlier in the same integration spec."
+                ),
+            )
+        return None
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        # 1) Plaintext secret-shaped keys.
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        # 2) operation_mode must be 'execute'.
+        operation_mode = (config.get("operation_mode") or "").lower() if isinstance(config.get("operation_mode"), str) else ""
+        if operation_mode not in cls.SUPPORTED_OPERATION_MODES:
+            supported = ", ".join(cls.SUPPORTED_OPERATION_MODES)
+            return BuilderValidationError(
+                f"operation_mode must be one of: {supported}",
+                error_code="UNSUPPORTED_REST_OPERATION_MODE",
+                field="operation_mode",
+                hint=(
+                    f"Use operation_mode='{cls.SUPPORTED_OPERATION_MODES[0]}'. "
+                    "The verb (GET/PATCH) goes in the 'method' field; Boomi's "
+                    "REST Client uses operationType=EXECUTE for all calls."
+                ),
+            )
+
+        # 3) component_name required.
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required",
+                error_code="REST_OPERATION_VALIDATION_FAILED",
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        # 4) connection_ref_key required (cross-step depends_on check lives in
+        # integration_builder._check_rest_operation_dependencies).
+        connection_ref_key = config.get("connection_ref_key")
+        if not connection_ref_key or not str(connection_ref_key).strip():
+            return BuilderValidationError(
+                "connection_ref_key is required for REST operations",
+                error_code="REST_CONNECTION_REF_REQUIRED",
+                field="connection_ref_key",
+                hint=(
+                    "Declare the REST connector-settings key the operation "
+                    "will bind to at process time, and add the same key to "
+                    "depends_on so plan ordering is correct."
+                ),
+            )
+
+        # 5) method gating.
+        raw_method = config.get("method")
+        method = (raw_method or "").upper() if isinstance(raw_method, str) else ""
+        if method in cls.SUPPORTED_METHODS:
+            pass
+        elif method in cls.VERIFIED_PENDING_METHODS:
+            supported = ", ".join(cls.SUPPORTED_METHODS)
+            return BuilderValidationError(
+                f"method {method!r} is recognized but not yet buildable — "
+                "no verified Boomi live export exists for this method",
+                error_code="UNVERIFIED_REST_XML_VARIANT",
+                field="method",
+                hint=(
+                    f"Supported methods in issue #24: {supported}. To add "
+                    f"{method} support, create a minimal REST Client {method} "
+                    "operation in Boomi, then a follow-up issue locks the "
+                    "shape against that export."
+                ),
+            )
+        else:
+            supported = ", ".join(cls.SUPPORTED_METHODS)
+            return BuilderValidationError(
+                f"Unknown method {raw_method!r}",
+                error_code="UNSUPPORTED_REST_METHOD",
+                field="method",
+                hint=f"Supported methods: {supported}.",
+            )
+
+        # 6) path required.
+        path = config.get("path")
+        if path is None or not str(path).strip():
+            return BuilderValidationError(
+                "path is required for REST operations",
+                error_code="REST_PATH_REQUIRED",
+                field="path",
+                hint=(
+                    "Provide the endpoint path appended onto the connection's "
+                    "base_url (e.g. '/v1/items/{id}'). REST Client preserves "
+                    "the path verbatim in emitted XML."
+                ),
+            )
+
+        # 7) query_parameters / request_headers — empty only until verified.
+        for q_field in ("query_parameters", "request_headers"):
+            err = cls._validate_dict_param(config.get(q_field), q_field)
+            if err is not None:
+                return err
+
+        # 8) Profile $ref tokens — empty token rejected.
+        for ref_field in ("request_profile_id", "response_profile_id"):
+            err = cls._validate_profile_ref(config.get(ref_field), ref_field)
+            if err is not None:
+                return err
+
+        return None
+
+    def build(self, **params) -> str:
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        component_name = params["component_name"]
+        method = params["method"].upper()
+        path = str(params["path"])
+        folder_name = params.get("folder_name", "Home")
+        description = params.get("description", "")
+
+        request_profile_type = params.get("request_profile_type", "xml")
+        response_profile_type = params.get("response_profile_type", "xml")
+        return_application_errors = bool(params.get("return_application_errors", True))
+        track_response = bool(params.get("track_response", True))
+
+        safe_name = _escape_xml(component_name)
+        safe_folder = _escape_xml(folder_name)
+        safe_desc = _escape_xml(description)
+        safe_path = _escape_xml(path)
+        safe_req_profile_type = _escape_xml(str(request_profile_type))
+        safe_resp_profile_type = _escape_xml(str(response_profile_type))
+
+        op_envelope_attrs = (
+            f'returnApplicationErrors="{_format_xml_value(return_application_errors)}"'
+            f' trackResponse="{_format_xml_value(track_response)}"'
+        )
+
+        # Optional profile attributes on GenericOperationConfig — only emitted
+        # when supplied. $ref tokens are preserved verbatim; apply-time
+        # resolution happens in integration_builder._resolve_dependency_tokens.
+        request_profile_attr = ""
+        if params.get("request_profile_id"):
+            request_profile_attr = (
+                f' requestProfile="{_escape_xml(str(params["request_profile_id"]))}"'
+            )
+        response_profile_attr = ""
+        if params.get("response_profile_id"):
+            response_profile_attr = (
+                f' responseProfile="{_escape_xml(str(params["response_profile_id"]))}"'
+            )
+
+        # followRedirects field — GET emits by default (value "NONE" per the
+        # live shape); PATCH (and other methods) only emit when the caller
+        # supplies follow_redirects explicitly.
+        follow_redirects_field = ""
+        follow_redirects = params.get("follow_redirects")
+        if follow_redirects is None and method == "GET":
+            follow_redirects = "NONE"
+        if follow_redirects is not None:
+            follow_redirects_field = (
+                f'                    <field id="followRedirects" type="string"'
+                f' value="{_escape_xml(str(follow_redirects))}"/>\n'
+            )
+
+        body_inner = (
+            f'                <GenericOperationConfig customOperationType="{method}"'
+            f' operationType="EXECUTE"'
+            f'{request_profile_attr}'
+            f' requestProfileType="{safe_req_profile_type}"'
+            f'{response_profile_attr}'
+            f' responseProfileType="{safe_resp_profile_type}">\n'
+            f'{follow_redirects_field}'
+            f'                    <field id="path" type="string" value="{safe_path}"/>\n'
+            '                    <field id="queryParameters" type="customproperties"><customProperties/></field>\n'
+            '                    <field id="requestHeaders" type="customproperties"><customProperties/></field>\n'
+            '                    <Options/>\n'
+            '                </GenericOperationConfig>\n'
+        )
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
+            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+            f'               type="connector-action" subType="{REST_CLIENT_SUBTYPE}"\n'
+            f'               name="{safe_name}"\n'
+            f'               folderName="{safe_folder}">\n'
+            '    <bns:encryptedValues/>\n'
+            f'    <bns:description>{safe_desc}</bns:description>\n'
+            '    <bns:object>\n'
+            f'        <Operation xmlns="" {op_envelope_attrs}>\n'
+            '            <Archiving directory="" enabled="false"/>\n'
+            '            <Configuration>\n'
+            f'{body_inner}'
+            '            </Configuration>\n'
+            '            <Tracking><TrackedFields/></Tracking>\n'
+            '            <Caching/>\n'
+            '        </Operation>\n'
+            '    </bns:object>\n'
+            '</bns:Component>'
+        )
+
+
+# ============================================================================
 # Registry
 # ============================================================================
 
 CONNECTOR_BUILDERS: Dict[str, type] = {
     "http": HttpConnectorBuilder,
     "database": DatabaseConnectorBuilder,
+    "rest": RestClientConnectionBuilder,
+    "rest_client": RestClientConnectionBuilder,
+    REST_CLIENT_SUBTYPE.lower(): RestClientConnectionBuilder,
 }
 
 
@@ -1094,6 +1730,9 @@ def get_connector_builder(connector_type: str):
 # connector-action have different XML shapes and required-field sets.
 CONNECTOR_ACTION_BUILDERS: Dict[tuple, type] = {
     ("database", "get"): DatabaseGetOperationBuilder,
+    ("rest", "execute"): RestClientOperationBuilder,
+    ("rest_client", "execute"): RestClientOperationBuilder,
+    (REST_CLIENT_SUBTYPE.lower(), "execute"): RestClientOperationBuilder,
 }
 
 
