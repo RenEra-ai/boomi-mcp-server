@@ -177,6 +177,79 @@ def test_create_missing_component_name_hint_does_not_show_http_url():
     assert '"auth_type"' not in hint
 
 
+# ----------------------------------------------------------------------------
+# Legacy HTTP Client connector fully removed (issue #24 follow-up).
+# ----------------------------------------------------------------------------
+
+def test_legacy_http_connector_type_returns_no_builder_error():
+    """Pre-#24 connector_type='http' built XML via HttpConnectorBuilder.
+    After the follow-up removal, no builder exists for 'http' — callers
+    must hit the structured 'no builder available' envelope and be
+    pointed at REST (the M2 target) plus the raw-XML escape hatch."""
+    client = MagicMock()
+    client.connector.get_connector.return_value = MagicMock()
+    result = manage_connector_action(
+        client,
+        "test",
+        "create",
+        config={
+            "connector_type": "http",
+            "component_name": "Legacy HTTP",
+            "url": "https://api.example.com",
+        },
+    )
+    assert result["_success"] is False
+    error = result.get("error", "")
+    assert "no builder" in error.lower() or "no builder" in result.get("hint", "").lower()
+    # Caller should see 'rest' and 'database' as the supported types.
+    haystack = (error + " " + result.get("hint", "")).lower()
+    assert "rest" in haystack
+    assert "database" in haystack
+    # And the raw-XML escape hatch is the legacy-HTTP path forward.
+    assert "config.xml" in haystack or "raw xml" in haystack or "config={\"xml\"" in haystack
+
+
+def test_update_no_longer_smart_merges_http_settings():
+    """The HTTP smart-merge update path (find_http_settings +
+    update_http_settings_fields + HTTP_UPDATE_MAP) was removed alongside
+    the HttpConnectorBuilder. A config={"url": "..."} update on an HTTP
+    component now falls through to 'No updatable fields' and the error
+    hint must NOT advertise url/auth_type/username/trust_all_certs as
+    updatable."""
+    from unittest.mock import patch as _patch
+    from boomi_mcp.categories.components.connectors import update_connector
+
+    http_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'type="connector-settings" subType="http" name="Legacy HTTP" '
+        'folderName="Home">'
+        '<bns:description></bns:description>'
+        '<bns:object>'
+        '<HttpSettings xmlns="" authenticationType="NONE" url="https://old/">'
+        '<AuthSettings user=""/>'
+        '<SSLOptions clientauth="false" trustServerCert="false"/>'
+        '</HttpSettings>'
+        '</bns:object>'
+        '</bns:Component>'
+    )
+    with _patch(
+        "boomi_mcp.categories.components.connectors.component_get_xml",
+        return_value={"name": "Legacy HTTP", "xml": http_xml},
+    ):
+        result = update_connector(MagicMock(), "test", "abc-123", {"url": "https://new"})
+
+    assert result["_success"] is False
+    assert "No updatable fields" in result.get("error", "")
+    hint = result.get("hint", "")
+    # The pre-removal hint suggested HTTP-specific fields. Those are gone.
+    for stale_field in ("url", "auth_type", "username", "trust_all_certs", "client_ssl_alias"):
+        assert stale_field not in hint, (
+            f"Update no-changes hint must not advertise the removed HTTP "
+            f"smart-merge field {stale_field!r}."
+        )
+
+
 def test_update_missing_config_hint_does_not_show_http_url():
     """The update-missing-config hint must be connector-type-agnostic. The
     pre-fix hint suggested {"url": "https://new-url.com"}, which is the

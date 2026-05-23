@@ -485,24 +485,6 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert "validation_error" not in steps_by_key["good_proc"]
 
     @patch(_PATCH_TARGET)
-    def test_http_connector_settings_skips_database_preflight(self, mock_pag):
-        mock_pag.return_value = []
-        http_comp = IntegrationComponentSpec(
-            key="http_conn",
-            type="connector-settings",
-            action="create",
-            name="HTTP Conn",
-            config={"connector_type": "http", "component_name": "HTTP Conn",
-                    "url": "https://api.example.com"},
-        )
-        config = _build_config([http_comp])
-        plan = _build_plan(MagicMock(), config)
-        step = plan["steps"][0]
-        assert step["planned_action"] == "create"
-        assert step["route"] == "connector_builder_or_xml"
-        assert "validation_error" not in step
-
-    @patch(_PATCH_TARGET)
     def test_reuse_path_skips_database_preflight(self, mock_pag):
         """Reuse never invokes the builder — incomplete config must not block reuse."""
         mock_pag.return_value = [_meta("existing-db-id", "Example SQL Server",
