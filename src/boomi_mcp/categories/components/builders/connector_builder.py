@@ -1002,6 +1002,14 @@ class RestClientConnectionBuilder:
         "client_credentials": "client_credentials",
     }
     _CERT_REF_FIELDS = ("private_certificate_ref", "public_certificate_ref")
+    # Boomi certificate component ids are UUIDs (canonical 8-4-4-4-12 hex
+    # form, case-insensitive). Codex round-3 P2 #2: enforce this shape so
+    # a caller accidentally pasting PEM/SSH-key content can't sneak the
+    # raw key material into emitted XML.
+    _BOOMI_COMPONENT_ID_RE = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
     FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
 
     @classmethod
@@ -1314,6 +1322,13 @@ class RestClientConnectionBuilder:
         # (per the live REST Certificate export, which carries auth=NONE plus
         # populated privateCertificate/publicCertificate refs — but cert refs
         # may co-occur with any auth selection).
+        #
+        # Codex round-3 P2 #2: a cert ref must be a Boomi component-id GUID,
+        # not raw PEM/key material. The previous validator only checked
+        # `isinstance(value, str)`, so PEM/SSH-key content would pass and
+        # be emitted verbatim as the field value — leaking key material
+        # into the XML and the plan output. Reject anything that isn't
+        # a UUID-shaped string.
         for cert_field in cls._CERT_REF_FIELDS:
             if cert_field in config and config[cert_field] not in (None, ""):
                 value = config[cert_field]
@@ -1328,6 +1343,22 @@ class RestClientConnectionBuilder:
                             "string) for the X509 client cert. Cert refs work "
                             "with any auth mode — they are an independent "
                             "client-cert option, not tied to auth=NONE."
+                        ),
+                    )
+                if not cls._BOOMI_COMPONENT_ID_RE.match(value.strip()):
+                    return BuilderValidationError(
+                        f"{cert_field} must be a Boomi certificate component "
+                        "id (canonical UUID 8-4-4-4-12 hex form). The supplied "
+                        f"value is not GUID-shaped (length={len(value)}).",
+                        error_code="REST_CONNECTOR_VALIDATION_FAILED",
+                        field=cert_field,
+                        hint=(
+                            "Pass the GUID-shaped Boomi component id (e.g. "
+                            "'21f598a6-1d90-4578-a35a-d0350c50b747') — NOT "
+                            "PEM content, NOT SSH key material, NOT a "
+                            "credential:// reference. Create the certificate "
+                            "component in Boomi UI first, then reference its "
+                            "component id here."
                         ),
                     )
 
@@ -1669,27 +1700,46 @@ class RestClientOperationBuilder:
     def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
         DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
 
-    # Secret-shaped key pattern for customProperties (Phase 6). Matches the
-    # well-known header/query-param key shapes that callers must NOT put
-    # plaintext secrets behind. Case-insensitive whole-string match.
+    # Secret-shaped key pattern for customProperties (Phase 6, extended in
+    # codex round 3). Matches the well-known header/query-param key shapes
+    # that callers must NOT put plaintext secrets behind. Case-insensitive
+    # whole-string match.
+    #
+    # Round-3 additions (Proxy-Authorization was the specific call-out;
+    # the others are the broader credential-bearing-header family that
+    # belongs alongside it):
+    #   - (proxy[-_]?)?authorization      catches Authorization AND
+    #                                     Proxy-Authorization
+    #   - x[-_]?(api|auth|csrf|session)[-_]?(key|token|secret)?
+    #                                     widened X-* prefix coverage
+    #                                     (X-CSRF-Token, X-Session-Token,
+    #                                      X-Auth-Password, X-API-*)
+    #   - (set[-_]?)?cookie               session tokens in Cookie /
+    #                                     Set-Cookie headers
+    #   - www[-_]?authenticate            server challenge header
+    #   - passwd                          common short-form
     _SECRET_PROPERTY_KEY_RE = re.compile(
         r"^("
-        r"authorization"
-        r"|x[-_]?(api|auth)[-_]?(key|token)?"
+        r"(proxy[-_]?)?authorization"
+        r"|x[-_]?(api|auth|csrf|session)[-_]?(key|token|secret|password|user)?"
         r"|api[-_]?(key|token)"
         r"|bearer"
         r"|token"
         r"|password"
+        r"|passwd"
         r"|secret"
         r"|credential(s)?"
         r"|client[-_]?secret"
+        r"|(set[-_]?)?cookie"
+        r"|www[-_]?authenticate"
         r")$",
         re.IGNORECASE,
     )
 
-    # Secret-shaped value patterns (Phase 6). Conservative — only fires for
-    # clearly-secret-looking values to avoid false-positives on normal URL
-    # query/header values like "application/json" or "en-US".
+    # Secret-shaped value patterns (Phase 6, extended in codex round 3).
+    # Conservative — only fires for clearly-secret-looking values to avoid
+    # false-positives on normal URL query/header values like
+    # "application/json" or "en-US".
     _SECRET_PROPERTY_VALUE_PATTERNS = (
         # Boomi explicit encrypted-marker literal prefix.
         re.compile(r"^\[encrypted\]", re.IGNORECASE),
@@ -1701,6 +1751,10 @@ class RestClientOperationBuilder:
         # markers; legitimate Content-Type / User-Agent / etc are far
         # shorter.
         re.compile(r"^[A-Za-z0-9+/=]{40,}$"),
+        # HTTP authorization scheme prefixes — RFC 7235 / 6750 / 7617 /
+        # 7616 / 4559. Catches credential payloads even when the KEY isn't
+        # named Authorization (e.g. `X-Custom-Header: Basic dXNlcjpwYXNz`).
+        re.compile(r"^(Bearer|Basic|Digest|Negotiate|NTLM)\s+\S", re.IGNORECASE),
     )
 
     @classmethod
