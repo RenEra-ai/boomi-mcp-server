@@ -2344,6 +2344,46 @@ class TestBuildPlanRestPreflight:
         )["config"]
         assert echoed["query_parameters"] == "[REDACTED]"
 
+    @patch(_PATCH_TARGET)
+    def test_oauth2_authorization_parameters_redacted_on_validation_error(self, mock_pag):
+        """Codex round-3 P1: a non-empty `oauth2.authorization_parameters`
+        triggers UNSUPPORTED_REST_OAUTH2_PARAMETERS, but before the fix
+        the rejected dict echoed into `integration_spec` verbatim because
+        the path wasn't in `_REST_SENSITIVE_FIELD_PATHS`. Add the path so
+        caller-supplied content (which may contain arbitrary user values)
+        is scrubbed on the rejection path."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["oauth2"]["authorization_parameters"] = {
+            "prompt": "LEAK_CODEX_R3_AUTH_PARAM_CANARY",
+        }
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_REST_OAUTH2_PARAMETERS"
+        assert step["validation_error"]["field"] == "oauth2.authorization_parameters"
+        assert "LEAK_CODEX_R3_AUTH_PARAM_CANARY" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["oauth2"]["authorization_parameters"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_oauth2_access_token_parameters_redacted_on_validation_error(self, mock_pag):
+        """Codex round-3 P1 (companion): same leak path for
+        `oauth2.access_token_parameters`."""
+        mock_pag.return_value = []
+        comp = _rest_conn_comp()
+        comp.config["oauth2"]["access_token_parameters"] = [
+            {"key": "audience", "value": "LEAK_CODEX_R3_TOKEN_PARAM_CANARY"},
+        ]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_rest_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_REST_OAUTH2_PARAMETERS"
+        assert step["validation_error"]["field"] == "oauth2.access_token_parameters"
+        assert "LEAK_CODEX_R3_TOKEN_PARAM_CANARY" not in repr(plan)
+        echoed = plan["integration_spec"]["components"][0]["config"]
+        assert echoed["oauth2"]["access_token_parameters"] == "[REDACTED]"
+
 
 class TestApplyRestPreflight:
     """Issue #24 — error_rest_validation steps must block apply."""
