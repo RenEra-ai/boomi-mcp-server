@@ -1360,3 +1360,67 @@ def test_port_at_tcp_range_boundaries_builds(port_value, expected_xml):
     root = ET.fromstring(xml)
     dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
     assert dcs.attrib["port"] == expected_xml
+
+
+# --- Port string edge cases (codex r4) ---------------------------------------
+# str.isdigit() returns True for non-ASCII digit-category chars (superscripts,
+# fullwidth digits, Arabic-Indic numerals, etc.). Some of those int() parses
+# (fullwidth → ok) and some it rejects (superscript → ValueError) — either
+# way, build() would emit the original caller string in the XML attribute,
+# so the validator must restrict to ASCII 0-9 only. Plus: Python 3.11+
+# caps int-string parsing at PYTHONINTMAXSTRDIGITS (default 4300), so a
+# very long digit string would raise an unstructured ValueError from int()
+# instead of returning a BuilderValidationError. Both gaps closed in r4.
+
+
+@pytest.mark.parametrize("non_ascii_digit", [
+    "²",       # SUPERSCRIPT TWO — isdigit()=True, int() raises ValueError
+    "２",       # FULLWIDTH DIGIT TWO — isdigit()=True, int() returns 2
+    "٣",       # ARABIC-INDIC DIGIT THREE — isdigit()=True, int() returns 3
+    "1４33",   # mixed ASCII + fullwidth
+    "14３3",
+])
+def test_port_with_non_ascii_digit_chars_fails_validation(non_ascii_digit):
+    """Even when str.isdigit() returns True, non-ASCII digit chars must
+    fail validation. Otherwise the validator might pass and build() would
+    emit the original glyph in the XML attribute (validator/emission
+    mismatch)."""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(port=non_ascii_digit))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "port"
+    assert "ascii" in (err.hint or "").lower()
+    # Critically, the offending glyph must never reach the XML.
+    assert non_ascii_digit not in str(err)
+
+
+def test_port_very_long_digit_string_fails_with_structured_error():
+    """Python 3.11+ caps int-string parsing at PYTHONINTMAXSTRDIGITS
+    (default 4300). isdigit() passes for any length, but int() raises
+    ValueError. validate_config must wrap that as DATABASE_CONNECTOR_VALIDATION_FAILED
+    to preserve the structured-error contract — not let the raw ValueError
+    propagate."""
+    long_digit_port = "9" * 4301
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(port=long_digit_port))
+    err = excinfo.value
+    # The error MUST be the structured BuilderValidationError type, not a
+    # bare ValueError. BuilderValidationError subclasses ValueError, so
+    # explicitly assert the subclass to lock in the contract.
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "port"
+
+
+def test_port_validator_never_raises_bare_value_error():
+    """Defensive contract test: even on pathological inputs that crash
+    int(), validate_config returns a BuilderValidationError rather than
+    letting the underlying exception propagate unstructured."""
+    for pathological in ("9" * 4301, "9" * 10000):
+        err = DatabaseConnectorBuilder.validate_config(
+            _minimal_config(port=pathological),
+        )
+        assert isinstance(err, BuilderValidationError)
+        assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+        assert err.field == "port"
