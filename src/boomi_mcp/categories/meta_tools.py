@@ -3119,7 +3119,133 @@ def _get_trading_partner_template(operation=None, standard=None, protocol=None, 
     }
 
 
-def _get_process_template(operation=None, **_):
+_PROCESS_FLOW_PROTOCOLS = {
+    "database_to_api_sync": {
+        "resource_type": "process",
+        "operation": "create",
+        "protocol": "database_to_api_sync",
+        "tool": "build_integration (action='plan' | 'apply')",
+        "process_kind": "database_to_api_sync",
+        "description": (
+            "Structured M2.5 process-flow builder that wires a DB Get "
+            "source to a REST send target, with an optional passthrough, "
+            "Message, or map-reference transform. Routed via build_integration "
+            "when an IntegrationSpecV1 component of type='process' carries "
+            "config.process_kind='database_to_api_sync'."
+        ),
+        "required_fields": [
+            "source.connector_type",
+            "source.connection_id",
+            "source.operation_id",
+            "source.action_type",
+            "target.connector_type",
+            "target.connection_id",
+            "target.operation_id",
+            "target.action_type",
+        ],
+        "optional_fields": [
+            "folder_name",
+            "description",
+            "execution",
+            "execution.trigger",
+            "execution.run_metadata",
+            "transform",
+            "transform.mode",
+            "transform.message_text",
+            "transform.map_ref",
+            "reliability",
+            "reliability.retry_count",
+            "reliability.dlq",
+            "reliability.dlq.mode",
+            "reliability.on_failure",
+        ],
+        "supported_transform_modes": ["passthrough", "message", "map_ref"],
+        "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
+        "supported_connector_action_bindings": {
+            "database_source": {
+                "connector_type": "database",
+                "action_type": "Get",
+            },
+            "rest_target": {
+                "connector_type": "rest | rest_client | officialboomi-X3979C-rest-prod",
+                "action_type": "GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS | TRACE",
+            },
+        },
+        "structured_errors": [
+            {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
+            {"error_code": "PROCESS_KIND_XML_CONFLICT", "field": "config.xml"},
+            {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "depends_on"},
+            {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target"},
+            {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
+            {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.dlq.mode"},
+            {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode"},
+            {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
+            {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
+        ],
+        "notes": [
+            "retry_count > 0 and dlq.mode != 'disabled' return PROCESS_RETRY_UNVERIFIED "
+            "for now; Try/Catch wrapper lands in a follow-up issue after live "
+            "Try/Catch XML is captured.",
+            "Map components are referenced by id or $ref token only; map creation "
+            "is tracked by issue #26.",
+            "Schedule activation, deployment, and execution remain M3 scope.",
+        ],
+        "example_component_spec": {
+            "key": "main_process",
+            "type": "process",
+            "action": "create",
+            "name": "<<Integration Process Name>>",
+            "depends_on": [
+                "db_connection",
+                "db_query_operation",
+                "target_rest_connection",
+                "target_rest_operation",
+            ],
+            "config": {
+                "process_kind": "database_to_api_sync",
+                "folder_name": "<<Boomi folder path>>",
+                "description": "<<optional description>>",
+                "execution": {
+                    "trigger": {"mode": "manual"},
+                    "run_metadata": {"process_name_dpp": "DPP_PROCESS_NAME"},
+                },
+                "source": {
+                    "connector_type": "database",
+                    "connection_id": "$ref:db_connection",
+                    "operation_id": "$ref:db_query_operation",
+                    "action_type": "Get",
+                    "label": "<<DB extract label>>",
+                },
+                "transform": {"mode": "passthrough"},
+                "target": {
+                    "connector_type": "rest",
+                    "connection_id": "$ref:target_rest_connection",
+                    "operation_id": "$ref:target_rest_operation",
+                    "action_type": "POST",
+                    "label": "<<REST send label>>",
+                },
+                "reliability": {
+                    "retry_count": 0,
+                    "dlq": {"mode": "disabled"},
+                    "on_failure": "stop_process",
+                },
+            },
+        },
+    },
+}
+
+
+def _get_process_template(operation=None, protocol=None, **_):
+    if protocol:
+        tpl = _PROCESS_FLOW_PROTOCOLS.get(protocol)
+        if not tpl:
+            return {
+                "_success": False,
+                "error": f"Unknown process protocol: {protocol}",
+                "valid_protocols": list(_PROCESS_FLOW_PROTOCOLS.keys()),
+            }
+        return {"_success": True, **tpl}
+
     if not operation:
         return {"_success": True, **_PROCESS_OVERVIEW}
 

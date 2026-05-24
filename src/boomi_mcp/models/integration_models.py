@@ -15,7 +15,16 @@ class IntegrationComponentSpec(BaseModel):
     action: Literal["create", "update"] = Field(default="create")
     name: Optional[str] = Field(default=None, description="Component display name")
     component_id: Optional[str] = Field(default=None, description="Required for direct updates when not discoverable")
-    config: Dict[str, Any] = Field(default_factory=dict, description="Type-specific configuration payload")
+    config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Type-specific configuration payload. For type='process', set "
+            "config.process_kind to opt into a structured process-flow "
+            "builder (e.g. 'database_to_api_sync' — issue #25). Process "
+            "components without process_kind fall through to the legacy "
+            "linear JSON-to-XML path in create_process."
+        ),
+    )
     depends_on: List[str] = Field(default_factory=list, description="Component keys this component depends on")
 
     @field_validator("depends_on")

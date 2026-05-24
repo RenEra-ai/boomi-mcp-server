@@ -2562,3 +2562,360 @@ class TestApplyRestPreflight:
         )
         resolved_config = send_call.kwargs["config"]
         assert resolved_config["request_profile_id"] == "prof-r001"
+
+
+# ---------------------------------------------------------------------------
+# Issue #25 — process-flow builder (M2.5)
+# ---------------------------------------------------------------------------
+
+def _process_flow_config(**overrides):
+    """A minimal-valid database_to_api_sync process-flow config."""
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "database",
+            "connection_id": "$ref:db_connection",
+            "operation_id": "$ref:db_query_operation",
+            "action_type": "Get",
+        },
+        "transform": {"mode": "passthrough"},
+        "target": {
+            "connector_type": "rest",
+            "connection_id": "$ref:target_rest_connection",
+            "operation_id": "$ref:target_rest_operation",
+            "action_type": "POST",
+        },
+        "reliability": {"retry_count": 0, "dlq": {"mode": "disabled"}},
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _process_flow_comp(
+    key="main_process",
+    name="Main Process",
+    action="create",
+    depends_on=(
+        "db_connection",
+        "db_query_operation",
+        "target_rest_connection",
+        "target_rest_operation",
+    ),
+    **config_overrides,
+):
+    return IntegrationComponentSpec(
+        key=key,
+        type="process",
+        action=action,
+        name=name,
+        config=_process_flow_config(**config_overrides),
+        depends_on=list(depends_on),
+    )
+
+
+def _stub_dep_comp(key):
+    """Cheap profile.json stub to satisfy depends_on without dragging in
+    real builders. Lives at the 'component' top-level type so it routes
+    to the generic component path."""
+    return IntegrationComponentSpec(
+        key=key,
+        type="component",
+        action="create",
+        name=key.replace("_", " ").title(),
+        config={"name": key, "type": "profile.json"},
+    )
+
+
+class TestBuildPlanProcessFlow:
+    """Plan-time validation for structured process-flow components."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_process_flow_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _process_flow_comp(),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        assert plan["_success"] is True
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "create"
+        assert process_step["route"] == "process_flow_xml"
+        assert "validation_error" not in process_step
+
+    @patch(_PATCH_TARGET)
+    def test_topo_order_places_process_after_deps(self, mock_pag):
+        mock_pag.return_value = []
+        # Put the process FIRST in the spec to confirm topo sort still
+        # moves it last in execution_order.
+        components = [
+            _process_flow_comp(),
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        order = plan["execution_order"]
+        assert order.index("main_process") == len(order) - 1
+        for dep in ("db_connection", "db_query_operation",
+                    "target_rest_connection", "target_rest_operation"):
+            assert order.index(dep) < order.index("main_process")
+
+    @patch(_PATCH_TARGET)
+    def test_unknown_process_kind_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _process_flow_comp(process_kind="not_a_real_archetype"),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_KIND_UNSUPPORTED"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_ref_in_depends_on_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        # depends_on omits target_rest_operation, but config still
+        # carries $ref:target_rest_operation.
+        bad_process = _process_flow_comp(
+            depends_on=("db_connection", "db_query_operation", "target_rest_connection"),
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            bad_process,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "MISSING_PROCESS_DEPENDENCY"
+
+    @patch(_PATCH_TARGET)
+    def test_retry_count_positive_errors_with_unverified(self, mock_pag):
+        mock_pag.return_value = []
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _process_flow_comp(reliability={"retry_count": 1}),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_RETRY_UNVERIFIED"
+
+    @patch(_PATCH_TARGET)
+    def test_dlq_non_disabled_errors_with_unverified(self, mock_pag):
+        mock_pag.return_value = []
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _process_flow_comp(
+                reliability={"retry_count": 0, "dlq": {"mode": "document_cache_ref"}},
+            ),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_RETRY_UNVERIFIED"
+
+    @patch(_PATCH_TARGET)
+    def test_plaintext_secret_blocks_process_validation(self, mock_pag):
+        import json as _json
+
+        mock_pag.return_value = []
+        bad = _process_flow_comp()
+        bad.config["password"] = "hunter2"
+        # Add a nested secret too — the redactor must descend into
+        # arbitrary dict/list nesting, not just top-level keys.
+        bad.config["source"]["api_key"] = "sk-leak-me"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        # The actual plaintext values must NOT survive into the plan
+        # response. Redaction happens via comp.config mutation, which
+        # propagates through spec.model_dump(). Codex review C1.
+        serialized = _json.dumps(plan)
+        assert "hunter2" not in serialized
+        assert "sk-leak-me" not in serialized
+        assert "[REDACTED]" in serialized
+
+    @patch(_PATCH_TARGET)
+    def test_legacy_process_without_kind_uses_legacy_route(self, mock_pag):
+        mock_pag.return_value = []
+        legacy_process = IntegrationComponentSpec(
+            key="legacy_proc",
+            type="process",
+            action="create",
+            name="Legacy Process",
+            config={
+                "name": "Legacy Process",
+                "shapes": [
+                    {"type": "start", "name": "start"},
+                    {"type": "stop", "name": "stop"},
+                ],
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([legacy_process]))
+        legacy_step = next(s for s in plan["steps"] if s["key"] == "legacy_proc")
+        assert legacy_step["route"] == "process_json_to_xml"
+        # And no spurious process-validation error attaches.
+        assert "validation_error" not in legacy_step
+
+    @patch(_PATCH_TARGET)
+    def test_update_with_invalid_config_errors_at_plan(self, mock_pag):
+        """Codex review C2: process update re-invokes the builder via
+        update_component({"xml": ...}). Validation must run for update too,
+        not just create/create_clone, or malformed update configs slip
+        past plan-time and explode at apply."""
+        mock_pag.return_value = []
+        bad_update = _process_flow_comp(
+            action="update",
+        )
+        bad_update.component_id = "00000000-0000-0000-0000-000000000099"
+        # Knock out a required binding so validate_config rejects it.
+        del bad_update.config["source"]["operation_id"]
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad_update,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_CONNECTOR_BINDING_INVALID"
+        assert process_step["validation_error"]["field"] == "source.operation_id"
+
+    @patch(_PATCH_TARGET)
+    def test_non_string_process_kind_does_not_crash_route_selection(self, mock_pag):
+        """QA bug #128: route selection in _build_plan normalizes process_kind
+        BEFORE the builder validator runs. Non-string values used to raise
+        AttributeError on .strip() at that site. Must now coerce via str()
+        and surface a structured PROCESS_KIND_UNSUPPORTED instead."""
+        mock_pag.return_value = []
+        bad = _process_flow_comp()
+        bad.config["process_kind"] = 123  # non-string
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_KIND_UNSUPPORTED"
+
+    @patch(_PATCH_TARGET)
+    def test_process_kind_plus_raw_xml_errors_at_plan(self, mock_pag):
+        """Codex review C4: declaring both process_kind and a raw config.xml
+        override used to silently drop the xml. Now rejected at plan-time
+        with PROCESS_KIND_XML_CONFLICT so the caller picks one path."""
+        mock_pag.return_value = []
+        conflicted = _process_flow_comp()
+        conflicted.config["xml"] = "<bns:Component/>"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            conflicted,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_KIND_XML_CONFLICT"
+        assert process_step["validation_error"]["field"] == "config.xml"
+
+
+class TestApplyPlanProcessFlow:
+    """Apply-time behavior for structured process-flow components."""
+
+    @patch(_PATCH_TARGET)
+    def test_apply_aborts_when_process_flow_validation_fails(self, mock_pag):
+        mock_pag.return_value = []
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _process_flow_comp(process_kind="not_a_real_archetype"),
+        ]
+        config = _build_config(components)
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        assert "Plan contains unresolvable steps" in result["error"]
+        # The unresolvable_steps envelope must surface the structured error.
+        unresolvable_codes = {
+            s["validation_error"]["error_code"]
+            for s in result["unresolvable_steps"]
+            if s.get("validation_error")
+        }
+        assert "PROCESS_KIND_UNSUPPORTED" in unresolvable_codes
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_resolves_refs_before_process_flow_build(self, mock_pag, mock_exec):
+        mock_pag.return_value = []
+        component_ids = {
+            "db_connection": "db-conn-uuid",
+            "db_query_operation": "db-op-uuid",
+            "target_rest_connection": "rest-conn-uuid",
+            "target_rest_operation": "rest-op-uuid",
+            "main_process": "proc-uuid",
+        }
+
+        def _mock_exec(*, comp, **_):
+            return {
+                "_success": True,
+                "component_id": component_ids[comp.key],
+                "type": comp.type,
+            }
+
+        mock_exec.side_effect = _mock_exec
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _process_flow_comp(),
+        ]
+        config = _build_config(components)
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        process_call = next(
+            call for call in mock_exec.call_args_list
+            if call.kwargs["comp"].key == "main_process"
+        )
+        resolved_config = process_call.kwargs["config"]
+        # Every $ref token must be substituted with the real component id
+        # by _resolve_dependency_tokens before _execute_component sees it.
+        assert resolved_config["source"]["connection_id"] == "db-conn-uuid"
+        assert resolved_config["source"]["operation_id"] == "db-op-uuid"
+        assert resolved_config["target"]["connection_id"] == "rest-conn-uuid"
+        assert resolved_config["target"]["operation_id"] == "rest-op-uuid"
