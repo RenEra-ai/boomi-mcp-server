@@ -2850,6 +2850,36 @@ class TestBuildPlanProcessFlow:
         assert process_step["validation_error"]["error_code"] == "PROCESS_KIND_XML_CONFLICT"
         assert process_step["validation_error"]["field"] == "config.xml"
 
+    @patch(_PATCH_TARGET)
+    def test_process_kind_xml_secret_combo_redacts_secret(self, mock_pag):
+        """Codex review r2 Q3: when process_kind + xml + secret are all set,
+        the xml-conflict check used to short-circuit before the secret scan,
+        leaving the plaintext value in raw_config (== comp.config) so it
+        echoed through spec.model_dump(). Scan must run first and redact."""
+        import json as _json
+
+        mock_pag.return_value = []
+        triple_threat = _process_flow_comp()
+        triple_threat.config["xml"] = "<bns:Component/>"
+        triple_threat.config["password"] = "hunter2"
+        triple_threat.config["source"]["api_key"] = "sk-also-leaks"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            triple_threat,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        # Secret scan runs first → PLAINTEXT_SECRET_REJECTED wins.
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        serialized = _json.dumps(plan)
+        assert "hunter2" not in serialized
+        assert "sk-also-leaks" not in serialized
+        assert "[REDACTED]" in serialized
+
 
 class TestApplyPlanProcessFlow:
     """Apply-time behavior for structured process-flow components."""

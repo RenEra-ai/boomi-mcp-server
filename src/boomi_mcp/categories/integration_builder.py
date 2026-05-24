@@ -1030,12 +1030,19 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             and db_err is None
             and rest_err is None
         ):
+            # Run the secret scan unconditionally. The xml-conflict check
+            # below short-circuits early, so without scanning first a
+            # process config like {process_kind, xml, password} would
+            # surface PROCESS_KIND_XML_CONFLICT while leaving the
+            # plaintext password in raw_config (== comp.config), which
+            # then echoes through spec.model_dump(). Codex review r2 Q3.
+            process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
             xml_override = bool(raw_config.get("xml"))
             # Codex review C4: process_kind + raw xml is ambiguous —
             # _execute_component cannot honor both, and falling through to
             # the legacy create_process path silently drops the user's XML.
             # Reject the conflict explicitly so callers must pick one.
-            if xml_override:
+            if process_flow_err is None and xml_override:
                 process_flow_err = BuilderValidationError(
                     "process_kind and config.xml are mutually exclusive.",
                     error_code="PROCESS_KIND_XML_CONFLICT",
@@ -1046,8 +1053,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         "to the legacy process_json_to_xml path."
                     ),
                 )
-            else:
-                process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
             # Codex review C2: process update also re-invokes the builder
             # (_execute_component → update_component({"xml": built_xml})),
             # unlike DB/REST whose update paths bypass the builder. So

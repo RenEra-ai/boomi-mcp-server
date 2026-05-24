@@ -226,6 +226,12 @@ class ProcessFlowBuilder:
         parse-back roundtrip guards against silent XML malformation
         (PROCESS_XML_VALIDATION_FAILED).
         """
+        # Coerce string-like metadata fields. validate_config does not
+        # type-check these, so a non-string description/folder_name/name
+        # would crash _escape_xml's .replace() with AttributeError at
+        # build time. str() coercion keeps build() total. Codex review
+        # r2 Q4.
+        name = str(name) if name is not None else ""
         if not name or not name.strip():
             raise BuilderValidationError(
                 "Process component name is required.",
@@ -240,7 +246,7 @@ class ProcessFlowBuilder:
         # str() coercion guards against non-string mode values reaching
         # build() in any code path that bypasses validate_config. Codex L1.
         transform_mode = str(transform.get("mode") or "passthrough").strip().lower()
-        description = config.get("description") or ""
+        description = str(config.get("description") or "")
 
         # Build shapes in deterministic flow order: start, source,
         # [transform], target, stop. transform is omitted entirely when
@@ -334,7 +340,7 @@ class ProcessFlowBuilder:
         )
 
         folder_attr = (
-            f' folderFullPath="{_escape_xml(folder_name)}"' if folder_name else ""
+            f' folderFullPath="{_escape_xml(str(folder_name))}"' if folder_name else ""
         )
         component_xml = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
