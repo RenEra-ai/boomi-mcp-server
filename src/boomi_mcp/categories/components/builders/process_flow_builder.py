@@ -84,49 +84,97 @@ class ProcessFlowBuilder:
     # Plan-time validation
     # ------------------------------------------------------------------
 
+    # Forbidden plaintext secret-shaped keys at any depth. A process
+    # component should never carry connector secrets — those live on the
+    # connector-settings component the process references via $ref.
+    # Matches the closed-list style used by DatabaseConnectorBuilder.
+    # `*_ref` fields (credential_ref, etc.) are NOT included: per the
+    # DB/REST builder contract those are URI references (e.g.
+    # credential://path/to/secret), not the secret itself.
+    FORBIDDEN_SECRET_FIELDS: Tuple[str, ...] = (
+        "password",
+        "passcode",
+        "secret",
+        "private_key",
+        "api_key",
+        "apikey",
+        "api-key",
+        "auth_token",
+        "access_token",
+        "client_secret",
+        "token",
+        "authorization",
+        "bearer",
+        "bearer_token",
+        "credentials",
+    )
+
     @classmethod
     def scan_forbidden_secret_fields(
-        cls, config: Dict[str, Any]
+        cls, config: Any, _path_prefix: str = ""
     ) -> Optional[BuilderValidationError]:
-        """Reject plaintext credential-shaped fields in process config.
+        """Detect plaintext secret-shaped keys at any depth.
 
-        A process component should never carry connector secrets — those
-        live on the connector-settings component the process references
-        via $ref. This is a defense-in-depth scan that mirrors the
-        existing database/REST builders' secret-scrub contract.
+        Restructured to match `DatabaseConnectorBuilder.scan_forbidden_secret_fields`:
+        at each dict level check every FORBIDDEN_SECRET_FIELDS key, then
+        recurse into dict children and list elements. Codex review r3 P1
+        — the prior substring-on-leaf approach missed `token`,
+        `authorization`, and `bearer_token`, and never inspected the
+        parent key, so nested shapes like `{"token": {"value": "..."}}`
+        would have leaked too.
         """
-        for path, value in _walk_scalars(config):
-            if isinstance(value, str) and _looks_like_secret_key(path[-1]):
-                return BuilderValidationError(
-                    f"Plaintext secret-shaped field {'.'.join(path)!r} is not "
-                    f"allowed in process config; reference connector secrets "
-                    f"via a connection_id / $ref:KEY token instead.",
-                    error_code="PLAINTEXT_SECRET_REJECTED",
-                    field=".".join(path),
-                    hint=(
-                        "Move credentials onto the connector-settings "
-                        "component and reference its connection_id from "
-                        "source/target."
-                    ),
+        if isinstance(config, dict):
+            for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
+                if forbidden in config:
+                    value = config[forbidden]
+                    if isinstance(value, str) and value:
+                        path = f"{_path_prefix}{forbidden}" if _path_prefix else forbidden
+                        return BuilderValidationError(
+                            f"Plaintext secret-shaped field {path!r} is not "
+                            f"allowed in process config; reference connector "
+                            f"secrets via a connection_id / $ref:KEY token "
+                            f"instead.",
+                            error_code="PLAINTEXT_SECRET_REJECTED",
+                            field=path,
+                            hint=(
+                                "Move credentials onto the connector-settings "
+                                "component and reference its connection_id "
+                                "from source/target."
+                            ),
+                        )
+            for key, value in config.items():
+                nested = cls.scan_forbidden_secret_fields(
+                    value, _path_prefix=f"{_path_prefix}{key}."
                 )
+                if nested is not None:
+                    return nested
+        elif isinstance(config, list):
+            for i, item in enumerate(config):
+                nested = cls.scan_forbidden_secret_fields(
+                    item, _path_prefix=f"{_path_prefix}[{i}]."
+                )
+                if nested is not None:
+                    return nested
+        # Scalars / None: no keys to scan.
         return None
 
     @classmethod
     def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
-        """Recursively replace any secret-keyed values with '[REDACTED]'.
+        """Recursively replace any FORBIDDEN_SECRET_FIELDS string values
+        with '[REDACTED]'.
 
-        Mirrors the DB/REST builder contract: integration_builder's plan
-        path mutates raw_config (== comp.config) so that the secret value
-        does not echo back through spec.model_dump(). Walks the same
-        dict/list tree that scan_forbidden_secret_fields walks via
-        _walk_scalars, so coverage stays in lockstep.
+        Mirrors scan_forbidden_secret_fields' dict-aware traversal — at
+        each dict level check forbidden keys, then descend into every
+        child. integration_builder._build_plan calls this on
+        PLAINTEXT_SECRET_REJECTED so the value does not echo through
+        spec.model_dump(). Codex review r3 P1.
         """
         if isinstance(config, dict):
-            for key, value in list(config.items()):
-                if isinstance(value, str) and _looks_like_secret_key(key):
-                    config[key] = "[REDACTED]"
-                else:
-                    cls.redact_forbidden_secret_fields_in_place(value)
+            for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
+                if forbidden in config and isinstance(config[forbidden], str):
+                    config[forbidden] = "[REDACTED]"
+            for value in config.values():
+                cls.redact_forbidden_secret_fields_in_place(value)
         elif isinstance(config, list):
             for item in config:
                 cls.redact_forbidden_secret_fields_in_place(item)
@@ -749,25 +797,6 @@ def _walk_scalars(value: Any, _path: Tuple[str, ...] = ()) -> Iterable[Tuple[Tup
             yield from _walk_scalars(item, _path + (f"[{i}]",))
     else:
         yield _path, value
-
-
-_SECRET_KEY_SUBSTRINGS = (
-    "password",
-    "passcode",
-    "secret",
-    "private_key",
-    "api_key",
-    "api-key",
-    "apikey",
-    "auth_token",
-    "access_token",
-    "client_secret",
-)
-
-
-def _looks_like_secret_key(name: str) -> bool:
-    lowered = name.lower()
-    return any(s in lowered for s in _SECRET_KEY_SUBSTRINGS)
 
 
 # ----------------------------------------------------------------------

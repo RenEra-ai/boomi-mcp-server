@@ -3146,9 +3146,6 @@ _PROCESS_FLOW_PROTOCOLS = {
         "optional_fields": [
             "folder_name",
             "description",
-            "execution",
-            "execution.trigger",
-            "execution.run_metadata",
             "transform",
             "transform.mode",
             "transform.message_text",
@@ -3157,7 +3154,16 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.retry_count",
             "reliability.dlq",
             "reliability.dlq.mode",
-            "reliability.on_failure",
+        ],
+        # Codex review r3 P2: execution.* and reliability.on_failure are
+        # planned for issue #28 (run metadata + error handling). Listing
+        # them as optional_fields here would have been a lie — the builder
+        # silently ignored them. They are documented as deferred so callers
+        # know the surface area exists but is not yet wired.
+        "deferred_fields": [
+            {"field": "execution.trigger", "tracked_by": "#28"},
+            {"field": "execution.run_metadata", "tracked_by": "#28"},
+            {"field": "reliability.on_failure", "tracked_by": "#28"},
         ],
         "supported_transform_modes": ["passthrough", "message", "map_ref"],
         "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
@@ -3205,10 +3211,6 @@ _PROCESS_FLOW_PROTOCOLS = {
                 "process_kind": "database_to_api_sync",
                 "folder_name": "<<Boomi folder path>>",
                 "description": "<<optional description>>",
-                "execution": {
-                    "trigger": {"mode": "manual"},
-                    "run_metadata": {"process_name_dpp": "DPP_PROCESS_NAME"},
-                },
                 "source": {
                     "connector_type": "database",
                     "connection_id": "$ref:db_connection",
@@ -3227,7 +3229,6 @@ _PROCESS_FLOW_PROTOCOLS = {
                 "reliability": {
                     "retry_count": 0,
                     "dlq": {"mode": "disabled"},
-                    "on_failure": "stop_process",
                 },
             },
         },

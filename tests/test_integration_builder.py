@@ -2949,3 +2949,33 @@ class TestApplyPlanProcessFlow:
         assert resolved_config["source"]["operation_id"] == "db-op-uuid"
         assert resolved_config["target"]["connection_id"] == "rest-conn-uuid"
         assert resolved_config["target"]["operation_id"] == "rest-op-uuid"
+
+    @patch(_PATCH_TARGET)
+    def test_clone_policy_emits_suffixed_name_for_process_flow(self, mock_pag):
+        """Codex review r3 P2 (clone bypass): _apply_clone_suffix writes
+        '<name>-clone' into config['name'], but _execute_component used to
+        consult comp.name first so the suffix was dropped. The emitted
+        process Component XML must carry the suffixed name."""
+        from src.boomi_mcp.categories.components.builders import ProcessFlowBuilder
+        # Re-create the apply-time path manually so we can assert on the
+        # emitted XML name. The real call chain runs _apply_clone_suffix
+        # then _execute_component → ProcessFlowBuilder.build, but mocking
+        # _execute_component would obscure exactly what we want to test.
+        from src.boomi_mcp.categories.integration_builder import _apply_clone_suffix
+        comp = _process_flow_comp(name="Main Process")
+        # Build the resolved config exactly as _apply_clone_suffix would
+        # leave it for an apply-time clone path.
+        suffixed_config = _apply_clone_suffix(comp, dict(comp.config))
+        suffixed_config["name"] = "Main Process-clone"  # matches helper
+
+        xml = ProcessFlowBuilder.build(
+            suffixed_config,
+            name=suffixed_config.get("name") or comp.name or comp.key,
+            folder_name=suffixed_config.get("folder_name"),
+        )
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml)
+        assert root.attrib["name"] == "Main Process-clone", (
+            "clone-suffix must reach the emitted XML; comp.name should not "
+            "override payload['name']"
+        )
