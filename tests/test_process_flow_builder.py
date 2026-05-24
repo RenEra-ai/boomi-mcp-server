@@ -515,6 +515,71 @@ class TestSecretScan:
         assert cfg["token"] == "[REDACTED]"
         assert cfg["source"]["authorization"] == "[REDACTED]"
 
+    # Codex review r4 P1: substring matching must catch variant key names
+    # that the r3 exact-match scanner missed. These were caught by the
+    # pre-r3 substring scanner — preserve that coverage.
+    @pytest.mark.parametrize("key", [
+        "apiKey",
+        "API_KEY",
+        "db_password",
+        "DB_PASSWORD",
+        "customerPassword",
+        "user_token",
+        "AUTH_TOKEN",
+        "customerSecret",
+        "bearer_token",
+    ])
+    def test_rejects_variant_secret_key_names(self, key):
+        cfg = _base_config()
+        cfg["source"][key] = "LEAK_VALUE"
+        err = ProcessFlowBuilder.scan_forbidden_secret_fields(cfg)
+        assert err is not None, f"variant key {key!r} should be flagged"
+        assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+        assert err.field == f"source.{key}"
+
+    # Codex review r4 P1: container-shape secrets — a forbidden key
+    # whose value is a dict or list. The r3 scanner only rejected string
+    # values, so these slipped through. The whole subtree is suspect.
+    def test_rejects_dict_under_forbidden_key(self):
+        cfg = _base_config()
+        cfg["source"]["authorization"] = {"value": "Bearer LEAK", "scheme": "Bearer"}
+        err = ProcessFlowBuilder.scan_forbidden_secret_fields(cfg)
+        assert err is not None
+        assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+        assert err.field == "source.authorization"
+
+    def test_rejects_list_under_forbidden_key(self):
+        cfg = _base_config()
+        cfg["source"]["token"] = ["LEAK_1", "LEAK_2"]
+        err = ProcessFlowBuilder.scan_forbidden_secret_fields(cfg)
+        assert err is not None
+        assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+
+    def test_redaction_obliterates_dict_under_forbidden_key(self):
+        cfg = _base_config()
+        cfg["source"]["password"] = {"plaintext": "hunter2", "note": "do not commit"}
+        cfg["source"]["apiKey"] = "sk-LEAK"  # variant key
+        ProcessFlowBuilder.redact_forbidden_secret_fields_in_place(cfg)
+        assert cfg["source"]["password"] == "[REDACTED]"
+        assert cfg["source"]["apiKey"] == "[REDACTED]"
+        # Nested plaintext under the redacted subtree must be obliterated too —
+        # confirm the whole value is replaced, not just inner string leaves.
+        assert "hunter2" not in str(cfg)
+
+    def test_empty_string_at_forbidden_key_is_skipped(self):
+        """Empty defaults are not secrets (matches DB builder convention)."""
+        cfg = _base_config()
+        cfg["source"]["password"] = ""
+        assert ProcessFlowBuilder.scan_forbidden_secret_fields(cfg) is None
+
+    def test_scalar_at_forbidden_key_is_skipped(self):
+        """None/bool/int at a forbidden key carries no plaintext to leak."""
+        cfg = _base_config()
+        cfg["source"]["password"] = None
+        assert ProcessFlowBuilder.scan_forbidden_secret_fields(cfg) is None
+        cfg["source"]["password"] = False
+        assert ProcessFlowBuilder.scan_forbidden_secret_fields(cfg) is None
+
 
 # ---------------------------------------------------------------------------
 # build() rejects empty name

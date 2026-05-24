@@ -84,13 +84,15 @@ class ProcessFlowBuilder:
     # Plan-time validation
     # ------------------------------------------------------------------
 
-    # Forbidden plaintext secret-shaped keys at any depth. A process
-    # component should never carry connector secrets — those live on the
-    # connector-settings component the process references via $ref.
-    # Matches the closed-list style used by DatabaseConnectorBuilder.
-    # `*_ref` fields (credential_ref, etc.) are NOT included: per the
-    # DB/REST builder contract those are URI references (e.g.
-    # credential://path/to/secret), not the secret itself.
+    # Substrings that mark a dict key as carrying a secret. Matching is
+    # case-insensitive — every key is lowercased before the substring
+    # check. This deliberately catches variants the connector contract
+    # doesn't enforce (apiKey, db_password, AUTH_TOKEN, customerSecret,
+    # etc.) because process configs are freeform user-provided JSON.
+    #
+    # `credential_ref` and similar `*_ref` keys do NOT contain any
+    # forbidden substring — they carry URI references (credential://...),
+    # not the secrets themselves.
     FORBIDDEN_SECRET_FIELDS: Tuple[str, ...] = (
         "password",
         "passcode",
@@ -105,9 +107,25 @@ class ProcessFlowBuilder:
         "token",
         "authorization",
         "bearer",
-        "bearer_token",
         "credentials",
     )
+
+    @classmethod
+    def _key_matches_forbidden(cls, key: Any) -> Optional[str]:
+        """Return the matched forbidden substring, or None.
+
+        Case-insensitive substring scan — catches camelCase (apiKey),
+        snake-prefixed (db_password), screaming-case (AUTH_TOKEN), and
+        compound names (customerSecret). Codex review r4 P1 — exact-key
+        membership was too narrow for freeform process configs.
+        """
+        if not isinstance(key, str):
+            return None
+        lowered = key.lower()
+        for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
+            if forbidden in lowered:
+                return forbidden
+        return None
 
     @classmethod
     def scan_forbidden_secret_fields(
@@ -115,34 +133,35 @@ class ProcessFlowBuilder:
     ) -> Optional[BuilderValidationError]:
         """Detect plaintext secret-shaped keys at any depth.
 
-        Restructured to match `DatabaseConnectorBuilder.scan_forbidden_secret_fields`:
-        at each dict level check every FORBIDDEN_SECRET_FIELDS key, then
-        recurse into dict children and list elements. Codex review r3 P1
-        — the prior substring-on-leaf approach missed `token`,
-        `authorization`, and `bearer_token`, and never inspected the
-        parent key, so nested shapes like `{"token": {"value": "..."}}`
-        would have leaked too.
+        At each dict level: case-insensitive substring match every key
+        against FORBIDDEN_SECRET_FIELDS. A match flags the entire value
+        — string non-empty (the obvious case) AND any dict / list
+        container (`authorization: {"value": "..."}` style). Then
+        recurse into non-matching subtrees in case a deeper key matches.
+
+        Codex review r4 P1: the previous r3 exact-key scanner missed
+        variant key names (apiKey, db_password) and container-shape
+        secrets that the pre-r3 substring scanner caught.
         """
         if isinstance(config, dict):
-            for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
-                if forbidden in config:
-                    value = config[forbidden]
-                    if isinstance(value, str) and value:
-                        path = f"{_path_prefix}{forbidden}" if _path_prefix else forbidden
-                        return BuilderValidationError(
-                            f"Plaintext secret-shaped field {path!r} is not "
-                            f"allowed in process config; reference connector "
-                            f"secrets via a connection_id / $ref:KEY token "
-                            f"instead.",
-                            error_code="PLAINTEXT_SECRET_REJECTED",
-                            field=path,
-                            hint=(
-                                "Move credentials onto the connector-settings "
-                                "component and reference its connection_id "
-                                "from source/target."
-                            ),
-                        )
             for key, value in config.items():
+                matched = cls._key_matches_forbidden(key)
+                if matched is not None:
+                    path = f"{_path_prefix}{key}" if _path_prefix else key
+                    # Reject both string leaves (the obvious case) AND
+                    # container shapes where the secret is one level
+                    # deeper. Empty strings still skip (matches the
+                    # explicit "value and value" convention used by the
+                    # DB builder for the same reason — empty defaults
+                    # are not secrets).
+                    if isinstance(value, str):
+                        if value:
+                            return cls._secret_rejection(path)
+                    elif isinstance(value, (dict, list)):
+                        return cls._secret_rejection(path)
+                    # Scalars (None / bool / int) at a forbidden key
+                    # carry no plaintext to leak — skip.
+                    continue
                 nested = cls.scan_forbidden_secret_fields(
                     value, _path_prefix=f"{_path_prefix}{key}."
                 )
@@ -159,22 +178,37 @@ class ProcessFlowBuilder:
         return None
 
     @classmethod
+    def _secret_rejection(cls, path: str) -> BuilderValidationError:
+        return BuilderValidationError(
+            f"Plaintext secret-shaped field {path!r} is not allowed in "
+            f"process config; reference connector secrets via a "
+            f"connection_id / $ref:KEY token instead.",
+            error_code="PLAINTEXT_SECRET_REJECTED",
+            field=path,
+            hint=(
+                "Move credentials onto the connector-settings component "
+                "and reference its connection_id from source/target."
+            ),
+        )
+
+    @classmethod
     def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
-        """Recursively replace any FORBIDDEN_SECRET_FIELDS string values
+        """Recursively replace any FORBIDDEN_SECRET_FIELDS-keyed values
         with '[REDACTED]'.
 
-        Mirrors scan_forbidden_secret_fields' dict-aware traversal — at
-        each dict level check forbidden keys, then descend into every
-        child. integration_builder._build_plan calls this on
-        PLAINTEXT_SECRET_REJECTED so the value does not echo through
-        spec.model_dump(). Codex review r3 P1.
+        Matches the scan: at each dict level, any case-insensitive
+        substring-matching key has its WHOLE value (string, dict, or
+        list) replaced with `"[REDACTED]"`. Container-shape secrets
+        (`{"password": {"plaintext": "..."}}`) are obliterated
+        wholesale, mirroring DatabaseConnectorBuilder.redact's behavior.
+        Codex review r4 P1.
         """
         if isinstance(config, dict):
-            for forbidden in cls.FORBIDDEN_SECRET_FIELDS:
-                if forbidden in config and isinstance(config[forbidden], str):
-                    config[forbidden] = "[REDACTED]"
-            for value in config.values():
-                cls.redact_forbidden_secret_fields_in_place(value)
+            for key in list(config.keys()):
+                if cls._key_matches_forbidden(key) is not None:
+                    config[key] = "[REDACTED]"
+                else:
+                    cls.redact_forbidden_secret_fields_in_place(config[key])
         elif isinstance(config, list):
             for item in config:
                 cls.redact_forbidden_secret_fields_in_place(item)
