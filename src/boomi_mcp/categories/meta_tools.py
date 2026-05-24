@@ -1222,7 +1222,9 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         "REST_BASE_URL_REQUIRED": "base_url absent or empty",
         "REST_BASE_URL_INVALID": "base_url scheme is not http:// or https://",
         "UNSUPPORTED_REST_AUTH_MODE": "auth or oauth2.grant_type is not buildable in issue #24",
+        "UNSUPPORTED_REST_OAUTH2_PARAMETERS": "oauth2.authorization_parameters or oauth2.access_token_parameters supplied non-empty (emission deferred)",
         "REST_SECRET_VALUE_FORBIDDEN": "raw secret value under oauth2.client_secret_ref or oauth2.client_secret",
+        "REST_POOLING_INVALID": "connection_pooling shape, type, or pool-dependent field paired with enabled=False",
         "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
     },
     "gotchas": [
@@ -1301,6 +1303,14 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
             "deferred until verified live exports exist. The token-not-set "
             "authorization_code grant IS buildable; only authorization_code "
             "with cached access-token emission remains out of scope."
+        ),
+        "oauth2_parameter_blocks": (
+            "oauth2.authorization_parameters and oauth2.access_token_parameters "
+            "emission is deferred. The builder always emits empty "
+            "<authorizationParameters/> and <accessTokenParameters/> elements; "
+            "non-empty caller values are rejected with "
+            "UNSUPPORTED_REST_OAUTH2_PARAMETERS until a verified live export "
+            "shows how to render populated parameter children."
         ),
     },
     "alternative_examples": {
