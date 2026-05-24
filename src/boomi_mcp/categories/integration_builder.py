@@ -49,7 +49,10 @@ from .components.builders import (
     REST_CLIENT_SUBTYPE,
     RestClientConnectionBuilder,
     RestClientOperationBuilder,
+    ProcessFlowBuilder,
     PROFILE_BUILDERS,
+    PROCESS_FLOW_BUILDERS,
+    get_process_flow_builder,
     get_profile_builder,
 )
 from .components.builders.connector_builder import _resolve_rest_connector_type
@@ -624,6 +627,56 @@ def _execute_component(
             payload.setdefault("component_name", comp.name)
 
     if comp.type == "process":
+        # process_kind=... opts into the structured process-flow builder
+        # (issue #25). _build_plan has already validated config + depends_on
+        # for create/create_clone/update, and rejected the
+        # process_kind + raw xml combination via PROCESS_KIND_XML_CONFLICT,
+        # so by the time we land here either:
+        #   - process_kind is set and we build the XML
+        #   - process_kind is unset and we use the legacy JSON path
+        # The two are mutually exclusive at the plan layer.
+        process_kind = str(
+            payload.get("process_kind") or payload.get("process_type") or ""
+        ).strip().lower()
+        if process_kind:
+            builder_cls = get_process_flow_builder(process_kind)
+            if builder_cls is None:
+                return {
+                    "_success": False,
+                    "error_code": "PROCESS_KIND_UNSUPPORTED",
+                    "error": (
+                        f"process_kind {process_kind!r} is not supported "
+                        f"by the structured process-flow builder."
+                    ),
+                    "field": "process_kind",
+                    "hint": (
+                        f"Supported process_kind values: "
+                        f"{sorted(PROCESS_FLOW_BUILDERS)}."
+                    ),
+                }
+            try:
+                xml = builder_cls.build(
+                    payload,
+                    name=comp.name or payload.get("name") or comp.key,
+                    folder_name=payload.get("folder_name"),
+                )
+            except BuilderValidationError as exc:
+                return {
+                    "_success": False,
+                    "error_code": exc.error_code,
+                    "error": str(exc),
+                    "field": exc.field,
+                    "hint": exc.hint,
+                }
+            if comp.action == "create":
+                return create_component(boomi_client, profile, {"xml": xml})
+            if not target_id:
+                return {
+                    "_success": False,
+                    "error": f"Missing process_id for update of component '{comp.key}'",
+                }
+            return update_component(boomi_client, profile, target_id, {"xml": xml})
+
         if comp.action == "create":
             return create_process(boomi_client, profile, payload)
         if not target_id:
@@ -723,8 +776,26 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             elif len(candidates) == 0:
                 planned_action = "error_missing_target"
 
+        # Process components opt into the structured process-flow builder
+        # via config.process_kind (or config.process_type). Without it,
+        # processes fall through to the legacy linear JSON-to-XML path
+        # in create_process. process_flow_xml is the new structured route
+        # added by issue #25 (M2.5).
+        raw_config = comp.config or {}
+        # str() coercion guards against non-string process_kind (e.g. 123)
+        # before .strip(). The builder's validate_config does the same; this
+        # site runs FIRST for route selection so it has to coerce too.
+        # Codex review L1 / QA bug #128.
+        process_kind = (
+            str(raw_config.get("process_kind") or raw_config.get("process_type") or "")
+            .strip()
+            .lower()
+        ) if comp.type == "process" else ""
+
         route = (
-            "process_json_to_xml"
+            "process_flow_xml"
+            if comp.type == "process" and process_kind
+            else "process_json_to_xml"
             if comp.type == "process"
             else "connector_builder_or_xml"
             if comp.type in ("connector-settings", "connector-action")
@@ -941,6 +1012,84 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # errors without losing the cert binding. Codex review round-5 P2.
             _redact_malformed_cert_refs(raw_config)
 
+        # Process-flow builder preflight (issue #25, M2.5). Two-tier like
+        # the database / REST blocks above:
+        #   (a) scan_forbidden_secret_fields runs whenever process_kind is
+        #       set, even on update/reuse paths — so a stray plaintext
+        #       credential in process config cannot leak through the plan
+        #       echo.
+        #   (b) validate_config runs only when the apply path will
+        #       actually invoke the builder (create / create_clone, and
+        #       no raw-XML override). Unknown process_kind always fails
+        #       so a typo cannot silently fall through to the legacy
+        #       linear path.
+        process_flow_err: Optional[BuilderValidationError] = None
+        if (
+            comp.type == "process"
+            and process_kind
+            and db_err is None
+            and rest_err is None
+        ):
+            xml_override = bool(raw_config.get("xml"))
+            # Codex review C4: process_kind + raw xml is ambiguous —
+            # _execute_component cannot honor both, and falling through to
+            # the legacy create_process path silently drops the user's XML.
+            # Reject the conflict explicitly so callers must pick one.
+            if xml_override:
+                process_flow_err = BuilderValidationError(
+                    "process_kind and config.xml are mutually exclusive.",
+                    error_code="PROCESS_KIND_XML_CONFLICT",
+                    field="config.xml",
+                    hint=(
+                        "Choose one: process_kind for the structured "
+                        "builder, OR omit process_kind and pass raw XML "
+                        "to the legacy process_json_to_xml path."
+                    ),
+                )
+            else:
+                process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
+            # Codex review C2: process update also re-invokes the builder
+            # (_execute_component → update_component({"xml": built_xml})),
+            # unlike DB/REST whose update paths bypass the builder. So
+            # validation MUST run for update too or a malformed update
+            # passes plan and explodes at apply.
+            will_invoke_process_flow_builder = (
+                process_flow_err is None
+                and planned_action in ("create", "create_clone", "update")
+            )
+            if process_flow_err is None and will_invoke_process_flow_builder:
+                builder_cls = get_process_flow_builder(process_kind)
+                if builder_cls is None:
+                    process_flow_err = BuilderValidationError(
+                        f"process_kind {process_kind!r} is not supported.",
+                        error_code="PROCESS_KIND_UNSUPPORTED",
+                        field="process_kind",
+                        hint=(
+                            f"Supported process_kind values: "
+                            f"{sorted(PROCESS_FLOW_BUILDERS)}."
+                        ),
+                    )
+                else:
+                    process_flow_err = builder_cls.validate_config(
+                        raw_config,
+                        depends_on=comp.depends_on,
+                    )
+
+        if process_flow_err is not None:
+            planned_action = "error_process_validation"
+            validation_error = {
+                "error_code": process_flow_err.error_code,
+                "error": str(process_flow_err),
+                "field": process_flow_err.field,
+                "hint": process_flow_err.hint,
+            }
+            # Scrub plaintext secrets from comp.config before the spec is
+            # echoed back via spec.model_dump(). Mirrors the DB/REST blocks
+            # at lines ~860 and ~943 — without this, a flagged value still
+            # leaks through the plan response. Codex review C1.
+            if process_flow_err.error_code == "PLAINTEXT_SECRET_REJECTED":
+                ProcessFlowBuilder.redact_forbidden_secret_fields_in_place(raw_config)
+
         step: Dict[str, Any] = {
             "key": comp.key,
             "type": comp.type,
@@ -1000,6 +1149,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             "error_missing_target",
             "error_database_validation",
             "error_rest_validation",
+            "error_process_validation",
         )
     ]
     if unresolvable_steps:
@@ -1032,6 +1182,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' failed "
                     f"REST validation: "
                     f"{ve.get('error_code', 'REST_CONNECTOR_VALIDATION_FAILED')} "
+                    f"on field {ve.get('field')!r}."
+                )
+            elif step["planned_action"] == "error_process_validation":
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed "
+                    f"process-flow validation: "
+                    f"{ve.get('error_code', 'PROCESS_XML_VALIDATION_FAILED')} "
                     f"on field {ve.get('field')!r}."
                 )
         return {

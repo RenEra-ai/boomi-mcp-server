@@ -23,6 +23,11 @@ from .profile_builder import (
     PROFILE_BUILDERS,
     get_profile_builder,
 )
+from .process_flow_builder import (
+    ProcessFlowBuilder,
+    PROCESS_FLOW_BUILDERS,
+    get_process_flow_builder,
+)
 
 __all__ = [
     "BuilderValidationError",
@@ -33,10 +38,13 @@ __all__ = [
     "REST_CLIENT_SUBTYPE",
     "RestClientConnectionBuilder",
     "RestClientOperationBuilder",
+    "ProcessFlowBuilder",
     "CONNECTOR_BUILDERS",
     "CONNECTOR_ACTION_BUILDERS",
     "PROFILE_BUILDERS",
+    "PROCESS_FLOW_BUILDERS",
     "get_connector_builder",
     "get_connector_action_builder",
     "get_profile_builder",
+    "get_process_flow_builder",
 ]
