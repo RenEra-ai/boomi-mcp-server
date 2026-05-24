@@ -655,9 +655,16 @@ def _execute_component(
                     ),
                 }
             try:
+                # payload["name"] takes precedence so _apply_clone_suffix's
+                # "<name>-clone" suffix actually reaches the emitted XML.
+                # _apply_clone_suffix writes the suffixed name into
+                # config["name"] (which becomes payload["name"]); if we
+                # consulted comp.name first the original unsuffixed name
+                # would win and the clone would emit as a name-duplicate.
+                # Codex review r3 P2 (clone bypass).
                 xml = builder_cls.build(
                     payload,
-                    name=comp.name or payload.get("name") or comp.key,
+                    name=payload.get("name") or comp.name or comp.key,
                     folder_name=payload.get("folder_name"),
                 )
             except BuilderValidationError as exc:

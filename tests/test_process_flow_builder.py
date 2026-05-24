@@ -470,6 +470,51 @@ class TestSecretScan:
         assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
         assert "source.api_key" in (err.field or "")
 
+    # Codex review r3 P1: cover the keys the old substring scanner missed.
+    @pytest.mark.parametrize("key", [
+        "token",
+        "authorization",
+        "bearer",
+        "bearer_token",
+        "credentials",
+    ])
+    def test_rejects_newly_covered_secret_keys_top_level(self, key):
+        cfg = _base_config()
+        cfg[key] = "LEAK_VALUE"
+        err = ProcessFlowBuilder.scan_forbidden_secret_fields(cfg)
+        assert err is not None, f"key {key!r} should be flagged"
+        assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+        assert err.field == key
+
+    @pytest.mark.parametrize("key", [
+        "token",
+        "authorization",
+        "bearer_token",
+    ])
+    def test_rejects_newly_covered_secret_keys_nested(self, key):
+        cfg = _base_config()
+        cfg["source"][key] = "LEAK_VALUE"
+        err = ProcessFlowBuilder.scan_forbidden_secret_fields(cfg)
+        assert err is not None
+        assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+        assert err.field == f"source.{key}"
+
+    def test_credential_ref_is_not_a_secret(self):
+        """credential_ref carries a URI reference (credential://...) — it's
+        the pointer to the secret, not the secret itself. DB/REST builders'
+        FORBIDDEN_SECRET_FIELDS exclude it too, by contract."""
+        cfg = _base_config()
+        cfg["source"]["credential_ref"] = "credential://example/secret/path"
+        assert ProcessFlowBuilder.scan_forbidden_secret_fields(cfg) is None
+
+    def test_redaction_replaces_value(self):
+        cfg = _base_config()
+        cfg["token"] = "LEAK"
+        cfg["source"]["authorization"] = "Bearer abc"
+        ProcessFlowBuilder.redact_forbidden_secret_fields_in_place(cfg)
+        assert cfg["token"] == "[REDACTED]"
+        assert cfg["source"]["authorization"] == "[REDACTED]"
+
 
 # ---------------------------------------------------------------------------
 # build() rejects empty name

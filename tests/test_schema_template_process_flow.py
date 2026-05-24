@@ -83,7 +83,6 @@ def test_template_lists_optional_fields(template):
     optional = template["optional_fields"]
     for field in (
         "folder_name",
-        "execution",
         "transform",
         "transform.mode",
         "reliability",
@@ -91,6 +90,34 @@ def test_template_lists_optional_fields(template):
         "reliability.dlq.mode",
     ):
         assert field in optional, f"optional field {field!r} missing from template"
+
+
+def test_template_deferred_fields_lists_unimplemented_surface(template):
+    """Codex review r3 P2: execution.* and reliability.on_failure were
+    advertised as accepted optional fields but silently ignored by the
+    builder. They must instead be documented as deferred so callers can't
+    mistake them for working surface area."""
+    deferred = {entry["field"]: entry["tracked_by"] for entry in template["deferred_fields"]}
+    assert deferred.get("execution.trigger") == "#28"
+    assert deferred.get("execution.run_metadata") == "#28"
+    assert deferred.get("reliability.on_failure") == "#28"
+
+
+def test_template_optional_fields_excludes_deferred(template):
+    """Defense-in-depth: a deferred field must not also appear in
+    optional_fields, or the schema sends mixed signals."""
+    optional = set(template["optional_fields"])
+    deferred_fields = {e["field"] for e in template["deferred_fields"]}
+    leaked = optional & deferred_fields
+    assert leaked == set(), f"deferred fields leaked into optional_fields: {leaked}"
+
+
+def test_template_example_does_not_use_deferred_fields(template):
+    """The example must not demonstrate deferred fields, or callers will
+    copy patterns that the builder silently ignores."""
+    example_config = template["example_component_spec"]["config"]
+    assert "execution" not in example_config
+    assert "on_failure" not in example_config.get("reliability", {})
 
 
 def test_template_supported_transform_modes(template):
