@@ -945,13 +945,25 @@ def _resolve_rest_connector_type(value: Any) -> Optional[str]:
 class RestClientConnectionBuilder:
     """Builder for Boomi REST Client connector-settings (issue #24, M2.4).
 
-    Issue #24 only ships OAUTH2 client_credentials. Every other auth mode
-    listed in the REST Client docs (NONE, BASIC, PASSWORD_DIGEST, NTLM,
-    CUSTOM, AWS_SIGNATURE, AWS_IAM_ROLES_ANYWHERE) returns
-    UNSUPPORTED_REST_AUTH_MODE — no verified live XML reference exists yet
-    for those shapes. The emitted XML for the supported shape matches the
-    live RenEra export at d6ee8b5b byte-for-byte modulo identity attrs and
-    secret-bearing fields.
+    Buildable auth modes (verified against live RenEra exports):
+      * NONE                            (verified 7f7e0730 / 499e5bd6)
+      * BASIC                           (verified 587b5fe0)
+      * NTLM                            (verified 1de43085)
+      * OAUTH2 client_credentials       (verified d6ee8b5b)
+      * OAUTH2 authorization_code       (token-not-set; verified 7abf0ad2)
+
+    Deferred — return UNSUPPORTED_REST_AUTH_MODE until a verified live
+    export exists for each:
+      * CUSTOM, PASSWORD_DIGEST
+      * AWS_SIGNATURE, AWS_IAM_ROLES_ANYWHERE
+      * OAUTH2 resource_owner_credentials, jwt_bearer
+      * OAUTH2 authorization_code with cached access-token emission
+
+    The emitted XML matches the corresponding live shape byte-for-byte
+    modulo identity attributes and secret-bearing fields. See
+    `_REST_SENSITIVE_FIELD_PATHS` in `integration_builder.py` for the
+    plan-output redaction sweep that scrubs raw secret material on
+    validation errors.
 
     Config keys:
         connector_type:           "rest" | "rest_client" | the subtype.
@@ -959,23 +971,48 @@ class RestClientConnectionBuilder:
                                   itself does not require it.
         component_name:           required.
         base_url:                 required; must begin with http:// or https://.
-        auth:                     required; only "OAUTH2" buildable.
-        oauth2:                   required when auth="OAUTH2".
-            grant_type:           required; only "client_credentials" buildable.
+        auth:                     required; one of NONE / BASIC / NTLM / OAUTH2.
+        username:                 required when auth in (BASIC, NTLM); rejected
+                                  with REST_CONNECTOR_VALIDATION_FAILED for
+                                  other auths.
+        credential_ref:           required when auth in (BASIC, NTLM); must
+                                  start with "credential://"; rejected for
+                                  other auths.
+        domain / workstation:     required when auth=NTLM; rejected for other
+                                  auths.
+        preemptive:               optional bool for auth in (BASIC, OAUTH2)
+                                  per Boomi docs; rejected for other auths.
+        private_certificate_ref:  optional; Boomi component id (UUID). Works
+                                  with any auth (client-cert is an
+                                  independent option).
+        public_certificate_ref:   optional; same shape and rules.
+        oauth2:                   required when auth=OAUTH2.
+            grant_type:           required; one of
+                                  client_credentials / authorization_code
+                                  (alias "code" → authorization_code).
             client_id:            required.
             client_secret_ref:    required; must start with "credential://".
                                   Builder NEVER emits the actual secret —
                                   it goes into the Boomi UI after create.
             access_token_url:     required; endpoint for token issuance.
+            authorization_url:    required when grant_type=authorization_code;
+                                  rejected for client_credentials.
             scope:                optional string.
             credentials_assertion_type: optional, defaults "client_secret".
-        preemptive:               optional bool, defaults False.
+            authorization_parameters / access_token_parameters: deferred —
+                                  rejected non-empty with
+                                  UNSUPPORTED_REST_OAUTH2_PARAMETERS.
+            access_token / cached_token: always rejected
+                                  (REST_SECRET_VALUE_FORBIDDEN) — the
+                                  builder emits token-not-set only.
         connect_timeout_ms:       optional int, defaults -1 (wait forever).
         read_timeout_ms:          optional int, defaults -1.
         cookie_scope:             optional, defaults "GLOBAL".
         connection_pooling:       optional dict {enabled?, max_total?,
                                   idle_timeout_seconds?}; defaults
-                                  enabled=False, others empty.
+                                  enabled=False. max_total and
+                                  idle_timeout_seconds are rejected with
+                                  REST_POOLING_INVALID unless enabled=True.
         folder_name / description: optional component-level fields.
     """
 
@@ -1830,20 +1867,36 @@ class RestClientConnectionBuilder:
 class RestClientOperationBuilder:
     """Builder for Boomi REST Client connector-action (issue #24, M2.4).
 
-    Issue #24 ships GET and PATCH only — these are the two verified live
-    exports (e268ea19, 64c4eafd). POST/PUT/DELETE/HEAD/OPTIONS/TRACE return
-    UNVERIFIED_REST_XML_VARIANT until a matching live export is created.
+    All 8 REST verbs are buildable: GET, POST, PUT, PATCH, DELETE, HEAD,
+    OPTIONS, TRACE. Method-specific shape differences locked against live
+    RenEra exports per phase 5 of issue #24.
 
-    Important shape differences observed in the live exports:
-      * GET emits a <field id="followRedirects" type="string" value="NONE"/>
-        BEFORE the path field.
-      * PATCH does NOT emit a followRedirects field at all.
-      * Both emit queryParameters and requestHeaders as customproperties
-        containers with empty <customProperties/> children.
-      * Operation envelope: returnApplicationErrors="true" trackResponse="true".
-      * GenericOperationConfig: customOperationType=<METHOD>,
-        operationType="EXECUTE", requestProfileType="xml",
-        responseProfileType="xml" (lowercase — Boomi's XML form).
+    followRedirects emission rule (matches live exports):
+      * GET, POST, HEAD, DELETE: emit `<field id="followRedirects"
+        value="NONE"/>` by default. Explicit NONE/STRICT/LAX always emits.
+      * PATCH, PUT, OPTIONS, TRACE: omit the field entirely by default.
+        Explicit values still emit.
+
+    customProperties (query_parameters / request_headers): plain key/value
+    entries are emitted as `<properties key=... value=.../>` children;
+    secret-shaped keys (Authorization, X-API-Key, etc.) and values
+    (JWT-shape, long base64, [encrypted] prefix) are rejected with
+    REST_SECRET_VALUE_FORBIDDEN. Encrypted entries from Boomi exports
+    (`encrypted=true`) are rejected with
+    UNSUPPORTED_REST_ENCRYPTED_CUSTOM_PROPERTY.
+
+    Operation envelope defaults (matches live exports):
+      * returnApplicationErrors="true", trackResponse="true". Both
+        accept caller bool overrides; strings/ints are rejected with
+        REST_OPERATION_VALIDATION_FAILED (no silent truthy-coercion).
+
+    GenericOperationConfig: customOperationType=<METHOD>,
+    operationType="EXECUTE", requestProfileType / responseProfileType
+    lowercase ("xml" / "json" / "none") per the live exports.
+
+    Verified live exports:
+      * GET   (e268ea19), PATCH (64c4eafd), and all 6 other verbs
+        confirmed against the new_findings_2026_05_23 export set.
     """
 
     SUPPORTED_OPERATION_MODES = ("execute",)
