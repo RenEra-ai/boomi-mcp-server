@@ -807,22 +807,47 @@ class DatabaseConnectorBuilder:
             # Normalize to an int for range checking. Reject non-int types
             # and non-digit strings here so the int range check below is the
             # single source of truth for valid-range semantics.
+            #
+            # `isascii() and isdigit()` (not just isdigit()) — str.isdigit()
+            # accepts non-ASCII digit-category chars like '²' (superscript)
+            # and '２' (fullwidth). Some round-trip through int() (e.g.
+            # int('２')=2), but build() emits the original caller string in
+            # the XML attribute, so a validator/emission mismatch would
+            # land non-ASCII glyphs in the connector XML. Restrict to
+            # ASCII 0-9 only.
             if isinstance(port_value, int):
                 port_int = port_value
             elif isinstance(port_value, str):
-                if not port_value.strip().isdigit():
+                stripped = port_value.strip()
+                if not (stripped.isascii() and stripped.isdigit()):
                     return BuilderValidationError(
-                        "port must be an integer or digit-only string "
-                        "(1..65535), got non-digit characters",
+                        "port must be an integer or ASCII digit-only string "
+                        "(1..65535), got non-ASCII-digit characters",
                         error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
                         field="port",
                         hint=(
                             "JDBC ports are positive integers (1..65535). "
-                            "Non-digit characters in port can also corrupt "
-                            "the emitted XML."
+                            "Use ASCII digits 0-9 only — non-ASCII digit "
+                            "glyphs can also corrupt the emitted XML."
                         ),
                     )
-                port_int = int(port_value.strip())
+                try:
+                    port_int = int(stripped)
+                except ValueError:
+                    # Python 3.11+ caps int-string parsing at
+                    # PYTHONINTMAXSTRDIGITS (default 4300). A digit string
+                    # longer than that passes isdigit() but int() raises.
+                    # Surface as a structured error to preserve the builder
+                    # contract.
+                    return BuilderValidationError(
+                        "port string is too long to parse as an integer",
+                        error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                        field="port",
+                        hint=(
+                            "JDBC ports are 1..65535 (max 5 digits). "
+                            "Inputs above that are invalid TCP ports."
+                        ),
+                    )
             else:
                 return BuilderValidationError(
                     f"port must be an integer or digit string, got "
