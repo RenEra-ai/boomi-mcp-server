@@ -2039,3 +2039,68 @@ def test_stale_authorization_url_non_string_value_rejected_for_client_credential
     err = excinfo.value
     assert err.error_code == "REST_CONNECTOR_VALIDATION_FAILED"
     assert err.field == "oauth2.authorization_url"
+
+
+# ----------------------------------------------------------------------------
+# Codex round 2 — oauth2 parameter blocks (authorization_parameters /
+# access_token_parameters) are out-of-scope for emission. The builder
+# always emits empty `<authorizationParameters/>` and `<accessTokenParameters/>`
+# regardless of caller input — so a non-empty caller value would be
+# silently dropped. Reject up front instead.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("param_field", ["authorization_parameters", "access_token_parameters"])
+@pytest.mark.parametrize(
+    "non_empty_value",
+    [{"foo": "bar"}, [{"key": "k", "value": "v"}], {"prompt": "consent"}],
+)
+def test_oauth2_parameter_blocks_rejected_when_non_empty_client_credentials(param_field, non_empty_value):
+    """Non-empty oauth2.authorization_parameters or
+    oauth2.access_token_parameters is out-of-scope — the builder always
+    emits empty parameter elements. Reject so caller knows the value
+    won't take effect."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"][param_field] = non_empty_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "UNSUPPORTED_REST_OAUTH2_PARAMETERS"
+    assert err.field == f"oauth2.{param_field}"
+
+
+@pytest.mark.parametrize("param_field", ["authorization_parameters", "access_token_parameters"])
+@pytest.mark.parametrize(
+    "non_empty_value",
+    [{"foo": "bar"}, [{"key": "k", "value": "v"}]],
+)
+def test_oauth2_parameter_blocks_rejected_when_non_empty_authorization_code(param_field, non_empty_value):
+    """Same rule applies to authorization_code grant: both parameter
+    blocks are out-of-scope for emission regardless of grant type."""
+    cfg = _minimal_oauth2_authcode_config()
+    cfg["oauth2"][param_field] = non_empty_value
+    with pytest.raises(BuilderValidationError) as excinfo:
+        RestClientConnectionBuilder().build(**{k: v for k, v in cfg.items() if k != "connector_type"})
+    err = excinfo.value
+    assert err.error_code == "UNSUPPORTED_REST_OAUTH2_PARAMETERS"
+    assert err.field == f"oauth2.{param_field}"
+
+
+@pytest.mark.parametrize("param_field", ["authorization_parameters", "access_token_parameters"])
+@pytest.mark.parametrize("empty_value", [{}, [], None, ""])
+def test_oauth2_parameter_blocks_empty_value_accepted(param_field, empty_value):
+    """Empty dict / list / None / empty-string is treated as "not
+    supplied" — accept it (callers may always include the key with an
+    empty container)."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"][param_field] = empty_value
+    assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+@pytest.mark.parametrize("param_field", ["authorization_parameters", "access_token_parameters"])
+def test_oauth2_parameter_blocks_absent_accepted(param_field):
+    """When the parameter key is omitted entirely, validation passes
+    (the common case — these blocks are deferred)."""
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"].pop(param_field, None)
+    assert RestClientConnectionBuilder.validate_config(cfg) is None

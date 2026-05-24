@@ -1232,6 +1232,30 @@ class RestClientConnectionBuilder:
                             "machine-to-machine flow with no user."
                         ),
                     )
+            # 5d) oauth2 parameter blocks (authorization_parameters and
+            # access_token_parameters) are deferred — the build path
+            # always emits empty `<authorizationParameters/>` and
+            # `<accessTokenParameters/>` elements. Rather than silently
+            # drop caller-supplied values, reject so the caller knows the
+            # input doesn't take effect. Empty container / None / "" are
+            # accepted (treated as "not supplied"); only truthy values
+            # trigger the gate.
+            for param_field in ("authorization_parameters", "access_token_parameters"):
+                value = oauth2.get(param_field)
+                if value:
+                    return BuilderValidationError(
+                        f"oauth2.{param_field} emission is deferred "
+                        "until a verified live export shows the shape",
+                        error_code="UNSUPPORTED_REST_OAUTH2_PARAMETERS",
+                        field=f"oauth2.{param_field}",
+                        hint=(
+                            f"Remove oauth2.{param_field} or supply an "
+                            "empty container. The builder currently "
+                            "emits empty parameter elements regardless "
+                            "of caller input; non-empty values would be "
+                            "silently dropped without this gate."
+                        ),
+                    )
 
         # 5b) Password-backed auth modes (BASIC) require username + credential_ref.
         # credential_ref carries the Boomi credential URL (the actual password
