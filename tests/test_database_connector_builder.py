@@ -150,8 +150,10 @@ def test_missing_required_field_raises_value_error(missing):
 
 
 def test_unknown_driver_id_raises_structured_error():
+    # Postgres remains unsupported in Issue #31 — no verified live #Common
+    # export to anchor the XML emission against, so the builder rejects it.
     with pytest.raises(BuilderValidationError) as excinfo:
-        DatabaseConnectorBuilder().build(**_minimal_config(driver_id="mysql"))
+        DatabaseConnectorBuilder().build(**_minimal_config(driver_id="postgres"))
     err = excinfo.value
     assert err.error_code == "UNSUPPORTED_DB_DRIVER"
     assert err.field == "driver_id"
@@ -241,7 +243,10 @@ def test_unknown_auth_mode_returns_unsupported_error():
     assert "username_password" in (err.hint or "")
 
 
-@pytest.mark.parametrize("unsupported_driver", ["postgres", "oracle", "mysql"])
+# Issue #31 promoted oracle, mysql, sap-hana, and custom to buildable.
+# Only drivers without a verified live #Common reference (Postgres, DB2,
+# Snowflake-via-host_port_db, etc.) remain UNSUPPORTED_DB_DRIVER.
+@pytest.mark.parametrize("unsupported_driver", ["postgres", "db2", "snowflake"])
 def test_unsupported_driver_returns_unsupported_db_driver_error(unsupported_driver):
     with pytest.raises(BuilderValidationError) as excinfo:
         DatabaseConnectorBuilder().build(**_minimal_config(driver_id=unsupported_driver))
@@ -271,7 +276,7 @@ def test_forbidden_secret_fields_rejected(forbidden):
 
 def test_validate_config_returns_error_without_raising():
     err = DatabaseConnectorBuilder.validate_config(
-        _minimal_config(driver_id="postgres")
+        _minimal_config(driver_id="db2")
     )
     assert isinstance(err, BuilderValidationError)
     assert err.error_code == "UNSUPPORTED_DB_DRIVER"
@@ -376,30 +381,41 @@ def _is_pool_enabled(xml: str) -> str:
     return dcs.attrib["isPoolEnabled"]
 
 
-def test_recognized_driver_ids_includes_custom_but_supported_does_not():
-    assert "custom" in DatabaseConnectorBuilder.RECOGNIZED_DRIVER_IDS
-    assert "custom" not in DatabaseConnectorBuilder.SUPPORTED_DRIVER_IDS
+def test_all_recognized_drivers_are_now_supported():
+    # Issue #31: every recognized driver is also buildable. No asymmetry
+    # remains until a future driver is added in deferred form.
+    recognized = set(DatabaseConnectorBuilder.RECOGNIZED_DRIVER_IDS)
+    supported = set(DatabaseConnectorBuilder.SUPPORTED_DRIVER_IDS)
+    assert recognized == supported
+    for required_id in (
+        "sqlserver", "microsoft_jdbc", "jtds",
+        "oracle", "mysql", "sap_hana", "sap-hana", "custom",
+    ):
+        assert required_id in recognized, required_id
 
 
 def test_driver_registry_carries_shape_and_buildable_metadata():
-    for driver_id in ("sqlserver", "jtds", "custom"):
+    for driver_id in ("sqlserver", "jtds", "oracle", "mysql", "sap-hana", "custom"):
         entry = DatabaseConnectorBuilder.DRIVERS[driver_id]
         assert "shape" in entry, driver_id
         assert "buildable" in entry, driver_id
-    assert DatabaseConnectorBuilder.DRIVERS["sqlserver"]["buildable"] is True
-    assert DatabaseConnectorBuilder.DRIVERS["jtds"]["buildable"] is True
-    assert DatabaseConnectorBuilder.DRIVERS["custom"]["buildable"] is False
+        assert entry["buildable"] is True, driver_id
     assert DatabaseConnectorBuilder.DRIVERS["custom"]["shape"] == "custom_url"
+    assert DatabaseConnectorBuilder.DRIVERS["sap-hana"]["port_required"] is True
+    assert DatabaseConnectorBuilder.DRIVERS["sap-hana"]["default_port"] is None
 
 
-def test_custom_driver_id_returns_unsupported_db_driver_shape():
+def test_custom_driver_with_only_host_port_db_fields_fails_with_shape_mismatch():
+    """Custom is buildable now (Issue #31) but uses the custom_url shape,
+    which requires custom_class_name + connection_url and rejects host."""
+    params = _minimal_config(driver_id="custom")  # carries host/dbname/etc.
     with pytest.raises(BuilderValidationError) as excinfo:
-        DatabaseConnectorBuilder().build(**_minimal_config(driver_id="custom"))
+        DatabaseConnectorBuilder().build(**{k: v for k, v in params.items() if k != "connector_type"})
     err = excinfo.value
-    assert err.error_code == "UNSUPPORTED_DB_DRIVER_SHAPE"
-    assert err.field == "driver_id"
-    hint = (err.hint or "").lower()
-    assert "custom" in hint or "reuse" in hint or "raw-xml" in hint or "raw xml" in hint
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    # custom_class_name is required and listed before forbidden fields in
+    # the validation order, so the first failure is the missing required.
+    assert err.field == "custom_class_name"
 
 
 def test_recommended_additional_is_metadata_not_enforcement():
@@ -904,3 +920,241 @@ def test_scan_forbidden_secret_fields_top_level_still_beats_arbitrary_nesting():
          "matrix": [[{"secret": "DEEP_DEADBEEF"}]]},
     )
     assert err.field == "password"
+
+
+# ===========================================================================
+# Issue #31 — Oracle / MySQL / SAP HANA host_port_db drivers + Custom shape
+# ===========================================================================
+
+
+def _custom_config(**overrides):
+    """Raw config dict for the custom_url shape."""
+    params = {
+        "connector_type": "database",
+        "component_name": "Snowflake via Custom",
+        "driver_id": "custom",
+        "auth_mode": "username_password",
+        "username": "INTEG_USER",
+        "credential_ref": "credential://test/custom/password",
+        "custom_class_name": "net.snowflake.client.jdbc.SnowflakeDriver",
+        "connection_url": "jdbc:snowflake://acct.snowflakecomputing.com/?db=PROD",
+    }
+    params.update(overrides)
+    return params
+
+
+def _build_custom(**overrides):
+    params = _custom_config(**overrides)
+    params.pop("connector_type", None)
+    return DatabaseConnectorBuilder().build(**params)
+
+
+# --- host_port_db: new buildable drivers --------------------------------------
+
+
+@pytest.mark.parametrize("driver_id,emits_driver_id,class_name,url_format,default_port", [
+    ("oracle", "oracle", "oracle.jdbc.driver.OracleDriver",
+     "jdbc:oracle:thin:@{0}:{1}:{2}", "1521"),
+    ("mysql", "mysql", "com.mysql.jdbc.Driver",
+     "jdbc:mysql://{0}:{1}/{2}{3}", "3306"),
+])
+def test_new_host_port_db_driver_emits_expected_attributes(
+    driver_id, emits_driver_id, class_name, url_format, default_port,
+):
+    xml = _build_minimal(driver_id=driver_id)
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["driverId"] == emits_driver_id
+    assert dcs.attrib["className"] == class_name
+    assert dcs.attrib["urlFormat"] == url_format
+    assert dcs.attrib["port"] == default_port
+    # Shared envelope still emits the encrypted-password marker.
+    enc = root.find("bns:encryptedValues/bns:encryptedValue", NS)
+    assert enc.attrib["path"] == "//DatabaseConnectionSettings/@password"
+    assert enc.attrib["isSet"] == "false"
+
+
+@pytest.mark.parametrize("driver_id", ["sap-hana", "sap_hana"])
+def test_sap_hana_emits_canonical_driver_id_and_class(driver_id):
+    xml = _build_minimal(driver_id=driver_id, port=30015)
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["driverId"] == "sap-hana"
+    assert dcs.attrib["className"] == "com.sap.db.jdbc.Driver"
+    assert dcs.attrib["urlFormat"] == "jdbc:sap://{0}:{1}/?databaseName={2}{3}"
+    assert dcs.attrib["port"] == "30015"
+
+
+def test_sap_hana_without_port_fails_with_database_connector_validation_failed():
+    params = _minimal_config(driver_id="sap_hana")
+    params.pop("port", None)  # caller did not supply port
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "port"
+    assert "sap" in (err.hint or "").lower()
+
+
+def test_sap_hana_blank_port_string_also_fails():
+    params = _minimal_config(driver_id="sap-hana", port="   ")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    assert excinfo.value.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert excinfo.value.field == "port"
+
+
+@pytest.mark.parametrize("driver_id,forbidden_field,forbidden_value", [
+    ("mysql", "custom_class_name", "com.example.Driver"),
+    ("mysql", "connection_url",   "jdbc:mysql://example/db"),
+    ("oracle", "custom_class_name", "com.example.Driver"),
+    ("sap_hana", "connection_url",   "jdbc:sap://example/db"),
+])
+def test_host_port_db_drivers_reject_custom_url_shape_fields(
+    driver_id, forbidden_field, forbidden_value,
+):
+    """A host_port_db driver must reject custom_class_name / connection_url
+    so a caller can't accidentally smuggle Custom-only fields in."""
+    extra = {"port": 30015} if driver_id == "sap_hana" else {}
+    params = _minimal_config(driver_id=driver_id, **{forbidden_field: forbidden_value}, **extra)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == forbidden_field
+
+
+# --- custom_url shape --------------------------------------------------------
+
+
+def test_custom_url_shape_emits_caller_class_name_and_connection_url():
+    xml = _build_custom()
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["driverId"] == "custom"
+    assert dcs.attrib["className"] == "net.snowflake.client.jdbc.SnowflakeDriver"
+    assert dcs.attrib["urlFormat"] == "jdbc:snowflake://acct.snowflakecomputing.com/?db=PROD"
+    # host/port/dbname/additional are emitted as empty attributes to match
+    # Boomi's live #Common Custom export shape (component 39fb519d-...).
+    assert dcs.attrib["host"] == ""
+    assert dcs.attrib["port"] == ""
+    assert dcs.attrib["dbname"] == ""
+    assert dcs.attrib["additional"] == ""
+    # Envelope invariants still hold.
+    enc = root.find("bns:encryptedValues/bns:encryptedValue", NS)
+    assert enc.attrib["path"] == "//DatabaseConnectionSettings/@password"
+    assert enc.attrib["isSet"] == "false"
+    assert dcs.find("WriteOptions") is not None
+    assert dcs.find("AdapterPoolInfo") is not None
+
+
+def test_custom_url_shape_xml_escapes_class_name_and_connection_url():
+    xml = _build_custom(
+        custom_class_name="com.example.<Driver>",
+        connection_url="jdbc:example://host?a=1&b=2",
+    )
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["className"] == "com.example.<Driver>"
+    assert dcs.attrib["urlFormat"] == "jdbc:example://host?a=1&b=2"
+
+
+@pytest.mark.parametrize("missing", ["custom_class_name", "connection_url"])
+def test_custom_url_missing_required_field_fails(missing):
+    params = _custom_config()
+    params.pop(missing)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == missing
+
+
+@pytest.mark.parametrize("forbidden,value", [
+    ("host",        "host.example.com"),
+    ("port",        5432),
+    ("dbname",      "MyDatabase"),
+    ("additional",  ";encrypt=true"),
+])
+def test_custom_url_shape_rejects_host_port_db_fields(forbidden, value):
+    """custom_url forbids host/port/dbname/additional in the JSON contract —
+    the XML still emits them as empty attrs, but caller-supplied values
+    must fail validation before build()."""
+    params = _custom_config(**{forbidden: value})
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == forbidden
+    assert "custom_url" in (err.hint or "")
+
+
+def test_custom_url_empty_string_carry_over_does_not_trip_forbidden_check():
+    """An explicit empty string on a forbidden field is a no-op (some clients
+    serialize all fields with defaults). validate_config should not reject."""
+    xml = _build_custom(host="", port="", dbname="", additional="")
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["driverId"] == "custom"
+
+
+def test_custom_url_credential_ref_still_required():
+    params = _custom_config()
+    params.pop("credential_ref")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    assert excinfo.value.error_code == "MISSING_CREDENTIAL_REF"
+
+
+def test_custom_url_plaintext_secret_in_connection_url_siblings_still_caught():
+    """Defense-in-depth: a secret-shaped key alongside a valid custom_url
+    config still trips PLAINTEXT_SECRET_REJECTED."""
+    params = _custom_config(password="LEAK_CUSTOM_DEADBEEF")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    err = excinfo.value
+    assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
+    assert err.field == "password"
+    assert "LEAK_CUSTOM_DEADBEEF" not in str(err)
+
+
+# --- Live-reference metadata + runtime prerequisites -------------------------
+
+
+@pytest.mark.parametrize("driver_id,expected_ref", [
+    ("sqlserver", "4ace95d7-6ee4-4f83-8fad-723d3fabdb2f"),
+    ("jtds",      "107aaef1-cb1e-4975-be44-69d120803864"),
+    ("oracle",    "6adf9e1e-39c8-4104-bc6c-9769b93aa161"),
+    ("mysql",     "bfbfea6f-39c7-498e-859b-6036959a20c8"),
+    ("sap-hana",  "c9077711-39a4-4d52-9f91-27bdf1f5b8ec"),
+    ("custom",    "39fb519d-e970-4aaf-a1f7-4eba39158e9d"),
+])
+def test_driver_registry_carries_live_reference_component_id(driver_id, expected_ref):
+    assert DatabaseConnectorBuilder.DRIVERS[driver_id]["live_reference_component_id"] == expected_ref
+
+
+@pytest.mark.parametrize("driver_id", ["mysql", "sap-hana", "custom"])
+def test_drivers_without_bundled_runtime_jar_carry_prerequisite_note(driver_id):
+    note = DatabaseConnectorBuilder.DRIVERS[driver_id].get("runtime_driver_prerequisite")
+    assert note, driver_id
+    assert "library" in note.lower()
+
+
+def test_sqlserver_and_jtds_have_no_runtime_prerequisite_note():
+    """SQL Server JDBC and jTDS ship with the Boomi runtime — no prereq note."""
+    for driver_id in ("sqlserver", "jtds", "oracle"):
+        assert "runtime_driver_prerequisite" not in DatabaseConnectorBuilder.DRIVERS[driver_id]

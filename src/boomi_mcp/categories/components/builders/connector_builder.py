@@ -98,21 +98,37 @@ def _format_xml_value(value: Any) -> str:
 class DatabaseConnectorBuilder:
     """Builder for Database (Legacy) connector-settings components.
 
-    Generates <DatabaseConnectionSettings> XML matching Boomi UI export structure.
-    M2.2 supports SQL Server (Microsoft JDBC and jTDS). Postgres/Oracle/MySQL are
-    deliberately not yet supported and return a structured UNSUPPORTED_DB_DRIVER.
+    Generates <DatabaseConnectionSettings> XML matching Boomi UI export
+    structure. Issue #31 (M2.x) extends the buildable set to SQL Server
+    (Microsoft JDBC and jTDS), Oracle, MySQL, SAP HANA, and Custom. Postgres
+    is still rejected with UNSUPPORTED_DB_DRIVER — no live #Common reference
+    XML exists yet.
+
+    Two driver shapes are modeled in DRIVERS:
+
+      host_port_db: sqlserver, jtds, oracle, mysql, sap-hana.
+        Caller supplies host/port/dbname; the builder substitutes them into
+        the driver's urlFormat. SAP HANA has no verified default port so
+        callers MUST supply one (port_required=True on the driver entry).
+
+      custom_url:  custom.
+        Caller supplies custom_class_name (→ className) and connection_url
+        (→ urlFormat) directly. host/port/dbname/additional are forbidden in
+        the JSON contract; the XML emits them as empty strings to match the
+        Boomi live-export shape byte-for-byte.
 
     Config keys:
         component_name:     required
         driver_id:          required; one of SUPPORTED_DRIVER_IDS
-                            ("sqlserver", "microsoft_jdbc", "jtds").
-                            "microsoft_jdbc" is an alias for the Microsoft JDBC
-                            driver and emits Boomi driverId="sqlserver".
+                            ("sqlserver", "microsoft_jdbc", "jtds", "oracle",
+                            "mysql", "sap_hana", "sap-hana", "custom").
+                            "microsoft_jdbc" is a caller-facing alias for the
+                            Microsoft JDBC driver and emits Boomi
+                            driverId="sqlserver"; "sap_hana" is an alias for
+                            the hyphenated canonical "sap-hana".
         auth_mode:          required; one of SUPPORTED_AUTH_MODES
                             ("username_password"). "windows_integrated" is
                             recognized but deliberately deferred.
-        host:               required
-        dbname:             required (database name)
         username:           required
         credential_ref:     required when auth_mode="username_password".
                             Opaque caller-side reference (e.g.
@@ -120,16 +136,35 @@ class DatabaseConnectorBuilder:
                             builder never writes it to the emitted XML —
                             secrets must be set in the Boomi UI after create
                             or supplied via the raw-XML escape hatch.
-        port:               optional; falls back to DRIVERS[driver_id]['default_port']
         folder_name:        optional; defaults to "Home"
         description:        optional
-        additional:         optional JDBC URL suffix appended verbatim into urlFormat {3}
-                            (e.g. ";encrypt=true;trustServerCertificate=true").
+
+        host_port_db shape only:
+            host:           required
+            dbname:         required (database name)
+            port:           required for sap-hana; optional elsewhere (falls
+                            back to DRIVERS[driver_id]['default_port'])
+            additional:     optional JDBC URL suffix appended verbatim into
+                            urlFormat {3} (e.g. ";encrypt=true;
+                            trustServerCertificate=true"). SQL Server's TLS
+                            workaround lives here.
+
+        custom_url shape only:
+            custom_class_name: required JDBC driver class FQCN
+            connection_url:    required full JDBC URL (no Boomi {0}{1}{2}{3}
+                               substitution happens — the caller's string is
+                               emitted verbatim as urlFormat).
 
     Plaintext secret-shaped keys (see FORBIDDEN_SECRET_FIELDS) are rejected
-    loudly with PLAINTEXT_SECRET_REJECTED before any XML is emitted.
+    loudly with PLAINTEXT_SECRET_REJECTED before any XML is emitted. Shape
+    mismatch (e.g. host on a custom_url driver) fails with
+    DATABASE_CONNECTOR_VALIDATION_FAILED before mutation.
     """
 
+    # Issue #31: the registry now models two shapes — host_port_db (SQL Server,
+    # jTDS, Oracle, MySQL, SAP HANA) and custom_url (caller-supplied Custom JDBC
+    # driver). live_reference_component_id points at the reneraai-5RO3DD
+    # `#Common` example used to verify each driver's XML byte-for-byte.
     DRIVERS: Dict[str, Dict[str, Any]] = {
         "sqlserver": {
             "shape":       "host_port_db",
@@ -144,6 +179,7 @@ class DatabaseConnectorBuilder:
             # is set. Surfaced as schema-template metadata only — the
             # builder does not auto-inject or warn (caller's choice).
             "recommended_additional": ";encrypt=true;trustServerCertificate=true",
+            "live_reference_component_id": "4ace95d7-6ee4-4f83-8fad-723d3fabdb2f",
         },
         "jtds": {
             "shape":       "host_port_db",
@@ -152,30 +188,87 @@ class DatabaseConnectorBuilder:
             "class_name":  "net.sourceforge.jtds.jdbc.Driver",
             "url_format":  "jdbc:jtds:sqlserver://{0}:{1}/{2}{3}",
             "default_port": 1433,
+            "live_reference_component_id": "107aaef1-cb1e-4975-be44-69d120803864",
+        },
+        "oracle": {
+            "shape":       "host_port_db",
+            "buildable":   True,
+            "driver_id":   "oracle",
+            "class_name":  "oracle.jdbc.driver.OracleDriver",
+            "url_format":  "jdbc:oracle:thin:@{0}:{1}:{2}",
+            "default_port": 1521,
+            "live_reference_component_id": "6adf9e1e-39c8-4104-bc6c-9769b93aa161",
+        },
+        "mysql": {
+            "shape":       "host_port_db",
+            "buildable":   True,
+            "driver_id":   "mysql",
+            "class_name":  "com.mysql.jdbc.Driver",
+            "url_format":  "jdbc:mysql://{0}:{1}/{2}{3}",
+            "default_port": 3306,
+            "live_reference_component_id": "bfbfea6f-39c7-498e-859b-6036959a20c8",
+            # The legacy com.mysql.jdbc.Driver ships outside the Boomi runtime —
+            # surfaced for callers via the schema template, not enforced here.
+            "runtime_driver_prerequisite": (
+                "MySQL Connector/J is not bundled with the Boomi runtime. "
+                "Upload the driver as a Custom Library and deploy it to the "
+                "runtime/environment before testing the connection."
+            ),
+        },
+        # Canonical key uses a hyphen to match the emitted Boomi driverId
+        # ("sap-hana"); "sap_hana" is exposed via DRIVER_ALIASES below.
+        "sap-hana": {
+            "shape":       "host_port_db",
+            "buildable":   True,
+            "driver_id":   "sap-hana",
+            "class_name":  "com.sap.db.jdbc.Driver",
+            "url_format":  "jdbc:sap://{0}:{1}/?databaseName={2}{3}",
+            # No verified default port — Boomi does not assume one for HANA,
+            # and tenant deployments vary (30015 cloud, 39015 system DB, etc).
+            "default_port": None,
+            "port_required": True,
+            "live_reference_component_id": "c9077711-39a4-4d52-9f91-27bdf1f5b8ec",
+            "runtime_driver_prerequisite": (
+                "SAP HANA JDBC (ngdbc) is not bundled with the Boomi runtime. "
+                "Deploy ngdbc.jar via Custom Library before connection tests."
+            ),
         },
         "custom": {
             "shape":       "custom_url",
-            "buildable":   False,
+            "buildable":   True,
             "driver_id":   "custom",
-            "unsupported_reason": (
-                "Custom driver XML emission is deferred until a verified live "
-                "Boomi Custom connection export is available. Use reuse mode "
-                "on an existing Boomi component or the raw-XML escape hatch "
-                "(config.xml=...) in the meantime."
+            # className and urlFormat come from caller-supplied custom_class_name
+            # and connection_url respectively — see build()'s custom_url branch.
+            "class_name_source": "custom_class_name",
+            "url_format_source": "connection_url",
+            "default_port": None,
+            "live_reference_component_id": "39fb519d-e970-4aaf-a1f7-4eba39158e9d",
+            "runtime_driver_prerequisite": (
+                "Custom JDBC drivers require an Account Library + Custom "
+                "Library component deployed to the runtime/environment. The "
+                "builder emits the XML envelope but does not deploy driver jars."
             ),
         },
     }
-    # "microsoft_jdbc" is a caller-facing alias for the Microsoft JDBC driver.
-    # The emitted Boomi driverId stays "sqlserver" — Boomi has no separate
-    # "microsoft_jdbc" registration; the alias just makes the config self-documenting.
+    # Caller-facing aliases. Each maps onto the canonical DRIVERS key; the
+    # emitted Boomi driverId comes from the canonical entry's "driver_id".
+    #   "microsoft_jdbc" → "sqlserver" (alias is self-documenting; Boomi has
+    #                      no separate registration for Microsoft JDBC).
+    #   "sap_hana"      → "sap-hana"  (underscore alias is JSON-friendly;
+    #                      Boomi's canonical id keeps the hyphen).
     DRIVER_ALIASES: Dict[str, str] = {
         "microsoft_jdbc": "sqlserver",
+        "sap_hana":       "sap-hana",
     }
 
-    # Recognized = entries in DRIVERS + DRIVER_ALIASES (includes custom).
-    # Supported = subset that is actually buildable today (excludes custom).
-    RECOGNIZED_DRIVER_IDS = ("sqlserver", "microsoft_jdbc", "jtds", "custom")
-    SUPPORTED_DRIVER_IDS = ("sqlserver", "microsoft_jdbc", "jtds")
+    # All recognized and currently-buildable driver IDs (Issue #31). Aliases
+    # are listed here so the schema template can advertise the underscore
+    # forms without callers having to discover them from the alias map.
+    RECOGNIZED_DRIVER_IDS = (
+        "sqlserver", "microsoft_jdbc", "jtds",
+        "oracle", "mysql", "sap_hana", "sap-hana", "custom",
+    )
+    SUPPORTED_DRIVER_IDS = RECOGNIZED_DRIVER_IDS
     SUPPORTED_AUTH_MODES = ("username_password",)
     UNSUPPORTED_FUTURE_AUTH_MODES = ("windows_integrated",)
     FORBIDDEN_SECRET_FIELDS = (
@@ -188,9 +281,7 @@ class DatabaseConnectorBuilder:
     )
     # Required keys at the builder-input level, keyed by driver shape.
     # `connector_type` is consumed one layer up by create_connector to pick the
-    # builder and never reaches build(). The "custom_url" shape is not
-    # buildable yet — validate_config rejects it with UNSUPPORTED_DB_DRIVER_SHAPE
-    # before this table is consulted.
+    # builder and never reaches build().
     REQUIRED_FIELDS_BY_SHAPE: Dict[str, tuple] = {
         "host_port_db": (
             "driver_id",
@@ -201,9 +292,25 @@ class DatabaseConnectorBuilder:
             "username",
             "credential_ref",
         ),
+        "custom_url": (
+            "driver_id",
+            "auth_mode",
+            "component_name",
+            "custom_class_name",
+            "connection_url",
+            "username",
+            "credential_ref",
+        ),
+    }
+    # Fields that are valid for one shape but must be rejected for another.
+    # Validated post-required so an empty-string value is also flagged when
+    # explicitly supplied (consistent with `required` empty-string handling).
+    FORBIDDEN_FIELDS_BY_SHAPE: Dict[str, tuple] = {
+        "host_port_db": ("custom_class_name", "connection_url"),
+        "custom_url":   ("host", "port", "dbname", "additional"),
     }
     # Back-compat alias: any external caller importing REQUIRED_FIELDS still
-    # gets the host_port_db tuple (the only shape we built in M2.2).
+    # gets the host_port_db tuple (the only shape exposed in M2.2).
     REQUIRED_FIELDS = REQUIRED_FIELDS_BY_SHAPE["host_port_db"]
 
     @classmethod
@@ -518,16 +625,16 @@ class DatabaseConnectorBuilder:
                 error_code="UNSUPPORTED_DB_DRIVER",
                 field="driver_id",
                 hint=(
-                    f"SQL Server is the only DB family supported today "
-                    f"({supported_drivers}). Postgres/Oracle/MySQL are "
-                    "deferred to later milestones."
+                    f"Supported driver_ids: {supported_drivers}. "
+                    "Postgres and other JDBC families without a live #Common "
+                    "reference export are deferred to later milestones."
                 ),
             )
 
-        # 2b) Driver recognized but not buildable yet (e.g. custom).
-        # Distinct error code (UNSUPPORTED_DB_DRIVER_SHAPE) so callers can
-        # branch: an unrecognized driver_id needs a typo-fix; a non-buildable
-        # one needs reuse / raw-XML escape hatch.
+        # 2b) Safety net for future drivers that we register but cannot build
+        # yet (none in the current registry — every entry is buildable=True
+        # after Issue #31). The branch stays so we can land a recognized-but-
+        # deferred driver later without losing the structured-error contract.
         if not driver.get("buildable", False):
             return BuilderValidationError(
                 f"driver_id {driver_id!r} is recognized but not buildable yet",
@@ -590,7 +697,8 @@ class DatabaseConnectorBuilder:
         # The buildable check above guarantees driver["shape"] is in
         # REQUIRED_FIELDS_BY_SHAPE — callers can only reach here on a
         # buildable shape we model.
-        required_fields = cls.REQUIRED_FIELDS_BY_SHAPE[driver["shape"]]
+        shape = driver["shape"]
+        required_fields = cls.REQUIRED_FIELDS_BY_SHAPE[shape]
         for required in required_fields:
             if required in ("driver_id", "auth_mode", "credential_ref"):
                 continue  # already handled above
@@ -601,6 +709,53 @@ class DatabaseConnectorBuilder:
                     error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
                     field=required,
                     hint=f"Provide a non-empty value for {required}.",
+                )
+
+        # 5b) Shape-specific forbidden fields. Reject UI-impossible combos
+        # (e.g. host on a custom_url driver, or custom_class_name on a
+        # host_port_db driver) before XML emission. Empty-string offenders
+        # also fail — consistent with how required-field empty strings fail
+        # above. None / missing keys are fine (those are simply not present).
+        for forbidden in cls.FORBIDDEN_FIELDS_BY_SHAPE.get(shape, ()):  # noqa: E501
+            if forbidden not in config:
+                continue
+            value = config[forbidden]
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue  # an explicit empty-string carry-over is a no-op
+            return BuilderValidationError(
+                f"{forbidden!r} is not a valid field for the {shape!r} "
+                f"driver shape (driver_id={driver_id!r})",
+                error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                field=forbidden,
+                hint=(
+                    f"Driver shape {shape!r} expects: "
+                    f"{', '.join(cls.REQUIRED_FIELDS_BY_SHAPE[shape])}. "
+                    f"Remove {forbidden!r} or pick a different driver_id."
+                ),
+            )
+
+        # 5c) Drivers without a verified default_port (sap-hana) require the
+        # caller to supply a non-empty port. host_port_db only — custom_url
+        # forbids port entirely and is already caught by the forbidden-field
+        # walker above.
+        if shape == "host_port_db" and driver.get("default_port") is None:
+            port_value = config.get("port")
+            port_missing = (
+                port_value is None
+                or (isinstance(port_value, str) and not port_value.strip())
+            )
+            if port_missing:
+                return BuilderValidationError(
+                    f"port is required for driver_id={driver_id!r} "
+                    "(no verified default port)",
+                    error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                    field="port",
+                    hint=(
+                        f"Supply an explicit port for {driver_id!r} — Boomi "
+                        "does not assume a default for this driver."
+                    ),
                 )
 
         # 6) Optional pooling block.
@@ -623,19 +778,43 @@ class DatabaseConnectorBuilder:
             raise error
 
         # validate_config guarantees driver is present, recognized, and
-        # buildable (only the host_port_db shape reaches this point).
+        # buildable. Shape-specific field assembly happens below; the outer
+        # <bns:Component …> envelope and the WriteOptions/AdapterPoolInfo
+        # blocks are identical across shapes.
         driver = self._resolve_driver(params["driver_id"])
         assert driver is not None  # narrowing for type checkers
+        shape = driver["shape"]
 
         component_name = params["component_name"]
-        host = params["host"]
-        dbname = params["dbname"]
         username = params["username"]
+        folder_name = params.get("folder_name", "Home")
+        description = params.get("description", "")
 
-        port = params.get('port', driver['default_port'])
-        folder_name = params.get('folder_name', 'Home')
-        description = params.get('description', '')
-        additional = params.get('additional', '')
+        if shape == "host_port_db":
+            host = params["host"]
+            dbname = params["dbname"]
+            port = params.get("port", driver["default_port"])
+            additional = params.get("additional", "")
+            class_name = driver["class_name"]
+            url_format = driver["url_format"]
+        elif shape == "custom_url":
+            # Custom shape: caller supplies className + full JDBC URL.
+            # host/port/dbname/additional are forbidden in the JSON contract
+            # but the XML still emits them as empty strings to match the
+            # live #Common Custom export byte-for-byte (component
+            # 39fb519d-e970-4aaf-a1f7-4eba39158e9d on reneraai-5RO3DD).
+            host = ""
+            dbname = ""
+            port = ""
+            additional = ""
+            class_name = params["custom_class_name"]
+            url_format = params["connection_url"]
+        else:  # pragma: no cover — validate_config guarantees a known shape
+            raise BuilderValidationError(
+                f"Internal: unknown driver shape {shape!r}",
+                error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                field="driver_id",
+            )
 
         safe_name = _escape_xml(component_name)
         safe_folder = _escape_xml(folder_name)
@@ -644,6 +823,8 @@ class DatabaseConnectorBuilder:
         safe_dbname = _escape_xml(dbname)
         safe_username = _escape_xml(username)
         safe_additional = _escape_xml(additional)
+        safe_class_name = _escape_xml(class_name)
+        safe_url_format = _escape_xml(url_format)
 
         # Resolve optional pooling/write_options. Defaults preserve M2.2 XML
         # byte-for-byte when caller omits both keys.
@@ -674,13 +855,13 @@ class DatabaseConnectorBuilder:
             f'    <bns:description>{safe_desc}</bns:description>\n'
             '    <bns:object>\n'
             f'        <DatabaseConnectionSettings xmlns="" additional="{safe_additional}"'
-            f' className="{driver["class_name"]}"'
+            f' className="{safe_class_name}"'
             f' dbname="{safe_dbname}"'
             f' driverId="{driver["driver_id"]}"'
             f' host="{safe_host}"'
             f' isPoolEnabled="{is_pool_enabled}"'
             f' port="{port}"'
-            f' urlFormat="{driver["url_format"]}"'
+            f' urlFormat="{safe_url_format}"'
             f' username="{safe_username}">\n'
             f'            <WriteOptions {write_options_attrs}/>\n'
             f'            <AdapterPoolInfo {adapter_pool_info_attrs}/>\n'
