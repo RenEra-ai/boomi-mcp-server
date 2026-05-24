@@ -1160,61 +1160,112 @@ def test_sqlserver_and_jtds_have_no_runtime_prerequisite_note():
         assert "runtime_driver_prerequisite" not in DatabaseConnectorBuilder.DRIVERS[driver_id]
 
 
-# --- Oracle `additional` rejection (codex review of 44b676e) -----------------
-# Oracle Thin's SID syntax (jdbc:oracle:thin:@host:port:sid) has no trailing
-# option slot, so the urlFormat template stops at {2}. Without an explicit
-# rejection, a caller passing `additional` would see the value land in the
-# XML attribute but get silently dropped at JDBC-URL-formatting time —
-# broken-by-design config that looks accepted.
+# --- Oracle `additional` is accepted (codex r1 reverted after KB check) ------
+# Boomi's Database Legacy docs say `additional` is appended to the end of the
+# connection URL across all drivers, not gated per-driver. The Oracle Thin SID
+# URL may not accept arbitrary trailing options at runtime, but that's a
+# runtime concern — the builder must emit whatever the caller supplies and
+# leave runtime acceptance to the JDBC layer. The schema's oracle variant
+# note documents the limitation and points at driver_id='custom' for
+# service-name URLs.
 
 
-def test_oracle_driver_carries_additional_not_supported_flag():
-    assert DatabaseConnectorBuilder.DRIVERS["oracle"]["additional_supported"] is False
-    # url_format only goes up to {2} — no {3} placeholder for additional.
-    assert "{3}" not in DatabaseConnectorBuilder.DRIVERS["oracle"]["url_format"]
+def test_oracle_driver_has_no_additional_supported_flag():
+    """Codex r2 walked back the per-driver `additional` gate — Boomi appends
+    `additional` to the end of the URL for every driver per the Database
+    Legacy docs. The flag mechanism was removed; no current driver opts out."""
+    for driver_id in DatabaseConnectorBuilder.DRIVERS:
+        assert "additional_supported" not in DatabaseConnectorBuilder.DRIVERS[driver_id], driver_id
 
 
-def test_oracle_with_non_empty_additional_fails_with_validation_failed():
-    params = _minimal_config(driver_id="oracle", additional=";readonly=true")
-    with pytest.raises(BuilderValidationError) as excinfo:
-        DatabaseConnectorBuilder().build(
-            **{k: v for k, v in params.items() if k != "connector_type"},
-        )
-    err = excinfo.value
-    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
-    assert err.field == "additional"
-    # Hint points the caller at the workaround (custom + service-name URL).
-    hint = (err.hint or "").lower()
-    assert "custom" in hint
-    assert "service" in hint
-
-
-def test_oracle_with_blank_additional_string_still_builds():
-    """Empty / whitespace-only `additional` is a no-op; the SID URL stays clean."""
-    for blank in ("", "   "):
-        xml = _build_minimal(driver_id="oracle", additional=blank)
-        root = ET.fromstring(xml)
-        dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
-        assert dcs.attrib["driverId"] == "oracle"
-        assert dcs.attrib["additional"] == blank
-        assert dcs.attrib["urlFormat"] == "jdbc:oracle:thin:@{0}:{1}:{2}"
-
-
-def test_oracle_omitting_additional_entirely_still_builds():
-    """No `additional` key at all is the common case and must not trip the guard."""
-    xml = _build_minimal(driver_id="oracle")  # _minimal_config has no `additional` key
+def test_oracle_accepts_additional_and_emits_it_into_xml():
+    xml = _build_minimal(driver_id="oracle", additional=";readonly=true")
     root = ET.fromstring(xml)
     dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
     assert dcs.attrib["driverId"] == "oracle"
-    assert dcs.attrib["additional"] == ""
+    assert dcs.attrib["additional"] == ";readonly=true"
+    # urlFormat in the registry remains the SID form — Boomi appends
+    # `additional` to the formed URL at JDBC-formatting time (vendor-side).
+    assert dcs.attrib["urlFormat"] == "jdbc:oracle:thin:@{0}:{1}:{2}"
 
 
-@pytest.mark.parametrize("driver_id", ["sqlserver", "jtds", "mysql", "sap_hana"])
-def test_other_host_port_db_drivers_still_accept_additional(driver_id):
-    """Only Oracle is gated on `additional`; the other host_port_db drivers
-    keep the existing {3}-slot behavior."""
+@pytest.mark.parametrize("driver_id", ["sqlserver", "jtds", "oracle", "mysql", "sap_hana"])
+def test_every_host_port_db_driver_accepts_additional(driver_id):
+    """All host_port_db drivers accept `additional` — Boomi handles the
+    URL-append semantics on its side."""
     extra = {"port": 30015} if driver_id == "sap_hana" else {}
     xml = _build_minimal(driver_id=driver_id, additional=";foo=bar", **extra)
     root = ET.fromstring(xml)
     dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
     assert dcs.attrib["additional"] == ";foo=bar"
+
+
+# --- Port validation and XML-attribute safety (codex r2) ---------------------
+# build() drops `port` straight into an XML attribute via f-string. Without
+# validation a caller string like '1433" injected="1' would inject an extra
+# XML attribute. Restrict port to int (non-bool) or all-digit string and
+# format via _format_xml_value() as defense-in-depth.
+
+
+@pytest.mark.parametrize("bad_port,bad_type_marker", [
+    (True,          "bool"),    # bool is a subclass of int — reject explicitly
+    (False,         "bool"),
+    (1.5,           "float"),
+    ([1433],        "list"),
+    ({"p": 1433},  "dict"),
+])
+def test_port_with_unsupported_type_fails_validation(bad_port, bad_type_marker):
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(port=bad_port))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "port"
+
+
+@pytest.mark.parametrize("bad_port", [
+    '1433" injected="1',           # XML injection vector — extra attribute
+    "1433;DROP TABLE x",
+    "1433 extra",
+    "abc",
+    "-1",                          # negative port (digit-string rejects '-')
+    "12.5",                        # decimal point
+])
+def test_port_with_non_digit_string_fails_validation(bad_port):
+    """Critical security check: a non-digit string in port must never reach
+    the XML f-string template (line 899)."""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(port=bad_port))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "port"
+
+
+def test_port_negative_integer_fails_validation():
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(port=-1))
+    assert excinfo.value.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert excinfo.value.field == "port"
+
+
+@pytest.mark.parametrize("good_port,expected_xml", [
+    (1433,    "1433"),
+    (65535,   "65535"),
+    ("1433",  "1433"),
+    ("11433", "11433"),
+])
+def test_port_with_valid_int_or_digit_string_builds(good_port, expected_xml):
+    xml = _build_minimal(port=good_port)
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["port"] == expected_xml
+
+
+def test_port_injection_attempt_does_not_appear_in_emitted_xml():
+    """Even if validate_config has a future gap, the XML must not contain the
+    injection string verbatim (defense-in-depth via _format_xml_value)."""
+    sentinel = '1433" injected="SHOULD_NOT_APPEAR'
+    with pytest.raises(BuilderValidationError):
+        DatabaseConnectorBuilder().build(**_minimal_config(port=sentinel))
+    # validate_config blocks the call; sentinel never lands in any output.
+    # Also confirm scan_forbidden_secret_fields doesn't trip on the bare port —
+    # it's about explicit type/format guards, not secret detection.

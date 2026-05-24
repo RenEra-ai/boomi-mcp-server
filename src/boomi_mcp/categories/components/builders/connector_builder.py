@@ -195,16 +195,18 @@ class DatabaseConnectorBuilder:
             "buildable":   True,
             "driver_id":   "oracle",
             "class_name":  "oracle.jdbc.driver.OracleDriver",
-            # Oracle Thin SID syntax has no trailing option slot. Boomi's
-            # urlFormat template stops at {2}; passing `additional` would
-            # silently drop the value because there's no {3} placeholder
-            # to substitute into. validate_config rejects non-empty
-            # `additional` for this driver — callers needing JDBC options
-            # should use driver_id='custom' with a service-name URL
-            # (jdbc:oracle:thin:@//host:port/service?option=value).
+            # Oracle Thin SID syntax (jdbc:oracle:thin:@host:port:sid) has
+            # no {3} substitution slot in Boomi's url_format. Boomi still
+            # appends `additional` to the end of the formed URL per its
+            # Database (Legacy) docs ("appended to the end of the connection
+            # URL according to your database vendor"), but Oracle Thin may
+            # not accept arbitrary trailing semicolon options. The builder
+            # emits whatever the caller supplies — runtime acceptance is the
+            # caller's concern; the variant note in the schema template
+            # points at driver_id='custom' with a service-name URL for
+            # callers who need vendor-style options.
             "url_format":  "jdbc:oracle:thin:@{0}:{1}:{2}",
             "default_port": 1521,
-            "additional_supported": False,
             "live_reference_component_id": "6adf9e1e-39c8-4104-bc6c-9769b93aa161",
         },
         "mysql": {
@@ -744,34 +746,6 @@ class DatabaseConnectorBuilder:
                 ),
             )
 
-        # 5b2) Per-driver `additional` support. Most host_port_db url_formats
-        # carry a {3} suffix slot for caller-supplied JDBC options; Oracle's
-        # Thin SID syntax (jdbc:oracle:thin:@host:port:sid) does not. Without
-        # this guard a non-empty `additional` is emitted in the XML attribute
-        # but silently dropped at JDBC-URL formatting time — broken-by-design
-        # config that looks valid. The flag stays orthogonal to the shape
-        # contract so future drivers without a {3} slot can opt in cleanly.
-        if shape == "host_port_db" and driver.get("additional_supported", True) is False:
-            additional_value = config.get("additional")
-            if isinstance(additional_value, str) and additional_value.strip():
-                return BuilderValidationError(
-                    f"`additional` is not supported for driver_id={driver_id!r} "
-                    "(no {3} slot in this driver's urlFormat)",
-                    error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
-                    field="additional",
-                    hint=(
-                        f"Oracle Thin SID URLs have no trailing option slot, "
-                        "so JDBC options can't ride along in `additional`. Use "
-                        "driver_id='custom' with a service-name connection_url "
-                        "(jdbc:oracle:thin:@//host:port/service?option=value) "
-                        "to pass driver options."
-                        if driver_id in ("oracle",)
-                        else f"This driver's urlFormat has no {{3}} placeholder. "
-                        "Remove `additional` or switch to driver_id='custom' "
-                        "with a fully-formed connection_url."
-                    ),
-                )
-
         # 5c) Drivers without a verified default_port (sap-hana) require the
         # caller to supply a non-empty port. host_port_db only — custom_url
         # forbids port entirely and is already caught by the forbidden-field
@@ -792,6 +766,56 @@ class DatabaseConnectorBuilder:
                         f"Supply an explicit port for {driver_id!r} — Boomi "
                         "does not assume a default for this driver."
                     ),
+                )
+
+        # 5d) Port type / format check (host_port_db). build() drops `port`
+        # straight into an XML attribute via f-string, so an unescaped string
+        # like `1433" injected="1` would inject extra attributes. Restrict to
+        # int (non-bool) or all-digit string. bool is a subclass of int in
+        # Python and must be rejected explicitly before the int check.
+        if shape == "host_port_db" and "port" in config:
+            port_value = config["port"]
+            if port_value is None or (
+                isinstance(port_value, str) and not port_value.strip()
+            ):
+                # Empty/None is handled by 5c (required) or by build()'s
+                # default-port fallback. Skip type check.
+                pass
+            elif isinstance(port_value, bool):
+                return BuilderValidationError(
+                    f"port must be an integer or digit string, got bool",
+                    error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                    field="port",
+                    hint="Use a JSON integer (e.g. 1433) or all-digit string.",
+                )
+            elif isinstance(port_value, int):
+                if port_value <= 0:
+                    return BuilderValidationError(
+                        f"port must be a positive integer, got {port_value!r}",
+                        error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                        field="port",
+                        hint="JDBC ports are positive integers (1..65535).",
+                    )
+            elif isinstance(port_value, str):
+                if not port_value.strip().isdigit():
+                    return BuilderValidationError(
+                        f"port must be an integer or digit-only string, got "
+                        f"non-digit characters",
+                        error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                        field="port",
+                        hint=(
+                            "JDBC ports are positive integers (1..65535). "
+                            "Non-digit characters in port can corrupt the "
+                            "emitted XML."
+                        ),
+                    )
+            else:
+                return BuilderValidationError(
+                    f"port must be an integer or digit string, got "
+                    f"{type(port_value).__name__}",
+                    error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                    field="port",
+                    hint="Use a JSON integer (e.g. 1433) or all-digit string.",
                 )
 
         # 6) Optional pooling block.
@@ -861,6 +885,10 @@ class DatabaseConnectorBuilder:
         safe_additional = _escape_xml(additional)
         safe_class_name = _escape_xml(class_name)
         safe_url_format = _escape_xml(url_format)
+        # validate_config guarantees port is None / "" / int / digit-string;
+        # _format_xml_value handles all three safely (bool→str, int→str,
+        # str→escaped). Defense-in-depth against any future validator gap.
+        safe_port = _format_xml_value(port) if port != "" else ""
 
         # Resolve optional pooling/write_options. Defaults preserve M2.2 XML
         # byte-for-byte when caller omits both keys.
@@ -896,7 +924,7 @@ class DatabaseConnectorBuilder:
             f' driverId="{driver["driver_id"]}"'
             f' host="{safe_host}"'
             f' isPoolEnabled="{is_pool_enabled}"'
-            f' port="{port}"'
+            f' port="{safe_port}"'
             f' urlFormat="{safe_url_format}"'
             f' username="{safe_username}">\n'
             f'            <WriteOptions {write_options_attrs}/>\n'
