@@ -768,47 +768,61 @@ class DatabaseConnectorBuilder:
                     ),
                 )
 
-        # 5d) Port type / format check (host_port_db). build() drops `port`
-        # straight into an XML attribute via f-string, so an unescaped string
-        # like `1433" injected="1` would inject extra attributes. Restrict to
-        # int (non-bool) or all-digit string. bool is a subclass of int in
-        # Python and must be rejected explicitly before the int check.
+        # 5d) Port type / format / range check (host_port_db). build() drops
+        # `port` straight into an XML attribute via f-string, so an unescaped
+        # string like `1433" injected="1` would inject extra attributes.
+        # Restrict to int (non-bool) or all-digit string, and enforce TCP
+        # port semantics (1..65535).
+        #
+        # Explicit null / blank-string is also rejected: build() uses
+        # params.get('port', default), so passing None or "" keeps the value
+        # (not the default) and emits port="None" or port="" in the XML —
+        # invalid Boomi config. Callers should OMIT the key to use the
+        # driver default, not pass null. SAP HANA's required-port check
+        # (section 5c) handles its own case earlier.
         if shape == "host_port_db" and "port" in config:
             port_value = config["port"]
-            if port_value is None or (
-                isinstance(port_value, str) and not port_value.strip()
-            ):
-                # Empty/None is handled by 5c (required) or by build()'s
-                # default-port fallback. Skip type check.
-                pass
-            elif isinstance(port_value, bool):
+            # bool is a subclass of int — reject explicitly before int check.
+            if isinstance(port_value, bool):
                 return BuilderValidationError(
-                    f"port must be an integer or digit string, got bool",
+                    "port must be an integer or digit string, got bool",
                     error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
                     field="port",
                     hint="Use a JSON integer (e.g. 1433) or all-digit string.",
                 )
-            elif isinstance(port_value, int):
-                if port_value <= 0:
-                    return BuilderValidationError(
-                        f"port must be a positive integer, got {port_value!r}",
-                        error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
-                        field="port",
-                        hint="JDBC ports are positive integers (1..65535).",
-                    )
+            if port_value is None or (
+                isinstance(port_value, str) and not port_value.strip()
+            ):
+                return BuilderValidationError(
+                    "port must not be null or blank when supplied; omit the "
+                    "key to use the driver default",
+                    error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                    field="port",
+                    hint=(
+                        f"Either omit the `port` key (uses default "
+                        f"{driver.get('default_port')!r}) or pass a positive "
+                        "integer / digit string in 1..65535."
+                    ),
+                )
+            # Normalize to an int for range checking. Reject non-int types
+            # and non-digit strings here so the int range check below is the
+            # single source of truth for valid-range semantics.
+            if isinstance(port_value, int):
+                port_int = port_value
             elif isinstance(port_value, str):
                 if not port_value.strip().isdigit():
                     return BuilderValidationError(
-                        f"port must be an integer or digit-only string, got "
-                        f"non-digit characters",
+                        "port must be an integer or digit-only string "
+                        "(1..65535), got non-digit characters",
                         error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
                         field="port",
                         hint=(
                             "JDBC ports are positive integers (1..65535). "
-                            "Non-digit characters in port can corrupt the "
-                            "emitted XML."
+                            "Non-digit characters in port can also corrupt "
+                            "the emitted XML."
                         ),
                     )
+                port_int = int(port_value.strip())
             else:
                 return BuilderValidationError(
                     f"port must be an integer or digit string, got "
@@ -816,6 +830,15 @@ class DatabaseConnectorBuilder:
                     error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
                     field="port",
                     hint="Use a JSON integer (e.g. 1433) or all-digit string.",
+                )
+            # TCP port range. Boomi can't connect to port 0 (OS-chosen, only
+            # valid for listening) or to ports outside 1..65535.
+            if port_int < 1 or port_int > 65535:
+                return BuilderValidationError(
+                    f"port {port_value!r} is outside the valid TCP range",
+                    error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                    field="port",
+                    hint="JDBC ports must be in 1..65535 (inclusive).",
                 )
 
         # 6) Optional pooling block.

@@ -1269,3 +1269,94 @@ def test_port_injection_attempt_does_not_appear_in_emitted_xml():
     # validate_config blocks the call; sentinel never lands in any output.
     # Also confirm scan_forbidden_secret_fields doesn't trip on the bare port —
     # it's about explicit type/format guards, not secret detection.
+
+
+# --- Port null/blank rejection (codex r3) -----------------------------------
+# A JSON client serializing `port: null` or `port: ""` for "use default"
+# previously slipped past validate_config: section 5d treated it as a skip,
+# but build()'s params.get('port', default) preserves the explicit value, so
+# the emitted XML carried port="None" or port="". Section 5d now rejects
+# both forms and tells callers to OMIT the key for default-port behavior.
+# SAP HANA (no default) keeps its required-port error via section 5c.
+
+
+@pytest.mark.parametrize("driver_id", ["sqlserver", "jtds", "oracle", "mysql"])
+def test_port_explicit_none_fails_validation_on_defaulted_driver(driver_id):
+    params = _minimal_config(driver_id=driver_id, port=None)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "port"
+    assert "null" in str(err) or "blank" in str(err)
+    assert "omit" in (err.hint or "").lower()
+
+
+@pytest.mark.parametrize("blank_port", ["", "   ", "\t", "\n"])
+def test_port_blank_string_fails_validation(blank_port):
+    """Empty / whitespace-only strings must not slip through. build() would
+    otherwise emit `port=""` and clients would see a corrupted attribute."""
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(**_minimal_config(port=blank_port))
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "port"
+
+
+def test_omitting_port_still_uses_driver_default():
+    """Regression guard: omitting the `port` key (no key, not null) still
+    falls back to the driver default — distinct from null/blank rejection."""
+    params = _minimal_config()
+    params.pop("port", None)  # _minimal_config has no port, but be explicit
+    xml = DatabaseConnectorBuilder().build(
+        **{k: v for k, v in params.items() if k != "connector_type"},
+    )
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["port"] == "1433"  # sqlserver default
+
+
+# --- Port range checks (codex r3 — uniform 1..65535) -------------------------
+# r2 enforced port > 0 on int paths but missed the upper bound (65535) and
+# the lower bound on string paths. r3 normalizes to int after the digit
+# check and applies the same 1..65535 envelope to both code paths.
+
+
+@pytest.mark.parametrize("driver_id,bad_port", [
+    # Out-of-range int (above the TCP ceiling)
+    ("sqlserver", 65536),
+    ("sqlserver", 100000),
+    ("oracle",    1000000),
+    # Out-of-range int (zero — OS-chosen, not valid for client connect)
+    ("sqlserver", 0),
+    # Out-of-range string forms
+    ("sqlserver", "0"),
+    ("sqlserver", "0000"),
+    ("sqlserver", "65536"),
+    ("sqlserver", "100000"),
+])
+def test_port_outside_tcp_range_fails_validation(driver_id, bad_port):
+    params = _minimal_config(driver_id=driver_id, port=bad_port)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "port"
+
+
+@pytest.mark.parametrize("port_value,expected_xml", [
+    (1,      "1"),       # lower bound
+    (1433,   "1433"),
+    (65535,  "65535"),   # upper bound
+    ("1",    "1"),
+    ("65535", "65535"),
+])
+def test_port_at_tcp_range_boundaries_builds(port_value, expected_xml):
+    xml = _build_minimal(port=port_value)
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["port"] == expected_xml
