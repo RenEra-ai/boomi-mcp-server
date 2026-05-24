@@ -754,15 +754,87 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert step.get("validation_error") is None
 
     @patch(_PATCH_TARGET)
-    def test_custom_driver_id_marks_plan_as_database_validation_error(self, mock_pag):
+    def test_custom_driver_with_wrong_shape_field_marks_plan_as_database_validation_error(self, mock_pag):
+        """Issue #31: Custom is buildable now, but uses the custom_url shape.
+        A caller mixing host_port_db fields (host/dbname) with driver_id=custom
+        must fail with DATABASE_CONNECTOR_VALIDATION_FAILED before mutation."""
         mock_pag.return_value = []
+        # _db_comp defaults carry host/port/dbname (host_port_db fields).
+        # validate_config flags the missing custom_class_name first — that's
+        # the contract: required-field checks run before forbidden-field
+        # checks, so the structured error nails the missing required field.
         comp = _db_comp(driver_id="custom")
         config = _build_config([comp])
         plan = _build_plan(MagicMock(), config)
         step = plan["steps"][0]
         assert step["planned_action"] == "error_database_validation"
-        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER_SHAPE"
-        assert step["validation_error"]["field"] == "driver_id"
+        assert step["validation_error"]["error_code"] == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+        assert step["validation_error"]["field"] == "custom_class_name"
+
+    @patch(_PATCH_TARGET)
+    def test_custom_driver_with_host_field_marks_plan_as_database_validation_error(self, mock_pag):
+        """custom_url shape rejects host (and port/dbname/additional) outright.
+        Once the required custom fields are present, the forbidden walker fires."""
+        mock_pag.return_value = []
+        # Build a valid custom_url config first, then add a forbidden host.
+        comp = IntegrationComponentSpec(
+            key="db_custom_with_host", type="connector-settings", action="create",
+            name="Custom with Host", config={
+                "connector_type": "database",
+                "driver_id": "custom",
+                "auth_mode": "username_password",
+                "component_name": "Custom with Host",
+                "username": "u",
+                "credential_ref": "credential://x/y",
+                "custom_class_name": "com.example.Driver",
+                "connection_url": "jdbc:example://host/db",
+                "host": "host.example.com",  # ← forbidden on custom_url
+            },
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+        assert step["validation_error"]["field"] == "host"
+        assert "custom_url" in step["validation_error"]["hint"]
+
+    @patch(_PATCH_TARGET)
+    def test_valid_custom_driver_plans_without_validation_error(self, mock_pag):
+        """A custom_url config with custom_class_name + connection_url and no
+        host_port_db fields passes preflight cleanly."""
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="db_custom_ok", type="connector-settings", action="create",
+            name="Custom OK", config={
+                "connector_type": "database",
+                "driver_id": "custom",
+                "auth_mode": "username_password",
+                "component_name": "Custom OK",
+                "username": "u",
+                "credential_ref": "credential://x/y",
+                "custom_class_name": "com.example.Driver",
+                "connection_url": "jdbc:example://host/db",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step["route"] == "connector_builder_or_xml"
+        assert step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
+    def test_sap_hana_missing_port_marks_plan_as_database_validation_error(self, mock_pag):
+        """SAP HANA has no verified default port — caller must supply it."""
+        mock_pag.return_value = []
+        comp = _db_comp(driver_id="sap_hana")
+        # Remove port from the default _db_config so we trigger the check.
+        del comp.config["port"]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+        assert step["validation_error"]["field"] == "port"
 
     @patch(_PATCH_TARGET)
     def test_invalid_pooling_marks_plan_as_database_validation_error(self, mock_pag):
@@ -993,7 +1065,11 @@ class TestApplyPlanDatabaseValidationFailFast:
 
     @patch("src.boomi_mcp.categories.integration_builder._execute_component")
     @patch(_PATCH_TARGET)
-    def test_apply_fails_before_execution_on_unsupported_db_driver_shape(self, mock_pag, mock_exec):
+    def test_apply_fails_before_execution_on_database_shape_mismatch(self, mock_pag, mock_exec):
+        """Issue #31: Custom is buildable but uses the custom_url shape. The
+        _db_comp default config carries host_port_db fields, so dispatching
+        as driver_id=custom fails fast with the structured validation error
+        (now field=custom_class_name) before any component execution."""
         mock_pag.return_value = []
         config = _build_config([_db_comp(driver_id="custom")])
         config["dry_run"] = False
@@ -1002,7 +1078,7 @@ class TestApplyPlanDatabaseValidationFailFast:
         assert len(result["unresolvable_steps"]) == 1
         bad = result["unresolvable_steps"][0]
         assert bad["planned_action"] == "error_database_validation"
-        assert bad["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER_SHAPE"
+        assert bad["validation_error"]["error_code"] == "DATABASE_CONNECTOR_VALIDATION_FAILED"
         mock_exec.assert_not_called()
 
     @patch("src.boomi_mcp.categories.integration_builder._execute_component")

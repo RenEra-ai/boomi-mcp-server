@@ -848,6 +848,25 @@ _COMPONENT_CREATE_CUSTOMLIBRARY = {
 }
 
 
+_HOST_PORT_DB_REQUIRED = [
+    "component_name", "driver_id", "auth_mode",
+    "host", "dbname", "username", "credential_ref",
+]
+_HOST_PORT_DB_OPTIONAL = [
+    "folder_name", "description", "port", "additional",
+    "pooling", "write_options",
+]
+_HOST_PORT_DB_FORBIDDEN = ["custom_class_name", "connection_url"]
+
+_CUSTOM_URL_REQUIRED = [
+    "component_name", "driver_id", "auth_mode",
+    "custom_class_name", "connection_url", "username", "credential_ref",
+]
+_CUSTOM_URL_OPTIONAL = [
+    "folder_name", "description", "pooling", "write_options",
+]
+_CUSTOM_URL_FORBIDDEN = ["host", "port", "dbname", "additional"]
+
 _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
     "resource_type": "component",
     "operation": "create",
@@ -855,10 +874,14 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
     "protocol": "database.sqlserver",
     "tool": "manage_connector (action='create')",
     "note": (
-        "Database (Legacy) connector for Microsoft SQL Server. Dispatched through "
-        "the builder registry (CONNECTOR_BUILDERS['database']) so callers pass JSON "
-        "config — not raw XML. The builder emits <DatabaseConnectionSettings> with "
-        "Boomi's default <WriteOptions> and <AdapterPoolInfo> blocks."
+        "Database (Legacy) connector. One builder, one outer "
+        "<DatabaseConnectionSettings> envelope, two driver shapes — "
+        "host_port_db (Microsoft SQL Server / jTDS / Oracle / MySQL / SAP HANA) "
+        "and custom_url (caller-supplied JDBC class + URL). Dispatched through "
+        "the builder registry (CONNECTOR_BUILDERS['database']) so callers pass "
+        "JSON config — not raw XML. The builder emits "
+        "<DatabaseConnectionSettings> with Boomi's <WriteOptions> and "
+        "<AdapterPoolInfo> blocks."
     ),
     "template": {
         "connector_type": "database",
@@ -885,8 +908,47 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
         "credential_ref",
     ],
     "defaults": {"connector_type": "database", "driver_id": "sqlserver", "auth_mode": "username_password", "port": 1433, "additional": ""},
-    "supported_driver_ids": ["sqlserver", "microsoft_jdbc", "jtds"],
-    "recognized_driver_ids": ["sqlserver", "microsoft_jdbc", "jtds", "custom"],
+    # All driver IDs (Issue #31) — every entry below is now buildable.
+    # Aliases (microsoft_jdbc, sap_hana) are listed so LLM clients can pick
+    # either form without consulting DRIVER_ALIASES.
+    "supported_driver_ids": [
+        "sqlserver", "microsoft_jdbc", "jtds",
+        "oracle", "mysql", "sap_hana", "sap-hana", "custom",
+    ],
+    "recognized_driver_ids": [
+        "sqlserver", "microsoft_jdbc", "jtds",
+        "oracle", "mysql", "sap_hana", "sap-hana", "custom",
+    ],
+    "shape_metadata": {
+        "host_port_db": {
+            "required": _HOST_PORT_DB_REQUIRED,
+            "optional": _HOST_PORT_DB_OPTIONAL,
+            "forbidden": _HOST_PORT_DB_FORBIDDEN,
+            "applies_to": [
+                "sqlserver", "microsoft_jdbc", "jtds",
+                "oracle", "mysql", "sap_hana", "sap-hana",
+            ],
+            "description": (
+                "Boomi substitutes host/port/dbname into the driver's "
+                "urlFormat placeholders ({0},{1},{2}); `additional` is "
+                "appended verbatim as {3}. Pick this shape when Boomi knows "
+                "the driver's URL template."
+            ),
+        },
+        "custom_url": {
+            "required": _CUSTOM_URL_REQUIRED,
+            "optional": _CUSTOM_URL_OPTIONAL,
+            "forbidden": _CUSTOM_URL_FORBIDDEN,
+            "applies_to": ["custom"],
+            "description": (
+                "Caller supplies the full JDBC driver class FQCN "
+                "(custom_class_name → className) and a complete JDBC URL "
+                "(connection_url → urlFormat). host/port/dbname/additional "
+                "are emitted as empty XML attributes to match Boomi's live "
+                "Custom export shape — do not pass them in JSON."
+            ),
+        },
+    },
     "driver_variants": {
         "sqlserver": {
             "shape": "host_port_db",
@@ -897,6 +959,7 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
             "default_port": 1433,
             "required": ["component_name", "host", "dbname", "username", "credential_ref"],
             "recommended_additional": ";encrypt=true;trustServerCertificate=true",
+            "live_reference_component_id": "4ace95d7-6ee4-4f83-8fad-723d3fabdb2f",
             "note": (
                 "Microsoft JDBC. Driver 12+ defaults to encrypt=true; the "
                 "recommended_additional clause adds trustServerCertificate=true "
@@ -913,18 +976,112 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
             "url_format": "jdbc:jtds:sqlserver://{0}:{1}/{2}{3}",
             "default_port": 1433,
             "required": ["component_name", "host", "dbname", "username", "credential_ref"],
-            "note": "Legacy jTDS driver. Pre-loaded in Boomi runtime; no TLS by default.",
+            "live_reference_component_id": "107aaef1-cb1e-4975-be44-69d120803864",
+            "note": (
+                "Legacy jTDS driver. Pre-loaded in Boomi runtime; no TLS by "
+                "default. For SQL Server Windows-domain auth, callers add "
+                ";domain=<domain> via `additional` and order matters: "
+                ";instance=<name>;domain=<value>. Boomi's UI auth mode for "
+                "Windows-integrated is not yet buildable in this MCP."
+            ),
         },
+        "oracle": {
+            "shape": "host_port_db",
+            "buildable": True,
+            "emits_driver_id": "oracle",
+            "class_name": "oracle.jdbc.driver.OracleDriver",
+            "url_format": "jdbc:oracle:thin:@{0}:{1}:{2}",
+            "default_port": 1521,
+            "required": ["component_name", "host", "dbname", "username", "credential_ref"],
+            "live_reference_component_id": "6adf9e1e-39c8-4104-bc6c-9769b93aa161",
+            "note": (
+                "Oracle Thin driver. `dbname` is the SID (Boomi's urlFormat "
+                "uses the colon-SID form). For service-name style URLs, use "
+                "driver_id='custom' with a connection_url built around "
+                "jdbc:oracle:thin:@//host:port/service_name."
+            ),
+        },
+        "mysql": {
+            "shape": "host_port_db",
+            "buildable": True,
+            "emits_driver_id": "mysql",
+            "class_name": "com.mysql.jdbc.Driver",
+            "url_format": "jdbc:mysql://{0}:{1}/{2}{3}",
+            "default_port": 3306,
+            "required": ["component_name", "host", "dbname", "username", "credential_ref"],
+            "live_reference_component_id": "bfbfea6f-39c7-498e-859b-6036959a20c8",
+            "runtime_driver_prerequisite": (
+                "MySQL Connector/J is not bundled with the Boomi runtime. "
+                "Upload the driver as a Custom Library and deploy it to the "
+                "runtime/environment before testing the connection. The "
+                "builder emits XML but does not deploy jars."
+            ),
+            "note": (
+                "Emits the legacy com.mysql.jdbc.Driver class (matches "
+                "Boomi's live #Common reference). Newer MySQL Connector/J "
+                "releases prefer com.mysql.cj.jdbc.Driver — use "
+                "driver_id='custom' to pin a different class name."
+            ),
+        },
+        "sap-hana": {
+            "shape": "host_port_db",
+            "buildable": True,
+            "emits_driver_id": "sap-hana",
+            "class_name": "com.sap.db.jdbc.Driver",
+            "url_format": "jdbc:sap://{0}:{1}/?databaseName={2}{3}",
+            "default_port": None,
+            "port_required": True,
+            "required": [
+                "component_name", "host", "port", "dbname", "username", "credential_ref",
+            ],
+            "live_reference_component_id": "c9077711-39a4-4d52-9f91-27bdf1f5b8ec",
+            "runtime_driver_prerequisite": (
+                "SAP HANA JDBC (ngdbc) is not bundled with the Boomi runtime. "
+                "Deploy ngdbc.jar via Custom Library before connection tests."
+            ),
+            "note": (
+                "No verified default port — callers MUST supply `port` "
+                "explicitly. Cloud HANA listens on 443/30015/etc; on-prem "
+                "varies. Missing port fails with "
+                "DATABASE_CONNECTOR_VALIDATION_FAILED before mutation."
+            ),
+        },
+        "sap_hana": {"alias_of": "sap-hana"},
         "custom": {
             "shape": "custom_url",
-            "buildable": False,
-            "unsupported_error_code": "UNSUPPORTED_DB_DRIVER_SHAPE",
-            "unsupported_reason": (
-                "Custom driver XML emission is deferred until a verified live "
-                "Boomi Custom connection export is available. Use reuse mode "
-                "on an existing Boomi component or the raw-XML escape hatch "
-                "(config.xml=...) in the meantime."
+            "buildable": True,
+            "emits_driver_id": "custom",
+            "class_name_source": "custom_class_name",
+            "url_format_source": "connection_url",
+            "default_port": None,
+            "required": [
+                "component_name", "custom_class_name", "connection_url",
+                "username", "credential_ref",
+            ],
+            "live_reference_component_id": "39fb519d-e970-4aaf-a1f7-4eba39158e9d",
+            "runtime_driver_prerequisite": (
+                "Custom JDBC drivers require an Account Library + Custom "
+                "Library component deployed to the runtime/environment. The "
+                "builder emits the XML envelope but does not deploy jars."
             ),
+            "note": (
+                "Caller supplies the FQCN via custom_class_name and the full "
+                "JDBC URL via connection_url — Boomi does not substitute "
+                "{0}{1}{2}{3} for this shape. host/port/dbname/additional "
+                "are forbidden in the JSON contract; the XML emits them as "
+                "empty attributes to match Boomi's live Custom export."
+            ),
+            "example": {
+                "connector_type": "database",
+                "driver_id": "custom",
+                "auth_mode": "username_password",
+                "component_name": "Snowflake via Custom JDBC",
+                "folder_name": "Process Library",
+                "username": "INTEG_USER",
+                "credential_ref": "credential://prod/snowflake/password",
+                "custom_class_name": "net.snowflake.client.jdbc.SnowflakeDriver",
+                "connection_url": "jdbc:snowflake://acct.snowflakecomputing.com/?db=PROD&schema=PUBLIC",
+            },
         },
     },
     "supported_auth_modes": ["username_password"],
@@ -1023,8 +1180,13 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
         "urlFormat=jdbc:sqlserver://{0}:{1};database={2}{3}); the alias is a caller "
         "convenience. driver_id='jtds' emits the legacy jTDS driver "
         "(className=net.sourceforge.jtds.jdbc.Driver, "
-        "urlFormat=jdbc:jtds:sqlserver://{0}:{1}/{2}{3}). Postgres/Oracle/MySQL are "
-        "deliberately unsupported in M2.2 and return error_code=UNSUPPORTED_DB_DRIVER."
+        "urlFormat=jdbc:jtds:sqlserver://{0}:{1}/{2}{3}). driver_id='oracle' emits "
+        "the Oracle Thin driver, driver_id='mysql' emits com.mysql.jdbc.Driver, "
+        "and driver_id='sap_hana' (canonical 'sap-hana') emits com.sap.db.jdbc.Driver. "
+        "driver_id='custom' switches to the custom_url shape — caller supplies the "
+        "full JDBC class via custom_class_name and the full URL via connection_url. "
+        "Postgres and other JDBC families without a verified Boomi reference export "
+        "remain unsupported and return error_code=UNSUPPORTED_DB_DRIVER."
     ),
     "gotchas": [
         (
@@ -1039,6 +1201,25 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
             "so the driver rejects the TLS handshake with a PKIX path error. Set "
             "additional=';encrypt=true;trustServerCertificate=true' (or "
             "';encrypt=false' for non-TLS dev only) to proceed."
+        ),
+        (
+            "SAP HANA has no verified default port. Callers MUST pass `port` "
+            "explicitly (e.g. 30015 for system DB, 443 for cloud HANA TLS, "
+            "39015/39041 for on-prem tenants). Missing port fails with "
+            "DATABASE_CONNECTOR_VALIDATION_FAILED field='port' before mutation."
+        ),
+        (
+            "Custom / MySQL / SAP HANA drivers are not bundled with the Boomi "
+            "runtime. The connector component XML lands successfully, but "
+            "Connection Tests will fail until you deploy the JDBC driver "
+            "(ngdbc.jar for SAP HANA, mysql-connector-j for MySQL, vendor JAR "
+            "for Custom) via an Account Library + Custom Library component."
+        ),
+        (
+            "driver_id='custom' rejects host/port/dbname/additional in the JSON "
+            "contract — Boomi's Custom shape carries them as empty XML attrs "
+            "and the full URL lives in connection_url. Supplying host on a "
+            "Custom config fails with DATABASE_CONNECTOR_VALIDATION_FAILED."
         ),
     ],
     "recommended_workflow": [
