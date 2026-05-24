@@ -479,3 +479,30 @@ def test_build_rejects_empty_name():
     with pytest.raises(BuilderValidationError) as exc:
         ProcessFlowBuilder.build(_base_config(), name="")
     assert exc.value.error_code == "PROCESS_XML_VALIDATION_FAILED"
+
+
+def test_build_coerces_non_string_description():
+    """Codex review r2 Q4: validate_config does not type-check description,
+    so a non-string value crashed _escape_xml's .replace() with
+    AttributeError. build() must coerce."""
+    cfg = _base_config()
+    cfg["description"] = 12345
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    root = ET.fromstring(xml)
+    assert root.find("bns:description", NS).text == "12345"
+
+
+def test_build_coerces_non_string_folder_name():
+    xml = ProcessFlowBuilder.build(_base_config(), name="N", folder_name=42)
+    root = ET.fromstring(xml)
+    assert root.attrib["folderFullPath"] == "42"
+
+
+def test_build_coerces_non_string_name():
+    """Pydantic normally coerces IntegrationComponentSpec.name, but
+    _execute_component's fallback `comp.name or payload.get('name') or
+    comp.key` can route a raw int through if the caller bypassed the
+    pydantic model. Defense-in-depth via str() coercion."""
+    xml = ProcessFlowBuilder.build(_base_config(), name=12345)
+    root = ET.fromstring(xml)
+    assert root.attrib["name"] == "12345"
