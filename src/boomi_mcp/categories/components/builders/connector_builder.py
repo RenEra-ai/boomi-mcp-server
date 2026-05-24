@@ -195,8 +195,16 @@ class DatabaseConnectorBuilder:
             "buildable":   True,
             "driver_id":   "oracle",
             "class_name":  "oracle.jdbc.driver.OracleDriver",
+            # Oracle Thin SID syntax has no trailing option slot. Boomi's
+            # urlFormat template stops at {2}; passing `additional` would
+            # silently drop the value because there's no {3} placeholder
+            # to substitute into. validate_config rejects non-empty
+            # `additional` for this driver — callers needing JDBC options
+            # should use driver_id='custom' with a service-name URL
+            # (jdbc:oracle:thin:@//host:port/service?option=value).
             "url_format":  "jdbc:oracle:thin:@{0}:{1}:{2}",
             "default_port": 1521,
+            "additional_supported": False,
             "live_reference_component_id": "6adf9e1e-39c8-4104-bc6c-9769b93aa161",
         },
         "mysql": {
@@ -735,6 +743,34 @@ class DatabaseConnectorBuilder:
                     f"Remove {forbidden!r} or pick a different driver_id."
                 ),
             )
+
+        # 5b2) Per-driver `additional` support. Most host_port_db url_formats
+        # carry a {3} suffix slot for caller-supplied JDBC options; Oracle's
+        # Thin SID syntax (jdbc:oracle:thin:@host:port:sid) does not. Without
+        # this guard a non-empty `additional` is emitted in the XML attribute
+        # but silently dropped at JDBC-URL formatting time — broken-by-design
+        # config that looks valid. The flag stays orthogonal to the shape
+        # contract so future drivers without a {3} slot can opt in cleanly.
+        if shape == "host_port_db" and driver.get("additional_supported", True) is False:
+            additional_value = config.get("additional")
+            if isinstance(additional_value, str) and additional_value.strip():
+                return BuilderValidationError(
+                    f"`additional` is not supported for driver_id={driver_id!r} "
+                    "(no {3} slot in this driver's urlFormat)",
+                    error_code="DATABASE_CONNECTOR_VALIDATION_FAILED",
+                    field="additional",
+                    hint=(
+                        f"Oracle Thin SID URLs have no trailing option slot, "
+                        "so JDBC options can't ride along in `additional`. Use "
+                        "driver_id='custom' with a service-name connection_url "
+                        "(jdbc:oracle:thin:@//host:port/service?option=value) "
+                        "to pass driver options."
+                        if driver_id in ("oracle",)
+                        else f"This driver's urlFormat has no {{3}} placeholder. "
+                        "Remove `additional` or switch to driver_id='custom' "
+                        "with a fully-formed connection_url."
+                    ),
+                )
 
         # 5c) Drivers without a verified default_port (sap-hana) require the
         # caller to supply a non-empty port. host_port_db only — custom_url

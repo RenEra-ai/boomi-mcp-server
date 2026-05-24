@@ -993,12 +993,18 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
             "url_format": "jdbc:oracle:thin:@{0}:{1}:{2}",
             "default_port": 1521,
             "required": ["component_name", "host", "dbname", "username", "credential_ref"],
+            # Oracle Thin SID URLs have no trailing option slot — see the
+            # `additional` rejection in validate_config and the note below.
+            "additional_supported": False,
             "live_reference_component_id": "6adf9e1e-39c8-4104-bc6c-9769b93aa161",
             "note": (
                 "Oracle Thin driver. `dbname` is the SID (Boomi's urlFormat "
-                "uses the colon-SID form). For service-name style URLs, use "
-                "driver_id='custom' with a connection_url built around "
-                "jdbc:oracle:thin:@//host:port/service_name."
+                "uses the colon-SID form). `additional` is rejected for "
+                "Oracle — the SID syntax has no {3} slot, so JDBC options "
+                "would be silently dropped. For service-name style URLs or "
+                "extra JDBC options, use driver_id='custom' with a "
+                "connection_url built around "
+                "jdbc:oracle:thin:@//host:port/service_name?option=value."
             ),
         },
         "mysql": {
