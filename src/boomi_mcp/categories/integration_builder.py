@@ -444,6 +444,13 @@ _REST_SENSITIVE_FIELD_PATHS = (
     "credential_ref",               # raw value when it should be credential://
     "request_headers",              # whole dict — Authorization / X-API-Key etc.
     "query_parameters",             # whole dict — api_key / token in querystring
+    # Codex round-3 P1: the OAuth2 parameter blocks are deferred-emission
+    # (rejected by validation with UNSUPPORTED_REST_OAUTH2_PARAMETERS) but
+    # callers can put arbitrary content there — `prompt=consent`,
+    # `audience=...`, custom claims, anything. Scrub on the rejection path
+    # so the rejected payload doesn't echo through `integration_spec`.
+    "oauth2.authorization_parameters",
+    "oauth2.access_token_parameters",
 )
 
 # Cert refs are handled separately by `_redact_malformed_cert_refs` (below)
