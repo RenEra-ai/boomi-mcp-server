@@ -321,6 +321,12 @@ def test_template_driver_variants_oracle():
     assert oracle["class_name"] == "oracle.jdbc.driver.OracleDriver"
     assert oracle["url_format"] == "jdbc:oracle:thin:@{0}:{1}:{2}"
     assert oracle["default_port"] == 1521
+    # Oracle Thin SID syntax has no {3} slot — `additional` is rejected, not
+    # silently dropped. Surfaced so LLM clients know to route via custom_url
+    # for JDBC options.
+    assert oracle["additional_supported"] is False
+    assert "additional" in oracle["note"].lower()
+    assert "service" in oracle["note"].lower()
     assert oracle["live_reference_component_id"] == "6adf9e1e-39c8-4104-bc6c-9769b93aa161"
 
 

@@ -1158,3 +1158,63 @@ def test_sqlserver_and_jtds_have_no_runtime_prerequisite_note():
     """SQL Server JDBC and jTDS ship with the Boomi runtime — no prereq note."""
     for driver_id in ("sqlserver", "jtds", "oracle"):
         assert "runtime_driver_prerequisite" not in DatabaseConnectorBuilder.DRIVERS[driver_id]
+
+
+# --- Oracle `additional` rejection (codex review of 44b676e) -----------------
+# Oracle Thin's SID syntax (jdbc:oracle:thin:@host:port:sid) has no trailing
+# option slot, so the urlFormat template stops at {2}. Without an explicit
+# rejection, a caller passing `additional` would see the value land in the
+# XML attribute but get silently dropped at JDBC-URL-formatting time —
+# broken-by-design config that looks accepted.
+
+
+def test_oracle_driver_carries_additional_not_supported_flag():
+    assert DatabaseConnectorBuilder.DRIVERS["oracle"]["additional_supported"] is False
+    # url_format only goes up to {2} — no {3} placeholder for additional.
+    assert "{3}" not in DatabaseConnectorBuilder.DRIVERS["oracle"]["url_format"]
+
+
+def test_oracle_with_non_empty_additional_fails_with_validation_failed():
+    params = _minimal_config(driver_id="oracle", additional=";readonly=true")
+    with pytest.raises(BuilderValidationError) as excinfo:
+        DatabaseConnectorBuilder().build(
+            **{k: v for k, v in params.items() if k != "connector_type"},
+        )
+    err = excinfo.value
+    assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
+    assert err.field == "additional"
+    # Hint points the caller at the workaround (custom + service-name URL).
+    hint = (err.hint or "").lower()
+    assert "custom" in hint
+    assert "service" in hint
+
+
+def test_oracle_with_blank_additional_string_still_builds():
+    """Empty / whitespace-only `additional` is a no-op; the SID URL stays clean."""
+    for blank in ("", "   "):
+        xml = _build_minimal(driver_id="oracle", additional=blank)
+        root = ET.fromstring(xml)
+        dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+        assert dcs.attrib["driverId"] == "oracle"
+        assert dcs.attrib["additional"] == blank
+        assert dcs.attrib["urlFormat"] == "jdbc:oracle:thin:@{0}:{1}:{2}"
+
+
+def test_oracle_omitting_additional_entirely_still_builds():
+    """No `additional` key at all is the common case and must not trip the guard."""
+    xml = _build_minimal(driver_id="oracle")  # _minimal_config has no `additional` key
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["driverId"] == "oracle"
+    assert dcs.attrib["additional"] == ""
+
+
+@pytest.mark.parametrize("driver_id", ["sqlserver", "jtds", "mysql", "sap_hana"])
+def test_other_host_port_db_drivers_still_accept_additional(driver_id):
+    """Only Oracle is gated on `additional`; the other host_port_db drivers
+    keep the existing {3}-slot behavior."""
+    extra = {"port": 30015} if driver_id == "sap_hana" else {}
+    xml = _build_minimal(driver_id=driver_id, additional=";foo=bar", **extra)
+    root = ET.fromstring(xml)
+    dcs = root.find("bns:object/DatabaseConnectionSettings", NS)
+    assert dcs.attrib["additional"] == ";foo=bar"
