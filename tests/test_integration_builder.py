@@ -2872,6 +2872,63 @@ class TestBuildPlanProcessFlow:
         assert process_step["validation_error"]["field"] == "name"
 
     @patch(_PATCH_TARGET)
+    def test_whitespace_only_name_difference_is_canonicalized(self, mock_pag):
+        """Codex review r10: r8's PROCESS_NAME_CONFLICT compared stripped
+        values, so top-level 'Name' + config.name ' Name ' looked equal
+        — but _resolve_existing_components used raw 'Name' for lookup
+        and emission used raw ' Name '. Result: plan said create, build
+        emitted whitespace-padded XML, Boomi created a duplicate.
+        Strip both surfaces at normalize time so plan + emit see the
+        same canonical value."""
+        # Match an existing "Name" in metadata
+        mock_pag.return_value = [
+            _meta("existing-proc-id", "Name", folder_name="X", comp_type="process"),
+        ]
+        # Construct a raw component dict (not via _process_flow_comp,
+        # so we exercise _normalize_component end-to-end).
+        proc = {
+            "key": "main_process",
+            "type": "process",
+            "action": "create",
+            "name": "Name",
+            "depends_on": [
+                "db_connection", "db_query_operation",
+                "target_rest_connection", "target_rest_operation",
+            ],
+            "config": {
+                "name": " Name ",  # whitespace-padded
+                "process_kind": "database_to_api_sync",
+                "source": {
+                    "connector_type": "database", "connection_id": "C1",
+                    "operation_id": "O1", "action_type": "Get",
+                },
+                "target": {
+                    "connector_type": "rest", "connection_id": "C2",
+                    "operation_id": "O2", "action_type": "POST",
+                },
+            },
+        }
+        stubs = [
+            _stub_dep_comp("db_connection").model_dump(),
+            _stub_dep_comp("db_query_operation").model_dump(),
+            _stub_dep_comp("target_rest_connection").model_dump(),
+            _stub_dep_comp("target_rest_operation").model_dump(),
+        ]
+        plan = _build_plan(
+            MagicMock(),
+            {"conflict_policy": "reuse", "integration_spec": {
+                "version": "1.0", "name": "t", "components": stubs + [proc],
+            }},
+        )
+        proc_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        # Canonicalized name → collision lookup finds the existing
+        # process → planned_action is reuse, not create.
+        assert proc_step["planned_action"] == "reuse"
+        assert proc_step["existing_component_id"] == "existing-proc-id"
+        # And the step's recorded name reflects the canonical form.
+        assert proc_step["name"] == "Name"
+
+    @patch(_PATCH_TARGET)
     def test_matching_top_level_and_config_name_passes(self, mock_pag):
         """Both surfaces set, identical → no conflict (regression guard)."""
         mock_pag.return_value = []

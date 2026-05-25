@@ -122,15 +122,27 @@ def _normalize_component(raw: Dict[str, Any], index: int) -> Dict[str, Any]:
     # Promote config.name to top-level name when the caller omitted it.
     # _resolve_existing_components matches against comp.name only — without
     # this fallback a process whose only name is inside config bypasses
-    # collision detection (Codex review r7 P2.1: r6 PROCESS_NAME_REQUIRED
-    # accepts config.name but the lookup ran with comp.name=None and
-    # missed any existing same-named process in the account).
+    # collision detection (Codex review r7 P2.1).
+    #
+    # Strip whitespace from BOTH surfaces so collision lookup, the
+    # PROCESS_NAME_CONFLICT check, and emitted XML all see the same
+    # canonical value. Codex review r10: top-level `name="X"` with
+    # `config.name=" X "` used to plan as `create` (lookup queried
+    # `"X"`, found nothing) and then emit XML carrying `" X "` —
+    # bypassing the r8 mismatch guard because the stripped comparison
+    # treated them as equal.
     raw_name = raw.get("name")
+    if isinstance(raw_name, str):
+        raw_name = raw_name.strip()
+        raw["name"] = raw_name  # not strictly needed downstream but keeps `raw` consistent for any in-place inspector
     config_name = config.get("name") if isinstance(config, dict) else None
+    if isinstance(config_name, str) and isinstance(config, dict):
+        config["name"] = config_name.strip()
+        config_name = config["name"]
     effective_name = (
         raw_name
-        if isinstance(raw_name, str) and raw_name.strip()
-        else (config_name if isinstance(config_name, str) and config_name.strip() else raw_name)
+        if isinstance(raw_name, str) and raw_name
+        else (config_name if isinstance(config_name, str) and config_name else raw_name)
     )
 
     return {
