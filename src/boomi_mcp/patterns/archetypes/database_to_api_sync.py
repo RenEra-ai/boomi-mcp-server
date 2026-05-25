@@ -2055,10 +2055,9 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         # Transform operations summary — route + full operand structure so
         # downstream issues (#26/#40/#41) can compile the right rung directly
         # from the spec without re-reading the original archetype payload.
-        # script_body is deliberately omitted per the issue #44 plan
-        # ("do not include raw SQL, payload bodies, script bodies, or resolved
-        # URLs in endpoint summaries"); has_script_body lets consumers know
-        # whether the body was supplied out-of-band.
+        # Inline script_body is rejected by MapScriptTransformOperation
+        # entirely (codex r3 P2), so it can never reach this summary;
+        # callers route scripts via script_component_ref instead.
         operation_summaries: List[Dict[str, Any]] = []
         for op in operations:
             if isinstance(op, DirectTransformOperation):
