@@ -406,7 +406,9 @@ def test_valid_build_emits_transform_flow_with_typed_metadata():
     assert by_type["map_function"]["input_count"] == 1
     assert by_type["map_function"]["target_path"] == "Root/target_b"
     # map_script: same — emit inputs[], outputs[], script_component_ref so
-    # #41 can compile from the spec. script_body stays out per plan.
+    # #41 can compile from the spec. Inline script_body is rejected by the
+    # contract (codex review r2 P2) and therefore can never appear in the
+    # spec — caller routes scripts via script_component_ref.
     assert by_type["map_script"]["future_builder_issue"] == "#41"
     assert by_type["map_script"]["script_slot"] == "enrich_row"
     assert by_type["map_script"]["language"] == "groovy2"
@@ -414,9 +416,10 @@ def test_valid_build_emits_transform_flow_with_typed_metadata():
     assert by_type["map_script"]["outputs"] == ["Root/list[]/target_c"]
     assert by_type["map_script"]["input_count"] == 1
     assert by_type["map_script"]["output_count"] == 1
-    # Defense-in-depth: the spec must not echo executable script bodies.
-    assert by_type["map_script"]["has_script_body"] is False
+    # Defense-in-depth: the spec must never echo executable script bodies
+    # nor any presence flag for a field the contract rejects outright.
     assert "script_body" not in by_type["map_script"]
+    assert "has_script_body" not in by_type["map_script"]
     # script_component_ref was not supplied in the fixture, so it's omitted.
     assert "script_component_ref" not in by_type["map_script"]
 
@@ -450,8 +453,9 @@ def test_map_function_summary_surfaces_inputs_and_parameters():
 
 
 def test_map_script_summary_surfaces_script_component_ref():
-    """Codex review P2a follow-up: when map_script declares
-    script_component_ref, it must round-trip; script_body must not."""
+    """Codex review r1 P2a: when map_script declares script_component_ref,
+    it must round-trip into the emitted spec so #41 can compile from the
+    spec metadata alone."""
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
         {
@@ -461,7 +465,6 @@ def test_map_script_summary_surfaces_script_component_ref():
             "inputs": ["source_a"],
             "outputs": ["Root/target_a"],
             "script_component_ref": "scripts/enrich_row",
-            "script_body": "<<task-authored script body>>",
         },
     ]
     result = _build(payload)
@@ -471,10 +474,57 @@ def test_map_script_summary_surfaces_script_component_ref():
     )
     op = transform_flow["operations"][0]
     assert op["script_component_ref"] == "scripts/enrich_row"
-    assert op["has_script_body"] is True
-    # script_body must not appear in the emitted spec.
+    # script_body is rejected by the contract (codex r2 P2), so neither the
+    # value nor any presence flag can appear in the emitted spec.
     assert "script_body" not in op
-    assert "task-authored script body" not in json.dumps(transform_flow)
+    assert "has_script_body" not in op
+
+
+def test_map_script_rejects_inline_script_body_with_41_pointer():
+    """Codex review r2 P2: accepting script_body then dropping it from the
+    emitted spec is a data-loss path. The contract must reject inline
+    script_body and point callers at script_component_ref / issue #41."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "map_script",
+            "script_slot": "enrich_row",
+            "language": "groovy2",
+            "inputs": ["source_a"],
+            "outputs": ["Root/target_a"],
+            "script_body": "<<task-authored script body>>",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert any(
+        "script_body" in fe["message"] and "#41" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected #41 pointer on script_body rejection, got {result['field_errors']!r}"
+
+
+def test_map_script_body_rejection_does_not_echo_body_content():
+    """The script_body rejection envelope must not echo the caller's body
+    text (defense-in-depth against scripts containing sensitive content)."""
+    sentinel = "sk_live_QA_SCRIPT_BODY_GUARD_DEADBEEF"
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "map_script",
+            "script_slot": "enrich_row",
+            "language": "groovy2",
+            "inputs": ["source_a"],
+            "outputs": ["Root/target_a"],
+            "script_body": sentinel,
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert sentinel not in json.dumps(result), (
+        "map_script.script_body rejection must not echo the caller's body "
+        "content back through the error envelope"
+    )
 
 
 def test_full_fixture_build_includes_watermark_and_dlq_flows():
@@ -731,10 +781,11 @@ def test_map_function_operation_validates_with_only_required_fields():
     assert "parameters" not in op
 
 
-def test_map_script_operation_validates_without_canned_script_body():
-    """A map_script operation without script_body must validate; the emitted
-    spec metadata must surface the operand details but never invent a default
-    body or component ref."""
+def test_map_script_operation_validates_without_inline_script():
+    """A map_script operation without script_component_ref must validate;
+    the emitted spec metadata must surface the operand details but never
+    invent a default body or component ref. Inline script_body is rejected
+    outright (codex r2 P2)."""
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
         {
@@ -758,10 +809,10 @@ def test_map_script_operation_validates_without_canned_script_body():
     assert op["language"] == "groovy2"
     assert op["inputs"] == ["source_a"]
     assert op["outputs"] == ["Root/target_a"]
-    assert op["has_script_body"] is False
-    # script_body and script_component_ref omitted from the input -> omitted
-    # from the summary (no synthetic defaults).
+    # script_body is rejected outright and was never accepted as a field;
+    # script_component_ref omitted from the input -> omitted from the summary.
     assert "script_body" not in op
+    assert "has_script_body" not in op
     assert "script_component_ref" not in op
 
 
