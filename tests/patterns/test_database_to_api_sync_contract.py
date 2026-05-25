@@ -392,19 +392,89 @@ def test_valid_build_emits_transform_flow_with_typed_metadata():
     ops = transform_flow["operations"]
     assert len(ops) == 3
     by_type = {op["operation_type"]: op for op in ops}
+    # direct: keeps source_field, target_path, and the documentation hint.
     assert by_type["direct"]["future_builder_issue"] == "#26"
     assert by_type["direct"]["source_field"] == "source_a"
     assert by_type["direct"]["target_path"] == "Root/target_a"
+    assert by_type["direct"]["documentation_hint"] == "carry first column verbatim"
+    # map_function: codex review P2a — emit full operand structure (inputs[],
+    # target_path) so #40 can compile from the spec without re-reading the
+    # original archetype payload.
     assert by_type["map_function"]["future_builder_issue"] == "#40"
     assert by_type["map_function"]["function_type"] == "trim"
+    assert by_type["map_function"]["inputs"] == ["source_b"]
     assert by_type["map_function"]["input_count"] == 1
+    assert by_type["map_function"]["target_path"] == "Root/target_b"
+    # map_script: same — emit inputs[], outputs[], script_component_ref so
+    # #41 can compile from the spec. script_body stays out per plan.
     assert by_type["map_script"]["future_builder_issue"] == "#41"
     assert by_type["map_script"]["script_slot"] == "enrich_row"
+    assert by_type["map_script"]["language"] == "groovy2"
+    assert by_type["map_script"]["inputs"] == ["source_c"]
+    assert by_type["map_script"]["outputs"] == ["Root/list[]/target_c"]
     assert by_type["map_script"]["input_count"] == 1
     assert by_type["map_script"]["output_count"] == 1
     # Defense-in-depth: the spec must not echo executable script bodies.
     assert by_type["map_script"]["has_script_body"] is False
-    assert by_type["map_script"]["has_script_component_ref"] is False
+    assert "script_body" not in by_type["map_script"]
+    # script_component_ref was not supplied in the fixture, so it's omitted.
+    assert "script_component_ref" not in by_type["map_script"]
+
+
+def test_map_function_summary_surfaces_inputs_and_parameters():
+    """Codex review P2a follow-up: when map_function declares inputs and a
+    parameters dict, both must round-trip into the spec for #40 to compile."""
+    payload = _valid_minimal()
+    payload["source"]["read_operation"]["result_schema"]["fields"] = [
+        {"name": "source_a", "data_type": "character"},
+        {"name": "source_b", "data_type": "character"},
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "map_function",
+            "function_type": "concat",
+            "inputs": ["source_a", "source_b"],
+            "target_path": "Root/target_a",
+            "parameters": {"separator": ", "},
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is True
+    transform_flow = next(
+        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
+    )
+    op = transform_flow["operations"][0]
+    assert op["inputs"] == ["source_a", "source_b"]
+    assert op["input_count"] == 2
+    assert op["parameters"] == {"separator": ", "}
+
+
+def test_map_script_summary_surfaces_script_component_ref():
+    """Codex review P2a follow-up: when map_script declares
+    script_component_ref, it must round-trip; script_body must not."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "map_script",
+            "script_slot": "enrich_row",
+            "language": "groovy2",
+            "inputs": ["source_a"],
+            "outputs": ["Root/target_a"],
+            "script_component_ref": "scripts/enrich_row",
+            "script_body": "<<task-authored script body>>",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is True
+    transform_flow = next(
+        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
+    )
+    op = transform_flow["operations"][0]
+    assert op["script_component_ref"] == "scripts/enrich_row"
+    assert op["has_script_body"] is True
+    # script_body must not appear in the emitted spec.
+    assert "script_body" not in op
+    assert "task-authored script body" not in json.dumps(transform_flow)
 
 
 def test_full_fixture_build_includes_watermark_and_dlq_flows():
@@ -634,7 +704,7 @@ def test_full_fixture_round_trip_includes_typed_operation_summaries():
 
 def test_map_function_operation_validates_with_only_required_fields():
     """A bare map_function operation (no parameters, no documentation_hint)
-    must validate and surface its future_builder pointer."""
+    must validate and surface its future_builder pointer and operand details."""
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
         {
@@ -654,13 +724,17 @@ def test_map_function_operation_validates_with_only_required_fields():
     assert op["operation_type"] == "map_function"
     assert op["future_builder_issue"] == "#40"
     assert op["function_type"] == "uppercase"
+    assert op["inputs"] == ["source_a"]
     assert op["input_count"] == 1
-    assert op["has_parameters"] is False
+    assert op["target_path"] == "Root/target_a"
+    # parameters omitted from the input -> omitted from the summary.
+    assert "parameters" not in op
 
 
 def test_map_script_operation_validates_without_canned_script_body():
     """A map_script operation without script_body must validate; the emitted
-    spec metadata must not invent a default body or component ref."""
+    spec metadata must surface the operand details but never invent a default
+    body or component ref."""
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
         {
@@ -682,8 +756,13 @@ def test_map_script_operation_validates_without_canned_script_body():
     assert op["future_builder_issue"] == "#41"
     assert op["script_slot"] == "enrich_row"
     assert op["language"] == "groovy2"
+    assert op["inputs"] == ["source_a"]
+    assert op["outputs"] == ["Root/target_a"]
     assert op["has_script_body"] is False
-    assert op["has_script_component_ref"] is False
+    # script_body and script_component_ref omitted from the input -> omitted
+    # from the summary (no synthetic defaults).
+    assert "script_body" not in op
+    assert "script_component_ref" not in op
 
 
 def test_documentation_hint_is_accepted_but_not_executable():
@@ -803,6 +882,52 @@ def test_simple_node_without_data_type_returns_field_error():
     payload["target"]["payload_profile"]["root"]["children"] = [
         {"name": "target_a", "kind": "simple"},
     ]
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "target.payload_profile.root")
+
+
+def test_profile_node_name_rejects_path_separator():
+    """Codex review P2b: a JSON node name containing '/' would silently
+    collapse distinct logical paths (e.g. leaf named 'a/b' colliding with
+    object 'a' -> leaf 'b'). The node-name validator must reject the
+    reserved path characters by construction."""
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "a/b", "kind": "simple", "data_type": "character"},
+    ]
+    result = _build(payload)
+    paths = _field_paths(result)
+    _assert_path_match(paths, "target.payload_profile.root")
+    assert any(
+        "reserved path characters" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected reserved-chars rejection, got {result['field_errors']!r}"
+
+
+def test_profile_node_name_rejects_array_marker_brackets():
+    """Codex review P2b: a JSON node name literally containing '[' or ']'
+    would collide with the array repetition marker (e.g. leaf 'list[]'
+    flattening to the same path as array 'list' with one child)."""
+    payload_open = _valid_minimal()
+    payload_open["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "list[", "kind": "simple", "data_type": "character"},
+    ]
+    paths_open = _field_paths(_build(payload_open))
+    _assert_path_match(paths_open, "target.payload_profile.root")
+
+    payload_close = _valid_minimal()
+    payload_close["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "list]", "kind": "simple", "data_type": "character"},
+    ]
+    paths_close = _field_paths(_build(payload_close))
+    _assert_path_match(paths_close, "target.payload_profile.root")
+
+
+def test_profile_node_name_rejection_covers_root_node():
+    """The reserved-char rejection must also fire on the profile root, not
+    just nested children."""
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["name"] = "Root/extra"
     paths = _field_paths(_build(payload))
     _assert_path_match(paths, "target.payload_profile.root")
 

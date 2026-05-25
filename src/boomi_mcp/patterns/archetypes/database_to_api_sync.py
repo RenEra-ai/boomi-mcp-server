@@ -773,8 +773,22 @@ class JSONProfileNode(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def _strip_required(cls, value: str) -> str:
-        return _stripped_nonblank(value)
+    def _strip_and_check_reserved(cls, value: str) -> str:
+        # Reject the path-segment separator and the array repetition marker
+        # so distinct profile leaves can never flatten to the same logical
+        # path. Without this guard a leaf literally named ``a/b`` would
+        # collide with object ``a`` -> leaf ``b`` (both flatten to
+        # ``Root/a/b``), and a leaf named ``list[]`` would collide with an
+        # array ``list`` containing one child.
+        stripped = _stripped_nonblank(value)
+        for reserved in ("/", "[", "]"):
+            if reserved in stripped:
+                raise ValueError(
+                    "JSONProfileNode.name must not contain the reserved "
+                    "path characters '/', '[', or ']'; these are used to "
+                    "form logical leaf paths (e.g. 'Root/list[]/key')"
+                )
+        return stripped
 
     @field_validator("description")
     @classmethod
@@ -1942,45 +1956,56 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             ],
         }
 
-        # Transform operations summary — route + structural info; never script
-        # bodies or parameter payloads.
+        # Transform operations summary — route + full operand structure so
+        # downstream issues (#26/#40/#41) can compile the right rung directly
+        # from the spec without re-reading the original archetype payload.
+        # script_body is deliberately omitted per the issue #44 plan
+        # ("do not include raw SQL, payload bodies, script bodies, or resolved
+        # URLs in endpoint summaries"); has_script_body lets consumers know
+        # whether the body was supplied out-of-band.
         operation_summaries: List[Dict[str, Any]] = []
         for op in operations:
             if isinstance(op, DirectTransformOperation):
-                operation_summaries.append(
-                    {
-                        "operation_type": "direct",
-                        "future_builder_issue": "#26",
-                        "source_field": op.source_field,
-                        "target_path": op.target_path,
-                    }
-                )
+                summary: Dict[str, Any] = {
+                    "operation_type": "direct",
+                    "future_builder_issue": "#26",
+                    "source_field": op.source_field,
+                    "target_path": op.target_path,
+                }
+                if op.documentation_hint is not None:
+                    summary["documentation_hint"] = op.documentation_hint
+                operation_summaries.append(summary)
             elif isinstance(op, MapFunctionTransformOperation):
-                operation_summaries.append(
-                    {
-                        "operation_type": "map_function",
-                        "future_builder_issue": "#40",
-                        "function_type": op.function_type,
-                        "input_count": len(op.inputs),
-                        "target_path": op.target_path,
-                        "has_parameters": op.parameters is not None,
-                    }
-                )
+                summary = {
+                    "operation_type": "map_function",
+                    "future_builder_issue": "#40",
+                    "function_type": op.function_type,
+                    "inputs": list(op.inputs),
+                    "input_count": len(op.inputs),
+                    "target_path": op.target_path,
+                }
+                if op.parameters is not None:
+                    summary["parameters"] = dict(op.parameters)
+                if op.documentation_hint is not None:
+                    summary["documentation_hint"] = op.documentation_hint
+                operation_summaries.append(summary)
             elif isinstance(op, MapScriptTransformOperation):
-                operation_summaries.append(
-                    {
-                        "operation_type": "map_script",
-                        "future_builder_issue": "#41",
-                        "script_slot": op.script_slot,
-                        "language": op.language,
-                        "input_count": len(op.inputs),
-                        "output_count": len(op.outputs),
-                        "has_script_body": op.script_body is not None,
-                        "has_script_component_ref": (
-                            op.script_component_ref is not None
-                        ),
-                    }
-                )
+                summary = {
+                    "operation_type": "map_script",
+                    "future_builder_issue": "#41",
+                    "script_slot": op.script_slot,
+                    "language": op.language,
+                    "inputs": list(op.inputs),
+                    "input_count": len(op.inputs),
+                    "outputs": list(op.outputs),
+                    "output_count": len(op.outputs),
+                    "has_script_body": op.script_body is not None,
+                }
+                if op.script_component_ref is not None:
+                    summary["script_component_ref"] = op.script_component_ref
+                if op.documentation_hint is not None:
+                    summary["documentation_hint"] = op.documentation_hint
+                operation_summaries.append(summary)
 
         # Flow summaries — labels + new schema/operation metadata.
         flows: List[Dict[str, Any]] = [
