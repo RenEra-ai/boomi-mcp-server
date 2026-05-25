@@ -662,9 +662,15 @@ def _execute_component(
                 # consulted comp.name first the original unsuffixed name
                 # would win and the clone would emit as a name-duplicate.
                 # Codex review r3 P2 (clone bypass).
+                #
+                # No comp.key fallback: plan-time PROCESS_NAME_REQUIRED
+                # (codex review r6 P2.1) guarantees one of these two is
+                # set before we get here. Falling back to comp.key would
+                # silently rename the Boomi-side process to the user's
+                # internal dependency token on update.
                 xml = builder_cls.build(
                     payload,
-                    name=payload.get("name") or comp.name or comp.key,
+                    name=payload.get("name") or comp.name,
                     folder_name=payload.get("folder_name"),
                 )
             except BuilderValidationError as exc:
@@ -1044,6 +1050,35 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # plaintext password in raw_config (== comp.config), which
             # then echoes through spec.model_dump(). Codex review r2 Q3.
             process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
+            # Codex review r6 P2.1: require an explicit name. Without
+            # this, _execute_component used to fall back to comp.key as
+            # the emitted XML name attribute, which on update silently
+            # renamed the existing process to its internal dependency
+            # key (e.g. "main_process"). Reject at plan-time so the
+            # caller must supply a real display name.
+            if process_flow_err is None:
+                config_name = raw_config.get("name")
+                effective_name = (
+                    (comp.name or "").strip()
+                    if isinstance(comp.name, str) else ""
+                ) or (
+                    str(config_name).strip()
+                    if isinstance(config_name, str) else ""
+                )
+                if not effective_name:
+                    process_flow_err = BuilderValidationError(
+                        "process component name is required for structured "
+                        "process_kind components; without one the emitted "
+                        "XML would carry the internal dependency key as "
+                        "the display name (silent rename on update).",
+                        error_code="PROCESS_NAME_REQUIRED",
+                        field="name",
+                        hint=(
+                            "Set IntegrationComponentSpec.name or "
+                            "config.name to the human-readable display "
+                            "name the process should carry in Boomi."
+                        ),
+                    )
             xml_override = bool(raw_config.get("xml"))
             # Codex review C4: process_kind + raw xml is ambiguous —
             # _execute_component cannot honor both, and falling through to

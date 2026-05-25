@@ -3180,6 +3180,7 @@ _PROCESS_FLOW_PROTOCOLS = {
         "structured_errors": [
             {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
             {"error_code": "PROCESS_KIND_XML_CONFLICT", "field": "config.xml"},
+            {"error_code": "PROCESS_NAME_REQUIRED", "field": "name"},
             {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "depends_on"},
             {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target"},
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},

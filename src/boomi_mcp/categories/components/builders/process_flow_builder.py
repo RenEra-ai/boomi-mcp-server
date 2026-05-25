@@ -338,10 +338,14 @@ class ProcessFlowBuilder:
         flow.append((
             "connectoraction_source",
             {
-                "connector_type": _canonical_connector_type(source.get("connector_type")),
-                "action_type": str(source.get("action_type") or ""),
-                "connection_id": str(source.get("connection_id") or ""),
-                "operation_id": str(source.get("operation_id") or ""),
+                # Database source — Boomi expects exact `connectorType="database"`
+                # and `actionType="Get"` (case-sensitive on both sides). The
+                # validator accepts case-insensitive input via .lower()/strip,
+                # so canonicalize here before emission. Codex review r6 P2.2.
+                "connector_type": _canonical_connector_type(source.get("connector_type")).lower(),
+                "action_type": str(source.get("action_type") or "").strip(),
+                "connection_id": str(source.get("connection_id") or "").strip(),
+                "operation_id": str(source.get("operation_id") or "").strip(),
                 "userlabel": str(source.get("label") or ""),
             },
         ))
@@ -364,14 +368,18 @@ class ProcessFlowBuilder:
         flow.append((
             "connectoraction_target",
             {
+                # _canonical_connector_type maps REST aliases ("rest",
+                # "rest_client") to the canonical subtype.
                 "connector_type": _canonical_connector_type(target.get("connector_type")),
                 # REST HTTP methods are case-insensitive on input (validator
                 # uppercases for membership check) but Boomi's live XML uses
                 # uppercase actionType="POST" — uppercase here so the emitted
                 # XML matches the canonical form. Codex review C3.
                 "action_type": str(target.get("action_type") or "").strip().upper(),
-                "connection_id": str(target.get("connection_id") or ""),
-                "operation_id": str(target.get("operation_id") or ""),
+                # Strip ID whitespace so whitespace-padded refs don't leak
+                # into emitted XML. Codex review r6 P2.2.
+                "connection_id": str(target.get("connection_id") or "").strip(),
+                "operation_id": str(target.get("operation_id") or "").strip(),
                 "userlabel": str(target.get("label") or ""),
             },
         ))

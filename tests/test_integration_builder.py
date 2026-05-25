@@ -2783,6 +2783,71 @@ class TestBuildPlanProcessFlow:
         assert "validation_error" not in legacy_step
 
     @patch(_PATCH_TARGET)
+    def test_process_without_name_errors_at_plan_create(self, mock_pag):
+        """Codex review r6 P2.1: structured process_kind components require
+        an explicit display name. Falling back to comp.key would land in
+        Boomi as a process named after the user's internal dependency
+        token. Reject at plan-time for create..."""
+        mock_pag.return_value = []
+        unnamed = _process_flow_comp()
+        unnamed.name = None
+        unnamed.config.pop("name", None)
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            unnamed,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_NAME_REQUIRED"
+        assert process_step["validation_error"]["field"] == "name"
+
+    @patch(_PATCH_TARGET)
+    def test_process_without_name_errors_at_plan_update(self, mock_pag):
+        """...and on update (which is the variant the reviewer's repro hit —
+        update_component({xml:...}) is a full-XML replacement, so a missing
+        name silently renames the existing process to comp.key)."""
+        mock_pag.return_value = []
+        unnamed_update = _process_flow_comp(action="update")
+        unnamed_update.name = None
+        unnamed_update.component_id = "00000000-0000-0000-0000-000000000099"
+        unnamed_update.config.pop("name", None)
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            unnamed_update,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_NAME_REQUIRED"
+
+    @patch(_PATCH_TARGET)
+    def test_process_with_only_config_name_passes(self, mock_pag):
+        """Caller can supply name via config.name even if comp.name is None
+        (the IntegrationSpecV1 schema permits both surfaces)."""
+        mock_pag.return_value = []
+        comp = _process_flow_comp()
+        comp.name = None
+        comp.config["name"] = "Process Name From Config"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            comp,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "create"
+        assert "validation_error" not in process_step
+
+    @patch(_PATCH_TARGET)
     def test_update_with_invalid_config_errors_at_plan(self, mock_pag):
         """Codex review C2: process update re-invokes the builder via
         update_component({"xml": ...}). Validation must run for update too,
