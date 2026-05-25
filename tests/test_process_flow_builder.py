@@ -492,6 +492,63 @@ class TestValidateConfig:
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
 
+    # Codex review r7 P2.2: padded $ref tokens bypass
+    # _resolve_dependency_tokens (which requires startswith at byte 0),
+    # then build()'s whitespace stripping emits the unresolved token as
+    # if it were a UUID. Reject the malformed shape at plan-time.
+    def test_rejects_leading_whitespace_in_ref_source(self):
+        cfg = _base_config()
+        cfg["source"]["connection_id"] = " $ref:db_connection"
+        err = ProcessFlowBuilder.validate_config(
+            cfg, depends_on=["db_connection"],
+        )
+        assert err is not None
+        assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
+        assert "source.connection_id" in (err.field or "")
+
+    def test_rejects_trailing_whitespace_in_ref_source(self):
+        cfg = _base_config()
+        cfg["source"]["operation_id"] = "$ref:db_query_operation "
+        err = ProcessFlowBuilder.validate_config(
+            cfg, depends_on=["db_query_operation"],
+        )
+        assert err is not None
+        assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
+
+    def test_rejects_padded_ref_in_target(self):
+        cfg = _base_config()
+        cfg["target"]["connection_id"] = " $ref:target_rest_connection "
+        err = ProcessFlowBuilder.validate_config(
+            cfg, depends_on=["target_rest_connection"],
+        )
+        assert err is not None
+        assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
+
+    def test_rejects_padded_ref_in_transform_map(self):
+        cfg = _base_config(
+            transform={"mode": "map_ref", "map_ref": " $ref:my_map"},
+        )
+        err = ProcessFlowBuilder.validate_config(
+            cfg, depends_on=["my_map"],
+        )
+        assert err is not None
+        assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
+
+    def test_accepts_unpadded_refs(self):
+        """Regression guard — clean refs continue to validate."""
+        cfg = _base_config()
+        cfg["source"]["connection_id"] = "$ref:db_connection"
+        cfg["source"]["operation_id"] = "$ref:db_query_operation"
+        cfg["target"]["connection_id"] = "$ref:target_rest_connection"
+        cfg["target"]["operation_id"] = "$ref:target_rest_operation"
+        assert ProcessFlowBuilder.validate_config(
+            cfg,
+            depends_on=[
+                "db_connection", "db_query_operation",
+                "target_rest_connection", "target_rest_operation",
+            ],
+        ) is None
+
 
 # ---------------------------------------------------------------------------
 # scan_forbidden_secret_fields

@@ -271,20 +271,43 @@ class ProcessFlowBuilder:
         # as literal "$ref:KEY" strings in emitted XML.
         declared = set(depends_on or [])
         for path, value in _walk_scalars(config):
-            if isinstance(value, str) and value.startswith("$ref:"):
-                ref_key = value[5:]
-                if ref_key not in declared:
-                    return BuilderValidationError(
-                        f"$ref:{ref_key} at {'.'.join(path)!r} is not "
-                        f"declared in the process component's depends_on.",
-                        error_code="MISSING_PROCESS_DEPENDENCY",
-                        field="depends_on",
-                        hint=(
-                            f"Add {ref_key!r} to the process component's "
-                            "depends_on list so $ref resolution can find it "
-                            "at apply time."
-                        ),
-                    )
+            if not isinstance(value, str):
+                continue
+            stripped = value.strip()
+            if not stripped.startswith("$ref:"):
+                continue
+            # Codex review r7 P2.2: a padded value like " $ref:foo " is
+            # not recognized as a ref by _resolve_dependency_tokens
+            # (which requires startswith at byte 0), but build()'s
+            # whitespace stripping then emits the unresolved token
+            # directly into the connectoraction XML. Reject the
+            # malformed shape here so apply never sees it.
+            if value != stripped:
+                return BuilderValidationError(
+                    f"$ref token at {'.'.join(path)!r} has surrounding "
+                    f"whitespace ({value!r}); refs must be exact "
+                    f"'$ref:KEY' strings.",
+                    error_code="MISSING_PROCESS_DEPENDENCY",
+                    field=".".join(path),
+                    hint=(
+                        "Remove leading/trailing whitespace from the "
+                        "$ref:KEY value. Apply-time substitution only "
+                        "matches refs that start at byte 0."
+                    ),
+                )
+            ref_key = value[5:]
+            if ref_key not in declared:
+                return BuilderValidationError(
+                    f"$ref:{ref_key} at {'.'.join(path)!r} is not "
+                    f"declared in the process component's depends_on.",
+                    error_code="MISSING_PROCESS_DEPENDENCY",
+                    field="depends_on",
+                    hint=(
+                        f"Add {ref_key!r} to the process component's "
+                        "depends_on list so $ref resolution can find it "
+                        "at apply time."
+                    ),
+                )
 
         return None
 
