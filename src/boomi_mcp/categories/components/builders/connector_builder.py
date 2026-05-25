@@ -23,6 +23,12 @@ class BuilderValidationError(ValueError):
     Subclasses ValueError so existing `except ValueError` catches still fire,
     but carries machine-readable fields (error_code, field, hint) so the MCP
     layer can return a structured envelope instead of an opaque message.
+
+    ``details`` is an optional dict for structured machine-readable context
+    (issue #49 uses it for cross-component ref-type mismatches: ref_key,
+    expected_role, actual_role). Existing call sites that don't pass it keep
+    working unchanged and the JSON envelope only grows the `details` key when
+    it is non-None.
     """
 
     def __init__(
@@ -32,11 +38,13 @@ class BuilderValidationError(ValueError):
         error_code: str,
         field: Optional[str] = None,
         hint: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__(message)
         self.error_code = error_code
         self.field = field
         self.hint = hint
+        self.details = details
 
 
 def _escape_xml(text: str) -> str:

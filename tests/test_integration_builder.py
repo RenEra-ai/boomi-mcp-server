@@ -2613,16 +2613,68 @@ def _process_flow_comp(
     )
 
 
-def _stub_dep_comp(key):
-    """Cheap profile.json stub to satisfy depends_on without dragging in
-    real builders. Lives at the 'component' top-level type so it routes
-    to the generic component path."""
+# Standard process-flow dep keys map to specific cross-component roles
+# (issue #49). When _stub_dep_comp is called with one of these keys the
+# stub is typed to match that role so the new PROCESS_REF_TYPE_MISMATCH
+# check at plan-time treats it as the right shape.
+_STUB_DEP_ROLES = {
+    "db_connection": "database connector-settings",
+    "db_query_operation": "database connector-action Get",
+    "target_rest_connection": "REST Client connector-settings",
+    "target_rest_operation": "REST Client connector-action",
+}
+
+
+def _stub_dep_comp(key, *, role=None, method="POST"):
+    """Role-aware stub to satisfy depends_on without dragging in real builders.
+
+    For the four standard process-flow dep keys (see _STUB_DEP_ROLES), the
+    stub takes the matching connector / action shape so issue #49 cross-component
+    $ref type validation accepts it. For ad-hoc keys, falls back to a
+    profile.json wrapper (the original semantics).
+
+    action="update" plus a synthetic component_id keeps the stub on the
+    update path so plan-time builder validation (which would reject these
+    minimal configs as malformed) is skipped — the DB/REST builder
+    validate_config blocks only run on create/create_clone.
+    """
+    role = role or _STUB_DEP_ROLES.get(key, "profile.json")
+    name = key.replace("_", " ").title()
+    stub_id = "00000000-0000-0000-0000-stubbed00001"
+    if role == "database connector-settings":
+        return IntegrationComponentSpec(
+            key=key, type="connector-settings", action="update",
+            component_id=stub_id, name=name,
+            config={"connector_type": "database", "name": name},
+        )
+    if role == "database connector-action Get":
+        return IntegrationComponentSpec(
+            key=key, type="connector-action", action="update",
+            component_id=stub_id, name=name,
+            config={"connector_type": "database", "operation_mode": "get", "name": name},
+        )
+    if role == "REST Client connector-settings":
+        return IntegrationComponentSpec(
+            key=key, type="connector-settings", action="update",
+            component_id=stub_id, name=name,
+            config={"connector_type": "rest", "name": name},
+        )
+    if role == "REST Client connector-action":
+        return IntegrationComponentSpec(
+            key=key, type="connector-action", action="update",
+            component_id=stub_id, name=name,
+            config={"connector_type": "rest", "method": method, "name": name},
+        )
+    if role == "profile.db":
+        return IntegrationComponentSpec(
+            key=key, type="profile.db", action="update",
+            component_id=stub_id, name=name,
+            config={"name": name},
+        )
+    # Default: profile.json wrapper (original _stub_dep_comp semantics).
     return IntegrationComponentSpec(
-        key=key,
-        type="component",
-        action="create",
-        name=key.replace("_", " ").title(),
-        config={"name": key, "type": "profile.json"},
+        key=key, type="component", action="create",
+        name=name, config={"name": key, "type": "profile.json"},
     )
 
 
@@ -3200,3 +3252,419 @@ class TestApplyPlanProcessFlow:
             "clone-suffix must reach the emitted XML; comp.name should not "
             "override payload['name']"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #49: cross-component $ref type validation
+# ---------------------------------------------------------------------------
+
+
+def _db_read_profile_stub(key="db_read_profile"):
+    """profile.db stub usable as a read_profile_id $ref target."""
+    return _stub_dep_comp(key, role="profile.db")
+
+
+def _rest_json_profile_stub(key="target_json_profile"):
+    """profile.json stub usable as a REST request/response_profile_id target.
+
+    Same shape as the legacy default _stub_dep_comp produced — the
+    fallback profile.json wrapper is already typed correctly for this
+    role so no extra plumbing is needed.
+    """
+    return _stub_dep_comp(key, role="profile.json")
+
+
+class TestBuildPlanDatabaseGetRefTypes:
+    """Issue #49: typed $ref validation for database Get operations."""
+
+    @patch(_PATCH_TARGET)
+    def test_connection_ref_key_pointing_to_profile_returns_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # connection_ref_key points at a profile.db component, not a
+        # database connector-settings. Existing reachability check
+        # passes (the key is in depends_on); new type check fires.
+        op = _db_get_op_comp(connection_ref_key="db_read_profile")
+        op.depends_on = ["db_read_profile"]
+        op.config.pop("read_profile_id", None)
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_read_profile_comp(),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        ve = op_step["validation_error"]
+        assert op_step["planned_action"] == "error_database_validation"
+        # read_profile_id is missing → that fires before the type check.
+        # Restore read_profile_id and ensure connection_ref_key type-mismatch wins.
+        assert ve["error_code"] == "MISSING_DB_READ_PROFILE_REF"
+
+    @patch(_PATCH_TARGET)
+    def test_connection_ref_key_pointing_to_action_returns_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # Reuse the read-profile fixture but call the dep a connector-action stub.
+        # connection_ref_key="rogue_action" → it's in depends_on but it's a
+        # database connector-action, not connector-settings.
+        bad_dep = _stub_dep_comp("rogue_action", role="database connector-action Get")
+        op = _db_get_op_comp(connection_ref_key="rogue_action")
+        op.depends_on = ["rogue_action", "db_read_profile"]
+        plan = _build_plan(MagicMock(), _build_config([
+            bad_dep,
+            _db_read_profile_comp(),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        ve = op_step["validation_error"]
+        assert op_step["planned_action"] == "error_database_validation"
+        assert ve["error_code"] == "DB_REF_TYPE_MISMATCH"
+        assert ve["field"] == "connection_ref_key"
+        assert ve["details"]["ref_key"] == "rogue_action"
+        assert ve["details"]["expected_role"] == "database connector-settings"
+        assert "connector-action" in ve["details"]["actual_role"]
+
+    @patch(_PATCH_TARGET)
+    def test_read_profile_id_ref_to_connection_returns_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # read_profile_id="$ref:db_connection" — pointing at the DB
+        # connector-settings instead of a profile.db. Type check fires.
+        op = _db_get_op_comp(read_profile_id="$ref:db_connection")
+        op.depends_on = ["db_connection"]
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        ve = op_step["validation_error"]
+        assert op_step["planned_action"] == "error_database_validation"
+        assert ve["error_code"] == "DB_REF_TYPE_MISMATCH"
+        assert ve["field"] == "read_profile_id"
+        assert ve["details"]["expected_role"] == "profile.db"
+        # actual_role reflects the database connector-settings classification.
+        assert "database connector-settings" in ve["details"]["actual_role"]
+
+    @patch(_PATCH_TARGET)
+    def test_uuid_read_profile_id_skips_type_check(self, mock_pag):
+        mock_pag.return_value = []
+        op = _db_get_op_comp(read_profile_id="abc-123-def")
+        op.depends_on = ["db_connection"]
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        # Direct UUID is outside-spec; existing tests already confirm
+        # this clean-plan path. Reasserted here for the issue #49 baseline.
+        assert op_step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
+    def test_missing_field_error_beats_type_check(self, mock_pag):
+        # Regression: even when the wrong-type ref is present, the
+        # pre-existing missing connection_ref_key check must still fire
+        # first with its original error code. Issue #49 added type checks
+        # AFTER existing ones — we don't want to reorder error_code
+        # ordering for callers depending on stable validation surface.
+        mock_pag.return_value = []
+        op = _db_get_op_comp()
+        op.config.pop("connection_ref_key")
+        op.depends_on = ["db_read_profile"]
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_read_profile_comp(),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        ve = op_step["validation_error"]
+        assert ve["error_code"] == "MISSING_DB_DEPENDENCY"
+        assert ve["field"] == "connection_ref_key"
+        # No details for the existing missing-field check (issue #49 only
+        # added details to the new TYPE_MISMATCH codes).
+        assert "details" not in ve
+
+
+class TestBuildPlanRestRefTypes:
+    """Issue #49: typed $ref validation for REST Client operations."""
+
+    @patch(_PATCH_TARGET)
+    def test_connection_ref_key_pointing_to_profile_returns_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # connection_ref_key="target_json_profile" — the dep is a profile,
+        # not a REST connector-settings. depends_on already includes it.
+        op = _rest_op_comp(
+            connection_ref_key="target_json_profile",
+            depends_on=("target_json_profile", "payload_map"),
+        )
+        # payload_source_ref_key still references payload_map; supply a stub.
+        plan = _build_plan(MagicMock(), _build_config([
+            _rest_json_profile_stub("target_json_profile"),
+            _stub_dep_comp("payload_map"),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        ve = op_step["validation_error"]
+        assert op_step["planned_action"] == "error_rest_validation"
+        assert ve["error_code"] == "REST_REF_TYPE_MISMATCH"
+        assert ve["field"] == "connection_ref_key"
+        assert ve["details"]["ref_key"] == "target_json_profile"
+        assert ve["details"]["expected_role"] == "REST Client connector-settings"
+        assert "profile.json" in ve["details"]["actual_role"]
+
+    @patch(_PATCH_TARGET)
+    def test_request_profile_id_ref_to_connection_returns_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # request_profile_id="$ref:target_rest_connection" — points at
+        # the REST connector-settings instead of a profile.json/xml.
+        op = _rest_op_comp(
+            request_profile_id="$ref:target_rest_connection",
+            depends_on=("target_rest_connection", "payload_map"),
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _rest_conn_comp(),
+            _stub_dep_comp("payload_map"),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        ve = op_step["validation_error"]
+        assert op_step["planned_action"] == "error_rest_validation"
+        assert ve["error_code"] == "REST_REF_TYPE_MISMATCH"
+        assert ve["field"] == "request_profile_id"
+        assert ve["details"]["expected_role"] == "profile.json or profile.xml"
+        assert "REST Client connector-settings" in ve["details"]["actual_role"]
+
+    @patch(_PATCH_TARGET)
+    def test_response_profile_id_ref_to_connection_returns_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(
+            response_profile_id="$ref:target_rest_connection",
+            depends_on=("target_rest_connection", "target_json_profile", "payload_map"),
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _rest_conn_comp(),
+            _rest_json_profile_stub("target_json_profile"),
+            _stub_dep_comp("payload_map"),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        ve = op_step["validation_error"]
+        assert ve["error_code"] == "REST_REF_TYPE_MISMATCH"
+        assert ve["field"] == "response_profile_id"
+
+    @patch(_PATCH_TARGET)
+    def test_profile_xml_ref_is_accepted_for_rest(self, mock_pag):
+        mock_pag.return_value = []
+        # profile.xml is an explicitly-supported REST profile type per the
+        # issue #49 plan; should plan cleanly.
+        xml_profile_stub = _stub_dep_comp("target_xml_profile", role="profile.json")
+        # Override to declare config.type=profile.xml on the wrapper.
+        xml_profile_stub.config["type"] = "profile.xml"
+        op = _rest_op_comp(
+            request_profile_id="$ref:target_xml_profile",
+            depends_on=("target_rest_connection", "target_xml_profile", "payload_map"),
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _rest_conn_comp(),
+            xml_profile_stub,
+            _stub_dep_comp("payload_map"),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        assert op_step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
+    def test_uuid_profile_id_skips_type_check(self, mock_pag):
+        mock_pag.return_value = []
+        op = _rest_op_comp(
+            request_profile_id="some-existing-profile-uuid",
+            response_profile_id="another-existing-profile-uuid",
+            depends_on=("target_rest_connection", "payload_map"),
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _rest_conn_comp(),
+            _stub_dep_comp("payload_map"),
+            op,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "target_rest_operation")
+        # Direct UUIDs are outside-spec and skip type-check; no error.
+        assert op_step.get("validation_error") is None
+
+
+class TestBuildPlanProcessFlowRefTypes:
+    """Issue #49: typed $ref validation for structured database_to_api_sync processes."""
+
+    @patch(_PATCH_TARGET)
+    def test_swapped_source_connection_and_operation_refs_repro(self, mock_pag):
+        # The repro the issue calls out: someone wires source.connection_id
+        # at the operation key and source.operation_id at the connection.
+        # Both targets exist and both keys are in depends_on, so the
+        # pre-existing reachability check passes — only the new type
+        # check catches the bug.
+        mock_pag.return_value = []
+        bad = _process_flow_comp()
+        bad.config["source"]["connection_id"] = "$ref:db_query_operation"
+        bad.config["source"]["operation_id"] = "$ref:db_connection"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        ve = process_step["validation_error"]
+        assert process_step["planned_action"] == "error_process_validation"
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "source.connection_id"
+        assert ve["details"]["ref_key"] == "db_query_operation"
+        assert ve["details"]["expected_role"] == "database connector-settings"
+        assert "connector-action" in ve["details"]["actual_role"]
+
+    @patch(_PATCH_TARGET)
+    def test_source_operation_id_pointing_to_connection_errors(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _process_flow_comp()
+        bad.config["source"]["operation_id"] = "$ref:db_connection"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "source.operation_id"
+        assert ve["details"]["expected_role"] == "database connector-action Get"
+
+    @patch(_PATCH_TARGET)
+    def test_target_connection_id_pointing_to_rest_op_errors(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _process_flow_comp()
+        bad.config["target"]["connection_id"] = "$ref:target_rest_operation"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "target.connection_id"
+        assert ve["details"]["expected_role"] == "REST Client connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_target_operation_id_pointing_to_rest_connection_errors(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _process_flow_comp()
+        bad.config["target"]["operation_id"] = "$ref:target_rest_connection"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "target.operation_id"
+        assert ve["details"]["expected_role"] == "REST Client connector-action"
+
+    @patch(_PATCH_TARGET)
+    def test_target_action_type_method_mismatch_errors(self, mock_pag):
+        mock_pag.return_value = []
+        # Default stub method is POST. target.action_type="PATCH" on the
+        # process config disagrees with the referenced operation's declared
+        # HTTP method.
+        bad = _process_flow_comp()
+        bad.config["target"]["action_type"] = "PATCH"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),  # method=POST
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "target.action_type"
+        assert ve["details"]["expected_role"] == "POST"
+        assert ve["details"]["actual_role"] == "PATCH"
+
+    @patch(_PATCH_TARGET)
+    def test_uuid_refs_skip_type_check(self, mock_pag):
+        mock_pag.return_value = []
+        # Replace every ref with a UUID-like literal; the existing
+        # MISSING_PROCESS_DEPENDENCY check ignores non-$ref strings, and
+        # the new type check also skips them. depends_on may be empty.
+        bad = _process_flow_comp(depends_on=())
+        bad.config["source"]["connection_id"] = "11111111-1111-1111-1111-111111111111"
+        bad.config["source"]["operation_id"] = "22222222-2222-2222-2222-222222222222"
+        bad.config["target"]["connection_id"] = "33333333-3333-3333-3333-333333333333"
+        bad.config["target"]["operation_id"] = "44444444-4444-4444-4444-444444444444"
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        # No validation error: direct UUIDs are out-of-spec and pass.
+        assert process_step.get("validation_error") is None
+        assert process_step["planned_action"] == "create"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_dep_error_beats_type_check(self, mock_pag):
+        # Regression: when depends_on is missing the key entirely, the
+        # pre-existing MISSING_PROCESS_DEPENDENCY check must fire — not
+        # the new PROCESS_REF_TYPE_MISMATCH. ProcessFlowBuilder.validate_config
+        # runs first and only when it returns clean do we run the type check.
+        mock_pag.return_value = []
+        bad = _process_flow_comp(
+            depends_on=("db_query_operation", "target_rest_connection", "target_rest_operation"),
+        )
+        # source.connection_id still references db_connection but the key
+        # is not in depends_on.
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "MISSING_PROCESS_DEPENDENCY"
+        # No details — only the new TYPE_MISMATCH codes ship structured details.
+        assert "details" not in ve
+
+    @patch(_PATCH_TARGET)
+    def test_no_method_declared_on_rest_op_skips_action_type_check(self, mock_pag):
+        # When the referenced REST operation has no declared method,
+        # target.action_type cannot be checked against it — silently skip.
+        mock_pag.return_value = []
+        no_method_rest = _stub_dep_comp("target_rest_operation")
+        # Strip the method field from the stub config.
+        no_method_rest.config.pop("method", None)
+        bad = _process_flow_comp()  # target.action_type defaults to POST
+        plan = _build_plan(MagicMock(), _build_config([
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            no_method_rest,
+            bad,
+        ]))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step.get("validation_error") is None
+        assert process_step["planned_action"] == "create"
+
+    @patch(_PATCH_TARGET)
+    def test_clean_typed_refs_plan_without_error(self, mock_pag):
+        # Sanity: all refs point at correctly-typed in-spec components,
+        # method matches action_type → clean plan.
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),  # method=POST, matches action_type=POST
+            _process_flow_comp(),
+        ]))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step.get("validation_error") is None
+        assert process_step["planned_action"] == "create"

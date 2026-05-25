@@ -138,6 +138,7 @@ def test_template_documents_error_codes():
         "UNSUPPORTED_DB_OPERATION_MODE",
         "MISSING_DB_READ_PROFILE_REF",
         "MISSING_DB_DEPENDENCY",
+        "DB_REF_TYPE_MISMATCH",
         "UNSUPPORTED_DB_GET_FIELD",
     ):
         assert expected in codes

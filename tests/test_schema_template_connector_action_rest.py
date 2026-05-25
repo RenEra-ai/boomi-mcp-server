@@ -180,6 +180,7 @@ def test_template_documents_error_codes():
         "REST_CONNECTION_REF_REQUIRED",
         "REST_DEPENDENCY_REQUIRED",
         "REST_PROFILE_REF_UNRESOLVED",
+        "REST_REF_TYPE_MISMATCH",
         "PLAINTEXT_SECRET_REJECTED",
     ):
         assert expected in codes
