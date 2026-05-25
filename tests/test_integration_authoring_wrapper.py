@@ -356,7 +356,14 @@ _DB_TO_API_SYNC_MINIMAL_PAYLOAD = {
                 "credential_ref": "secrets/db/svc_sync",
             },
         },
-        "read_operation": {"sql": "<<user-authored SELECT statement>>"},
+        "read_operation": {
+            "sql": "<<user-authored DB read statement>>",
+            "result_schema": {
+                "fields": [
+                    {"name": "source_a", "data_type": "character"},
+                ],
+            },
+        },
     },
     "target": {
         "binding": {
@@ -367,12 +374,27 @@ _DB_TO_API_SYNC_MINIMAL_PAYLOAD = {
             },
         },
         "send_request": {"method": "POST", "path": "/v1/items"},
+        "payload_profile": {
+            "format": "json",
+            "root": {
+                "name": "Root",
+                "kind": "object",
+                "children": [
+                    {
+                        "name": "target_a",
+                        "kind": "simple",
+                        "data_type": "character",
+                    },
+                ],
+            },
+        },
     },
     "transform": {
-        "mappings": [
+        "operations": [
             {
-                "source_field": "<<source field name>>",
-                "target_field": "<<target field name>>",
+                "operation_type": "direct",
+                "source_field": "source_a",
+                "target_path": "Root/target_a",
             },
         ],
     },

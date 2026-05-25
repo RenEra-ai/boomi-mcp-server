@@ -1,4 +1,16 @@
-"""Tests for the contract-only database_to_api_sync archetype (Issue #21)."""
+"""Tests for the contract-only database_to_api_sync archetype (issues #21, #44).
+
+Issue #44 (M2.1a) replaced the legacy ``transform.mappings`` /
+``transform.payload_template`` / ``transform.script_slots`` surface with:
+
+  * caller-declared DB read result fields under
+    ``source.read_operation.result_schema``,
+  * caller-supplied JSON profile tree under ``target.payload_profile``, and
+  * discriminated typed transform operations under ``transform.operations``.
+
+The fixtures + tests below cover both the legacy contract guarantees (kept
+intact by issue #44) and the new typed schema surface.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +53,12 @@ def _valid_minimal() -> Dict[str, Any]:
                 },
             },
             "read_operation": {
-                "sql": "<<user-authored SELECT statement>>",
+                "sql": "<<user-authored DB read statement>>",
+                "result_schema": {
+                    "fields": [
+                        {"name": "source_a", "data_type": "character"},
+                    ],
+                },
             },
         },
         "target": {
@@ -56,12 +73,27 @@ def _valid_minimal() -> Dict[str, Any]:
                 "method": "POST",
                 "path": "/v1/items",
             },
+            "payload_profile": {
+                "format": "json",
+                "root": {
+                    "name": "Root",
+                    "kind": "object",
+                    "children": [
+                        {
+                            "name": "target_a",
+                            "kind": "simple",
+                            "data_type": "character",
+                        },
+                    ],
+                },
+            },
         },
         "transform": {
-            "mappings": [
+            "operations": [
                 {
-                    "source_field": "<<source field name>>",
-                    "target_field": "<<target field name>>",
+                    "operation_type": "direct",
+                    "source_field": "source_a",
+                    "target_path": "Root/target_a",
                 },
             ],
         },
@@ -77,7 +109,13 @@ def _valid_minimal() -> Dict[str, Any]:
 
 
 def _valid_full() -> Dict[str, Any]:
-    """Fuller payload: scheduled, watermark, retry, DLQ enabled, run metadata."""
+    """Fuller payload: scheduled, watermark, retry, DLQ enabled, run metadata.
+
+    Demonstrates the full surface: result_schema with two declared fields,
+    nested JSON payload profile (root object + repeating array), one direct
+    + one map_function + one map_script transform operation, and a watermark
+    referencing a declared source field.
+    """
     return {
         "naming": {
             "integration_name": "demo-db-to-api-incremental",
@@ -92,7 +130,18 @@ def _valid_full() -> Dict[str, Any]:
                 "component_id": "<<existing connector id>>",
             },
             "read_operation": {
-                "sql": "<<user-authored incremental SELECT statement>>",
+                "sql": "<<user-authored incremental DB read statement>>",
+                "result_schema": {
+                    "fields": [
+                        {
+                            "name": "source_a",
+                            "data_type": "character",
+                            "required": True,
+                        },
+                        {"name": "source_b", "data_type": "datetime"},
+                        {"name": "source_c", "data_type": "number"},
+                    ],
+                },
                 "parameters": [
                     {"name": "<<bind parameter name>>", "direction": "in"},
                 ],
@@ -119,14 +168,60 @@ def _valid_full() -> Dict[str, Any]:
                 ],
                 "expected_status_codes": [200, 202],
             },
+            "payload_profile": {
+                "format": "json",
+                "root": {
+                    "name": "Root",
+                    "kind": "object",
+                    "children": [
+                        {
+                            "name": "target_a",
+                            "kind": "simple",
+                            "data_type": "character",
+                            "required": True,
+                        },
+                        {
+                            "name": "target_b",
+                            "kind": "simple",
+                            "data_type": "datetime",
+                        },
+                        {
+                            "name": "list",
+                            "kind": "array",
+                            "children": [
+                                {
+                                    "name": "target_c",
+                                    "kind": "simple",
+                                    "data_type": "number",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
         },
         "transform": {
-            "mappings": [
-                {"source_field": "<<source a>>", "target_field": "<<target a>>"},
-                {"source_field": "<<source b>>", "target_field": "<<target b>>", "transform_hint": "trim"},
+            "operations": [
+                {
+                    "operation_type": "direct",
+                    "source_field": "source_a",
+                    "target_path": "Root/target_a",
+                    "documentation_hint": "carry first column verbatim",
+                },
+                {
+                    "operation_type": "map_function",
+                    "function_type": "trim",
+                    "inputs": ["source_b"],
+                    "target_path": "Root/target_b",
+                },
+                {
+                    "operation_type": "map_script",
+                    "script_slot": "enrich_row",
+                    "language": "groovy2",
+                    "inputs": ["source_c"],
+                    "outputs": ["Root/list[]/target_c"],
+                },
             ],
-            "payload_template": "<<user-authored payload template>>",
-            "script_slots": {"pre_send": "<<user-authored hook body>>"},
         },
         "execution": {
             "trigger": {
@@ -134,7 +229,7 @@ def _valid_full() -> Dict[str, Any]:
                 "schedule": {"cron": "<<cron expression>>", "timezone": "UTC"},
             },
             "watermark": {
-                "field": "<<watermark column>>",
+                "field": "source_b",
                 "kind": "timestamp",
                 "persistence": "dpp",
             },
@@ -255,7 +350,61 @@ def test_valid_build_emits_zero_component_contract_spec():
     assert rules["raw_xml_exposed"] is False
     assert rules["boomi_mutation"] is False
     assert rules["requires_m2_9_for_executable_components"] is True
+    # Issue #44 M2.1a additions:
+    assert rules["metadata_version"] == "0.2.0"
+    assert "caller-declared" in rules["profile_schema_strategy"]
+    assert "caller-supplied" in rules["profile_schema_strategy"]
+    assert rules["transform_routes"] == {
+        "direct": "#26",
+        "map_function": "#40",
+        "map_script": "#41",
+        "xslt": "#42 (rejected in M2)",
+    }
     assert spec["name"] == "demo-db-to-api-sync"
+
+
+def test_valid_build_emits_transform_flow_with_typed_metadata():
+    """Issue #44: emit_spec must surface source schema, target leaf paths, and
+    operation summaries on the transform flow entry so downstream issues
+    (#26/#40/#41) can choose the right rung from spec metadata alone."""
+    result = build_from_archetype_action("database_to_api_sync", _valid_full())
+    assert result["_success"] is True, result
+    spec = result["integration_spec"]
+    transform_flow = next(f for f in spec["flows"] if f["key"] == "transform")
+
+    src_schema = transform_flow["source_schema"]
+    assert src_schema["field_count"] == 3
+    assert {f["name"] for f in src_schema["fields"]} == {
+        "source_a",
+        "source_b",
+        "source_c",
+    }
+
+    target_profile = transform_flow["target_payload_profile"]
+    assert target_profile["format"] == "json"
+    assert target_profile["root_name"] == "Root"
+    leaf_paths = {leaf["path"] for leaf in target_profile["leaves"]}
+    # Array repetition surfaces as [] on the array segment per the M2.1a path
+    # strategy ("Represent array repetition in the logical path with [] on the
+    # array segment, e.g. Root/list[]/key").
+    assert leaf_paths == {"Root/target_a", "Root/target_b", "Root/list[]/target_c"}
+
+    ops = transform_flow["operations"]
+    assert len(ops) == 3
+    by_type = {op["operation_type"]: op for op in ops}
+    assert by_type["direct"]["future_builder_issue"] == "#26"
+    assert by_type["direct"]["source_field"] == "source_a"
+    assert by_type["direct"]["target_path"] == "Root/target_a"
+    assert by_type["map_function"]["future_builder_issue"] == "#40"
+    assert by_type["map_function"]["function_type"] == "trim"
+    assert by_type["map_function"]["input_count"] == 1
+    assert by_type["map_script"]["future_builder_issue"] == "#41"
+    assert by_type["map_script"]["script_slot"] == "enrich_row"
+    assert by_type["map_script"]["input_count"] == 1
+    assert by_type["map_script"]["output_count"] == 1
+    # Defense-in-depth: the spec must not echo executable script bodies.
+    assert by_type["map_script"]["has_script_body"] is False
+    assert by_type["map_script"]["has_script_component_ref"] is False
 
 
 def test_full_fixture_build_includes_watermark_and_dlq_flows():
@@ -326,11 +475,11 @@ def test_blank_sql_returns_field_error():
     _assert_path_match(paths, "source.read_operation.sql")
 
 
-def test_empty_mappings_returns_field_error():
+def test_empty_operations_returns_field_error():
     payload = _valid_minimal()
-    payload["transform"]["mappings"] = []
+    payload["transform"]["operations"] = []
     paths = _field_paths(_build(payload))
-    _assert_path_match(paths, "transform.mappings")
+    _assert_path_match(paths, "transform.operations")
 
 
 def test_rest_auth_without_credential_ref_returns_field_error():
@@ -459,6 +608,520 @@ def test_watermark_consistency_error_does_not_echo_query_param_names():
     assert sentinel not in json.dumps(result), (
         "watermark-consistency error must not echo caller-supplied query "
         "parameter names back to the caller"
+    )
+
+
+# ===========================================================================
+# Issue #44 — typed schema + transform operations contract
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Positive cases — full fixture validates with map_function + map_script,
+# minimal fixture validates direct-only.
+# ---------------------------------------------------------------------------
+
+
+def test_full_fixture_round_trip_includes_typed_operation_summaries():
+    """The full fixture's three operation types (direct, map_function,
+    map_script) must validate and round-trip into the emitted spec metadata
+    with the right future-builder pointers."""
+    params = DatabaseToApiSyncArchetype.validate_parameters(_valid_full())
+    spec = DatabaseToApiSyncArchetype.emit_spec(params)
+    transform_flow = next(f for f in spec.flows if f["key"] == "transform")
+    op_types = {op["operation_type"]: op["future_builder_issue"] for op in transform_flow["operations"]}
+    assert op_types == {"direct": "#26", "map_function": "#40", "map_script": "#41"}
+
+
+def test_map_function_operation_validates_with_only_required_fields():
+    """A bare map_function operation (no parameters, no documentation_hint)
+    must validate and surface its future_builder pointer."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "map_function",
+            "function_type": "uppercase",
+            "inputs": ["source_a"],
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is True, result
+    transform_flow = next(
+        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
+    )
+    assert len(transform_flow["operations"]) == 1
+    op = transform_flow["operations"][0]
+    assert op["operation_type"] == "map_function"
+    assert op["future_builder_issue"] == "#40"
+    assert op["function_type"] == "uppercase"
+    assert op["input_count"] == 1
+    assert op["has_parameters"] is False
+
+
+def test_map_script_operation_validates_without_canned_script_body():
+    """A map_script operation without script_body must validate; the emitted
+    spec metadata must not invent a default body or component ref."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "map_script",
+            "script_slot": "enrich_row",
+            "language": "groovy2",
+            "inputs": ["source_a"],
+            "outputs": ["Root/target_a"],
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is True, result
+    transform_flow = next(
+        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
+    )
+    assert len(transform_flow["operations"]) == 1
+    op = transform_flow["operations"][0]
+    assert op["operation_type"] == "map_script"
+    assert op["future_builder_issue"] == "#41"
+    assert op["script_slot"] == "enrich_row"
+    assert op["language"] == "groovy2"
+    assert op["has_script_body"] is False
+    assert op["has_script_component_ref"] is False
+
+
+def test_documentation_hint_is_accepted_but_not_executable():
+    """documentation_hint must be accepted on every operation type without
+    influencing routing."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+            "documentation_hint": "passes the value verbatim",
+        },
+    ]
+    assert _build(payload)["_success"] is True
+
+
+# ---------------------------------------------------------------------------
+# Negative cases — result_schema
+# ---------------------------------------------------------------------------
+
+
+def test_missing_result_schema_returns_field_error():
+    payload = _valid_minimal()
+    payload["source"]["read_operation"].pop("result_schema")
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "source.read_operation")
+
+
+def test_empty_result_schema_fields_returns_field_error():
+    payload = _valid_minimal()
+    payload["source"]["read_operation"]["result_schema"]["fields"] = []
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "source.read_operation.result_schema.fields")
+
+
+def test_duplicate_result_schema_field_names_returns_field_error():
+    payload = _valid_minimal()
+    payload["source"]["read_operation"]["result_schema"]["fields"] = [
+        {"name": "source_a", "data_type": "character"},
+        {"name": "source_a", "data_type": "number"},
+    ]
+    # Add the new source field reference so transform validation doesn't
+    # mask the duplicate-name error.
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    paths = _field_paths(result)
+    _assert_path_match(paths, "source.read_operation.result_schema")
+    assert any("duplicate" in fe["message"] for fe in result["field_errors"]), (
+        f"expected 'duplicate' to surface in error message, got {result['field_errors']!r}"
+    )
+
+
+def test_unsupported_result_field_data_type_returns_field_error():
+    payload = _valid_minimal()
+    payload["source"]["read_operation"]["result_schema"]["fields"] = [
+        {"name": "source_a", "data_type": "boolean"},
+    ]
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "source.read_operation.result_schema.fields")
+
+
+# ---------------------------------------------------------------------------
+# Negative cases — payload_profile
+# ---------------------------------------------------------------------------
+
+
+def test_missing_payload_profile_returns_field_error():
+    payload = _valid_minimal()
+    payload["target"].pop("payload_profile")
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "target")
+
+
+def test_payload_profile_root_must_be_object():
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"] = {
+        "name": "Root",
+        "kind": "simple",
+        "data_type": "character",
+    }
+    result = _build(payload)
+    paths = _field_paths(result)
+    _assert_path_match(paths, "target.payload_profile")
+    assert any("object" in fe["message"] for fe in result["field_errors"]), (
+        f"expected 'object' to surface in error message, got {result['field_errors']!r}"
+    )
+
+
+def test_object_node_without_children_returns_field_error():
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"] = {
+        "name": "Root",
+        "kind": "object",
+    }
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "target.payload_profile.root")
+
+
+def test_array_node_without_children_returns_field_error():
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "list", "kind": "array"},
+    ]
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "target.payload_profile.root")
+
+
+def test_simple_node_without_data_type_returns_field_error():
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "target_a", "kind": "simple"},
+    ]
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "target.payload_profile.root")
+
+
+# ---------------------------------------------------------------------------
+# Negative cases — transform operations
+# ---------------------------------------------------------------------------
+
+
+def test_transform_references_unknown_source_field_fails():
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "unknown_source_field",
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert any(
+        "source field name not declared" in fe["message"]
+        and "result_schema" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected unknown-source-field error, got {result['field_errors']!r}"
+
+
+def test_transform_references_unknown_target_path_fails():
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/does_not_exist",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert any(
+        "target path" in fe["message"] for fe in result["field_errors"]
+    ), f"expected unknown-target-path error, got {result['field_errors']!r}"
+
+
+def test_transform_targeting_object_node_fails():
+    """A direct operation cannot bind to an object node; only simple leaves
+    are valid transform targets per the M2.1a contract."""
+    payload = _valid_minimal()
+    # Add a nested object so we have an object node to (incorrectly) target.
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {
+            "name": "target_a",
+            "kind": "simple",
+            "data_type": "character",
+        },
+        {
+            "name": "wrapper",
+            "kind": "object",
+            "children": [
+                {
+                    "name": "nested_target",
+                    "kind": "simple",
+                    "data_type": "character",
+                },
+            ],
+        },
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/wrapper",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert any(
+        "target path" in fe["message"] for fe in result["field_errors"]
+    )
+
+
+def test_transform_targeting_array_node_fails():
+    """A direct operation cannot bind to an array node; only simple leaves
+    are valid transform targets."""
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {
+            "name": "target_a",
+            "kind": "simple",
+            "data_type": "character",
+        },
+        {
+            "name": "list",
+            "kind": "array",
+            "children": [
+                {"name": "elem", "kind": "simple", "data_type": "character"},
+            ],
+        },
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/list",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_duplicate_target_binding_across_operations_fails():
+    payload = _valid_minimal()
+    payload["source"]["read_operation"]["result_schema"]["fields"] = [
+        {"name": "source_a", "data_type": "character"},
+        {"name": "source_b", "data_type": "character"},
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+        {
+            "operation_type": "direct",
+            "source_field": "source_b",
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert any(
+        "bind" in fe["message"] and "more than once" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected duplicate-binding error, got {result['field_errors']!r}"
+
+
+def test_map_script_duplicate_output_across_operations_fails():
+    payload = _valid_minimal()
+    payload["source"]["read_operation"]["result_schema"]["fields"] = [
+        {"name": "source_a", "data_type": "character"},
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+        {
+            "operation_type": "map_script",
+            "script_slot": "overwrite_target_a",
+            "language": "groovy2",
+            "inputs": ["source_a"],
+            "outputs": ["Root/target_a"],
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_watermark_referencing_unknown_source_field_fails():
+    payload = _valid_full()
+    payload["execution"]["watermark"]["field"] = "not_a_declared_field"
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert any(
+        "watermark" in fe["message"]
+        and "result_schema" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected watermark-source-ref error, got {result['field_errors']!r}"
+
+
+# ---------------------------------------------------------------------------
+# Negative cases — unsupported operation types
+# ---------------------------------------------------------------------------
+
+
+def test_unsupported_operation_type_returns_field_error():
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "totally_unknown",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_xslt_operation_type_emits_issue_42_pointer():
+    """operation_type='xslt' must surface a friendly pointer to issue #42."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {"operation_type": "xslt", "stylesheet_ref": "<<xslt body>>"},
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert any("#42" in fe["message"] for fe in result["field_errors"]), (
+        f"expected #42 pointer in error message, got {result['field_errors']!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Negative cases — legacy executable surface
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_mappings_shape_is_rejected():
+    """The legacy ``transform.mappings`` shape is rejected as
+    ``extra_forbidden`` so callers can't accidentally route to the old path."""
+    payload = _valid_minimal()
+    # Replace the typed operations with the legacy shape.
+    payload["transform"] = {
+        "mappings": [
+            {"source_field": "source_a", "target_field": "Root/target_a"},
+        ],
+    }
+    result = _build(payload)
+    paths = _field_paths(result)
+    # Without operations, the typed contract surfaces a missing-operations
+    # field error AND extra_forbidden for mappings.
+    assert any("transform" in p for p in paths)
+
+
+def test_legacy_payload_template_is_rejected():
+    payload = _valid_minimal()
+    payload["transform"]["payload_template"] = "<<legacy payload template>>"
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "transform")
+
+
+def test_legacy_script_slots_is_rejected():
+    payload = _valid_minimal()
+    payload["transform"]["script_slots"] = {"pre_send": "<<legacy hook body>>"}
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "transform")
+
+
+def test_legacy_transform_hint_on_operation_is_rejected():
+    """The legacy executable ``transform_hint`` field is dropped; only
+    ``documentation_hint`` is accepted on operations."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+            "transform_hint": "trim",
+        },
+    ]
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "transform.operations")
+
+
+# ---------------------------------------------------------------------------
+# Negative cases — secret hygiene
+# ---------------------------------------------------------------------------
+
+
+def test_transform_validation_error_does_not_echo_source_field_names():
+    """Cross-field validation must not echo the offending source-field name
+    back through the error envelope (defense-in-depth against callers using
+    sensitive identifiers)."""
+    sentinel = "sk_live_UNKNOWN_FIELD_ECHO_GUARD_DEADBEEF"
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": sentinel,
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert sentinel not in json.dumps(result), (
+        "transform-reference error must not echo caller-supplied source field "
+        "names back to the caller"
+    )
+
+
+def test_duplicate_target_binding_error_does_not_echo_target_paths():
+    """Duplicate-target error must not echo the offending leaf path."""
+    sentinel_segment = "sk_live_TARGET_PATH_ECHO_GUARD_DEADBEEF"
+    payload = _valid_minimal()
+    payload["source"]["read_operation"]["result_schema"]["fields"] = [
+        {"name": "source_a", "data_type": "character"},
+        {"name": "source_b", "data_type": "character"},
+    ]
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": sentinel_segment, "kind": "simple", "data_type": "character"},
+    ]
+    target_path = f"Root/{sentinel_segment}"
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": target_path,
+        },
+        {
+            "operation_type": "direct",
+            "source_field": "source_b",
+            "target_path": target_path,
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    # The sentinel will appear in the emitted spec on success — but failure
+    # responses must keep cross-field errors structural.
+    assert sentinel_segment not in json.dumps(result["field_errors"]), (
+        "duplicate-target-binding error must not echo caller-supplied target "
+        "leaf paths back to the caller"
     )
 
 
