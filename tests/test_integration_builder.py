@@ -2848,6 +2848,48 @@ class TestBuildPlanProcessFlow:
         assert "validation_error" not in process_step
 
     @patch(_PATCH_TARGET)
+    def test_name_mismatch_between_top_level_and_config_errors_at_plan(self, mock_pag):
+        """Codex review r8 F1: planning + collision lookup use comp.name
+        (the top-level field), but apply-time build() prefers
+        payload["name"] (== config["name"]) to honor the r3 clone-suffix
+        precedence. When both surfaces are set and disagree, the emitted
+        XML carries a name that didn't go through collision lookup —
+        creating duplicates or silently renaming on update."""
+        mock_pag.return_value = []
+        comp = _process_flow_comp(name="Top Level Name")
+        comp.config["name"] = "Different Config Name"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            comp,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_NAME_CONFLICT"
+        assert process_step["validation_error"]["field"] == "name"
+
+    @patch(_PATCH_TARGET)
+    def test_matching_top_level_and_config_name_passes(self, mock_pag):
+        """Both surfaces set, identical → no conflict (regression guard)."""
+        mock_pag.return_value = []
+        comp = _process_flow_comp(name="Same Name")
+        comp.config["name"] = "Same Name"
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            comp,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "create"
+        assert "validation_error" not in process_step
+
+    @patch(_PATCH_TARGET)
     def test_config_name_participates_in_collision_lookup(self, mock_pag):
         """Codex review r7 P2.1: with the r6 fix accepting config.name as
         a valid display name, collision detection has to see it too. If

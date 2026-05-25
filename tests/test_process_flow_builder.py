@@ -102,18 +102,22 @@ def test_build_emits_component_envelope():
 
 
 def test_build_folder_full_path_attribute():
+    # Codex review r8 F2: folderName is the writable folder attribute
+    # (folderFullPath is response-only metadata Boomi ignores on writes).
     xml = ProcessFlowBuilder.build(
         _base_config(),
         name="My Process",
         folder_name="Some/Folder",
     )
     root = ET.fromstring(xml)
-    assert root.attrib.get("folderFullPath") == "Some/Folder"
+    assert root.attrib.get("folderName") == "Some/Folder"
+    assert "folderFullPath" not in root.attrib
 
 
 def test_build_omits_folder_when_not_supplied():
     xml = ProcessFlowBuilder.build(_base_config(), name="My Process")
     root = ET.fromstring(xml)
+    assert "folderName" not in root.attrib
     assert "folderFullPath" not in root.attrib
 
 
@@ -241,6 +245,19 @@ def test_target_ids_whitespace_stripped_in_xml():
     ca = shapes[2].find("configuration/connectoraction")
     assert ca.attrib["connectionId"] == "C2"
     assert ca.attrib["operationId"] == "O2"
+
+
+def test_map_id_literal_whitespace_stripped_in_xml():
+    """Codex review r8 F3: validate_config accepts a padded literal
+    map_ref/map_id as long as ref.strip() is non-empty, but the
+    unstripped value used to flow into the emitted mapId attribute,
+    breaking map shape resolution at apply. Strip at emission to mirror
+    the r6.2 fix for connection_id/operation_id."""
+    cfg = _base_config(transform={"mode": "map_ref", "map_ref": "  MAP-UUID-9999  "})
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    assert shapes[2].attrib["shapetype"] == "map"
+    assert shapes[2].find("configuration/map").attrib["mapId"] == "MAP-UUID-9999"
 
 
 def test_stop_shape_has_continue_true_default():
@@ -707,7 +724,7 @@ def test_build_coerces_non_string_description():
 def test_build_coerces_non_string_folder_name():
     xml = ProcessFlowBuilder.build(_base_config(), name="N", folder_name=42)
     root = ET.fromstring(xml)
-    assert root.attrib["folderFullPath"] == "42"
+    assert root.attrib["folderName"] == "42"
 
 
 def test_build_coerces_non_string_name():
