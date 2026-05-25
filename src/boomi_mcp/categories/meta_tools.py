@@ -3228,7 +3228,7 @@ _PROCESS_FLOW_PROTOCOLS = {
                     "connector_type": "rest",
                     "connection_id": "$ref:target_rest_connection",
                     "operation_id": "$ref:target_rest_operation",
-                    "action_type": "POST",
+                    "action_type": "PATCH",
                     "label": "<<REST send label>>",
                 },
                 "reliability": {

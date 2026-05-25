@@ -3668,3 +3668,37 @@ class TestBuildPlanProcessFlowRefTypes:
         process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
         assert process_step.get("validation_error") is None
         assert process_step["planned_action"] == "create"
+
+    @patch(_PATCH_TARGET)
+    def test_published_schema_examples_compose_without_method_mismatch(self, mock_pag):
+        """Regression for codex r1: the published rest.operation and
+        database_to_api_sync schema examples must compose into a single
+        valid spec — i.e. their HTTP verbs must agree. Without this guard
+        a user/agent copying both examples wholesale gets a confusing
+        PROCESS_REF_TYPE_MISMATCH at plan time despite following the docs.
+        """
+        from src.boomi_mcp.categories.meta_tools import (
+            get_schema_template_action,
+        )
+        mock_pag.return_value = []
+        rest_op_template = get_schema_template_action(
+            resource_type="component",
+            operation="create",
+            component_type="connector-action",
+            protocol="rest.operation",
+        )
+        process_template = get_schema_template_action(
+            resource_type="process",
+            operation="create",
+            protocol="database_to_api_sync",
+        )
+        rest_op_example = rest_op_template["example"]
+        process_example = process_template["example_component_spec"]
+        rest_op_method = rest_op_example["config"]["method"]
+        process_action_type = process_example["config"]["target"]["action_type"]
+        assert rest_op_method.upper() == process_action_type.upper(), (
+            f"rest.operation example method={rest_op_method!r} disagrees "
+            f"with database_to_api_sync example target.action_type="
+            f"{process_action_type!r} — copies of both examples will hit "
+            f"PROCESS_REF_TYPE_MISMATCH at plan time"
+        )
