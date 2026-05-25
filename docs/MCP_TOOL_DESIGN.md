@@ -2,7 +2,7 @@
 
 Status: active
 Version: 3.0
-Last updated: 2026-05-15
+Last updated: 2026-05-23
 Supersedes: `docs/archive/MCP_TOOL_DESIGN_V2_2026-03-10.md`
 
 ## 1. Purpose
@@ -31,8 +31,9 @@ The goal is not to make the LLM compose Boomi shapes by hand. The goal is to giv
 4. New authoring tools sit above `build_integration` and emit `IntegrationSpecV1`.
 5. Archetypes define closed architecture and open task slots.
 6. Archetypes do not ship content templates: no canned SQL, OData filters, SOAP envelopes, REST payloads, field mappings, or Groovy snippets.
-7. Raw component/XML tools remain available only as escape hatches for unsupported cases.
-8. The first implementation path is depth-first: make `database_to_api_sync` work end-to-end before broadening the catalog.
+7. Transformation compiles through native Boomi rungs first: direct map, map function, map script, then process-level script only when explicitly requested.
+8. Raw component/XML tools remain available only as escape hatches for unsupported cases.
+9. The first implementation path is depth-first: make `database_to_api_sync` work end-to-end before broadening the catalog.
 
 ## 3. Current Baseline
 
@@ -92,11 +93,25 @@ Primitives are reusable building blocks used by archetypes. They are not usually
 Primitive categories:
 
 - Source: DB extract, REST fetch, OData fetch, SOAP fetch, HTTP listener receive.
-- Transform: normalize profile, map fields, XML/JSON conversion, named script slot.
+- Transform: normalize profile, map fields, map functions, map scripts, XML/JSON conversion, named process-level script slot.
 - Target: REST send, DB insert/upsert, SOAP send.
 - Operations: schedule, watermark, retry, DLQ, error classifier, run metadata.
 
 Each primitive owns a small Boomi subprocess or component group and has a clear input/output contract.
+
+Transformation compiler policy:
+
+- The LLM-facing source of truth is structured transform intent in archetype parameters and `IntegrationSpecV1`, not Boomi visual map XML or Groovy source.
+- The compiler uses the least powerful Boomi-native rung that can represent the requested transform:
+  1. direct field-to-field map
+  2. `transform.function` for standard per-field operations such as date format, default value, string operations, simple lookup, sequential value, and math
+  3. `script.mapping` for in-map scripted transformations
+  4. `script.processing` only when the caller explicitly asks for process-level document manipulation
+- Unsupported transform intent fails before apply with field-level errors. It must not silently fall back to process-level Groovy.
+- XSLT is out of M2 by default and is reconsidered only for XML-heavy migration or SOAP/XML scenarios that provide a real source artifact.
+- Profile fields are generated from explicit schema contracts or discovery output. For M2, the supported sources are caller-declared DB read output fields and caller-supplied JSON schema/profile intent; browse/introspection and sample inference are discovery work.
+- Existing component updates must preserve unknown Component XML by reading the current component, merging owned subtrees, and writing the full replacement payload only after preservation. This applies to builder-generated connectors, profiles, maps, functions, scripts, and processes.
+- Agents review transformations through structured surfaces such as field lists, mapping diffs, unmapped-field validation, test payloads, and expected/actual comparison.
 
 ### L4: IntegrationSpecV1 Execution Spec
 
@@ -169,8 +184,8 @@ Forbidden in archetype source:
 
 Allowed in archetype source:
 
-- slots named `query`, `operation`, `endpoint`, `field_mappings`, `payload_template`, and `script_slots`
-- validation for required slots
+- typed slots that callers populate without canned content: `source.read_operation.sql` (caller-authored read statement), `source.read_operation.result_schema` (caller-declared DB result fields), `target.send_request.method` / `target.send_request.path`, `target.payload_profile` (caller-supplied JSON profile tree), and `transform.operations` (discriminated typed operations: `direct` / `map_function` / `map_script`)
+- validation for required slots and cross-field references (e.g. transform operations must reference declared source fields and target leaf paths)
 - safe defaults for architecture behavior, such as retry count, DLQ enabled, logging enabled, and watermark strategy
 - Boomi structural scaffolding, such as facade, error handling, retry branch, document properties, and schedule envelope
 
@@ -279,6 +294,8 @@ Initial primitive set:
 - `http_listener_receive`
 - `normalize_profile`
 - `field_map`
+- `map_function_transform`
+- `map_script_transform`
 - `xml_json_convert`
 - `rest_send_with_retry`
 - `db_upsert`
@@ -331,11 +348,14 @@ Future read-only tools:
 - `discover_soap_wsdl(url, auth_ref?)`
 - `discover_odata_metadata(base_url, auth_ref?)`
 - `discover_db_schema(connection_ref, schema_filter?)`
+- `infer_profile_fields(source_type, artifact, options?)`
+- `import_existing_integration(artifact_type, artifact, context?)`
 
 Rules:
 
 - Discovery tools are read-only.
 - They return schema/spec information for the LLM to author open task slots.
+- They can produce profile-field contracts and migration-oriented `IntegrationSpecV1` drafts for review.
 - They do not create SQL, payloads, mappings, or scripts automatically.
 - DB discovery should use Boomi-side execution or another safe mechanism; the MCP host should not require direct JDBC access to customer databases.
 

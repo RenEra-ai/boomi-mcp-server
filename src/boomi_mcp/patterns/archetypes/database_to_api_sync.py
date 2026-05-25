@@ -1121,19 +1121,15 @@ class MapScriptTransformOperation(_BaseTransformOperation):
             "reference a kind='simple' leaf in target.payload_profile."
         ),
     )
-    script_body: Optional[str] = Field(
-        default=None,
-        description=(
-            "Optional task-authored script body. The contract never supplies "
-            "a default body and never parses or executes the value. Issue #41 "
-            "owns runnable script handling."
-        ),
-    )
     script_component_ref: Optional[str] = Field(
         default=None,
         description=(
-            "Optional reference to a future Boomi script component (resolved "
-            "at execution time by issue #41). Surfaced verbatim."
+            "Reference to a future Boomi script component (resolved at "
+            "execution time by issue #41). This is the only script-routing "
+            "channel the M2 contract exposes; inline script_body is rejected "
+            "until #41 ships and can decide how to handle runnable bodies "
+            "without data-loss between build_from_archetype and downstream "
+            "compilation."
         ),
     )
 
@@ -1142,12 +1138,32 @@ class MapScriptTransformOperation(_BaseTransformOperation):
     def _strip_required(cls, value: str) -> str:
         return _stripped_nonblank(value)
 
-    @field_validator("script_body", "script_component_ref")
+    @field_validator("script_component_ref")
     @classmethod
     def _strip_optional(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         return _stripped_nonblank(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_script_body_until_41(cls, data: Any) -> Any:
+        # Reject inline script_body at the contract layer. emit_spec
+        # deliberately does not echo script bodies into IntegrationSpec
+        # (per plan: "do not include raw SQL, payload bodies, script bodies,
+        # or resolved URLs in endpoint summaries"), so accepting the field
+        # would silently discard caller-authored content between
+        # build_from_archetype and downstream compilation. Issue #41 owns
+        # runnable script handling and will reintroduce the field with
+        # whatever round-trip story it requires.
+        if isinstance(data, dict) and "script_body" in data:
+            raise ValueError(
+                "map_script.script_body is not accepted by the M2 contract; "
+                "issue #41 owns runnable script handling. Reference a future "
+                "script component via script_component_ref instead, or omit "
+                "the body until #41 ships."
+            )
+        return data
 
     @field_validator("inputs", "outputs")
     @classmethod
@@ -2079,7 +2095,6 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "input_count": len(op.inputs),
                     "outputs": list(op.outputs),
                     "output_count": len(op.outputs),
-                    "has_script_body": op.script_body is not None,
                 }
                 if op.script_component_ref is not None:
                     summary["script_component_ref"] = op.script_component_ref
