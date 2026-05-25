@@ -1,16 +1,29 @@
-"""Issue #21: contract-only database_to_api_sync archetype (M2.1).
+"""Issue #44: contract-only database_to_api_sync archetype (M2.1a).
 
-Exposes a strict Pydantic parameter contract for a SQL Server source → REST
+Exposes a strict Pydantic parameter contract for a SQL Server source -> REST
 target sync. The archetype validates the schema and emits a non-executable
 IntegrationSpecV1 (zero components). Executable component emission is owned
-by M2.9; this file deliberately does not touch any builder, profile, or live
-Boomi account.
+by later milestones; this file deliberately does not touch any builder,
+profile, or live Boomi account.
+
+M2.1a (issue #44) replaces the legacy ``transform.mappings`` /
+``transform.payload_template`` / ``transform.script_slots`` surface with:
+
+  * caller-declared DB read result fields under ``source.read_operation.result_schema``,
+  * caller-supplied JSON profile tree under ``target.payload_profile``, and
+  * discriminated typed transform operations under ``transform.operations``
+    (``direct`` -> #26, ``map_function`` -> #40, ``map_script`` -> #41;
+    ``xslt`` is rejected with a pointer to #42).
+
+The archetype does not parse SQL, browse the database, sample rows, infer
+schema, or import existing integrations — those discovery features belong
+to #47 / #48.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Set, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -51,9 +64,10 @@ class NamingConfig(BaseModel):
     component_prefix: str = Field(
         ...,
         description=(
-            "Prefix applied to every emitted Boomi component name in M2.9. "
-            "Recorded under spec.naming.component_prefix; the contract emits "
-            "zero components, so this is reserved for the executable stage."
+            "Prefix applied to every emitted Boomi component name once executable "
+            "builders ship. Recorded under spec.naming.component_prefix; the "
+            "contract emits zero components, so this is reserved for the "
+            "executable stage."
         ),
     )
     component_names: Optional[Dict[str, str]] = Field(
@@ -69,8 +83,8 @@ class NamingConfig(BaseModel):
         default=None,
         description=(
             "Optional Boomi folder path under which components will be created "
-            "in M2.9 (e.g. 'Integrations/CRM/Sync'). Echoed in spec.folders.path "
-            "without normalization."
+            "by future executable builders (e.g. 'Integrations/CRM/Sync'). "
+            "Echoed in spec.folders.path without normalization."
         ),
     )
     runtime_hints: Optional[Dict[str, Any]] = Field(
@@ -93,6 +107,95 @@ class NamingConfig(BaseModel):
         if value is None:
             return None
         return _stripped_nonblank(value)
+
+
+# ---------------------------------------------------------------------------
+# Source result schema — DB read output fields (caller-declared, M2.1a)
+# ---------------------------------------------------------------------------
+
+
+class DBResultField(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        ...,
+        description=(
+            "Logical field name produced by the DB read operation. The contract "
+            "never parses the read SQL or browses the database; every output "
+            "field consumed by downstream profile/map builders must be declared "
+            "here."
+        ),
+    )
+    data_type: Literal["character", "number", "datetime"] = Field(
+        ...,
+        description=(
+            "Conservative M2 source field data type. 'character' covers "
+            "VARCHAR/CHAR/CLOB-like strings; 'number' covers INTEGER/DECIMAL/"
+            "NUMERIC/FLOAT; 'datetime' covers TIMESTAMP/DATE/TIME. Boolean and "
+            "binary types are deferred until DB profile builders expand their "
+            "supported set."
+        ),
+    )
+    required: bool = Field(
+        default=False,
+        description=(
+            "Whether the field is expected to be present in every record. "
+            "Surfaced verbatim to downstream profile/map builders."
+        ),
+    )
+    description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional human-readable description of the field. Non-executable; "
+            "downstream builders may surface it in profile docs."
+        ),
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _strip_required(cls, value: str) -> str:
+        return _stripped_nonblank(value)
+
+    @field_validator("description")
+    @classmethod
+    def _strip_optional(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _stripped_nonblank(value)
+
+
+class DBResultSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fields: List[DBResultField] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Caller-declared output fields produced by the DB read operation. "
+            "Must be non-empty and unique by name. Issue #43 consumes this list "
+            "to generate the DB read profile in M2; #26/#40/#41 consume it as "
+            "the source-side reference set for transform operations."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _unique_field_names(self) -> "DBResultSchema":
+        seen: Set[str] = set()
+        duplicate_count = 0
+        for f in self.fields:
+            if f.name in seen:
+                duplicate_count += 1
+            else:
+                seen.add(f.name)
+        if duplicate_count:
+            # The offending field names are deliberately not echoed: this
+            # mirrors pattern_validation_error()'s policy of never echoing
+            # caller-supplied input values back through the error envelope.
+            raise ValueError(
+                f"result_schema.fields contains {duplicate_count} duplicate "
+                "field name(s); every entry must use a unique name"
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +253,8 @@ class DbCreateSettings(BaseModel):
         default_factory=dict,
         description=(
             "Optional JDBC URL options (e.g. 'encrypt' -> 'true', "
-            "'trustServerCertificate' -> 'true'). Surfaced verbatim to the "
-            "M2.9 builder; the contract does not interpret keys."
+            "'trustServerCertificate' -> 'true'). Surfaced verbatim to "
+            "downstream builders; the contract does not interpret keys."
         ),
     )
 
@@ -200,9 +303,9 @@ class DbConnectionBinding(BaseModel):
     mode: Literal["create", "reuse"] = Field(
         ...,
         description=(
-            "How to materialize the database connector in M2.9. 'create' builds "
-            "a new Boomi connector from settings; 'reuse' references an existing "
-            "connector by component_id or component_name."
+            "How to materialize the database connector. 'create' builds a new "
+            "Boomi connector from settings (later milestone); 'reuse' references "
+            "an existing connector by component_id or component_name."
         ),
     )
     settings: Optional[DbCreateSettings] = Field(
@@ -276,8 +379,8 @@ class DbReadParameter(BaseModel):
         default=None,
         description=(
             "Optional JDBC SQL type hint (e.g. 'VARCHAR', 'TIMESTAMP'). The "
-            "contract does not validate the value; M2.9 passes it through to "
-            "the database operation profile."
+            "contract does not validate the value; downstream builders pass it "
+            "through to the database operation profile."
         ),
     )
 
@@ -300,18 +403,25 @@ class DbReadOperation(BaseModel):
     sql: str = Field(
         ...,
         description=(
-            "User- or LLM-authored SELECT statement executed against the "
-            "source database. The contract never generates SQL and never "
-            "rewrites the value; it only validates that the string is "
-            "non-blank."
+            "User- or LLM-authored read statement executed against the source "
+            "database. The contract never generates SQL and never rewrites the "
+            "value; it only validates that the string is non-blank."
+        ),
+    )
+    result_schema: DBResultSchema = Field(
+        ...,
+        description=(
+            "Caller-declared output schema for the read operation. The contract "
+            "never infers result fields from sql, browse, metadata, or row "
+            "samples; transforms must reference declared fields by name."
         ),
     )
     parameters: List[DbReadParameter] = Field(
         default_factory=list,
         description=(
             "Bind parameters referenced by the SQL statement. The contract "
-            "does not parse the SQL — supplying parameters here is purely "
-            "declarative for the M2.9 builder."
+            "does not parse the SQL; supplying parameters here is purely "
+            "declarative for downstream builders."
         ),
     )
     batch_size: Optional[int] = Field(
@@ -319,7 +429,8 @@ class DbReadOperation(BaseModel):
         ge=1,
         description=(
             "Optional batch size for the database read operation. Surfaced "
-            "verbatim to M2.9; the contract does not impose a maximum."
+            "verbatim to downstream builders; the contract does not impose a "
+            "maximum."
         ),
     )
     fetch_size: Optional[int] = Field(
@@ -327,7 +438,7 @@ class DbReadOperation(BaseModel):
         ge=1,
         description=(
             "Optional JDBC fetch size hint for streaming large result sets. "
-            "Surfaced verbatim to M2.9."
+            "Surfaced verbatim to downstream builders."
         ),
     )
     max_rows: Optional[int] = Field(
@@ -335,14 +446,16 @@ class DbReadOperation(BaseModel):
         ge=1,
         description=(
             "Optional ceiling on the number of rows returned per execution. "
-            "Surfaced verbatim to M2.9; the contract does not enforce it."
+            "Surfaced verbatim to downstream builders; the contract does not "
+            "enforce it."
         ),
     )
     link_element: Optional[str] = Field(
         default=None,
         description=(
             "Optional name of a link element used when the database operation "
-            "feeds into a downstream nested call. Surfaced verbatim to M2.9."
+            "feeds into a downstream nested call. Surfaced verbatim to "
+            "downstream builders."
         ),
     )
 
@@ -372,14 +485,15 @@ class DatabaseSource(BaseModel):
     read_operation: DbReadOperation = Field(
         ...,
         description=(
-            "The database read operation (SQL, bind parameters, batching "
-            "hints) that produces records for transformation and send."
+            "The database read operation (SQL, declared result schema, bind "
+            "parameters, batching hints) that produces records for transformation "
+            "and send."
         ),
     )
 
 
 # ---------------------------------------------------------------------------
-# Target — REST
+# Target — REST + JSON payload profile (caller-supplied, M2.1a)
 # ---------------------------------------------------------------------------
 
 
@@ -418,7 +532,7 @@ class RestCreateSettings(BaseModel):
         description=(
             "Optional default headers applied to every REST request "
             "(e.g. 'Content-Type' -> 'application/json'). Surfaced verbatim "
-            "to M2.9."
+            "to downstream builders."
         ),
     )
 
@@ -458,8 +572,8 @@ class RestConnectionBinding(BaseModel):
     mode: Literal["create", "reuse"] = Field(
         ...,
         description=(
-            "How to materialize the REST connector in M2.9. 'create' builds "
-            "a new Boomi connector from settings; 'reuse' references an "
+            "How to materialize the REST connector. 'create' builds a new Boomi "
+            "connector from settings (later milestone); 'reuse' references an "
             "existing connector by component_id or component_name."
         ),
     )
@@ -596,6 +710,141 @@ class RestSendRequest(BaseModel):
         return _stripped_nonblank(value)
 
 
+class JSONProfileNode(BaseModel):
+    """A node in the caller-supplied JSON payload profile tree.
+
+    The contract represents the target payload as a deterministic profile tree
+    rather than as a raw body template. Downstream builders (issue #43 for the
+    JSON profile, #26/#40/#41 for transforms) consume this tree to generate a
+    Boomi JSON profile and map. Only ``kind='simple'`` nodes are valid
+    transform targets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        ...,
+        description=(
+            "Profile node name. Used as the JSON object entry name, the array "
+            "name (with '[]' appended when forming logical paths), or the root "
+            "element name."
+        ),
+    )
+    kind: Literal["simple", "object", "array"] = Field(
+        ...,
+        description=(
+            "Profile node kind. 'simple' is a leaf value (transform-targetable); "
+            "'object' contains named children as object entries; 'array' "
+            "repeats its children as the element shape."
+        ),
+    )
+    data_type: Optional[Literal["character", "number", "datetime", "boolean"]] = Field(
+        default=None,
+        description=(
+            "Leaf data type. Required when kind='simple'; must be omitted for "
+            "kind='object' and kind='array'. Boolean is supported for JSON "
+            "leaves; DB source result fields stay character/number/datetime "
+            "until DB profile builders expand their supported set."
+        ),
+    )
+    required: bool = Field(
+        default=False,
+        description=(
+            "Whether the JSON node is required in the emitted payload. "
+            "Surfaced verbatim to downstream profile/map builders."
+        ),
+    )
+    description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional human-readable description of the JSON node. "
+            "Non-executable."
+        ),
+    )
+    children: Optional[List["JSONProfileNode"]] = Field(
+        default=None,
+        description=(
+            "Child nodes. Required and non-empty for kind='object' (named "
+            "entries) and kind='array' (element shape, expressed as the "
+            "entries reached under the array repetition segment). Must be "
+            "omitted for kind='simple'."
+        ),
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _strip_required(cls, value: str) -> str:
+        return _stripped_nonblank(value)
+
+    @field_validator("description")
+    @classmethod
+    def _strip_optional(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _stripped_nonblank(value)
+
+    @model_validator(mode="after")
+    def _shape_consistency(self) -> "JSONProfileNode":
+        if self.kind == "simple":
+            if self.data_type is None:
+                raise ValueError("kind='simple' requires data_type")
+            if self.children is not None:
+                raise ValueError("kind='simple' must not supply children")
+        else:
+            if self.data_type is not None:
+                raise ValueError(
+                    f"kind={self.kind!r} must not supply data_type"
+                )
+            if not self.children:
+                raise ValueError(
+                    f"kind={self.kind!r} requires non-empty children"
+                )
+            seen: Set[str] = set()
+            duplicate_count = 0
+            for child in self.children:
+                if child.name in seen:
+                    duplicate_count += 1
+                else:
+                    seen.add(child.name)
+            if duplicate_count:
+                # Do not echo child names — defense-in-depth against secret
+                # echo in case callers ever use sensitive identifiers.
+                raise ValueError(
+                    f"kind={self.kind!r} has {duplicate_count} duplicate child "
+                    "name(s); every child must use a unique name"
+                )
+        return self
+
+
+class JSONPayloadProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["json"] = Field(
+        default="json",
+        description=(
+            "Profile format. M2 supports 'json' only; XML / EDI / flat-file "
+            "target profile families are deferred to a later milestone."
+        ),
+    )
+    root: JSONProfileNode = Field(
+        ...,
+        description=(
+            "Root node of the JSON payload profile. Must be kind='object'; "
+            "arrays and simple leaves are not valid JSON profile roots in M2 "
+            "(Boomi JSON profiles require exactly one root object)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _root_must_be_object(self) -> "JSONPayloadProfile":
+        if self.root.kind != "object":
+            raise ValueError(
+                "payload_profile.root.kind must be 'object'; arrays and simple "
+                "leaves are not valid JSON profile roots in M2"
+            )
+        return self
+
+
 class RestTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -614,87 +863,260 @@ class RestTarget(BaseModel):
             "target."
         ),
     )
+    payload_profile: JSONPayloadProfile = Field(
+        ...,
+        description=(
+            "Caller-supplied JSON profile tree describing the request body. "
+            "The contract represents target intent as a deterministic profile "
+            "tree (not a raw body template); only kind='simple' leaves are "
+            "valid transform targets."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
-# Transform
+# Transform — discriminated typed operations (M2.1a)
 # ---------------------------------------------------------------------------
 
 
-class FieldMapping(BaseModel):
+class _BaseTransformOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    documentation_hint: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional non-executable human-readable note about the operation's "
+            "intent. Downstream builders must not parse or execute the value; "
+            "it exists to preserve task-authored context, not as a routing "
+            "signal."
+        ),
+    )
+
+    @field_validator("documentation_hint")
+    @classmethod
+    def _strip_optional_hint(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _stripped_nonblank(value)
+
+
+class DirectTransformOperation(_BaseTransformOperation):
+    operation_type: Literal["direct"] = Field(
+        ...,
+        description=(
+            "Discriminator: 'direct' routes to a one-to-one Boomi map step. "
+            "Future builder: issue #26."
+        ),
+    )
     source_field: str = Field(
         ...,
         description=(
-            "Source field name as produced by the database read operation."
+            "Name of a field declared in source.read_operation.result_schema."
+            "fields. The cross-field validator rejects unknown names."
         ),
     )
-    target_field: str = Field(
+    target_path: str = Field(
         ...,
         description=(
-            "Target field name as expected by the REST send request payload."
-        ),
-    )
-    transform_hint: Optional[str] = Field(
-        default=None,
-        description=(
-            "Optional short, free-form hint describing the per-field "
-            "transformation (e.g. 'trim', 'uppercase'). The contract does "
-            "not interpret or execute the value; it is surfaced verbatim to "
-            "M2.9. No scripts or templating syntax."
+            "Logical leaf path inside target.payload_profile (slash-separated, "
+            "e.g. 'Root/name' or 'Root/list[]/key'). Must reference a "
+            "kind='simple' leaf; object and array nodes cannot be transform "
+            "targets."
         ),
     )
 
-    @field_validator("source_field", "target_field")
+    @field_validator("source_field", "target_path")
     @classmethod
     def _strip_required(cls, value: str) -> str:
         return _stripped_nonblank(value)
 
-    @field_validator("transform_hint")
+
+class MapFunctionTransformOperation(_BaseTransformOperation):
+    operation_type: Literal["map_function"] = Field(
+        ...,
+        description=(
+            "Discriminator: 'map_function' routes to a Boomi map function step. "
+            "Future builder: issue #40."
+        ),
+    )
+    function_type: str = Field(
+        ...,
+        description=(
+            "Task-authored function route name (e.g. 'trim', 'uppercase', "
+            "'concat'). The contract surfaces the value verbatim; issue #40 "
+            "owns the concrete allowed-set."
+        ),
+    )
+    inputs: List[str] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "One or more function inputs. Each entry must reference a name "
+            "declared in source.read_operation.result_schema.fields."
+        ),
+    )
+    target_path: str = Field(
+        ...,
+        description=(
+            "Logical leaf path inside target.payload_profile. Must reference a "
+            "kind='simple' leaf."
+        ),
+    )
+    parameters: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Optional opaque parameter object surfaced verbatim to issue #40. "
+            "The contract does not interpret keys or values."
+        ),
+    )
+
+    @field_validator("function_type", "target_path")
+    @classmethod
+    def _strip_required(cls, value: str) -> str:
+        return _stripped_nonblank(value)
+
+    @field_validator("inputs")
+    @classmethod
+    def _strip_inputs(cls, value: List[str]) -> List[str]:
+        cleaned: List[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("inputs entries must be strings")
+            cleaned.append(_stripped_nonblank(item))
+        return cleaned
+
+
+class MapScriptTransformOperation(_BaseTransformOperation):
+    operation_type: Literal["map_script"] = Field(
+        ...,
+        description=(
+            "Discriminator: 'map_script' routes to a Boomi map script step. "
+            "Future builder: issue #41."
+        ),
+    )
+    script_slot: str = Field(
+        ...,
+        description=(
+            "Stable task-authored slot name (e.g. 'pre_send', 'enrich_row'). "
+            "Surfaced verbatim to issue #41 to identify the script's role."
+        ),
+    )
+    language: Literal["groovy2", "groovy", "javascript"] = Field(
+        ...,
+        description=(
+            "Script language. 'groovy2' targets the recommended modern Boomi "
+            "Groovy 2 runtime; 'groovy' targets legacy Groovy 1; 'javascript' "
+            "targets the Boomi JavaScript runtime. Selection is task-authored "
+            "and surfaced verbatim to issue #41."
+        ),
+    )
+    inputs: List[str] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Source field names consumed by the script. Each entry must "
+            "reference a name declared in source.read_operation.result_schema."
+            "fields."
+        ),
+    )
+    outputs: List[str] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Target leaf paths populated by the script. Each entry must "
+            "reference a kind='simple' leaf in target.payload_profile."
+        ),
+    )
+    script_body: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional task-authored script body. The contract never supplies "
+            "a default body and never parses or executes the value. Issue #41 "
+            "owns runnable script handling."
+        ),
+    )
+    script_component_ref: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional reference to a future Boomi script component (resolved "
+            "at execution time by issue #41). Surfaced verbatim."
+        ),
+    )
+
+    @field_validator("script_slot")
+    @classmethod
+    def _strip_required(cls, value: str) -> str:
+        return _stripped_nonblank(value)
+
+    @field_validator("script_body", "script_component_ref")
     @classmethod
     def _strip_optional(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         return _stripped_nonblank(value)
+
+    @field_validator("inputs", "outputs")
+    @classmethod
+    def _strip_input_paths(cls, value: List[str]) -> List[str]:
+        cleaned: List[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("entries must be strings")
+            cleaned.append(_stripped_nonblank(item))
+        return cleaned
+
+
+TransformOperation = Annotated[
+    Union[
+        DirectTransformOperation,
+        MapFunctionTransformOperation,
+        MapScriptTransformOperation,
+    ],
+    Field(discriminator="operation_type"),
+]
 
 
 class TransformConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mappings: List[FieldMapping] = Field(
+    operations: List[TransformOperation] = Field(
         ...,
         min_length=1,
         description=(
-            "One or more field mappings from source rows to target payload. "
-            "At least one mapping is required; the contract never invents "
-            "mappings or generates a template."
-        ),
-    )
-    payload_template: Optional[str] = Field(
-        default=None,
-        description=(
-            "Optional user- or LLM-authored payload template for the REST "
-            "request body. The contract has no default and never generates "
-            "this value; M2.9 treats it as an opaque string."
-        ),
-    )
-    script_slots: Dict[str, str] = Field(
-        default_factory=dict,
-        description=(
-            "Optional named user-authored script slots (e.g. 'pre_send', "
-            "'post_send'). Keys are role names; values are opaque scripts "
-            "that M2.9 may attach to the corresponding integration shape. "
-            "The contract never parses or executes scripts."
+            "Typed transform operations. Every operation carries an "
+            "operation_type discriminator selecting its compile route: "
+            "'direct' (one-to-one field mapping; issue #26), 'map_function' "
+            "(Boomi map function step; issue #40), or 'map_script' (map "
+            "script component; issue #41). operation_type='xslt' is rejected "
+            "with a pointer to issue #42. Legacy free-form transform_hint, "
+            "payload_template, and script_slots are no longer accepted as "
+            "executable routes."
         ),
     )
 
-    @field_validator("payload_template")
+    @model_validator(mode="before")
     @classmethod
-    def _strip_optional(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        return _stripped_nonblank(value)
+    def _reject_xslt_with_42_pointer(cls, data: Any) -> Any:
+        # mode='before' runs before the discriminator picks a variant, so an
+        # explicit 'xslt' value can be surfaced with a friendly #42 pointer
+        # rather than the generic union_tag_invalid error. The offending index
+        # is included, but no caller-supplied content is echoed.
+        if isinstance(data, dict):
+            ops = data.get("operations")
+            if isinstance(ops, list):
+                for idx, op in enumerate(ops):
+                    if isinstance(op, dict):
+                        op_type = op.get("operation_type")
+                        if (
+                            isinstance(op_type, str)
+                            and op_type.strip().lower() == "xslt"
+                        ):
+                            raise ValueError(
+                                f"operations[{idx}].operation_type='xslt' is "
+                                "not supported in M2; see issue #42 for the "
+                                "XSLT support decision."
+                            )
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -709,15 +1131,16 @@ class Schedule(BaseModel):
         ...,
         description=(
             "Cron expression for the scheduled trigger. The contract does "
-            "not parse or validate the cron syntax; M2.9 passes it to the "
-            "Boomi schedule shape verbatim."
+            "not parse or validate the cron syntax; downstream builders pass "
+            "it to the Boomi schedule shape verbatim."
         ),
     )
     timezone: Optional[str] = Field(
         default=None,
         description=(
             "Optional IANA timezone string (e.g. 'UTC', 'America/New_York'). "
-            "Surfaced verbatim to M2.9; the contract does not validate it."
+            "Surfaced verbatim to downstream builders; the contract does not "
+            "validate it."
         ),
     )
 
@@ -742,7 +1165,7 @@ class ExecutionTrigger(BaseModel):
         description=(
             "How the integration is started. 'manual' is invoked on demand; "
             "'scheduled' requires a Schedule and is fired by the Boomi "
-            "scheduler in M2.9."
+            "scheduler once executable builders ship."
         ),
     )
     schedule: Optional[Schedule] = Field(
@@ -768,8 +1191,10 @@ class Watermark(BaseModel):
     field: str = Field(
         ...,
         description=(
-            "Source column or output field that drives the high-water-mark "
-            "advancement (e.g. 'last_modified_at')."
+            "Name of a source result field driving high-water-mark "
+            "advancement (e.g. 'last_modified_at'). Must reference a name "
+            "declared in source.read_operation.result_schema.fields; the "
+            "cross-field validator rejects unknown names."
         ),
     )
     kind: Literal["timestamp", "sequence"] = Field(
@@ -783,7 +1208,8 @@ class Watermark(BaseModel):
         default=None,
         description=(
             "Optional initial high-water-mark value used on the first run "
-            "before any state has been persisted. Surfaced verbatim to M2.9."
+            "before any state has been persisted. Surfaced verbatim to "
+            "downstream builders."
         ),
     )
     persistence: Literal["dpp", "external_store"] = Field(
@@ -791,7 +1217,7 @@ class Watermark(BaseModel):
         description=(
             "Where the watermark is persisted. 'dpp' uses Boomi Dynamic "
             "Process Properties; 'external_store' delegates to an external "
-            "key/value store whose binding is configured in M2.9."
+            "key/value store whose binding is configured by future builders."
         ),
     )
 
@@ -829,8 +1255,8 @@ class ExecutionConfig(BaseModel):
         default_factory=dict,
         description=(
             "Optional opaque key/value metadata associated with every run "
-            "(e.g. business owner, runbook URL). Surfaced verbatim to M2.9; "
-            "the contract does not interpret keys."
+            "(e.g. business owner, runbook URL). Surfaced verbatim to "
+            "downstream builders; the contract does not interpret keys."
         ),
     )
 
@@ -848,7 +1274,8 @@ class RetryPolicy(BaseModel):
         ge=1,
         description=(
             "Maximum number of attempts per record (1 means no retry). The "
-            "contract surfaces this value verbatim; M2.9 wires the retry shape."
+            "contract surfaces this value verbatim; downstream builders wire "
+            "the retry shape."
         ),
     )
     backoff: Literal["none", "fixed", "exponential"] = Field(
@@ -864,8 +1291,8 @@ class RetryPolicy(BaseModel):
         ge=0,
         description=(
             "Initial backoff interval in seconds for 'fixed' / 'exponential' "
-            "backoffs. The contract does not enforce a default; M2.9 picks "
-            "one when this value is omitted."
+            "backoffs. The contract does not enforce a default; downstream "
+            "builders pick one when this value is omitted."
         ),
     )
 
@@ -878,14 +1305,14 @@ class DlqTarget(BaseModel):
         description=(
             "Kind of dead-letter destination: a Boomi folder, a messaging "
             "topic, or a queue. The contract does not validate the target's "
-            "existence; M2.9 wires the destination."
+            "existence; downstream builders wire the destination."
         ),
     )
     address: str = Field(
         ...,
         description=(
             "Address of the dead-letter destination (e.g. folder path, topic "
-            "name, queue URL). Surfaced verbatim to M2.9."
+            "name, queue URL). Surfaced verbatim to downstream builders."
         ),
     )
 
@@ -943,8 +1370,8 @@ class ErrorClassifier(BaseModel):
         default_factory=list,
         description=(
             "Optional free-form rule labels describing additional classifier "
-            "behavior to be implemented in M2.9 (e.g. 'rate_limit_exhausted'). "
-            "Values are opaque labels; no scripts."
+            "behavior to be implemented by downstream builders (e.g. "
+            "'rate_limit_exhausted'). Values are opaque labels; no scripts."
         ),
     )
 
@@ -974,6 +1401,35 @@ class ReliabilityConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Profile flatten helper (M2.1a logical leaf-path index)
+# ---------------------------------------------------------------------------
+
+
+def _flatten_payload_profile_leaves(
+    profile: JSONPayloadProfile,
+) -> Dict[str, str]:
+    """Return mapping of leaf logical path -> data_type for every simple leaf.
+
+    Walks the root downward producing slash-separated paths. Arrays append
+    ``[]`` to their own segment (e.g. ``Root/list[]/key``); only nodes with
+    ``kind='simple'`` become leaves.
+    """
+    leaves: Dict[str, str] = {}
+
+    def _walk(node: JSONProfileNode, prefix: str) -> None:
+        if node.kind == "simple":
+            # data_type presence is guaranteed by JSONProfileNode._shape_consistency.
+            leaves[prefix] = node.data_type or ""
+            return
+        segment = f"{prefix}[]" if node.kind == "array" else prefix
+        for child in node.children or []:
+            _walk(child, f"{segment}/{child.name}")
+
+    _walk(profile.root, profile.root.name)
+    return leaves
+
+
+# ---------------------------------------------------------------------------
 # Top-level parameters
 # ---------------------------------------------------------------------------
 
@@ -991,21 +1447,24 @@ class DatabaseToApiSyncParameters(BaseModel):
     source: DatabaseSource = Field(
         ...,
         description=(
-            "Database source configuration: connector binding and read "
-            "operation."
+            "Database source configuration: connector binding, read operation, "
+            "and caller-declared result schema."
         ),
     )
     target: RestTarget = Field(
         ...,
         description=(
-            "REST target configuration: connector binding and send request."
+            "REST target configuration: connector binding, send request, and "
+            "caller-supplied JSON payload profile tree."
         ),
     )
     transform: TransformConfig = Field(
         ...,
         description=(
-            "Field mappings, optional payload template, and optional named "
-            "script slots that move source records into the target payload."
+            "Typed transform operations that move source result fields into "
+            "target JSON profile leaves. Discriminated by operation_type: "
+            "direct (#26), map_function (#40), map_script (#41); xslt is "
+            "rejected (#42)."
         ),
     )
     execution: ExecutionConfig = Field(
@@ -1043,6 +1502,86 @@ class DatabaseToApiSyncParameters(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_transform_refs(self) -> "DatabaseToApiSyncParameters":
+        source_field_names: Set[str] = {
+            f.name for f in self.source.read_operation.result_schema.fields
+        }
+        target_leaves: Dict[str, str] = _flatten_payload_profile_leaves(
+            self.target.payload_profile
+        )
+
+        unknown_source_refs = 0
+        unknown_target_refs = 0
+        duplicate_target_bindings = 0
+        bound_target_paths: Set[str] = set()
+
+        def _bind(target_path: str) -> None:
+            nonlocal duplicate_target_bindings
+            if target_path in bound_target_paths:
+                duplicate_target_bindings += 1
+            else:
+                bound_target_paths.add(target_path)
+
+        for op in self.transform.operations:
+            if isinstance(op, DirectTransformOperation):
+                if op.source_field not in source_field_names:
+                    unknown_source_refs += 1
+                if op.target_path in target_leaves:
+                    _bind(op.target_path)
+                else:
+                    unknown_target_refs += 1
+            elif isinstance(op, MapFunctionTransformOperation):
+                for inp in op.inputs:
+                    if inp not in source_field_names:
+                        unknown_source_refs += 1
+                if op.target_path in target_leaves:
+                    _bind(op.target_path)
+                else:
+                    unknown_target_refs += 1
+            elif isinstance(op, MapScriptTransformOperation):
+                for inp in op.inputs:
+                    if inp not in source_field_names:
+                        unknown_source_refs += 1
+                for out in op.outputs:
+                    if out in target_leaves:
+                        _bind(out)
+                    else:
+                        unknown_target_refs += 1
+
+        issues: List[str] = []
+        if unknown_source_refs:
+            issues.append(
+                f"transform.operations contain {unknown_source_refs} "
+                "reference(s) to a source field name not declared in "
+                "source.read_operation.result_schema.fields"
+            )
+        if unknown_target_refs:
+            issues.append(
+                f"transform.operations contain {unknown_target_refs} "
+                "reference(s) to a target path that is not a declared simple "
+                "leaf in target.payload_profile"
+            )
+        if duplicate_target_bindings:
+            issues.append(
+                f"transform.operations bind {duplicate_target_bindings} "
+                "target leaf path(s) more than once; every leaf may be the "
+                "destination of at most one direct/map_function/map_script "
+                "output"
+            )
+
+        if issues:
+            raise ValueError(" | ".join(issues))
+
+        if self.execution.watermark is not None:
+            if self.execution.watermark.field not in source_field_names:
+                raise ValueError(
+                    "execution.watermark.field must reference a name declared "
+                    "in source.read_operation.result_schema.fields"
+                )
+
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Archetype
@@ -1052,20 +1591,21 @@ class DatabaseToApiSyncParameters(BaseModel):
 # Example payload sentinels — these intentionally do NOT look like real SQL,
 # OData filters, SOAP envelopes, REST payloads, field mappings, or scripts.
 # They exist only to demonstrate the parameter shape.
-_EXAMPLE_SQL_SENTINEL = "<<user-authored DB read query>>"
-_EXAMPLE_PAYLOAD_SENTINEL = "<<user-authored REST body template>>"
+_EXAMPLE_SQL_SENTINEL = "<<user-authored DB read statement>>"
 
 
 class DatabaseToApiSyncArchetype(ArchetypePattern):
     metadata = PatternMetadata(
         name="database_to_api_sync",
-        version="0.1.0",
+        version="0.2.0",
         kind=PatternKind.ARCHETYPE,
         description=(
             "Contract-only archetype for replicating SQL Server records to a "
             "REST API on a manual or scheduled trigger. Validates parameters "
-            "and emits a non-executable IntegrationSpecV1; executable "
-            "component emission is owned by M2.9."
+            "(including caller-declared DB result fields, a caller-supplied "
+            "JSON payload profile tree, and typed transform operations) and "
+            "emits a non-executable IntegrationSpecV1. Executable component "
+            "emission is owned by issues #43 / #26 / #40 / #41 / #29."
         ),
         tags=[
             "database",
@@ -1083,7 +1623,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         not_for=[
             "bidirectional sync",
             "real-time change-data-capture",
-            "executable component emission before M2.9",
+            "executable component emission before downstream builders ship",
         ],
     )
     parameters_model = DatabaseToApiSyncParameters
@@ -1091,12 +1631,17 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
     capability_notes = [
         "Discoverable, fully-typed parameter contract for a SQL Server -> REST sync.",
         "Strict per-field validation surfaces structured PARAM_VALIDATION_FAILED errors.",
+        "Caller-declared DB result schema and caller-supplied JSON profile tree are the M2 source of truth.",
+        "Typed transform operations route to issue #26 (direct), #40 (map_function), or #41 (map_script).",
         "Credentials cross the contract only as opaque credential_ref values.",
-        "Emits a zero-component IntegrationSpecV1; M2.9 owns executable component emission.",
+        "Emits a zero-component IntegrationSpecV1; downstream issues own executable component emission.",
     ]
     limitations = [
         "Emits no executable Boomi components and performs no Boomi mutation.",
         "Does not expose or generate raw XML.",
+        "Does not infer DB result fields from SQL, browse, metadata, or row samples (issue #47 owns discovery).",
+        "Does not import existing integrations (issue #48 owns import / draft).",
+        "operation_type='xslt' is rejected; the XSLT decision is owned by issue #42.",
         "SQL Server is the only supported database family in M2.1; Postgres / Oracle / Snowflake are deferred.",
         "credential_ref values are opaque end-to-end; the contract never resolves or validates secrets.",
     ]
@@ -1104,10 +1649,11 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         PatternExample(
             name="minimal_manual_sync",
             description=(
-                "Smallest valid payload: create-mode SQL Server source, create-mode "
-                "REST target with no auth, a single field mapping, manual trigger, "
-                "DLQ disabled. Demonstrates the parameter shape only; the SQL and "
-                "payload template are placeholders, not reusable templates."
+                "Smallest valid payload: create-mode SQL Server source with one "
+                "declared result field, create-mode REST target with no auth and "
+                "a one-leaf JSON payload profile, a single direct transform "
+                "operation, manual trigger, DLQ disabled. Placeholder sentinels "
+                "only — not a reusable template."
             ),
             parameters={
                 "naming": {
@@ -1128,6 +1674,14 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     },
                     "read_operation": {
                         "sql": _EXAMPLE_SQL_SENTINEL,
+                        "result_schema": {
+                            "fields": [
+                                {
+                                    "name": "source_field_a",
+                                    "data_type": "character",
+                                },
+                            ],
+                        },
                     },
                 },
                 "target": {
@@ -1142,12 +1696,27 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                         "method": "POST",
                         "path": "/v1/items",
                     },
+                    "payload_profile": {
+                        "format": "json",
+                        "root": {
+                            "name": "Root",
+                            "kind": "object",
+                            "children": [
+                                {
+                                    "name": "target_a",
+                                    "kind": "simple",
+                                    "data_type": "character",
+                                },
+                            ],
+                        },
+                    },
                 },
                 "transform": {
-                    "mappings": [
+                    "operations": [
                         {
-                            "source_field": "<<source field name>>",
-                            "target_field": "<<target field name>>",
+                            "operation_type": "direct",
+                            "source_field": "source_field_a",
+                            "target_path": "Root/target_a",
                         },
                     ],
                 },
@@ -1164,11 +1733,14 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         PatternExample(
             name="scheduled_with_watermark",
             description=(
-                "Fuller payload: reuse-mode DB connection by component id, "
-                "create-mode REST target with bearer-token credential_ref, "
+                "Fuller payload: reuse-mode DB connection by component id with "
+                "two declared result fields, create-mode REST target with "
+                "bearer-token credential_ref and a nested JSON payload profile, "
+                "two transform operations (one direct, one map_function), "
                 "scheduled trigger, timestamp watermark, retry, DLQ enabled, "
-                "and run metadata. SQL / mappings remain placeholder sentinels "
-                "to keep the example free of reusable template content."
+                "and run metadata. Examples deliberately exclude map_script "
+                "declarations to keep the published payload free of language "
+                "tokens covered by the hygiene-marker guard."
             ),
             parameters={
                 "naming": {
@@ -1184,8 +1756,24 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     },
                     "read_operation": {
                         "sql": _EXAMPLE_SQL_SENTINEL,
+                        "result_schema": {
+                            "fields": [
+                                {
+                                    "name": "source_a",
+                                    "data_type": "character",
+                                    "required": True,
+                                },
+                                {
+                                    "name": "source_b",
+                                    "data_type": "datetime",
+                                },
+                            ],
+                        },
                         "parameters": [
-                            {"name": "<<bind parameter name>>", "direction": "in"},
+                            {
+                                "name": "<<bind parameter name>>",
+                                "direction": "in",
+                            },
                         ],
                         "batch_size": 500,
                     },
@@ -1210,22 +1798,53 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                             },
                         ],
                     },
+                    "payload_profile": {
+                        "format": "json",
+                        "root": {
+                            "name": "Root",
+                            "kind": "object",
+                            "children": [
+                                {
+                                    "name": "target_a",
+                                    "kind": "simple",
+                                    "data_type": "character",
+                                    "required": True,
+                                },
+                                {
+                                    "name": "target_b",
+                                    "kind": "simple",
+                                    "data_type": "datetime",
+                                },
+                            ],
+                        },
+                    },
                 },
                 "transform": {
-                    "mappings": [
-                        {"source_field": "<<source field a>>", "target_field": "<<target field a>>"},
-                        {"source_field": "<<source field b>>", "target_field": "<<target field b>>"},
+                    "operations": [
+                        {
+                            "operation_type": "direct",
+                            "source_field": "source_a",
+                            "target_path": "Root/target_a",
+                            "documentation_hint": "carry first column verbatim",
+                        },
+                        {
+                            "operation_type": "map_function",
+                            "function_type": "trim",
+                            "inputs": ["source_b"],
+                            "target_path": "Root/target_b",
+                        },
                     ],
-                    "payload_template": _EXAMPLE_PAYLOAD_SENTINEL,
-                    "script_slots": {"pre_send": "<<user-authored hook body>>"},
                 },
                 "execution": {
                     "trigger": {
                         "mode": "scheduled",
-                        "schedule": {"cron": "<<cron expression>>", "timezone": "UTC"},
+                        "schedule": {
+                            "cron": "<<cron expression>>",
+                            "timezone": "UTC",
+                        },
                     },
                     "watermark": {
-                        "field": "<<watermark column>>",
+                        "field": "source_b",
                         "kind": "timestamp",
                         "persistence": "dpp",
                     },
@@ -1260,6 +1879,9 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         source_binding = parameters.source.binding
         target_binding = parameters.target.binding
         target_send = parameters.target.send_request
+        result_schema = parameters.source.read_operation.result_schema
+        payload_profile = parameters.target.payload_profile
+        operations = parameters.transform.operations
 
         # Endpoint summaries — no SQL, no payload bodies, no resolved URLs.
         db_endpoint: Dict[str, Any] = {
@@ -1294,7 +1916,73 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             if target_binding.component_name:
                 rest_endpoint["component_name"] = target_binding.component_name
 
-        # Flow summaries — labels only.
+        # Source schema summary — names + data types only, no SQL or row data.
+        source_schema_summary: Dict[str, Any] = {
+            "field_count": len(result_schema.fields),
+            "fields": [
+                {
+                    "name": f.name,
+                    "data_type": f.data_type,
+                    "required": f.required,
+                }
+                for f in result_schema.fields
+            ],
+        }
+
+        # Target payload-profile summary — leaf path index + data type only,
+        # never a raw JSON body sample.
+        target_leaves = _flatten_payload_profile_leaves(payload_profile)
+        target_profile_summary: Dict[str, Any] = {
+            "format": payload_profile.format,
+            "root_name": payload_profile.root.name,
+            "leaf_count": len(target_leaves),
+            "leaves": [
+                {"path": path, "data_type": data_type}
+                for path, data_type in sorted(target_leaves.items())
+            ],
+        }
+
+        # Transform operations summary — route + structural info; never script
+        # bodies or parameter payloads.
+        operation_summaries: List[Dict[str, Any]] = []
+        for op in operations:
+            if isinstance(op, DirectTransformOperation):
+                operation_summaries.append(
+                    {
+                        "operation_type": "direct",
+                        "future_builder_issue": "#26",
+                        "source_field": op.source_field,
+                        "target_path": op.target_path,
+                    }
+                )
+            elif isinstance(op, MapFunctionTransformOperation):
+                operation_summaries.append(
+                    {
+                        "operation_type": "map_function",
+                        "future_builder_issue": "#40",
+                        "function_type": op.function_type,
+                        "input_count": len(op.inputs),
+                        "target_path": op.target_path,
+                        "has_parameters": op.parameters is not None,
+                    }
+                )
+            elif isinstance(op, MapScriptTransformOperation):
+                operation_summaries.append(
+                    {
+                        "operation_type": "map_script",
+                        "future_builder_issue": "#41",
+                        "script_slot": op.script_slot,
+                        "language": op.language,
+                        "input_count": len(op.inputs),
+                        "output_count": len(op.outputs),
+                        "has_script_body": op.script_body is not None,
+                        "has_script_component_ref": (
+                            op.script_component_ref is not None
+                        ),
+                    }
+                )
+
+        # Flow summaries — labels + new schema/operation metadata.
         flows: List[Dict[str, Any]] = [
             {
                 "key": "extract",
@@ -1306,11 +1994,14 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             },
             {
                 "key": "transform",
-                "name": "Map / template payload",
+                "name": "Map source to JSON payload",
                 "source": "extract",
                 "target": None,
                 "operation": "transform",
                 "executable": False,
+                "source_schema": source_schema_summary,
+                "target_payload_profile": target_profile_summary,
+                "operations": operation_summaries,
             },
             {
                 "key": "send",
@@ -1361,8 +2052,9 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             goals=[
                 "Replicate data from a SQL Server source to a REST target on a "
                 "manual or scheduled trigger.",
-                "Executable Boomi components are deferred to M2.9; this build "
-                "emits the contract only.",
+                "Executable Boomi components are deferred to downstream "
+                "builders (#43 / #26 / #40 / #41 / #29); this build emits the "
+                "contract only.",
             ],
             endpoints=[db_endpoint, rest_endpoint],
             flows=flows,
@@ -1375,5 +2067,18 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "raw_xml_exposed": False,
                 "boomi_mutation": False,
                 "requires_m2_9_for_executable_components": True,
+                "metadata_version": "0.2.0",
+                "profile_schema_strategy": (
+                    "M2 uses caller-declared DB read result fields and a "
+                    "caller-supplied JSON profile tree for the REST target; "
+                    "no SQL parsing, DB metadata introspection, row sampling, "
+                    "or Boomi browse is performed by this archetype."
+                ),
+                "transform_routes": {
+                    "direct": "#26",
+                    "map_function": "#40",
+                    "map_script": "#41",
+                    "xslt": "#42 (rejected in M2)",
+                },
             },
         )
