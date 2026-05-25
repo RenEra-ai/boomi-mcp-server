@@ -1141,16 +1141,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         "to the legacy process_json_to_xml path."
                     ),
                 )
-            # Codex review C2: process update also re-invokes the builder
-            # (_execute_component → update_component({"xml": built_xml})),
-            # unlike DB/REST whose update paths bypass the builder. So
-            # validation MUST run for update too or a malformed update
-            # passes plan and explodes at apply.
-            will_invoke_process_flow_builder = (
-                process_flow_err is None
-                and planned_action in ("create", "create_clone", "update")
-            )
-            if process_flow_err is None and will_invoke_process_flow_builder:
+            # Codex review r9: enum-membership check is a contract
+            # assertion about the spec, not about the apply step. Run it
+            # unconditionally so a typo like process_kind="bad" surfaces
+            # even when conflict_policy=reuse finds an existing match
+            # (planned_action="reuse" used to skip the whole block).
+            builder_cls: Optional[type] = None
+            if process_flow_err is None:
                 builder_cls = get_process_flow_builder(process_kind)
                 if builder_cls is None:
                     process_flow_err = BuilderValidationError(
@@ -1162,11 +1159,23 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                             f"{sorted(PROCESS_FLOW_BUILDERS)}."
                         ),
                     )
-                else:
-                    process_flow_err = builder_cls.validate_config(
-                        raw_config,
-                        depends_on=comp.depends_on,
-                    )
+
+            # Codex review C2: process update also re-invokes the builder
+            # (_execute_component → update_component({"xml": built_xml})),
+            # unlike DB/REST whose update paths bypass the builder. So
+            # full config validation runs on every mutating action; for
+            # reuse / error_* the enum check above is enough — we won't
+            # emit XML so source/target bindings don't matter.
+            will_invoke_process_flow_builder = (
+                process_flow_err is None
+                and builder_cls is not None
+                and planned_action in ("create", "create_clone", "update")
+            )
+            if will_invoke_process_flow_builder:
+                process_flow_err = builder_cls.validate_config(
+                    raw_config,
+                    depends_on=comp.depends_on,
+                )
 
         if process_flow_err is not None:
             planned_action = "error_process_validation"

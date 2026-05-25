@@ -2890,6 +2890,35 @@ class TestBuildPlanProcessFlow:
         assert "validation_error" not in process_step
 
     @patch(_PATCH_TARGET)
+    def test_unsupported_process_kind_caught_on_reuse_path(self, mock_pag):
+        """Codex review r9: PROCESS_KIND_UNSUPPORTED must fire on every
+        planned_action, not just mutating ones. When conflict_policy=reuse
+        finds an existing same-named process, planned_action becomes
+        'reuse' — the previous gate skipped the enum check entirely, so
+        a typo like process_kind='totally_not_a_real_kind' planned clean
+        as reuse instead of surfacing the contract error."""
+        mock_pag.return_value = [
+            _meta("existing-proc-id", "Existing Process",
+                  folder_name="X", comp_type="process"),
+        ]
+        bad_kind = _process_flow_comp(
+            name="Existing Process",
+            process_kind="totally_not_a_real_kind",
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad_kind,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        # Without the r9 fix this would be planned_action="reuse" with no error.
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_KIND_UNSUPPORTED"
+
+    @patch(_PATCH_TARGET)
     def test_config_name_participates_in_collision_lookup(self, mock_pag):
         """Codex review r7 P2.1: with the r6 fix accepting config.name as
         a valid display name, collision detection has to see it too. If
