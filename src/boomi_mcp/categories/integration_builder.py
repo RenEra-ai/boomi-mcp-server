@@ -119,11 +119,25 @@ def _normalize_component(raw: Dict[str, Any], index: int) -> Dict[str, Any]:
     if not isinstance(depends_on, list):
         raise ValueError(f"Component '{key}' depends_on must be an array")
 
+    # Promote config.name to top-level name when the caller omitted it.
+    # _resolve_existing_components matches against comp.name only — without
+    # this fallback a process whose only name is inside config bypasses
+    # collision detection (Codex review r7 P2.1: r6 PROCESS_NAME_REQUIRED
+    # accepts config.name but the lookup ran with comp.name=None and
+    # missed any existing same-named process in the account).
+    raw_name = raw.get("name")
+    config_name = config.get("name") if isinstance(config, dict) else None
+    effective_name = (
+        raw_name
+        if isinstance(raw_name, str) and raw_name.strip()
+        else (config_name if isinstance(config_name, str) and config_name.strip() else raw_name)
+    )
+
     return {
         "key": key,
         "type": normalized_type,
         "action": action,
-        "name": raw.get("name"),
+        "name": effective_name,
         "component_id": raw.get("component_id"),
         "config": config,
         "depends_on": depends_on,

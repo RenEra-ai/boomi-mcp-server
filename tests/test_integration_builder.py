@@ -2848,6 +2848,34 @@ class TestBuildPlanProcessFlow:
         assert "validation_error" not in process_step
 
     @patch(_PATCH_TARGET)
+    def test_config_name_participates_in_collision_lookup(self, mock_pag):
+        """Codex review r7 P2.1: with the r6 fix accepting config.name as
+        a valid display name, collision detection has to see it too. If
+        we only checked comp.name, a process whose name lives in config
+        would dodge _resolve_existing_components and apply would create
+        a duplicate (or surface a late API error under conflict_policy=fail).
+        The promotion in _normalize_component closes that gap."""
+        mock_pag.return_value = [
+            _meta("existing-proc-id", "Process Name From Config",
+                  folder_name="X", comp_type="process"),
+        ]
+        comp = _process_flow_comp()
+        comp.name = None
+        comp.config["name"] = "Process Name From Config"
+        plan = _build_plan(MagicMock(), _build_config([
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            comp,
+        ]))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        # With config.name promoted to top-level, the existing component
+        # is found and conflict_policy=reuse should route to reuse.
+        assert process_step["planned_action"] == "reuse"
+        assert process_step["existing_component_id"] == "existing-proc-id"
+
+    @patch(_PATCH_TARGET)
     def test_update_with_invalid_config_errors_at_plan(self, mock_pag):
         """Codex review C2: process update re-invokes the builder via
         update_component({"xml": ...}). Validation must run for update too,
