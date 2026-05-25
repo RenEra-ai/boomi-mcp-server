@@ -46,6 +46,62 @@ def _stripped_nonblank(value: str) -> str:
     return stripped
 
 
+# Secret-shape substring list. Mirrors
+# src/boomi_mcp/categories/components/builders/process_flow_builder.py's
+# FORBIDDEN_SECRET_FIELDS verbatim — case-insensitive substring match catches
+# camelCase, snake-prefixed, and SCREAMING-CASE variants. credential_ref and
+# similar *_ref keys carry opaque URI references and are intentionally NOT in
+# this list. Codex review r1 P2: map_function.parameters is the only
+# schema-opaque dict the archetype echoes back into IntegrationSpecV1 on
+# success, so plaintext secret keys must be rejected at parameter-validation
+# time before they can leak through the spec.
+_FORBIDDEN_SECRET_KEY_SUBSTRINGS = (
+    "password",
+    "passcode",
+    "secret",
+    "private_key",
+    "api_key",
+    "apikey",
+    "api-key",
+    "auth_token",
+    "access_token",
+    "client_secret",
+    "token",
+    "authorization",
+    "bearer",
+    "credentials",
+)
+
+
+def _key_matches_secret_shape(key: Any) -> Optional[str]:
+    """Return the matched forbidden substring or None."""
+    if not isinstance(key, str):
+        return None
+    lowered = key.lower()
+    for forbidden in _FORBIDDEN_SECRET_KEY_SUBSTRINGS:
+        if forbidden in lowered:
+            return forbidden
+    return None
+
+
+def _scan_for_secret_shaped_keys(value: Any) -> bool:
+    """Recursively walk dict/list containers; True iff any dict key (at any
+    depth) matches a forbidden substring. Used by map_function.parameters
+    validation to reject plaintext secret-shaped keys before they reach the
+    emitted IntegrationSpec."""
+    if isinstance(value, dict):
+        for key, sub in value.items():
+            if _key_matches_secret_shape(key) is not None:
+                return True
+            if _scan_for_secret_shaped_keys(sub):
+                return True
+    elif isinstance(value, list):
+        for item in value:
+            if _scan_for_secret_shaped_keys(item):
+                return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Naming
 # ---------------------------------------------------------------------------
@@ -998,6 +1054,30 @@ class MapFunctionTransformOperation(_BaseTransformOperation):
                 raise ValueError("inputs entries must be strings")
             cleaned.append(_stripped_nonblank(item))
         return cleaned
+
+    @field_validator("parameters")
+    @classmethod
+    def _reject_plaintext_secret_keys(
+        cls, value: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        # parameters is the only schema-opaque dict the archetype echoes back
+        # in IntegrationSpec.flows[transform].operations[*].parameters on a
+        # successful build. Reject plaintext secret-shaped keys at any nesting
+        # depth so the spec output never leaks plaintext. The offending key
+        # name is not echoed back through the error envelope — callers route
+        # secrets via the connector binding's credential_ref instead.
+        if value is None:
+            return None
+        if _scan_for_secret_shaped_keys(value):
+            raise ValueError(
+                "map_function.parameters contains a key whose name matches a "
+                "forbidden secret-shaped substring (e.g. password / token / "
+                "secret / api_key / bearer / authorization). Reference "
+                "connector secrets via the connector binding's credential_ref "
+                "instead; map_function.parameters is echoed back in the "
+                "emitted IntegrationSpec and must not carry plaintext secrets."
+            )
+        return value
 
 
 class MapScriptTransformOperation(_BaseTransformOperation):

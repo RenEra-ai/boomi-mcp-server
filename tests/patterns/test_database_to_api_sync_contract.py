@@ -933,6 +933,110 @@ def test_profile_node_name_rejection_covers_root_node():
 
 
 # ---------------------------------------------------------------------------
+# Codex r1 review: reject plaintext secret-shaped keys in map_function.parameters
+# (the only schema-opaque dict the archetype echoes back in the emitted spec)
+# ---------------------------------------------------------------------------
+
+
+def _map_function_payload_with_parameters(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a fresh payload where the sole transform op is a map_function
+    carrying the supplied parameters dict."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "map_function",
+            "function_type": "concat",
+            "inputs": ["source_a"],
+            "target_path": "Root/target_a",
+            "parameters": parameters,
+        },
+    ]
+    return payload
+
+
+def test_map_function_parameters_rejects_top_level_secret_key():
+    """A literal `password` key in parameters must surface a structured
+    PARAM_VALIDATION_FAILED — the dict is echoed back in the spec, so plaintext
+    secret leaks must be blocked at parameter validation."""
+    payload = _map_function_payload_with_parameters({"password": "hunter2"})
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    assert any(
+        "forbidden secret-shaped substring" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected secret-shape rejection, got {result['field_errors']!r}"
+
+
+def test_map_function_parameters_rejects_camelcase_secret_key():
+    """The substring scan must catch camelCase (apiKey), snake_prefixed
+    (db_password), and SCREAMING-CASE (AUTH_TOKEN) variants."""
+    for key in ("apiKey", "db_password", "AUTH_TOKEN", "customerSecret", "Authorization"):
+        payload = _map_function_payload_with_parameters({key: "VALUE"})
+        result = _build(payload)
+        assert result["_success"] is False, f"variant {key!r} should have been rejected"
+        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_map_function_parameters_rejects_nested_secret_key():
+    """A secret-shaped key at any nesting depth must be rejected — callers
+    can't bypass the scan by wrapping the secret in a sub-dict."""
+    payload = _map_function_payload_with_parameters(
+        {"auth": {"nested": {"bearer": "<<token sentinel>>"}}}
+    )
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_map_function_parameters_rejects_secret_in_list_dict():
+    """The scan must descend into lists of dicts so callers can't bypass it
+    by wrapping the secret-shaped key inside a list element."""
+    payload = _map_function_payload_with_parameters(
+        {"headers": [{"bearer_token": "<<token sentinel>>"}]}
+    )
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_map_function_parameters_rejection_does_not_echo_offending_value():
+    """The error envelope must not echo the plaintext secret VALUE."""
+    sentinel = "sk_live_QA_PARAM_VALUE_GUARD_DEADBEEF"
+    payload = _map_function_payload_with_parameters({"password": sentinel})
+    result = _build(payload)
+    assert result["_success"] is False
+    assert sentinel not in json.dumps(result), (
+        "secret-shaped-key rejection must not echo the plaintext value"
+    )
+
+
+def test_map_function_parameters_accepts_non_secret_keys():
+    """Regression: legitimate parameter keys (e.g. 'separator', 'precision',
+    'locale') must continue to validate."""
+    payload = _map_function_payload_with_parameters(
+        {"separator": ", ", "locale": "en-US", "precision": 4}
+    )
+    result = _build(payload)
+    assert result["_success"] is True, result
+    transform_flow = next(
+        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
+    )
+    op = transform_flow["operations"][0]
+    assert op["parameters"] == {"separator": ", ", "locale": "en-US", "precision": 4}
+
+
+def test_map_function_parameters_accepts_credential_ref_style_keys():
+    """`credential_ref` carries an opaque URI reference (not the secret
+    itself); the scan must NOT reject `*_ref` style keys."""
+    payload = _map_function_payload_with_parameters(
+        {"credential_ref": "secrets/rest/bearer", "settings_ref": "configs/x"}
+    )
+    result = _build(payload)
+    assert result["_success"] is True, result
+
+
+# ---------------------------------------------------------------------------
 # Negative cases — transform operations
 # ---------------------------------------------------------------------------
 
