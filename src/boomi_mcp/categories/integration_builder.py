@@ -312,12 +312,17 @@ def _extract_component_id(result: Dict[str, Any]) -> Optional[str]:
 #
 # These helpers read an IntegrationComponentSpec from `components_by_key` and
 # classify it into the role buckets the preflight type checks compare against.
-# They are read-only (no Boomi calls, no mutation) and intentionally
-# permissive — when a component's family cannot be reliably classified (raw
-# XML connector-action with no structured connector_type, generic wrapper
-# with an unrecognized config.type, etc.) the helpers return None, and the
-# call site treats the ref as "outside-spec, skip type check" rather than
-# failing on ambiguous metadata.
+# They are read-only (no Boomi calls, no mutation). When a component's
+# family cannot be reliably classified (raw XML connector-action with no
+# structured connector_type, generic wrapper with an unrecognized
+# config.type, etc.) the helpers return None — and because the call sites
+# compare classifier output against the expected role string, a None result
+# is treated as a mismatch and the in-spec ref is REJECTED with a
+# *_REF_TYPE_MISMATCH error. Only OUTSIDE-spec refs (where
+# `components_by_key.get(ref_key) is None` — i.e. direct UUIDs / literal
+# live component-ids) skip the type check; ambiguous in-spec metadata
+# fails plan-time per the source plan's "callers should add plan-only
+# metadata or use direct UUIDs" guidance.
 # --------------------------------------------------------------------------
 
 
