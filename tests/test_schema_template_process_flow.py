@@ -144,6 +144,7 @@ def test_template_documents_all_structured_error_codes(template):
         "PROCESS_KIND_UNSUPPORTED",
         "PROCESS_KIND_XML_CONFLICT",
         "PROCESS_NAME_REQUIRED",
+        "PROCESS_NAME_CONFLICT",
         "MISSING_PROCESS_DEPENDENCY",
         "PROCESS_CONNECTOR_BINDING_INVALID",
         "PROCESS_SHAPE_UNSUPPORTED",

@@ -384,7 +384,11 @@ class ProcessFlowBuilder:
             flow.append((
                 "map",
                 {
-                    "map_id": str(transform.get("map_ref") or transform.get("map_id") or ""),
+                    # Strip whitespace so a padded literal map ID
+                    # ("  ABC-MAP-123  ") becomes canonical before
+                    # emission. Padded $ref tokens are already rejected
+                    # at validate_config (r7 P2.2). Codex review r8 F3.
+                    "map_id": str(transform.get("map_ref") or transform.get("map_id") or "").strip(),
                     "userlabel": str(transform.get("label") or ""),
                 },
             ))
@@ -452,8 +456,13 @@ class ProcessFlowBuilder:
             '</process>'
         )
 
+        # folderName is the writable folder attribute on Component
+        # create/update; folderFullPath is response-only metadata that
+        # Boomi ignores on writes. All other builders in the repo
+        # (DatabaseConnectorBuilder, RestClient*, profile builders) emit
+        # folderName for placement — match them. Codex review r8 F2.
         folder_attr = (
-            f' folderFullPath="{_escape_xml(str(folder_name))}"' if folder_name else ""
+            f' folderName="{_escape_xml(str(folder_name))}"' if folder_name else ""
         )
         component_xml = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

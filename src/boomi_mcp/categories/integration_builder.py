@@ -1072,13 +1072,15 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # caller must supply a real display name.
             if process_flow_err is None:
                 config_name = raw_config.get("name")
-                effective_name = (
-                    (comp.name or "").strip()
+                comp_name_clean = (
+                    comp.name.strip()
                     if isinstance(comp.name, str) else ""
-                ) or (
-                    str(config_name).strip()
+                )
+                config_name_clean = (
+                    config_name.strip()
                     if isinstance(config_name, str) else ""
                 )
+                effective_name = comp_name_clean or config_name_clean
                 if not effective_name:
                     process_flow_err = BuilderValidationError(
                         "process component name is required for structured "
@@ -1091,6 +1093,36 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                             "Set IntegrationComponentSpec.name or "
                             "config.name to the human-readable display "
                             "name the process should carry in Boomi."
+                        ),
+                    )
+                # Codex review r8 F1: when BOTH surfaces are set and
+                # they differ, plan-time collision lookup uses comp.name
+                # but _execute_component's build() call prefers
+                # payload["name"] (the r3 clone-suffix precedence).
+                # That mismatch creates a duplicate on create / silently
+                # renames on update because Boomi gets a different name
+                # than the metadata search resolved. Reject the conflict
+                # explicitly. (Apply-time _apply_clone_suffix intentionally
+                # introduces a "-clone" difference; that path mutates
+                # config["name"] AFTER plan, so this plan-time check
+                # never sees it.)
+                elif (
+                    comp_name_clean
+                    and config_name_clean
+                    and comp_name_clean != config_name_clean
+                ):
+                    process_flow_err = BuilderValidationError(
+                        f"top-level name {comp_name_clean!r} and "
+                        f"config.name {config_name_clean!r} disagree; "
+                        f"collision lookup uses the top-level name but "
+                        f"the emitted XML would use config.name.",
+                        error_code="PROCESS_NAME_CONFLICT",
+                        field="name",
+                        hint=(
+                            "Either drop config.name or make it match "
+                            "the top-level IntegrationComponentSpec.name. "
+                            "Pick one surface so plan-time collision "
+                            "detection and apply-time XML emission agree."
                         ),
                     )
             xml_override = bool(raw_config.get("xml"))
