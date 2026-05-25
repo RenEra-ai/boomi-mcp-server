@@ -198,6 +198,51 @@ def test_target_action_type_uppercase_with_leading_whitespace():
     assert ca.attrib["actionType"] == "PATCH"
 
 
+# Codex review r6 P2.2 — emitted XML must canonicalize binding values
+# even when the validator accepted case-insensitive / whitespace-padded
+# input. Boomi's connector resolution is case-sensitive on the source
+# side and treats id whitespace as literal characters.
+
+def test_source_connector_type_capitalized_is_lowercased_in_xml():
+    cfg = _base_config()
+    cfg["source"]["connector_type"] = "Database"  # capitalized
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    ca = shapes[1].find("configuration/connectoraction")
+    assert ca.attrib["connectorType"] == "database"
+
+
+def test_source_action_type_whitespace_stripped_in_xml():
+    cfg = _base_config()
+    cfg["source"]["action_type"] = "  Get  "
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    ca = shapes[1].find("configuration/connectoraction")
+    assert ca.attrib["actionType"] == "Get"
+
+
+def test_source_ids_whitespace_stripped_in_xml():
+    cfg = _base_config()
+    cfg["source"]["connection_id"] = "  C1  "
+    cfg["source"]["operation_id"] = "  O1  "
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    ca = shapes[1].find("configuration/connectoraction")
+    assert ca.attrib["connectionId"] == "C1"
+    assert ca.attrib["operationId"] == "O1"
+
+
+def test_target_ids_whitespace_stripped_in_xml():
+    cfg = _base_config()
+    cfg["target"]["connection_id"] = "  C2  "
+    cfg["target"]["operation_id"] = "  O2  "
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    ca = shapes[2].find("configuration/connectoraction")
+    assert ca.attrib["connectionId"] == "C2"
+    assert ca.attrib["operationId"] == "O2"
+
+
 def test_stop_shape_has_continue_true_default():
     xml = ProcessFlowBuilder.build(_base_config(), name="My Process")
     _, _, shapes = _parse_process(xml)
