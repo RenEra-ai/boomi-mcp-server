@@ -307,9 +307,147 @@ def _extract_component_id(result: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+# --------------------------------------------------------------------------
+# Cross-component $ref type classification (issue #49)
+#
+# These helpers read an IntegrationComponentSpec from `components_by_key` and
+# classify it into the role buckets the preflight type checks compare against.
+# They are read-only (no Boomi calls, no mutation) and intentionally
+# permissive — when a component's family cannot be reliably classified (raw
+# XML connector-action with no structured connector_type, generic wrapper
+# with an unrecognized config.type, etc.) the helpers return None, and the
+# call site treats the ref as "outside-spec, skip type check" rather than
+# failing on ambiguous metadata.
+# --------------------------------------------------------------------------
+
+
+def _effective_component_type(comp: IntegrationComponentSpec) -> Optional[str]:
+    """Return the type to use for ref classification.
+
+    For the generic ``"component"`` wrapper, fall back to ``config.type`` /
+    ``config.component_type`` so a wrapper carrying ``config.type="profile.json"``
+    classifies the same way as a top-level ``profile.json`` component.
+    Mirrors the wrapper-unwrapping ``_metadata_type_for_component`` already
+    does at integration_builder.py:245.
+    """
+    if comp.type != "component":
+        return comp.type
+    raw_type = comp.config.get("type") if isinstance(comp.config, dict) else None
+    if isinstance(raw_type, str) and raw_type.strip():
+        return raw_type.strip()
+    raw_type = comp.config.get("component_type") if isinstance(comp.config, dict) else None
+    if isinstance(raw_type, str) and raw_type.strip():
+        return raw_type.strip()
+    return None
+
+
+def _classify_connector_settings(comp: IntegrationComponentSpec) -> Optional[str]:
+    """Return ``"database connector-settings"`` / ``"REST Client connector-settings"`` / None.
+
+    Uses the same family detectors ``_build_plan`` uses (raw XML subType
+    fallback included) so the classification stays consistent with the
+    routing in the call sites above.
+    """
+    if _effective_component_type(comp) != "connector-settings":
+        return None
+    raw_config = comp.config if isinstance(comp.config, dict) else {}
+    xml_payload = raw_config.get("xml")
+    xml_text = xml_payload if isinstance(xml_payload, str) else ""
+
+    connector_type = raw_config.get("connector_type")
+    if isinstance(connector_type, str) and connector_type.strip().lower() == "database":
+        return "database connector-settings"
+    if _XML_DATABASE_SUBTYPE_RE.search(xml_text):
+        return "database connector-settings"
+    if _resolve_rest_connector_type(connector_type) is not None:
+        return "REST Client connector-settings"
+    if _XML_REST_SUBTYPE_RE.search(xml_text):
+        return "REST Client connector-settings"
+    return None
+
+
+def _classify_connector_action(
+    comp: IntegrationComponentSpec,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return (role, http_method_upper).
+
+    ``role`` is one of:
+      * ``"database connector-action Get"`` — database Get operation
+      * ``"database connector-action <other>"`` — database non-Get operation
+      * ``"REST Client connector-action"`` — REST Client operation (any method)
+      * None — connector-action whose family/role cannot be classified
+
+    ``http_method_upper`` is the declared HTTP method for REST operations
+    (uppercased), or None when not declared / not a REST operation. The
+    process-flow ref-type check uses it to compare against
+    ``target.action_type``.
+    """
+    if _effective_component_type(comp) != "connector-action":
+        return (None, None)
+    raw_config = comp.config if isinstance(comp.config, dict) else {}
+
+    connector_type = raw_config.get("connector_type")
+    family_lower = (
+        connector_type.strip().lower() if isinstance(connector_type, str) else ""
+    )
+
+    if family_lower == "database":
+        mode = raw_config.get("operation_mode")
+        mode_lower = mode.strip().lower() if isinstance(mode, str) else ""
+        action_type = raw_config.get("action_type") or raw_config.get("actionType")
+        action_lower = (
+            action_type.strip().lower() if isinstance(action_type, str) else ""
+        )
+        if mode_lower == "get" or action_lower == "get":
+            return ("database connector-action Get", None)
+        return ("database connector-action <other>", None)
+
+    if _resolve_rest_connector_type(connector_type) is not None:
+        method = raw_config.get("method")
+        if not (isinstance(method, str) and method.strip()):
+            method = raw_config.get("action_type") or raw_config.get("actionType")
+        method_upper = (
+            method.strip().upper()
+            if isinstance(method, str) and method.strip()
+            else None
+        )
+        return ("REST Client connector-action", method_upper)
+
+    return (None, None)
+
+
+def _classify_profile(comp: IntegrationComponentSpec) -> Optional[str]:
+    """Return ``"profile.db"`` / ``"profile.json"`` / ``"profile.xml"`` / None."""
+    effective = _effective_component_type(comp)
+    if effective in ("profile.db", "profile.json", "profile.xml"):
+        return effective
+    return None
+
+
+def _format_actual_role(comp: IntegrationComponentSpec) -> str:
+    """Short human label for ``details.actual_role`` in mismatch errors.
+
+    Avoids echoing config values or secrets — uses only the structural
+    type / family classification.
+    """
+    effective = _effective_component_type(comp) or "<unknown>"
+    if effective == "connector-settings":
+        family = _classify_connector_settings(comp)
+        return family if family is not None else "connector-settings (unknown family)"
+    if effective == "connector-action":
+        role, method = _classify_connector_action(comp)
+        if role is None:
+            return "connector-action (unknown family)"
+        if method:
+            return f"{role} [{method}]"
+        return role
+    return effective
+
+
 def _check_database_get_dependencies(
     comp: IntegrationComponentSpec,
     raw_config: Dict[str, Any],
+    components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
 ) -> Optional[BuilderValidationError]:
     """Cross-step dependency checks specific to database Get operations.
 
@@ -345,6 +483,29 @@ def _check_database_get_dependencies(
             ),
         )
 
+    # Issue #49: cross-component type check. Skip outside-spec refs
+    # (components_by_key.get returns None for direct UUIDs / live IDs).
+    if components_by_key is not None:
+        target = components_by_key.get(connection_ref_key)
+        if target is not None and _classify_connector_settings(target) != "database connector-settings":
+            actual_role = _format_actual_role(target)
+            return BuilderValidationError(
+                f"connection_ref_key {connection_ref_key!r} must reference a "
+                f"database connector-settings component (got {actual_role})",
+                error_code="DB_REF_TYPE_MISMATCH",
+                field="connection_ref_key",
+                hint=(
+                    "Point connection_ref_key at the database "
+                    "connector-settings key; profile and connector-action "
+                    "keys are not valid here."
+                ),
+                details={
+                    "ref_key": connection_ref_key,
+                    "expected_role": "database connector-settings",
+                    "actual_role": actual_role,
+                },
+            )
+
     read_profile_id = raw_config.get("read_profile_id")
     if isinstance(read_profile_id, str) and read_profile_id.startswith("$ref:"):
         ref_key = read_profile_id[5:]
@@ -368,6 +529,25 @@ def _check_database_get_dependencies(
                     "order creates the profile before the operation."
                 ),
             )
+        if components_by_key is not None:
+            target = components_by_key.get(ref_key)
+            if target is not None and _classify_profile(target) != "profile.db":
+                actual_role = _format_actual_role(target)
+                return BuilderValidationError(
+                    f"read_profile_id $ref target {ref_key!r} must reference a "
+                    f"profile.db component (got {actual_role})",
+                    error_code="DB_REF_TYPE_MISMATCH",
+                    field="read_profile_id",
+                    hint=(
+                        "Point read_profile_id at a profile.db component "
+                        "declared earlier in the spec."
+                    ),
+                    details={
+                        "ref_key": ref_key,
+                        "expected_role": "profile.db",
+                        "actual_role": actual_role,
+                    },
+                )
 
     return None
 
@@ -375,6 +555,7 @@ def _check_database_get_dependencies(
 def _check_rest_operation_dependencies(
     comp: IntegrationComponentSpec,
     raw_config: Dict[str, Any],
+    components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
 ) -> Optional[BuilderValidationError]:
     """Cross-step dependency checks specific to REST Client operations (issue #24).
 
@@ -416,6 +597,28 @@ def _check_rest_operation_dependencies(
             ),
         )
 
+    # Issue #49: cross-component type check. Skip outside-spec refs.
+    if components_by_key is not None:
+        target = components_by_key.get(connection_ref_key)
+        if target is not None and _classify_connector_settings(target) != "REST Client connector-settings":
+            actual_role = _format_actual_role(target)
+            return BuilderValidationError(
+                f"connection_ref_key {connection_ref_key!r} must reference a "
+                f"REST Client connector-settings component (got {actual_role})",
+                error_code="REST_REF_TYPE_MISMATCH",
+                field="connection_ref_key",
+                hint=(
+                    "Point connection_ref_key at the REST Client "
+                    "connector-settings key; profile and connector-action "
+                    "keys are not valid here."
+                ),
+                details={
+                    "ref_key": connection_ref_key,
+                    "expected_role": "REST Client connector-settings",
+                    "actual_role": actual_role,
+                },
+            )
+
     for ref_field in ("request_profile_id", "response_profile_id"):
         value = raw_config.get(ref_field)
         if isinstance(value, str) and value.startswith("$ref:"):
@@ -440,6 +643,27 @@ def _check_rest_operation_dependencies(
                         "order creates the profile before the operation."
                     ),
                 )
+            if components_by_key is not None:
+                target = components_by_key.get(ref_key)
+                if target is not None and _classify_profile(target) not in ("profile.json", "profile.xml"):
+                    actual_role = _format_actual_role(target)
+                    return BuilderValidationError(
+                        f"{ref_field} $ref target {ref_key!r} must reference a "
+                        f"profile.json or profile.xml component (got {actual_role})",
+                        error_code="REST_REF_TYPE_MISMATCH",
+                        field=ref_field,
+                        hint=(
+                            "Point the profile ref at a profile.json or "
+                            "profile.xml component; profile.db, "
+                            "connector-settings, and connector-action "
+                            "are not valid here."
+                        ),
+                        details={
+                            "ref_key": ref_key,
+                            "expected_role": "profile.json or profile.xml",
+                            "actual_role": actual_role,
+                        },
+                    )
 
     payload_source_ref_key = raw_config.get("payload_source_ref_key")
     if (
@@ -457,6 +681,123 @@ def _check_rest_operation_dependencies(
                 "order creates the payload-producing step before the operation."
             ),
         )
+
+    return None
+
+
+def _check_process_flow_ref_types(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+    components_by_key: Dict[str, IntegrationComponentSpec],
+) -> Optional[BuilderValidationError]:
+    """Type-check $ref:KEY tokens in a structured process-flow config (issue #49).
+
+    Returns None when all in-spec refs match the expected role for their slot.
+    Direct UUID / literal component-id values are skipped (outside-spec —
+    cannot be classified locally per the issue #49 non-goals).
+
+    Runs only after ``ProcessFlowBuilder.validate_config`` has already
+    confirmed the structural shape and depends_on reachability. Any padded
+    ``" $ref:KEY "`` variants were rejected upstream as MISSING_PROCESS_DEPENDENCY,
+    so this helper only needs to handle exact ``"$ref:KEY"`` strings.
+    """
+    source = raw_config.get("source") if isinstance(raw_config.get("source"), dict) else {}
+    target = raw_config.get("target") if isinstance(raw_config.get("target"), dict) else {}
+
+    slot_rules = (
+        ("source.connection_id", source.get("connection_id"), "database connector-settings"),
+        ("source.operation_id", source.get("operation_id"), "database connector-action Get"),
+        ("target.connection_id", target.get("connection_id"), "REST Client connector-settings"),
+        ("target.operation_id", target.get("operation_id"), "REST Client connector-action"),
+    )
+
+    target_op_ref_component: Optional[IntegrationComponentSpec] = None
+
+    for field_path, raw_value, expected_role in slot_rules:
+        if not (isinstance(raw_value, str) and raw_value.startswith("$ref:")):
+            continue
+        ref_key = raw_value[5:]
+        if not ref_key:
+            continue
+        target_comp = components_by_key.get(ref_key)
+        if target_comp is None:
+            continue
+
+        if expected_role == "database connector-settings":
+            ok = _classify_connector_settings(target_comp) == expected_role
+        elif expected_role == "database connector-action Get":
+            role, _ = _classify_connector_action(target_comp)
+            ok = role == expected_role
+        elif expected_role == "REST Client connector-settings":
+            ok = _classify_connector_settings(target_comp) == expected_role
+        elif expected_role == "REST Client connector-action":
+            role, _ = _classify_connector_action(target_comp)
+            ok = role == expected_role
+            if ok:
+                target_op_ref_component = target_comp
+        else:
+            ok = True
+
+        if not ok:
+            actual_role = _format_actual_role(target_comp)
+            return BuilderValidationError(
+                f"{field_path} {raw_value!r} must reference a {expected_role} "
+                f"component (got {actual_role})",
+                error_code="PROCESS_REF_TYPE_MISMATCH",
+                field=field_path,
+                hint=(
+                    "Point this $ref at a component whose declared role "
+                    "matches the expected_role; swapped refs and unrelated "
+                    "component types are rejected at plan time."
+                ),
+                details={
+                    "ref_key": ref_key,
+                    "expected_role": expected_role,
+                    "actual_role": actual_role,
+                },
+            )
+
+    # Optional method/action_type consistency check (issue #49): when
+    # target.operation_id resolves to an in-spec REST operation that
+    # carries a declared method, target.action_type must match it
+    # uppercased. Skip silently when the referenced operation has no
+    # declared method (cannot compare against unknown).
+    if target_op_ref_component is not None:
+        _, declared_method = _classify_connector_action(target_op_ref_component)
+        declared_action_type = target.get("action_type")
+        declared_action_upper = (
+            declared_action_type.strip().upper()
+            if isinstance(declared_action_type, str) and declared_action_type.strip()
+            else None
+        )
+        if (
+            declared_method is not None
+            and declared_action_upper is not None
+            and declared_method != declared_action_upper
+        ):
+            target_op_raw = target.get("operation_id")
+            target_op_ref_key = (
+                target_op_raw[5:]
+                if isinstance(target_op_raw, str) and target_op_raw.startswith("$ref:")
+                else ""
+            )
+            return BuilderValidationError(
+                f"target.action_type {declared_action_upper!r} does not match "
+                f"the method {declared_method!r} declared on the referenced "
+                f"REST operation",
+                error_code="PROCESS_REF_TYPE_MISMATCH",
+                field="target.action_type",
+                hint=(
+                    "Align target.action_type with the HTTP method declared "
+                    "on the referenced REST connector-action, or change the "
+                    "referenced operation to one whose method matches."
+                ),
+                details={
+                    "ref_key": target_op_ref_key,
+                    "expected_role": declared_method,
+                    "actual_role": declared_action_upper,
+                },
+            )
 
     return None
 
@@ -951,7 +1292,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     # upsert, missing), validate_config above returns first
                     # with UNSUPPORTED_DB_OPERATION_MODE.
                     if db_err is None:
-                        db_err = _check_database_get_dependencies(comp, raw_config)
+                        db_err = _check_database_get_dependencies(
+                            comp, raw_config, components_by_key
+                        )
         if db_err is not None:
             planned_action = "error_database_validation"
             validation_error = {
@@ -960,6 +1303,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 "field": db_err.field,
                 "hint": db_err.hint,
             }
+            if db_err.details is not None:
+                validation_error["details"] = db_err.details
             # Scrub EVERY plaintext secret-shaped field from the spec dump,
             # not just the one named in the error. scan_forbidden_secret_fields
             # stops on first match, but a single bad config can carry multiple
@@ -1023,7 +1368,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 else:  # is_rest_send_operation
                     rest_err = RestClientOperationBuilder.validate_config(effective_config)
                     if rest_err is None:
-                        rest_err = _check_rest_operation_dependencies(comp, raw_config)
+                        rest_err = _check_rest_operation_dependencies(
+                            comp, raw_config, components_by_key
+                        )
 
         if rest_err is not None:
             planned_action = "error_rest_validation"
@@ -1033,6 +1380,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 "field": rest_err.field,
                 "hint": rest_err.hint,
             }
+            if rest_err.details is not None:
+                validation_error["details"] = rest_err.details
             if rest_err.error_code == "PLAINTEXT_SECRET_REJECTED" and rest_scanner_cls is not None:
                 rest_scanner_cls.redact_forbidden_secret_fields_in_place(
                     raw_config
@@ -1188,6 +1537,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     raw_config,
                     depends_on=comp.depends_on,
                 )
+                # Issue #49: after the local structural validator passes,
+                # type-check every in-spec $ref:KEY against components_by_key.
+                # Gated on builder_cls is ProcessFlowBuilder because the
+                # source/target shape this helper reads is specific to the
+                # database_to_api_sync structured process; future process_kind
+                # builders will add their own ref-type helpers when they land.
+                if process_flow_err is None and builder_cls is ProcessFlowBuilder:
+                    process_flow_err = _check_process_flow_ref_types(
+                        comp, raw_config, components_by_key
+                    )
 
         if process_flow_err is not None:
             planned_action = "error_process_validation"
@@ -1197,6 +1556,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 "field": process_flow_err.field,
                 "hint": process_flow_err.hint,
             }
+            if process_flow_err.details is not None:
+                validation_error["details"] = process_flow_err.details
             # Scrub plaintext secrets from comp.config before the spec is
             # echoed back via spec.model_dump(). Mirrors the DB/REST blocks
             # at lines ~860 and ~943 — without this, a flagged value still
