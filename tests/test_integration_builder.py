@@ -3943,3 +3943,115 @@ class TestBuildPlanTransformMapDirect:
         map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
         assert map_step["planned_action"] == "create"
         assert "validation_error" not in map_step
+
+
+# ---------------------------------------------------------------------------
+# Issue #26 codex r1 P2 fixes — plan/apply mismatch regressions
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPlanIssue26CodexR1Fixes:
+    """Plan-time validation gaps that previously let bad configs slip into apply."""
+
+    @patch(_PATCH_TARGET)
+    def test_structured_update_runs_validate_config(self, mock_pag):
+        """Finding #1: profile.json update path must be validated at plan
+        time. Otherwise a bad update (e.g. data_type='blob') plans clean as
+        'update' and crashes apply after dependencies have already mutated
+        state."""
+        mock_pag.return_value = []  # no existing matches → update fails with
+        # error_missing_target, but the validate_config error must fire BEFORE
+        # that — adjust by mocking an existing component for the update.
+        # Simpler: use action='update' WITH component_id supplied so
+        # planned_action stays 'update'.
+        bad = _json_profile_comp()
+        bad.action = "update"
+        bad.component_id = "ffffffff-1111-2222-3333-444444444444"
+        bad.config["root"]["children"].append(
+            {"name": "x", "kind": "simple", "data_type": "blob"}
+        )
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_PROFILE_FIELD_TYPE"
+
+    @patch(_PATCH_TARGET)
+    def test_top_level_named_profile_indexes_correctly_for_map(self, mock_pag):
+        """Finding #2: a profile that supplies IntegrationComponentSpec.name
+        but no config.component_name must still index successfully so the
+        downstream map can validate."""
+        mock_pag.return_value = []
+        # Profile relies on top-level name; config has no component_name.
+        json_profile = _json_profile_comp()
+        json_profile.config.pop("component_name", None)
+        # Map references that profile — should plan without error because
+        # _resolve_map_profile_index injects comp.name into component_name.
+        map_comp = _direct_map_comp(source_ref_key="json_profile", target_ref_key="json_profile")
+        plan = _build_plan(MagicMock(), _build_config([json_profile, map_comp]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        assert map_step["planned_action"] == "create"
+        assert "validation_error" not in map_step
+
+    @patch(_PATCH_TARGET)
+    def test_dollar_ref_to_non_profile_component_fails_index_unavailable(self, mock_pag):
+        """Finding #3: $ref:KEY pointing at a non-profile (or unknown)
+        component must fail with MAP_PROFILE_INDEX_UNAVAILABLE at plan time,
+        not silently apply with unresolved $ref."""
+        mock_pag.return_value = []
+        # Map's source_profile_id is $ref:db_connection — db_connection is a
+        # connector-settings stub (created by _stub_dep_comp), not a profile.
+        map_comp = _direct_map_comp(
+            source_ref_key="db_connection",
+            target_ref_key="json_profile",
+            source_type="profile.db",  # claimed type doesn't match actual
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _stub_dep_comp("db_connection"),
+            _json_profile_comp(),
+            map_comp,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "MAP_PROFILE_INDEX_UNAVAILABLE"
+        assert map_step["validation_error"]["details"]["side"] == "source"
+
+    @patch(_PATCH_TARGET)
+    def test_map_ref_missing_from_depends_on_fails_at_plan(self, mock_pag):
+        """Finding #4: a map whose source_profile_id references a profile
+        but omits the profile key from depends_on must be rejected at plan
+        time. Without this, topological sort may place the map before the
+        profile and _resolve_dependency_tokens returns the literal $ref:KEY
+        string at apply time."""
+        mock_pag.return_value = []
+        # Use a separate target profile so we can drop source from depends_on
+        # cleanly. Construct map manually since the helper's depends_on is
+        # derived from ref keys.
+        json_profile = _json_profile_comp()
+        target_profile = _json_profile_comp(key="json_tgt", name="Tgt")
+        map_comp = IntegrationComponentSpec(
+            key="bad_deps_map",
+            type="transform.map",
+            action="create",
+            name="Bad Deps Map",
+            depends_on=["json_tgt"],  # MISSING json_profile (the source)
+            config={
+                "component_type": "transform.map",
+                "map_type": "direct",
+                "component_name": "Bad Deps Map",
+                "source_profile_id": "$ref:json_profile",
+                "source_profile_type": "profile.json",
+                "target_profile_id": "$ref:json_tgt",
+                "target_profile_type": "profile.json",
+                "field_mappings": [
+                    {"source_path": "Root/a", "target_path": "Root/a"},
+                ],
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            json_profile, target_profile, map_comp,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "bad_deps_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "MAP_PROFILE_REF_REQUIRED"
+        assert map_step["validation_error"]["details"]["side"] == "source"
+        assert map_step["validation_error"]["details"]["ref_key"] == "json_profile"

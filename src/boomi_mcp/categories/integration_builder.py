@@ -487,11 +487,21 @@ def _resolve_map_profile_index(
         builder_cls = DatabaseReadProfileBuilder
     if builder_cls is None:
         return None
+    # Mirror _execute_component's comp.name → component_name fallback. A
+    # profile that supplies only the top-level IntegrationComponentSpec.name
+    # (and omits config.component_name) is valid — _execute_component
+    # injects the default before invoking the builder. Without the same
+    # injection here, the validate_config inside build_field_index would
+    # fail with "component_name is required" and the map would erroneously
+    # surface MAP_PROFILE_INDEX_UNAVAILABLE. Codex r1 P2 finding #2.
+    effective_config = dict(raw_config)
+    if target_comp.name and not effective_config.get("component_name"):
+        effective_config["component_name"] = target_comp.name
     try:
         # DatabaseReadProfileBuilder.build_field_index doesn't run a
         # validate_config gate, so a malformed DB profile here would still
         # raise — caller treats the None return as "no index available".
-        return builder_cls.build_field_index(raw_config)
+        return builder_cls.build_field_index(effective_config)
     except BuilderValidationError:
         return None
     except Exception:
@@ -1781,11 +1791,17 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 raw_config
             )
             # (b) validate_config gated on apply path actually invoking the
-            #     builder (create / create_clone, no raw XML).
+            #     builder. _execute_component invokes the structured builder
+            #     on create / create_clone AND update (update_component({
+            #     "xml": built_xml}) re-emits XML from config), so validation
+            #     must cover update too — otherwise a bad structured update
+            #     (e.g. JSON profile leaf with data_type='blob') plans clean
+            #     and crashes apply after earlier steps have already mutated
+            #     state. Codex r1 P2 finding #1.
             will_invoke_gen_profile_builder = (
                 gen_profile_err is None
                 and not xml_payload
-                and planned_action in ("create", "create_clone")
+                and planned_action in ("create", "create_clone", "update")
             )
             if will_invoke_gen_profile_builder:
                 effective_config = dict(raw_config)
@@ -1866,13 +1882,110 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                             ),
                         )
                     else:
-                        gen_profile_err = type(
-                            map_builder_instance
-                        ).validate_config(
-                            effective_config,
-                            source_index=source_index,
-                            target_index=target_index,
-                        )
+                        # depends_on coverage check (Codex r1 P2 finding #4).
+                        # _apply_plan's _resolve_dependency_tokens substitutes
+                        # $ref:KEY from id_registry, which is populated as
+                        # components apply in topological order. If a map
+                        # references a profile via $ref but that profile key
+                        # isn't in the map's depends_on, the topo sort may
+                        # place the map before the profile and apply will
+                        # crash with unresolved $ref tokens. Require explicit
+                        # declaration to keep ordering safe.
+                        declared_deps = set(comp.depends_on or [])
+                        for side in ("source", "target"):
+                            ref_value = effective_config.get(
+                                f"{side}_profile_id"
+                            )
+                            if (
+                                isinstance(ref_value, str)
+                                and ref_value.startswith("$ref:")
+                            ):
+                                ref_key = ref_value[len("$ref:") :]
+                                if ref_key not in declared_deps:
+                                    gen_profile_err = BuilderValidationError(
+                                        f"{side}_profile_id $ref target must "
+                                        f"also appear in depends_on so the "
+                                        f"profile runs before the map",
+                                        error_code="MAP_PROFILE_REF_REQUIRED",
+                                        field="depends_on",
+                                        hint=(
+                                            f"Add the {side} profile key to "
+                                            "depends_on so the execution "
+                                            "order builds the profile before "
+                                            "the map."
+                                        ),
+                                        details={
+                                            "side": side,
+                                            "ref_key": ref_key,
+                                        },
+                                    )
+                                    break
+
+                        if gen_profile_err is None:
+                            gen_profile_err = type(
+                                map_builder_instance
+                            ).validate_config(
+                                effective_config,
+                                source_index=source_index,
+                                target_index=target_index,
+                            )
+                        # Codex r1 P2 finding #3: a $ref pointing at a non-
+                        # profile, missing, or otherwise unindexable component
+                        # produces source_index/target_index == None. The map
+                        # builder's validate_config skips path-existence checks
+                        # when an index is None, so without this guard the
+                        # plan would succeed and apply would fail. Treat
+                        # unindexable $ref refs as plan-time failures, even
+                        # though their syntax (starting with $ref:) looks
+                        # superficially valid.
+                        if gen_profile_err is None:
+                            for side, side_index in (
+                                ("source", source_index),
+                                ("target", target_index),
+                            ):
+                                ref_value = effective_config.get(
+                                    f"{side}_profile_id"
+                                )
+                                if (
+                                    isinstance(ref_value, str)
+                                    and ref_value.startswith("$ref:")
+                                    and side_index is None
+                                ):
+                                    ref_key = ref_value[len("$ref:") :]
+                                    target_comp = (
+                                        components_by_key.get(ref_key)
+                                        if components_by_key is not None
+                                        else None
+                                    )
+                                    target_type = (
+                                        target_comp.type
+                                        if target_comp is not None
+                                        else None
+                                    )
+                                    gen_profile_err = BuilderValidationError(
+                                        f"{side}_profile_id $ref target "
+                                        "could not be indexed — the referenced "
+                                        "component is missing, malformed, or "
+                                        "not a profile (profile.db / "
+                                        "profile.json / profile.xml).",
+                                        error_code="MAP_PROFILE_INDEX_UNAVAILABLE",
+                                        field=f"{side}_profile_id",
+                                        hint=(
+                                            "Confirm the referenced key exists "
+                                            "in the spec and is a profile "
+                                            "component the map builder can "
+                                            "index. Non-profile component "
+                                            "types cannot be referenced as "
+                                            "map endpoints in M2."
+                                        ),
+                                        details={
+                                            "side": side,
+                                            "ref_key": ref_key,
+                                            "target_component_type": target_type,
+                                        },
+                                    )
+                                    break
+
                         # Literal-UUID profile refs (no $ref) can't be indexed
                         # in M2 — #47 owns existing-profile discovery. Reject
                         # at plan time so the caller knows what to fix.
