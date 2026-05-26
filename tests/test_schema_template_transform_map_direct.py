@@ -47,9 +47,19 @@ def test_no_protocol_returns_direct_default():
 
 
 def test_unknown_protocol_returns_structured_error():
-    result = _call(component_type="transform.map", protocol="function")
+    # 'function' is now a valid transform.map protocol (issue #40); exercise a
+    # truly-unknown protocol instead.
+    result = _call(component_type="transform.map", protocol="bogus-protocol")
     assert result["_success"] is False
     assert "direct" in result["valid_protocols"]
+    assert "function" in result["valid_protocols"]
+
+
+def test_function_protocol_routes_to_function_template():
+    # Sanity-check that 'function' now resolves to the #40 template.
+    result = _call(component_type="transform.map", protocol="function")
+    assert result["_success"] is True
+    assert result["protocol"] == "function"
 
 
 def test_template_documents_required_fields():

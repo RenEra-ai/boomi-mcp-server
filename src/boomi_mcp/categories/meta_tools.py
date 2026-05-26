@@ -2558,19 +2558,33 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         "component_type": "transform.map",
         "map_type": "direct",
     },
-    "supported_map_types": ["direct"],
+    "supported_map_types": ["direct", "function", "map_function"],
     "unsupported_routes": {
-        "functions": "#40 (map_function builder)",
+        "functions": (
+            "Raw <Functions> XML is not accepted; switch to "
+            "map_type='function' (#40) and declare structured function_mappings."
+        ),
+        "function_mappings": (
+            "function_mappings belong to map_type='function' (#40); they are "
+            "rejected on direct maps."
+        ),
         "scripts": "#41 (map_script builder)",
         "xslt": "#42 (XSLT transform builder)",
-        "default_values": "#40 (defaults bind via constant function)",
-        "lookup": "#40 (lookups bind via lookup function)",
-        "expression": "#40 (expressions bind via custom function)",
+        "default_values": (
+            "Switch to map_type='function' and declare "
+            "function_mappings[].function_type='default_value' (#40)."
+        ),
+        "lookup": (
+            "Switch to map_type='function' and declare "
+            "function_mappings[].function_type='simple_lookup' (#40)."
+        ),
+        "expression": "#41 (map_script builder; or use a function primitive)",
     },
     "unsupported_routes_note": (
-        "Direct maps in M2.6 are profile-to-profile only. Any config key "
-        "naming a deferred route fails plan-time with "
-        "UNSUPPORTED_TRANSFORM_ROUTE plus a pointer to the future issue."
+        "Direct maps are profile-to-profile only. Function-class routes "
+        "(default/lookup/standard function primitives) are now supported via "
+        "map_type='function' (#40); script.mapping/XSLT remain tracked by "
+        "#41/#42."
     ),
     "depends_on_requirements": [
         "Include source_profile_id's $ref key in depends_on so the source "
@@ -2682,9 +2696,396 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         ),
     },
     "out_of_scope": {
-        "map_function": (
-            "Function steps (trim / concat / lookup / custom expression) are "
-            "tracked by issue #40."
+        "map_function_advanced": (
+            "The first M2 standard function set (date_format, default_value, "
+            "trim/left_trim/right_trim, uppercase/lowercase, append/prepend/"
+            "replace/remove, simple_lookup, sequential_value, math) is "
+            "supported on map_type='function' (#40). Standalone reusable "
+            "transform.function components and chained multi-step function "
+            "graphs remain future work."
+        ),
+        "map_script": (
+            "Groovy / JavaScript map scripts are tracked by issue #41."
+        ),
+        "xslt": (
+            "XSLT transform components are tracked by issue #42."
+        ),
+        "existing_profile_index_discovery": (
+            "Indexing arbitrary existing-profile XML to support literal-UUID "
+            "profile refs is tracked by issue #47."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "transform.map",
+    "protocol": "function",
+    "tool": "manage_component (action='create')",
+    "note": (
+        "Structured map-function transform.map. Each entry in function_mappings "
+        "declares one mapped output via {function_type, inputs, target_path, "
+        "parameters}. M2.6a supports a 12-family allow-list: date_format, "
+        "default_value, trim, left_trim, right_trim, uppercase, lowercase, "
+        "append, prepend, replace, remove, math. Mixed maps may also declare "
+        "direct field_mappings alongside function_mappings. Source/target "
+        "profile refs follow the same '$ref:KEY' rule as direct maps; literal "
+        "existing-profile UUIDs are rejected with MAP_PROFILE_INDEX_UNAVAILABLE "
+        "(deferred to #47). simple_lookup and sequential_value are deferred "
+        "follow-up work — see out_of_scope for the live-shape evidence "
+        "required to enable them. script.mapping (#41), XSLT (#42), "
+        "standalone reusable transform.function components, and chained "
+        "multi-step function graphs remain out of scope."
+    ),
+    "template": {
+        "component_type": "transform.map",
+        "map_type": "function",
+        "component_name": "<<map name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "source_profile_id": "$ref:<<source profile key>>",
+        "source_profile_type": "<<profile.db | profile.json | profile.xml>>",
+        "target_profile_id": "$ref:<<target profile key>>",
+        "target_profile_type": "<<profile.db | profile.json | profile.xml>>",
+        "field_mappings": [
+            {
+                "source_path": "<<optional direct source path>>",
+                "target_path": "<<optional direct target path>>",
+            },
+        ],
+        "function_mappings": [
+            {
+                "function_type": "<<one of the supported_function_types keys>>",
+                "inputs": ["<<source logical path>>"],
+                "target_path": "<<target logical path>>",
+                "parameters": {
+                    "<<parameter key>>": "<<parameter value placeholder>>",
+                },
+            },
+        ],
+    },
+    "required": [
+        "component_type",
+        "map_type",
+        "component_name",
+        "source_profile_id",
+        "source_profile_type",
+        "target_profile_id",
+        "target_profile_type",
+        "function_mappings",
+    ],
+    "optional": [
+        "field_mappings",
+        "folder_path",
+        "description",
+    ],
+    "defaults": {
+        "component_type": "transform.map",
+        "map_type": "function",
+    },
+    "supported_map_types": ["function", "map_function"],
+    "supported_function_types": {
+        "date_format": {
+            "mapped_inputs": 1,
+            "required_parameters": ["input_format", "output_format"],
+            "optional_parameters": [],
+            "note": (
+                "Inputs[0] = source date string. parameters.input_format and "
+                "parameters.output_format follow Boomi date pattern syntax."
+            ),
+        },
+        "default_value": {
+            "mapped_inputs": 0,
+            "required_parameters": ["value"],
+            "optional_parameters": [],
+            "note": (
+                "Emits a <Default toKey value/> entry inside <Defaults> rather "
+                "than a <FunctionStep>; parameters.value is the literal "
+                "default written to target_path."
+            ),
+        },
+        "trim": {
+            "mapped_inputs": 1,
+            "required_parameters": [],
+            "optional_parameters": [],
+            "note": "Whitespace trim (TrimWhitespace).",
+        },
+        "left_trim": {
+            "mapped_inputs": 1,
+            "required_parameters": ["fix_to_length"],
+            "optional_parameters": [],
+            "note": "Truncate to first parameters.fix_to_length characters.",
+        },
+        "right_trim": {
+            "mapped_inputs": 1,
+            "required_parameters": ["fix_to_length"],
+            "optional_parameters": [],
+            "note": "Truncate to last parameters.fix_to_length characters.",
+        },
+        "uppercase": {
+            "mapped_inputs": 1,
+            "required_parameters": [],
+            "optional_parameters": [],
+            "note": "StringToUpper.",
+        },
+        "lowercase": {
+            "mapped_inputs": 1,
+            "required_parameters": [],
+            "optional_parameters": [],
+            "note": "StringToLower.",
+        },
+        "append": {
+            "mapped_inputs": 1,
+            "required_parameters": ["value"],
+            "optional_parameters": ["fix_to_length"],
+            "note": (
+                "Append parameters.value to source string. "
+                "parameters.fix_to_length is optional pad/fix length."
+            ),
+        },
+        "prepend": {
+            "mapped_inputs": 1,
+            "required_parameters": ["value"],
+            "optional_parameters": ["fix_to_length"],
+            "note": "Prepend parameters.value to source string.",
+        },
+        "replace": {
+            "mapped_inputs": 1,
+            "required_parameters": ["search", "replacement"],
+            "optional_parameters": [],
+            "note": (
+                "Search-and-replace on the source string. parameters.search "
+                "may be a regex pattern; parameters.replacement is the "
+                "replacement string."
+            ),
+        },
+        "remove": {
+            "mapped_inputs": 1,
+            "required_parameters": ["value"],
+            "optional_parameters": [],
+            "note": "Remove all occurrences of parameters.value.",
+        },
+        "math": {
+            "mapped_inputs": "1 or 2 depending on parameters.operation",
+            "required_parameters": ["operation"],
+            "optional_parameters": ["precision", "rounding_mode"],
+            "supported_operations": [
+                "add",
+                "subtract",
+                "multiply",
+                "divide",
+                "set_precision",
+                "ceil",
+                "floor",
+                "abs",
+            ],
+            "note": (
+                "operation dispatches to one of MathAdd/MathSubtract/"
+                "MathMultiply/MathDivide/MathSetPrecision/MathCeil/MathFloor/"
+                "MathABS. add/subtract/multiply/divide take 2 mapped inputs; "
+                "set_precision takes 1 mapped input plus parameters.precision; "
+                "ceil/floor/abs take 1 mapped input."
+            ),
+        },
+    },
+    "unsupported_routes": {
+        "functions": (
+            "Raw <Functions> XML escape hatch is not accepted; use the "
+            "structured function_mappings contract instead."
+        ),
+        "function_steps": (
+            "Raw <FunctionStep> XML escape hatch is not accepted; use the "
+            "structured function_mappings contract instead."
+        ),
+        "scripts": "#41 (map_script builder)",
+        "map_scripts": "#41 (map_script builder)",
+        "xslt": "#42 (XSLT transform builder)",
+        "xslt_source": "#42 (XSLT transform builder)",
+        "expression": "#41 (map_script builder; or use a function primitive)",
+        "default_values": (
+            "Use function_mappings[].function_type='default_value' instead "
+            "of the raw <Defaults> escape hatch."
+        ),
+        "lookup": (
+            "Use function_mappings[].function_type='simple_lookup' instead "
+            "of the raw lookup escape hatch."
+        ),
+    },
+    "unsupported_routes_note": (
+        "Function-map authors go through the structured registry. Raw "
+        "<Functions>/<FunctionStep> XML, raw <Defaults>, raw lookup blocks, "
+        "scripts, XSLT, and free-form expressions all fail plan-time with "
+        "UNSUPPORTED_TRANSFORM_ROUTE."
+    ),
+    "depends_on_requirements": [
+        "Include source_profile_id's $ref key in depends_on so the source "
+        "profile component runs first.",
+        "Include target_profile_id's $ref key in depends_on so the target "
+        "profile component runs first.",
+        "Both profiles must be in-spec — literal existing-profile UUIDs "
+        "produce MAP_PROFILE_INDEX_UNAVAILABLE (issue #47 owns existing-"
+        "profile schema discovery).",
+    ],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+        "api_key",
+        "credentials",
+        "authorization",
+        "bearer",
+    ],
+    "error_codes": {
+        "MAP_PROFILE_REF_REQUIRED": (
+            "source_profile_id or target_profile_id missing / blank, or a "
+            "$ref target was not declared in depends_on"
+        ),
+        "MAP_PROFILE_INDEX_UNAVAILABLE": (
+            "literal existing-profile UUID supplied without an in-spec "
+            "generated profile component to index (deferred to #47)"
+        ),
+        "MAP_FIELD_NOT_FOUND": (
+            "function_mappings[].inputs[] or .target_path is not declared in "
+            "the corresponding profile's field index"
+        ),
+        "DUPLICATE_TARGET_MAPPING": (
+            "two entries (from function_mappings + field_mappings combined) "
+            "bind the same target_path"
+        ),
+        "UNSUPPORTED_TRANSFORM_ROUTE": (
+            "config declares a raw <Functions>/<Defaults>/<Lookup> escape "
+            "hatch, scripts, XSLT, or expressions"
+        ),
+        "UNSUPPORTED_MAP_FUNCTION_TYPE": (
+            "function_type is not in the supported 14-family allow-list"
+        ),
+        "MAP_FUNCTION_INPUT_COUNT_MISMATCH": (
+            "function_mappings[].inputs count does not match the family's "
+            "mapped-input rule"
+        ),
+        "MAP_FUNCTION_PARAMETER_MISSING": (
+            "a required parameter for the function family is missing or empty"
+        ),
+        "MAP_FUNCTION_PARAMETER_INVALID": (
+            "a parameter value fails type / enum validation for the family"
+        ),
+        "UNSUPPORTED_MATH_OPERATION": (
+            "parameters.operation for the math family is not in the supported "
+            "operation set"
+        ),
+        "PROFILE_FIELD_NOT_MAPPABLE": (
+            "an input or target path resolves to a structural node "
+            "(object/array/non-leaf element)"
+        ),
+        "PROFILE_FIELD_VALIDATION_FAILED": (
+            "shape / cross-field issue in the map config"
+        ),
+        "PLAINTEXT_SECRET_REJECTED": (
+            "a key in the config dict (including inside function_mappings or "
+            "parameters) matches a secret-shaped substring"
+        ),
+    },
+    "gotchas": [
+        (
+            "Each function_mapping produces ONE target output in M2.6a. "
+            "Multi-output graphs (StringSplit, user-defined functions) and "
+            "chained function steps are future work."
+        ),
+        (
+            "Mapping order is deterministic: direct field_mappings first, "
+            "then for each function in declaration order — its source-to-"
+            "input mappings, then its output-to-target mapping. Function IDs "
+            "and positions match the 1-based index of function_mappings."
+        ),
+        (
+            "default_value entries do NOT emit a <FunctionStep>; they emit "
+            "<Default toKey value/> inside the map's <Defaults> block. "
+            "parameters.value is the literal written verbatim to the target "
+            "leaf."
+        ),
+        (
+            "simple_lookup rows are task-authored — provide your own "
+            "{ref1, ref2} (or {from, to}) entries. No canned reference data "
+            "is shipped here."
+        ),
+        (
+            "Boomi maps reject duplicate target bindings — only one entry "
+            "(direct or function) may write each destination leaf."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Create the source profile component (profile.db / profile.json / profile.xml).",
+        "2. Create the target profile component (profile.db / profile.json / profile.xml).",
+        "3. Plan this map with map_type='function', source_profile_id='$ref:<src key>', "
+        "target_profile_id='$ref:<tgt key>', depends_on=[<src>, <tgt>], "
+        "and one entry per transformed output in function_mappings.",
+        "4. Apply — $ref tokens resolve to real UUIDs, function steps are "
+        "emitted with deterministic IDs, and mapping order is stable "
+        "across repeated builds.",
+    ],
+    "update_note": (
+        "Field-level updates are not supported yet. To revise, recreate via "
+        "manage_component or use the raw-XML escape hatch (config.xml)."
+    ),
+    "example": {
+        "key": "db_to_json_function_map",
+        "type": "transform.map",
+        "action": "create",
+        "name": "<<map display name>>",
+        "depends_on": ["<<source profile key>>", "<<target profile key>>"],
+        "config": {
+            "component_type": "transform.map",
+            "map_type": "function",
+            "component_name": "<<map display name>>",
+            "source_profile_id": "$ref:<<source profile key>>",
+            "source_profile_type": "<<profile.db | profile.json | profile.xml>>",
+            "target_profile_id": "$ref:<<target profile key>>",
+            "target_profile_type": "<<profile.db | profile.json | profile.xml>>",
+            "function_mappings": [
+                {
+                    "function_type": "<<one supported function family>>",
+                    "inputs": ["<<source logical path>>"],
+                    "target_path": "<<target logical path>>",
+                    "parameters": {
+                        "<<parameter key>>": "<<parameter value placeholder>>",
+                    },
+                },
+            ],
+        },
+        "_example_note": (
+            "Placeholder values only. Replace angle-bracket markers with "
+            "task-specific keys / paths / parameters. No canned mappings or "
+            "lookup rows are shipped here."
+        ),
+    },
+    "out_of_scope": {
+        "simple_lookup": (
+            "simple_lookup is deferred from #40 — the Boomi platform rejected "
+            "the documented API-level <SimpleLookup><Table><Rows> shape with "
+            "'Invalid content was found starting with element \\'Table\\'. One "
+            "of \\'{Input}\\' is expected.' Live transform.map XML evidence is "
+            "required before this family can be re-enabled."
+        ),
+        "sequential_value": (
+            "sequential_value is deferred from #40 — the Boomi platform "
+            "rejected <SequentialValue keyName batchSize keyFixToLength/> "
+            "with 'Attribute \\'keyFixToLength\\' is not allowed to appear in "
+            "element \\'SequentialValue\\''. Live transform.map XML evidence "
+            "is required before this family can be re-enabled."
+        ),
+        "standalone_transform_function": (
+            "Standalone reusable transform.function components (user-defined "
+            "functions shared across maps) remain future work."
+        ),
+        "chained_function_graphs": (
+            "Wiring multi-step function pipelines (function-A.output -> "
+            "function-B.input) remains future work; M2.6a is one function "
+            "per target output."
         ),
         "map_script": (
             "Groovy / JavaScript map scripts are tracked by issue #41."
@@ -3886,11 +4287,13 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         if component_type == "transform.map":
             if protocol == "direct":
                 return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_DIRECT}
+            if protocol in ("function", "map_function"):
+                return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION}
             if protocol:
                 return {
                     "_success": False,
                     "error": f"Unknown transform.map protocol: {protocol}",
-                    "valid_protocols": ["direct"],
+                    "valid_protocols": ["direct", "function", "map_function"],
                 }
             return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_DIRECT}
         if component_type == "connector-action":

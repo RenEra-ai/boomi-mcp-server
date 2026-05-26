@@ -4055,3 +4055,202 @@ class TestBuildPlanIssue26CodexR1Fixes:
         assert map_step["validation_error"]["error_code"] == "MAP_PROFILE_REF_REQUIRED"
         assert map_step["validation_error"]["details"]["side"] == "source"
         assert map_step["validation_error"]["details"]["ref_key"] == "json_profile"
+
+
+# ---------------------------------------------------------------------------
+# Issue #40 — transform.map function map plan routing
+# ---------------------------------------------------------------------------
+
+
+def _function_map_comp(
+    key="function_map",
+    name="Test Function Map",
+    source_ref_key="xml_profile",
+    target_ref_key="json_profile",
+    source_type="profile.xml",
+    target_type="profile.json",
+    function_mappings=None,
+    field_mappings=None,
+    map_type="function",
+    **config_overrides,
+):
+    cfg = {
+        "component_type": "transform.map",
+        "map_type": map_type,
+        "component_name": name,
+        "source_profile_id": f"$ref:{source_ref_key}",
+        "source_profile_type": source_type,
+        "target_profile_id": f"$ref:{target_ref_key}",
+        "target_profile_type": target_type,
+        "function_mappings": function_mappings or [
+            {
+                "function_type": "lowercase",
+                "inputs": ["rows/row[]/key"],
+                "target_path": "Root/list[]/key",
+                "parameters": {},
+            },
+        ],
+    }
+    if field_mappings is not None:
+        cfg["field_mappings"] = field_mappings
+    cfg.update(config_overrides)
+    depends = (
+        [source_ref_key, target_ref_key]
+        if source_ref_key != target_ref_key
+        else [source_ref_key]
+    )
+    return IntegrationComponentSpec(
+        key=key, type="transform.map", action="create", name=name, config=cfg,
+        depends_on=depends,
+    )
+
+
+class TestBuildPlanTransformMapFunction:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_function_map_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _function_map_comp(),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "function_map")
+        assert map_step["planned_action"] == "create"
+        assert map_step["route"] == "map_builder_or_xml"
+        assert "validation_error" not in map_step
+
+    @patch(_PATCH_TARGET)
+    def test_transform_summary_advertises_function_count(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _function_map_comp(
+                function_mappings=[
+                    {
+                        "function_type": "lowercase",
+                        "inputs": ["rows/row[]/key"],
+                        "target_path": "Root/list[]/key",
+                        "parameters": {},
+                    },
+                    {
+                        "function_type": "default_value",
+                        "inputs": [],
+                        "target_path": "Root/a",
+                        "parameters": {"value": "constant"},
+                    },
+                ],
+            ),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "function_map")
+        summary = map_step["transform_summary"]
+        assert summary["map_type"] == "function"
+        assert summary["function_count"] == 2
+        assert summary["direct_mapping_count"] == 0
+        assert summary["function_types_used"] == ["lowercase", "default_value"]
+
+    @patch(_PATCH_TARGET)
+    def test_map_function_alias_routes_through_function_builder(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _function_map_comp(map_type="map_function"),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "function_map")
+        assert map_step["planned_action"] == "create"
+        assert map_step["transform_summary"]["map_type"] == "map_function"
+
+    @patch(_PATCH_TARGET)
+    def test_literal_uuid_source_errors_with_index_unavailable(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _function_map_comp()
+        bad.config["source_profile_id"] = "00000000-1111-2222-3333-444444444444"
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "function_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "MAP_PROFILE_INDEX_UNAVAILABLE"
+
+    @patch(_PATCH_TARGET)
+    def test_unknown_function_type_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _function_map_comp(function_mappings=[
+            {
+                "function_type": "fake_function",
+                "inputs": ["rows/row[]/key"],
+                "target_path": "Root/list[]/key",
+                "parameters": {},
+            },
+        ])
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "function_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "UNSUPPORTED_MAP_FUNCTION_TYPE"
+
+    @patch(_PATCH_TARGET)
+    def test_duplicate_target_across_function_and_field_mappings(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _function_map_comp(
+            function_mappings=[
+                {
+                    "function_type": "lowercase",
+                    "inputs": ["rows/row[]/key"],
+                    "target_path": "Root/a",
+                    "parameters": {},
+                },
+            ],
+            field_mappings=[
+                {"source_path": "rows/row[]/key", "target_path": "Root/a"},
+            ],
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "function_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "DUPLICATE_TARGET_MAPPING"
+
+    @patch(_PATCH_TARGET)
+    def test_math_unsupported_operation_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _function_map_comp(function_mappings=[
+            {
+                "function_type": "math",
+                "inputs": ["rows/row[]/key", "rows/row[]/key"],
+                "target_path": "Root/a",
+                "parameters": {"operation": "modulo"},
+            },
+        ])
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "function_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "UNSUPPORTED_MATH_OPERATION"
+
+    @patch(_PATCH_TARGET)
+    def test_direct_map_summary_includes_zero_function_count(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _json_profile_comp(),
+            _direct_map_comp(),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        summary = map_step["transform_summary"]
+        assert summary["map_type"] == "direct"
+        assert summary["function_count"] == 0
+        assert summary["direct_mapping_count"] >= 1
+        assert summary["function_types_used"] == []
