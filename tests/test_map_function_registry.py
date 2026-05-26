@@ -30,12 +30,10 @@ SUPPORTED_FAMILIES = (
     "prepend",
     "replace",
     "remove",
+    "simple_lookup",
+    "sequential_value",
     "math",
 )
-
-# simple_lookup and sequential_value are deferred from M2.6a — see deferral
-# comment in map_function_registry.py. They must NOT resolve in the registry.
-DEFERRED_FAMILIES = ("simple_lookup", "sequential_value")
 
 
 # ---------------------------------------------------------------------------
@@ -69,13 +67,6 @@ def test_get_function_family_returns_none_for_unknown():
     assert get_function_family("totally_bogus") is None
     assert get_function_family("") is None
     assert get_function_family(None) is None  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize("name", DEFERRED_FAMILIES)
-def test_deferred_families_do_not_resolve(name):
-    # simple_lookup and sequential_value were rejected by the Boomi platform
-    # during M2.6a live QA — see deferral comment in map_function_registry.py.
-    assert get_function_family(name) is None
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +189,52 @@ def test_validate_remove_happy_path():
     assert _run("remove", ["src/name"], {"value": " "}) is None
 
 
+def test_validate_simple_lookup_requires_non_empty_rows():
+    err = _run("simple_lookup", ["src/key"], {"rows": []})
+    assert err is not None
+    assert err.error_code == "MAP_FUNCTION_PARAMETER_INVALID"
+
+
+def test_validate_simple_lookup_accepts_ref_form():
+    err = _run(
+        "simple_lookup",
+        ["src/key"],
+        {"rows": [{"ref1": "A", "ref2": "1"}, {"ref1": "B", "ref2": "2"}]},
+    )
+    assert err is None
+
+
+def test_validate_simple_lookup_accepts_from_to_form():
+    err = _run(
+        "simple_lookup",
+        ["src/key"],
+        {"rows": [{"from": "A", "to": "1"}]},
+    )
+    assert err is None
+
+
+def test_validate_simple_lookup_rejects_mixed_keys():
+    err = _run("simple_lookup", ["src/key"], {"rows": [{"ref1": "A"}]})
+    assert err is not None
+    assert err.error_code == "MAP_FUNCTION_PARAMETER_INVALID"
+
+
+def test_validate_sequential_value_no_inputs_no_parameters():
+    # Component-XML form is parameter-free; keyName/batchSize/keyFixToLength
+    # live in the Environment Map Extension layer.
+    err = _run("sequential_value", [], {})
+    assert err is None
+
+
+def test_validate_sequential_value_rejects_extension_level_params():
+    # If a caller mistakenly puts extension-level params in component config,
+    # the registry rejects them since the builder cannot serialize them into
+    # the component XML.
+    err = _run("sequential_value", [], {"key_name": "abc"})
+    assert err is not None
+    assert err.error_code == "MAP_FUNCTION_PARAMETER_INVALID"
+
+
 def test_validate_math_add_two_inputs():
     assert _run("math", ["a", "b"], {"operation": "add"}) is None
 
@@ -317,7 +354,8 @@ def test_emit_function_step_string_to_lower():
     assert 'key="1"' in xml
     assert 'position="1"' in xml
     assert '<Inputs><Input default="" key="1" name="Original String"/></Inputs>' in xml
-    assert '<Outputs><Output key="1" name="Result"/></Outputs>' in xml
+    # Output key=2 matches live Boomi UI convention (FUNCTION_OUTPUT_KEY).
+    assert '<Outputs><Output key="2" name="Result"/></Outputs>' in xml
     assert "<Configuration/>" in xml
 
 
@@ -334,6 +372,47 @@ def test_emit_function_step_date_format_populates_defaults():
     assert 'default="yyyy-MM-dd"' in xml
     assert 'name="Output Mask"' in xml
     assert 'default="MM/dd/yyyy"' in xml
+
+
+def test_emit_function_step_simple_lookup_renders_crossref_table():
+    family = get_function_family("simple_lookup")
+    xml = emit_function_step(
+        family,
+        step_key=1,
+        parameters={
+            "rows": [{"ref1": "A", "ref2": "active"}, {"from": "I", "to": "inactive"}],
+        },
+    )
+    # Live-verified component XML form uses CrossRefTableObj wrapper.
+    assert "<SimpleLookup>" in xml
+    assert '<Input index="1" name="Key"/>' in xml
+    assert '<Output index="1" name="Value"/>' in xml
+    assert "<CrossRefTableObj><CrossRefTable>" in xml
+    assert "<columnHeader>ref1</columnHeader>" in xml
+    assert "<columnHeader>ref2</columnHeader>" in xml
+    assert '<ref value="A"/><ref value="active"/>' in xml
+    assert '<ref value="I"/><ref value="inactive"/>' in xml
+
+
+def test_emit_function_step_sequential_value_empty_configuration():
+    family = get_function_family("sequential_value")
+    xml = emit_function_step(family, step_key=1, parameters={})
+    # Live-verified: component XML is empty <SequentialValue/>. The keyName /
+    # batchSize / keyFixToLength settings live in environment extensions,
+    # NOT in the component XML.
+    assert "<Configuration><SequentialValue/></Configuration>" in xml
+    assert "keyName" not in xml
+    assert "batchSize" not in xml
+
+
+def test_emit_function_step_output_key_uses_2():
+    # Codex r3 finding: live Boomi UI saves single-output FunctionSteps with
+    # output key=2 (not 1). The builder must match this convention so the
+    # corresponding output-mapping fromKey reference resolves correctly.
+    family = get_function_family("lowercase")
+    xml = emit_function_step(family, step_key=1, parameters={})
+    assert '<Output key="2" name="Result"/>' in xml
+    assert '<Output key="1"' not in xml
 
 
 def test_emit_function_step_math_dispatches_on_operation():

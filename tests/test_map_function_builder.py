@@ -369,7 +369,8 @@ def test_build_lowercase_function_emits_function_step_and_mappings():
     outputs = step.findall("Outputs/Output")
     assert len(outputs) == 1
     assert outputs[0].attrib["name"] == "Result"
-    assert outputs[0].attrib["key"] == "1"
+    # Output key=2 matches live Boomi UI convention (FUNCTION_OUTPUT_KEY).
+    assert outputs[0].attrib["key"] == "2"
 
     mappings = root.findall("bns:object/Map/Mappings/Mapping", NS)
     # Expect: 1 profile→function-input + 1 function-output→profile = 2
@@ -382,7 +383,8 @@ def test_build_lowercase_function_emits_function_step_and_mappings():
     assert profile_to_function[0].attrib["toFunction"] == "1"
     assert profile_to_function[0].attrib["toKey"] == "1"
     assert function_to_profile[0].attrib["fromFunction"] == "1"
-    assert function_to_profile[0].attrib["fromKey"] == "1"
+    # Output key=2 matches live Boomi UI convention (FUNCTION_OUTPUT_KEY).
+    assert function_to_profile[0].attrib["fromKey"] == "2"
 
 
 def test_build_date_format_populates_input_masks():
@@ -452,32 +454,66 @@ def test_validate_config_none_parameters_treated_as_empty():
     assert err is None
 
 
-def test_validate_config_deferred_simple_lookup_rejected():
-    cfg = _function_map_config(function_mappings=[
-        {
-            "function_type": "simple_lookup",
-            "inputs": ["rows/row[]/key"],
-            "target_path": "Root/list[]/status",
-            "parameters": {"rows": [{"ref1": "A", "ref2": "active"}]},
-        },
-    ])
-    err = MapFunctionBuilder.validate_config(cfg)
-    assert err is not None
-    assert err.error_code == "UNSUPPORTED_MAP_FUNCTION_TYPE"
+def test_build_simple_lookup_renders_crossref_table():
+    xml = _build(
+        _function_map_config(
+            function_mappings=[
+                {
+                    "function_type": "simple_lookup",
+                    "inputs": ["rows/row[]/key"],
+                    "target_path": "Root/list[]/status",
+                    "parameters": {
+                        "rows": [
+                            {"ref1": "A", "ref2": "active"},
+                            {"ref1": "I", "ref2": "inactive"},
+                        ],
+                    },
+                },
+            ],
+        )
+    )
+    assert "<SimpleLookup>" in xml
+    assert "<CrossRefTableObj>" in xml
+    assert '<ref value="A"/><ref value="active"/>' in xml
+    # Verify output-mapping fromKey matches the FUNCTION_OUTPUT_KEY (2).
+    root = _parse(xml)
+    function_outputs = [
+        m for m in root.findall("bns:object/Map/Mappings/Mapping", NS)
+        if m.attrib.get("fromType") == "function"
+    ]
+    assert len(function_outputs) == 1
+    assert function_outputs[0].attrib["fromKey"] == "2"
 
 
-def test_validate_config_deferred_sequential_value_rejected():
-    cfg = _function_map_config(function_mappings=[
-        {
-            "function_type": "sequential_value",
-            "inputs": [],
-            "target_path": "Root/list[]/key",
-            "parameters": {"key_name": "order_seq"},
-        },
-    ])
-    err = MapFunctionBuilder.validate_config(cfg)
-    assert err is not None
-    assert err.error_code == "UNSUPPORTED_MAP_FUNCTION_TYPE"
+def test_build_sequential_value_emits_empty_configuration():
+    xml = _build(
+        _function_map_config(
+            function_mappings=[
+                {
+                    "function_type": "sequential_value",
+                    "inputs": [],
+                    "target_path": "Root/list[]/key",
+                    "parameters": {},
+                },
+            ],
+        )
+    )
+    root = _parse(xml)
+    steps = root.findall("bns:object/Map/Functions/FunctionStep", NS)
+    assert len(steps) == 1
+    assert steps[0].attrib["type"] == "SequentialValue"
+    # The empty <SequentialValue/> matches the live Boomi schema.
+    config = steps[0].find("Configuration/SequentialValue")
+    assert config is not None
+    assert list(config) == []  # no children
+    assert list(config.attrib.items()) == []  # no attributes
+
+    # No profile->function-input mapping since inputs=[]
+    mappings = root.findall("bns:object/Map/Mappings/Mapping", NS)
+    profile_to_function = [m for m in mappings if m.attrib.get("toType") == "function"]
+    function_to_profile = [m for m in mappings if m.attrib.get("fromType") == "function"]
+    assert len(profile_to_function) == 0
+    assert len(function_to_profile) == 1
 
 
 def test_build_math_add_two_inputs():
