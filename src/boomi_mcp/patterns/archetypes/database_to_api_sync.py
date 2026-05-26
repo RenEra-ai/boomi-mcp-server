@@ -1558,6 +1558,30 @@ def _flatten_payload_profile_leaves(
     return leaves
 
 
+def _required_simple_leaf_paths(profile: JSONPayloadProfile) -> Set[str]:
+    """Return the set of logical leaf paths whose JSON profile node is
+    ``kind='simple'`` AND ``required=True``.
+
+    Uses the same path convention as ``_flatten_payload_profile_leaves``.
+    Required structural nodes (object/array) are excluded because they are
+    not transform-targetable — only their simple leaf descendants can
+    receive a direct/map_function/map_script output.
+    """
+    required: Set[str] = set()
+
+    def _walk(node: JSONProfileNode, prefix: str) -> None:
+        if node.kind == "simple":
+            if node.required:
+                required.add(prefix)
+            return
+        segment = f"{prefix}[]" if node.kind == "array" else prefix
+        for child in node.children or []:
+            _walk(child, f"{segment}/{child.name}")
+
+    _walk(profile.root, profile.root.name)
+    return required
+
+
 # ---------------------------------------------------------------------------
 # Top-level parameters
 # ---------------------------------------------------------------------------
@@ -1678,6 +1702,16 @@ class DatabaseToApiSyncParameters(BaseModel):
                     else:
                         unknown_target_refs += 1
 
+        # Issue #43 review r2 P2: every required simple leaf in the JSON
+        # payload profile must be the destination of at least one transform
+        # output, otherwise downstream profile/map builders (#26) could emit a
+        # payload that omits a required field. The offending paths are
+        # intentionally NOT echoed in the error message — same defense-in-depth
+        # policy as the duplicate_target_bindings branch, since profile node
+        # names can carry caller-specific identifiers.
+        required_target_paths = _required_simple_leaf_paths(self.target.payload_profile)
+        unmapped_required_count = len(required_target_paths - bound_target_paths)
+
         issues: List[str] = []
         if unknown_source_refs:
             issues.append(
@@ -1696,6 +1730,14 @@ class DatabaseToApiSyncParameters(BaseModel):
                 f"transform.operations bind {duplicate_target_bindings} "
                 "target leaf path(s) more than once; every leaf may be the "
                 "destination of at most one direct/map_function/map_script "
+                "output"
+            )
+        if unmapped_required_count:
+            issues.append(
+                f"transform.operations leave {unmapped_required_count} "
+                "required target leaf path(s) unmapped; every required "
+                "simple leaf in target.payload_profile must be the "
+                "destination of at least one direct/map_function/map_script "
                 "output"
             )
 
