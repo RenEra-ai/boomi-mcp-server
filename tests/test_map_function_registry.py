@@ -219,18 +219,36 @@ def test_validate_simple_lookup_rejects_mixed_keys():
     assert err.error_code == "MAP_FUNCTION_PARAMETER_INVALID"
 
 
-def test_validate_sequential_value_no_inputs_no_parameters():
-    # Component-XML form is parameter-free; keyName/batchSize/keyFixToLength
-    # live in the Environment Map Extension layer.
+def test_validate_sequential_value_requires_key_name():
+    # Codex r5: live-verified shape uses additional Input elements with
+    # default values for Key Name / Fix to Length / Batch Size. Key Name is
+    # required per the Boomi Map Function docs.
     err = _run("sequential_value", [], {})
+    assert err is not None
+    assert err.error_code == "MAP_FUNCTION_PARAMETER_MISSING"
+    assert "key_name" in err.field
+
+
+def test_validate_sequential_value_accepts_key_name_only():
+    err = _run("sequential_value", [], {"key_name": "order_seq"})
     assert err is None
 
 
-def test_validate_sequential_value_rejects_extension_level_params():
-    # If a caller mistakenly puts extension-level params in component config,
-    # the registry rejects them since the builder cannot serialize them into
-    # the component XML.
-    err = _run("sequential_value", [], {"key_name": "abc"})
+def test_validate_sequential_value_accepts_all_three_params():
+    err = _run(
+        "sequential_value",
+        [],
+        {"key_name": "order_seq", "fix_to_length": 6, "batch_size": 1},
+    )
+    assert err is None
+
+
+def test_validate_sequential_value_rejects_non_positive_int_params():
+    err = _run(
+        "sequential_value",
+        [],
+        {"key_name": "order_seq", "fix_to_length": 0},
+    )
     assert err is not None
     assert err.error_code == "MAP_FUNCTION_PARAMETER_INVALID"
 
@@ -396,15 +414,37 @@ def test_emit_function_step_simple_lookup_renders_crossref_table():
     assert '<ref value="I"/><ref value="inactive"/>' in xml
 
 
-def test_emit_function_step_sequential_value_empty_configuration():
+def test_emit_function_step_sequential_value_emits_input_defaults():
+    # Codex r5 fix: Key Name / Fix to Length / Batch Size are stored as
+    # additional <Input> elements with default attribute values, NOT on the
+    # <SequentialValue/> Configuration block. Live-verified 2026-05-26 on
+    # renera by creating a SequentialValue map and inspecting the saved XML.
     family = get_function_family("sequential_value")
-    xml = emit_function_step(family, step_key=1, parameters={})
-    # Live-verified: component XML is empty <SequentialValue/>. The keyName /
-    # batchSize / keyFixToLength settings live in environment extensions,
-    # NOT in the component XML.
+    xml = emit_function_step(
+        family,
+        step_key=1,
+        parameters={"key_name": "order_seq", "fix_to_length": 6, "batch_size": 1},
+    )
+    # Configuration block stays empty (Boomi rejects child elements / attrs).
     assert "<Configuration><SequentialValue/></Configuration>" in xml
-    assert "keyName" not in xml
-    assert "batchSize" not in xml
+    # Params go on Input default attributes with the exact names Boomi
+    # expects.
+    assert '<Input default="" key="1" name="Increment Basis"/>' in xml
+    assert '<Input default="order_seq" key="2" name="Key Name"/>' in xml
+    assert '<Input default="6" key="3" name="Fix to Length"/>' in xml
+    assert '<Input default="1" key="4" name="Batch Size"/>' in xml
+
+
+def test_emit_function_step_sequential_value_optional_params_omitted():
+    # When optional params aren't supplied, the Input elements still emit
+    # (Boomi needs all 4 inputs declared) but with default="".
+    family = get_function_family("sequential_value")
+    xml = emit_function_step(
+        family, step_key=1, parameters={"key_name": "order_seq"}
+    )
+    assert '<Input default="order_seq" key="2" name="Key Name"/>' in xml
+    assert '<Input default="" key="3" name="Fix to Length"/>' in xml
+    assert '<Input default="" key="4" name="Batch Size"/>' in xml
 
 
 def test_emit_function_step_output_key_uses_2():

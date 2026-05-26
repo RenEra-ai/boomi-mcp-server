@@ -103,12 +103,15 @@ def test_template_documents_all_14_supported_function_types():
         assert name in supported, f"missing {name!r} in supported_function_types"
 
 
-def test_template_documents_sequential_value_extension_caveat():
-    # sequential_value's keyName/batchSize/keyFixToLength are environment
-    # extension settings, not component-XML parameters. The out_of_scope
-    # entry documents this distinction.
+def test_template_documents_sequential_value_authorable_params():
+    # Codex r5 fix: sequential_value now exposes Key Name / Fix to Length /
+    # Batch Size as authorable parameters (verified live as Input default
+    # attributes in the component XML).
     result = _call(component_type="transform.map", protocol="function")
-    assert "sequential_value_extension_settings" in result["out_of_scope"]
+    sv = result["supported_function_types"]["sequential_value"]
+    assert "key_name" in sv["required_parameters"]
+    assert "fix_to_length" in sv["optional_parameters"]
+    assert "batch_size" in sv["optional_parameters"]
 
 
 def test_template_math_lists_all_8_operations():

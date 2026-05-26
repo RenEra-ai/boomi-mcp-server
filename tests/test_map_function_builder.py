@@ -485,7 +485,7 @@ def test_build_simple_lookup_renders_crossref_table():
     assert function_outputs[0].attrib["fromKey"] == "2"
 
 
-def test_build_sequential_value_emits_empty_configuration():
+def test_build_sequential_value_emits_4_inputs_with_param_defaults():
     xml = _build(
         _function_map_config(
             function_mappings=[
@@ -493,7 +493,11 @@ def test_build_sequential_value_emits_empty_configuration():
                     "function_type": "sequential_value",
                     "inputs": [],
                     "target_path": "Root/list[]/key",
-                    "parameters": {},
+                    "parameters": {
+                        "key_name": "order_seq",
+                        "fix_to_length": 6,
+                        "batch_size": 1,
+                    },
                 },
             ],
         )
@@ -502,18 +506,42 @@ def test_build_sequential_value_emits_empty_configuration():
     steps = root.findall("bns:object/Map/Functions/FunctionStep", NS)
     assert len(steps) == 1
     assert steps[0].attrib["type"] == "SequentialValue"
-    # The empty <SequentialValue/> matches the live Boomi schema.
+
+    # All 4 Input elements emit with the exact Boomi-expected names.
+    inputs = steps[0].findall("Inputs/Input")
+    assert [inp.attrib["name"] for inp in inputs] == [
+        "Increment Basis", "Key Name", "Fix to Length", "Batch Size",
+    ]
+    assert [inp.attrib["default"] for inp in inputs] == [
+        "", "order_seq", "6", "1",
+    ]
+
+    # Configuration stays empty <SequentialValue/>.
     config = steps[0].find("Configuration/SequentialValue")
     assert config is not None
-    assert list(config) == []  # no children
-    assert list(config.attrib.items()) == []  # no attributes
+    assert list(config) == []
+    assert list(config.attrib.items()) == []
 
-    # No profile->function-input mapping since inputs=[]
+    # No profile->function-input mapping since user-mapped inputs=[]
     mappings = root.findall("bns:object/Map/Mappings/Mapping", NS)
     profile_to_function = [m for m in mappings if m.attrib.get("toType") == "function"]
     function_to_profile = [m for m in mappings if m.attrib.get("fromType") == "function"]
     assert len(profile_to_function) == 0
     assert len(function_to_profile) == 1
+
+
+def test_build_sequential_value_requires_key_name():
+    cfg = _function_map_config(function_mappings=[
+        {
+            "function_type": "sequential_value",
+            "inputs": [],
+            "target_path": "Root/list[]/key",
+            "parameters": {},  # no key_name
+        },
+    ])
+    err = MapFunctionBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "MAP_FUNCTION_PARAMETER_MISSING"
 
 
 def test_build_math_add_two_inputs():
