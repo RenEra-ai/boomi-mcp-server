@@ -547,6 +547,172 @@ def test_emitted_spec_carries_no_xml_or_mutation_markers():
 
 
 # ---------------------------------------------------------------------------
+# Issue #43 (M2.5b): generated profile field payloads + indexes on transform
+# ---------------------------------------------------------------------------
+
+
+def _transform_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
+    result = build_from_archetype_action("database_to_api_sync", payload)
+    assert result["_success"] is True, result
+    spec = result["integration_spec"]
+    return next(f for f in spec["flows"] if f["key"] == "transform")
+
+
+def test_issue_43_transform_flow_carries_source_profile_generation():
+    transform_flow = _transform_flow(_valid_full())
+    src_gen = transform_flow["source_profile_generation"]
+    assert src_gen["generation_mode"] == "profile_from_db_read_fields"
+    assert src_gen["component_type"] == "profile.db"
+    assert src_gen["profile_type"] == "database.read"
+    # output_fields shape matches DatabaseReadProfileBuilder expectations.
+    expected_output_fields = [
+        {
+            "name": "source_a",
+            "data_type": "character",
+            "mandatory": True,
+            "enforce_unique": False,
+        },
+        {
+            "name": "source_b",
+            "data_type": "datetime",
+            "mandatory": False,
+            "enforce_unique": False,
+        },
+        {
+            "name": "source_c",
+            "data_type": "number",
+            "mandatory": False,
+            "enforce_unique": False,
+        },
+    ]
+    assert src_gen["profile_config"]["output_fields"] == expected_output_fields
+    # source field_index covers every declared field.
+    assert set(src_gen["field_index_by_path"].keys()) == {
+        "source_a",
+        "source_b",
+        "source_c",
+    }
+    assert src_gen["mappable_paths"] == ["source_a", "source_b", "source_c"]
+
+
+def test_issue_43_transform_flow_carries_target_profile_generation():
+    transform_flow = _transform_flow(_valid_full())
+    tgt_gen = transform_flow["target_profile_generation"]
+    assert tgt_gen["generation_mode"] == "profile_from_json_schema"
+    assert tgt_gen["component_type"] == "profile.json"
+    assert tgt_gen["profile_type"] == "json.generated"
+    # Normalized tree preserves child order from the fixture.
+    root = tgt_gen["profile_config"]["root"]
+    assert root["name"] == "Root"
+    assert root["kind"] == "object"
+    assert [c["name"] for c in root["children"]] == ["target_a", "target_b", "list"]
+    # field_index covers every node — structural + leaves.
+    assert set(tgt_gen["field_index_by_path"].keys()) == {
+        "Root",
+        "Root/target_a",
+        "Root/target_b",
+        "Root/list",
+        "Root/list[]/target_c",
+    }
+    # mappable_paths matches the legacy _flatten_payload_profile_leaves shape
+    # (regression guard against path-convention drift between #43 helpers and
+    # the contract's leaf summary).
+    target_summary_leaves = {
+        leaf["path"] for leaf in transform_flow["target_payload_profile"]["leaves"]
+    }
+    assert set(tgt_gen["mappable_paths"]) == target_summary_leaves == {
+        "Root/target_a",
+        "Root/target_b",
+        "Root/list[]/target_c",
+    }
+
+
+def test_issue_43_transform_flow_direct_field_mappings_excludes_non_direct():
+    transform_flow = _transform_flow(_valid_full())
+    direct = transform_flow["direct_field_mappings"]
+    # _valid_full() has 1 direct + 1 map_function + 1 map_script operation;
+    # only the direct one is normalized into direct_field_mappings.
+    assert direct == [
+        {
+            "route": "direct",
+            "source_path": "source_a",
+            "target_path": "Root/target_a",
+            "source_data_type": "character",
+            "target_data_type": "character",
+        },
+    ]
+    # The existing operations summary still carries all three operation types.
+    op_types = {op["operation_type"] for op in transform_flow["operations"]}
+    assert op_types == {"direct", "map_function", "map_script"}
+
+
+def test_issue_43_existing_transform_flow_keys_intact():
+    """Regression: issues #40/#41/#42 operation metadata must remain untouched
+    on the transform flow when issue #43 keys are added."""
+    transform_flow = _transform_flow(_valid_full())
+    # Issue #44 keys still present and well-formed.
+    assert "source_schema" in transform_flow
+    assert "target_payload_profile" in transform_flow
+    assert "operations" in transform_flow
+    by_type = {op["operation_type"]: op for op in transform_flow["operations"]}
+    assert by_type["map_function"]["inputs"] == ["source_b"]
+    assert by_type["map_function"]["target_path"] == "Root/target_b"
+    assert by_type["map_script"]["inputs"] == ["source_c"]
+    assert by_type["map_script"]["outputs"] == ["Root/list[]/target_c"]
+
+
+def test_issue_43_contract_only_components_remain_empty():
+    """Issue #43 must not introduce executable components into the spec."""
+    result = build_from_archetype_action("database_to_api_sync", _valid_full())
+    assert result["_success"] is True
+    assert result["boomi_mutation"] is False
+    assert result["integration_spec"]["components"] == []
+
+
+def test_issue_43_generation_metadata_does_not_echo_sql_or_description():
+    """Anti-template hygiene: generation metadata must carry no SQL body, no
+    raw XML, no JSON payload sample, and no echoed description text."""
+    payload = _valid_full()
+    sentinel_sql = "<<custom-sql-WITH-marker-DEADBEEF-uppercase-DELETE-keyword>>"
+    payload["source"]["read_operation"]["sql"] = sentinel_sql
+    payload["target"]["payload_profile"]["root"]["description"] = (
+        "<<root-description-marker-DEADBEEF>>"
+    )
+    payload["target"]["payload_profile"]["root"]["children"][0]["description"] = (
+        "<<leaf-description-marker-DEADBEEF>>"
+    )
+
+    transform_flow = _transform_flow(payload)
+    src_gen = transform_flow["source_profile_generation"]
+    tgt_gen = transform_flow["target_profile_generation"]
+
+    gen_blob = json.dumps(
+        [src_gen, tgt_gen, transform_flow["direct_field_mappings"]]
+    )
+    # SQL body must never appear in generation metadata.
+    assert sentinel_sql not in gen_blob
+    # Descriptions on profile nodes must never be echoed into the normalized
+    # tree (anti-template hygiene).
+    assert "root-description-marker-DEADBEEF" not in gen_blob
+    assert "leaf-description-marker-DEADBEEF" not in gen_blob
+    # XML markers must never appear in generation metadata.
+    for marker in ("<?xml", "<process", "<connector", "<operation"):
+        assert marker not in gen_blob, (
+            f"generation metadata unexpectedly contains XML marker {marker!r}"
+        )
+
+
+def test_issue_43_validation_rules_profile_strategy_mentions_43_and_47():
+    """validation_rules.profile_schema_strategy must mention both issue #43
+    (generated indexes) and issue #47 (deferred inference)."""
+    result = build_from_archetype_action("database_to_api_sync", _valid_minimal())
+    rules = result["integration_spec"]["validation_rules"]
+    strategy = rules["profile_schema_strategy"]
+    assert "#43" in strategy
+    assert "#47" in strategy
+
+
+# ---------------------------------------------------------------------------
 # Invalid payloads → PARAM_VALIDATION_FAILED with field_errors
 # ---------------------------------------------------------------------------
 
