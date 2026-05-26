@@ -2745,17 +2745,16 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
     "note": (
         "Structured map-function transform.map. Each entry in function_mappings "
         "declares one mapped output via {function_type, inputs, target_path, "
-        "parameters}. M2.6a supports a 12-family allow-list: date_format, "
+        "parameters}. M2.6a supports a 14-family allow-list: date_format, "
         "default_value, trim, left_trim, right_trim, uppercase, lowercase, "
-        "append, prepend, replace, remove, math. Mixed maps may also declare "
-        "direct field_mappings alongside function_mappings. Source/target "
-        "profile refs follow the same '$ref:KEY' rule as direct maps; literal "
-        "existing-profile UUIDs are rejected with MAP_PROFILE_INDEX_UNAVAILABLE "
-        "(deferred to #47). simple_lookup and sequential_value are deferred "
-        "follow-up work — see out_of_scope for the live-shape evidence "
-        "required to enable them. script.mapping (#41), XSLT (#42), "
-        "standalone reusable transform.function components, and chained "
-        "multi-step function graphs remain out of scope."
+        "append, prepend, replace, remove, simple_lookup, sequential_value, "
+        "math. Mixed maps may also declare direct field_mappings alongside "
+        "function_mappings. Source/target profile refs follow the same "
+        "'$ref:KEY' rule as direct maps; literal existing-profile UUIDs are "
+        "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (deferred to #47). "
+        "script.mapping (#41), XSLT (#42), standalone reusable "
+        "transform.function components, and chained multi-step function "
+        "graphs remain out of scope."
     ),
     "template": {
         "component_type": "transform.map",
@@ -2884,6 +2883,29 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
             "required_parameters": ["value"],
             "optional_parameters": [],
             "note": "Remove all occurrences of parameters.value.",
+        },
+        "simple_lookup": {
+            "mapped_inputs": 1,
+            "required_parameters": ["rows"],
+            "optional_parameters": [],
+            "note": (
+                "parameters.rows is a non-empty list of {ref1, ref2} (or "
+                "{from, to}) entries. The lookup table is task-authored — no "
+                "canned reference data is shipped here. Boomi stores the "
+                "table internally via a CrossRefTableObj wrapper; the "
+                "builder handles that encoding."
+            ),
+        },
+        "sequential_value": {
+            "mapped_inputs": 0,
+            "required_parameters": [],
+            "optional_parameters": [],
+            "note": (
+                "Source-free sequence generator. The keyName, batchSize, "
+                "and keyFixToLength settings live in the Environment Map "
+                "Extension layer, NOT in the component XML — configure them "
+                "via deployment extensions after the component is created."
+            ),
         },
         "math": {
             "mapped_inputs": "1 or 2 depending on parameters.operation",
@@ -3087,19 +3109,12 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         ),
     },
     "out_of_scope": {
-        "simple_lookup": (
-            "simple_lookup is deferred from #40 — the Boomi platform rejected "
-            "the documented API-level <SimpleLookup><Table><Rows> shape with "
-            "'Invalid content was found starting with element \\'Table\\'. One "
-            "of \\'{Input}\\' is expected.' Live transform.map XML evidence is "
-            "required before this family can be re-enabled."
-        ),
-        "sequential_value": (
-            "sequential_value is deferred from #40 — the Boomi platform "
-            "rejected <SequentialValue keyName batchSize keyFixToLength/> "
-            "with 'Attribute \\'keyFixToLength\\' is not allowed to appear in "
-            "element \\'SequentialValue\\''. Live transform.map XML evidence "
-            "is required before this family can be re-enabled."
+        "sequential_value_extension_settings": (
+            "sequential_value's keyName, batchSize, and keyFixToLength "
+            "settings live in the Environment Map Extension layer (NOT the "
+            "component XML). Configure them via deployment extensions after "
+            "the component is created. The component builder only emits an "
+            "empty <SequentialValue/> placeholder."
         ),
         "standalone_transform_function": (
             "Standalone reusable transform.function components (user-defined "

@@ -81,7 +81,7 @@ def test_template_lists_field_mappings_as_optional():
     assert "field_mappings" in result.get("optional", [])
 
 
-def test_template_documents_all_12_supported_function_types():
+def test_template_documents_all_14_supported_function_types():
     result = _call(component_type="transform.map", protocol="function")
     supported = result["supported_function_types"]
     for name in (
@@ -96,20 +96,19 @@ def test_template_documents_all_12_supported_function_types():
         "prepend",
         "replace",
         "remove",
+        "simple_lookup",
+        "sequential_value",
         "math",
     ):
         assert name in supported, f"missing {name!r} in supported_function_types"
 
 
-def test_template_does_not_advertise_deferred_simple_lookup_or_sequential_value():
+def test_template_documents_sequential_value_extension_caveat():
+    # sequential_value's keyName/batchSize/keyFixToLength are environment
+    # extension settings, not component-XML parameters. The out_of_scope
+    # entry documents this distinction.
     result = _call(component_type="transform.map", protocol="function")
-    supported = result["supported_function_types"]
-    assert "simple_lookup" not in supported
-    assert "sequential_value" not in supported
-    # But out_of_scope should document why they are deferred.
-    oos = result["out_of_scope"]
-    assert "simple_lookup" in oos
-    assert "sequential_value" in oos
+    assert "sequential_value_extension_settings" in result["out_of_scope"]
 
 
 def test_template_math_lists_all_8_operations():

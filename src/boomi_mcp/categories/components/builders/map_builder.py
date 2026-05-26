@@ -80,6 +80,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .connector_builder import BuilderValidationError, _escape_xml
 from .map_function_registry import (
+    FUNCTION_OUTPUT_KEY,
     SUPPORTED_FUNCTION_TYPES,
     emit_default_entry,
     emit_function_step,
@@ -1012,10 +1013,13 @@ class MapFunctionBuilder:
                 )
 
             # 2b. Function output → profile mapping (single output per M2.6a).
+            # fromKey must match the FUNCTION_OUTPUT_KEY emitted in the
+            # corresponding FunctionStep's <Outputs> block (live Boomi UI
+            # saves use key=2 for single-output families).
             tgt_entry = target_index[target_path]
             mapping_lines.append(
                 f'<Mapping fromFunction="{step_key}" '
-                f'fromKey="1" '
+                f'fromKey="{FUNCTION_OUTPUT_KEY}" '
                 f'fromType="function" '
                 f'toKey="{tgt_entry["key"]}" '
                 f'toKeyPath="{_escape_xml(tgt_entry["key_path"])}" '

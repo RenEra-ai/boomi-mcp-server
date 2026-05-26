@@ -80,6 +80,14 @@ from .profile_generation import (
 _DEFAULT_VALUE_SENTINEL = "__default_value__"
 
 
+# Output port key for every single-output FunctionStep emitted by this builder.
+# Live evidence (2026-05-26) from saved Boomi maps consistently shows output
+# key=2 for single-output string/math/date families (Sum2, String2Lower,
+# MathDivide, DateFormat all stored as key=2). Boomi schema-accepts key=1
+# too, but matches the UI convention by using 2 here.
+FUNCTION_OUTPUT_KEY: int = 2
+
+
 @dataclass(frozen=True)
 class FunctionFamily:
     """Metadata + emitter for one supported map-function family."""
@@ -113,10 +121,71 @@ def _emit_empty_configuration(_parameters: Mapping[str, object]) -> str:
     return "<Configuration/>"
 
 
-# NOTE: configuration emitters and parameter validators for simple_lookup /
-# sequential_value were removed when those families were deferred — the
-# in-component Boomi XML shape for both is unknown without live evidence
-# (see the deferral comment below the math family registration).
+def _emit_simple_lookup_configuration(parameters: Mapping[str, object]) -> str:
+    """Render the in-component <SimpleLookup> Configuration body.
+
+    Discovered live (2026-05-26) by iteratively probing Boomi's component
+    schema. The in-component form is NOT the same as the Environment Map
+    Extension API form — Boomi uses a CrossRefTableObj wrapper with
+    ColumnHeaders/Rows/Values/<ref value=""/> in the component XML:
+
+    .. code-block:: xml
+
+        <SimpleLookup>
+          <Input index="1" name="Key"/>
+          <Output index="1" name="Value"/>
+          <CrossRefTableObj>
+            <CrossRefTable>
+              <ColumnHeaders>
+                <columnHeader>ref1</columnHeader>
+                <columnHeader>ref2</columnHeader>
+              </ColumnHeaders>
+              <Rows>
+                <row><Values><ref value="A"/><ref value="active"/></Values></row>
+              </Rows>
+            </CrossRefTable>
+          </CrossRefTableObj>
+        </SimpleLookup>
+    """
+    rows = parameters.get("rows") or []
+    row_xml: List[str] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        ref1_value = row.get("ref1", row.get("from", ""))
+        ref2_value = row.get("ref2", row.get("to", ""))
+        row_xml.append(
+            "<row><Values>"
+            f'<ref value="{_escape_xml(str(ref1_value))}"/>'
+            f'<ref value="{_escape_xml(str(ref2_value))}"/>'
+            "</Values></row>"
+        )
+    return (
+        "<Configuration><SimpleLookup>"
+        '<Input index="1" name="Key"/>'
+        '<Output index="1" name="Value"/>'
+        "<CrossRefTableObj><CrossRefTable>"
+        "<ColumnHeaders>"
+        "<columnHeader>ref1</columnHeader>"
+        "<columnHeader>ref2</columnHeader>"
+        "</ColumnHeaders>"
+        f"<Rows>{''.join(row_xml)}</Rows>"
+        "</CrossRefTable></CrossRefTableObj>"
+        "</SimpleLookup></Configuration>"
+    )
+
+
+def _emit_sequential_value_configuration(_parameters: Mapping[str, object]) -> str:
+    """Render the in-component <SequentialValue/> Configuration body.
+
+    Discovered live (2026-05-26): the in-component form is EMPTY. Boomi
+    rejects keyName/batchSize/keyFixToLength as both attributes and child
+    elements on the in-component <SequentialValue> node. Those parameters
+    live in the Environment Map Extension layer (per the Boomi SDK's
+    ``MapExtensionsSequentialValue`` model) and are configured separately
+    after the component is deployed.
+    """
+    return "<Configuration><SequentialValue/></Configuration>"
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +208,27 @@ def _validate_string(value: object) -> Optional[str]:
 def _validate_positive_int(value: object) -> Optional[str]:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return "must be a positive integer"
+    return None
+
+
+def _validate_lookup_rows(value: object) -> Optional[str]:
+    if not isinstance(value, list) or len(value) == 0:
+        return "must be a non-empty list of {ref1, ref2} (or {from, to}) entries"
+    for index, row in enumerate(value):
+        if not isinstance(row, Mapping):
+            return f"row[{index}] must be a mapping object"
+        if "ref1" in row or "ref2" in row:
+            if "ref1" not in row or "ref2" not in row:
+                return f"row[{index}] must declare both ref1 and ref2"
+            if not isinstance(row["ref1"], str) or not isinstance(row["ref2"], str):
+                return f"row[{index}].ref1 and ref2 must be strings"
+        elif "from" in row or "to" in row:
+            if "from" not in row or "to" not in row:
+                return f"row[{index}] must declare both from and to"
+            if not isinstance(row["from"], str) or not isinstance(row["to"], str):
+                return f"row[{index}].from and to must be strings"
+        else:
+            return f"row[{index}] must declare ref1/ref2 or from/to"
     return None
 
 
@@ -378,21 +468,41 @@ _REMOVE = FunctionFamily(
     parameter_validators={"value": _validate_string},
 )
 
-# NOTE: simple_lookup (SimpleLookup) and sequential_value (SequentialValue) are
-# DEFERRED for M2.6a. The Boomi platform rejected the documented API-level
-# Configuration shape with schema errors when QA submitted a map containing
-# either family on 2026-05-26:
-#
-#   SimpleLookup:    "Invalid content was found starting with element 'Table'.
-#                    One of '{Input}' is expected."
-#   SequentialValue: "Attribute 'keyFixToLength' is not allowed to appear in
-#                    element 'SequentialValue'." (same for keyName / batchSize)
-#
-# The in-component XML shape for these two families differs from the
-# Environment Map Extension API docs example, and no live transform.map
-# component using either family was available on renera or work accounts at
-# implementation time. Both are tracked as #40 follow-up work pending live
-# Boomi XML evidence.
+# simple_lookup (SimpleLookup) — uses CrossRefTableObj wrapper in component XML.
+# Shape verified live 2026-05-26 by iterative Boomi schema probing.
+_SIMPLE_LOOKUP = FunctionFamily(
+    name="simple_lookup",
+    fn_type="SimpleLookup",
+    category="Lookup",
+    mapped_input_count=(1, 1),
+    static_input_names=("Key",),
+    parameter_input_defaults={},
+    required_parameters=("rows",),
+    optional_parameters=(),
+    output_name="Value",
+    emit_configuration=_emit_simple_lookup_configuration,
+    parameter_validators={"rows": _validate_lookup_rows},
+)
+
+# sequential_value (SequentialValue) — empty <Configuration><SequentialValue/></Configuration>.
+# Verified live 2026-05-26: in-component XML is empty. The keyName / batchSize /
+# keyFixToLength settings live in the Environment Map Extension layer (the
+# SDK ``MapExtensionsSequentialValue`` model), NOT in the component XML.
+# Callers configure those via deployment extensions after the component is
+# created — out of scope for the component builder.
+_SEQUENTIAL_VALUE = FunctionFamily(
+    name="sequential_value",
+    fn_type="SequentialValue",
+    category="Sequential",
+    mapped_input_count=(0, 0),
+    static_input_names=("Increment Basis",),
+    parameter_input_defaults={},
+    required_parameters=(),
+    optional_parameters=(),
+    output_name="Result",
+    emit_configuration=_emit_sequential_value_configuration,
+    parameter_validators={},
+)
 
 # math (dispatcher — fn_type resolved from parameters["operation"]).
 # Note: ``rounding_mode`` was considered but is NOT accepted as an optional
@@ -431,7 +541,8 @@ FUNCTION_FAMILIES: Dict[str, FunctionFamily] = {
         _PREPEND,
         _REPLACE,
         _REMOVE,
-        # simple_lookup and sequential_value deferred — see comment above _MATH.
+        _SIMPLE_LOOKUP,
+        _SEQUENTIAL_VALUE,
         _MATH,
     )
 }
@@ -663,9 +774,13 @@ def emit_function_step(
         )
     inputs_xml = f"<Inputs>{''.join(input_parts)}</Inputs>" if input_parts else "<Inputs/>"
 
-    # Emit <Outputs>.
+    # Emit <Outputs>. Output key per FUNCTION_OUTPUT_KEY (live-verified
+    # convention: Boomi UI saves single-output families with key=2).
     output_name = family.output_name or "Result"
-    outputs_xml = f'<Outputs><Output key="1" name="{_escape_xml(output_name)}"/></Outputs>'
+    outputs_xml = (
+        f'<Outputs><Output key="{FUNCTION_OUTPUT_KEY}" '
+        f'name="{_escape_xml(output_name)}"/></Outputs>'
+    )
 
     # Emit <Configuration>.
     emit_cfg = family.emit_configuration or _emit_empty_configuration
@@ -692,6 +807,7 @@ def emit_default_entry(target_key: int, value: str) -> str:
 
 __all__ = [
     "FUNCTION_FAMILIES",
+    "FUNCTION_OUTPUT_KEY",
     "FunctionFamily",
     "SUPPORTED_FUNCTION_TYPES",
     "SUPPORTED_MATH_OPERATIONS",
