@@ -182,12 +182,13 @@ def _emit_simple_lookup_configuration(parameters: Mapping[str, object]) -> str:
 def _emit_sequential_value_configuration(_parameters: Mapping[str, object]) -> str:
     """Render the in-component <SequentialValue/> Configuration body.
 
-    Discovered live (2026-05-26): the in-component form is EMPTY. Boomi
-    rejects keyName/batchSize/keyFixToLength as both attributes and child
-    elements on the in-component <SequentialValue> node. Those parameters
-    live in the Environment Map Extension layer (per the Boomi SDK's
-    ``MapExtensionsSequentialValue`` model) and are configured separately
-    after the component is deployed.
+    Discovered live (2026-05-26): the in-component <Configuration> block is
+    EMPTY. Boomi rejects keyName/batchSize/keyFixToLength as both attributes
+    and child elements on the in-component <SequentialValue> node. The
+    authorable Key Name / Fix to Length / Batch Size parameters live as
+    ``default`` attributes on the FunctionStep's <Input> elements with
+    those exact names (emitted by ``emit_function_step`` via the family's
+    ``parameter_input_defaults`` map).
     """
     return "<Configuration><SequentialValue/></Configuration>"
 
