@@ -199,13 +199,15 @@ def test_template_defaults_have_no_canned_content():
         assert marker not in template_blob
 
 
-def test_template_unsupported_routes_point_at_41_42():
+def test_template_unsupported_routes_point_at_script_map_type_and_42():
     result = _call(component_type="transform.map", protocol="function")
     unsupported = result["unsupported_routes"]
     # Raw <Functions> XML escape hatch stays rejected.
     assert "structured function_mappings" in unsupported.get("functions", "").lower() \
         or "structured" in unsupported.get("functions", "").lower()
-    assert "#41" in unsupported.get("scripts", "")
+    # After #41 shipped, the raw <scripts> escape hatch points at the
+    # structured map_type='script' route, not a future-issue marker.
+    assert "map_type='script'" in unsupported.get("scripts", "")
     assert "#42" in unsupported.get("xslt", "")
 
 
@@ -215,11 +217,15 @@ def test_template_depends_on_requirements_mention_dollar_ref():
     assert "$ref" in deps_blob
 
 
-def test_template_out_of_scope_points_at_41_42_47_and_advanced_function_work():
+def test_template_out_of_scope_points_at_42_47_and_advanced_function_work():
+    # After #41 shipped, the function template's out_of_scope no longer
+    # carries a "#41" pointer — reusable script-based transforms are
+    # supported via map_type='script' (#41). Standalone reusable
+    # transform.function wrappers and chained function graphs remain
+    # future work; #42 is XSLT; #47 is existing-profile discovery.
     result = _call(component_type="transform.map", protocol="function")
     oos_blob = " ".join(result["out_of_scope"].values())
     oos_keys = set(result["out_of_scope"].keys())
-    assert "#41" in oos_blob
     assert "#42" in oos_blob
     assert "#47" in oos_blob
     assert "standalone" in oos_blob.lower() or "reusable" in oos_blob.lower()

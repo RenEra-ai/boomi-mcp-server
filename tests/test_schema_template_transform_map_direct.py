@@ -82,7 +82,9 @@ def test_template_lists_unsupported_routes_with_issue_pointers():
     result = _call(component_type="transform.map", protocol="direct")
     unsupported = result["unsupported_routes"]
     assert "#40" in unsupported.get("functions", "")
-    assert "#41" in unsupported.get("scripts", "")
+    # #41 shipped — the raw <scripts> escape hatch now points callers at the
+    # structured map_type='script' route instead of a future-work marker.
+    assert "map_type='script'" in unsupported.get("scripts", "")
     assert "#42" in unsupported.get("xslt", "")
     assert "lookup" in unsupported
     assert "expression" in unsupported
@@ -128,11 +130,15 @@ def test_template_depends_on_requirements_mention_dollar_ref():
     assert "$ref" in deps_blob
 
 
-def test_template_out_of_scope_points_at_40_41_42_47():
+def test_template_out_of_scope_points_at_40_42_47_after_41_shipped():
+    # After #41 shipped, the direct template's out_of_scope no longer carries
+    # a "#41" pointer — reusable script-based transforms are supported via
+    # map_type='script'. The remaining future-work markers stay: #40 covers
+    # advanced function work (chained graphs / standalone reusable function
+    # components), #42 is XSLT, #47 is existing-profile discovery.
     result = _call(component_type="transform.map", protocol="direct")
     oos_blob = " ".join(result["out_of_scope"].values())
     assert "#40" in oos_blob
-    assert "#41" in oos_blob
     assert "#42" in oos_blob
     assert "#47" in oos_blob
 

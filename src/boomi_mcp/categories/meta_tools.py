@@ -2577,7 +2577,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
             "function_mappings belong to map_type='function' (#40); they are "
             "rejected on direct maps."
         ),
-        "scripts": "#41 (map_script builder)",
+        "scripts": (
+            "Switch to map_type='script' and declare script_mappings[] "
+            "referencing a script.mapping component (#41 shipped)."
+        ),
         "xslt": "#42 (XSLT transform builder)",
         "default_values": (
             "Switch to map_type='function' and declare "
@@ -2587,13 +2590,17 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
             "Switch to map_type='function' and declare "
             "function_mappings[].function_type='simple_lookup' (#40)."
         ),
-        "expression": "#41 (map_script builder; or use a function primitive)",
+        "expression": (
+            "Inline Boomi expressions are not a structured primitive. Use a "
+            "native function via map_type='function' (#40), or wrap the logic "
+            "in a script.mapping component called via map_type='script' (#41)."
+        ),
     },
     "unsupported_routes_note": (
         "Direct maps are profile-to-profile only. Function-class routes "
-        "(default/lookup/standard function primitives) are now supported via "
-        "map_type='function' (#40); script.mapping/XSLT remain tracked by "
-        "#41/#42."
+        "(default/lookup/standard function primitives) are supported via "
+        "map_type='function' (#40); reusable script-based transforms are "
+        "supported via map_type='script' (#41). XSLT remains tracked by #42."
     ),
     "depends_on_requirements": [
         "Include source_profile_id's $ref key in depends_on so the source "
@@ -2713,9 +2720,6 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
             "transform.function components and chained multi-step function "
             "graphs remain future work."
         ),
-        "map_script": (
-            "Groovy / JavaScript map scripts are tracked by issue #41."
-        ),
         "xslt": (
             "XSLT transform components are tracked by issue #42."
         ),
@@ -2752,7 +2756,8 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         "function_mappings. Source/target profile refs follow the same "
         "'$ref:KEY' rule as direct maps; literal existing-profile UUIDs are "
         "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (deferred to #47). "
-        "script.mapping (#41), XSLT (#42), standalone reusable "
+        "Reusable script-based transforms (Groovy / JavaScript) ship in "
+        "map_type='script' (#41). XSLT (#42), standalone reusable "
         "transform.function components, and chained multi-step function "
         "graphs remain out of scope."
     ),
@@ -2948,11 +2953,22 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
             "Raw <FunctionStep> XML escape hatch is not accepted; use the "
             "structured function_mappings contract instead."
         ),
-        "scripts": "#41 (map_script builder)",
-        "map_scripts": "#41 (map_script builder)",
+        "scripts": (
+            "Switch to map_type='script' and declare script_mappings[] "
+            "referencing a script.mapping component (#41 shipped)."
+        ),
+        "map_scripts": (
+            "Switch to map_type='script' and declare script_mappings[] "
+            "referencing a script.mapping component (#41 shipped)."
+        ),
         "xslt": "#42 (XSLT transform builder)",
         "xslt_source": "#42 (XSLT transform builder)",
-        "expression": "#41 (map_script builder; or use a function primitive)",
+        "expression": (
+            "Inline Boomi expressions are not a structured primitive. Use a "
+            "native function via map_type='function' (#40), or wrap the "
+            "logic in a script.mapping component called via "
+            "map_type='script' (#41)."
+        ),
         "default_values": (
             "Use function_mappings[].function_type='default_value' instead "
             "of the raw <Defaults> escape hatch."
@@ -3122,8 +3138,489 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
             "function-B.input) remains future work; M2.6a is one function "
             "per target output."
         ),
-        "map_script": (
-            "Groovy / JavaScript map scripts are tracked by issue #41."
+        "xslt": (
+            "XSLT transform components are tracked by issue #42."
+        ),
+        "existing_profile_index_discovery": (
+            "Indexing arbitrary existing-profile XML to support literal-UUID "
+            "profile refs is tracked by issue #47."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_SCRIPT_MAPPING = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "script.mapping",
+    "tool": "manage_component (action='create')",
+    "tool_note": (
+        "Reusable script.mapping components are standalone — they can be "
+        "created via manage_component directly, or declared as an in-spec "
+        "component in build_integration alongside the transform.map that "
+        "calls them via map_type='script' (#41)."
+    ),
+    "note": (
+        "Wraps a caller-authored Boomi Map Script in a structured component "
+        "with declared <Input> and <Output> variables. Boomi sets mapped "
+        "input values before the script runs; the script must assign each "
+        "<Output> variable before returning. The component is referenced "
+        "from a transform.map via map_type='script' and "
+        "script_mappings[].script_component_id."
+    ),
+    "template": {
+        "component_type": "script.mapping",
+        "component_name": "<<script display name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "language": "<<groovy2 | groovy | javascript>>",
+        "script_body": "<<caller-authored script body>>",
+        "inputs": [
+            {
+                "name": "<<inputVarName>>",
+                "data_type": "<<character | date | integer | float>>",
+            },
+        ],
+        "outputs": [
+            {
+                "name": "<<outputVarName>>",
+            },
+        ],
+        "preserve_order": True,
+        "use_cache": True,
+    },
+    "required": [
+        "component_type",
+        "component_name",
+        "language",
+        "script_body",
+        "inputs",
+        "outputs",
+    ],
+    "optional": [
+        "folder_path",
+        "description",
+        "preserve_order",
+        "use_cache",
+    ],
+    "defaults": {
+        "component_type": "script.mapping",
+        "preserve_order": True,
+        "use_cache": True,
+    },
+    "supported_languages": ["groovy", "groovy2", "javascript"],
+    "supported_input_data_types": [
+        "character",
+        "date",
+        "integer",
+        "float",
+    ],
+    "output_data_type_inference_note": (
+        "Output entries declare only 'name' — Boomi infers each output's "
+        "data type from the value the script assigns at runtime. "
+        "Supplying 'data_type' on an output is rejected as misleading."
+    ),
+    "variable_name_rule": (
+        "Input and output variable names share one namespace inside the "
+        "script body. Names must match ^[A-Za-z_][A-Za-z0-9_]*$ and must "
+        "be unique across inputs + outputs."
+    ),
+    "indexing_rule": (
+        "<Input> entries receive 1-based dataType/index/name attributes in "
+        "declaration order. <Output> entries continue monotonically — the "
+        "first Output's index is len(inputs) + 1. Live Boomi exports use "
+        "exactly this pattern (verified across two work-account references)."
+    ),
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+        "api_key",
+        "credentials",
+        "authorization",
+        "bearer",
+    ],
+    "error_codes": {
+        "SCRIPT_MAPPING_VALIDATION_FAILED": (
+            "shape / unknown-key / type-check failure not covered by a "
+            "more specific code"
+        ),
+        "SCRIPT_MAPPING_BODY_REQUIRED": (
+            "script_body missing or blank"
+        ),
+        "SCRIPT_MAPPING_LANGUAGE_UNSUPPORTED": (
+            "language not in (groovy, groovy2, javascript)"
+        ),
+        "SCRIPT_MAPPING_VARIABLE_INVALID": (
+            "input/output variable name invalid, duplicate, or carries "
+            "an unsupported data_type"
+        ),
+        "UNSUPPORTED_TRANSFORM_ROUTE": (
+            "raw <Functions>/<scripts>/<xslt>/<expression> escape-hatch "
+            "keys are not accepted in a script.mapping config"
+        ),
+        "PLAINTEXT_SECRET_REJECTED": (
+            "a dict key inside the config matches a secret-shaped name"
+        ),
+    },
+    "gotchas": [
+        (
+            "Boomi's Custom script docs note: character inputs are passed "
+            "as empty strings for null/omitted source values; date, "
+            "integer, and float inputs can be null. Script authors must "
+            "handle nulls explicitly for non-character inputs."
+        ),
+        (
+            "preserveOrder='true' tells Boomi to set mapped inputs in the "
+            "declared order before running the script — important when "
+            "the script computes outputs that depend on input order."
+        ),
+        (
+            "Output values' types are inferred from what the script "
+            "assigns. Returning the wrong type (e.g. a non-numeric "
+            "string when the target field is numeric) surfaces at apply "
+            "time, not at component create time."
+        ),
+    ],
+    "example": {
+        "key": "<<script_key>>",
+        "type": "script.mapping",
+        "action": "create",
+        "name": "<<script display name>>",
+        "config": {
+            "component_type": "script.mapping",
+            "component_name": "<<script display name>>",
+            "language": "groovy2",
+            "script_body": "<<caller-authored script body>>",
+            "inputs": [
+                {"name": "<<inputVarName>>", "data_type": "character"},
+            ],
+            "outputs": [
+                {"name": "<<outputVarName>>"},
+            ],
+            "preserve_order": True,
+            "use_cache": True,
+        },
+        "_example_note": (
+            "Placeholder values only. Replace angle-bracket markers with "
+            "task-specific keys / variable names / script body. No canned "
+            "Groovy or JavaScript business logic is shipped here."
+        ),
+    },
+    "out_of_scope": {
+        "script_processing": (
+            "Process-level Groovy / JavaScript (script.processing, Data "
+            "Process custom scripting) is not a map primitive and is "
+            "explicitly NOT a fallback for unsupported script-map "
+            "requests."
+        ),
+        "standalone_transform_function": (
+            "Standalone reusable transform.function wrappers around a "
+            "script.mapping component remain future work; #41 only ships "
+            "in-map calls to reusable script.mapping components."
+        ),
+        "discovered_runtime_typing": (
+            "The builder does not introspect the script body to infer "
+            "input or output runtime types. Authors declare data_type "
+            "on inputs; output types come from the assigned value at "
+            "run time."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "transform.map",
+    "protocol": "script",
+    "tool": "build_integration (action='plan' | 'apply')",
+    "tool_note": (
+        "Script-route transform.map creation goes through build_integration "
+        "so the map builder can compute source/target profile field indexes "
+        "from in-spec '$ref:KEY' profile components and resolve any "
+        "'$ref:KEY' script_component_id references via depends_on. "
+        "manage_component (action='create') only dispatches profile builders "
+        "today — it does not understand structured script_mappings."
+    ),
+    "note": (
+        "In-map calls to one or more reusable script.mapping components. "
+        "Each entry in script_mappings declares one userdefined "
+        "<FunctionStep> with {script_component_id, inputs, outputs}. inputs "
+        "map source-profile paths to script input variables; outputs map "
+        "script output variables to target-profile paths. Mixed maps may "
+        "also declare direct field_mappings alongside script_mappings. "
+        "Source/target profile refs follow the same '$ref:KEY' rule as "
+        "direct and function maps; literal existing-profile UUIDs are "
+        "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (deferred to #47)."
+    ),
+    "template": {
+        "component_type": "transform.map",
+        "map_type": "script",
+        "component_name": "<<map name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "source_profile_id": "$ref:<<source profile key>>",
+        "source_profile_type": "<<profile.db | profile.json | profile.xml>>",
+        "target_profile_id": "$ref:<<target profile key>>",
+        "target_profile_type": "<<profile.db | profile.json | profile.xml>>",
+        "field_mappings": [
+            {
+                "source_path": "<<optional direct source path>>",
+                "target_path": "<<optional direct target path>>",
+            },
+        ],
+        "script_mappings": [
+            {
+                "script_slot": "<<task-authored slot name>>",
+                "script_component_id": "$ref:<<script.mapping key>>",
+                "language": "<<groovy2 | groovy | javascript (informational)>>",
+                "cache_enabled": False,
+                "inputs": [
+                    {
+                        "source_path": "<<source logical path>>",
+                        "input_name": "<<matches script.mapping <Input name>>>",
+                    },
+                ],
+                "outputs": [
+                    {
+                        "output_name": "<<matches script.mapping <Output name>>>",
+                        "target_path": "<<target logical path>>",
+                    },
+                ],
+            },
+        ],
+    },
+    "required": [
+        "component_type",
+        "map_type",
+        "component_name",
+        "source_profile_id",
+        "source_profile_type",
+        "target_profile_id",
+        "target_profile_type",
+        "script_mappings",
+    ],
+    "optional": [
+        "field_mappings",
+        "folder_path",
+        "description",
+    ],
+    "defaults": {
+        "component_type": "transform.map",
+        "map_type": "script",
+    },
+    "supported_map_types": ["script", "map_script"],
+    "script_component_id_rule": (
+        "Each script_mappings entry references a reusable script.mapping "
+        "component by literal UUID or by '$ref:KEY'. '$ref:KEY' targets "
+        "must also appear in depends_on so the script.mapping component "
+        "applies before this map (topo-sort safety)."
+    ),
+    "in_map_xml_shape_note": (
+        "Each script call emits a userdefined <FunctionStep "
+        "category='userdefined' type='userdefined' id='<scriptComponentId>'> "
+        "with an empty <Configuration/>. This matches the live Boomi shape "
+        "for in-map calls to reusable script.mapping components. The "
+        "<Configuration><Scripting><ScriptToExecute>...</Scripting></Configuration> "
+        "shape only appears inside standalone transform.function wrappers, "
+        "which remain out of scope."
+    ),
+    "unsupported_routes": {
+        "functions": (
+            "Raw <Functions> XML escape hatch is not accepted; use the "
+            "structured script_mappings contract instead."
+        ),
+        "function_steps": (
+            "Raw <FunctionStep> XML escape hatch is not accepted; use the "
+            "structured script_mappings contract instead."
+        ),
+        "function_mappings": (
+            "Native map-function primitives belong to map_type='function' "
+            "(#40); split function + script work across separate maps or "
+            "use one map_type per map."
+        ),
+        "scripts": (
+            "Raw <scripts> XML is not accepted; reference a reusable "
+            "script.mapping component via script_mappings[].script_component_id."
+        ),
+        "map_scripts": (
+            "Raw <map_scripts> XML is not accepted; reference a reusable "
+            "script.mapping component via script_mappings[].script_component_id."
+        ),
+        "xslt": "#42 (XSLT transform builder)",
+        "xslt_source": "#42 (XSLT transform builder)",
+        "expression": (
+            "Inline Boomi expressions are not a structured primitive. "
+            "Wrap the logic in a script.mapping component."
+        ),
+        "default_values": (
+            "Use map_type='function' and declare "
+            "function_mappings[].function_type='default_value' (#40)."
+        ),
+        "lookup": (
+            "Use map_type='function' and declare "
+            "function_mappings[].function_type='simple_lookup' (#40)."
+        ),
+    },
+    "unsupported_routes_note": (
+        "Script-map authors go through the structured script_mappings "
+        "contract. Raw XML escape hatches and route classes that belong "
+        "to other map types reject with structured errors."
+    ),
+    "depends_on_requirements": [
+        "Include source_profile_id's $ref key in depends_on so the source "
+        "profile component runs first.",
+        "Include target_profile_id's $ref key in depends_on so the target "
+        "profile component runs first.",
+        "Include every script_mappings[].script_component_id's $ref key in "
+        "depends_on so each referenced script.mapping component runs before "
+        "this map.",
+        "Both profiles must be in-spec — literal existing-profile UUIDs "
+        "produce MAP_PROFILE_INDEX_UNAVAILABLE (deferred to #47).",
+    ],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+        "api_key",
+        "credentials",
+        "authorization",
+        "bearer",
+    ],
+    "error_codes": {
+        "MAP_PROFILE_REF_REQUIRED": (
+            "source_profile_id or target_profile_id missing / blank, or a "
+            "$ref target isn't declared in depends_on"
+        ),
+        "MAP_PROFILE_INDEX_UNAVAILABLE": (
+            "literal existing-profile UUID supplied without an in-spec "
+            "generated profile component to index (deferred to #47)"
+        ),
+        "MAP_FIELD_NOT_FOUND": (
+            "a script input's source_path or output's target_path is not "
+            "declared in the corresponding profile's field index"
+        ),
+        "DUPLICATE_TARGET_MAPPING": (
+            "two entries — across field_mappings and script_mappings "
+            "outputs — bind the same target_path"
+        ),
+        "UNSUPPORTED_TRANSFORM_ROUTE": (
+            "config declares a function/script/xslt/lookup/expression/"
+            "default route that doesn't belong to map_type='script'"
+        ),
+        "SCRIPT_MAPPING_REF_REQUIRED": (
+            "script_mappings[].script_component_id is missing, or a "
+            "$ref script key is not declared in depends_on"
+        ),
+        "PROFILE_FIELD_NOT_MAPPABLE": (
+            "source_path or target_path resolves to a structural node "
+            "(object/array/non-leaf element)"
+        ),
+        "PROFILE_FIELD_VALIDATION_FAILED": (
+            "shape / cross-field issue in the map config"
+        ),
+        "PLAINTEXT_SECRET_REJECTED": (
+            "a key in the config dict matches a secret-shaped substring"
+        ),
+    },
+    "gotchas": [
+        (
+            "$ref:KEY tokens are resolved at apply time. Renaming a "
+            "referenced profile or script.mapping component after planning "
+            "requires a fresh plan."
+        ),
+        (
+            "Each script.mapping output has its own port key; multi-output "
+            "scripts emit one Mapping row per output. The script_mappings "
+            "entry must list every output you want to bind to a "
+            "target_path — outputs you omit are dropped."
+        ),
+        (
+            "Cross-list duplicate-target detection runs across "
+            "field_mappings AND every script_mappings[].outputs[]; the "
+            "destination leaf may receive at most one mapping total."
+        ),
+        (
+            "input_name / output_name strings must match the corresponding "
+            "<Input name> / <Output name> declared inside the referenced "
+            "script.mapping component for Boomi to bind values at run time."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Create the source profile component (profile.db / profile.json / profile.xml).",
+        "2. Create the target profile component (profile.db / profile.json / profile.xml).",
+        "3. Create the script.mapping component(s) the map will call.",
+        "4. Plan this map with source_profile_id, target_profile_id, and "
+        "every script_mappings[].script_component_id referenced via "
+        "'$ref:KEY'; declare all three in depends_on.",
+        "5. Apply — $ref tokens resolve to real UUIDs and the map XML "
+        "emits with deterministic FunctionStep IDs and Mapping rows.",
+    ],
+    "example": {
+        "key": "<<map_key>>",
+        "type": "transform.map",
+        "action": "create",
+        "name": "<<map display name>>",
+        "depends_on": [
+            "<<source profile key>>",
+            "<<target profile key>>",
+            "<<script.mapping key>>",
+        ],
+        "config": {
+            "component_type": "transform.map",
+            "map_type": "script",
+            "component_name": "<<map display name>>",
+            "source_profile_id": "$ref:<<source profile key>>",
+            "source_profile_type": "<<profile.db | profile.json | profile.xml>>",
+            "target_profile_id": "$ref:<<target profile key>>",
+            "target_profile_type": "<<profile.db | profile.json | profile.xml>>",
+            "script_mappings": [
+                {
+                    "script_slot": "<<task-authored slot name>>",
+                    "script_component_id": "$ref:<<script.mapping key>>",
+                    "inputs": [
+                        {
+                            "source_path": "<<source logical path>>",
+                            "input_name": "<<matches script <Input name>>>",
+                        },
+                    ],
+                    "outputs": [
+                        {
+                            "output_name": "<<matches script <Output name>>>",
+                            "target_path": "<<target logical path>>",
+                        },
+                    ],
+                },
+            ],
+        },
+        "_example_note": (
+            "Placeholder values only. Replace angle-bracket markers with "
+            "task-specific keys / paths / variable names. No canned script "
+            "wiring is shipped here."
+        ),
+    },
+    "out_of_scope": {
+        "script_processing_fallback": (
+            "Process-level Groovy / JavaScript (script.processing, Data "
+            "Process custom scripting) is NOT used as a fallback for "
+            "unsupported map-script requests."
+        ),
+        "standalone_transform_function": (
+            "Standalone reusable transform.function wrappers around a "
+            "script.mapping component remain future work; #41 only ships "
+            "in-map calls."
+        ),
+        "chained_script_graphs": (
+            "Wiring one script's output into another script's input via a "
+            "single FunctionStep chain remains future work; declare each "
+            "as a separate script_mappings entry instead."
         ),
         "xslt": (
             "XSLT transform components are tracked by issue #42."
@@ -4324,13 +4821,23 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
                 return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_DIRECT}
             if protocol in ("function", "map_function"):
                 return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION}
+            if protocol in ("script", "map_script"):
+                return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT}
             if protocol:
                 return {
                     "_success": False,
                     "error": f"Unknown transform.map protocol: {protocol}",
-                    "valid_protocols": ["direct", "function", "map_function"],
+                    "valid_protocols": [
+                        "direct",
+                        "function",
+                        "map_function",
+                        "script",
+                        "map_script",
+                    ],
                 }
             return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_DIRECT}
+        if component_type == "script.mapping":
+            return {"_success": True, **_COMPONENT_CREATE_SCRIPT_MAPPING}
         if component_type == "connector-action":
             if protocol == "database.get":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}

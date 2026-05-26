@@ -1103,15 +1103,18 @@ class MapScriptTransformOperation(_BaseTransformOperation):
     operation_type: Literal["map_script"] = Field(
         ...,
         description=(
-            "Discriminator: 'map_script' routes to a Boomi map script step. "
-            "Future builder: issue #41."
+            "Discriminator: 'map_script' routes to a Boomi map script step "
+            "rendered as an in-map userdefined FunctionStep referencing a "
+            "reusable script.mapping component (issue #41)."
         ),
     )
     script_slot: str = Field(
         ...,
         description=(
-            "Stable task-authored slot name (e.g. 'pre_send', 'enrich_row'). "
-            "Surfaced verbatim to issue #41 to identify the script's role."
+            "Stable task-authored slot name (e.g. 'pre_send', 'enrich_row') "
+            "used to identify the script's role inside the archetype "
+            "summary. Carried through to ScriptMappingBuilder / "
+            "MapScriptBuilder verbatim."
         ),
     )
     language: Literal["groovy2", "groovy", "javascript"] = Field(
@@ -1119,8 +1122,9 @@ class MapScriptTransformOperation(_BaseTransformOperation):
         description=(
             "Script language. 'groovy2' targets the recommended modern Boomi "
             "Groovy 2 runtime; 'groovy' targets legacy Groovy 1; 'javascript' "
-            "targets the Boomi JavaScript runtime. Selection is task-authored "
-            "and surfaced verbatim to issue #41."
+            "targets the Boomi JavaScript runtime. The script.mapping "
+            "component's own language attribute is the source of truth at "
+            "emit time; this field is informational for archetype callers."
         ),
     )
     inputs: List[str] = Field(
@@ -1143,12 +1147,26 @@ class MapScriptTransformOperation(_BaseTransformOperation):
     script_component_ref: Optional[str] = Field(
         default=None,
         description=(
-            "Reference to a future Boomi script component (resolved at "
-            "execution time by issue #41). This is the only script-routing "
-            "channel the M2 contract exposes; inline script_body is rejected "
-            "until #41 ships and can decide how to handle runnable bodies "
-            "without data-loss between build_from_archetype and downstream "
-            "compilation."
+            "Reference to an existing Boomi script.mapping component "
+            "(literal componentId or '$ref:KEY' pointing at an in-spec "
+            "script.mapping component). When provided, this archetype "
+            "operation describes a reuse-mode script call; when omitted in "
+            "favor of script_body, callers signal create-mode where a "
+            "matching script.mapping component is expected to be "
+            "materialised separately."
+        ),
+    )
+    script_body: Optional[str] = Field(
+        default=None,
+        description=(
+            "Caller-authored script source. The M2 archetype layer accepts "
+            "the field but does NOT auto-emit a script.mapping component "
+            "into the IntegrationSpec components list — the archetype "
+            "stays contract-only for now. Downstream tooling that wants "
+            "to materialise the script component reads this field from "
+            "the operation; the IntegrationSpec summary only surfaces a "
+            "presence boolean, never the body itself, to avoid echoing "
+            "caller-authored code through plan metadata."
         ),
     )
 
@@ -1159,30 +1177,19 @@ class MapScriptTransformOperation(_BaseTransformOperation):
 
     @field_validator("script_component_ref")
     @classmethod
-    def _strip_optional(cls, value: Optional[str]) -> Optional[str]:
+    def _strip_optional_ref(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         return _stripped_nonblank(value)
 
-    @model_validator(mode="before")
+    @field_validator("script_body")
     @classmethod
-    def _reject_script_body_until_41(cls, data: Any) -> Any:
-        # Reject inline script_body at the contract layer. emit_spec
-        # deliberately does not echo script bodies into IntegrationSpec
-        # (per plan: "do not include raw SQL, payload bodies, script bodies,
-        # or resolved URLs in endpoint summaries"), so accepting the field
-        # would silently discard caller-authored content between
-        # build_from_archetype and downstream compilation. Issue #41 owns
-        # runnable script handling and will reintroduce the field with
-        # whatever round-trip story it requires.
-        if isinstance(data, dict) and "script_body" in data:
-            raise ValueError(
-                "map_script.script_body is not accepted by the M2 contract; "
-                "issue #41 owns runnable script handling. Reference a future "
-                "script component via script_component_ref instead, or omit "
-                "the body until #41 ships."
-            )
-        return data
+    def _strip_optional_body(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        # Non-blank if present — silently accepting an empty string would
+        # discard caller intent. Empty/whitespace-only bodies fail loudly.
+        return _stripped_nonblank(value)
 
     @field_validator("inputs", "outputs")
     @classmethod
@@ -2116,9 +2123,10 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         # Transform operations summary — route + full operand structure so
         # downstream issues (#26/#40/#41) can compile the right rung directly
         # from the spec without re-reading the original archetype payload.
-        # Inline script_body is rejected by MapScriptTransformOperation
-        # entirely (codex r3 P2), so it can never reach this summary;
-        # callers route scripts via script_component_ref instead.
+        # For map_script: ``script_body`` is accepted on the operand (#41
+        # shipped) but the summary only surfaces a presence boolean — the
+        # body itself never enters plan metadata so caller-authored code
+        # doesn't echo back through emit_spec.
         operation_summaries: List[Dict[str, Any]] = []
         for op in operations:
             if isinstance(op, DirectTransformOperation):
@@ -2155,6 +2163,8 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "input_count": len(op.inputs),
                     "outputs": list(op.outputs),
                     "output_count": len(op.outputs),
+                    # Presence boolean only — never echo the body itself.
+                    "script_body_present": op.script_body is not None,
                 }
                 if op.script_component_ref is not None:
                     summary["script_component_ref"] = op.script_component_ref

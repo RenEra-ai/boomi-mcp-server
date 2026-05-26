@@ -59,6 +59,10 @@ from .components.builders.connector_builder import _resolve_rest_connector_type
 from .components.builders.json_profile_builder import JSONGeneratedProfileBuilder
 from .components.builders.xml_profile_builder import XMLGeneratedProfileBuilder
 from .components.builders.map_builder import DirectMapBuilder, get_map_builder
+from .components.builders.script_mapping_builder import (
+    ScriptMappingBuilder,
+    get_script_mapping_builder,
+)
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.processes import create_process, update_process
@@ -97,6 +101,11 @@ _METADATA_TYPE_MAP = {
     "profile.json": "profile.json",
     "profile.xml": "profile.xml",
     "transform.map": "transform.map",
+    # Issue #41: standalone script.mapping participates in metadata lookup
+    # so conflict_policy=reuse/fail can find existing script components by
+    # name and update-by-name resolves correctly. Mirrors the clone-suffix
+    # safeguard block which already includes script.mapping.
+    "script.mapping": "script.mapping",
 }
 
 
@@ -1023,10 +1032,16 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
             cloned["component_name"] = f"{base}{suffix}"
         return cloned
 
-    # Issue #26: generated profile.json/profile.xml and transform.map all
-    # participate in metadata lookup and need the clone-suffix safeguard so a
-    # second plan run can't see an identical duplicate as an ambiguous match.
-    if comp.type in ("profile.json", "profile.xml", "transform.map"):
+    # Issue #26 + #41: generated profile.json/profile.xml, transform.map,
+    # and script.mapping all participate in metadata lookup and need the
+    # clone-suffix safeguard so a second plan run can't see an identical
+    # duplicate as an ambiguous match.
+    if comp.type in (
+        "profile.json",
+        "profile.xml",
+        "transform.map",
+        "script.mapping",
+    ):
         base = cloned.get("component_name") or comp.name
         if base:
             cloned["component_name"] = f"{base}{suffix}"
@@ -1059,6 +1074,7 @@ def _execute_component(
         "profile.json",
         "profile.xml",
         "transform.map",
+        "script.mapping",
     ):
         payload.setdefault("component_type", comp.type)
     if comp.name:
@@ -1074,6 +1090,7 @@ def _execute_component(
             "profile.json",
             "profile.xml",
             "transform.map",
+            "script.mapping",
         ):
             # Mirror plan-time validation, which injects comp.name into
             # effective_config["component_name"] before calling validate_config.
@@ -1184,6 +1201,42 @@ def _execute_component(
             return {"_success": False, "error": f"Missing component_id for update of trading partner '{comp.key}'"}
         return update_trading_partner(boomi_client, profile, target_id, payload)
 
+    # Issue #41: structured script.mapping routes through ScriptMappingBuilder.
+    # Raw-XML bypass preserved — when payload['xml'] is set, the build()
+    # call is skipped and the raw XML is used verbatim by create_component.
+    if comp.type == "script.mapping" and not payload.get("xml"):
+        builder_class = get_script_mapping_builder(comp.type)
+        if builder_class is None:
+            return {
+                "_success": False,
+                "error_code": "SCRIPT_MAPPING_VALIDATION_FAILED",
+                "error": (
+                    f"No ScriptMappingBuilder registered for {comp.type!r}."
+                ),
+                "field": "component_type",
+            }
+        try:
+            built_xml = builder_class().build(**payload)
+        except BuilderValidationError as exc:
+            return {
+                "_success": False,
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "field": exc.field,
+                "hint": exc.hint,
+            }
+        envelope = {"xml": built_xml, "component_type": "script.mapping"}
+        if comp.action == "create":
+            return create_component(boomi_client, profile, envelope)
+        if not target_id:
+            return {
+                "_success": False,
+                "error": (
+                    f"Missing component_id for update of script '{comp.key}'"
+                ),
+            }
+        return update_component(boomi_client, profile, target_id, envelope)
+
     # Issue #26: generated profile.json / profile.xml route through the
     # profile-builder registry. Raw-XML bypass is preserved — when
     # payload['xml'] is set, the build() call is skipped and the raw XML
@@ -1239,13 +1292,15 @@ def _execute_component(
                 "error_code": "UNSUPPORTED_TRANSFORM_ROUTE",
                 "error": (
                     f"map_type {map_type!r} is not supported for transform.map. "
-                    "Supported: direct, function, map_function."
+                    "Supported: direct, function, map_function, script, "
+                    "map_script."
                 ),
                 "field": "map_type",
                 "hint": (
-                    "Use map_type='direct' for profile-to-profile direct field "
-                    "mappings; use map_type='function' for structured "
-                    "map-function primitives (#40)."
+                    "Use map_type='direct' for profile-to-profile direct "
+                    "field mappings; map_type='function' for structured "
+                    "map-function primitives (#40); map_type='script' for "
+                    "in-map calls to reusable script.mapping components (#41)."
                 ),
             }
         raw_comp_config = comp.config or {}
@@ -1777,12 +1832,15 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         is_generated_json_profile = comp.type == "profile.json"
         is_generated_xml_profile = comp.type == "profile.xml"
         is_direct_map = comp.type == "transform.map"
+        is_script_mapping_component = comp.type == "script.mapping"
         if is_generated_json_profile:
             gen_profile_scanner_cls = JSONGeneratedProfileBuilder
         elif is_generated_xml_profile:
             gen_profile_scanner_cls = XMLGeneratedProfileBuilder
         elif is_direct_map:
             gen_profile_scanner_cls = DirectMapBuilder
+        elif is_script_mapping_component:
+            gen_profile_scanner_cls = ScriptMappingBuilder
 
         if (
             gen_profile_scanner_cls is not None
@@ -1878,15 +1936,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         gen_profile_err = BuilderValidationError(
                             f"map_type {map_type!r} is not supported for "
                             "transform.map. Supported: direct, function, "
-                            "map_function.",
+                            "map_function, script, map_script.",
                             error_code="UNSUPPORTED_TRANSFORM_ROUTE",
                             field="map_type",
                             hint=(
                                 "Use map_type='direct' for profile-to-profile "
-                                "mappings or map_type='function' for "
-                                "structured map-function primitives (#40). "
-                                "script.mapping/XSLT remain tracked by "
-                                "#41/#42."
+                                "mappings, map_type='function' for structured "
+                                "map-function primitives (#40), or "
+                                "map_type='script' for in-map calls to "
+                                "reusable script.mapping components (#41). "
+                                "XSLT remains tracked by #42."
                             ),
                         )
                     else:
@@ -1928,6 +1987,100 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                         },
                                     )
                                     break
+
+                        # Issue #41: script_mappings[].script_component_id
+                        # $ref targets must also appear in depends_on so the
+                        # referenced script.mapping component applies before
+                        # the calling map (same topo-sort safety rule that
+                        # applies to source/target profile $refs), AND the
+                        # referenced component must actually be a
+                        # script.mapping — otherwise apply resolves the
+                        # $ref to a non-script UUID and emits a userdefined
+                        # FunctionStep whose ``id`` points at the wrong
+                        # component type (Codex r1 P2 finding #4).
+                        if (
+                            gen_profile_err is None
+                            and map_type in ("script", "map_script")
+                        ):
+                            sm_list = effective_config.get("script_mappings") or []
+                            if isinstance(sm_list, list):
+                                for sm_idx, sm in enumerate(sm_list):
+                                    if not isinstance(sm, Mapping):
+                                        continue
+                                    ref_value = sm.get("script_component_id")
+                                    if not (
+                                        isinstance(ref_value, str)
+                                        and ref_value.startswith("$ref:")
+                                    ):
+                                        continue
+                                    ref_key = ref_value[len("$ref:") :]
+                                    if ref_key not in declared_deps:
+                                        gen_profile_err = BuilderValidationError(
+                                            f"script_mappings[{sm_idx}]."
+                                            "script_component_id $ref "
+                                            "target must also appear in "
+                                            "depends_on so the script.mapping "
+                                            "applies before this map",
+                                            error_code="SCRIPT_MAPPING_REF_REQUIRED",
+                                            field="depends_on",
+                                            hint=(
+                                                "Add the script.mapping "
+                                                "component key to "
+                                                "depends_on so the "
+                                                "execution order builds "
+                                                "the script component "
+                                                "before the map."
+                                            ),
+                                            details={
+                                                "script_mappings_index": sm_idx,
+                                                "ref_key": ref_key,
+                                            },
+                                        )
+                                        break
+
+                                    # Reject $refs that don't target a
+                                    # script.mapping component. Apply
+                                    # would otherwise resolve the ref to
+                                    # the wrong UUID and emit a FunctionStep
+                                    # whose ``id`` points at a profile /
+                                    # connector / other type — Boomi runtime
+                                    # would fail to bind any inputs/outputs.
+                                    target_comp = (
+                                        components_by_key.get(ref_key)
+                                        if components_by_key is not None
+                                        else None
+                                    )
+                                    target_type = (
+                                        target_comp.type
+                                        if target_comp is not None
+                                        else None
+                                    )
+                                    if target_type != "script.mapping":
+                                        gen_profile_err = BuilderValidationError(
+                                            f"script_mappings[{sm_idx}]."
+                                            f"script_component_id $ref "
+                                            f"target {ref_key!r} resolves "
+                                            f"to a {target_type!r} "
+                                            "component, not a script.mapping",
+                                            error_code="SCRIPT_MAPPING_REF_REQUIRED",
+                                            field=(
+                                                f"script_mappings[{sm_idx}]."
+                                                "script_component_id"
+                                            ),
+                                            hint=(
+                                                "Reference an in-spec "
+                                                "script.mapping component "
+                                                "by '$ref:KEY' or a literal "
+                                                "existing script.mapping "
+                                                "componentId."
+                                            ),
+                                            details={
+                                                "script_mappings_index": sm_idx,
+                                                "ref_key": ref_key,
+                                                "target_component_type": target_type,
+                                            },
+                                        )
+                                        break
 
                         if gen_profile_err is None:
                             gen_profile_err = type(
@@ -2027,6 +2180,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                         details={"side": side},
                                     )
                                     break
+                elif is_script_mapping_component:
+                    # Issue #41: script.mapping has no source/target profile
+                    # refs to thread — it is profile-agnostic. Just run the
+                    # builder's structured config validator.
+                    gen_profile_err = ScriptMappingBuilder.validate_config(
+                        effective_config
+                    )
 
         if gen_profile_err is not None:
             planned_action = "error_generated_profile_validation"
@@ -2091,7 +2251,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         if normalized and normalized not in seen_function_types:
                             seen_function_types.add(normalized)
                             function_types_seen.append(normalized)
-            step["transform_summary"] = {
+            transform_summary: Dict[str, Any] = {
                 "map_type": map_type_value,
                 "direct_mapping_count": (
                     len(field_mappings_value)
@@ -2105,6 +2265,45 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 ),
                 "function_types_used": function_types_seen,
             }
+            # Issue #41: surface script-route counts + slot / language
+            # inventories when this map calls reusable script.mapping
+            # components. Only populated when map_type is script/map_script
+            # so direct + function plans keep their existing shape.
+            if map_type_value in ("script", "map_script"):
+                script_mappings_value = (
+                    map_summary_config.get("script_mappings") or []
+                )
+                script_slots_seen: List[str] = []
+                seen_slots: set = set()
+                script_langs_seen: List[str] = []
+                seen_langs: set = set()
+                for sm in (
+                    script_mappings_value
+                    if isinstance(script_mappings_value, list)
+                    else []
+                ):
+                    if not isinstance(sm, Mapping):
+                        continue
+                    slot = sm.get("script_slot")
+                    if isinstance(slot, str):
+                        slot_n = slot.strip()
+                        if slot_n and slot_n not in seen_slots:
+                            seen_slots.add(slot_n)
+                            script_slots_seen.append(slot_n)
+                    lang = sm.get("language")
+                    if isinstance(lang, str):
+                        lang_n = lang.strip().lower()
+                        if lang_n and lang_n not in seen_langs:
+                            seen_langs.add(lang_n)
+                            script_langs_seen.append(lang_n)
+                transform_summary["script_count"] = (
+                    len(script_mappings_value)
+                    if isinstance(script_mappings_value, list)
+                    else 0
+                )
+                transform_summary["script_slots_used"] = script_slots_seen
+                transform_summary["script_languages_used"] = script_langs_seen
+            step["transform_summary"] = transform_summary
 
         steps.append(step)
 
