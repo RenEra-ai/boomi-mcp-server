@@ -488,24 +488,44 @@ _SIMPLE_LOOKUP = FunctionFamily(
     parameter_validators={"rows": _validate_lookup_rows},
 )
 
-# sequential_value (SequentialValue) — empty <Configuration><SequentialValue/></Configuration>.
-# Verified live 2026-05-26: in-component XML is empty. The keyName / batchSize /
-# keyFixToLength settings live in the Environment Map Extension layer (the
-# SDK ``MapExtensionsSequentialValue`` model), NOT in the component XML.
-# Callers configure those via deployment extensions after the component is
-# created — out of scope for the component builder.
+# sequential_value (SequentialValue) — params go as additional <Input> elements
+# (NOT on the <SequentialValue/> Configuration block). Live-verified 2026-05-26:
+# Boomi stores Key Name / Fix to Length / Batch Size as Input ``default``
+# attributes on Input elements with those exact names. The <Configuration>
+# block holds an empty <SequentialValue/> placeholder.
+#
+# Per the Boomi "Map Function components" docs, Sequential Value has three
+# authorable fields: Key Name (unique counter identifier), Fix to Length
+# (zero-padded length, optional), Batch Size (allocation reservation,
+# optional, default 1). Increment Basis is an unmapped trigger input the
+# builder always emits with default="" so the function increments per
+# source record.
 _SEQUENTIAL_VALUE = FunctionFamily(
     name="sequential_value",
     fn_type="SequentialValue",
     category="Sequential",
     mapped_input_count=(0, 0),
-    static_input_names=("Increment Basis",),
-    parameter_input_defaults={},
-    required_parameters=(),
-    optional_parameters=(),
+    static_input_names=(
+        "Increment Basis",
+        "Key Name",
+        "Fix to Length",
+        "Batch Size",
+    ),
+    # 0-based positions into static_input_names — Key Name is at index 1, etc.
+    parameter_input_defaults={
+        "key_name": 1,
+        "fix_to_length": 2,
+        "batch_size": 3,
+    },
+    required_parameters=("key_name",),
+    optional_parameters=("fix_to_length", "batch_size"),
     output_name="Result",
     emit_configuration=_emit_sequential_value_configuration,
-    parameter_validators={},
+    parameter_validators={
+        "key_name": _validate_non_blank_string,
+        "fix_to_length": _validate_positive_int,
+        "batch_size": _validate_positive_int,
+    },
 )
 
 # math (dispatcher — fn_type resolved from parameters["operation"]).

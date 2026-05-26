@@ -2898,13 +2898,17 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         },
         "sequential_value": {
             "mapped_inputs": 0,
-            "required_parameters": [],
-            "optional_parameters": [],
+            "required_parameters": ["key_name"],
+            "optional_parameters": ["fix_to_length", "batch_size"],
             "note": (
-                "Source-free sequence generator. The keyName, batchSize, "
-                "and keyFixToLength settings live in the Environment Map "
-                "Extension layer, NOT in the component XML — configure them "
-                "via deployment extensions after the component is created."
+                "Source-free counter. parameters.key_name is an arbitrary "
+                "unique name that identifies the counter (the runtime "
+                "stores the latest value here for cross-execution "
+                "continuation). fix_to_length zero-pads the result to a "
+                "fixed width. batch_size reserves a block of sequence "
+                "values in memory (default 1). Boomi stores all three as "
+                "Input default attributes on the FunctionStep, not on the "
+                "<SequentialValue/> Configuration block."
             ),
         },
         "math": {
@@ -3109,13 +3113,6 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         ),
     },
     "out_of_scope": {
-        "sequential_value_extension_settings": (
-            "sequential_value's keyName, batchSize, and keyFixToLength "
-            "settings live in the Environment Map Extension layer (NOT the "
-            "component XML). Configure them via deployment extensions after "
-            "the component is created. The component builder only emits an "
-            "empty <SequentialValue/> placeholder."
-        ),
         "standalone_transform_function": (
             "Standalone reusable transform.function components (user-defined "
             "functions shared across maps) remain future work."

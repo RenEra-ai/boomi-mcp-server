@@ -129,18 +129,12 @@ _DIRECT_ONLY_REJECT_KEYS: Dict[str, str] = {
         "Switch to map_type='function' and declare function_mappings[].function_type='default_value'."
     ),
     "lookup": (
-        "Inline lookup tables in transform.map are not currently supported "
-        "(simple_lookup function is deferred from #40 pending live Boomi XML "
-        "evidence). Inline lookup as a direct mapping is not viable; "
-        "consider modeling the lookup as a DB or document-cache fetch "
-        "outside the map."
+        "Switch to map_type='function' and declare "
+        "function_mappings[].function_type='simple_lookup'."
     ),
     "lookups": (
-        "Inline lookup tables in transform.map are not currently supported "
-        "(simple_lookup function is deferred from #40 pending live Boomi XML "
-        "evidence). Inline lookup as a direct mapping is not viable; "
-        "consider modeling the lookup as a DB or document-cache fetch "
-        "outside the map."
+        "Switch to map_type='function' and declare "
+        "function_mappings[].function_type='simple_lookup'."
     ),
 }
 

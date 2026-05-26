@@ -268,8 +268,8 @@ def test_validate_config_allows_same_source_to_multiple_targets():
         ("function_mappings", "map_type='function'"),
         ("default_values", "function_type='default_value'"),
         ("defaults", "function_type='default_value'"),
-        ("lookup", "deferred from #40"),
-        ("lookups", "deferred from #40"),
+        ("lookup", "function_type='simple_lookup'"),
+        ("lookups", "function_type='simple_lookup'"),
     ],
 )
 def test_validate_config_rejects_unsupported_transform_route(key, expected_pointer):
