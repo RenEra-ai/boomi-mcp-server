@@ -56,6 +56,9 @@ from .components.builders import (
     get_profile_builder,
 )
 from .components.builders.connector_builder import _resolve_rest_connector_type
+from .components.builders.json_profile_builder import JSONGeneratedProfileBuilder
+from .components.builders.xml_profile_builder import XMLGeneratedProfileBuilder
+from .components.builders.map_builder import DirectMapBuilder, get_map_builder
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.processes import create_process, update_process
@@ -77,6 +80,9 @@ _TYPE_ALIASES = {
     "trading_partner": "trading_partner",
     "component": "component",
     "profile.db": "profile.db",
+    "profile.json": "profile.json",
+    "profile.xml": "profile.xml",
+    "transform.map": "transform.map",
 }
 
 _METADATA_TYPE_MAP = {
@@ -85,6 +91,12 @@ _METADATA_TYPE_MAP = {
     "connector-action": "connector-action",
     "trading_partner": "tradingpartner",
     "profile.db": "profile.db",
+    # Issue #26 adds builders for the three generated/direct component types.
+    # Both the structured-config path and the raw-XML escape hatch route
+    # through these metadata keys.
+    "profile.json": "profile.json",
+    "profile.xml": "profile.xml",
+    "transform.map": "transform.map",
 }
 
 
@@ -447,6 +459,45 @@ def _format_actual_role(comp: IntegrationComponentSpec) -> str:
             return f"{role} [{method}]"
         return role
     return effective
+
+
+# Issue #26: resolve the field index for a transform.map's source / target
+# profile reference. Returns None when the reference is a literal UUID or
+# points at an unknown / non-profile component — in those cases the map
+# builder's validator raises MAP_PROFILE_INDEX_UNAVAILABLE.
+def _resolve_map_profile_index(
+    profile_id: Any,
+    components_by_key: Optional[Dict[str, "IntegrationComponentSpec"]],
+) -> Optional[Dict[str, Dict[str, Any]]]:
+    if components_by_key is None:
+        return None
+    if not isinstance(profile_id, str) or not profile_id.startswith("$ref:"):
+        return None
+    ref_key = profile_id[len("$ref:") :]
+    target_comp = components_by_key.get(ref_key)
+    if target_comp is None:
+        return None
+    raw_config = target_comp.config or {}
+    builder_cls = None
+    if target_comp.type == "profile.json":
+        builder_cls = JSONGeneratedProfileBuilder
+    elif target_comp.type == "profile.xml":
+        builder_cls = XMLGeneratedProfileBuilder
+    elif target_comp.type == "profile.db":
+        builder_cls = DatabaseReadProfileBuilder
+    if builder_cls is None:
+        return None
+    try:
+        # DatabaseReadProfileBuilder.build_field_index doesn't run a
+        # validate_config gate, so a malformed DB profile here would still
+        # raise — caller treats the None return as "no index available".
+        return builder_cls.build_field_index(raw_config)
+    except BuilderValidationError:
+        return None
+    except Exception:
+        # Defense-in-depth: an unexpected error in index-building shouldn't
+        # crash the plan loop. Map validation will surface MAP_PROFILE_INDEX_UNAVAILABLE.
+        return None
 
 
 def _check_database_get_dependencies(
@@ -962,6 +1013,15 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
             cloned["component_name"] = f"{base}{suffix}"
         return cloned
 
+    # Issue #26: generated profile.json/profile.xml and transform.map all
+    # participate in metadata lookup and need the clone-suffix safeguard so a
+    # second plan run can't see an identical duplicate as an ambiguous match.
+    if comp.type in ("profile.json", "profile.xml", "transform.map"):
+        base = cloned.get("component_name") or comp.name
+        if base:
+            cloned["component_name"] = f"{base}{suffix}"
+        return cloned
+
     return cloned
 
 
@@ -971,6 +1031,8 @@ def _execute_component(
     comp: IntegrationComponentSpec,
     config: Dict[str, Any],
     target_id: Optional[str] = None,
+    *,
+    components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
 ) -> Dict[str, Any]:
     payload = dict(config)
     # Align apply-time dispatcher predicates with plan-time predicates:
@@ -980,7 +1042,14 @@ def _execute_component(
     # the duplicate component_type key would plan clean against the right
     # validator and then misroute at apply (Codex review items 1+2 against
     # commit f398b35).
-    if comp.type in ("connector-settings", "connector-action", "profile.db"):
+    if comp.type in (
+        "connector-settings",
+        "connector-action",
+        "profile.db",
+        "profile.json",
+        "profile.xml",
+        "transform.map",
+    ):
         payload.setdefault("component_type", comp.type)
     if comp.name:
         if comp.type == "process":
@@ -990,12 +1059,17 @@ def _execute_component(
             payload.setdefault("name", comp.name)
         elif comp.type == "trading_partner":
             payload.setdefault("component_name", comp.name)
-        elif comp.type == "profile.db":
+        elif comp.type in (
+            "profile.db",
+            "profile.json",
+            "profile.xml",
+            "transform.map",
+        ):
             # Mirror plan-time validation, which injects comp.name into
             # effective_config["component_name"] before calling validate_config.
             # Without this, a spec with top-level name="..." but no
             # config.component_name plans clean and then fails at apply with
-            # DATABASE_OPERATION_VALIDATION_FAILED: component_name is required.
+            # the builder's missing-name error.
             payload.setdefault("component_name", comp.name)
 
     if comp.type == "process":
@@ -1100,6 +1174,114 @@ def _execute_component(
             return {"_success": False, "error": f"Missing component_id for update of trading partner '{comp.key}'"}
         return update_trading_partner(boomi_client, profile, target_id, payload)
 
+    # Issue #26: generated profile.json / profile.xml route through the
+    # profile-builder registry. Raw-XML bypass is preserved — when
+    # payload['xml'] is set, the build() call is skipped and the raw XML
+    # is used verbatim by create_component / update_component.
+    if comp.type in ("profile.json", "profile.xml") and not payload.get("xml"):
+        profile_type = (payload.get("profile_type") or "").lower()
+        builder_instance = get_profile_builder(comp.type, profile_type)
+        if builder_instance is None:
+            return {
+                "_success": False,
+                "error_code": "UNSUPPORTED_PROFILE_GENERATION_MODE",
+                "error": (
+                    f"profile_type {profile_type!r} is not supported for "
+                    f"{comp.type}."
+                ),
+                "field": "profile_type",
+            }
+        try:
+            built_xml = builder_instance.build(**payload)
+        except BuilderValidationError as exc:
+            return {
+                "_success": False,
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "field": exc.field,
+                "hint": exc.hint,
+            }
+        envelope = {"xml": built_xml, "component_type": comp.type}
+        if comp.action == "create":
+            return create_component(boomi_client, profile, envelope)
+        if not target_id:
+            return {
+                "_success": False,
+                "error": (
+                    f"Missing component_id for update of profile '{comp.key}'"
+                ),
+            }
+        return update_component(boomi_client, profile, target_id, envelope)
+
+    # Issue #26: transform.map routes through the direct-map builder. Source
+    # and target field indexes are computed from the in-spec profile
+    # components referenced by source_profile_id / target_profile_id ($ref:KEY).
+    # The resolved config already has $ref:KEY substituted for real Boomi
+    # UUIDs by _resolve_dependency_tokens — but to find the in-spec profile
+    # component for index computation, we need the ORIGINAL comp.config
+    # (where $ref:KEY is still a $ref:KEY string).
+    if comp.type == "transform.map" and not payload.get("xml"):
+        map_type = (payload.get("map_type") or "").lower()
+        map_builder_instance = get_map_builder(comp.type, map_type)
+        if map_builder_instance is None:
+            return {
+                "_success": False,
+                "error_code": "UNSUPPORTED_TRANSFORM_ROUTE",
+                "error": (
+                    f"map_type {map_type!r} is not supported for transform.map. "
+                    "Supported: direct."
+                ),
+                "field": "map_type",
+            }
+        raw_comp_config = comp.config or {}
+        source_index = _resolve_map_profile_index(
+            raw_comp_config.get("source_profile_id"),
+            components_by_key,
+        )
+        target_index = _resolve_map_profile_index(
+            raw_comp_config.get("target_profile_id"),
+            components_by_key,
+        )
+        if source_index is None or target_index is None:
+            return {
+                "_success": False,
+                "error_code": "MAP_PROFILE_INDEX_UNAVAILABLE",
+                "error": (
+                    "Cannot compute source/target field index from in-spec "
+                    "profile components. Literal existing-profile UUIDs are "
+                    "not indexable in M2 (#47 owns existing-profile discovery)."
+                ),
+                "hint": (
+                    "Reference both source and target profiles as in-spec "
+                    "components via '$ref:KEY'."
+                ),
+            }
+        try:
+            built_xml = map_builder_instance.build(
+                source_index=source_index,
+                target_index=target_index,
+                **payload,
+            )
+        except BuilderValidationError as exc:
+            return {
+                "_success": False,
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "field": exc.field,
+                "hint": exc.hint,
+            }
+        envelope = {"xml": built_xml, "component_type": "transform.map"}
+        if comp.action == "create":
+            return create_component(boomi_client, profile, envelope)
+        if not target_id:
+            return {
+                "_success": False,
+                "error": (
+                    f"Missing component_id for update of map '{comp.key}'"
+                ),
+            }
+        return update_component(boomi_client, profile, target_id, envelope)
+
     if comp.action == "create":
         return create_component(boomi_client, profile, payload)
     if not target_id:
@@ -1187,7 +1369,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             else "trading_partner_json"
             if comp.type == "trading_partner"
             else "profile_builder_or_xml"
-            if comp.type == "profile.db"
+            if comp.type in ("profile.db", "profile.json", "profile.xml")
+            else "map_builder_or_xml"
+            if comp.type == "transform.map"
             else "generic_component_xml"
         )
 
@@ -1570,6 +1754,177 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             if process_flow_err.error_code == "PLAINTEXT_SECRET_REJECTED":
                 ProcessFlowBuilder.redact_forbidden_secret_fields_in_place(raw_config)
 
+        # Issue #26 (M2.6): generated profile.json / profile.xml / transform.map
+        # preflight. Mirrors the DB/REST/process blocks above — two-tier
+        # secret scan + validate_config gated on apply path.
+        gen_profile_err: Optional[BuilderValidationError] = None
+        gen_profile_scanner_cls = None
+        is_generated_json_profile = comp.type == "profile.json"
+        is_generated_xml_profile = comp.type == "profile.xml"
+        is_direct_map = comp.type == "transform.map"
+        if is_generated_json_profile:
+            gen_profile_scanner_cls = JSONGeneratedProfileBuilder
+        elif is_generated_xml_profile:
+            gen_profile_scanner_cls = XMLGeneratedProfileBuilder
+        elif is_direct_map:
+            gen_profile_scanner_cls = DirectMapBuilder
+
+        if (
+            gen_profile_scanner_cls is not None
+            and db_err is None
+            and rest_err is None
+            and process_flow_err is None
+        ):
+            # (a) Secret scan runs unconditionally so reuse/update/raw-XML
+            #     configs cannot leak plaintext into the plan echo.
+            gen_profile_err = gen_profile_scanner_cls.scan_forbidden_secret_fields(
+                raw_config
+            )
+            # (b) validate_config gated on apply path actually invoking the
+            #     builder (create / create_clone, no raw XML).
+            will_invoke_gen_profile_builder = (
+                gen_profile_err is None
+                and not xml_payload
+                and planned_action in ("create", "create_clone")
+            )
+            if will_invoke_gen_profile_builder:
+                effective_config = dict(raw_config)
+                if comp.name:
+                    effective_config.setdefault("component_name", comp.name)
+                # profile.json / profile.xml — straightforward validation.
+                if is_generated_json_profile:
+                    profile_type = (
+                        (effective_config.get("profile_type") or "").lower()
+                    )
+                    builder_instance = get_profile_builder(
+                        "profile.json", profile_type
+                    )
+                    if builder_instance is None:
+                        gen_profile_err = BuilderValidationError(
+                            f"profile_type {profile_type!r} is not supported "
+                            "for profile.json. Supported: json.generated.",
+                            error_code="UNSUPPORTED_PROFILE_GENERATION_MODE",
+                            field="profile_type",
+                            hint=(
+                                "Use profile_type='json.generated' to drive "
+                                "the structured JSON profile builder."
+                            ),
+                        )
+                    else:
+                        gen_profile_err = type(
+                            builder_instance
+                        ).validate_config(effective_config)
+                elif is_generated_xml_profile:
+                    profile_type = (
+                        (effective_config.get("profile_type") or "").lower()
+                    )
+                    builder_instance = get_profile_builder(
+                        "profile.xml", profile_type
+                    )
+                    if builder_instance is None:
+                        gen_profile_err = BuilderValidationError(
+                            f"profile_type {profile_type!r} is not supported "
+                            "for profile.xml. Supported: xml.generated.",
+                            error_code="UNSUPPORTED_PROFILE_GENERATION_MODE",
+                            field="profile_type",
+                            hint=(
+                                "Use profile_type='xml.generated' for the "
+                                "element-only structured XML profile builder."
+                            ),
+                        )
+                    else:
+                        gen_profile_err = type(
+                            builder_instance
+                        ).validate_config(effective_config)
+                elif is_direct_map:
+                    # transform.map: thread source / target field indexes from
+                    # the in-spec profile components so MAP_FIELD_NOT_FOUND
+                    # fires at plan time when a $ref:KEY target maps to a
+                    # missing leaf in the referenced profile.
+                    source_index = _resolve_map_profile_index(
+                        effective_config.get("source_profile_id"),
+                        components_by_key,
+                    )
+                    target_index = _resolve_map_profile_index(
+                        effective_config.get("target_profile_id"),
+                        components_by_key,
+                    )
+                    map_type = (effective_config.get("map_type") or "").lower()
+                    map_builder_instance = get_map_builder(
+                        "transform.map", map_type
+                    )
+                    if map_builder_instance is None:
+                        gen_profile_err = BuilderValidationError(
+                            f"map_type {map_type!r} is not supported for "
+                            "transform.map. Supported: direct.",
+                            error_code="UNSUPPORTED_TRANSFORM_ROUTE",
+                            field="map_type",
+                            hint=(
+                                "Use map_type='direct' for #26 profile-to-"
+                                "profile mappings. function/script/xslt "
+                                "routes are tracked by #40/#41/#42."
+                            ),
+                        )
+                    else:
+                        gen_profile_err = type(
+                            map_builder_instance
+                        ).validate_config(
+                            effective_config,
+                            source_index=source_index,
+                            target_index=target_index,
+                        )
+                        # Literal-UUID profile refs (no $ref) can't be indexed
+                        # in M2 — #47 owns existing-profile discovery. Reject
+                        # at plan time so the caller knows what to fix.
+                        if gen_profile_err is None:
+                            for side in ("source", "target"):
+                                ref_value = effective_config.get(
+                                    f"{side}_profile_id"
+                                )
+                                if (
+                                    isinstance(ref_value, str)
+                                    and not ref_value.startswith("$ref:")
+                                ):
+                                    gen_profile_err = BuilderValidationError(
+                                        f"{side}_profile_id is a literal "
+                                        "existing-profile reference without "
+                                        "an in-spec generated profile "
+                                        "component — the map builder has no "
+                                        "field index to validate against.",
+                                        error_code="MAP_PROFILE_INDEX_UNAVAILABLE",
+                                        field=f"{side}_profile_id",
+                                        hint=(
+                                            f"Either declare the {side} "
+                                            "profile as an in-spec "
+                                            "profile.json / profile.xml / "
+                                            "profile.db component and "
+                                            f"reference it via '$ref:KEY', "
+                                            "or wait for issue #47 "
+                                            "(existing-profile schema "
+                                            "discovery)."
+                                        ),
+                                        details={"side": side},
+                                    )
+                                    break
+
+        if gen_profile_err is not None:
+            planned_action = "error_generated_profile_validation"
+            validation_error = {
+                "error_code": gen_profile_err.error_code,
+                "error": str(gen_profile_err),
+                "field": gen_profile_err.field,
+                "hint": gen_profile_err.hint,
+            }
+            if gen_profile_err.details is not None:
+                validation_error["details"] = gen_profile_err.details
+            if (
+                gen_profile_err.error_code == "PLAINTEXT_SECRET_REJECTED"
+                and gen_profile_scanner_cls is not None
+            ):
+                gen_profile_scanner_cls.redact_forbidden_secret_fields_in_place(
+                    raw_config
+                )
+
         step: Dict[str, Any] = {
             "key": comp.key,
             "type": comp.type,
@@ -1630,6 +1985,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             "error_database_validation",
             "error_rest_validation",
             "error_process_validation",
+            "error_generated_profile_validation",
         )
     ]
     if unresolvable_steps:
@@ -1670,6 +2026,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' failed "
                     f"process-flow validation: "
                     f"{ve.get('error_code', 'PROCESS_XML_VALIDATION_FAILED')} "
+                    f"on field {ve.get('field')!r}."
+                )
+            elif step["planned_action"] == "error_generated_profile_validation":
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed "
+                    f"generated profile / map validation: "
+                    f"{ve.get('error_code', 'PROFILE_FIELD_VALIDATION_FAILED')} "
                     f"on field {ve.get('field')!r}."
                 )
         return {
@@ -1727,6 +2091,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             comp=comp,
             config=resolved_config,
             target_id=target_id,
+            components_by_key=components_by_key,
         )
 
         component_id = _extract_component_id(exec_result)

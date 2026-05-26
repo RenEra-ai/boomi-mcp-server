@@ -21,6 +21,7 @@ from boomi_mcp.categories.components.builders.profile_generation import (
     build_profile_generation_artifacts,
     profile_from_db_read_fields,
     profile_from_json_schema,
+    profile_from_xml_schema,
     reject_unsupported_generation_source,
     validate_field_mappings,
 )
@@ -376,6 +377,178 @@ def test_profile_from_json_schema_rejects_reserved_char_in_node_name():
     }
     with pytest.raises(BuilderValidationError) as excinfo:
         profile_from_json_schema(profile)
+    assert excinfo.value.error_code == INVALID_PROFILE_FIELD_PATH
+
+
+# ---------------------------------------------------------------------------
+# profile_from_xml_schema (issue #26 backfill)
+# ---------------------------------------------------------------------------
+
+
+def _xml_profile() -> Dict[str, Any]:
+    return {
+        "format": "xml",
+        "root": {
+            "name": "ShippingOrders",
+            "kind": "element",
+            "min_occurs": 1,
+            "max_occurs": -1,
+            "children": [
+                {
+                    "name": "ShippingOrder",
+                    "kind": "element",
+                    "max_occurs": -1,
+                    "children": [
+                        {"name": "OrderID", "kind": "element", "data_type": "character"},
+                        {"name": "OrderDate", "kind": "element", "data_type": "datetime"},
+                        {"name": "Total", "kind": "element", "data_type": "number"},
+                        {"name": "Active", "kind": "element", "data_type": "boolean"},
+                    ],
+                },
+            ],
+        },
+    }
+
+
+def test_profile_from_xml_schema_happy_path():
+    result = profile_from_xml_schema(_xml_profile())
+    assert result["generation_mode"] == "profile_from_xml_schema"
+    assert result["component_type"] == "profile.xml"
+    assert result["profile_type"] == "xml.generated"
+
+    index = result["field_index_by_path"]
+    expected_paths = {
+        "ShippingOrders",
+        "ShippingOrders[]/ShippingOrder",
+        "ShippingOrders[]/ShippingOrder[]/OrderID",
+        "ShippingOrders[]/ShippingOrder[]/OrderDate",
+        "ShippingOrders[]/ShippingOrder[]/Total",
+        "ShippingOrders[]/ShippingOrder[]/Active",
+    }
+    assert set(index.keys()) == expected_paths
+    # Every entry advertises profile.xml metadata.
+    for entry in index.values():
+        assert entry["profile_component_type"] == "profile.xml"
+        assert entry["source"] == "xml_schema"
+        assert entry["kind"] == "element"
+    # Mappable_paths covers only leaves (elements without children).
+    assert set(result["mappable_paths"]) == {
+        "ShippingOrders[]/ShippingOrder[]/OrderID",
+        "ShippingOrders[]/ShippingOrder[]/OrderDate",
+        "ShippingOrders[]/ShippingOrder[]/Total",
+        "ShippingOrders[]/ShippingOrder[]/Active",
+    }
+
+
+def test_profile_from_xml_schema_non_repeating_root():
+    profile = {
+        "format": "xml",
+        "root": {
+            "name": "Order",
+            "kind": "element",
+            "max_occurs": 1,
+            "children": [
+                {"name": "id", "kind": "element", "data_type": "character"},
+            ],
+        },
+    }
+    result = profile_from_xml_schema(profile)
+    # max_occurs=1 means no [] appended to the segment for children.
+    assert set(result["field_index_by_path"].keys()) == {"Order", "Order/id"}
+    assert result["mappable_paths"] == ["Order/id"]
+
+
+def test_profile_from_xml_schema_rejects_simple_root():
+    profile = {
+        "format": "xml",
+        "root": {"name": "Root", "kind": "simple", "data_type": "character"},
+    }
+    with pytest.raises(BuilderValidationError) as excinfo:
+        profile_from_xml_schema(profile)
+    assert excinfo.value.error_code == PROFILE_GENERATION_VALIDATION_FAILED
+    assert excinfo.value.field == "payload_profile.root.kind"
+
+
+def test_profile_from_xml_schema_rejects_unsupported_data_type():
+    profile = {
+        "format": "xml",
+        "root": {
+            "name": "Root",
+            "kind": "element",
+            "children": [{"name": "x", "kind": "element", "data_type": "blob"}],
+        },
+    }
+    with pytest.raises(BuilderValidationError) as excinfo:
+        profile_from_xml_schema(profile)
+    assert excinfo.value.error_code == UNSUPPORTED_PROFILE_FIELD_TYPE
+
+
+def test_profile_from_xml_schema_rejects_duplicate_sibling():
+    profile = {
+        "format": "xml",
+        "root": {
+            "name": "Root",
+            "kind": "element",
+            "children": [
+                {"name": "x", "kind": "element", "data_type": "character"},
+                {"name": "x", "kind": "element", "data_type": "character"},
+            ],
+        },
+    }
+    with pytest.raises(BuilderValidationError) as excinfo:
+        profile_from_xml_schema(profile)
+    assert excinfo.value.error_code == DUPLICATE_PROFILE_FIELD_PATH
+
+
+def test_profile_from_xml_schema_rejects_non_xml_format():
+    with pytest.raises(BuilderValidationError) as excinfo:
+        profile_from_xml_schema({"format": "json", "root": {"name": "R", "kind": "element"}})
+    assert excinfo.value.error_code == PROFILE_GENERATION_VALIDATION_FAILED
+    assert excinfo.value.field == "payload_profile.format"
+
+
+def test_profile_from_xml_schema_rejects_invalid_max_occurs():
+    profile = {
+        "format": "xml",
+        "root": {
+            "name": "Root",
+            "kind": "element",
+            "max_occurs": 0,
+            "children": [{"name": "x", "kind": "element", "data_type": "character"}],
+        },
+    }
+    with pytest.raises(BuilderValidationError) as excinfo:
+        profile_from_xml_schema(profile)
+    assert excinfo.value.error_code == PROFILE_GENERATION_VALIDATION_FAILED
+    assert excinfo.value.field == "payload_profile.root.max_occurs"
+
+
+def test_profile_from_xml_schema_structural_element_rejects_data_type():
+    profile = {
+        "format": "xml",
+        "root": {
+            "name": "Root",
+            "kind": "element",
+            "data_type": "character",
+            "children": [{"name": "x", "kind": "element", "data_type": "character"}],
+        },
+    }
+    with pytest.raises(BuilderValidationError) as excinfo:
+        profile_from_xml_schema(profile)
+    assert excinfo.value.error_code == PROFILE_GENERATION_VALIDATION_FAILED
+
+
+def test_profile_from_xml_schema_rejects_reserved_path_chars():
+    profile = {
+        "format": "xml",
+        "root": {
+            "name": "Root",
+            "kind": "element",
+            "children": [{"name": "a/b", "kind": "element", "data_type": "character"}],
+        },
+    }
+    with pytest.raises(BuilderValidationError) as excinfo:
+        profile_from_xml_schema(profile)
     assert excinfo.value.error_code == INVALID_PROFILE_FIELD_PATH
 
 

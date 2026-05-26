@@ -44,6 +44,16 @@ PROFILE_FIELD_NOT_FOUND = "PROFILE_FIELD_NOT_FOUND"
 PROFILE_FIELD_NOT_MAPPABLE = "PROFILE_FIELD_NOT_MAPPABLE"
 DUPLICATE_TARGET_MAPPING = "DUPLICATE_TARGET_MAPPING"
 
+# Issue #26 additions — consumed by the generated profile / direct map builders
+# that live alongside this module.
+UNSUPPORTED_PROFILE_GENERATION_MODE = "UNSUPPORTED_PROFILE_GENERATION_MODE"
+PROFILE_FIELD_VALIDATION_FAILED = "PROFILE_FIELD_VALIDATION_FAILED"
+UNSUPPORTED_XML_PROFILE_FEATURE = "UNSUPPORTED_XML_PROFILE_FEATURE"
+MAP_PROFILE_REF_REQUIRED = "MAP_PROFILE_REF_REQUIRED"
+MAP_PROFILE_INDEX_UNAVAILABLE = "MAP_PROFILE_INDEX_UNAVAILABLE"
+MAP_FIELD_NOT_FOUND = "MAP_FIELD_NOT_FOUND"
+UNSUPPORTED_TRANSFORM_ROUTE = "UNSUPPORTED_TRANSFORM_ROUTE"
+
 
 # Supported data type sets — kept in sync with the matching Pydantic Literal
 # definitions in src/boomi_mcp/patterns/archetypes/database_to_api_sync.py.
@@ -476,6 +486,247 @@ def _walk_json_node(
 
 
 # ---------------------------------------------------------------------------
+# XML target profile generation (issue #26)
+# ---------------------------------------------------------------------------
+
+
+def profile_from_xml_schema(
+    payload_profile: Any,
+    *,
+    component_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Generate a profile.xml builder payload and target element-path index
+    from a caller-supplied XML profile tree.
+
+    Input: a dict with shape ``{format: 'xml', root: <XMLProfileNode>}``.
+    Every node has ``kind='element'``. Element with children → structural
+    (non-mappable); element with no children → mappable leaf with a data_type.
+
+    The returned ``field_index_by_path`` covers every node (structural and
+    leaf); ``mappable_paths`` contains only the simple leaf paths.
+
+    Logical path convention matches ``_walk_json_node``: repeating elements
+    (``max_occurs != 1``) append ``[]`` to the segment used by their
+    descendants (mirrors the JSON array convention). Issue #26 is element-
+    only: no attributes, namespaces, or schema imports are accepted at this
+    layer — those rejections live in the matching XML profile builder.
+    """
+    data = _as_mapping(payload_profile, "payload_profile")
+
+    fmt = data.get("format")
+    if fmt != "xml":
+        raise BuilderValidationError(
+            "payload_profile.format must be 'xml' for profile_from_xml_schema",
+            error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+            field="payload_profile.format",
+            hint="Use profile_from_json_schema for JSON profile trees.",
+            details={"format": fmt},
+        )
+
+    root_raw = data.get("root")
+    if root_raw is None:
+        raise BuilderValidationError(
+            "payload_profile.root is required",
+            error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+            field="payload_profile.root",
+        )
+    root_dict = _as_mapping(root_raw, "payload_profile.root")
+
+    if root_dict.get("kind") != "element":
+        raise BuilderValidationError(
+            "payload_profile.root.kind must be 'element'",
+            error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+            field="payload_profile.root.kind",
+            hint=(
+                "M2 XML profiles are element-only. Other XML constructs "
+                "(attributes, mixed content, namespaces) require the raw-XML "
+                "escape hatch or wait for issue #47 (XSD inference)."
+            ),
+            details={"kind": root_dict.get("kind")},
+        )
+
+    root_name = _validate_node_name(root_dict.get("name"), "payload_profile.root")
+
+    field_index: Dict[str, Dict[str, Any]] = {}
+    mappable_paths: List[str] = []
+    normalized_root = _walk_xml_node(
+        root_dict,
+        root_name,
+        "payload_profile.root",
+        field_index,
+        mappable_paths,
+        is_root=True,
+    )
+
+    return {
+        "generation_mode": "profile_from_xml_schema",
+        "component_type": "profile.xml",
+        "profile_type": "xml.generated",
+        "component_name": component_name,
+        "profile_config": {"format": "xml", "root": normalized_root},
+        "field_index_by_path": field_index,
+        "mappable_paths": mappable_paths,
+    }
+
+
+def _walk_xml_node(
+    node_raw: Any,
+    path: str,
+    field_loc: str,
+    field_index: Dict[str, Dict[str, Any]],
+    mappable_paths: List[str],
+    *,
+    is_root: bool = False,
+) -> Dict[str, Any]:
+    """Validate an XML element node at logical ``path``, recurse into
+    children, return the normalized profile_config tree entry."""
+    node = _as_mapping(node_raw, field_loc)
+    name = _validate_node_name(node.get("name"), field_loc)
+
+    kind = node.get("kind")
+    if kind != "element":
+        raise BuilderValidationError(
+            f"{field_loc}.kind={kind!r} is not supported; M2 XML profiles are "
+            "element-only",
+            error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+            field=f"{field_loc}.kind",
+            hint="Set kind='element' on every XML profile node.",
+            details={"kind": kind, "path": path},
+        )
+
+    children_raw = node.get("children")
+    data_type = node.get("data_type")
+    required = bool(node.get("required", False))
+    min_occurs = node.get("min_occurs", 1 if is_root else 0)
+    max_occurs = node.get("max_occurs", 1)
+
+    if not isinstance(min_occurs, int) or min_occurs < 0:
+        raise BuilderValidationError(
+            f"{field_loc}.min_occurs must be a non-negative integer",
+            error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+            field=f"{field_loc}.min_occurs",
+            details={"min_occurs": min_occurs, "path": path},
+        )
+    if not isinstance(max_occurs, int) or (max_occurs < 1 and max_occurs != -1):
+        raise BuilderValidationError(
+            f"{field_loc}.max_occurs must be a positive integer or -1 "
+            "(unbounded)",
+            error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+            field=f"{field_loc}.max_occurs",
+            details={"max_occurs": max_occurs, "path": path},
+        )
+
+    has_children = isinstance(children_raw, list) and len(children_raw) > 0
+    repeating = max_occurs != 1
+
+    if has_children:
+        if data_type is not None:
+            raise BuilderValidationError(
+                f"{field_loc} has children and must not declare data_type",
+                error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+                field=f"{field_loc}.data_type",
+                details={"path": path},
+            )
+        field_index[path] = {
+            "path": path,
+            "name": name,
+            "kind": "element",
+            "data_type": None,
+            "required": required,
+            "min_occurs": min_occurs,
+            "max_occurs": max_occurs,
+            "mappable": False,
+            "profile_component_type": "profile.xml",
+            "source": "xml_schema",
+        }
+
+        segment = f"{path}[]" if repeating else path
+        seen_child_names: Dict[str, int] = {}
+        normalized_children: List[Dict[str, Any]] = []
+        for child_index, child_raw in enumerate(children_raw):
+            child_field_loc = f"{field_loc}.children[{child_index}]"
+            child_data = _as_mapping(child_raw, child_field_loc)
+            child_name = _validate_node_name(child_data.get("name"), child_field_loc)
+            if child_name in seen_child_names:
+                raise BuilderValidationError(
+                    f"{child_field_loc}.name duplicates an earlier sibling",
+                    error_code=DUPLICATE_PROFILE_FIELD_PATH,
+                    field=f"{child_field_loc}.name",
+                    hint=(
+                        "Sibling XML elements must use unique names; logical "
+                        "paths would otherwise collide."
+                    ),
+                    details={
+                        "path": f"{segment}/{child_name}",
+                        "parent_path": path,
+                        "first_index": seen_child_names[child_name],
+                        "duplicate_index": child_index,
+                    },
+                )
+            seen_child_names[child_name] = child_index
+            child_path = f"{segment}/{child_name}"
+            normalized_children.append(
+                _walk_xml_node(
+                    child_raw,
+                    child_path,
+                    child_field_loc,
+                    field_index,
+                    mappable_paths,
+                )
+            )
+
+        normalized_node: Dict[str, Any] = {
+            "name": name,
+            "kind": "element",
+            "required": required,
+            "min_occurs": min_occurs,
+            "max_occurs": max_occurs,
+            "children": normalized_children,
+        }
+        return normalized_node
+
+    # Leaf element — must have a data_type.
+    if data_type not in _JSON_LEAF_TYPES:
+        raise BuilderValidationError(
+            f"{field_loc}.data_type={data_type!r} is not a supported XML leaf "
+            "data type",
+            error_code=UNSUPPORTED_PROFILE_FIELD_TYPE,
+            field=f"{field_loc}.data_type",
+            hint=(
+                "Supported XML leaf data types: "
+                + ", ".join(_JSON_LEAF_TYPES)
+                + ". XML stores boolean as character format."
+            ),
+            details={
+                "data_type": data_type,
+                "supported": list(_JSON_LEAF_TYPES),
+                "path": path,
+            },
+        )
+    field_index[path] = {
+        "path": path,
+        "name": name,
+        "kind": "element",
+        "data_type": data_type,
+        "required": required,
+        "min_occurs": min_occurs,
+        "max_occurs": max_occurs,
+        "mappable": True,
+        "profile_component_type": "profile.xml",
+        "source": "xml_schema",
+    }
+    mappable_paths.append(path)
+    return {
+        "name": name,
+        "kind": "element",
+        "data_type": data_type,
+        "required": required,
+        "min_occurs": min_occurs,
+        "max_occurs": max_occurs,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Direct mapping validation
 # ---------------------------------------------------------------------------
 
@@ -570,9 +821,10 @@ def validate_field_mappings(
                 error_code=PROFILE_FIELD_NOT_MAPPABLE,
                 field=f"mappings[{index}].target_path",
                 hint=(
-                    "Only kind='simple' JSON leaves are mappable destinations. "
-                    "Object and array nodes describe structure, not scalar "
-                    "values."
+                    "Only scalar leaves are mappable destinations: simple JSON "
+                    "leaves (kind='simple') or XML elements without children. "
+                    "Object / array / structural-element nodes describe shape, "
+                    "not scalar values."
                 ),
                 details={
                     "path": target_path,

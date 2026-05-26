@@ -2171,6 +2171,535 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Issue #26 (M2.6): generated JSON profile, generated XML profile, direct map
+# ---------------------------------------------------------------------------
+
+_COMPONENT_CREATE_PROFILE_JSON_GENERATED = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "profile.json",
+    "protocol": "json.generated",
+    "tool": "manage_component (action='create')",
+    "note": (
+        "Generated JSON profile. Builds a Boomi profile.json component from a "
+        "structured field tree (root object → entries → optional nested "
+        "object / repeating array nodes). M2 supports four scalar data types: "
+        "character, number, datetime, boolean. The builder emits a deterministic "
+        "JSONRootValue → JSONObject envelope with per-leaf field indexes that "
+        "the direct map builder (protocol='direct') consumes to render "
+        "<Mapping fromKey/toKey/fromKeyPath/toKeyPath/fromNamePath/toNamePath/>."
+    ),
+    "template": {
+        "component_type": "profile.json",
+        "profile_type": "json.generated",
+        "component_name": "<<profile name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "root": {
+            "name": "<<root node name>>",
+            "kind": "object",
+            "children": [
+                {
+                    "name": "<<leaf name>>",
+                    "kind": "simple",
+                    "data_type": "<<character | number | datetime | boolean>>",
+                    "required": False,
+                },
+            ],
+        },
+    },
+    "required": [
+        "component_type",
+        "profile_type",
+        "component_name",
+        "root",
+    ],
+    "defaults": {
+        "component_type": "profile.json",
+        "profile_type": "json.generated",
+    },
+    "supported_data_types": ["character", "number", "datetime", "boolean"],
+    "supported_kinds": ["simple", "object", "array"],
+    "field_tree_rules": [
+        "Root must have kind='object'.",
+        "Simple leaves carry a data_type and may NOT declare children.",
+        "Object and array nodes require non-empty children and may NOT carry data_type.",
+        "Reserved characters '/', '[', ']' are not allowed in node names "
+        "(they form logical path segments and array repetition markers).",
+        "Boomi JSON profiles synthesize a JSONObject wrapper named 'Object' "
+        "inside the root and inside every JSONArrayElement; logical leaf "
+        "paths use 'Root/list[]/key' but the emitted namePath is "
+        "'Root/Object/list/Array/list/Object/key'.",
+    ],
+    "depends_on_requirements": [
+        "No external dependencies. Generated profiles are self-contained.",
+        "Downstream transform.map components reference this profile via "
+        "'$ref:KEY' in their source_profile_id / target_profile_id and add "
+        "the key to their depends_on.",
+    ],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+        "api_key",
+        "credentials",
+        "authorization",
+        "bearer",
+    ],
+    "error_codes": {
+        "UNSUPPORTED_PROFILE_GENERATION_MODE": (
+            "profile_type is not 'json.generated'"
+        ),
+        "PROFILE_FIELD_VALIDATION_FAILED": (
+            "shape / cross-field issue in the field tree"
+        ),
+        "PROFILE_GENERATION_VALIDATION_FAILED": (
+            "malformed root or node validated by profile_from_json_schema"
+        ),
+        "DUPLICATE_PROFILE_FIELD_PATH": (
+            "two siblings inside an object/array share the same name"
+        ),
+        "UNSUPPORTED_PROFILE_FIELD_TYPE": (
+            "data_type outside character/number/datetime/boolean"
+        ),
+        "INVALID_PROFILE_FIELD_PATH": (
+            "node name contains '/', '[' or ']' (reserved path characters)"
+        ),
+        "PLAINTEXT_SECRET_REJECTED": (
+            "a key in the config dict matches a secret-shaped substring"
+        ),
+    },
+    "gotchas": [
+        (
+            "Boolean leaves emit an empty <DataFormat/> tag (matches live "
+            "Boomi JSON profile reference). Other types use ProfileCharacterFormat / "
+            "ProfileNumberFormat / ProfileDateFormat children."
+        ),
+        (
+            "Arrays always wrap the array element's fields in a synthetic "
+            "JSONObject (matches the live profile.json envelope). Arrays of "
+            "pure scalars are not modeled in M2; wrap in an object with one "
+            "scalar entry to express the same shape."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Declare the JSON field tree (root object, entries, optional nested object/array).",
+        "2. Plan this profile component standalone or alongside a transform.map.",
+        "3. Apply — the builder emits deterministic dense keys (starting at 1) "
+        "and exposes a per-leaf path index for downstream maps.",
+    ],
+    "update_note": (
+        "Field-level updates are not supported yet. To revise, recreate via "
+        "manage_component or use the raw-XML escape hatch."
+    ),
+    "example": {
+        "key": "request_json_profile",
+        "type": "profile.json",
+        "action": "create",
+        "name": "<<profile display name>>",
+        "config": {
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": "<<profile display name>>",
+            "root": {
+                "name": "<<root name>>",
+                "kind": "object",
+                "children": [
+                    {
+                        "name": "<<scalar leaf>>",
+                        "kind": "simple",
+                        "data_type": "<<character | number | datetime | boolean>>",
+                    },
+                ],
+            },
+        },
+        "_example_note": (
+            "Placeholder values only. Replace the angle-bracket markers with "
+            "your task-specific tree. No canned JSON payloads are shipped here."
+        ),
+    },
+    "out_of_scope": {
+        "inferred_from_sample_json": (
+            "Inferring the field tree from a sample JSON document is tracked "
+            "by issue #47."
+        ),
+        "edi_flatfile_profiles": (
+            "EDI and flat-file profile families are deferred to later issues."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_PROFILE_XML_GENERATED = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "profile.xml",
+    "protocol": "xml.generated",
+    "tool": "manage_component (action='create')",
+    "note": (
+        "Generated XML profile (element-only). Builds a Boomi profile.xml "
+        "component from a structured element tree where every node has "
+        "kind='element'. Each element either contains children (structural) "
+        "or carries a data_type (leaf). M2 supports four leaf data types: "
+        "character, number, datetime, boolean (boolean stores as character "
+        "format, mirroring live Boomi XML profile shape). Element-only — "
+        "attributes, namespaces, and schema imports are rejected with "
+        "UNSUPPORTED_XML_PROFILE_FEATURE; use the raw-XML escape hatch or "
+        "wait for issue #47 (XSD/sample-XML inference)."
+    ),
+    "template": {
+        "component_type": "profile.xml",
+        "profile_type": "xml.generated",
+        "component_name": "<<profile name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "root": {
+            "name": "<<root element name>>",
+            "kind": "element",
+            "min_occurs": 1,
+            "max_occurs": 1,
+            "children": [
+                {
+                    "name": "<<row element>>",
+                    "kind": "element",
+                    "max_occurs": -1,
+                    "children": [
+                        {
+                            "name": "<<leaf>>",
+                            "kind": "element",
+                            "data_type": "<<character | number | datetime | boolean>>",
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    "required": [
+        "component_type",
+        "profile_type",
+        "component_name",
+        "root",
+    ],
+    "defaults": {
+        "component_type": "profile.xml",
+        "profile_type": "xml.generated",
+        "min_occurs_root": 1,
+        "max_occurs_root": 1,
+        "min_occurs_child": 0,
+        "max_occurs_child": 1,
+    },
+    "supported_data_types": ["character", "number", "datetime", "boolean"],
+    "supported_kinds": ["element"],
+    "field_tree_rules": [
+        "Every node must use kind='element' (M2 is element-only).",
+        "Element with children = structural (no data_type); element without "
+        "children = leaf (data_type required).",
+        "max_occurs accepts a positive integer or -1 (unbounded). min_occurs "
+        "is a non-negative integer.",
+        "Reserved characters '/', '[', ']' are not allowed in node names.",
+        "Repeating elements (max_occurs != 1) append '[]' to the logical "
+        "path segment that their descendants use (matches the JSON profile "
+        "convention).",
+    ],
+    "unsupported_features": [
+        "attributes",
+        "namespaces",
+        "namespace_uri",
+        "xsd",
+        "schema_import",
+    ],
+    "unsupported_features_note": (
+        "Element-only generation. For complex XML profiles (attributes, "
+        "namespaces, schema imports), use the raw-XML escape hatch "
+        "(config={'xml': '...'}) or wait for issue #47."
+    ),
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+        "api_key",
+        "credentials",
+        "authorization",
+        "bearer",
+    ],
+    "error_codes": {
+        "UNSUPPORTED_PROFILE_GENERATION_MODE": (
+            "profile_type is not 'xml.generated'"
+        ),
+        "UNSUPPORTED_XML_PROFILE_FEATURE": (
+            "config carries an attribute/namespace/schema-import key not "
+            "supported by element-only M2 generation"
+        ),
+        "PROFILE_FIELD_VALIDATION_FAILED": (
+            "shape / cross-field issue in the element tree"
+        ),
+        "PROFILE_GENERATION_VALIDATION_FAILED": (
+            "malformed root or node validated by profile_from_xml_schema"
+        ),
+        "DUPLICATE_PROFILE_FIELD_PATH": (
+            "two sibling elements share the same name"
+        ),
+        "UNSUPPORTED_PROFILE_FIELD_TYPE": (
+            "data_type outside character/number/datetime/boolean"
+        ),
+        "INVALID_PROFILE_FIELD_PATH": (
+            "element name contains '/', '[' or ']' (reserved path characters)"
+        ),
+        "PLAINTEXT_SECRET_REJECTED": (
+            "a key in the config dict matches a secret-shaped substring"
+        ),
+    },
+    "depends_on_requirements": [
+        "No external dependencies. Generated profiles are self-contained.",
+    ],
+    "recommended_workflow": [
+        "1. Declare the XML element tree (root element, nested elements, leaves with data_type).",
+        "2. Plan this profile component standalone or alongside a transform.map.",
+        "3. Apply — the builder emits deterministic dense keys and exposes a "
+        "per-leaf path index for downstream maps.",
+    ],
+    "update_note": (
+        "Field-level updates are not supported yet. To revise, recreate via "
+        "manage_component or use the raw-XML escape hatch."
+    ),
+    "example": {
+        "key": "shipping_xml_profile",
+        "type": "profile.xml",
+        "action": "create",
+        "name": "<<profile display name>>",
+        "config": {
+            "component_type": "profile.xml",
+            "profile_type": "xml.generated",
+            "component_name": "<<profile display name>>",
+            "root": {
+                "name": "<<root>>",
+                "kind": "element",
+                "min_occurs": 1,
+                "max_occurs": 1,
+                "children": [
+                    {
+                        "name": "<<leaf>>",
+                        "kind": "element",
+                        "data_type": "<<character | number | datetime | boolean>>",
+                    },
+                ],
+            },
+        },
+        "_example_note": (
+            "Placeholder values only. Replace the angle-bracket markers with "
+            "your task-specific element tree. No canned XML envelopes are "
+            "shipped here."
+        ),
+    },
+    "out_of_scope": {
+        "inferred_from_xsd": (
+            "Inferring the element tree from an XSD / sample XML is tracked "
+            "by issue #47."
+        ),
+        "attributes_and_namespaces": (
+            "Element attributes, mixed content, and namespace declarations "
+            "are deferred; use the raw-XML escape hatch for now."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "transform.map",
+    "protocol": "direct",
+    "tool": "manage_component (action='create')",
+    "note": (
+        "Direct profile-to-profile transform.map. Renders one <Mapping/> per "
+        "source/target leaf pair. M2 is direct-only — function (#40), script "
+        "(#41), XSLT (#42), lookup, expression, and default routes are "
+        "rejected at plan time with structured pointers. Source and target "
+        "profile references must point at in-spec profile.json / profile.xml / "
+        "profile.db components via '$ref:KEY'; literal existing-profile UUIDs "
+        "are rejected with MAP_PROFILE_INDEX_UNAVAILABLE (issue #47 owns "
+        "existing-profile schema discovery)."
+    ),
+    "template": {
+        "component_type": "transform.map",
+        "map_type": "direct",
+        "component_name": "<<map name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "source_profile_id": "$ref:<<source profile key>>",
+        "source_profile_type": "<<profile.db | profile.json | profile.xml>>",
+        "target_profile_id": "$ref:<<target profile key>>",
+        "target_profile_type": "<<profile.db | profile.json | profile.xml>>",
+        "field_mappings": [
+            {
+                "source_path": "<<source logical path>>",
+                "target_path": "<<target logical path>>",
+            },
+        ],
+    },
+    "required": [
+        "component_type",
+        "map_type",
+        "component_name",
+        "source_profile_id",
+        "source_profile_type",
+        "target_profile_id",
+        "target_profile_type",
+        "field_mappings",
+    ],
+    "defaults": {
+        "component_type": "transform.map",
+        "map_type": "direct",
+    },
+    "supported_map_types": ["direct"],
+    "unsupported_routes": {
+        "functions": "#40 (map_function builder)",
+        "scripts": "#41 (map_script builder)",
+        "xslt": "#42 (XSLT transform builder)",
+        "default_values": "#40 (defaults bind via constant function)",
+        "lookup": "#40 (lookups bind via lookup function)",
+        "expression": "#40 (expressions bind via custom function)",
+    },
+    "unsupported_routes_note": (
+        "Direct maps in M2.6 are profile-to-profile only. Any config key "
+        "naming a deferred route fails plan-time with "
+        "UNSUPPORTED_TRANSFORM_ROUTE plus a pointer to the future issue."
+    ),
+    "depends_on_requirements": [
+        "Include source_profile_id's $ref key in depends_on so the source "
+        "profile component runs first.",
+        "Include target_profile_id's $ref key in depends_on so the target "
+        "profile component runs first.",
+        "Both profiles must be in-spec — literal existing-profile UUIDs "
+        "produce MAP_PROFILE_INDEX_UNAVAILABLE because issue #26 does not "
+        "parse arbitrary Boomi profile XML (issue #47 owns that path).",
+    ],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+        "api_key",
+        "credentials",
+        "authorization",
+        "bearer",
+    ],
+    "error_codes": {
+        "MAP_PROFILE_REF_REQUIRED": (
+            "source_profile_id or target_profile_id missing / blank"
+        ),
+        "MAP_PROFILE_INDEX_UNAVAILABLE": (
+            "literal existing-profile UUID supplied without an in-spec "
+            "generated profile component to index (deferred to #47)"
+        ),
+        "MAP_FIELD_NOT_FOUND": (
+            "source_path or target_path is not declared in the corresponding "
+            "profile's field index"
+        ),
+        "DUPLICATE_TARGET_MAPPING": (
+            "two field_mappings entries bind the same target_path"
+        ),
+        "UNSUPPORTED_TRANSFORM_ROUTE": (
+            "config declares a function/script/xslt/lookup/expression/default "
+            "route deferred to #40/#41/#42"
+        ),
+        "PROFILE_FIELD_NOT_MAPPABLE": (
+            "source_path or target_path resolves to a structural node "
+            "(object/array/non-leaf element)"
+        ),
+        "PROFILE_FIELD_VALIDATION_FAILED": (
+            "shape / cross-field issue in the map config"
+        ),
+        "PLAINTEXT_SECRET_REJECTED": (
+            "a key in the config dict matches a secret-shaped substring"
+        ),
+    },
+    "gotchas": [
+        (
+            "$ref:KEY tokens are resolved at apply time. The plan-time "
+            "validator uses the referenced component's config to compute "
+            "the field index, then re-checks every source_path / target_path "
+            "against the index. Renaming a referenced profile component "
+            "after planning requires a fresh plan."
+        ),
+        (
+            "Boomi maps reject duplicate target bindings — only one direct "
+            "mapping may write each destination leaf. To fan in multiple "
+            "sources, use a map_function (issue #40) when it lands."
+        ),
+        (
+            "Source and target profile types may differ "
+            "(profile.db→profile.json, profile.json→profile.xml, etc.). "
+            "The builder reads the matching profile builder's "
+            "build_field_index() to render fromKeyPath/toKeyPath consistently."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Create the source profile component (profile.db / profile.json / profile.xml).",
+        "2. Create the target profile component (profile.db / profile.json / profile.xml).",
+        "3. Plan this map with source_profile_id='$ref:<src key>', "
+        "target_profile_id='$ref:<tgt key>', and depends_on=[<src>, <tgt>].",
+        "4. Apply — $ref tokens resolve to real UUIDs, and the map XML is "
+        "emitted with deterministic fromKey/toKey path references.",
+    ],
+    "update_note": (
+        "Field-level updates are not supported yet. To revise, recreate via "
+        "manage_component or use the raw-XML escape hatch."
+    ),
+    "example": {
+        "key": "db_to_json_map",
+        "type": "transform.map",
+        "action": "create",
+        "name": "<<map display name>>",
+        "depends_on": ["<<source profile key>>", "<<target profile key>>"],
+        "config": {
+            "component_type": "transform.map",
+            "map_type": "direct",
+            "component_name": "<<map display name>>",
+            "source_profile_id": "$ref:<<source profile key>>",
+            "source_profile_type": "<<profile.db | profile.json | profile.xml>>",
+            "target_profile_id": "$ref:<<target profile key>>",
+            "target_profile_type": "<<profile.db | profile.json | profile.xml>>",
+            "field_mappings": [
+                {
+                    "source_path": "<<source logical path>>",
+                    "target_path": "<<target logical path>>",
+                },
+            ],
+        },
+        "_example_note": (
+            "Placeholder values only. Replace angle-bracket markers with "
+            "task-specific keys / paths. No canned mappings are shipped here."
+        ),
+    },
+    "out_of_scope": {
+        "map_function": (
+            "Function steps (trim / concat / lookup / custom expression) are "
+            "tracked by issue #40."
+        ),
+        "map_script": (
+            "Groovy / JavaScript map scripts are tracked by issue #41."
+        ),
+        "xslt": (
+            "XSLT transform components are tracked by issue #42."
+        ),
+        "existing_profile_index_discovery": (
+            "Indexing arbitrary existing-profile XML to support literal-UUID "
+            "profile refs is tracked by issue #47."
+        ),
+    },
+}
+
+
 _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
     "resource_type": "component",
     "operation": "create",
@@ -3334,6 +3863,36 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
                     "valid_protocols": _COMPONENT_CREATE_PROFILE_DB_OVERVIEW["available_protocols"],
                 }
             return {"_success": True, **_COMPONENT_CREATE_PROFILE_DB_OVERVIEW}
+        if component_type == "profile.json":
+            if protocol == "json.generated":
+                return {"_success": True, **_COMPONENT_CREATE_PROFILE_JSON_GENERATED}
+            if protocol:
+                return {
+                    "_success": False,
+                    "error": f"Unknown profile.json protocol: {protocol}",
+                    "valid_protocols": ["json.generated"],
+                }
+            return {"_success": True, **_COMPONENT_CREATE_PROFILE_JSON_GENERATED}
+        if component_type == "profile.xml":
+            if protocol == "xml.generated":
+                return {"_success": True, **_COMPONENT_CREATE_PROFILE_XML_GENERATED}
+            if protocol:
+                return {
+                    "_success": False,
+                    "error": f"Unknown profile.xml protocol: {protocol}",
+                    "valid_protocols": ["xml.generated"],
+                }
+            return {"_success": True, **_COMPONENT_CREATE_PROFILE_XML_GENERATED}
+        if component_type == "transform.map":
+            if protocol == "direct":
+                return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_DIRECT}
+            if protocol:
+                return {
+                    "_success": False,
+                    "error": f"Unknown transform.map protocol: {protocol}",
+                    "valid_protocols": ["direct"],
+                }
+            return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_DIRECT}
         if component_type == "connector-action":
             if protocol == "database.get":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}

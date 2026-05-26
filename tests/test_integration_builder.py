@@ -3702,3 +3702,244 @@ class TestBuildPlanProcessFlowRefTypes:
             f"{process_action_type!r} — copies of both examples will hit "
             f"PROCESS_REF_TYPE_MISMATCH at plan time"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #26 — profile.json / profile.xml / transform.map plan routing
+# ---------------------------------------------------------------------------
+
+
+def _json_profile_comp(key="json_profile", name="Test JSON Profile", **config_overrides):
+    cfg = {
+        "component_type": "profile.json",
+        "profile_type": "json.generated",
+        "component_name": name,
+        "root": {
+            "name": "Root",
+            "kind": "object",
+            "children": [
+                {"name": "a", "kind": "simple", "data_type": "character"},
+                {"name": "list", "kind": "array", "children": [
+                    {"name": "key", "kind": "simple", "data_type": "character"},
+                ]},
+            ],
+        },
+    }
+    cfg.update(config_overrides)
+    return IntegrationComponentSpec(
+        key=key, type="profile.json", action="create", name=name, config=cfg,
+    )
+
+
+def _xml_profile_comp(key="xml_profile", name="Test XML Profile", **config_overrides):
+    cfg = {
+        "component_type": "profile.xml",
+        "profile_type": "xml.generated",
+        "component_name": name,
+        "root": {
+            "name": "rows",
+            "kind": "element",
+            "max_occurs": 1,
+            "children": [
+                {"name": "row", "kind": "element", "max_occurs": -1, "children": [
+                    {"name": "key", "kind": "element", "data_type": "character"},
+                ]},
+            ],
+        },
+    }
+    cfg.update(config_overrides)
+    return IntegrationComponentSpec(
+        key=key, type="profile.xml", action="create", name=name, config=cfg,
+    )
+
+
+def _direct_map_comp(
+    key="json_to_json_map",
+    name="Test Map",
+    source_ref_key="json_profile",
+    target_ref_key="json_profile",
+    source_type="profile.json",
+    target_type="profile.json",
+    field_mappings=None,
+    **config_overrides,
+):
+    cfg = {
+        "component_type": "transform.map",
+        "map_type": "direct",
+        "component_name": name,
+        "source_profile_id": f"$ref:{source_ref_key}",
+        "source_profile_type": source_type,
+        "target_profile_id": f"$ref:{target_ref_key}",
+        "target_profile_type": target_type,
+        "field_mappings": field_mappings or [
+            {"source_path": "Root/a", "target_path": "Root/a"},
+        ],
+    }
+    cfg.update(config_overrides)
+    return IntegrationComponentSpec(
+        key=key, type="transform.map", action="create", name=name, config=cfg,
+        depends_on=[source_ref_key, target_ref_key] if source_ref_key != target_ref_key else [source_ref_key],
+    )
+
+
+class TestBuildPlanGeneratedProfileJson:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_json_profile_routes_through_builder(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([_json_profile_comp()]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step["route"] == "profile_builder_or_xml"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_invalid_json_profile_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _json_profile_comp()
+        bad.config["root"]["children"].append(
+            {"name": "x", "kind": "simple", "data_type": "blob"}
+        )
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_PROFILE_FIELD_TYPE"
+
+    @patch(_PATCH_TARGET)
+    def test_wrong_profile_type_errors_with_unsupported_mode(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _json_profile_comp()
+        bad.config["profile_type"] = "database.read"
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_PROFILE_GENERATION_MODE"
+
+    @patch(_PATCH_TARGET)
+    def test_secret_shaped_key_redacted(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _json_profile_comp()
+        bad.config["password"] = "sk_live_LEAK"
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = plan["steps"][0]
+        assert step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        # The redacted value must appear in the echoed spec (the original
+        # value is replaced with [REDACTED]).
+        spec_blob = str(plan["integration_spec"])
+        assert "sk_live_LEAK" not in spec_blob
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_bypass_preserved(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _json_profile_comp()
+        bad.config = {
+            "component_type": "profile.json",
+            "xml": "<bns:Component>...</bns:Component>",
+        }
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = plan["steps"][0]
+        # Raw XML bypasses structured validation — should plan as create
+        # without builder errors.
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+
+class TestBuildPlanGeneratedProfileXml:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_xml_profile_routes_through_builder(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([_xml_profile_comp()]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "create"
+        assert step["route"] == "profile_builder_or_xml"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_xml_feature_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _xml_profile_comp()
+        bad.config["root"]["children"][0]["attributes"] = [{"name": "id"}]
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_XML_PROFILE_FEATURE"
+
+
+class TestBuildPlanTransformMapDirect:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_in_spec_map_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _json_profile_comp(),
+            _direct_map_comp(),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        assert map_step["planned_action"] == "create"
+        assert map_step["route"] == "map_builder_or_xml"
+        assert "validation_error" not in map_step
+
+    @patch(_PATCH_TARGET)
+    def test_literal_uuid_profile_id_errors_with_index_unavailable(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _direct_map_comp(source_ref_key="json_profile", target_ref_key="json_profile")
+        # Replace source_profile_id with a literal UUID (no $ref).
+        bad.config["source_profile_id"] = "00000000-1111-2222-3333-444444444444"
+        plan = _build_plan(MagicMock(), _build_config([_json_profile_comp(), bad]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "MAP_PROFILE_INDEX_UNAVAILABLE"
+
+    @patch(_PATCH_TARGET)
+    def test_unknown_target_path_errors_with_map_field_not_found(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _direct_map_comp(field_mappings=[
+            {"source_path": "Root/a", "target_path": "Root/missing"},
+        ])
+        plan = _build_plan(MagicMock(), _build_config([_json_profile_comp(), bad]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "MAP_FIELD_NOT_FOUND"
+
+    @patch(_PATCH_TARGET)
+    def test_duplicate_target_path_errors_with_duplicate_target_mapping(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _direct_map_comp(field_mappings=[
+            {"source_path": "Root/a", "target_path": "Root/a"},
+            {"source_path": "Root/list[]/key", "target_path": "Root/a"},
+        ])
+        plan = _build_plan(MagicMock(), _build_config([_json_profile_comp(), bad]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "DUPLICATE_TARGET_MAPPING"
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_transform_route_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _direct_map_comp()
+        bad.config["functions"] = ["foo"]
+        plan = _build_plan(MagicMock(), _build_config([_json_profile_comp(), bad]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "UNSUPPORTED_TRANSFORM_ROUTE"
+
+    @patch(_PATCH_TARGET)
+    def test_xml_to_json_map_with_in_spec_profiles_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _direct_map_comp(
+                source_ref_key="xml_profile",
+                target_ref_key="json_profile",
+                source_type="profile.xml",
+                target_type="profile.json",
+                field_mappings=[
+                    {"source_path": "rows/row[]/key", "target_path": "Root/list[]/key"},
+                ],
+            ),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "json_to_json_map")
+        assert map_step["planned_action"] == "create"
+        assert "validation_error" not in map_step

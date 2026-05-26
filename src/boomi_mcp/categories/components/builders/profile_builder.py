@@ -375,6 +375,50 @@ class _DatabaseReadProfileBuilderBase:
         return None
 
     # ------------------------------------------------------------------
+    # Field index (issue #26: consumed by DirectMapBuilder)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def build_field_index(
+        cls, config: Dict[str, Any]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return ``{output_field_name: {key, key_path, name_path, ...}}``.
+
+        Keys are dense integers starting at 5, matching the allocation in
+        ``build()`` (DBStatement=2, DBFields=3, DBParameters=4, then output
+        fields). The direct map builder (#26) uses this index to render
+        ``<Mapping fromKey/toKey fromKeyPath/toKeyPath fromNamePath/toNamePath/>``
+        attributes that reference DB profile fields.
+
+        Caller is responsible for validating the config first via
+        ``validate_config`` — this method assumes a well-formed
+        ``output_fields`` list.
+        """
+        index: Dict[str, Dict[str, Any]] = {}
+        next_key = 5
+        for field in config.get("output_fields") or []:
+            if not isinstance(field, dict):
+                continue
+            name_raw = field.get("name")
+            if not name_raw or not str(name_raw).strip():
+                continue
+            name = str(name_raw).strip()
+            data_type = field.get("data_type", cls.DEFAULT_FIELD_DATA_TYPE)
+            index[name] = {
+                "path": name,
+                "name": name,
+                "key": next_key,
+                "key_path": f"*[@key='2']/*[@key='3']/*[@key='{next_key}']",
+                "name_path": f"Statement/Fields/{name}",
+                "data_type": data_type,
+                "kind": "simple",
+                "required": bool(field.get("mandatory", False)),
+                "mappable": True,
+            }
+            next_key += 1
+        return index
+
+    # ------------------------------------------------------------------
     # XML rendering helpers (shared)
     # ------------------------------------------------------------------
 
@@ -708,10 +752,20 @@ class DatabaseStoredProcedureReadProfileBuilder(_DatabaseReadProfileBuilderBase)
 
 # Keyed by (component_type, profile_type). Mirrors the pattern of
 # CONNECTOR_ACTION_BUILDERS in connector_builder.py.
+#
+# Imports are at module bottom (after the existing builders are defined) to
+# avoid circular imports — the new issue #26 builders may eventually pull
+# helpers back from this module.
+from .json_profile_builder import JSONGeneratedProfileBuilder  # noqa: E402
+from .xml_profile_builder import XMLGeneratedProfileBuilder  # noqa: E402
+
+
 PROFILE_BUILDERS: Dict[Tuple[str, str], type] = {
     ("profile.db", "database.read"): DatabaseReadProfileBuilder,
     ("profile.db", "database.stored_procedure_read"):
         DatabaseStoredProcedureReadProfileBuilder,
+    ("profile.json", "json.generated"): JSONGeneratedProfileBuilder,
+    ("profile.xml", "xml.generated"): XMLGeneratedProfileBuilder,
 }
 
 
