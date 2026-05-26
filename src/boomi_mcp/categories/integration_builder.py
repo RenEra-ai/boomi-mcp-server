@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from uuid import uuid4
 
 # Matches `subType="database"` and `subType='database'` with any (or no)
@@ -1239,9 +1239,14 @@ def _execute_component(
                 "error_code": "UNSUPPORTED_TRANSFORM_ROUTE",
                 "error": (
                     f"map_type {map_type!r} is not supported for transform.map. "
-                    "Supported: direct."
+                    "Supported: direct, function, map_function."
                 ),
                 "field": "map_type",
+                "hint": (
+                    "Use map_type='direct' for profile-to-profile direct field "
+                    "mappings; use map_type='function' for structured "
+                    "map-function primitives (#40)."
+                ),
             }
         raw_comp_config = comp.config or {}
         source_index = _resolve_map_profile_index(
@@ -1872,13 +1877,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     if map_builder_instance is None:
                         gen_profile_err = BuilderValidationError(
                             f"map_type {map_type!r} is not supported for "
-                            "transform.map. Supported: direct.",
+                            "transform.map. Supported: direct, function, "
+                            "map_function.",
                             error_code="UNSUPPORTED_TRANSFORM_ROUTE",
                             field="map_type",
                             hint=(
-                                "Use map_type='direct' for #26 profile-to-"
-                                "profile mappings. function/script/xslt "
-                                "routes are tracked by #40/#41/#42."
+                                "Use map_type='direct' for profile-to-profile "
+                                "mappings or map_type='function' for "
+                                "structured map-function primitives (#40). "
+                                "script.mapping/XSLT remain tracked by "
+                                "#41/#42."
                             ),
                         )
                     else:
@@ -2061,6 +2069,42 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
 
         if validation_error is not None:
             step["validation_error"] = validation_error
+
+        # Issue #40: surface the function route explicitly in plan output so
+        # plan readers can distinguish direct maps from function maps without
+        # peeking at the raw config. Counts come from the same effective_config
+        # the validator saw (which has $ref tokens resolved or kept verbatim).
+        if comp.type == "transform.map":
+            map_summary_config = raw_config or {}
+            map_type_value = (
+                str(map_summary_config.get("map_type") or "").strip().lower() or None
+            )
+            field_mappings_value = map_summary_config.get("field_mappings") or []
+            function_mappings_value = map_summary_config.get("function_mappings") or []
+            function_types_seen: List[str] = []
+            seen_function_types: set = set()
+            for fm in function_mappings_value if isinstance(function_mappings_value, list) else []:
+                if isinstance(fm, Mapping):
+                    ft = fm.get("function_type")
+                    if isinstance(ft, str):
+                        normalized = ft.strip().lower()
+                        if normalized and normalized not in seen_function_types:
+                            seen_function_types.add(normalized)
+                            function_types_seen.append(normalized)
+            step["transform_summary"] = {
+                "map_type": map_type_value,
+                "direct_mapping_count": (
+                    len(field_mappings_value)
+                    if isinstance(field_mappings_value, list)
+                    else 0
+                ),
+                "function_count": (
+                    len(function_mappings_value)
+                    if isinstance(function_mappings_value, list)
+                    else 0
+                ),
+                "function_types_used": function_types_seen,
+            }
 
         steps.append(step)
 

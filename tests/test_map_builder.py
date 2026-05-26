@@ -113,8 +113,10 @@ def test_registry_resolves_direct_map_builder():
 
 
 def test_registry_returns_none_for_unknown_map_type():
-    assert get_map_builder("transform.map", "function") is None
+    # Note: ("transform.map", "function") is wired by #40 (MapFunctionBuilder);
+    # this test only asserts truly-unknown pairs return None.
     assert get_map_builder("transform.unknown", "direct") is None
+    assert get_map_builder("transform.map", "totally-bogus") is None
     assert get_map_builder("", "") is None
 
 
@@ -252,12 +254,22 @@ def test_validate_config_allows_same_source_to_multiple_targets():
 @pytest.mark.parametrize(
     "key,expected_pointer",
     [
-        ("functions", "#40"),
+        # Raw-XML escape hatches still reject regardless of builder.
+        ("functions", "structured function_mappings"),
+        ("function_steps", "structured function_mappings"),
         ("scripts", "#41"),
+        ("map_scripts", "#41"),
         ("xslt", "#42"),
-        ("default_values", "#40"),
-        ("lookup", "#40"),
-        ("expression", "#40"),
+        ("xslt_source", "#42"),
+        ("expression", "#41"),
+        ("expressions", "#41"),
+        # Route-class keys: direct builder routes the caller at the function
+        # builder instead of the bare future-issue pointer.
+        ("function_mappings", "map_type='function'"),
+        ("default_values", "function_type='default_value'"),
+        ("defaults", "function_type='default_value'"),
+        ("lookup", "deferred from #40"),
+        ("lookups", "deferred from #40"),
     ],
 )
 def test_validate_config_rejects_unsupported_transform_route(key, expected_pointer):
