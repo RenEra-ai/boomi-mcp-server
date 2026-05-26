@@ -1149,6 +1149,42 @@ def test_profile_node_name_rejection_covers_root_node():
     _assert_path_match(paths, "target.payload_profile.root")
 
 
+def test_db_result_field_name_rejects_reserved_path_chars():
+    """Codex r1 (issue #43): DBResultField.name must reject '/', '[', ']' at
+    parameter-validation time so callers see a structured PARAM_VALIDATION_FAILED
+    rather than an opaque ARCHETYPE_BUILD_FAILED from the issue #43 profile
+    generation helper. DB field names become source profile logical paths;
+    reserved chars would collide with the Root/list[]/key convention.
+    """
+    for reserved in ("a/b", "a[", "a]"):
+        payload = _valid_minimal()
+        payload["source"]["read_operation"]["result_schema"]["fields"] = [
+            {"name": reserved, "data_type": "character"},
+        ]
+        # The transform mapping must reference the new field name too, so we
+        # do not trip the cross-validator on a missing source reference.
+        payload["transform"]["operations"] = [
+            {
+                "operation_type": "direct",
+                "source_field": reserved,
+                "target_path": "Root/target_a",
+            },
+        ]
+        result = _build(payload)
+        # The point of the fix: structured field-error envelope, NOT
+        # ARCHETYPE_BUILD_FAILED.
+        assert result["_success"] is False, result
+        assert result["error_code"] == "PARAM_VALIDATION_FAILED", (
+            f"expected PARAM_VALIDATION_FAILED for name={reserved!r}, got {result!r}"
+        )
+        paths = [fe["field_path"] for fe in result["field_errors"]]
+        _assert_path_match(paths, "source.read_operation.result_schema")
+        assert any(
+            "reserved path characters" in fe["message"]
+            for fe in result["field_errors"]
+        ), f"expected reserved-chars rejection on DB field, got {result['field_errors']!r}"
+
+
 # ---------------------------------------------------------------------------
 # Codex r1 review: reject plaintext secret-shaped keys in map_function.parameters
 # (the only schema-opaque dict the archetype echoes back in the emitted spec)
