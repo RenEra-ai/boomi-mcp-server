@@ -27,6 +27,9 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Set, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ...categories.components.builders.profile_generation import (
+    build_profile_generation_artifacts,
+)
 from ...models.integration_models import IntegrationSpecV1
 from ..base import ArchetypePattern, PatternExample, PatternKind, PatternMetadata
 
@@ -2101,6 +2104,24 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     summary["documentation_hint"] = op.documentation_hint
                 operation_summaries.append(summary)
 
+        # Issue #43 (M2.5b): build deterministic, builder-ready profile field
+        # payloads + path indexes from the validated DB result schema and JSON
+        # payload profile tree, plus normalized direct mapping metadata. By the
+        # time we reach emit_spec all the structural validation has already run
+        # (Pydantic + _validate_transform_refs), so these helpers are expected to
+        # succeed for any payload that passed validate_parameters; they are still
+        # invoked through the same code path issue #26 / #47 will use, so any
+        # divergence between the strict contract and the generation helpers
+        # surfaces immediately rather than as a downstream builder failure.
+        gen_artifacts = build_profile_generation_artifacts(
+            result_schema,
+            payload_profile,
+            direct_operations=[
+                op for op in operations
+                if isinstance(op, DirectTransformOperation)
+            ],
+        )
+
         # Flow summaries — labels + new schema/operation metadata.
         flows: List[Dict[str, Any]] = [
             {
@@ -2121,6 +2142,12 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "source_schema": source_schema_summary,
                 "target_payload_profile": target_profile_summary,
                 "operations": operation_summaries,
+                # Issue #43 (M2.5b): generated profile field payloads + indexes
+                # consumed by issue #26 / #40 / #41 builders without
+                # reimplementing field indexing per builder.
+                "source_profile_generation": gen_artifacts["source"],
+                "target_profile_generation": gen_artifacts["target"],
+                "direct_field_mappings": gen_artifacts["direct_mappings"],
             },
             {
                 "key": "send",
@@ -2191,7 +2218,12 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "M2 uses caller-declared DB read result fields and a "
                     "caller-supplied JSON profile tree for the REST target; "
                     "no SQL parsing, DB metadata introspection, row sampling, "
-                    "or Boomi browse is performed by this archetype."
+                    "or Boomi browse is performed by this archetype. Issue "
+                    "#43 generates deterministic source/target profile field "
+                    "indexes and normalized direct mapping metadata on the "
+                    "transform flow for downstream profile/map builders "
+                    "(issue #26); metadata/sample inference is deferred to "
+                    "issue #47."
                 ),
                 "transform_routes": {
                     "direct": "#26",
