@@ -160,10 +160,14 @@ def _emit_simple_lookup_configuration(parameters: Mapping[str, object]) -> str:
             f'<ref value="{_escape_xml(str(ref2_value))}"/>'
             "</Values></row>"
         )
+    # The Output index inside the SimpleLookup configuration must match the
+    # FunctionStep's outer <Output key="..."> so Boomi binds the lookup
+    # result to the correct port at runtime. Both use FUNCTION_OUTPUT_KEY
+    # (which is also written into the outer <Outputs><Output key=.../>).
     return (
         "<Configuration><SimpleLookup>"
         '<Input index="1" name="Key"/>'
-        '<Output index="1" name="Value"/>'
+        f'<Output index="{FUNCTION_OUTPUT_KEY}" name="Value"/>'
         "<CrossRefTableObj><CrossRefTable>"
         "<ColumnHeaders>"
         "<columnHeader>ref1</columnHeader>"

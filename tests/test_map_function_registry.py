@@ -386,7 +386,9 @@ def test_emit_function_step_simple_lookup_renders_crossref_table():
     # Live-verified component XML form uses CrossRefTableObj wrapper.
     assert "<SimpleLookup>" in xml
     assert '<Input index="1" name="Key"/>' in xml
-    assert '<Output index="1" name="Value"/>' in xml
+    # Codex r4: Output index must match FUNCTION_OUTPUT_KEY (2) so the lookup
+    # result binds to the FunctionStep's outer <Output key="2"> port.
+    assert '<Output index="2" name="Value"/>' in xml
     assert "<CrossRefTableObj><CrossRefTable>" in xml
     assert "<columnHeader>ref1</columnHeader>" in xml
     assert "<columnHeader>ref2</columnHeader>" in xml
