@@ -4254,3 +4254,411 @@ class TestBuildPlanTransformMapFunction:
         assert summary["function_count"] == 0
         assert summary["direct_mapping_count"] >= 1
         assert summary["function_types_used"] == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #41 — script.mapping component + transform.map script-route routing
+# ---------------------------------------------------------------------------
+
+
+def _script_mapping_comp(
+    key="enrich_row_script",
+    name="Test Script Mapping",
+    **config_overrides,
+):
+    cfg = {
+        "component_type": "script.mapping",
+        "component_name": name,
+        "language": "groovy2",
+        "script_body": "outputValue = inputValue.toUpperCase()",
+        "inputs": [{"name": "inputValue", "data_type": "character"}],
+        "outputs": [{"name": "outputValue"}],
+    }
+    cfg.update(config_overrides)
+    return IntegrationComponentSpec(
+        key=key, type="script.mapping", action="create", name=name, config=cfg,
+    )
+
+
+def _script_map_comp(
+    key="script_map",
+    name="Test Script Map",
+    source_ref_key="xml_profile",
+    target_ref_key="json_profile",
+    source_type="profile.xml",
+    target_type="profile.json",
+    script_mappings=None,
+    field_mappings=None,
+    map_type="script",
+    script_ref_keys=("enrich_row_script",),
+    **config_overrides,
+):
+    cfg = {
+        "component_type": "transform.map",
+        "map_type": map_type,
+        "component_name": name,
+        "source_profile_id": f"$ref:{source_ref_key}",
+        "source_profile_type": source_type,
+        "target_profile_id": f"$ref:{target_ref_key}",
+        "target_profile_type": target_type,
+        "script_mappings": script_mappings or [
+            {
+                "script_component_id": f"$ref:{script_ref_keys[0]}",
+                "script_slot": "enrich_row",
+                "inputs": [
+                    {"source_path": "rows/row[]/key", "input_name": "inputValue"},
+                ],
+                "outputs": [
+                    {"output_name": "outputValue", "target_path": "Root/list[]/key"},
+                ],
+            },
+        ],
+    }
+    if field_mappings is not None:
+        cfg["field_mappings"] = field_mappings
+    cfg.update(config_overrides)
+    depends = [source_ref_key, target_ref_key, *script_ref_keys]
+    # Deduplicate while preserving order.
+    seen = set()
+    depends_dedup = []
+    for d in depends:
+        if d not in seen:
+            seen.add(d)
+            depends_dedup.append(d)
+    return IntegrationComponentSpec(
+        key=key, type="transform.map", action="create", name=name, config=cfg,
+        depends_on=depends_dedup,
+    )
+
+
+class TestBuildPlanScriptMappingComponent:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_script_mapping_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([_script_mapping_comp()]))
+        step = next(s for s in plan["steps"] if s["key"] == "enrich_row_script")
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_language_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _script_mapping_comp()
+        bad.config["language"] = "python"
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = next(s for s in plan["steps"] if s["key"] == "enrich_row_script")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "SCRIPT_MAPPING_LANGUAGE_UNSUPPORTED"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_missing_script_body_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _script_mapping_comp()
+        del bad.config["script_body"]
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = next(s for s in plan["steps"] if s["key"] == "enrich_row_script")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "SCRIPT_MAPPING_BODY_REQUIRED"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_secret_shaped_key_redacted(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _script_mapping_comp()
+        bad.config["password"] = "leaked"
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = next(s for s in plan["steps"] if s["key"] == "enrich_row_script")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        )
+        # Original config has the secret redacted in the plan echo.
+        emitted = plan["integration_spec"]["components"][0]["config"]
+        assert emitted["password"] == "[REDACTED]"
+
+
+class TestBuildPlanTransformMapScript:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_script_map_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            _script_map_comp(),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "create"
+        assert "validation_error" not in map_step
+
+    @patch(_PATCH_TARGET)
+    def test_map_script_alias_routes_through_script_builder(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            _script_map_comp(map_type="map_script"),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "create"
+        assert map_step["transform_summary"]["map_type"] == "map_script"
+
+    @patch(_PATCH_TARGET)
+    def test_transform_summary_advertises_script_count_slots_languages(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            _script_mapping_comp(key="other_script", name="Other Script"),
+            _script_map_comp(
+                script_mappings=[
+                    {
+                        "script_component_id": "$ref:enrich_row_script",
+                        "script_slot": "enrich_row",
+                        "language": "groovy2",
+                        "inputs": [
+                            {"source_path": "rows/row[]/key", "input_name": "inputValue"},
+                        ],
+                        "outputs": [
+                            {"output_name": "outputValue", "target_path": "Root/list[]/key"},
+                        ],
+                    },
+                    {
+                        "script_component_id": "$ref:other_script",
+                        "script_slot": "other_slot",
+                        "language": "javascript",
+                        "inputs": [
+                            {"source_path": "rows/row[]/key", "input_name": "inputValue"},
+                        ],
+                        "outputs": [
+                            {"output_name": "outputValue", "target_path": "Root/a"},
+                        ],
+                    },
+                ],
+                script_ref_keys=("enrich_row_script", "other_script"),
+            ),
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        summary = map_step["transform_summary"]
+        assert summary["map_type"] == "script"
+        assert summary["script_count"] == 2
+        assert summary["script_slots_used"] == ["enrich_row", "other_slot"]
+        assert summary["script_languages_used"] == ["groovy2", "javascript"]
+
+    @patch(_PATCH_TARGET)
+    def test_missing_depends_on_for_script_ref_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _script_map_comp()
+        # Drop the script ref from depends_on.
+        bad.depends_on = [d for d in bad.depends_on if d != "enrich_row_script"]
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            map_step["validation_error"]["error_code"]
+            == "SCRIPT_MAPPING_REF_REQUIRED"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_literal_uuid_source_errors_with_index_unavailable(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _script_map_comp()
+        bad.config["source_profile_id"] = "00000000-1111-2222-3333-444444444444"
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            map_step["validation_error"]["error_code"]
+            == "MAP_PROFILE_INDEX_UNAVAILABLE"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_unresolved_source_path_errors_with_map_field_not_found(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _script_map_comp(
+            script_mappings=[
+                {
+                    "script_component_id": "$ref:enrich_row_script",
+                    "script_slot": "enrich_row",
+                    "inputs": [
+                        {"source_path": "rows/row[]/missing", "input_name": "in"},
+                    ],
+                    "outputs": [
+                        {"output_name": "out", "target_path": "Root/list[]/key"},
+                    ],
+                },
+            ],
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert map_step["validation_error"]["error_code"] == "MAP_FIELD_NOT_FOUND"
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_map_type_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _script_map_comp(map_type="bogus")
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            map_step["validation_error"]["error_code"]
+            == "UNSUPPORTED_TRANSFORM_ROUTE"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_mixed_direct_and_script_route_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _script_map_comp(
+            field_mappings=[
+                {"source_path": "rows/row[]/key", "target_path": "Root/a"},
+            ],
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            comp,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "create"
+        summary = map_step["transform_summary"]
+        assert summary["direct_mapping_count"] == 1
+        assert summary["script_count"] == 1
+
+    @patch(_PATCH_TARGET)
+    def test_duplicate_target_across_field_and_script_outputs_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        # field_mappings binds Root/list[]/key; the default script_map binds
+        # the same target via script_mappings[0].outputs[0].target_path.
+        bad = _script_map_comp(
+            field_mappings=[
+                {"source_path": "rows/row[]/key", "target_path": "Root/list[]/key"},
+            ],
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            map_step["validation_error"]["error_code"]
+            == "DUPLICATE_TARGET_MAPPING"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_function_mappings_rejected_on_script_route(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _script_map_comp()
+        bad.config["function_mappings"] = [
+            {"function_type": "uppercase", "inputs": [], "target_path": "x"},
+        ]
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            map_step["validation_error"]["error_code"]
+            == "UNSUPPORTED_TRANSFORM_ROUTE"
+        )
+        assert map_step["validation_error"]["field"] == "function_mappings"
+
+    @patch(_PATCH_TARGET)
+    def test_script_ref_pointing_at_non_script_component_rejected(self, mock_pag):
+        # Codex r1 P2 finding #4: $ref:KEY for script_component_id whose
+        # target isn't a script.mapping (here: a profile.xml) must fail at
+        # plan time. Without this guard, apply would resolve the $ref to a
+        # profile UUID and emit a userdefined FunctionStep whose id points
+        # at the wrong component type.
+        mock_pag.return_value = []
+        bad = _script_map_comp(
+            script_mappings=[
+                {
+                    "script_component_id": "$ref:xml_profile",
+                    "script_slot": "wrong",
+                    "inputs": [
+                        {"source_path": "rows/row[]/key", "input_name": "in"},
+                    ],
+                    "outputs": [
+                        {"output_name": "out", "target_path": "Root/list[]/key"},
+                    ],
+                },
+            ],
+            script_ref_keys=("xml_profile",),
+        )
+        plan = _build_plan(MagicMock(), _build_config([
+            _xml_profile_comp(),
+            _json_profile_comp(),
+            _script_mapping_comp(),
+            bad,
+        ]))
+        map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
+        assert map_step["planned_action"] == "error_generated_profile_validation"
+        validation_error = map_step["validation_error"]
+        assert validation_error["error_code"] == "SCRIPT_MAPPING_REF_REQUIRED"
+        # The field points at the misrouted script_component_id, not
+        # depends_on (which is the topo-sort guard, a separate case).
+        assert "script_component_id" in validation_error["field"]
+        assert validation_error["details"]["target_component_type"] == "profile.xml"
+
+
+class TestScriptMappingMetadataRegistrationAndDefaults:
+    """Codex r1 P2 findings #2 and #3:
+    - script.mapping must participate in metadata lookup (conflict_policy
+      reuse/fail + update-by-name).
+    - Apply-time must inject comp.name into payload['component_name'] when
+      the spec carries only a top-level name, mirroring plan-time."""
+
+    def test_script_mapping_in_metadata_type_map(self):
+        from boomi_mcp.categories.integration_builder import _METADATA_TYPE_MAP
+        assert _METADATA_TYPE_MAP.get("script.mapping") == "script.mapping"
+
+    def test_apply_time_name_default_covers_script_mapping(self):
+        # Walking _execute_component is invasive; instead verify the
+        # source-level dispatch list literally contains script.mapping.
+        # Documents the fix to Codex P2 #3 — without script.mapping in
+        # the name-defaulting elif, a clean plan would fail at apply with
+        # 'component_name is required'.
+        import inspect
+        from boomi_mcp.categories import integration_builder as ib
+        source = inspect.getsource(ib._execute_component)
+        # The block: ``elif comp.type in (..., "script.mapping",):
+        # payload.setdefault("component_name", comp.name)``
+        assert '"script.mapping",' in source
+        assert 'payload.setdefault("component_name", comp.name)' in source

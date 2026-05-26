@@ -23,6 +23,7 @@ from .builders import (
     PROFILE_BUILDERS,
     get_profile_builder,
 )
+from .builders.script_mapping_builder import get_script_mapping_builder
 
 
 # ============================================================================
@@ -57,6 +58,23 @@ def create_component(
             builder = get_profile_builder(component_type, profile_type or "")
             if builder is not None:
                 xml = builder.build(**config)
+                result = _create_component_raw(boomi_client, xml)
+                return {
+                    "_success": True,
+                    "message": f"Created {component_type} '{result['name']}'",
+                    "component_id": result['component_id'],
+                    "name": result['name'],
+                    "type": result['type'],
+                    "profile": profile,
+                }
+            # Issue #41: standalone script.mapping components also dispatch
+            # through manage_component (the component is profile-agnostic so
+            # it doesn't need build_integration's profile-index threading).
+            # This mirrors the schema template's "tool: manage_component
+            # (action='create')" advertisement.
+            sm_builder_cls = get_script_mapping_builder(component_type)
+            if sm_builder_cls is not None:
+                xml = sm_builder_cls().build(**config)
                 result = _create_component_raw(boomi_client, xml)
                 return {
                     "_success": True,

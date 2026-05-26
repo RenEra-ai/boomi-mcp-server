@@ -1,13 +1,17 @@
-"""Issue #26 + #40: transform.map builders.
+"""Issue #26 + #40 + #41: transform.map builders.
 
 * ``DirectMapBuilder`` (Issue #26) — profile-to-profile direct field maps.
 * ``MapFunctionBuilder`` (Issue #40) — structured map-function mappings (the
   standard Boomi map-function rung). Functions are authored as typed JSON
   primitives; their XML encoding lives in
   ``map_function_registry.py``.
+* ``MapScriptBuilder`` (Issue #41) — in-map calls to reusable
+  ``script.mapping`` components via a ``category="userdefined"
+  type="userdefined"`` ``<FunctionStep>``. The standalone reusable script
+  component itself is emitted by ``script_mapping_builder.py``.
 
 Reference XML shape evidence (fetched 2026-05-25 for direct, 2026-05-26 for
-function additions):
+function additions, 2026-05-26 for #41 script additions):
 
 * reneraai-5RO3DD ``77bb73d5-43ae-4581-8ab9-af615f3778e5`` (Order DB to
   Shipping XML).
@@ -20,6 +24,10 @@ function additions):
 * work ``f5481730-b9b1-4b67-96eb-3a510feaa734`` — ``String2Lower``.
 * work ``e9e1a9b6-1dab-45c4-acf5-c6ba610be9ac`` — full FunctionStep
   attribute set.
+* work ``0ba00843-dba8-4a50-8e57-bfcba5fbc315`` — in-map userdefined
+  FunctionStep referencing a reusable script.mapping (#41 reference
+  shape: ``category="userdefined" type="userdefined" id="..."`` with
+  ``<Configuration/>`` empty).
 
 Envelope shape (every emitted map mirrors these segments):
 
@@ -94,6 +102,7 @@ from .profile_generation import (
     MAP_PROFILE_REF_REQUIRED,
     PROFILE_FIELD_NOT_MAPPABLE,
     PROFILE_FIELD_VALIDATION_FAILED,
+    SCRIPT_MAPPING_REF_REQUIRED,
     UNSUPPORTED_MAP_FUNCTION_TYPE,
     UNSUPPORTED_TRANSFORM_ROUTE,
 )
@@ -107,10 +116,24 @@ _RAW_XML_REJECT_KEYS: Dict[str, str] = {
     "function_steps": "Provide structured function_mappings instead of raw <FunctionStep> XML.",
     "xslt": "#42 (XSLT transform builder)",
     "xslt_source": "#42 (XSLT transform builder)",
-    "scripts": "#41 (map_script builder)",
-    "map_scripts": "#41 (map_script builder)",
-    "expression": "#41 (map_script builder; or use a supported function primitive)",
-    "expressions": "#41 (map_script builder; or use a supported function primitive)",
+    "scripts": (
+        "Switch to map_type='script' and declare script_mappings[] referencing a "
+        "script.mapping component (#41 shipped)."
+    ),
+    "map_scripts": (
+        "Switch to map_type='script' and declare script_mappings[] referencing a "
+        "script.mapping component (#41 shipped)."
+    ),
+    "expression": (
+        "Inline Boomi expressions are not a structured primitive. Use a native "
+        "function via map_type='function' (#40), or wrap the logic in a "
+        "script.mapping component called via map_type='script' (#41)."
+    ),
+    "expressions": (
+        "Inline Boomi expressions are not a structured primitive. Use a native "
+        "function via map_type='function' (#40), or wrap the logic in a "
+        "script.mapping component called via map_type='script' (#41)."
+    ),
 }
 
 
@@ -146,6 +169,34 @@ _FUNCTION_BUILDER_REJECT_KEYS: Dict[str, str] = {
     key: value
     for key, value in _DIRECT_ONLY_REJECT_KEYS.items()
     if key != "function_mappings"
+}
+
+
+# Script-map route-class rejections — script maps accept ``script_mappings``
+# (their primary input) and optional ``field_mappings`` (mixed direct + script
+# maps). Other route classes still reject so callers route through the
+# structured primitives owned by the appropriate map_type.
+_SCRIPT_BUILDER_REJECT_KEYS: Dict[str, str] = {
+    "function_mappings": (
+        "Switch to map_type='function' for native function primitives, or "
+        "split the function + script work across separate maps."
+    ),
+    "default_values": (
+        "Switch to map_type='function' and declare "
+        "function_mappings[].function_type='default_value'."
+    ),
+    "defaults": (
+        "Switch to map_type='function' and declare "
+        "function_mappings[].function_type='default_value'."
+    ),
+    "lookup": (
+        "Switch to map_type='function' and declare "
+        "function_mappings[].function_type='simple_lookup'."
+    ),
+    "lookups": (
+        "Switch to map_type='function' and declare "
+        "function_mappings[].function_type='simple_lookup'."
+    ),
 }
 
 
@@ -1052,6 +1103,484 @@ class MapFunctionBuilder:
 
 
 # ---------------------------------------------------------------------------
+# MapScriptBuilder (Issue #41)
+# ---------------------------------------------------------------------------
+
+
+class MapScriptBuilder:
+    """Emit transform.map XML that calls reusable script.mapping components.
+
+    Each entry in ``script_mappings`` declares one in-map script call:
+    a userdefined ``<FunctionStep>`` referencing a ``script.mapping``
+    component by ``id``, plus profile→function-input and
+    function-output→profile ``<Mapping>`` rows for each declared input
+    and output. Optional ``field_mappings`` are accepted for mixed maps
+    that combine direct copies with script calls. Duplicate target
+    bindings across both lists reject with ``DUPLICATE_TARGET_MAPPING``.
+
+    Live XML reference: work ``0ba00843-dba8-4a50-8e57-bfcba5fbc315``.
+    The in-map shape is ``category="userdefined" type="userdefined"
+    id="<scriptComponentId>"`` with ``<Configuration/>`` empty — NOT
+    the ``<Configuration><Scripting>...`` block that appears in
+    standalone ``transform.function`` wrappers (which remain future
+    work outside #41).
+    """
+
+    SUPPORTED_MAP_TYPES: Tuple[str, ...] = ("script", "map_script")
+    FORBIDDEN_SECRET_FIELDS: Tuple[str, ...] = _FORBIDDEN_SECRET_FIELDS
+
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        return _scan_forbidden_secret_fields(
+            config, cls.FORBIDDEN_SECRET_FIELDS, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        _redact_forbidden_secret_fields_in_place(config, cls.FORBIDDEN_SECRET_FIELDS)
+
+    @classmethod
+    def validate_config(
+        cls,
+        config: Dict[str, Any],
+        *,
+        source_index: Optional[Mapping[str, Mapping[str, Any]]] = None,
+        target_index: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    ) -> Optional[BuilderValidationError]:
+        """Validate a transform.map script/map_script config."""
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        raw_err = _validate_raw_xml_reject(config)
+        if raw_err is not None:
+            return raw_err
+
+        route_err = _validate_route_class_reject(
+            config, _SCRIPT_BUILDER_REJECT_KEYS
+        )
+        if route_err is not None:
+            return route_err
+
+        map_type = config.get("map_type") or ""
+        if map_type not in cls.SUPPORTED_MAP_TYPES:
+            return BuilderValidationError(
+                f"map_type must be one of {cls.SUPPORTED_MAP_TYPES} "
+                f"(got {map_type!r})",
+                error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                field="map_type",
+                hint=(
+                    "Use map_type='script' (or 'map_script') for in-map "
+                    "calls to reusable script.mapping components."
+                ),
+            )
+
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required",
+                error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        ref_err = _validate_profile_refs(config)
+        if ref_err is not None:
+            return ref_err
+
+        script_mappings = config.get("script_mappings")
+        if not isinstance(script_mappings, list) or not script_mappings:
+            return BuilderValidationError(
+                "script_mappings must be a non-empty list",
+                error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                field="script_mappings",
+                hint=(
+                    "Declare at least one entry of "
+                    "{script_component_id, inputs, outputs}. inputs map "
+                    "source-profile paths to script input variables; "
+                    "outputs map script output variables to "
+                    "target-profile paths."
+                ),
+            )
+
+        seen_target_paths: Dict[str, int] = {}
+
+        for index, sm in enumerate(script_mappings):
+            field_prefix = f"script_mappings[{index}]"
+            if not isinstance(sm, Mapping):
+                return BuilderValidationError(
+                    f"{field_prefix} must be a mapping object",
+                    error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                    field=field_prefix,
+                )
+
+            script_component_id = sm.get("script_component_id")
+            if not isinstance(script_component_id, str) or not script_component_id.strip():
+                return BuilderValidationError(
+                    f"{field_prefix}.script_component_id is required",
+                    error_code=SCRIPT_MAPPING_REF_REQUIRED,
+                    field=f"{field_prefix}.script_component_id",
+                    hint=(
+                        "Reference a reusable script.mapping component "
+                        "by literal UUID or by '$ref:KEY' pointing at an "
+                        "in-spec script.mapping component (the in-spec "
+                        "key must also appear in this map's depends_on)."
+                    ),
+                )
+
+            inputs_raw = sm.get("inputs")
+            if not isinstance(inputs_raw, list) or not inputs_raw:
+                return BuilderValidationError(
+                    f"{field_prefix}.inputs must be a non-empty list",
+                    error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                    field=f"{field_prefix}.inputs",
+                    hint=(
+                        "Each entry is {source_path, input_name}. "
+                        "source_path is a source-profile logical path; "
+                        "input_name matches an <Input name> declared on "
+                        "the referenced script.mapping component."
+                    ),
+                )
+
+            normalized_inputs: List[Tuple[str, str]] = []
+            for in_idx, entry in enumerate(inputs_raw):
+                if not isinstance(entry, Mapping):
+                    return BuilderValidationError(
+                        f"{field_prefix}.inputs[{in_idx}] must be a "
+                        "mapping object",
+                        error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                        field=f"{field_prefix}.inputs[{in_idx}]",
+                    )
+                source_path = entry.get("source_path")
+                input_name = entry.get("input_name")
+                if not isinstance(source_path, str) or not source_path.strip():
+                    return BuilderValidationError(
+                        f"{field_prefix}.inputs[{in_idx}].source_path "
+                        "must be a non-blank string",
+                        error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                        field=f"{field_prefix}.inputs[{in_idx}].source_path",
+                    )
+                if not isinstance(input_name, str) or not input_name.strip():
+                    return BuilderValidationError(
+                        f"{field_prefix}.inputs[{in_idx}].input_name "
+                        "must be a non-blank string",
+                        error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                        field=f"{field_prefix}.inputs[{in_idx}].input_name",
+                    )
+                normalized_inputs.append(
+                    (source_path.strip(), input_name.strip())
+                )
+
+            outputs_raw = sm.get("outputs")
+            if not isinstance(outputs_raw, list) or not outputs_raw:
+                return BuilderValidationError(
+                    f"{field_prefix}.outputs must be a non-empty list",
+                    error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                    field=f"{field_prefix}.outputs",
+                    hint=(
+                        "Each entry is {output_name, target_path}. "
+                        "output_name matches an <Output name> declared "
+                        "on the referenced script.mapping component; "
+                        "target_path is a target-profile logical path."
+                    ),
+                )
+
+            normalized_outputs: List[Tuple[str, str]] = []
+            for out_idx, entry in enumerate(outputs_raw):
+                if not isinstance(entry, Mapping):
+                    return BuilderValidationError(
+                        f"{field_prefix}.outputs[{out_idx}] must be a "
+                        "mapping object",
+                        error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                        field=f"{field_prefix}.outputs[{out_idx}]",
+                    )
+                output_name = entry.get("output_name")
+                target_path = entry.get("target_path")
+                if not isinstance(output_name, str) or not output_name.strip():
+                    return BuilderValidationError(
+                        f"{field_prefix}.outputs[{out_idx}].output_name "
+                        "must be a non-blank string",
+                        error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                        field=f"{field_prefix}.outputs[{out_idx}].output_name",
+                    )
+                if not isinstance(target_path, str) or not target_path.strip():
+                    return BuilderValidationError(
+                        f"{field_prefix}.outputs[{out_idx}].target_path "
+                        "must be a non-blank string",
+                        error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                        field=f"{field_prefix}.outputs[{out_idx}].target_path",
+                    )
+                normalized_outputs.append(
+                    (output_name.strip(), target_path.strip())
+                )
+
+                # Cross-list duplicate target detection.
+                tp = target_path.strip()
+                if tp in seen_target_paths:
+                    return BuilderValidationError(
+                        f"{field_prefix}.outputs[{out_idx}].target_path "
+                        "is bound more than once",
+                        error_code=DUPLICATE_TARGET_MAPPING,
+                        field=f"{field_prefix}.outputs[{out_idx}].target_path",
+                        hint=(
+                            "Each destination leaf may receive at most "
+                            "one mapping across field_mappings and "
+                            "script_mappings outputs."
+                        ),
+                        details={
+                            "path": tp,
+                            "first_index": seen_target_paths[tp],
+                            "duplicate_index": index,
+                        },
+                    )
+                seen_target_paths[tp] = index
+
+            # Index-sensitive path existence checks.
+            if source_index is not None:
+                for in_idx, (source_path, _input_name) in enumerate(
+                    normalized_inputs
+                ):
+                    src_entry = source_index.get(source_path)
+                    if src_entry is None:
+                        return BuilderValidationError(
+                            f"{field_prefix}.inputs[{in_idx}].source_path "
+                            "is not present in the source profile field "
+                            "index",
+                            error_code=MAP_FIELD_NOT_FOUND,
+                            field=f"{field_prefix}.inputs[{in_idx}].source_path",
+                            hint=(
+                                "Reference a leaf path declared in the "
+                                "source profile component."
+                            ),
+                            details={"path": source_path, "side": "source"},
+                        )
+                    if not src_entry.get("mappable", False):
+                        return BuilderValidationError(
+                            f"{field_prefix}.inputs[{in_idx}].source_path "
+                            "resolves to a structural node",
+                            error_code=PROFILE_FIELD_NOT_MAPPABLE,
+                            field=f"{field_prefix}.inputs[{in_idx}].source_path",
+                            hint=(
+                                "Script inputs must be scalar leaves. "
+                                "Object/array/structural-element nodes "
+                                "are not mappable."
+                            ),
+                            details={"path": source_path, "side": "source"},
+                        )
+            if target_index is not None:
+                for out_idx, (_output_name, target_path) in enumerate(
+                    normalized_outputs
+                ):
+                    tgt_entry = target_index.get(target_path)
+                    if tgt_entry is None:
+                        return BuilderValidationError(
+                            f"{field_prefix}.outputs[{out_idx}].target_path "
+                            "is not present in the target profile field "
+                            "index",
+                            error_code=MAP_FIELD_NOT_FOUND,
+                            field=f"{field_prefix}.outputs[{out_idx}].target_path",
+                            hint=(
+                                "Reference a leaf path declared in the "
+                                "target profile component."
+                            ),
+                            details={"path": target_path, "side": "target"},
+                        )
+                    if not tgt_entry.get("mappable", False):
+                        return BuilderValidationError(
+                            f"{field_prefix}.outputs[{out_idx}].target_path "
+                            "resolves to a structural node",
+                            error_code=PROFILE_FIELD_NOT_MAPPABLE,
+                            field=f"{field_prefix}.outputs[{out_idx}].target_path",
+                            hint=(
+                                "Target paths must point at scalar "
+                                "leaves. Object/array/structural-element "
+                                "nodes are not mappable destinations."
+                            ),
+                            details={"path": target_path, "side": "target"},
+                        )
+
+        # Optional field_mappings (mixed direct + script map). Validate
+        # via shared helper and pass through the cross-list duplicate
+        # tracker.
+        field_mappings = config.get("field_mappings")
+        if field_mappings is not None:
+            if not isinstance(field_mappings, list):
+                return BuilderValidationError(
+                    "field_mappings must be a list (omit for script-only maps)",
+                    error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                    field="field_mappings",
+                )
+            return _validate_direct_field_mappings(
+                field_mappings,
+                source_index=source_index,
+                target_index=target_index,
+                seen_target_paths=seen_target_paths,
+            )
+
+        return None
+
+    def build(
+        self,
+        *,
+        source_index: Mapping[str, Mapping[str, Any]],
+        target_index: Mapping[str, Mapping[str, Any]],
+        **params: Any,
+    ) -> str:
+        """Emit the wrapped ``<bns:Component type='transform.map'>`` XML.
+
+        Mapping order is deterministic:
+
+        1. Direct profile→profile mappings (from ``field_mappings``) in
+           declaration order.
+        2. For each script mapping (in declaration order):
+           a. Profile→function-input mappings (one per declared input).
+           b. Function-output→profile mappings (one per declared output).
+        3. ``<FunctionStep>`` blocks emitted in declaration order. ``key`` /
+           ``position`` match the script mapping's 1-based index. ``id`` is
+           the resolved script.mapping component UUID.
+        4. ``<Defaults/>`` is emitted empty — script maps do not author
+           default values; that's the ``function`` route's job.
+        """
+        config = dict(params)
+        validation_err = self.validate_config(
+            config, source_index=source_index, target_index=target_index
+        )
+        if validation_err is not None:
+            raise validation_err
+
+        source_profile_id = str(config["source_profile_id"]).strip()
+        target_profile_id = str(config["target_profile_id"]).strip()
+        if source_profile_id.startswith("$ref:") or target_profile_id.startswith("$ref:"):
+            raise BuilderValidationError(
+                "source_profile_id and target_profile_id must be resolved "
+                "to Boomi UUIDs before XML emission",
+                error_code=MAP_PROFILE_INDEX_UNAVAILABLE,
+                field=(
+                    "source_profile_id"
+                    if source_profile_id.startswith("$ref:")
+                    else "target_profile_id"
+                ),
+                hint=(
+                    "Integration builder must resolve '$ref:KEY' tokens "
+                    "via _resolve_dependency_tokens before invoking build()."
+                ),
+            )
+
+        component_name = str(config["component_name"]).strip()
+        folder_path = config.get("folder_path")
+        description = config.get("description") or ""
+
+        mapping_lines: List[str] = []
+
+        # 1. Direct field_mappings first.
+        for mapping in config.get("field_mappings") or []:
+            source_path = str(mapping["source_path"]).strip()
+            target_path = str(mapping["target_path"]).strip()
+            mapping_lines.append(
+                _render_direct_mapping(
+                    source_index[source_path], target_index[target_path]
+                )
+            )
+
+        # 2. + 3. Script mappings: profile↔function Mapping rows + FunctionStep.
+        function_blocks: List[str] = []
+        for step_index, sm in enumerate(config["script_mappings"], start=1):
+            step_key = step_index
+            script_component_id = str(sm["script_component_id"]).strip()
+            if script_component_id.startswith("$ref:"):
+                # Defense-in-depth: integration builder must resolve $ref
+                # tokens before invoking build().
+                raise BuilderValidationError(
+                    f"script_mappings[{step_index - 1}].script_component_id "
+                    "must be resolved to a Boomi UUID before XML emission",
+                    error_code=MAP_PROFILE_INDEX_UNAVAILABLE,
+                    field=f"script_mappings[{step_index - 1}].script_component_id",
+                    hint=(
+                        "Integration builder must resolve '$ref:KEY' "
+                        "tokens via _resolve_dependency_tokens before "
+                        "invoking build()."
+                    ),
+                )
+
+            cache_enabled = bool(sm.get("cache_enabled", False))
+            display_name = (
+                str(sm.get("script_slot") or component_name).strip()
+                or component_name
+            )
+
+            # 2a. profile → function input mappings (port keys 1..N).
+            inputs_xml_parts: List[str] = []
+            for input_idx, entry in enumerate(sm["inputs"], start=1):
+                source_path = str(entry["source_path"]).strip()
+                input_name = str(entry["input_name"]).strip()
+                src_entry = source_index[source_path]
+                mapping_lines.append(
+                    f'<Mapping fromKey="{src_entry["key"]}" '
+                    f'fromKeyPath="{_escape_xml(src_entry["key_path"])}" '
+                    f'fromNamePath="{_escape_xml(src_entry["name_path"])}" '
+                    f'fromType="profile" '
+                    f'toFunction="{step_key}" '
+                    f'toKey="{input_idx}" '
+                    f'toType="function"/>'
+                )
+                inputs_xml_parts.append(
+                    f'<Input key="{input_idx}" name="{_escape_xml(input_name)}"/>'
+                )
+
+            # 2b. function output → profile mappings (port keys 1..M).
+            outputs_xml_parts: List[str] = []
+            for output_idx, entry in enumerate(sm["outputs"], start=1):
+                output_name = str(entry["output_name"]).strip()
+                target_path = str(entry["target_path"]).strip()
+                tgt_entry = target_index[target_path]
+                mapping_lines.append(
+                    f'<Mapping fromFunction="{step_key}" '
+                    f'fromKey="{output_idx}" '
+                    f'fromType="function" '
+                    f'toKey="{tgt_entry["key"]}" '
+                    f'toKeyPath="{_escape_xml(tgt_entry["key_path"])}" '
+                    f'toNamePath="{_escape_xml(tgt_entry["name_path"])}" '
+                    f'toType="profile"/>'
+                )
+                outputs_xml_parts.append(
+                    f'<Output key="{output_idx}" name="{_escape_xml(output_name)}"/>'
+                )
+
+            # 3. userdefined FunctionStep (live shape — empty Configuration).
+            y = 10.0 + 50.0 * step_key
+            function_blocks.append(
+                f'<FunctionStep cacheEnabled="{"true" if cache_enabled else "false"}" '
+                f'cacheOption="none" category="userdefined" enabled="true" '
+                f'id="{_escape_xml(script_component_id)}" key="{step_key}" '
+                f'name="{_escape_xml(display_name)}" position="{step_key}" '
+                f'sumEnabled="false" type="userdefined" x="30.0" y="{y}">'
+                f'<Inputs>{"".join(inputs_xml_parts)}</Inputs>'
+                f'<Outputs>{"".join(outputs_xml_parts)}</Outputs>'
+                "<Configuration/>"
+                "</FunctionStep>"
+            )
+
+        functions_xml = (
+            '<Functions optimizeExecutionOrder="true">'
+            f"{''.join(function_blocks)}"
+            "</Functions>"
+        )
+
+        return _render_map_envelope(
+            component_name=component_name,
+            folder_path=folder_path,
+            description=description,
+            source_profile_id=source_profile_id,
+            target_profile_id=target_profile_id,
+            mappings_xml="".join(mapping_lines),
+            functions_xml=functions_xml,
+            defaults_xml="<Defaults/>",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -1060,6 +1589,8 @@ MAP_BUILDERS: Dict[Tuple[str, str], type] = {
     ("transform.map", "direct"): DirectMapBuilder,
     ("transform.map", "function"): MapFunctionBuilder,
     ("transform.map", "map_function"): MapFunctionBuilder,
+    ("transform.map", "script"): MapScriptBuilder,
+    ("transform.map", "map_script"): MapScriptBuilder,
 }
 
 

@@ -474,16 +474,17 @@ def test_map_script_summary_surfaces_script_component_ref():
     )
     op = transform_flow["operations"][0]
     assert op["script_component_ref"] == "scripts/enrich_row"
-    # script_body is rejected by the contract (codex r2 P2), so neither the
-    # value nor any presence flag can appear in the emitted spec.
+    # script_body wasn't supplied — the presence boolean reports False.
+    # The body itself never appears in the summary regardless.
+    assert op["script_body_present"] is False
     assert "script_body" not in op
-    assert "has_script_body" not in op
 
 
-def test_map_script_rejects_inline_script_body_with_41_pointer():
-    """Codex review r2 P2: accepting script_body then dropping it from the
-    emitted spec is a data-loss path. The contract must reject inline
-    script_body and point callers at script_component_ref / issue #41."""
+def test_map_script_accepts_inline_script_body_after_41_ships():
+    """Issue #41 shipped — the contract layer now accepts script_body and
+    surfaces a presence boolean in the emitted spec without echoing the
+    body itself. Materializing the matching script.mapping component is
+    downstream tooling's job, not the archetype's."""
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
         {
@@ -496,17 +497,21 @@ def test_map_script_rejects_inline_script_body_with_41_pointer():
         },
     ]
     result = _build(payload)
-    assert result["_success"] is False
-    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
-    assert any(
-        "script_body" in fe["message"] and "#41" in fe["message"]
-        for fe in result["field_errors"]
-    ), f"expected #41 pointer on script_body rejection, got {result['field_errors']!r}"
+    assert result["_success"] is True, result
+    transform_flow = next(
+        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
+    )
+    op = transform_flow["operations"][0]
+    assert op["script_body_present"] is True
+    # The body itself must never leak through emit_spec.
+    assert "script_body" not in op
 
 
-def test_map_script_body_rejection_does_not_echo_body_content():
-    """The script_body rejection envelope must not echo the caller's body
-    text (defense-in-depth against scripts containing sensitive content)."""
+def test_map_script_summary_does_not_echo_script_body_content():
+    """Defense-in-depth: script_body is accepted on the contract but the
+    body string itself must never appear in the emitted spec — only a
+    presence boolean. Sensitive script content (credentials in code,
+    business logic) stays out of plan metadata."""
     sentinel = "sk_live_QA_SCRIPT_BODY_GUARD_DEADBEEF"
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
@@ -520,11 +525,30 @@ def test_map_script_body_rejection_does_not_echo_body_content():
         },
     ]
     result = _build(payload)
-    assert result["_success"] is False
+    assert result["_success"] is True, result
     assert sentinel not in json.dumps(result), (
-        "map_script.script_body rejection must not echo the caller's body "
-        "content back through the error envelope"
+        "map_script.script_body content must not echo through the emitted "
+        "spec — only a script_body_present boolean is allowed."
     )
+
+
+def test_map_script_blank_script_body_is_rejected():
+    """A whitespace-only script_body discards caller intent silently if
+    accepted. The validator strips and re-checks for non-blank content."""
+    payload = _valid_minimal()
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "map_script",
+            "script_slot": "enrich_row",
+            "language": "groovy2",
+            "inputs": ["source_a"],
+            "outputs": ["Root/target_a"],
+            "script_body": "   \t  ",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
 
 
 def test_full_fixture_build_includes_watermark_and_dlq_flows():
