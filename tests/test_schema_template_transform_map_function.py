@@ -129,6 +129,33 @@ def test_template_math_lists_all_8_operations():
         assert op in ops
 
 
+def test_template_math_does_not_advertise_rounding_mode():
+    # Codex r2: rounding_mode was previously listed as an optional parameter
+    # but the builder rejects it; the template must not promise it either.
+    result = _call(component_type="transform.map", protocol="function")
+    math = result["supported_function_types"]["math"]
+    assert "rounding_mode" not in math.get("optional_parameters", [])
+
+
+def test_template_math_documents_precision_applicability():
+    # Codex r2: precision only valid for set_precision — the template must
+    # warn callers so they don't request it for other operations.
+    result = _call(component_type="transform.map", protocol="function")
+    math = result["supported_function_types"]["math"]
+    assert "applicability" in math
+    assert "set_precision" in math["applicability"]
+
+
+def test_template_tool_points_at_build_integration():
+    # Codex r2: structured maps must be created via build_integration; the
+    # template previously pointed at manage_component which only dispatches
+    # profile builders.
+    result = _call(component_type="transform.map", protocol="function")
+    assert "build_integration" in result["tool"]
+    assert "tool_note" in result
+    assert "build_integration" in result["tool_note"]
+
+
 def test_template_advertises_issue_40_error_codes():
     result = _call(component_type="transform.map", protocol="function")
     codes = result["error_codes"]

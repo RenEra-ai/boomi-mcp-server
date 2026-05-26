@@ -2516,7 +2516,16 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
     "operation": "create",
     "component_type": "transform.map",
     "protocol": "direct",
-    "tool": "manage_component (action='create')",
+    "tool": "build_integration (action='plan' | 'apply')",
+    "tool_note": (
+        "Structured transform.map creation goes through build_integration so "
+        "the map builder can compute source/target profile field indexes "
+        "from in-spec '$ref:KEY' profile components. manage_component "
+        "(action='create') only dispatches profile builders today — it does "
+        "not understand structured field_mappings. To author a single map "
+        "outside an integration spec, fall back to the raw-XML escape hatch "
+        "via manage_component config={'xml': '<bns:Component ...>...'}"
+    ),
     "note": (
         "Direct profile-to-profile transform.map. Renders one <Mapping/> per "
         "source/target leaf pair. M2 is direct-only — function (#40), script "
@@ -2723,7 +2732,16 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
     "operation": "create",
     "component_type": "transform.map",
     "protocol": "function",
-    "tool": "manage_component (action='create')",
+    "tool": "build_integration (action='plan' | 'apply')",
+    "tool_note": (
+        "Structured transform.map creation goes through build_integration so "
+        "the map builder can compute source/target profile field indexes "
+        "from in-spec '$ref:KEY' profile components. manage_component "
+        "(action='create') only dispatches profile builders today — it does "
+        "not understand structured function_mappings. To author a single map "
+        "outside an integration spec, fall back to the raw-XML escape hatch "
+        "via manage_component config={'xml': '<bns:Component ...>...'}"
+    ),
     "note": (
         "Structured map-function transform.map. Each entry in function_mappings "
         "declares one mapped output via {function_type, inputs, target_path, "
@@ -2870,7 +2888,12 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         "math": {
             "mapped_inputs": "1 or 2 depending on parameters.operation",
             "required_parameters": ["operation"],
-            "optional_parameters": ["precision", "rounding_mode"],
+            "optional_parameters": ["precision"],
+            "applicability": (
+                "parameters.precision is only valid when operation == "
+                "'set_precision'; supplying it with any other operation "
+                "fails plan-time with MAP_FUNCTION_PARAMETER_INVALID."
+            ),
             "supported_operations": [
                 "add",
                 "subtract",
