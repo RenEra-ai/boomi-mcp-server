@@ -187,6 +187,15 @@ def _validate_math_operation(value: object) -> Optional[str]:
     return None
 
 
+def _validate_math_precision(value: object) -> Optional[str]:
+    # Boomi accepts integer precision >=0 in the set_precision step. Reject
+    # non-int / negative values so the emitted XML never carries a blank or
+    # bogus default attribute.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return "must be a non-negative integer"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -401,7 +410,10 @@ _MATH = FunctionFamily(
     optional_parameters=("precision",),
     output_name="Result",
     emit_configuration=_emit_empty_configuration,
-    parameter_validators={"operation": _validate_math_operation},
+    parameter_validators={
+        "operation": _validate_math_operation,
+        "precision": _validate_math_precision,
+    },
 )
 
 
@@ -528,6 +540,15 @@ def validate_function_mapping(
             )
 
     allowed_keys = set(family.required_parameters) | set(family.optional_parameters)
+    # Per-operation narrowing for math: `precision` is only valid when
+    # operation == set_precision; otherwise emit_function_step would silently
+    # drop it. Reject at validate time so callers can't accidentally request
+    # a no-op transform.
+    if family.name == "math":
+        op = parameters.get("operation")
+        op_str = op.strip().lower() if isinstance(op, str) else None
+        if op_str != "set_precision":
+            allowed_keys = allowed_keys - {"precision"}
     for key, value in parameters.items():
         if key not in allowed_keys:
             return BuilderValidationError(

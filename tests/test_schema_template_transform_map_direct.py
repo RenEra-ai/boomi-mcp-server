@@ -135,3 +135,13 @@ def test_template_out_of_scope_points_at_40_41_42_47():
     assert "#41" in oos_blob
     assert "#42" in oos_blob
     assert "#47" in oos_blob
+
+
+def test_template_tool_points_at_build_integration():
+    # Codex r2: structured maps must be created via build_integration; the
+    # template previously pointed at manage_component which only dispatches
+    # profile builders.
+    result = _call(component_type="transform.map", protocol="direct")
+    assert "build_integration" in result["tool"]
+    assert "tool_note" in result
+    assert "build_integration" in result["tool_note"]

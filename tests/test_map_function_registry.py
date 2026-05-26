@@ -266,6 +266,44 @@ def test_validate_math_does_not_accept_rounding_mode():
     assert "rounding_mode" in err.field
 
 
+def test_validate_math_precision_rejected_for_non_set_precision_ops():
+    # Codex r2: precision was previously accepted for every math operation
+    # but only emitted for set_precision — silent no-op for add/subtract/etc.
+    # Now narrowed: precision only valid when operation == set_precision.
+    for op in ("add", "subtract", "multiply", "divide", "ceil", "floor", "abs"):
+        inputs = ["a", "b"] if op in ("add", "subtract", "multiply", "divide") else ["a"]
+        err = _run("math", inputs, {"operation": op, "precision": 2})
+        assert err is not None, f"precision was silently accepted for math.{op}"
+        assert err.error_code == "MAP_FUNCTION_PARAMETER_INVALID"
+        assert "precision" in err.field
+
+
+def test_validate_math_set_precision_rejects_invalid_precision_value():
+    # Codex r2: set_precision must reject non-int / negative precision so the
+    # emitted XML never carries a blank or bogus default="<bad>" attribute.
+    for bad in (None, "abc", -1, 1.5, True):
+        params = {"operation": "set_precision"}
+        if bad is not None:
+            params["precision"] = bad
+        err = _run("math", ["a"], params)
+        if bad is None:
+            # None precision: missing-but-optional, this is allowed (set_precision
+            # has no required precision per the registry).
+            assert err is None
+        else:
+            assert err is not None, f"set_precision accepted bad precision {bad!r}"
+            # bool True is technically isinstance(int) but our validator
+            # rejects bool explicitly.
+            assert err.error_code == "MAP_FUNCTION_PARAMETER_INVALID"
+
+
+def test_validate_math_set_precision_accepts_valid_precision():
+    err = _run("math", ["a"], {"operation": "set_precision", "precision": 0})
+    assert err is None
+    err2 = _run("math", ["a"], {"operation": "set_precision", "precision": 6})
+    assert err2 is None
+
+
 # ---------------------------------------------------------------------------
 # emit_function_step
 # ---------------------------------------------------------------------------
