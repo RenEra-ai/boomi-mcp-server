@@ -212,8 +212,24 @@ class DBResultField(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def _strip_required(cls, value: str) -> str:
-        return _stripped_nonblank(value)
+    def _strip_and_check_reserved(cls, value: str) -> str:
+        # Reject the path-segment separator and array repetition marker so a DB
+        # field name can never collide with the logical path conventions used
+        # by the issue #43 profile generation helpers and downstream profile/
+        # map builders (Root/list[]/key style). Without this guard a caller
+        # could pass result_schema validation with `customer/id` and then
+        # crash emit_spec() inside profile_generation with an opaque
+        # ARCHETYPE_BUILD_FAILED — the strict contract must own this rejection
+        # so callers see a structured PARAM_VALIDATION_FAILED instead.
+        stripped = _stripped_nonblank(value)
+        for reserved in ("/", "[", "]"):
+            if reserved in stripped:
+                raise ValueError(
+                    "DBResultField.name must not contain the reserved path "
+                    "characters '/', '[', or ']'; these are used by issue #43 "
+                    "profile field generation to form logical field paths"
+                )
+        return stripped
 
     @field_validator("description")
     @classmethod
