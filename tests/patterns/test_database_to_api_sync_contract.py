@@ -1425,6 +1425,166 @@ def test_duplicate_target_binding_across_operations_fails():
     ), f"expected duplicate-binding error, got {result['field_errors']!r}"
 
 
+def test_unmapped_required_target_leaf_fails():
+    """Issue #43 review r2 P2: a required simple leaf in target.payload_profile
+    that no transform op binds must be rejected at parameter-validation time,
+    not silently emit a spec that #26 would then turn into a payload missing a
+    required field."""
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "target_a", "kind": "simple", "data_type": "character"},
+        {
+            "name": "required_b",
+            "kind": "simple",
+            "data_type": "character",
+            "required": True,
+        },
+    ]
+    # transform.operations binds only target_a; required_b is unmapped.
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False, result
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED", result
+    assert any(
+        "required target leaf path" in fe["message"]
+        and "unmapped" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected unmapped-required-leaf rejection, got {result['field_errors']!r}"
+
+
+def test_required_target_leaf_mapped_via_map_script_succeeds():
+    """Coverage check: map_script outputs count as binding the required leaf."""
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "target_a", "kind": "simple", "data_type": "character"},
+        {
+            "name": "required_b",
+            "kind": "simple",
+            "data_type": "character",
+            "required": True,
+        },
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+        {
+            "operation_type": "map_script",
+            "script_slot": "fill_required_b",
+            "language": "groovy2",
+            "inputs": ["source_a"],
+            "outputs": ["Root/required_b"],
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is True, result
+
+
+def test_required_target_leaf_inside_array_must_be_mapped():
+    """A required simple leaf reachable only via an array repetition segment
+    is still required — its path is Root/<array>[]/<leaf>."""
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "target_a", "kind": "simple", "data_type": "character"},
+        {
+            "name": "list",
+            "kind": "array",
+            "children": [
+                {
+                    "name": "required_key",
+                    "kind": "simple",
+                    "data_type": "character",
+                    "required": True,
+                },
+            ],
+        },
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert any(
+        "required target leaf path" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected nested-required-leaf rejection, got {result['field_errors']!r}"
+
+
+def test_unmapped_required_leaf_error_does_not_echo_paths():
+    """Same defense-in-depth as duplicate-target-binding: the cross-field error
+    must not echo caller-supplied leaf paths back through the envelope."""
+    sentinel = "sk_live_REQUIRED_LEAF_ECHO_GUARD_DEADBEEF"
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "target_a", "kind": "simple", "data_type": "character"},
+        {
+            "name": sentinel,
+            "kind": "simple",
+            "data_type": "character",
+            "required": True,
+        },
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+    ]
+    result = _build(payload)
+    assert result["_success"] is False
+    assert sentinel not in json.dumps(result["field_errors"]), (
+        "unmapped-required-leaf error must not echo caller-supplied target "
+        "leaf paths back to the caller"
+    )
+
+
+def test_required_structural_node_does_not_demand_binding():
+    """Required `object` / `array` nodes are structural — they are not
+    transform-targetable, so the unmapped-required check must NOT fire on
+    them. Only required `kind='simple'` leaves count.
+    """
+    payload = _valid_minimal()
+    payload["target"]["payload_profile"]["root"]["children"] = [
+        {"name": "target_a", "kind": "simple", "data_type": "character"},
+        {
+            "name": "list",
+            "kind": "array",
+            "required": True,
+            "children": [
+                {
+                    "name": "key",
+                    "kind": "simple",
+                    "data_type": "character",
+                },
+            ],
+        },
+    ]
+    payload["transform"]["operations"] = [
+        {
+            "operation_type": "direct",
+            "source_field": "source_a",
+            "target_path": "Root/target_a",
+        },
+    ]
+    # Required leaf `Root/list[]/key` is itself optional, and the required
+    # `list` array node is structural — neither demands a binding.
+    result = _build(payload)
+    assert result["_success"] is True, result
+
+
 def test_map_script_duplicate_output_across_operations_fails():
     payload = _valid_minimal()
     payload["source"]["read_operation"]["result_schema"]["fields"] = [
