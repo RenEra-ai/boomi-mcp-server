@@ -172,6 +172,20 @@ _FUNCTION_BUILDER_REJECT_KEYS: Dict[str, str] = {
 }
 
 
+# Allowed keys inside a ``script_mappings[]`` entry. Any other key (notably
+# ``script_body`` — that belongs on a standalone ``script.mapping`` component,
+# not on a transform.map script call) is rejected so the builder can't
+# silently drop caller-authored content during XML emission.
+_SCRIPT_MAPPING_ENTRY_KEYS: Tuple[str, ...] = (
+    "script_component_id",
+    "inputs",
+    "outputs",
+    "script_slot",
+    "language",
+    "cache_enabled",
+)
+
+
 # Script-map route-class rejections — script maps accept ``script_mappings``
 # (their primary input) and optional ``field_mappings`` (mixed direct + script
 # maps). Other route classes still reject so callers route through the
@@ -1216,6 +1230,41 @@ class MapScriptBuilder:
                     field=field_prefix,
                 )
 
+            # Strict-keys check: reject any key build() would silently drop.
+            # Most importantly, ``script_body`` belongs on the standalone
+            # ``script.mapping`` component config — accepting it here and
+            # ignoring it during emit would silently discard caller-authored
+            # code. (Codex r2 P2 finding #1.)
+            for unknown_key in sm.keys():
+                if unknown_key in _SCRIPT_MAPPING_ENTRY_KEYS:
+                    continue
+                if unknown_key == "script_body":
+                    return BuilderValidationError(
+                        f"{field_prefix}.script_body is not accepted on a "
+                        "transform.map script_mappings entry — the entry "
+                        "references an existing script.mapping component "
+                        "by id, not an inline body.",
+                        error_code=UNSUPPORTED_TRANSFORM_ROUTE,
+                        field=f"{field_prefix}.script_body",
+                        hint=(
+                            "Declare the script body on a separate "
+                            "script.mapping component (component_type="
+                            "'script.mapping' with language + script_body "
+                            "+ inputs + outputs), then reference its key "
+                            "from this entry via script_component_id="
+                            "'$ref:<script_key>'."
+                        ),
+                    )
+                return BuilderValidationError(
+                    f"{field_prefix}.{unknown_key} is not a recognised "
+                    "script_mappings entry key",
+                    error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                    field=f"{field_prefix}.{unknown_key}",
+                    hint=(
+                        f"Supported keys: {sorted(_SCRIPT_MAPPING_ENTRY_KEYS)}."
+                    ),
+                )
+
             script_component_id = sm.get("script_component_id")
             if not isinstance(script_component_id, str) or not script_component_id.strip():
                 return BuilderValidationError(
@@ -1227,6 +1276,27 @@ class MapScriptBuilder:
                         "by literal UUID or by '$ref:KEY' pointing at an "
                         "in-spec script.mapping component (the in-spec "
                         "key must also appear in this map's depends_on)."
+                    ),
+                )
+
+            # Type-check cache_enabled before bool() coerces stringy values.
+            # ``bool("false")`` is ``True`` in Python because non-empty
+            # strings are truthy — so a JSON-deserialized "false" would
+            # silently emit ``cacheEnabled="true"`` in the FunctionStep.
+            # (Codex r2 P2 finding #2.)
+            if "cache_enabled" in sm and not isinstance(
+                sm["cache_enabled"], bool
+            ):
+                return BuilderValidationError(
+                    f"{field_prefix}.cache_enabled must be a boolean "
+                    f"(got {type(sm['cache_enabled']).__name__})",
+                    error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                    field=f"{field_prefix}.cache_enabled",
+                    hint=(
+                        "Pass true or false as a JSON boolean — stringy "
+                        "values like \"false\" / \"true\" coerce "
+                        "incorrectly under Python truthiness and would "
+                        "produce the wrong cacheEnabled attribute."
                     ),
                 )
 

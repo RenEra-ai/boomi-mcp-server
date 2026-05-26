@@ -683,6 +683,127 @@ def test_unresolved_dollar_ref_source_profile_id_rejected_at_build():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Codex r2 P2 fixes — silent-drop & truthiness hazards
+# ---------------------------------------------------------------------------
+
+
+def test_script_body_in_script_mapping_entry_rejected_with_pointer():
+    """Codex r2 P2 #1: a caller-authored script_body inside a
+    script_mappings entry would be silently ignored by build(). Reject
+    explicitly and point at the standalone script.mapping component path."""
+    cfg = _minimal_config(
+        script_mappings=[
+            {
+                "script_component_id": "script-uuid-aaa",
+                "script_body": "<<would be silently dropped>>",
+                "inputs": [
+                    {"source_path": "Source/work_date", "input_name": "in"},
+                ],
+                "outputs": [
+                    {"output_name": "out", "target_path": "Target/WorkDate"},
+                ],
+            },
+        ],
+    )
+    with pytest.raises(Exception) as exc_info:
+        _build(cfg)
+    assert exc_info.value.error_code == "UNSUPPORTED_TRANSFORM_ROUTE"
+    assert "script_body" in exc_info.value.field
+    # Hint must point at the standalone script.mapping component path.
+    assert "script.mapping" in exc_info.value.hint
+    assert "script_component_id" in exc_info.value.hint
+
+
+def test_unknown_key_in_script_mapping_entry_rejected():
+    """Defense-in-depth: any key beyond the documented allow-list is
+    rejected so typos don't silently produce mis-emitted XML."""
+    cfg = _minimal_config(
+        script_mappings=[
+            {
+                "script_component_id": "script-uuid-aaa",
+                "typo_key": "value",
+                "inputs": [
+                    {"source_path": "Source/work_date", "input_name": "in"},
+                ],
+                "outputs": [
+                    {"output_name": "out", "target_path": "Target/WorkDate"},
+                ],
+            },
+        ],
+    )
+    with pytest.raises(Exception) as exc_info:
+        _build(cfg)
+    assert exc_info.value.error_code == "PROFILE_FIELD_VALIDATION_FAILED"
+    assert "typo_key" in exc_info.value.field
+
+
+def test_string_false_cache_enabled_rejected_not_silently_inverted():
+    """Codex r2 P2 #2: ``bool("false")`` is True in Python, so a stringy
+    "false" would silently emit ``cacheEnabled="true"`` if we used the
+    truthiness conversion blindly. Reject non-boolean cache_enabled values
+    instead of inverting the caller's intent."""
+    cfg = _minimal_config(
+        script_mappings=[
+            {
+                "script_component_id": "script-uuid-aaa",
+                "cache_enabled": "false",
+                "inputs": [
+                    {"source_path": "Source/work_date", "input_name": "in"},
+                ],
+                "outputs": [
+                    {"output_name": "out", "target_path": "Target/WorkDate"},
+                ],
+            },
+        ],
+    )
+    with pytest.raises(Exception) as exc_info:
+        _build(cfg)
+    assert exc_info.value.error_code == "PROFILE_FIELD_VALIDATION_FAILED"
+    assert "cache_enabled" in exc_info.value.field
+
+
+def test_int_one_cache_enabled_also_rejected_as_non_boolean():
+    """Strictness extends to other truthy-but-not-bool values."""
+    cfg = _minimal_config(
+        script_mappings=[
+            {
+                "script_component_id": "script-uuid-aaa",
+                "cache_enabled": 1,
+                "inputs": [
+                    {"source_path": "Source/work_date", "input_name": "in"},
+                ],
+                "outputs": [
+                    {"output_name": "out", "target_path": "Target/WorkDate"},
+                ],
+            },
+        ],
+    )
+    with pytest.raises(Exception) as exc_info:
+        _build(cfg)
+    assert exc_info.value.error_code == "PROFILE_FIELD_VALIDATION_FAILED"
+
+
+def test_proper_boolean_cache_enabled_still_works():
+    """Sanity: actual booleans still pass through to XML emission."""
+    cfg = _minimal_config(
+        script_mappings=[
+            {
+                "script_component_id": "script-uuid-aaa",
+                "cache_enabled": True,
+                "inputs": [
+                    {"source_path": "Source/work_date", "input_name": "in"},
+                ],
+                "outputs": [
+                    {"output_name": "out", "target_path": "Target/WorkDate"},
+                ],
+            },
+        ],
+    )
+    xml = _build(cfg)
+    assert 'cacheEnabled="true"' in xml
+
+
 def test_direct_map_builder_rejects_script_mappings():
     """A direct map config with a stray script_mappings field still fails
     fast — the per-builder rejection layer keeps script syntax out of
