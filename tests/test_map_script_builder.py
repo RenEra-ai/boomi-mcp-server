@@ -805,9 +805,10 @@ def test_proper_boolean_cache_enabled_still_works():
 
 
 def test_direct_map_builder_rejects_script_mappings():
-    """A direct map config with a stray script_mappings field still fails
-    fast — the per-builder rejection layer keeps script syntax out of
-    direct maps even now that #41 has shipped."""
+    """Codex r3 P1 #2 follow-up: a direct map config with a stray
+    script_mappings field must reject at the validator layer rather than
+    silently accepting and dropping caller-authored script intent during
+    XML emission. Mirrors the function-builder rejection for the same key."""
     cfg = {
         "component_type": "transform.map",
         "map_type": "direct",
@@ -819,7 +820,6 @@ def test_direct_map_builder_rejects_script_mappings():
         "field_mappings": [
             {"source_path": "Source/work_date", "target_path": "Target/WorkDate"},
         ],
-        # Stray — must reject.
         "script_mappings": [
             {
                 "script_component_id": "x",
@@ -829,18 +829,7 @@ def test_direct_map_builder_rejects_script_mappings():
         ],
     }
     err = DirectMapBuilder.validate_config(cfg)
-    # DirectMapBuilder doesn't carry a per-builder reject list for
-    # script_mappings (it's not a route-class key recognised by direct
-    # maps). But the unknown-key behaviour must still surface — direct
-    # maps don't silently accept unrelated structured fields. The
-    # acceptable outcome is either UNSUPPORTED_TRANSFORM_ROUTE or
-    # PROFILE_FIELD_VALIDATION_FAILED — either confirms the field is
-    # not silently ignored.
-    # In practice DirectMapBuilder only validates known keys, so a
-    # stray script_mappings is ignored — defense-in-depth is enforced
-    # at the dispatcher (map_type='direct' never routes to a script
-    # builder), not at the DirectMapBuilder validator. This test
-    # documents that behaviour: validation passes with map_type='direct'
-    # ignoring stray keys, but the apply path never reaches a script
-    # builder.
-    assert err is None
+    assert err is not None
+    assert err.error_code == "UNSUPPORTED_TRANSFORM_ROUTE"
+    assert err.field == "script_mappings"
+    assert "map_type='script'" in err.hint

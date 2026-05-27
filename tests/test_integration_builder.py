@@ -4455,23 +4455,46 @@ class TestBuildPlanTransformMapScript:
         assert summary["script_languages_used"] == ["groovy2", "javascript"]
 
     @patch(_PATCH_TARGET)
-    def test_missing_depends_on_for_script_ref_errors_at_plan(self, mock_pag):
+    def test_script_ref_without_depends_on_is_safe_via_wrapper_synthesis(self, mock_pag):
+        # After the Issue #41 r3 wrapper synthesis pass, omitting the
+        # script.mapping key from the calling map's depends_on is safe:
+        # plan-time synthesis injects an auto-synthesized
+        # transform.function wrapper, adds the wrapper key to the map's
+        # depends_on, and the wrapper itself depends on the script.mapping.
+        # Topological order stays correct via the wrapper hop.
         mock_pag.return_value = []
-        bad = _script_map_comp()
-        # Drop the script ref from depends_on.
-        bad.depends_on = [d for d in bad.depends_on if d != "enrich_row_script"]
+        sloppy = _script_map_comp()
+        # Drop the script ref from the map's depends_on — synthesis
+        # should not require the caller to list it explicitly.
+        sloppy.depends_on = [d for d in sloppy.depends_on if d != "enrich_row_script"]
         plan = _build_plan(MagicMock(), _build_config([
             _xml_profile_comp(),
             _json_profile_comp(),
             _script_mapping_comp(),
-            bad,
+            sloppy,
         ]))
         map_step = next(s for s in plan["steps"] if s["key"] == "script_map")
-        assert map_step["planned_action"] == "error_generated_profile_validation"
-        assert (
-            map_step["validation_error"]["error_code"]
-            == "SCRIPT_MAPPING_REF_REQUIRED"
+        assert map_step["planned_action"] == "create"
+        assert "validation_error" not in map_step
+        # The auto-synthesized wrapper appears in the spec with the
+        # script.mapping as its sole dependency.
+        wrapper_key = "__auto_wrapper_enrich_row_script__"
+        wrapper = next(
+            c for c in plan["integration_spec"]["components"]
+            if c["key"] == wrapper_key
         )
+        assert wrapper["type"] == "transform.function"
+        assert "enrich_row_script" in wrapper["depends_on"]
+        # The map's depends_on now includes the wrapper (auto-added by
+        # synthesis), and execution_order runs script → wrapper → map.
+        the_map = next(
+            c for c in plan["integration_spec"]["components"]
+            if c["key"] == "script_map"
+        )
+        assert wrapper_key in the_map["depends_on"]
+        order = plan["execution_order"]
+        assert order.index("enrich_row_script") < order.index(wrapper_key)
+        assert order.index(wrapper_key) < order.index("script_map")
 
     @patch(_PATCH_TARGET)
     def test_literal_uuid_source_errors_with_index_unavailable(self, mock_pag):

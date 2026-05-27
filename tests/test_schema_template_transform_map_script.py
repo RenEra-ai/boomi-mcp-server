@@ -84,10 +84,15 @@ def test_template_lists_supported_map_types():
 
 
 def test_template_documents_script_component_id_ref_rule():
+    # After Codex r3 P1 #1, the rule now documents wrapper auto-synthesis
+    # rather than the old "list script_key in depends_on" rule. The
+    # synthesized wrapper is auto-added to depends_on, so the caller's
+    # surface contract is simpler: declare the script.mapping + reference
+    # it via '$ref:<script_key>'.
     result = _call(component_type="transform.map", protocol="script")
     rule = result["script_component_id_rule"]
     assert "$ref" in rule
-    assert "depends_on" in rule
+    assert "wrapper" in rule.lower() or "synthes" in rule.lower()
 
 
 def test_template_documents_in_map_xml_shape_explicitly():

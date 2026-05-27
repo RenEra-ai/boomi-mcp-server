@@ -159,6 +159,10 @@ _DIRECT_ONLY_REJECT_KEYS: Dict[str, str] = {
         "Switch to map_type='function' and declare "
         "function_mappings[].function_type='simple_lookup'."
     ),
+    "script_mappings": (
+        "Switch to map_type='script' (or 'map_script') and declare "
+        "script_mappings[] referencing a script.mapping component (#41)."
+    ),
 }
 
 

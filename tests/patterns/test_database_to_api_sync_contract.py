@@ -503,16 +503,18 @@ def test_map_script_accepts_inline_script_body_after_41_ships():
     )
     op = transform_flow["operations"][0]
     assert op["script_body_present"] is True
-    # The body itself must never leak through emit_spec.
-    assert "script_body" not in op
+    # Codex r3 P2 #3: the body itself round-trips into the spec so downstream
+    # compilation can materialise the matching script.mapping component.
+    assert op["script_body"] == "<<task-authored script body>>"
 
 
-def test_map_script_summary_does_not_echo_script_body_content():
-    """Defense-in-depth: script_body is accepted on the contract but the
-    body string itself must never appear in the emitted spec — only a
-    presence boolean. Sensitive script content (credentials in code,
-    business logic) stays out of plan metadata."""
-    sentinel = "sk_live_QA_SCRIPT_BODY_GUARD_DEADBEEF"
+def test_map_script_summary_round_trips_script_body_content():
+    """Codex r3 P2 finding #3: the actual script_body must round-trip into
+    the emitted spec so downstream build_integration / #41 wrapper synthesis
+    can materialise a script.mapping component from spec metadata alone.
+    Dropping the body to only a presence boolean would lose runnable content
+    between build_from_archetype and downstream compilation."""
+    sentinel = "outputValue = inputValue.toUpperCase() // round-trip sentinel"
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
         {
@@ -526,10 +528,16 @@ def test_map_script_summary_does_not_echo_script_body_content():
     ]
     result = _build(payload)
     assert result["_success"] is True, result
-    assert sentinel not in json.dumps(result), (
-        "map_script.script_body content must not echo through the emitted "
-        "spec — only a script_body_present boolean is allowed."
+    transform_flow = next(
+        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
     )
+    op = transform_flow["operations"][0]
+    assert op["script_body_present"] is True
+    assert op["script_body"] == sentinel
+    # Defence-in-depth: the body should also appear in the JSON envelope
+    # (caller-output, not code) so spec-driven downstream tooling can find
+    # it without re-walking the original archetype payload.
+    assert sentinel in json.dumps(result)
 
 
 def test_map_script_blank_script_body_is_rejected():

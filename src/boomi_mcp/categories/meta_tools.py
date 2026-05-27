@@ -3416,18 +3416,25 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
     "supported_map_types": ["script", "map_script"],
     "script_component_id_rule": (
         "Each script_mappings entry references a reusable script.mapping "
-        "component by literal UUID or by '$ref:KEY'. '$ref:KEY' targets "
-        "must also appear in depends_on so the script.mapping component "
-        "applies before this map (topo-sort safety)."
+        "component by '$ref:<script_key>' (recommended) or by a literal "
+        "transform.function wrapper componentId. When you use "
+        "'$ref:<script_key>' against an in-spec script.mapping, the plan "
+        "automatically synthesizes a transform.function wrapper that "
+        "bridges the map to the script.mapping; the synthesized wrapper "
+        "applies in topological order before the calling map and is "
+        "visible as a first-class component in the plan output."
     ),
     "in_map_xml_shape_note": (
         "Each script call emits a userdefined <FunctionStep "
-        "category='userdefined' type='userdefined' id='<scriptComponentId>'> "
-        "with an empty <Configuration/>. This matches the live Boomi shape "
-        "for in-map calls to reusable script.mapping components. The "
-        "<Configuration><Scripting><ScriptToExecute>...</Scripting></Configuration> "
-        "shape only appears inside standalone transform.function wrappers, "
-        "which remain out of scope."
+        "category='userdefined' type='userdefined' id='<wrapper_componentId>'> "
+        "with an empty <Configuration/>. Boomi's live shape REQUIRES the "
+        "userdefined id to point at a transform.function wrapper component, "
+        "NOT at the script.mapping directly — the wrapper internally "
+        "references the script.mapping via <Configuration><Scripting "
+        "componentId='...' useComponent='true'>. The integration builder "
+        "auto-synthesizes the wrapper from the referenced script.mapping's "
+        "structure, so callers only declare the script.mapping + reference "
+        "it via '$ref:<script_key>'."
     ),
     "unsupported_routes": {
         "functions": (

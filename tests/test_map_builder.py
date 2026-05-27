@@ -514,3 +514,65 @@ def test_build_db_source_to_json_target_renders_correct_namepath():
     # Live reference (renera 77bb73d5...) shows OrderNum at key=6 in DB
     # profile, mapping to OrderID at key=3 in XML target. Same envelope shape.
     assert mappings[0].attrib["fromKey"] == "6"
+
+
+# ---------------------------------------------------------------------------
+# Codex r3 P1 finding #2: direct/function maps must REJECT script_mappings
+# instead of silently accepting and dropping caller-authored script intent.
+# ---------------------------------------------------------------------------
+
+
+def test_direct_map_rejects_script_mappings_with_route_pointer():
+    src_idx, tgt_idx = _build_indexes()
+    cfg = _direct_map_config()
+    cfg["script_mappings"] = [
+        {
+            "script_component_id": "some-uuid",
+            "inputs": [],
+            "outputs": [],
+        },
+    ]
+    err = DirectMapBuilder.validate_config(
+        cfg, source_index=src_idx, target_index=tgt_idx
+    )
+    assert err is not None
+    assert err.error_code == "UNSUPPORTED_TRANSFORM_ROUTE"
+    assert err.field == "script_mappings"
+    assert "map_type='script'" in err.hint
+
+
+def test_function_map_also_rejects_script_mappings():
+    from boomi_mcp.categories.components.builders.map_builder import MapFunctionBuilder
+    src_idx, tgt_idx = _build_indexes()
+    # Build a minimal function map config (mirrors test_map_function_builder.py).
+    cfg = {
+        "component_type": "transform.map",
+        "map_type": "function",
+        "component_name": "Bad Function Map with Stray Script",
+        "source_profile_id": "aaaaaaaa-1111-1111-1111-111111111111",
+        "source_profile_type": "profile.xml",
+        "target_profile_id": "bbbbbbbb-2222-2222-2222-222222222222",
+        "target_profile_type": "profile.json",
+        "function_mappings": [
+            {
+                "function_type": "lowercase",
+                "inputs": ["rows/row[]/key"],
+                "target_path": "Root/list[]/key",
+                "parameters": {},
+            },
+        ],
+        # Stray — must reject before XML emission silently drops it.
+        "script_mappings": [
+            {
+                "script_component_id": "some-uuid",
+                "inputs": [],
+                "outputs": [],
+            },
+        ],
+    }
+    err = MapFunctionBuilder.validate_config(
+        cfg, source_index=src_idx, target_index=tgt_idx
+    )
+    assert err is not None
+    assert err.error_code == "UNSUPPORTED_TRANSFORM_ROUTE"
+    assert err.field == "script_mappings"

@@ -2163,9 +2163,16 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "input_count": len(op.inputs),
                     "outputs": list(op.outputs),
                     "output_count": len(op.outputs),
-                    # Presence boolean only — never echo the body itself.
+                    # Presence boolean for quick contract checks. The actual
+                    # body is round-tripped below when supplied — downstream
+                    # build_integration / #41 wrapper synthesis needs the
+                    # runnable content to materialise a script.mapping
+                    # component, so dropping it here would be data-loss
+                    # (Codex r3 P2 finding #3).
                     "script_body_present": op.script_body is not None,
                 }
+                if op.script_body is not None:
+                    summary["script_body"] = op.script_body
                 if op.script_component_ref is not None:
                     summary["script_component_ref"] = op.script_component_ref
                 if op.documentation_hint is not None:
