@@ -355,3 +355,128 @@ def test_plan_execution_order_runs_script_then_wrapper_then_map():
     order = plan["execution_order"]
     assert order.index("my_script") < order.index("__auto_wrapper_my_script__")
     assert order.index("__auto_wrapper_my_script__") < order.index("the_map")
+
+
+# ---------------------------------------------------------------------------
+# Codex r4 P2: caller-declared transform.function wrappers must satisfy
+# depends_on + target-type checks. Without them a manual wrapper can plan
+# clean and fail at apply (unresolved $ref) or emit a Scripting componentId
+# pointing at the wrong type (profile / connector / other).
+# ---------------------------------------------------------------------------
+
+
+def _caller_declared_wrapper(
+    key="__auto_wrapper_my_script__",
+    name="Caller-declared wrapper",
+    script_ref_key="my_script",
+    depends_on=None,
+):
+    return IntegrationComponentSpec(
+        key=key, type="transform.function", action="create", name=name,
+        depends_on=depends_on if depends_on is not None else [script_ref_key],
+        config={
+            "component_type": "transform.function",
+            "component_name": name,
+            "script_component_id": f"$ref:{script_ref_key}",
+            "language": "groovy2",
+            "script_body": "outputValue = inputValue.toUpperCase()",
+            "inputs": [{"name": "inputValue", "data_type": "character"}],
+            "outputs": [{"name": "outputValue"}],
+        },
+    )
+
+
+def test_caller_declared_wrapper_missing_depends_on_rejected_at_plan():
+    # Wrapper $ref:my_script but depends_on=[] — topo would put the wrapper
+    # before the script.mapping, apply would crash on unresolved $ref.
+    config = {
+        "integration_spec": {
+            "name": "Bad Wrapper Spec",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                # Use a non-auto key so synthesis doesn't override it.
+                _caller_declared_wrapper(
+                    key="manual_wrapper", depends_on=[],
+                ).model_dump(),
+                _script_map_comp(script_ref_key="manual_wrapper").model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    wrapper_step = next(
+        s for s in plan["steps"] if s["key"] == "manual_wrapper"
+    )
+    assert wrapper_step["planned_action"] == "error_generated_profile_validation"
+    err = wrapper_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_REF_REQUIRED"
+    assert err["field"] == "depends_on"
+    assert err["details"]["ref_key"] == "my_script"
+
+
+def test_caller_declared_wrapper_pointing_at_profile_rejected_at_plan():
+    # Wrapper script_component_id=$ref:src_profile (a profile.xml). Plan
+    # must reject — apply would emit <Scripting componentId='<profile-uuid>'/>
+    # which Boomi can't bind as a script.
+    config = {
+        "integration_spec": {
+            "name": "Wrong-type Wrapper",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                _caller_declared_wrapper(
+                    key="manual_wrapper",
+                    script_ref_key="src_profile",
+                    depends_on=["src_profile"],
+                ).model_dump(),
+                _script_map_comp(script_ref_key="manual_wrapper").model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    wrapper_step = next(
+        s for s in plan["steps"] if s["key"] == "manual_wrapper"
+    )
+    assert wrapper_step["planned_action"] == "error_generated_profile_validation"
+    err = wrapper_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_REF_REQUIRED"
+    assert err["field"] == "script_component_id"
+    assert err["details"]["target_component_type"] == "profile.xml"
+
+
+def test_caller_declared_wrapper_with_valid_script_ref_plans_clean():
+    # Honest wrapper: depends_on includes the script, target is script.mapping.
+    config = {
+        "integration_spec": {
+            "name": "Good Wrapper Spec",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                _caller_declared_wrapper(
+                    key="manual_wrapper", depends_on=["my_script"],
+                ).model_dump(),
+                _script_map_comp(script_ref_key="manual_wrapper").model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    wrapper_step = next(
+        s for s in plan["steps"] if s["key"] == "manual_wrapper"
+    )
+    assert wrapper_step["planned_action"] == "create"
+    assert "validation_error" not in wrapper_step
