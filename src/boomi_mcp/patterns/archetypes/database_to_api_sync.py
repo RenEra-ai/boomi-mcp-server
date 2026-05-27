@@ -1147,13 +1147,19 @@ class MapScriptTransformOperation(_BaseTransformOperation):
     script_component_ref: Optional[str] = Field(
         default=None,
         description=(
-            "Reference to an existing Boomi script.mapping component "
-            "(literal componentId or '$ref:KEY' pointing at an in-spec "
-            "script.mapping component). When provided, this archetype "
-            "operation describes a reuse-mode script call; when omitted in "
-            "favor of script_body, callers signal create-mode where a "
-            "matching script.mapping component is expected to be "
-            "materialised separately."
+            "Reference to a reusable script wiring. Use '$ref:KEY' pointing "
+            "at an in-spec script.mapping (downstream wrapper synthesis "
+            "auto-creates the transform.function wrapper) or '$ref:KEY' "
+            "pointing at an in-spec transform.function wrapper. A literal "
+            "componentId may be supplied at the archetype layer for "
+            "downstream tooling that wraps existing-Boomi script reuse, "
+            "but build_integration's #41 contract rejects literal IDs in "
+            "the corresponding map's script_mappings[].script_component_id "
+            "— Boomi requires the map FunctionStep id to point at a "
+            "transform.function wrapper, which can only be synthesized "
+            "from in-spec components. Callers reusing existing scripts "
+            "should declare an in-spec transform.function wrapper that "
+            "embeds the existing script.mapping's componentId."
         ),
     )
     script_body: Optional[str] = Field(
@@ -1162,11 +1168,12 @@ class MapScriptTransformOperation(_BaseTransformOperation):
             "Caller-authored script source. The M2 archetype layer accepts "
             "the field but does NOT auto-emit a script.mapping component "
             "into the IntegrationSpec components list — the archetype "
-            "stays contract-only for now. Downstream tooling that wants "
-            "to materialise the script component reads this field from "
-            "the operation; the IntegrationSpec summary only surfaces a "
-            "presence boolean, never the body itself, to avoid echoing "
-            "caller-authored code through plan metadata."
+            "stays contract-only. After issue #41 r3, the emitted "
+            "operation summary round-trips the full body verbatim "
+            "(alongside ``script_body_present``) so downstream "
+            "build_integration / wrapper-synthesis tooling can materialise "
+            "the matching script.mapping component without re-reading the "
+            "original archetype payload."
         ),
     )
 
@@ -2123,10 +2130,12 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         # Transform operations summary — route + full operand structure so
         # downstream issues (#26/#40/#41) can compile the right rung directly
         # from the spec without re-reading the original archetype payload.
-        # For map_script: ``script_body`` is accepted on the operand (#41
-        # shipped) but the summary only surfaces a presence boolean — the
-        # body itself never enters plan metadata so caller-authored code
-        # doesn't echo back through emit_spec.
+        # For map_script: ``script_body`` round-trips verbatim alongside
+        # ``script_body_present`` so #41 wrapper-synthesis tooling can
+        # materialise the matching script.mapping component from spec
+        # metadata alone (Codex r3 P2 #3 — dropping the body would be
+        # data-loss between build_from_archetype and downstream
+        # compilation).
         operation_summaries: List[Dict[str, Any]] = []
         for op in operations:
             if isinstance(op, DirectTransformOperation):

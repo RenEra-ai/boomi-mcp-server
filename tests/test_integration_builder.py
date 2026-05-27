@@ -4517,16 +4517,19 @@ class TestBuildPlanTransformMapScript:
     @patch(_PATCH_TARGET)
     def test_unresolved_source_path_errors_with_map_field_not_found(self, mock_pag):
         mock_pag.return_value = []
+        # Port names match _script_mapping_comp's declared inputValue /
+        # outputValue so the Codex r5 port-shape check passes and the
+        # MAP_FIELD_NOT_FOUND failure for the bad source_path surfaces.
         bad = _script_map_comp(
             script_mappings=[
                 {
                     "script_component_id": "$ref:enrich_row_script",
                     "script_slot": "enrich_row",
                     "inputs": [
-                        {"source_path": "rows/row[]/missing", "input_name": "in"},
+                        {"source_path": "rows/row[]/missing", "input_name": "inputValue"},
                     ],
                     "outputs": [
-                        {"output_name": "out", "target_path": "Root/list[]/key"},
+                        {"output_name": "outputValue", "target_path": "Root/list[]/key"},
                     ],
                 },
             ],

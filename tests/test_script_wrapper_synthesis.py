@@ -454,6 +454,206 @@ def test_caller_declared_wrapper_pointing_at_profile_rejected_at_plan():
     assert err["details"]["target_component_type"] == "profile.xml"
 
 
+# ---------------------------------------------------------------------------
+# Codex r5 P1 #1: literal componentId in script_mappings[].script_component_id
+# is rejected at plan time. Without rejection, the map's FunctionStep id
+# would point at whatever literal UUID the caller supplied — if that UUID
+# is a script.mapping rather than a transform.function wrapper, Boomi
+# cannot bind script ports at runtime (the original broken shape #41 r3
+# meant to fix).
+# ---------------------------------------------------------------------------
+
+
+def test_literal_script_component_id_in_script_mappings_rejected_at_plan():
+    """Literal componentId values bypass wrapper synthesis. Reject them
+    at plan time and direct callers to either declare a wrapper in-spec
+    or use $ref against an in-spec script.mapping."""
+    map_with_literal = _script_map_comp()
+    map_with_literal.config["script_mappings"][0]["script_component_id"] = (
+        "00000000-0000-0000-0000-aaaaaaaaaaaa"
+    )
+    config = {
+        "integration_spec": {
+            "name": "Literal UUID Reject",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                # Need a separate script.mapping in-spec; the literal
+                # UUID test focuses on the MAP's rejection regardless.
+                _script_comp().model_dump(),
+                map_with_literal.model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "error_generated_profile_validation"
+    err = map_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_REF_REQUIRED"
+    assert "script_component_id" in err["field"]
+    # Hint must direct callers at the wrapper-as-in-spec path.
+    assert "transform.function" in err["hint"]
+    assert "$ref" in err["hint"]
+
+
+# ---------------------------------------------------------------------------
+# Codex r5 P1 #2: cross-validate map's script_mappings ports against the
+# referenced script.mapping/transform.function port surface. Without this,
+# a map can declare 2 inputs against a 1-input script, with mismatched
+# names, and the plan still succeeds — apply emits a FunctionStep with
+# port keys that Boomi can't bind to the wrapper.
+# ---------------------------------------------------------------------------
+
+
+def test_map_input_count_mismatch_against_script_rejected_at_plan():
+    """Map declares 2 inputs but referenced script.mapping has 1."""
+    map_with_mismatch = _script_map_comp()
+    map_with_mismatch.config["script_mappings"][0]["inputs"] = [
+        {"source_path": "rows/row[]/key", "input_name": "inputValue"},
+        {"source_path": "rows/row[]/key", "input_name": "extraInput"},
+    ]
+    config = {
+        "integration_spec": {
+            "name": "Input Count Mismatch",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                map_with_mismatch.model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "error_generated_profile_validation"
+    err = map_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_VARIABLE_INVALID"
+    assert "inputs" in err["field"]
+    assert err["details"]["expected_inputs"] == ["inputValue"]
+    assert err["details"]["actual_inputs"] == ["inputValue", "extraInput"]
+
+
+def test_map_output_count_mismatch_against_script_rejected_at_plan():
+    """Map declares 2 outputs but referenced script.mapping has 1."""
+    map_with_mismatch = _script_map_comp()
+    map_with_mismatch.config["script_mappings"][0]["outputs"] = [
+        {"output_name": "outputValue", "target_path": "Root/list[]/key"},
+        {"output_name": "extraOutput", "target_path": "Root/list[]/key"},
+    ]
+    config = {
+        "integration_spec": {
+            "name": "Output Count Mismatch",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                map_with_mismatch.model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "error_generated_profile_validation"
+    err = map_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_VARIABLE_INVALID"
+    assert "outputs" in err["field"]
+
+
+def test_map_input_name_mismatch_against_script_rejected_at_plan():
+    """Map declares an input with a name that doesn't appear in the
+    script.mapping's input declarations."""
+    map_with_mismatch = _script_map_comp()
+    map_with_mismatch.config["script_mappings"][0]["inputs"] = [
+        {"source_path": "rows/row[]/key", "input_name": "wrongInputName"},
+    ]
+    config = {
+        "integration_spec": {
+            "name": "Input Name Mismatch",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                map_with_mismatch.model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "error_generated_profile_validation"
+    err = map_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_VARIABLE_INVALID"
+    assert "input_name" in err["field"]
+    assert err["details"]["actual_name"] == "wrongInputName"
+    assert err["details"]["expected_names"] == ["inputValue"]
+
+
+def test_map_output_name_mismatch_against_script_rejected_at_plan():
+    map_with_mismatch = _script_map_comp()
+    map_with_mismatch.config["script_mappings"][0]["outputs"] = [
+        {"output_name": "wrongOutputName", "target_path": "Root/list[]/key"},
+    ]
+    config = {
+        "integration_spec": {
+            "name": "Output Name Mismatch",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                map_with_mismatch.model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "error_generated_profile_validation"
+    err = map_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_VARIABLE_INVALID"
+    assert "output_name" in err["field"]
+
+
+def test_map_with_matching_port_shape_plans_clean():
+    """Sanity: a map whose script_mappings ports exactly match the
+    referenced script.mapping plans without port-shape errors."""
+    config = {
+        "integration_spec": {
+            "name": "Matching Port Shape",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                _script_map_comp().model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "create"
+
+
 def test_caller_declared_wrapper_with_valid_script_ref_plans_clean():
     # Honest wrapper: depends_on includes the script, target is script.mapping.
     config = {
