@@ -2528,6 +2528,23 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                     # AND by position; if counts or names
                                     # diverge, the map calls the wrapper
                                     # with incompatible ports at runtime.
+                                    #
+                                    # Codex r6 P2: skip the cross-check when
+                                    # inputs/outputs aren't lists yet —
+                                    # MapScriptBuilder.validate_config below
+                                    # will surface the structural error
+                                    # (e.g. ``inputs: true``,
+                                    # ``outputs: 1``) as a structured
+                                    # PROFILE_FIELD_VALIDATION_FAILED.
+                                    # Iterating a non-list here used to
+                                    # crash _build_plan with a raw
+                                    # TypeError instead.
+                                    raw_inputs = sm.get("inputs")
+                                    raw_outputs = sm.get("outputs")
+                                    if not isinstance(raw_inputs, list) or not isinstance(
+                                        raw_outputs, list
+                                    ):
+                                        continue
                                     expected_input_names = _ref_target_input_names(
                                         target_comp
                                     )
@@ -2536,12 +2553,12 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                     )
                                     actual_input_names = [
                                         str(entry.get("input_name") or "").strip()
-                                        for entry in (sm.get("inputs") or [])
+                                        for entry in raw_inputs
                                         if isinstance(entry, Mapping)
                                     ]
                                     actual_output_names = [
                                         str(entry.get("output_name") or "").strip()
-                                        for entry in (sm.get("outputs") or [])
+                                        for entry in raw_outputs
                                         if isinstance(entry, Mapping)
                                     ]
                                     port_err = _check_port_shape_alignment(
