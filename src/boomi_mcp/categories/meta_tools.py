@@ -3129,9 +3129,14 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         ),
     },
     "out_of_scope": {
-        "standalone_transform_function": (
-            "Standalone reusable transform.function components (user-defined "
-            "functions shared across maps) remain future work."
+        "standalone_transform_function_authoring_surface": (
+            "There is no first-class authoring surface for standalone "
+            "transform.function components in the function-map route. "
+            "#41 introduces a script-wrapper specialization (auto-synth "
+            "or caller-declared) for bridging maps to script.mapping "
+            "components; a general-purpose transform.function builder "
+            "for non-script userdefined function graphs remains future "
+            "work."
         ),
         "chained_function_graphs": (
             "Wiring multi-step function pipelines (function-A.output -> "
@@ -3317,10 +3322,15 @@ _COMPONENT_CREATE_SCRIPT_MAPPING = {
             "explicitly NOT a fallback for unsupported script-map "
             "requests."
         ),
-        "standalone_transform_function": (
-            "Standalone reusable transform.function wrappers around a "
-            "script.mapping component remain future work; #41 only ships "
-            "in-map calls to reusable script.mapping components."
+        "standalone_transform_function_authoring_surface": (
+            "There is no first-class authoring surface for standalone "
+            "transform.function components beyond the script-wrapper "
+            "specialization #41 ships. The integration builder "
+            "auto-synthesizes wrappers from in-spec script.mapping refs "
+            "and accepts caller-declared transform.function components "
+            "for existing-script reuse, but a general-purpose "
+            "transform.function builder (for non-script userdefined "
+            "function graphs) remains future work."
         ),
         "discovered_runtime_typing": (
             "The builder does not introspect the script body to infer "
@@ -3627,10 +3637,15 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
             "Process custom scripting) is NOT used as a fallback for "
             "unsupported map-script requests."
         ),
-        "standalone_transform_function": (
-            "Standalone reusable transform.function wrappers around a "
-            "script.mapping component remain future work; #41 only ships "
-            "in-map calls."
+        "standalone_transform_function_authoring_surface": (
+            "There is no first-class authoring surface for standalone "
+            "transform.function components beyond the script-wrapper "
+            "specialization #41 ships. Plan-time synthesis auto-creates "
+            "wrappers from in-spec script.mapping refs, and callers can "
+            "declare their own transform.function components for "
+            "existing-script reuse, but a general-purpose "
+            "transform.function builder (for non-script userdefined "
+            "function graphs) remains future work."
         ),
         "chained_script_graphs": (
             "Wiring one script's output into another script's input via a "

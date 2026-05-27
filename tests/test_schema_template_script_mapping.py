@@ -166,8 +166,13 @@ def test_template_out_of_scope_marks_script_processing_as_off_limits():
 
 
 def test_template_out_of_scope_marks_standalone_transform_function_future():
+    # Codex r7 P2: the key name was clarified to
+    # ``standalone_transform_function_authoring_surface`` since a
+    # script-wrapper specialization (#41) DOES ship a transform.function
+    # builder — the future-work caveat applies only to the general-purpose
+    # authoring surface for non-script userdefined function graphs.
     result = _call(component_type="script.mapping")
-    assert "standalone_transform_function" in result["out_of_scope"]
+    assert "standalone_transform_function_authoring_surface" in result["out_of_scope"]
 
 
 def test_template_gotchas_mention_input_null_semantics():
