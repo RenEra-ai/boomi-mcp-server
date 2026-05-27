@@ -2581,7 +2581,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
             "Switch to map_type='script' and declare script_mappings[] "
             "referencing a script.mapping component (#41 shipped)."
         ),
-        "xslt": "#42 (XSLT transform builder)",
+        "xslt": "#42 (XSLT deferred decision; unsupported in M2)",
         "default_values": (
             "Switch to map_type='function' and declare "
             "function_mappings[].function_type='default_value' (#40)."
@@ -2721,7 +2721,11 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
             "graphs remain future work."
         ),
         "xslt": (
-            "XSLT transform components are tracked by issue #42."
+            "XSLT support is explicitly deferred and out of M2 "
+            "(issue #42). It is not a planned M2 builder; reopen only "
+            "for XML-heavy migration, SOAP/XML-to-XML scenarios, or "
+            "imported integration assets that already ship XSLT "
+            "stylesheets."
         ),
         "existing_profile_index_discovery": (
             "Indexing arbitrary existing-profile XML to support literal-UUID "
@@ -2961,8 +2965,8 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
             "Switch to map_type='script' and declare script_mappings[] "
             "referencing a script.mapping component (#41 shipped)."
         ),
-        "xslt": "#42 (XSLT transform builder)",
-        "xslt_source": "#42 (XSLT transform builder)",
+        "xslt": "#42 (XSLT deferred decision; unsupported in M2)",
+        "xslt_source": "#42 (XSLT deferred decision; unsupported in M2)",
         "expression": (
             "Inline Boomi expressions are not a structured primitive. Use a "
             "native function via map_type='function' (#40), or wrap the "
@@ -3144,7 +3148,11 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
             "per target output."
         ),
         "xslt": (
-            "XSLT transform components are tracked by issue #42."
+            "XSLT support is explicitly deferred and out of M2 "
+            "(issue #42). It is not a planned M2 builder; reopen only "
+            "for XML-heavy migration, SOAP/XML-to-XML scenarios, or "
+            "imported integration assets that already ship XSLT "
+            "stylesheets."
         ),
         "existing_profile_index_discovery": (
             "Indexing arbitrary existing-profile XML to support literal-UUID "
@@ -3476,8 +3484,8 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
             "Raw <map_scripts> XML is not accepted; reference a reusable "
             "script.mapping component via script_mappings[].script_component_id."
         ),
-        "xslt": "#42 (XSLT transform builder)",
-        "xslt_source": "#42 (XSLT transform builder)",
+        "xslt": "#42 (XSLT deferred decision; unsupported in M2)",
+        "xslt_source": "#42 (XSLT deferred decision; unsupported in M2)",
         "expression": (
             "Inline Boomi expressions are not a structured primitive. "
             "Wrap the logic in a script.mapping component."
@@ -3653,7 +3661,11 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
             "as a separate script_mappings entry instead."
         ),
         "xslt": (
-            "XSLT transform components are tracked by issue #42."
+            "XSLT support is explicitly deferred and out of M2 "
+            "(issue #42). It is not a planned M2 builder; reopen only "
+            "for XML-heavy migration, SOAP/XML-to-XML scenarios, or "
+            "imported integration assets that already ship XSLT "
+            "stylesheets."
         ),
         "existing_profile_index_discovery": (
             "Indexing arbitrary existing-profile XML to support literal-UUID "

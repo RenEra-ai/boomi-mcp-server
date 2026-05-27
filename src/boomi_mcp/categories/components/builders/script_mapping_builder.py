@@ -119,8 +119,8 @@ _RAW_XML_REJECT_KEYS: Dict[str, str] = {
     "functions": "Raw <Functions> XML is not accepted; supply structured inputs/outputs instead.",
     "function_steps": "Raw <FunctionStep> XML is not accepted; supply structured inputs/outputs instead.",
     "scripts": "Raw <scripts> XML is not accepted; script.mapping accepts a single script_body string.",
-    "xslt": "XSLT is unrelated to script.mapping (XSLT remains future work, #42).",
-    "xslt_source": "XSLT is unrelated to script.mapping (XSLT remains future work, #42).",
+    "xslt": "XSLT is unrelated to script.mapping; XSLT support is deferred and unsupported in M2 (#42).",
+    "xslt_source": "XSLT is unrelated to script.mapping; XSLT support is deferred and unsupported in M2 (#42).",
     "expression": "Boomi expressions are not a script.mapping primitive; place expression logic in script_body.",
     "expressions": "Boomi expressions are not a script.mapping primitive; place expression logic in script_body.",
 }
