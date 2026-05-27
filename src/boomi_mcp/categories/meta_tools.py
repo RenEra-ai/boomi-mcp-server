@@ -5624,7 +5624,49 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             ],
         },
 
-        # === Category 8: Meta / Power Tools ===
+        # === Category 8: Documentation ===
+        "search_boomi_docs": {
+            "category": "Documentation",
+            "description": (
+                "Search the Boomi documentation knowledge base by semantic "
+                "similarity and return top-ranked chunks with inline content."
+            ),
+            "actions": ["(single action — semantic docs search)"],
+            "read_only": True,
+            "parameters": {
+                "query": "str (required) — factual Boomi docs question or search terms",
+                "top_k": "int (optional) — number of chunks to return, capped by server config",
+            },
+            "examples": [
+                'search_boomi_docs(query="Agent step output process property", top_k=5)',
+                'search_boomi_docs(query="Tracking Direction Input Documents Output Documents Process Reporting")',
+            ],
+            "note": (
+                "Use this before answering factual Boomi platform behavior, "
+                "connector, configuration, deployment/runtime, scripting, EDI/API, "
+                "or error-message questions."
+            ),
+        },
+        "read_boomi_doc_page": {
+            "category": "Documentation",
+            "description": (
+                "Read chunks from a Boomi documentation page by page_key after "
+                "a search result indicates the page is relevant."
+            ),
+            "actions": ["(single action — read page chunks)"],
+            "read_only": True,
+            "parameters": {
+                "page_key": "str (required) — page_key returned by search_boomi_docs",
+                "max_chunks": "int (optional) — number of chunks to return",
+                "start_chunk_index": "int (optional) — pagination start index",
+            },
+            "examples": [
+                'read_boomi_doc_page(page_key="https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/int-Agent_step")',
+            ],
+            "note": "Use after search_boomi_docs when surrounding page context is needed.",
+        },
+
+        # === Category 9: Meta / Power Tools ===
         "get_schema_template": {
             "category": "Meta Tools",
             "description": "Get example payloads, field descriptions, and enum values for all tools",
@@ -5681,7 +5723,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "note": "No parameters needed. Returns this catalog.",
         },
 
-        # === Category 8b: Account Group Management ===
+        # === Category 9b: Account Group Management ===
         "manage_account_groups": {
             "category": "Administration",
             "description": "Manage account groups — CRUD, account associations, user roles, integration pack sharing",
@@ -5705,7 +5747,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             ],
         },
 
-        # === Category 9: Listener Management ===
+        # === Category 10: Listener Management ===
         "manage_listeners": {
             "category": "Runtime Operations",
             "description": "Manage Boomi listener processes — status, pause, resume, restart",
@@ -5724,7 +5766,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             ],
         },
 
-        # === Category 10: Integration Pack Management ===
+        # === Category 11: Integration Pack Management ===
         "manage_integration_packs": {
             "category": "Administration",
             "description": "Manage integration packs — publisher packs, instances, releases, attachments",
@@ -5869,6 +5911,13 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "4. analyze_component(action='dependencies', component_id='...') → check dependencies",
             ],
         },
+        "research_boomi_docs": {
+            "description": "Look up current Boomi product behavior in the bundled documentation KB",
+            "steps": [
+                "1. search_boomi_docs(query='...', top_k=5) → find relevant documentation chunks",
+                "2. read_boomi_doc_page(page_key='<hit page_key>') → read surrounding page context when needed",
+            ],
+        },
         "manage_admin_operations": {
             "description": "Account administration — roles, branches, and uncovered APIs",
             "steps": [
@@ -5938,6 +5987,13 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (integration packs, secrets rotation, etc.)",
         "profile_required": "Most tools require a 'profile' parameter — get it from list_boomi_profiles()",
     }
+    # Only point at the docs KB when the live runtime actually registers it.
+    if available_tools is None or "search_boomi_docs" in available_tools:
+        hints["boomi_docs"] = (
+            "For factual Boomi product behavior, connector/configuration semantics, "
+            "runtime behavior, EDI/API behavior, scripting, or error messages, "
+            "start with search_boomi_docs()."
+        )
     # Only recommend the archetype-first flow when the entry-point tool is
     # actually registered; otherwise the hint points at a tool the catalog
     # doesn't surface.

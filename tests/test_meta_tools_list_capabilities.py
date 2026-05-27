@@ -20,6 +20,11 @@ AUTHORING_TOOLS = (
     "build_from_archetype",
 )
 
+DOC_TOOLS = (
+    "search_boomi_docs",
+    "read_boomi_doc_page",
+)
+
 
 # ---------------------------------------------------------------------------
 # Catalog membership and annotations
@@ -42,6 +47,25 @@ def test_authoring_tools_marked_read_only_and_no_boomi_mutation():
         assert entry.get("no_boomi_mutation") is True, (
             f"{name} must declare no_boomi_mutation=True"
         )
+
+
+def test_list_capabilities_includes_docs_kb_tools():
+    catalog = list_capabilities_action()
+    tools = catalog["tools"]
+    for name in DOC_TOOLS:
+        assert name in tools, f"{name} missing from list_capabilities tools"
+        assert tools[name]["category"] == "Documentation"
+        assert tools[name]["read_only"] is True
+
+
+def test_docs_workflow_and_hint_point_at_search_tool():
+    catalog = list_capabilities_action()
+    assert "research_boomi_docs" in catalog["workflows"]
+    steps = " ".join(catalog["workflows"]["research_boomi_docs"]["steps"])
+    assert "search_boomi_docs" in steps
+    assert "read_boomi_doc_page" in steps
+    assert "boomi_docs" in catalog["hints"]
+    assert "search_boomi_docs" in catalog["hints"]["boomi_docs"]
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +137,26 @@ def test_authoring_workflow_dropped_when_tools_not_registered():
     # The archetype-first workflow must be dropped because its steps reference
     # tools no longer in the catalog.
     assert "build_integration_from_description" not in catalog["workflows"]
+
+
+def test_docs_tools_filtered_when_not_registered():
+    only = {"build_integration", "get_schema_template", "list_boomi_profiles"}
+    catalog = list_capabilities_action(available_tools=only)
+
+    for name in DOC_TOOLS:
+        assert name not in catalog["tools"], (
+            f"{name} should be filtered out when not in available_tools"
+        )
+    assert "research_boomi_docs" not in catalog["workflows"]
+    assert "boomi_docs" not in catalog["hints"]
+
+
+def test_docs_workflow_preserved_when_docs_tools_registered():
+    only = {"search_boomi_docs", "read_boomi_doc_page"}
+    catalog = list_capabilities_action(available_tools=only)
+    assert set(catalog["tools"]) == set(DOC_TOOLS)
+    assert "research_boomi_docs" in catalog["workflows"]
+    assert "boomi_docs" in catalog["hints"]
 
 
 def test_authoring_workflow_preserved_when_all_referenced_tools_present():
