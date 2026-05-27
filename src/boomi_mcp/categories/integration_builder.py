@@ -2431,6 +2431,80 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     gen_profile_err = TransformFunctionWrapperBuilder.validate_config(
                         effective_config
                     )
+                    # Codex r4 P2: caller-declared wrappers must satisfy
+                    # the same depends_on + target-type checks the map-
+                    # side script_mappings refs already enforce. Without
+                    # this, a wrapper with script_component_id='$ref:KEY'
+                    # where KEY is missing from depends_on can plan
+                    # before the script applies (topo break → unresolved
+                    # $ref at apply), and a $ref pointing at a profile
+                    # would resolve to the wrong UUID and emit a
+                    # <Scripting componentId='<profile-uuid>'/> that
+                    # fails at Boomi runtime. Auto-synthesized wrappers
+                    # satisfy these checks by construction; the cost is
+                    # negligible to run them for every wrapper.
+                    if gen_profile_err is None:
+                        ref_value = effective_config.get("script_component_id")
+                        if (
+                            isinstance(ref_value, str)
+                            and ref_value.startswith("$ref:")
+                        ):
+                            ref_key = ref_value[len("$ref:") :]
+                            declared_deps = set(comp.depends_on or [])
+                            if ref_key not in declared_deps:
+                                gen_profile_err = BuilderValidationError(
+                                    f"transform.function wrapper "
+                                    f"script_component_id $ref target "
+                                    f"{ref_key!r} must also appear in "
+                                    "depends_on so the referenced "
+                                    "script.mapping applies before the "
+                                    "wrapper",
+                                    error_code="SCRIPT_MAPPING_REF_REQUIRED",
+                                    field="depends_on",
+                                    hint=(
+                                        "Add the script.mapping component "
+                                        "key to the wrapper's depends_on "
+                                        "so the execution order builds "
+                                        "the script component before the "
+                                        "wrapper."
+                                    ),
+                                    details={"ref_key": ref_key},
+                                )
+                            else:
+                                target_comp = (
+                                    components_by_key.get(ref_key)
+                                    if components_by_key is not None
+                                    else None
+                                )
+                                target_type = (
+                                    target_comp.type
+                                    if target_comp is not None
+                                    else None
+                                )
+                                if target_type != "script.mapping":
+                                    gen_profile_err = BuilderValidationError(
+                                        f"transform.function wrapper "
+                                        f"script_component_id $ref "
+                                        f"target {ref_key!r} resolves to "
+                                        f"a {target_type!r} component, "
+                                        "not a script.mapping",
+                                        error_code="SCRIPT_MAPPING_REF_REQUIRED",
+                                        field="script_component_id",
+                                        hint=(
+                                            "Wrappers reference a "
+                                            "script.mapping component via "
+                                            "Configuration/Scripting "
+                                            "componentId. Point the "
+                                            "$ref at an in-spec "
+                                            "script.mapping (or use a "
+                                            "literal script.mapping "
+                                            "componentId)."
+                                        ),
+                                        details={
+                                            "ref_key": ref_key,
+                                            "target_component_type": target_type,
+                                        },
+                                    )
 
         if gen_profile_err is not None:
             planned_action = "error_generated_profile_validation"
