@@ -631,6 +631,41 @@ def test_map_output_name_mismatch_against_script_rejected_at_plan():
     assert "output_name" in err["field"]
 
 
+def test_non_list_inputs_outputs_surface_structured_error_not_crash():
+    """Codex r6 P2: a JSON-valid but type-malformed entry such as
+    ``inputs: true`` or ``outputs: 1`` must not crash the port-shape
+    pre-check (used to raise TypeError from iterating a bool/int).
+    Defer to MapScriptBuilder.validate_config so the caller sees a
+    structured PROFILE_FIELD_VALIDATION_FAILED instead."""
+    malformed_map = _script_map_comp()
+    malformed_map.config["script_mappings"][0]["inputs"] = True
+    malformed_map.config["script_mappings"][0]["outputs"] = 1
+    config = {
+        "integration_spec": {
+            "name": "Malformed Port Types",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                _script_comp().model_dump(),
+                malformed_map.model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        # Must not crash with TypeError — assertion is implicit:
+        # _build_plan returns instead of propagating an exception.
+        plan = _build_plan(MagicMock(), config)
+    assert plan["_success"] is True
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "error_generated_profile_validation"
+    err = map_step["validation_error"]
+    assert err["error_code"] == "PROFILE_FIELD_VALIDATION_FAILED"
+    assert "script_mappings" in err["field"]
+
+
 def test_map_with_matching_port_shape_plans_clean():
     """Sanity: a map whose script_mappings ports exactly match the
     referenced script.mapping plans without port-shape errors."""
