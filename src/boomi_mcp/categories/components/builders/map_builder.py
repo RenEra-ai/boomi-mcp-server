@@ -114,8 +114,8 @@ from .profile_generation import (
 _RAW_XML_REJECT_KEYS: Dict[str, str] = {
     "functions": "Provide structured function_mappings instead of raw <Functions> XML.",
     "function_steps": "Provide structured function_mappings instead of raw <FunctionStep> XML.",
-    "xslt": "#42 (XSLT transform builder)",
-    "xslt_source": "#42 (XSLT transform builder)",
+    "xslt": "#42 (XSLT deferred decision; unsupported in M2)",
+    "xslt_source": "#42 (XSLT deferred decision; unsupported in M2)",
     "scripts": (
         "Switch to map_type='script' and declare script_mappings[] referencing a "
         "script.mapping component (#41 shipped)."

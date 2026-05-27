@@ -1,7 +1,7 @@
 # Integration Authoring Roadmap
 
 Status: active
-Last updated: 2026-05-15
+Last updated: 2026-05-23
 Parent design: `docs/MCP_TOOL_DESIGN.md`
 
 ## Summary
@@ -12,19 +12,19 @@ Each milestone should be implemented as one project epic with smaller issues und
 
 ## Roadmap Dates
 
-Dates assume one main implementer, code review time, and live Boomi QA buffers. Repository milestones are the source of truth for due dates.
+Dates assume one main implementer, code review time, and live Boomi QA buffers. Repository milestones are the source of truth for due dates. This schedule was accelerated after M1 completed on 2026-05-16, ahead of the original 2026-05-29 due date.
 
 | Milestone | Start | Due | Status |
 |---|---:|---:|---|
-| M0 Docs Alignment | 2026-05-18 | 2026-05-18 | Done after docs/date commit is pushed |
-| M1 Archetype Framework Skeleton | 2026-05-18 | 2026-05-29 | Done 2026-05-16 (sub-issues #15–#20 closed; 361 tests passing) |
-| M2 `database_to_api_sync` Vertical Slice | 2026-06-01 | 2026-06-26 | Depends on M1 |
-| M3 Deploy and Test Orchestration | 2026-06-29 | 2026-07-10 | Depends on M2 apply path |
-| M4 Agent Ergonomics | 2026-07-13 | 2026-07-24 | Depends on M1/M2 tool surface |
-| M5 API Variants | 2026-07-27 | 2026-08-21 | Depends on M2/M4 |
-| M6 Event and Listener Variants | 2026-08-24 | 2026-09-11 | Depends on M3/M5 |
-| M7 Discovery Tools | 2026-09-14 | 2026-10-02 | Depends on core archetypes |
-| M8 Archetype Composition | 2026-10-05 | 2026-10-23 | Depends on at least 3 stable archetypes |
+| M0 Docs Alignment | 2026-05-15 | 2026-05-15 | Done 2026-05-15 |
+| M1 Archetype Framework Skeleton | 2026-05-15 | 2026-05-16 | Done 2026-05-16 (sub-issues #15-#20 closed; 361 tests passing) |
+| M2 `database_to_api_sync` Vertical Slice | 2026-05-18 | 2026-06-12 | In progress; accelerated after M1 |
+| M3 Deploy and Test Orchestration | 2026-06-15 | 2026-06-26 | Depends on M2 apply path |
+| M4 Agent Ergonomics | 2026-06-29 | 2026-07-10 | Depends on M1/M2 tool surface |
+| M5 API Variants | 2026-07-13 | 2026-08-07 | Depends on M2/M4 |
+| M6 Event and Listener Variants | 2026-08-10 | 2026-08-28 | Depends on M3/M5 |
+| M7 Discovery Tools | 2026-08-31 | 2026-09-18 | Depends on core archetypes |
+| M8 Archetype Composition | 2026-09-21 | 2026-10-09 | Depends on at least 3 stable archetypes |
 
 ## M0: Docs Alignment
 
@@ -92,11 +92,35 @@ Implementation focus:
 - Add minimum process-shape support required for facade, retry, error handling, and subprocess calls.
 - Add profile/map support required by the vertical slice:
   - source result normalization
-  - simple field-to-field mapping
+  - direct field-to-field mapping
   - XML/JSON conversion when required by Boomi execution
+  - M2.6 baseline (Issue #26): direct profile/map/conversion only
+  - M2.6a (Issue #40): `transform.function` library for date format, default value, string ops, simple lookup, sequential value, and math
+  - M2.6b (Issue #41): `script.mapping` as the in-map escape hatch
+  - M2.6c (Issue #42): XSLT support decision recorded — XSLT is explicitly out of M2 for `database_to_api_sync`.
+    - Rationale: M2 targets DB-to-REST payload construction, and the shipped transform ladder (direct map #26, `transform.function` #40, `script.mapping` #41) already covers field-to-field, standard per-field operations, and in-map custom logic without an XSLT rung. There is no DB-to-REST scenario in M2 that direct/function/script cannot express.
+    - Current validation (must remain in place): `operation_type='xslt'` in `database_to_api_sync` fails before mutation with a `PARAM_VALIDATION_FAILED` error pointing at issue #42; `transform.map` direct/function/script schemas reject `xslt`/`xslt_source` keys as unsupported M2 routes; no XSLT component is emitted by `build_integration` plan or apply.
+    - Reopen triggers (do not implement until at least one is present): XML-heavy migration with real source artifacts, SOAP/XML-to-XML target shape, unknown XML/JSON structure where Boomi's XSLT Stylesheet component is the right native tool, or imported integration assets that already ship XSLT stylesheets.
+    - Likely future placement: a dedicated issue under M5 (API variants), M7 (discovery / import existing integration), or a separate XML-heavy migration milestone — not M2. Implementation will be an `xslt` component builder plus Data Process step integration in the process compiler, not a `transform.map` fallback. The anti-template rule applies: stylesheet bodies must be caller-authored, migrated, or discovered; canned XSLT will never ship as a template.
+  - M2.6d (Issue #43): profile field generation for DB read fields and task-supplied JSON schema/profile intent; metadata/sample/XSD/XML inference is deferred to M7 Issue #47
+  - M2.1a (Issue #44): amend `database_to_api_sync` with explicit source schema, target schema, and typed transform intent before M2.6/M2.7 consume the contract
+  - M2.x (Issue #45): Component XML read-merge-write preservation for full-replacement updates across builder-generated connectors, profiles, maps, functions, scripts, and processes
+  - M2.x (Issue #46): MCP transformation review surface for field lists, mapping diffs, unmapped validation, test payloads, and expected/actual comparison
+- Use the transformation escalation ladder:
+  - direct map first
+  - `transform.function` for supported standard operations
+  - `script.mapping` for in-map custom logic
+  - `script.processing` only when explicitly requested for process-level document manipulation
+- Closed M2.1-M2.3 review disposition, 2026-05-23:
+  - No immediate code changes are required for the already shipped M2.2/M2.3 builders.
+  - Issue #21 remains closed; Issue #44 is the contract amendment before M2.6/M2.7 consume typed transformation and profile-schema fields.
+  - Issue #22 remains valid for SQL Server connector/settings emission; full-replacement Component update preservation is tracked separately in Issue #45.
+  - Issue #23 result-profile binding is treated as a deferred component reference; the builder validates `$ref` dependencies and apply resolves them before execution.
 - Add primitives:
   - `db_extract`
   - `field_map`
+  - `map_function_transform`
+  - `map_script_transform`
   - `xml_json_convert`
   - `rest_send_with_retry`
   - `schedule_envelope`
@@ -108,16 +132,18 @@ Implementation focus:
 
 Exit criteria:
 
-- Given parameters for DB credential reference, SQL query, REST endpoint, mapping, schedule, retry/DLQ policy, and naming, the archetype emits a complete `IntegrationSpecV1`.
+- Given parameters for DB credential reference, SQL query, REST endpoint, source/target schema, mapping, schedule, retry/DLQ policy, and naming, the archetype emits a complete `IntegrationSpecV1`.
 - `build_integration plan` produces deterministic component order.
 - `build_integration apply` creates the expected component set in a test Boomi account.
 - The emitted design includes error handling, retry behavior, run metadata, and DLQ behavior by default.
+- Transform compilation is explicit and reviewable before apply; unsupported transforms fail before mutation instead of silently falling back to process-level Groovy.
 
 Validation:
 
 - Golden-spec tests for each primitive and for the full archetype.
-- Builder tests for emitted connector/process/profile/map XML or JSON payloads.
+- Builder tests for emitted connector/process/profile/map/function/script XML or JSON payloads.
 - MCP tests for `build_from_archetype("database_to_api_sync", ...)`.
+- Transformation review tests for field listing, mapping diff, unmapped validation, test payload generation, and expected/actual comparison.
 - Live Boomi QA: create, deploy when M3 exists, run test, fetch logs, and exercise a failure row.
 
 ## M3: Deploy and Test Orchestration
@@ -231,12 +257,15 @@ Implementation focus:
   - `discover_soap_wsdl`
   - `discover_odata_metadata`
   - `discover_db_schema`
+  - `infer_profile_fields` for DB metadata, sample JSON, XSD, and sample XML (Issue #47)
+  - `import_existing_integration` for migration artifacts/descriptions to `IntegrationSpecV1` drafts (Issue #48)
 - Return structured schema/spec summaries suitable for LLM reasoning.
 - Keep discovery separate from archetype building. Discovery suggests possible values but does not create hidden templates.
 
 Exit criteria:
 
 - The LLM can inspect source/target schema information before filling archetype parameters.
+- Existing integration artifacts or descriptions can be converted into reviewable `IntegrationSpecV1` drafts before normal build workflow.
 - Discovery tools do not mutate Boomi or customer systems.
 - DB discovery does not require direct customer JDBC access from the MCP host.
 
