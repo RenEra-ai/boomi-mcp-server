@@ -573,7 +573,9 @@ def test_map_output_count_mismatch_against_script_rejected_at_plan():
 
 def test_map_input_name_mismatch_against_script_rejected_at_plan():
     """Map declares an input with a name that doesn't appear in the
-    script.mapping's input declarations."""
+    script.mapping's input declarations. After Codex r7 P1 the
+    ordered-equality check surfaces this as a whole-inputs mismatch
+    (Boomi binds by position, so name-and-position must match together)."""
     map_with_mismatch = _script_map_comp()
     map_with_mismatch.config["script_mappings"][0]["inputs"] = [
         {"source_path": "rows/row[]/key", "input_name": "wrongInputName"},
@@ -598,12 +600,14 @@ def test_map_input_name_mismatch_against_script_rejected_at_plan():
     assert map_step["planned_action"] == "error_generated_profile_validation"
     err = map_step["validation_error"]
     assert err["error_code"] == "SCRIPT_MAPPING_VARIABLE_INVALID"
-    assert "input_name" in err["field"]
-    assert err["details"]["actual_name"] == "wrongInputName"
-    assert err["details"]["expected_names"] == ["inputValue"]
+    assert err["field"] == "script_mappings[0].inputs"
+    assert err["details"]["expected_inputs"] == ["inputValue"]
+    assert err["details"]["actual_inputs"] == ["wrongInputName"]
 
 
 def test_map_output_name_mismatch_against_script_rejected_at_plan():
+    """Same as inputs — Codex r7 P1 surfaces this as whole-outputs
+    ordered mismatch rather than per-entry name mismatch."""
     map_with_mismatch = _script_map_comp()
     map_with_mismatch.config["script_mappings"][0]["outputs"] = [
         {"output_name": "wrongOutputName", "target_path": "Root/list[]/key"},
@@ -628,7 +632,9 @@ def test_map_output_name_mismatch_against_script_rejected_at_plan():
     assert map_step["planned_action"] == "error_generated_profile_validation"
     err = map_step["validation_error"]
     assert err["error_code"] == "SCRIPT_MAPPING_VARIABLE_INVALID"
-    assert "output_name" in err["field"]
+    assert err["field"] == "script_mappings[0].outputs"
+    assert err["details"]["expected_outputs"] == ["outputValue"]
+    assert err["details"]["actual_outputs"] == ["wrongOutputName"]
 
 
 def test_non_list_inputs_outputs_surface_structured_error_not_crash():
@@ -664,6 +670,141 @@ def test_non_list_inputs_outputs_surface_structured_error_not_crash():
     err = map_step["validation_error"]
     assert err["error_code"] == "PROFILE_FIELD_VALIDATION_FAILED"
     assert "script_mappings" in err["field"]
+
+
+def test_reordered_input_ports_rejected_at_plan():
+    """Codex r7 P1: a 2-input script with the map declaring inputs in
+    swapped order must reject, because Boomi binds map FunctionStep ports
+    to wrapper ports by numeric key (position), not by name. Set-based
+    membership would silently allow positional misrouting."""
+    swapped_script = IntegrationComponentSpec(
+        key="multi_io_script", type="script.mapping", action="create",
+        name="Multi IO Script",
+        config={
+            "component_type": "script.mapping",
+            "component_name": "Multi IO Script",
+            "language": "groovy2",
+            "script_body": "outB = inA; outA = inB",
+            "inputs": [
+                {"name": "inA", "data_type": "character"},
+                {"name": "inB", "data_type": "character"},
+            ],
+            "outputs": [{"name": "outA"}, {"name": "outB"}],
+        },
+    )
+    swapped_map = IntegrationComponentSpec(
+        key="the_map", type="transform.map", action="create", name="Swap Map",
+        depends_on=["src_profile", "tgt_profile", "multi_io_script"],
+        config={
+            "component_type": "transform.map", "map_type": "script",
+            "component_name": "Swap Map",
+            "source_profile_id": "$ref:src_profile",
+            "source_profile_type": "profile.xml",
+            "target_profile_id": "$ref:tgt_profile",
+            "target_profile_type": "profile.json",
+            "script_mappings": [{
+                "script_component_id": "$ref:multi_io_script",
+                # Swapped order: inB, inA instead of inA, inB.
+                "inputs": [
+                    {"source_path": "rows/row[]/key", "input_name": "inB"},
+                    {"source_path": "rows/row[]/key", "input_name": "inA"},
+                ],
+                "outputs": [
+                    {"output_name": "outA", "target_path": "Root/list[]/key"},
+                    {"output_name": "outB", "target_path": "Root/a"},
+                ],
+            }],
+        },
+    )
+    config = {
+        "integration_spec": {
+            "name": "Reordered Ports",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                swapped_script.model_dump(),
+                swapped_map.model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "error_generated_profile_validation"
+    err = map_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_VARIABLE_INVALID"
+    assert err["field"] == "script_mappings[0].inputs"
+    assert err["details"]["expected_inputs"] == ["inA", "inB"]
+    assert err["details"]["actual_inputs"] == ["inB", "inA"]
+
+
+def test_reordered_output_ports_rejected_at_plan():
+    """Outputs need the same ordered-equality enforcement as inputs."""
+    swapped_script = IntegrationComponentSpec(
+        key="multi_io_script", type="script.mapping", action="create",
+        name="Multi IO Script",
+        config={
+            "component_type": "script.mapping",
+            "component_name": "Multi IO Script",
+            "language": "groovy2",
+            "script_body": "outA = inA; outB = inB",
+            "inputs": [
+                {"name": "inA", "data_type": "character"},
+                {"name": "inB", "data_type": "character"},
+            ],
+            "outputs": [{"name": "outA"}, {"name": "outB"}],
+        },
+    )
+    swapped_map = IntegrationComponentSpec(
+        key="the_map", type="transform.map", action="create", name="Swap Map",
+        depends_on=["src_profile", "tgt_profile", "multi_io_script"],
+        config={
+            "component_type": "transform.map", "map_type": "script",
+            "component_name": "Swap Map",
+            "source_profile_id": "$ref:src_profile",
+            "source_profile_type": "profile.xml",
+            "target_profile_id": "$ref:tgt_profile",
+            "target_profile_type": "profile.json",
+            "script_mappings": [{
+                "script_component_id": "$ref:multi_io_script",
+                "inputs": [
+                    {"source_path": "rows/row[]/key", "input_name": "inA"},
+                    {"source_path": "rows/row[]/key", "input_name": "inB"},
+                ],
+                # Swapped: outB, outA instead of outA, outB.
+                "outputs": [
+                    {"output_name": "outB", "target_path": "Root/list[]/key"},
+                    {"output_name": "outA", "target_path": "Root/a"},
+                ],
+            }],
+        },
+    )
+    config = {
+        "integration_spec": {
+            "name": "Reordered Outputs",
+            "components": [
+                _profile_xml_comp().model_dump(),
+                _profile_json_comp().model_dump(),
+                swapped_script.model_dump(),
+                swapped_map.model_dump(),
+            ],
+        },
+    }
+    with patch(
+        "boomi_mcp.categories.integration_builder.paginate_metadata",
+        return_value=[],
+    ):
+        plan = _build_plan(MagicMock(), config)
+    map_step = next(s for s in plan["steps"] if s["key"] == "the_map")
+    assert map_step["planned_action"] == "error_generated_profile_validation"
+    err = map_step["validation_error"]
+    assert err["error_code"] == "SCRIPT_MAPPING_VARIABLE_INVALID"
+    assert err["field"] == "script_mappings[0].outputs"
+    assert err["details"]["expected_outputs"] == ["outA", "outB"]
+    assert err["details"]["actual_outputs"] == ["outB", "outA"]
 
 
 def test_map_with_matching_port_shape_plans_clean():

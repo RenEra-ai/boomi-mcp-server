@@ -460,18 +460,31 @@ def _check_port_shape_alignment(
     """
     field_prefix = f"script_mappings[{sm_idx}]"
 
-    if len(actual_inputs) != len(expected_inputs):
+    # Codex r7 P1: ordered equality, not set membership. Boomi binds the
+    # map's FunctionStep ports to the wrapper's external ports by numeric
+    # ``key`` (position), not by name — name is for editor display only.
+    # If actual_inputs=['inB','inA'] and expected_inputs=['inA','inB'],
+    # the emitted map XML sends source-profile value-for-inA into the
+    # wrapper port at key=1 (which the wrapper labels "inA") but the
+    # FunctionStep declares that key=1 is "inB", and the wrapper-side
+    # binding silently misroutes inputs/outputs at runtime. Require the
+    # caller's declaration order to match the referenced component's
+    # external port declaration order verbatim.
+    if actual_inputs != expected_inputs:
         return BuilderValidationError(
-            f"{field_prefix}.inputs declares "
-            f"{len(actual_inputs)} entries but the referenced "
-            f"{target_type} component {ref_key!r} declares "
-            f"{len(expected_inputs)} input ports",
+            f"{field_prefix}.inputs port order / names do not match the "
+            f"referenced {target_type} component {ref_key!r}; map XML "
+            "wires ports positionally by key, so the declared order "
+            "must mirror the referenced component's external inputs",
             error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
             field=f"{field_prefix}.inputs",
             hint=(
-                "Each map script_mappings input must map to a declared "
-                f"input on the referenced {target_type}; counts must "
-                "match. Expected: " + ", ".join(expected_inputs) or "(none)"
+                f"Required ordered input port names: "
+                + (", ".join(expected_inputs) or "(none)")
+                + ". Reorder script_mappings inputs[] to match — Boomi "
+                "binds map FunctionStep input port at key=1 to the "
+                "referenced component's external port at key=1, key=2 "
+                "to key=2, and so on."
             ),
             details={
                 "script_mappings_index": sm_idx,
@@ -481,18 +494,18 @@ def _check_port_shape_alignment(
             },
         )
 
-    if len(actual_outputs) != len(expected_outputs):
+    if actual_outputs != expected_outputs:
         return BuilderValidationError(
-            f"{field_prefix}.outputs declares "
-            f"{len(actual_outputs)} entries but the referenced "
-            f"{target_type} component {ref_key!r} declares "
-            f"{len(expected_outputs)} output ports",
+            f"{field_prefix}.outputs port order / names do not match the "
+            f"referenced {target_type} component {ref_key!r}; map XML "
+            "wires ports positionally by key, so the declared order "
+            "must mirror the referenced component's external outputs",
             error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
             field=f"{field_prefix}.outputs",
             hint=(
-                "Each map script_mappings output must map to a declared "
-                f"output on the referenced {target_type}; counts must "
-                "match. Expected: " + ", ".join(expected_outputs) or "(none)"
+                f"Required ordered output port names: "
+                + (", ".join(expected_outputs) or "(none)")
+                + ". Reorder script_mappings outputs[] to match."
             ),
             details={
                 "script_mappings_index": sm_idx,
@@ -501,52 +514,6 @@ def _check_port_shape_alignment(
                 "actual_outputs": actual_outputs,
             },
         )
-
-    expected_input_set = set(expected_inputs)
-    for in_idx, actual_name in enumerate(actual_inputs):
-        if actual_name not in expected_input_set:
-            return BuilderValidationError(
-                f"{field_prefix}.inputs[{in_idx}].input_name "
-                f"{actual_name!r} does not match any declared input on "
-                f"the referenced {target_type} component {ref_key!r}",
-                error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
-                field=f"{field_prefix}.inputs[{in_idx}].input_name",
-                hint=(
-                    "Boomi binds map ports to the referenced component "
-                    "by name. Expected one of: "
-                    + (", ".join(expected_inputs) or "(none)")
-                ),
-                details={
-                    "script_mappings_index": sm_idx,
-                    "input_index": in_idx,
-                    "ref_key": ref_key,
-                    "actual_name": actual_name,
-                    "expected_names": expected_inputs,
-                },
-            )
-
-    expected_output_set = set(expected_outputs)
-    for out_idx, actual_name in enumerate(actual_outputs):
-        if actual_name not in expected_output_set:
-            return BuilderValidationError(
-                f"{field_prefix}.outputs[{out_idx}].output_name "
-                f"{actual_name!r} does not match any declared output on "
-                f"the referenced {target_type} component {ref_key!r}",
-                error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
-                field=f"{field_prefix}.outputs[{out_idx}].output_name",
-                hint=(
-                    "Boomi binds map ports to the referenced component "
-                    "by name. Expected one of: "
-                    + (", ".join(expected_outputs) or "(none)")
-                ),
-                details={
-                    "script_mappings_index": sm_idx,
-                    "output_index": out_idx,
-                    "ref_key": ref_key,
-                    "actual_name": actual_name,
-                    "expected_names": expected_outputs,
-                },
-            )
 
     return None
 
