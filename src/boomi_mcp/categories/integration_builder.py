@@ -404,6 +404,153 @@ def _build_auto_wrapper_spec(
     )
 
 
+# Codex r5 P1 #2 helpers — extract the external port surface from a
+# referenced script.mapping or transform.function wrapper so we can
+# cross-validate the calling map's script_mappings entry against it.
+def _ref_target_input_names(
+    target_comp: IntegrationComponentSpec,
+) -> List[str]:
+    """Return the ordered list of input names exposed by the referenced
+    component's external port surface."""
+    cfg = target_comp.config or {}
+    return [
+        str(entry.get("name") or "").strip()
+        for entry in (cfg.get("inputs") or [])
+        if isinstance(entry, Mapping) and entry.get("name")
+    ]
+
+
+def _ref_target_output_names(
+    target_comp: IntegrationComponentSpec,
+) -> List[str]:
+    """Return the ordered list of output names exposed by the referenced
+    component's external port surface."""
+    cfg = target_comp.config or {}
+    return [
+        str(entry.get("name") or "").strip()
+        for entry in (cfg.get("outputs") or [])
+        if isinstance(entry, Mapping) and entry.get("name")
+    ]
+
+
+def _check_port_shape_alignment(
+    *,
+    sm_idx: int,
+    ref_key: str,
+    target_type: str,
+    expected_inputs: List[str],
+    actual_inputs: List[str],
+    expected_outputs: List[str],
+    actual_outputs: List[str],
+) -> Optional[BuilderValidationError]:
+    """Return a structured error if the map's script_mappings entry port
+    shape diverges from the referenced component's declarations.
+
+    Cross-checks:
+
+    1. Input count match.
+    2. Output count match.
+    3. Input names — every actual name must exist in the expected set
+       (order can differ; Boomi binds by name).
+    4. Output names — same rule.
+
+    The error code is ``SCRIPT_MAPPING_VARIABLE_INVALID`` since the
+    mismatch always boils down to a variable-name / port mismatch on
+    the calling side.
+    """
+    field_prefix = f"script_mappings[{sm_idx}]"
+
+    if len(actual_inputs) != len(expected_inputs):
+        return BuilderValidationError(
+            f"{field_prefix}.inputs declares "
+            f"{len(actual_inputs)} entries but the referenced "
+            f"{target_type} component {ref_key!r} declares "
+            f"{len(expected_inputs)} input ports",
+            error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
+            field=f"{field_prefix}.inputs",
+            hint=(
+                "Each map script_mappings input must map to a declared "
+                f"input on the referenced {target_type}; counts must "
+                "match. Expected: " + ", ".join(expected_inputs) or "(none)"
+            ),
+            details={
+                "script_mappings_index": sm_idx,
+                "ref_key": ref_key,
+                "expected_inputs": expected_inputs,
+                "actual_inputs": actual_inputs,
+            },
+        )
+
+    if len(actual_outputs) != len(expected_outputs):
+        return BuilderValidationError(
+            f"{field_prefix}.outputs declares "
+            f"{len(actual_outputs)} entries but the referenced "
+            f"{target_type} component {ref_key!r} declares "
+            f"{len(expected_outputs)} output ports",
+            error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
+            field=f"{field_prefix}.outputs",
+            hint=(
+                "Each map script_mappings output must map to a declared "
+                f"output on the referenced {target_type}; counts must "
+                "match. Expected: " + ", ".join(expected_outputs) or "(none)"
+            ),
+            details={
+                "script_mappings_index": sm_idx,
+                "ref_key": ref_key,
+                "expected_outputs": expected_outputs,
+                "actual_outputs": actual_outputs,
+            },
+        )
+
+    expected_input_set = set(expected_inputs)
+    for in_idx, actual_name in enumerate(actual_inputs):
+        if actual_name not in expected_input_set:
+            return BuilderValidationError(
+                f"{field_prefix}.inputs[{in_idx}].input_name "
+                f"{actual_name!r} does not match any declared input on "
+                f"the referenced {target_type} component {ref_key!r}",
+                error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
+                field=f"{field_prefix}.inputs[{in_idx}].input_name",
+                hint=(
+                    "Boomi binds map ports to the referenced component "
+                    "by name. Expected one of: "
+                    + (", ".join(expected_inputs) or "(none)")
+                ),
+                details={
+                    "script_mappings_index": sm_idx,
+                    "input_index": in_idx,
+                    "ref_key": ref_key,
+                    "actual_name": actual_name,
+                    "expected_names": expected_inputs,
+                },
+            )
+
+    expected_output_set = set(expected_outputs)
+    for out_idx, actual_name in enumerate(actual_outputs):
+        if actual_name not in expected_output_set:
+            return BuilderValidationError(
+                f"{field_prefix}.outputs[{out_idx}].output_name "
+                f"{actual_name!r} does not match any declared output on "
+                f"the referenced {target_type} component {ref_key!r}",
+                error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
+                field=f"{field_prefix}.outputs[{out_idx}].output_name",
+                hint=(
+                    "Boomi binds map ports to the referenced component "
+                    "by name. Expected one of: "
+                    + (", ".join(expected_outputs) or "(none)")
+                ),
+                details={
+                    "script_mappings_index": sm_idx,
+                    "output_index": out_idx,
+                    "ref_key": ref_key,
+                    "actual_name": actual_name,
+                    "expected_names": expected_outputs,
+                },
+            )
+
+    return None
+
+
 def _topological_order(spec: IntegrationSpecV1) -> List[str]:
     components_by_key = {comp.key: comp for comp in spec.components}
     if len(components_by_key) != len(spec.components):
@@ -2232,6 +2379,62 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                     if not isinstance(sm, Mapping):
                                         continue
                                     ref_value = sm.get("script_component_id")
+                                    # Codex r5 P1 #1: literal componentIds
+                                    # (non-$ref strings) bypass wrapper
+                                    # synthesis. The map's FunctionStep
+                                    # ``id`` would point directly at
+                                    # whatever UUID the caller supplied —
+                                    # if that UUID is a script.mapping
+                                    # rather than a transform.function
+                                    # wrapper, Boomi cannot bind script
+                                    # inputs/outputs at runtime. Reject
+                                    # literal IDs until live-fetch lets
+                                    # us auto-create wrappers for
+                                    # existing-script reuse.
+                                    if (
+                                        isinstance(ref_value, str)
+                                        and ref_value.strip()
+                                        and not ref_value.startswith("$ref:")
+                                    ):
+                                        gen_profile_err = BuilderValidationError(
+                                            f"script_mappings[{sm_idx}]."
+                                            "script_component_id must be a "
+                                            "'$ref:KEY' pointing at an in-spec "
+                                            "script.mapping (auto-synth wrapper) "
+                                            "or transform.function wrapper. "
+                                            "Literal componentId values are "
+                                            "not supported in #41 — Boomi "
+                                            "requires the map FunctionStep "
+                                            "id to point at a transform.function "
+                                            "wrapper, which the system can "
+                                            "only synthesize from in-spec "
+                                            "components.",
+                                            error_code="SCRIPT_MAPPING_REF_REQUIRED",
+                                            field=(
+                                                f"script_mappings[{sm_idx}]."
+                                                "script_component_id"
+                                            ),
+                                            hint=(
+                                                "For existing-Boomi script "
+                                                "reuse: declare a "
+                                                "transform.function wrapper "
+                                                "as an in-spec component "
+                                                "(component_type="
+                                                "'transform.function' with "
+                                                "script_component_id referencing "
+                                                "the existing script.mapping "
+                                                "key) and reference it via "
+                                                "'$ref:<wrapper_key>'. For "
+                                                "in-spec script.mappings, use "
+                                                "'$ref:<script_key>' and the "
+                                                "wrapper is synthesized "
+                                                "automatically."
+                                            ),
+                                            details={
+                                                "script_mappings_index": sm_idx,
+                                            },
+                                        )
+                                        break
                                     if not (
                                         isinstance(ref_value, str)
                                         and ref_value.startswith("$ref:")
@@ -2314,6 +2517,44 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                                 "target_component_type": target_type,
                                             },
                                         )
+                                        break
+
+                                    # Codex r5 P1 #2: cross-validate the
+                                    # map's port surface against the
+                                    # referenced script.mapping (or
+                                    # transform.function wrapper). Boomi
+                                    # binds map FunctionStep inputs/outputs
+                                    # to the referenced component by name
+                                    # AND by position; if counts or names
+                                    # diverge, the map calls the wrapper
+                                    # with incompatible ports at runtime.
+                                    expected_input_names = _ref_target_input_names(
+                                        target_comp
+                                    )
+                                    expected_output_names = _ref_target_output_names(
+                                        target_comp
+                                    )
+                                    actual_input_names = [
+                                        str(entry.get("input_name") or "").strip()
+                                        for entry in (sm.get("inputs") or [])
+                                        if isinstance(entry, Mapping)
+                                    ]
+                                    actual_output_names = [
+                                        str(entry.get("output_name") or "").strip()
+                                        for entry in (sm.get("outputs") or [])
+                                        if isinstance(entry, Mapping)
+                                    ]
+                                    port_err = _check_port_shape_alignment(
+                                        sm_idx=sm_idx,
+                                        ref_key=ref_key,
+                                        target_type=target_type,
+                                        expected_inputs=expected_input_names,
+                                        actual_inputs=actual_input_names,
+                                        expected_outputs=expected_output_names,
+                                        actual_outputs=actual_output_names,
+                                    )
+                                    if port_err is not None:
+                                        gen_profile_err = port_err
                                         break
 
                         if gen_profile_err is None:

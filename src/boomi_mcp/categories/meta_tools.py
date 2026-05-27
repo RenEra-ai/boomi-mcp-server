@@ -3415,14 +3415,22 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
     },
     "supported_map_types": ["script", "map_script"],
     "script_component_id_rule": (
-        "Each script_mappings entry references a reusable script.mapping "
-        "component by '$ref:<script_key>' (recommended) or by a literal "
-        "transform.function wrapper componentId. When you use "
-        "'$ref:<script_key>' against an in-spec script.mapping, the plan "
-        "automatically synthesizes a transform.function wrapper that "
-        "bridges the map to the script.mapping; the synthesized wrapper "
-        "applies in topological order before the calling map and is "
-        "visible as a first-class component in the plan output."
+        "Each script_mappings entry references a script.mapping or a "
+        "transform.function wrapper via '$ref:<key>' pointing at an in-spec "
+        "component. Literal componentId values are NOT accepted at this "
+        "level — Boomi requires the map FunctionStep id to point at a "
+        "transform.function wrapper, which the system can only synthesize "
+        "from in-spec components. For '$ref:<script_key>' against an "
+        "in-spec script.mapping, the plan automatically synthesizes a "
+        "transform.function wrapper that bridges the map to the "
+        "script.mapping; the synthesized wrapper applies in topological "
+        "order before the calling map and is visible as a first-class "
+        "component in the plan output. To reuse an EXISTING Boomi "
+        "script.mapping, declare a transform.function wrapper as an "
+        "in-spec component (component_type='transform.function' with "
+        "script_component_id referencing the existing script.mapping by "
+        "literal UUID or by another $ref) and reference that wrapper "
+        "from the map."
     ),
     "in_map_xml_shape_note": (
         "Each script call emits a userdefined <FunctionStep "
