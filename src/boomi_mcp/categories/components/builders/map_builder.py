@@ -1276,10 +1276,17 @@ class MapScriptBuilder:
                     error_code=SCRIPT_MAPPING_REF_REQUIRED,
                     field=f"{field_prefix}.script_component_id",
                     hint=(
-                        "Reference a reusable script.mapping component "
-                        "by literal UUID or by '$ref:KEY' pointing at an "
-                        "in-spec script.mapping component (the in-spec "
-                        "key must also appear in this map's depends_on)."
+                        "Use '$ref:<script_key>' to reference an in-spec "
+                        "script.mapping (the integration builder auto-"
+                        "synthesizes a transform.function wrapper) or "
+                        "'$ref:<wrapper_key>' to reference an in-spec "
+                        "transform.function wrapper directly. Literal "
+                        "componentIds are not accepted for map script "
+                        "calls — Boomi requires the FunctionStep id to "
+                        "point at a wrapper component, which the system "
+                        "can only synthesize from in-spec components. The "
+                        "referenced key must also appear in this map's "
+                        "depends_on."
                     ),
                 )
 

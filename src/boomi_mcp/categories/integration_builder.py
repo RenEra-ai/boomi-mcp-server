@@ -446,13 +446,13 @@ def _check_port_shape_alignment(
     """Return a structured error if the map's script_mappings entry port
     shape diverges from the referenced component's declarations.
 
-    Cross-checks:
-
-    1. Input count match.
-    2. Output count match.
-    3. Input names — every actual name must exist in the expected set
-       (order can differ; Boomi binds by name).
-    4. Output names — same rule.
+    Required: ordered list equality across both ``inputs`` and
+    ``outputs`` (count + names + order). Boomi binds the calling map's
+    FunctionStep input/output ports to the wrapper's external ports by
+    numeric ``key`` (position), not by name — port names are for editor
+    display only. A reordered list with the same name set would emit
+    syntactically valid XML but misroute values at runtime, so set
+    membership alone is insufficient.
 
     The error code is ``SCRIPT_MAPPING_VARIABLE_INVALID`` since the
     mismatch always boils down to a variable-name / port mismatch on
