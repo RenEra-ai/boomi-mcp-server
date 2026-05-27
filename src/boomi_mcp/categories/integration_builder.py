@@ -2471,12 +2471,18 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                                 "script_component_id"
                                             ),
                                             hint=(
-                                                "Reference an in-spec "
-                                                "script.mapping component "
-                                                "(auto-synth wrapper) or a "
-                                                "transform.function wrapper "
-                                                "by '$ref:KEY', or a literal "
-                                                "existing wrapper componentId."
+                                                "Use '$ref:<script_key>' "
+                                                "for an in-spec script.mapping "
+                                                "(auto-synth wrapper) or "
+                                                "'$ref:<wrapper_key>' for an "
+                                                "in-spec transform.function "
+                                                "wrapper. Literal componentIds "
+                                                "are not accepted at this "
+                                                "level — Boomi requires the "
+                                                "map FunctionStep id to point "
+                                                "at a wrapper, which the "
+                                                "system can only synthesize "
+                                                "from in-spec components."
                                             ),
                                             details={
                                                 "script_mappings_index": sm_idx,
