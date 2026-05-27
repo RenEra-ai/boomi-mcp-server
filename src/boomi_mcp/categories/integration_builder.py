@@ -63,6 +63,10 @@ from .components.builders.script_mapping_builder import (
     ScriptMappingBuilder,
     get_script_mapping_builder,
 )
+from .components.builders.transform_function_wrapper_builder import (
+    TransformFunctionWrapperBuilder,
+    get_transform_function_wrapper_builder,
+)
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.processes import create_process, update_process
@@ -106,6 +110,10 @@ _METADATA_TYPE_MAP = {
     # name and update-by-name resolves correctly. Mirrors the clone-suffix
     # safeguard block which already includes script.mapping.
     "script.mapping": "script.mapping",
+    # Issue #41 r3: auto-synthesized transform.function wrappers also
+    # participate in metadata lookup so repeated plan runs reuse the
+    # same wrapper component instead of leaking duplicates.
+    "transform.function": "transform.function",
 }
 
 
@@ -228,6 +236,172 @@ def _normalize_to_spec(config: Dict[str, Any]) -> IntegrationSpecV1:
     spec_data["components"] = normalized_components
 
     return IntegrationSpecV1(**spec_data)
+
+
+# Codex r3 P1 finding #1: Boomi's live transform.map XML references a
+# ``transform.function`` wrapper from the userdefined ``<FunctionStep id=...>``
+# attribute — NOT the script.mapping directly. The wrapper internally
+# references the script.mapping via ``<Configuration><Scripting
+# componentId="...">``. Maps that wire a script.mapping UUID into the
+# FunctionStep id slot will not bind at Boomi runtime.
+#
+# Rather than make callers author the wrapper component manually, the
+# integration builder synthesises one per referenced script.mapping at
+# plan time. The synthesized wrapper is a first-class in-spec component:
+# it appears in the plan output, applies in topological order before the
+# calling map, and has its own depends_on edge to the underlying
+# script.mapping.
+#
+# Shared-wrapper policy: one wrapper per (script.mapping key) within the
+# spec — multiple maps that reference the same script.mapping share the
+# same wrapper. Callers who need bespoke wrappers can declare them
+# explicitly as transform.function components.
+_AUTO_WRAPPER_KEY_PREFIX = "__auto_wrapper_"
+
+
+def _synthesize_script_function_wrappers(spec: IntegrationSpecV1) -> None:
+    """Synthesize transform.function wrappers for transform.map/script entries.
+
+    Mutates ``spec.components`` in place: appends synthesized wrapper
+    components, rewrites each calling map's
+    ``script_mappings[].script_component_id`` to point at the wrapper
+    key, and adds the wrapper key to the map's ``depends_on``.
+
+    Only $ref:KEY references targeting in-spec ``script.mapping``
+    components trigger synthesis. Literal componentId values and refs
+    that target other types are left untouched — those are the caller's
+    responsibility to wire correctly (and validation downstream surfaces
+    the mismatch where it can).
+    """
+    components_by_key: Dict[str, IntegrationComponentSpec] = {
+        comp.key: comp for comp in spec.components
+    }
+
+    # Existing wrappers (keyed by script.mapping key) so we can share
+    # across multiple calling maps. Also covers caller-declared wrappers
+    # already in the spec.
+    synthesized_wrappers_by_script_key: Dict[str, str] = {}
+
+    new_wrappers: List[IntegrationComponentSpec] = []
+
+    for comp in spec.components:
+        if comp.type != "transform.map":
+            continue
+        map_type = ((comp.config or {}).get("map_type") or "").strip().lower()
+        if map_type not in ("script", "map_script"):
+            continue
+        script_mappings = (comp.config or {}).get("script_mappings")
+        if not isinstance(script_mappings, list):
+            continue
+
+        for sm in script_mappings:
+            if not isinstance(sm, dict):
+                continue
+            ref_value = sm.get("script_component_id")
+            if not (
+                isinstance(ref_value, str) and ref_value.startswith("$ref:")
+            ):
+                continue
+            script_key = ref_value[len("$ref:") :]
+            script_comp = components_by_key.get(script_key)
+            if script_comp is None or script_comp.type != "script.mapping":
+                # Not a script.mapping reference — leave untouched. The
+                # plan-time validator surfaces a structured error for the
+                # wrong-type case at the same level (Codex r1 P2 #4).
+                continue
+
+            wrapper_key = synthesized_wrappers_by_script_key.get(script_key)
+            if wrapper_key is None:
+                wrapper_key = f"{_AUTO_WRAPPER_KEY_PREFIX}{script_key}__"
+                # If the caller happens to have declared a component with
+                # exactly this key already, don't synthesize a duplicate —
+                # trust the caller's declaration.
+                if wrapper_key in components_by_key:
+                    synthesized_wrappers_by_script_key[script_key] = wrapper_key
+                else:
+                    wrapper = _build_auto_wrapper_spec(
+                        wrapper_key=wrapper_key,
+                        script_key=script_key,
+                        script_comp=script_comp,
+                    )
+                    new_wrappers.append(wrapper)
+                    components_by_key[wrapper_key] = wrapper
+                    synthesized_wrappers_by_script_key[script_key] = wrapper_key
+
+            # Rewrite the map's reference to point at the wrapper.
+            sm["script_component_id"] = f"$ref:{wrapper_key}"
+
+            # Add the wrapper key to the calling map's depends_on.
+            if wrapper_key not in comp.depends_on:
+                comp.depends_on.append(wrapper_key)
+
+    spec.components.extend(new_wrappers)
+
+
+def _build_auto_wrapper_spec(
+    *,
+    wrapper_key: str,
+    script_key: str,
+    script_comp: IntegrationComponentSpec,
+) -> IntegrationComponentSpec:
+    """Construct an auto-synthesized transform.function wrapper IntegrationComponentSpec.
+
+    The wrapper's structure is copied from the referenced script.mapping:
+    same language, preserve_order, use_cache, script_body, inputs, outputs.
+    The wrapper carries an inline ScriptToExecute snapshot (matching live
+    Boomi shape) and references the script.mapping at runtime via
+    Configuration/Scripting componentId.
+    """
+    script_cfg = script_comp.config or {}
+    base_name = (
+        script_comp.name
+        or script_cfg.get("component_name")
+        or script_key
+    )
+    wrapper_name = f"{base_name} (Wrapper)"
+
+    # Inputs / outputs are copied verbatim from the script.mapping — they
+    # define the wrapper's external port surface and the inner Scripting
+    # variable declarations.
+    inputs = [
+        {
+            "name": str(entry.get("name") or "").strip(),
+            "data_type": str(entry.get("data_type") or "").strip(),
+        }
+        for entry in (script_cfg.get("inputs") or [])
+        if isinstance(entry, Mapping)
+    ]
+    outputs = [
+        {"name": str(entry.get("name") or "").strip()}
+        for entry in (script_cfg.get("outputs") or [])
+        if isinstance(entry, Mapping)
+    ]
+
+    wrapper_config: Dict[str, Any] = {
+        "component_type": "transform.function",
+        "component_name": wrapper_name,
+        "script_component_id": f"$ref:{script_key}",
+        "language": script_cfg.get("language"),
+        "script_body": script_cfg.get("script_body"),
+        "inputs": inputs,
+        "outputs": outputs,
+    }
+    # Mirror optional script.mapping flags so the wrapper's inline
+    # Configuration/Scripting attributes match the referenced component.
+    for opt_key in ("preserve_order", "use_cache"):
+        if opt_key in script_cfg:
+            wrapper_config[opt_key] = script_cfg[opt_key]
+    if script_cfg.get("folder_path"):
+        wrapper_config["folder_path"] = script_cfg["folder_path"]
+
+    return IntegrationComponentSpec(
+        key=wrapper_key,
+        type="transform.function",
+        action="create",
+        name=wrapper_name,
+        config=wrapper_config,
+        depends_on=[script_key],
+    )
 
 
 def _topological_order(spec: IntegrationSpecV1) -> List[str]:
@@ -1033,14 +1207,16 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
         return cloned
 
     # Issue #26 + #41: generated profile.json/profile.xml, transform.map,
-    # and script.mapping all participate in metadata lookup and need the
-    # clone-suffix safeguard so a second plan run can't see an identical
-    # duplicate as an ambiguous match.
+    # script.mapping, and synthesized transform.function wrappers all
+    # participate in metadata lookup and need the clone-suffix safeguard
+    # so a second plan run can't see an identical duplicate as an
+    # ambiguous match.
     if comp.type in (
         "profile.json",
         "profile.xml",
         "transform.map",
         "script.mapping",
+        "transform.function",
     ):
         base = cloned.get("component_name") or comp.name
         if base:
@@ -1075,6 +1251,7 @@ def _execute_component(
         "profile.xml",
         "transform.map",
         "script.mapping",
+        "transform.function",
     ):
         payload.setdefault("component_type", comp.type)
     if comp.name:
@@ -1091,6 +1268,7 @@ def _execute_component(
             "profile.xml",
             "transform.map",
             "script.mapping",
+            "transform.function",
         ):
             # Mirror plan-time validation, which injects comp.name into
             # effective_config["component_name"] before calling validate_config.
@@ -1200,6 +1378,44 @@ def _execute_component(
         if not target_id:
             return {"_success": False, "error": f"Missing component_id for update of trading partner '{comp.key}'"}
         return update_trading_partner(boomi_client, profile, target_id, payload)
+
+    # Issue #41 r3: synthesized transform.function wrappers route through
+    # TransformFunctionWrapperBuilder. End users do not typically author
+    # these directly — they're materialized by _synthesize_script_function_wrappers
+    # — but the apply path handles them like any other in-spec component.
+    if comp.type == "transform.function" and not payload.get("xml"):
+        wrapper_cls = get_transform_function_wrapper_builder(comp.type)
+        if wrapper_cls is None:
+            return {
+                "_success": False,
+                "error_code": "SCRIPT_MAPPING_VALIDATION_FAILED",
+                "error": (
+                    f"No TransformFunctionWrapperBuilder registered for "
+                    f"{comp.type!r}."
+                ),
+                "field": "component_type",
+            }
+        try:
+            built_xml = wrapper_cls().build(**payload)
+        except BuilderValidationError as exc:
+            return {
+                "_success": False,
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "field": exc.field,
+                "hint": exc.hint,
+            }
+        envelope = {"xml": built_xml, "component_type": "transform.function"}
+        if comp.action == "create":
+            return create_component(boomi_client, profile, envelope)
+        if not target_id:
+            return {
+                "_success": False,
+                "error": (
+                    f"Missing component_id for update of wrapper '{comp.key}'"
+                ),
+            }
+        return update_component(boomi_client, profile, target_id, envelope)
 
     # Issue #41: structured script.mapping routes through ScriptMappingBuilder.
     # Raw-XML bypass preserved — when payload['xml'] is set, the build()
@@ -1361,6 +1577,11 @@ def _execute_component(
 
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     spec = _normalize_to_spec(config)
+    # Issue #41 r3: inject transform.function wrappers between any
+    # transform.map (map_type='script') and the script.mapping it
+    # references. Live Boomi requires the indirection — see
+    # _synthesize_script_function_wrappers docstring.
+    _synthesize_script_function_wrappers(spec)
     conflict_policy = (config.get("conflict_policy") or "reuse").lower()
     if conflict_policy not in ("reuse", "clone", "fail"):
         return {
@@ -1833,6 +2054,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         is_generated_xml_profile = comp.type == "profile.xml"
         is_direct_map = comp.type == "transform.map"
         is_script_mapping_component = comp.type == "script.mapping"
+        is_transform_function_wrapper = comp.type == "transform.function"
         if is_generated_json_profile:
             gen_profile_scanner_cls = JSONGeneratedProfileBuilder
         elif is_generated_xml_profile:
@@ -1841,6 +2063,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             gen_profile_scanner_cls = DirectMapBuilder
         elif is_script_mapping_component:
             gen_profile_scanner_cls = ScriptMappingBuilder
+        elif is_transform_function_wrapper:
+            gen_profile_scanner_cls = TransformFunctionWrapperBuilder
 
         if (
             gen_profile_scanner_cls is not None
@@ -2039,12 +2263,17 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                         break
 
                                     # Reject $refs that don't target a
-                                    # script.mapping component. Apply
-                                    # would otherwise resolve the ref to
-                                    # the wrong UUID and emit a FunctionStep
-                                    # whose ``id`` points at a profile /
-                                    # connector / other type — Boomi runtime
-                                    # would fail to bind any inputs/outputs.
+                                    # script.mapping or a transform.function
+                                    # wrapper. After plan-time synthesis,
+                                    # ``script_mappings[].script_component_id``
+                                    # references the wrapper component
+                                    # (type=transform.function); caller-
+                                    # declared refs may still target a
+                                    # script.mapping directly (synthesis
+                                    # handles the rewrite). Other types
+                                    # would resolve to a wrong UUID and
+                                    # Boomi would fail to bind inputs/
+                                    # outputs at runtime.
                                     target_comp = (
                                         components_by_key.get(ref_key)
                                         if components_by_key is not None
@@ -2055,13 +2284,17 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                         if target_comp is not None
                                         else None
                                     )
-                                    if target_type != "script.mapping":
+                                    if target_type not in (
+                                        "script.mapping",
+                                        "transform.function",
+                                    ):
                                         gen_profile_err = BuilderValidationError(
                                             f"script_mappings[{sm_idx}]."
                                             f"script_component_id $ref "
                                             f"target {ref_key!r} resolves "
                                             f"to a {target_type!r} "
-                                            "component, not a script.mapping",
+                                            "component, not a script.mapping "
+                                            "or transform.function wrapper",
                                             error_code="SCRIPT_MAPPING_REF_REQUIRED",
                                             field=(
                                                 f"script_mappings[{sm_idx}]."
@@ -2070,9 +2303,10 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                             hint=(
                                                 "Reference an in-spec "
                                                 "script.mapping component "
-                                                "by '$ref:KEY' or a literal "
-                                                "existing script.mapping "
-                                                "componentId."
+                                                "(auto-synth wrapper) or a "
+                                                "transform.function wrapper "
+                                                "by '$ref:KEY', or a literal "
+                                                "existing wrapper componentId."
                                             ),
                                             details={
                                                 "script_mappings_index": sm_idx,
@@ -2185,6 +2419,16 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     # refs to thread — it is profile-agnostic. Just run the
                     # builder's structured config validator.
                     gen_profile_err = ScriptMappingBuilder.validate_config(
+                        effective_config
+                    )
+                elif is_transform_function_wrapper:
+                    # Issue #41 r3: transform.function wrappers are auto-
+                    # synthesized by _synthesize_script_function_wrappers,
+                    # but plan-time validation still runs through the
+                    # builder's validate_config to catch any caller-
+                    # declared wrappers and to defend against synthesis
+                    # bugs (defense-in-depth).
+                    gen_profile_err = TransformFunctionWrapperBuilder.validate_config(
                         effective_config
                     )
 
