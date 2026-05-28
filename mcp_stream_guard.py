@@ -122,6 +122,11 @@ class McpStreamGuardState:
         self.mcp_path = mcp_path.rstrip("/") or DEFAULT_MCP_PATH
         self.active_streams: dict[str, StreamRecord] = {}
         self.sessions: dict[str, float] = {}
+        # Transient count of POSTs currently being processed, per session id.
+        # An in-flight POST is treated as liveness (see has_inflight) without
+        # granting persistent activity credit, so it clears as soon as the POST
+        # returns regardless of the response status.
+        self.inflight: dict[str, int] = {}
         self._session_manager = None  # bound post-construction
         self._lock = anyio.Lock()
         self._salt = config.identity_salt.encode()
@@ -144,11 +149,36 @@ class McpStreamGuardState:
                 if record.session_id == session_id:
                     record.last_post = now
 
+    async def inflight_inc(self, session_id: Optional[str]) -> None:
+        if not session_id:
+            return
+        async with self._lock:
+            self.inflight[session_id] = self.inflight.get(session_id, 0) + 1
+
+    async def inflight_dec(self, session_id: Optional[str]) -> None:
+        if not session_id:
+            return
+        async with self._lock:
+            remaining = self.inflight.get(session_id, 0) - 1
+            if remaining > 0:
+                self.inflight[session_id] = remaining
+            else:
+                self.inflight.pop(session_id, None)
+
+    def has_inflight(self, session_id: Optional[str]) -> bool:
+        """True if a POST is currently processing for this session. Read without
+        the lock (single-threaded event loop; dict.get is atomic and there is no
+        await), so the GET watchdog can consult it cheaply on every poll."""
+        if not session_id:
+            return False
+        return self.inflight.get(session_id, 0) > 0
+
     async def forget_session(self, session_id: Optional[str]) -> None:
         if not session_id:
             return
         async with self._lock:
             self.sessions.pop(session_id, None)
+            self.inflight.pop(session_id, None)
             for record in self.active_streams.values():
                 if record.session_id == session_id:
                     record.cancel_event.set()
@@ -165,14 +195,30 @@ class McpStreamGuardState:
                 logger.exception("MCP_STREAM_GUARD session reaper error")
 
     async def _reap_once(self) -> None:
-        now = anyio.current_time()
         cutoff = self.config.session_idle_seconds
         async with self._lock:
-            stale = [sid for sid, last in self.sessions.items() if now - last >= cutoff]
+            now = anyio.current_time()
+            stale = [
+                sid for sid, last in self.sessions.items()
+                if now - last >= cutoff and self.inflight.get(sid, 0) <= 0
+            ]
         for session_id in stale:
             await self._terminate_session(session_id)
 
     async def _terminate_session(self, session_id: str) -> None:
+        cutoff = self.config.session_idle_seconds
+        # Re-check under the lock right before terminating: a POST may have
+        # refreshed this session, or one may now be in flight, after the stale
+        # snapshot was taken. Remove it from tracking atomically so we only
+        # terminate a still-idle session with no in-flight work.
+        async with self._lock:
+            last = self.sessions.get(session_id)
+            if last is None:
+                return  # already gone
+            if anyio.current_time() - last < cutoff or self.inflight.get(session_id, 0) > 0:
+                return  # became active again after the snapshot; leave it alone
+            self.sessions.pop(session_id, None)
+
         transport = None
         manager = self._session_manager
         instances = getattr(manager, "_server_instances", None) if manager is not None else None
@@ -187,8 +233,13 @@ class McpStreamGuardState:
                 )
             if isinstance(instances, dict):
                 instances.pop(session_id, None)
+        # The SDK transport for this id is now gone. If a racing accepted POST
+        # re-added local tracking (or in-flight count) for the same id while
+        # terminate() was pending, that tracking is stale — the SDK would 404 it
+        # — so drop it to avoid treating a dead session as established.
         async with self._lock:
             self.sessions.pop(session_id, None)
+            self.inflight.pop(session_id, None)
         logger.info(
             "MCP_SESSION_REAP session_id_prefix=%s reason=idle terminated=%s",
             session_id[:8],
@@ -401,7 +452,11 @@ class McpStreamGuardMiddleware:
                             reason = "superseded"
                             tg.cancel_scope.cancel()
                             return
-                        if t - max(record.last_useful, record.last_post) >= cfg.work_idle_seconds:
+                        # An in-flight POST on this stream's session is active
+                        # work even though it produces no GET-channel frames, so
+                        # do not close the stream as idle while one is processing.
+                        idle = t - max(record.last_useful, record.last_post) >= cfg.work_idle_seconds
+                        if idle and not self.state.has_inflight(record.session_id):
                             reason = "work_idle"
                             tg.cancel_scope.cancel()
                             return
@@ -421,35 +476,40 @@ class McpStreamGuardMiddleware:
 
     async def _admit_get(self, record: StreamRecord, scope) -> bool:
         """Enforce the per-identity GET cap. Supersede the oldest stream when
-        over budget; reject the new stream only if the old one will not close."""
+        over budget; reject the new stream only if the old one will not close.
+
+        Check-and-insert is performed atomically under a single lock acquisition
+        so a concurrent reconnect burst for the same identity cannot all observe
+        room and insert past the cap. When over budget we supersede the oldest
+        stream, then loop back and re-check under the lock before inserting.
+        """
         cfg = self.config
         cap = cfg.max_get_streams_per_identity
-        if cap <= 0:
+        while True:
             async with self.state._lock:
-                self.state.active_streams[record.stream_id] = record
-            return True
+                same = [
+                    r for r in self.state.active_streams.values()
+                    if r.identity_key == record.identity_key
+                ]
+                if cap <= 0 or len(same) < cap:
+                    # Reserve the slot atomically under the lock that saw room.
+                    self.state.active_streams[record.stream_id] = record
+                    return True
+                victim = min(same, key=lambda r: r.started_at)
+                over_count = len(same)
 
-        async with self.state._lock:
-            same = [r for r in self.state.active_streams.values() if r.identity_key == record.identity_key]
-            victim = min(same, key=lambda r: r.started_at) if len(same) >= cap else None
-
-        if victim is not None:
             self._log(
                 "MCP_STREAM_THRESHOLD",
                 scope=scope,
                 record=record,
                 reason="get_cap_exceeded",
-                active_get_count=len(same),
+                active_get_count=over_count,
                 level=logging.WARNING,
             )
             victim.cancel_event.set()
             if not await self._wait_until_gone(victim.stream_id, cfg.supersede_wait_seconds):
                 return False
             self._log("MCP_STREAM_SUPERSEDE", scope=scope, record=record, reason="superseded_victim")
-
-        async with self.state._lock:
-            self.state.active_streams[record.stream_id] = record
-        return True
 
     async def _wait_until_gone(self, stream_id: str, timeout: float) -> bool:
         deadline = anyio.current_time() + max(0.0, timeout)
@@ -464,23 +524,61 @@ class McpStreamGuardMiddleware:
     # -- POST: pass through, track session activity ------------------------- #
     async def _handle_post(self, scope, receive, send):
         req_session = _header(scope, b"mcp-session-id")
-        captured = {"session_id": req_session}
-        await self.state.touch_post(req_session, anyio.current_time())
+        captured = {"session_id": req_session, "status": None}
+        inflight_keys: set = set()
+
+        async def _mark_inflight(session_id):
+            # Transient liveness signal (not persistent activity credit): while it
+            # is set, the GET watchdog and reaper treat the session as active, so
+            # a long-running tool call cannot have its correlated GET stream
+            # closed or its session reaped mid-work. Cleared in finally regardless
+            # of status, so a client looping fast rejected POSTs gains no credit.
+            if session_id and session_id not in inflight_keys:
+                inflight_keys.add(session_id)
+                await self.state.inflight_inc(session_id)
+
+        # Key in-flight against the request session id when known up front.
+        await _mark_inflight(req_session)
 
         async def capturing_send(message):
             if message.get("type") == "http.response.start":
+                status = message.get("status")
+                captured["status"] = status
                 for key, value in message.get("headers") or []:
                     if key.lower() == b"mcp-session-id":
                         try:
                             captured["session_id"] = value.decode("latin-1")
                         except Exception:  # pragma: no cover - defensive
                             pass
+                # Persistent activity credit only for ACCEPTED POSTs, recorded as
+                # soon as acceptance is known. Rejected POSTs (4xx/5xx) record no
+                # activity — only the transient in-flight marker, which clears
+                # when the request returns. Also key in-flight against the session
+                # learned from the response header (e.g. an SSE POST that
+                # establishes the session): a GET opened for that returned id
+                # while the POST is still streaming must see it as in flight. The
+                # mark happens before send() below, so the client cannot open that
+                # GET before the in-flight marker exists.
+                if status is not None and status < 400:
+                    await _mark_inflight(captured["session_id"])
+                    await self.state.touch_post(captured["session_id"], anyio.current_time())
             await send(message)
 
         try:
             await self.app(scope, receive, capturing_send)
         finally:
-            await self.state.touch_post(captured["session_id"], anyio.current_time())
+            # Finalize under a shield so cancellation (client disconnect on a long
+            # streaming POST, shutdown) cannot abort these awaits and leak an
+            # in-flight count non-zero forever. Refresh the accepted-activity
+            # timestamp BEFORE decrementing in-flight so there is never a window
+            # where an accepted session looks idle (inflight==0 and last_post
+            # stale) to a concurrent reaper/watchdog.
+            with anyio.CancelScope(shield=True):
+                status = captured["status"]
+                if status is not None and status < 400:
+                    await self.state.touch_post(captured["session_id"], anyio.current_time())
+                for session_id in inflight_keys:
+                    await self.state.inflight_dec(session_id)
 
     # -- DELETE: pass through, drop tracked session ------------------------- #
     async def _handle_delete(self, scope, receive, send):
