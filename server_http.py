@@ -16,6 +16,7 @@ from mcp_stream_guard import (
     McpStreamGuardConfig,
     McpStreamGuardMiddleware,
     McpStreamGuardState,
+    bind_auth_jwt_issuer,
     bind_fastmcp_session_manager,
     install_reaper_lifespan,
 )
@@ -69,6 +70,7 @@ if __name__ == "__main__":
             middleware=[Middleware(McpStreamGuardMiddleware, state=guard_state)]
         )
         bind_fastmcp_session_manager(app, guard_state)
+        bind_auth_jwt_issuer(app, guard_state)
         install_reaper_lifespan(app, guard_state)
     else:
         print("[INFO] MCP stream guard disabled (BOOMI_MCP_STREAM_GUARD_ENABLED=false)")
