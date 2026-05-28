@@ -86,6 +86,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import BuilderValidationError, _escape_xml
 from .map_function_registry import (
     FUNCTION_OUTPUT_KEY,
@@ -1673,6 +1674,27 @@ MAP_BUILDERS: Dict[Tuple[str, str], type] = {
     ("transform.map", "script"): MapScriptBuilder,
     ("transform.map", "map_script"): MapScriptBuilder,
 }
+
+
+# Issue #45 — update-preservation policy.
+#
+# All three map flavors own the entire `<Map>` subtree because the builder
+# authoritatively renders every Map child (Mappings, Functions, Defaults,
+# DocumentCacheJoins) plus the from/to profile attributes. Unknown Map
+# children/attributes — which today are not produced by any Boomi-generated
+# transform.map export we have — would not survive this policy; if Boomi
+# adds new Map siblings in the future, the policy will need to switch from
+# subtree-replace to a named-children merge. `bns:encryptedValues` and any
+# `bns:Component`-level unknown children still survive (they're outside the
+# owned subtree).
+_TRANSFORM_MAP_POLICY = PreservationPolicy(
+    component_type="transform.map",
+    owned_paths=(OwnedPath(path="bns:object/Map"),),
+)
+
+DirectMapBuilder.PRESERVATION_POLICY = _TRANSFORM_MAP_POLICY
+MapFunctionBuilder.PRESERVATION_POLICY = _TRANSFORM_MAP_POLICY
+MapScriptBuilder.PRESERVATION_POLICY = _TRANSFORM_MAP_POLICY
 
 
 def get_map_builder(component_type: str, map_type: str):

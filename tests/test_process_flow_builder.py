@@ -735,3 +735,50 @@ def test_build_coerces_non_string_name():
     xml = ProcessFlowBuilder.build(_base_config(), name=12345)
     root = ET.fromstring(xml)
     assert root.attrib["name"] == "12345"
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_process_flow_preservation_policy_attached():
+    policy = ProcessFlowBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "process"
+    paths = {op.path for op in policy.owned_paths}
+    assert paths == {"bns:object/process"}
+
+
+def test_process_flow_update_preserves_process_overrides():
+    """`bns:processOverrides` is populated by Boomi (UI per-environment
+    override config). Builders never author it, so it MUST survive a
+    structured update — only the inner `<process>` flow is owned."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = ProcessFlowBuilder.build(_base_config(), name="renamed")
+    current = ProcessFlowBuilder.build(_base_config(), name="original")
+    # Inject a populated processOverrides in current (builder emits empty)
+    current = current.replace(
+        "<bns:processOverrides/>",
+        (
+            '<bns:processOverrides>'
+            '<override path="//conn/@host" environmentId="env-1" value="prod.db"/>'
+            '<override path="//conn/@host" environmentId="env-2" value="staging.db"/>'
+            "</bns:processOverrides>"
+        ),
+    )
+
+    merged = merge_for_update(
+        current, desired, ProcessFlowBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    overrides = root.find("bns:processOverrides", NS)
+    assert overrides is not None
+    entries = overrides.findall("override")
+    assert len(entries) == 2
+    envs = {o.attrib.get("environmentId") for o in entries}
+    assert envs == {"env-1", "env-2"}
+    # And the process subtree was renamed via owned root attr
+    assert root.attrib["name"] == "renamed"

@@ -58,6 +58,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import BuilderValidationError, _escape_xml
 from .profile_generation import (
     SCRIPT_MAPPING_BODY_REQUIRED,
@@ -522,6 +523,17 @@ class ScriptMappingBuilder:
 SCRIPT_MAPPING_BUILDERS: Dict[str, type] = {
     "script.mapping": ScriptMappingBuilder,
 }
+
+
+# Issue #45 — update-preservation policy. The builder owns the entire
+# `<MappingScript>` subtree (script body, declared Input/Output ports,
+# language/preserveOrder/useCache attrs). bns:encryptedValues, unknown
+# bns:Component-level children, and unknown bns:object siblings are
+# preserved automatically.
+ScriptMappingBuilder.PRESERVATION_POLICY = PreservationPolicy(
+    component_type="script.mapping",
+    owned_paths=(OwnedPath(path="bns:object/MappingScript"),),
+)
 
 
 def get_script_mapping_builder(component_type: str) -> Optional[type]:

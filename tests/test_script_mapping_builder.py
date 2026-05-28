@@ -453,3 +453,45 @@ class TestManageComponentDispatchesScriptMapping:
         assert result["_success"] is False
         assert result["error_code"] == "SCRIPT_MAPPING_LANGUAGE_UNSUPPORTED"
         assert fake_raw.call_count == 0
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_script_mapping_preservation_policy_attached():
+    policy = ScriptMappingBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "script.mapping"
+    paths = {op.path for op in policy.owned_paths}
+    assert paths == {"bns:object/MappingScript"}
+
+
+def test_script_mapping_update_preserves_unknown_xml():
+    """Outside the owned `<MappingScript>` subtree, unknown XML must survive."""
+    import xml.etree.ElementTree as ET
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    NS = {"bns": "http://api.platform.boomi.com/"}
+    desired = ScriptMappingBuilder().build(
+        **_minimal_config(component_name="renamed")
+    )
+    current = ScriptMappingBuilder().build(**_minimal_config())
+    # Inject a future bns:Component-level child after </bns:object>
+    current = current.replace(
+        "</bns:object>",
+        "</bns:object><bns:processOverrides><override key=\"x\"/></bns:processOverrides>",
+    )
+
+    merged = merge_for_update(
+        current, desired, ScriptMappingBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    # Owned subtree was renamed
+    assert root.attrib["name"] == "renamed"
+    # processOverrides survived
+    overrides = root.find("bns:processOverrides", NS)
+    assert overrides is not None
+    assert overrides.find("override") is not None

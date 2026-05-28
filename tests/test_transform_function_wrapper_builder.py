@@ -203,3 +203,43 @@ def test_script_body_xml_escaped_not_cdata():
     assert "<![CDATA[" not in xml
     # Body is XML-escaped inside <ScriptToExecute>.
     assert "&quot;&lt;foo &amp; bar&gt;&quot;" in xml
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_wrapper_preservation_policy_attached():
+    policy = TransformFunctionWrapperBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "transform.function"
+    paths = {op.path for op in policy.owned_paths}
+    assert paths == {"bns:object/Function"}
+
+
+def test_wrapper_update_preserves_encrypted_values_and_root_attrs():
+    import xml.etree.ElementTree as ET
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    NS = {"bns": "http://api.platform.boomi.com/"}
+    desired = TransformFunctionWrapperBuilder().build(
+        **_minimal_config(component_name="renamed")
+    )
+    current = TransformFunctionWrapperBuilder().build(**_minimal_config())
+    current = current.replace(
+        "<bns:encryptedValues/>",
+        '<bns:encryptedValues>'
+        '<bns:encryptedValue path="//x" isSet="true"/>'
+        '</bns:encryptedValues>',
+    )
+
+    merged = merge_for_update(
+        current, desired, TransformFunctionWrapperBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    assert root.attrib["name"] == "renamed"
+    ev = root.find("bns:encryptedValues/bns:encryptedValue", NS)
+    assert ev is not None
+    assert ev.attrib.get("isSet") == "true"

@@ -66,6 +66,7 @@ Supported data types (shared by output fields and parameters):
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import BuilderValidationError, _escape_xml
 
 
@@ -767,6 +768,31 @@ PROFILE_BUILDERS: Dict[Tuple[str, str], type] = {
     ("profile.json", "json.generated"): JSONGeneratedProfileBuilder,
     ("profile.xml", "xml.generated"): XMLGeneratedProfileBuilder,
 }
+
+
+# Issue #45 — update-preservation policies for the two DB Read profile
+# builders. The JSON/XML profile builders attach their own policies in
+# their own modules so direct imports (without going through this module)
+# still see the PRESERVATION_POLICY class attribute.
+#
+# Codex r8 P2 narrow-risk guard: the type="profile.db" root check
+# alone passes for DB write profiles too (a future #32 deferral), so
+# pointing this read-builder update at a write profile would build a
+# hybrid component. Validate the executionType marker pre-merge.
+_DATABASE_READ_PROFILE_POLICY = PreservationPolicy(
+    component_type="profile.db",
+    owned_paths=(OwnedPath(path="bns:object/DatabaseProfile/DataElements"),),
+    subtype_marker_xpath=(
+        "bns:object/DatabaseProfile/ProfileProperties/DatabaseGeneralInfo"
+    ),
+    subtype_marker_attr="executionType",
+    subtype_marker_expected="dbread",
+)
+
+DatabaseReadProfileBuilder.PRESERVATION_POLICY = _DATABASE_READ_PROFILE_POLICY
+DatabaseStoredProcedureReadProfileBuilder.PRESERVATION_POLICY = (
+    _DATABASE_READ_PROFILE_POLICY
+)
 
 
 def get_profile_builder(component_type: str, profile_type: str):

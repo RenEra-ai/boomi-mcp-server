@@ -576,3 +576,45 @@ def test_function_map_also_rejects_script_mappings():
     assert err is not None
     assert err.error_code == "UNSUPPORTED_TRANSFORM_ROUTE"
     assert err.field == "script_mappings"
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_direct_map_preservation_policy_attached():
+    policy = DirectMapBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "transform.map"
+    paths = {op.path for op in policy.owned_paths}
+    assert paths == {"bns:object/Map"}
+
+
+def test_direct_map_update_preserves_encrypted_values_and_root_attrs():
+    """Owned subtree is `<Map>`. Outside the Map, `bns:encryptedValues`
+    entries and unknown bns:Component attributes/children must survive."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = _build_map_xml(component_name="renamed")
+    current = _build_map_xml(component_name="original")
+    # Inject an unknown root attr + a populated encryptedValues entry
+    current = current.replace(
+        'name="original"',
+        'name="original" futureRootAttr="opaque"',
+    )
+    current = current.replace(
+        "<bns:encryptedValues/>",
+        '<bns:encryptedValues>'
+        '<bns:encryptedValue path="//some/path" isSet="true"/>'
+        '</bns:encryptedValues>',
+    )
+
+    merged = merge_for_update(current, desired, DirectMapBuilder.PRESERVATION_POLICY)
+    root = ET.fromstring(merged)
+    assert root.attrib.get("futureRootAttr") == "opaque"
+    assert root.attrib["name"] == "renamed"
+    ev = root.find("bns:encryptedValues/bns:encryptedValue", NS)
+    assert ev is not None
+    assert ev.attrib.get("isSet") == "true"

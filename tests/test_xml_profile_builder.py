@@ -340,3 +340,52 @@ def test_build_raises_for_invalid_config():
             }
         )
     assert excinfo.value.error_code == "UNSUPPORTED_PROFILE_FIELD_TYPE"
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_xml_profile_preservation_policy_attached():
+    policy = XMLGeneratedProfileBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "profile.xml"
+    paths = {op.path for op in policy.owned_paths}
+    assert paths == {"bns:object/XMLProfile/DataElements"}
+
+
+def test_xml_profile_update_preserves_namespaces_and_taglists():
+    """XMLProfile siblings such as `Namespaces` and `tagLists` must
+    survive a structured update — only `DataElements` is owned."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired_xml = XMLGeneratedProfileBuilder().build(**_config())
+    current_xml = XMLGeneratedProfileBuilder().build(**_config())
+    # Replace the empty default namespace with a customized one and
+    # inject a future section
+    current_xml = current_xml.replace(
+        '<Namespaces><XMLNamespace key="-1" name="Empty Namespace"><Types/></XMLNamespace></Namespaces>',
+        (
+            '<Namespaces>'
+            '<XMLNamespace key="-1" name="Empty Namespace"><Types/></XMLNamespace>'
+            '<XMLNamespace key="42" name="custom" uri="urn:user:ns"><Types/></XMLNamespace>'
+            '</Namespaces>'
+        ),
+    )
+    current_xml = current_xml.replace(
+        "<tagLists/>",
+        '<tagLists><tagList key="future" name="user-added"/></tagLists>',
+    )
+
+    merged = merge_for_update(
+        current_xml, desired_xml, XMLGeneratedProfileBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    profile = root.find("bns:object/XMLProfile", NS)
+    namespaces = profile.findall("Namespaces/XMLNamespace")
+    assert any(ns.attrib.get("name") == "custom" for ns in namespaces)
+    tag_list = profile.find("tagLists/tagList")
+    assert tag_list is not None
+    assert tag_list.attrib["key"] == "future"

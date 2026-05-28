@@ -499,8 +499,11 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert "validation_error" not in step
 
     @patch(_PATCH_TARGET)
-    def test_update_path_skips_database_preflight(self, mock_pag):
-        """Update goes through update_connector, not the builder."""
+    def test_update_path_runs_database_preflight(self, mock_pag):
+        """Codex r2 P2: structured connector updates now invoke the builder
+        at apply time (read-merge-write), so plan-time validation must run
+        for update too — otherwise an invalid update plans clean and only
+        fails after earlier steps have mutated."""
         comp = _db_comp(action="update")
         comp.component_id = "explicit-id"  # bypass ambiguity lookup
         comp.config.pop("credential_ref")
@@ -508,8 +511,33 @@ class TestBuildPlanDatabaseConnectorPreflight:
         config = _build_config([comp])
         plan = _build_plan(MagicMock(), config)
         step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert "validation_error" in step
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_DRIVER"
+
+    @patch(_PATCH_TARGET)
+    def test_metadata_only_update_skips_database_preflight(self, mock_pag):
+        """Codex r2 P2: but metadata-only updates (only name/description/folder)
+        still route through update_connector's smart-merge, bypassing the
+        builder — so they don't trigger plan-time validation."""
+        comp = IntegrationComponentSpec(
+            key="db_conn",
+            type="connector-settings",
+            action="update",
+            name="Example SQL Server",
+            component_id="explicit-id",
+            config={
+                "connector_type": "database",
+                "name": "Renamed Connector",
+                "description": "updated description",
+            },
+        )
+        config = _build_config([comp])
+        plan = _build_plan(MagicMock(), config)
+        step = plan["steps"][0]
         assert step["planned_action"] == "update"
         assert "validation_error" not in step
+        assert step["update_mode"] == "metadata_smart_merge"
         mock_pag.assert_not_called()
 
     @patch(_PATCH_TARGET)
@@ -859,13 +887,15 @@ class TestBuildPlanDatabaseConnectorPreflight:
         assert step["validation_error"]["field"] == "write_options.sql_file_path"
 
     @patch(_PATCH_TARGET)
-    def test_update_path_skips_pooling_validation_but_keeps_secret_scan(self, mock_pag):
-        """Update mode (component_id supplied) bypasses full builder validation
-        — bogus pooling key does NOT block update, but plaintext secrets still do.
-        Same boundary applies to reuse — the will_invoke_builder gate only fires
-        for create/create_clone in _build_plan."""
+    def test_update_path_runs_full_validation_and_secret_scan(self, mock_pag):
+        """Codex r2 P2: structured updates invoke the builder at apply
+        time, so plan-time validation must catch builder errors AND
+        secret-scan leaks. Metadata-only updates skip the builder, but
+        bogus body fields (pooling, host) do not — they trigger the
+        full validator at plan time."""
         mock_pag.return_value = []
-        # Bogus pooling on update path: should NOT trip shape/pooling validation.
+        # Bogus pooling on update path: now DOES trip shape/pooling validation
+        # because the structured update apply will invoke the builder.
         comp_update = IntegrationComponentSpec(
             key="db_update", type="connector-settings", action="update",
             name="Existing DB", component_id="existing-db-id",
@@ -874,9 +904,10 @@ class TestBuildPlanDatabaseConnectorPreflight:
         )
         plan_update = _build_plan(MagicMock(), _build_config([comp_update]))
         step_update = plan_update["steps"][0]
-        assert step_update["planned_action"] != "error_database_validation"
+        assert step_update["planned_action"] == "error_database_validation"
 
-        # But plaintext secret on update path is STILL caught by the secret scan.
+        # Plaintext secret on update path remains caught by the secret scan
+        # (which runs regardless of will_invoke_builder gating).
         comp_secret = IntegrationComponentSpec(
             key="db_secret", type="connector-settings", action="update",
             name="Existing DB", component_id="existing-db-id",
@@ -1990,14 +2021,17 @@ class TestBuildPlanRestPreflight:
         assert "validation_error" not in step
 
     @patch(_PATCH_TARGET)
-    def test_update_path_skips_rest_builder_preflight(self, mock_pag):
+    def test_update_path_runs_rest_builder_preflight(self, mock_pag):
+        """Codex r2 P2: REST connection updates with body fields invoke
+        the builder at apply, so plan-time validation runs for update too."""
         comp = _rest_conn_comp(action="update")
         comp.component_id = "explicit-rest-id"
         comp.config.pop("base_url")
         plan = _build_plan(MagicMock(), _build_config([comp]))
         step = plan["steps"][0]
-        assert step["planned_action"] == "update"
-        assert "validation_error" not in step
+        assert step["planned_action"] == "error_rest_validation"
+        # base_url is required by the REST connection builder.
+        assert "base_url" in step["validation_error"]["field"]
 
     @patch(_PATCH_TARGET)
     def test_unsupported_auth_marks_rest_connection_unresolvable(self, mock_pag):
@@ -2660,10 +2694,23 @@ def _stub_dep_comp(key, *, role=None, method="POST"):
             config={"connector_type": "rest", "name": name},
         )
     if role == "REST Client connector-action":
+        # Codex r2 P2 follow-up: structured connector-action updates now
+        # invoke the builder at apply time, so the stub config must be
+        # builder-valid (path + connection_ref_key required). The
+        # cross-ref check (issue #49) reads `method` for action_type
+        # matching.
         return IntegrationComponentSpec(
             key=key, type="connector-action", action="update",
             component_id=stub_id, name=name,
-            config={"connector_type": "rest", "method": method, "name": name},
+            config={
+                "connector_type": "rest",
+                "operation_mode": "execute",
+                "method": method,
+                "path": "/v1/stub",
+                "component_name": name,
+                "connection_ref_key": "target_rest_connection",
+            },
+            depends_on=["target_rest_connection"],
         )
     if role == "profile.db":
         return IntegrationComponentSpec(
@@ -4688,3 +4735,877 @@ class TestScriptMappingMetadataRegistrationAndDefaults:
         # payload.setdefault("component_name", comp.name)``
         assert '"script.mapping",' in source
         assert 'payload.setdefault("component_name", comp.name)' in source
+
+
+# ============================================================================
+# Issue #45 — build_integration plan/apply preservation wiring
+# ============================================================================
+
+
+class TestBuildPlanUpdatePreservationMetadata:
+    """Plan output exposes update_mode / preserves_unknown_xml /
+    owned_paths / preserved_paths on every structured-route update step."""
+
+    @patch(_PATCH_TARGET)
+    def test_structured_builder_update_step_carries_read_merge_write(self, mock_pag):
+        mock_pag.return_value = [
+            _meta("id-existing", "Example SQL Server", comp_type="connector-settings"),
+        ]
+        comp = _db_comp(action="update", component_id="id-existing")
+        result = _build_plan(MagicMock(), _build_config([comp]))
+        assert result["_success"] is True
+        step = result["steps"][0]
+        assert step["planned_action"] == "update"
+        assert step["update_mode"] == "read_merge_write"
+        assert step["preserves_unknown_xml"] is True
+        assert "bns:object/DatabaseConnectionSettings" in step["owned_paths"]
+        assert "bns:encryptedValues" in step["preserved_paths"]
+        assert "bns:processOverrides" in step["preserved_paths"]
+
+    @patch(_PATCH_TARGET)
+    def test_raw_xml_update_step_carries_full_xml_replace(self, mock_pag):
+        mock_pag.return_value = [
+            _meta("id-existing", "Raw XML Connector", comp_type="connector-settings"),
+        ]
+        comp = IntegrationComponentSpec(
+            key="raw-conn",
+            type="connector-settings",
+            action="update",
+            name="Raw XML Connector",
+            component_id="id-existing",
+            config={"xml": "<bns:Component xmlns:bns='http://api.platform.boomi.com/' "
+                            "type='connector-settings' subType='database' name='Raw XML Connector'/>"},
+        )
+        result = _build_plan(MagicMock(), _build_config([comp]))
+        assert result["_success"] is True
+        step = result["steps"][0]
+        assert step["planned_action"] == "update"
+        assert step["update_mode"] == "full_xml_replace"
+        assert step["preserves_unknown_xml"] is False
+        assert "owned_paths" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_create_step_omits_update_mode(self, mock_pag):
+        mock_pag.return_value = []  # no existing → fresh create
+        comp = _db_comp(action="create")
+        result = _build_plan(MagicMock(), _build_config([comp]))
+        step = result["steps"][0]
+        assert step["planned_action"] == "create"
+        assert "update_mode" not in step
+        assert "preserves_unknown_xml" not in step
+        assert "owned_paths" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_reuse_step_omits_update_mode(self, mock_pag):
+        mock_pag.return_value = [
+            _meta("id-existing", "Example SQL Server", comp_type="connector-settings"),
+        ]
+        # conflict_policy=reuse + action=create on an existing match → reuse
+        comp = _db_comp(action="create")
+        result = _build_plan(
+            MagicMock(),
+            _build_config([comp], conflict_policy="reuse"),
+        )
+        step = result["steps"][0]
+        assert step["planned_action"] == "reuse"
+        assert "update_mode" not in step
+
+
+class TestApplyStructuredUpdate:
+    """The apply-time helper fetches current XML, merges, and pushes via
+    update_component_raw — never via update_component with raw built XML."""
+
+    def test_apply_structured_update_fetches_current_xml_and_pushes_merged(self):
+        from src.boomi_mcp.categories.integration_builder import (
+            _apply_structured_update,
+        )
+        from src.boomi_mcp.categories.components.builders.connector_builder import (
+            DatabaseConnectorBuilder,
+        )
+
+        boomi_client = MagicMock()
+        # Current live XML carries an unknown root attr (must survive) and
+        # an encryptedValues entry with isSet=true (must survive).
+        current_xml = (
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+            'type="connector-settings" subType="database" name="old" '
+            'futureFlag="opaque">'
+            '<bns:encryptedValues>'
+            '<bns:encryptedValue path="//DatabaseConnectionSettings/@password" isSet="true"/>'
+            '</bns:encryptedValues>'
+            '<bns:description>desc</bns:description>'
+            '<bns:object>'
+            '<DatabaseConnectionSettings xmlns="" dbname="olddb" host="old.example.com" '
+            'port="3306" username="x"/>'
+            '</bns:object>'
+            '</bns:Component>'
+        )
+        # Codex r7 P2: built_xml must include the password xpath
+        # marker the real builder emits, so the owned_encrypted_paths
+        # prune logic correctly preserves the live isSet=true secret.
+        built_xml = (
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+            'type="connector-settings" subType="database" name="renamed">'
+            '<bns:encryptedValues>'
+            '<bns:encryptedValue path="//DatabaseConnectionSettings/@password" isSet="false"/>'
+            '</bns:encryptedValues>'
+            '<bns:description>new</bns:description>'
+            '<bns:object>'
+            '<DatabaseConnectionSettings xmlns="" dbname="newdb" host="db.example.com" '
+            'port="5432" username="y"/>'
+            '</bns:object>'
+            '</bns:Component>'
+        )
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml",
+            return_value={"xml": current_xml, "type": "connector-settings"},
+        ):
+            result = _apply_structured_update(
+                boomi_client,
+                "test_profile",
+                "id-existing",
+                _db_comp(action="update", component_id="id-existing"),
+                built_xml,
+                DatabaseConnectorBuilder.PRESERVATION_POLICY,
+            )
+        assert result["_success"] is True
+        # update_component_raw was called with merged XML
+        boomi_client.component.update_component_raw.assert_called_once()
+        call_args = boomi_client.component.update_component_raw.call_args
+        merged_xml = call_args[0][1]
+        # Unknown attr survived
+        assert 'futureFlag="opaque"' in merged_xml
+        # Owned attrs replaced
+        assert 'name="renamed"' in merged_xml
+        # Owned subtree replaced
+        assert 'dbname="newdb"' in merged_xml
+        assert 'dbname="olddb"' not in merged_xml
+        # Existing encryptedValue (isSet=true) preserved
+        assert 'isSet="true"' in merged_xml
+
+    def test_apply_structured_update_missing_policy_short_circuits_before_fetch(self):
+        from src.boomi_mcp.categories.integration_builder import (
+            _apply_structured_update,
+        )
+
+        boomi_client = MagicMock()
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml"
+        ) as mock_fetch:
+            result = _apply_structured_update(
+                boomi_client,
+                "test_profile",
+                "id-existing",
+                _db_comp(action="update", component_id="id-existing"),
+                "<bns:Component/>",
+                None,
+            )
+        assert result["_success"] is False
+        assert result["error_code"] == "UPDATE_PRESERVATION_POLICY_UNSUPPORTED"
+        mock_fetch.assert_not_called()
+        boomi_client.component.update_component_raw.assert_not_called()
+
+    def test_apply_structured_update_fetch_failure_surfaced_structured(self):
+        from src.boomi_mcp.categories.integration_builder import (
+            _apply_structured_update,
+        )
+        from src.boomi_mcp.categories.components.builders.connector_builder import (
+            DatabaseConnectorBuilder,
+        )
+
+        boomi_client = MagicMock()
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml",
+            side_effect=Exception("GET failed: 404"),
+        ):
+            result = _apply_structured_update(
+                boomi_client,
+                "test_profile",
+                "id-missing",
+                _db_comp(action="update", component_id="id-missing"),
+                "<bns:Component/>",
+                DatabaseConnectorBuilder.PRESERVATION_POLICY,
+            )
+        assert result["_success"] is False
+        assert result["error_code"] == "UPDATE_PRESERVATION_FETCH_FAILED"
+        boomi_client.component.update_component_raw.assert_not_called()
+
+    def test_apply_structured_update_merge_failure_short_circuits_push(self):
+        from src.boomi_mcp.categories.integration_builder import (
+            _apply_structured_update,
+        )
+        from src.boomi_mcp.categories.components.builders.connector_builder import (
+            DatabaseConnectorBuilder,
+        )
+
+        boomi_client = MagicMock()
+        # Type mismatch — current is connector-action, policy expects connector-settings
+        bad_current_xml = (
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+            'type="connector-action" subType="database" name="x"/>'
+        )
+        built_xml = (
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+            'type="connector-settings" subType="database" name="x">'
+            '<bns:object>'
+            '<DatabaseConnectionSettings xmlns=""/>'
+            '</bns:object>'
+            '</bns:Component>'
+        )
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml",
+            return_value={"xml": bad_current_xml, "type": "connector-action"},
+        ):
+            result = _apply_structured_update(
+                boomi_client,
+                "test_profile",
+                "id-existing",
+                _db_comp(action="update", component_id="id-existing"),
+                built_xml,
+                DatabaseConnectorBuilder.PRESERVATION_POLICY,
+            )
+        assert result["_success"] is False
+        assert result["error_code"] == "UPDATE_PRESERVATION_TYPE_MISMATCH"
+        boomi_client.component.update_component_raw.assert_not_called()
+
+
+# ============================================================================
+# Codex review r2 — plan-time validation of structured updates
+# ============================================================================
+
+
+class TestPlanTimeValidationOfUpdates:
+    """Codex r2 P2: builder updates must validate at plan time so apply
+    failures don't leave the system half-mutated. Updates that invoke
+    the structured builder run the full validator; metadata-only updates
+    bypass the builder so they're not validated against builder rules."""
+
+    @patch(_PATCH_TARGET)
+    def test_profile_db_update_with_missing_query_fails_plan(self, mock_pag):
+        """Codex r2 P2: profile.db update now invokes the structured
+        builder, so missing query must be caught at plan time."""
+        comp = IntegrationComponentSpec(
+            key="db_profile",
+            type="profile.db",
+            action="update",
+            name="Example Read Profile",
+            component_id="explicit-profile-id",
+            config={
+                "component_type": "profile.db",
+                "profile_type": "database.read",
+                "component_name": "Example Read Profile",
+                # query intentionally missing
+                "output_fields": [{"name": "one"}],
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "MISSING_DB_QUERY"
+
+    @patch(_PATCH_TARGET)
+    def test_profile_db_update_with_unsupported_profile_type_fails_plan(self, mock_pag):
+        # Include body fields (query, output_fields) so this is treated
+        # as a structured-builder update — metadata-only updates with
+        # an unsupported profile_type would just route through smart-merge
+        # and ignore profile_type entirely (Codex r3 P2 follow-up).
+        comp = IntegrationComponentSpec(
+            key="db_profile",
+            type="profile.db",
+            action="update",
+            name="Example Read Profile",
+            component_id="explicit-profile-id",
+            config={
+                "component_type": "profile.db",
+                "profile_type": "database.write",  # unsupported in M2
+                "component_name": "Example Read Profile",
+                "query": "SELECT 1 AS one",
+                "output_fields": [{"name": "one"}],
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "UNSUPPORTED_DB_PROFILE_MODE"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_profile_db_metadata_only_update_bypasses_builder(self, mock_pag):
+        """Codex r3 P2: profile.db updates with ONLY metadata fields
+        bypass the structured builder and route through smart-merge,
+        matching the pre-#45 behaviour for renames/description edits."""
+        comp = IntegrationComponentSpec(
+            key="db_profile",
+            type="profile.db",
+            action="update",
+            name="Example Read Profile",
+            component_id="explicit-profile-id",
+            config={
+                "component_type": "profile.db",
+                "component_name": "Renamed Profile",
+                "description": "rename via build_integration",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "update"
+        assert "validation_error" not in step
+        assert step["update_mode"] == "metadata_smart_merge"
+        assert step["preserves_unknown_xml"] is True
+
+    @patch(_PATCH_TARGET)
+    def test_rest_op_update_with_missing_path_fails_plan(self, mock_pag):
+        """REST connector-action update with body fields (method, but no
+        path) invokes the builder at apply, so missing path is caught
+        at plan time."""
+        # Stub the upstream REST connection so the operation's
+        # connection_ref_key resolves to an in-spec dependency.
+        rest_conn_stub = IntegrationComponentSpec(
+            key="rest_conn",
+            type="connector-settings",
+            action="update",
+            name="Stub Conn",
+            component_id="explicit-conn-id",
+            config={"connector_type": "rest", "name": "Stub Conn"},
+        )
+        comp = IntegrationComponentSpec(
+            key="rest_op",
+            type="connector-action",
+            action="update",
+            name="Stub Op",
+            component_id="explicit-op-id",
+            config={
+                "connector_type": "rest",
+                "operation_mode": "execute",
+                "method": "POST",
+                "connection_ref_key": "rest_conn",
+                "component_name": "Stub Op",
+                # path intentionally missing
+            },
+            depends_on=["rest_conn"],
+        )
+        plan = _build_plan(MagicMock(), _build_config([rest_conn_stub, comp]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "rest_op")
+        # Should be error_rest_validation, not a clean update step
+        assert op_step["planned_action"] == "error_rest_validation"
+
+    @patch(_PATCH_TARGET)
+    def test_metadata_only_connector_update_bypasses_builder_validation(self, mock_pag):
+        """Mirror of the positive case from TestBuildPlanDatabaseConnectorPreflight:
+        when only metadata fields are present, the builder is not invoked
+        and validation does not run."""
+        comp = IntegrationComponentSpec(
+            key="rest_conn",
+            type="connector-settings",
+            action="update",
+            name="Example REST Conn",
+            component_id="explicit-rest-id",
+            config={
+                "connector_type": "rest",
+                "name": "Renamed REST",
+                # No base_url, auth, oauth2, etc. → metadata-only
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "update"
+        assert "validation_error" not in step
+        assert step["update_mode"] == "metadata_smart_merge"
+
+
+class TestCodexR4Followups:
+    """Codex r4 P2 regressions."""
+
+    @patch(_PATCH_TARGET)
+    def test_profile_db_metadata_only_rename_via_component_name_routes_to_smart_merge(self, mock_pag):
+        """Codex r4 P2 finding #1: profile.db metadata-only updates that
+        carry the schema-template field `component_name` (not `name`)
+        must route through smart-merge AND actually rename — pre-fix
+        update_component ignored component_name."""
+        comp = IntegrationComponentSpec(
+            key="db_profile",
+            type="profile.db",
+            action="update",
+            name="Existing Profile",
+            component_id="explicit-profile-id",
+            config={
+                "component_type": "profile.db",
+                "component_name": "Renamed Profile",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["update_mode"] == "metadata_smart_merge"
+
+    def test_update_component_consumes_component_name_alias(self):
+        """update_component now treats component_name as an alias for name."""
+        from src.boomi_mcp.categories.components.manage_component import (
+            update_component,
+        )
+        import xml.etree.ElementTree as ET
+
+        boomi_client = MagicMock()
+        current_xml = (
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+            'type="profile.db" name="old" componentId="cid"/>'
+        )
+        with patch(
+            "src.boomi_mcp.categories.components.manage_component.component_get_xml",
+            return_value={"xml": current_xml, "name": "old"},
+        ):
+            result = update_component(
+                boomi_client,
+                "dev",
+                "cid",
+                {"component_name": "new-name-via-alias"},
+            )
+        assert result["_success"] is True
+        boomi_client.component.update_component_raw.assert_called_once()
+        sent_xml = boomi_client.component.update_component_raw.call_args[0][1]
+        assert 'name="new-name-via-alias"' in sent_xml
+
+    @patch(_PATCH_TARGET)
+    def test_non_string_connector_type_does_not_crash_plan(self, mock_pag):
+        """Codex r4 P2 finding #2: a non-string connector_type plus body
+        fields used to crash _resolve_preservation_policy with
+        AttributeError during planning. Now it should plan with no
+        policy resolved and surface a normal validation envelope."""
+        comp = IntegrationComponentSpec(
+            key="bad_rest",
+            type="connector-settings",
+            action="update",
+            name="Bad Connector",
+            component_id="explicit-id",
+            config={
+                "connector_type": 123,  # int, not str — would crash .lower()
+                "base_url": "https://example.com",
+                "auth": "NONE",
+            },
+        )
+        # Should not raise; plan completes (validation_error envelope is fine).
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        assert plan["_success"] is True
+        step = plan["steps"][0]
+        # update_mode should NOT be read_merge_write (no policy resolved).
+        assert step.get("update_mode") != "read_merge_write"
+
+
+class TestCodexR5Followups:
+    """Codex r5 P2: plan-output update_mode classification accuracy."""
+
+    @patch(_PATCH_TARGET)
+    def test_generic_component_metadata_only_update_reports_smart_merge(self, mock_pag):
+        """Codex r5 P2: a generic `type='component'` update with only
+        metadata fields routes through update_component smart-merge at
+        apply (preserves body XML), so the plan must report
+        update_mode='metadata_smart_merge' not 'full_xml_replace'."""
+        comp = IntegrationComponentSpec(
+            key="generic",
+            type="component",
+            action="update",
+            name="Some Existing Component",
+            component_id="explicit-id",
+            config={
+                "name": "Renamed Component",
+                "description": "rename",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "update"
+        assert step["update_mode"] == "metadata_smart_merge"
+        assert step["preserves_unknown_xml"] is True
+
+    @patch(_PATCH_TARGET)
+    def test_trading_partner_update_reports_smart_merge(self, mock_pag):
+        """trading_partner updates use update_trading_partner's JSON
+        partial-update path — preserves unknown fields in the live
+        component, equivalent to a smart-merge."""
+        comp = IntegrationComponentSpec(
+            key="partner",
+            type="trading_partner",
+            action="update",
+            name="Existing Partner",
+            component_id="explicit-tp-id",
+            config={"component_name": "Renamed Partner"},
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["update_mode"] == "metadata_smart_merge"
+        assert step["preserves_unknown_xml"] is True
+
+    @patch(_PATCH_TARGET)
+    def test_legacy_process_update_without_process_kind_reports_full_replace(self, mock_pag):
+        """Process updates without process_kind go through update_process
+        which rebuilds the XML wholesale (no preservation)."""
+        comp = IntegrationComponentSpec(
+            key="legacy_proc",
+            type="process",
+            action="update",
+            name="Legacy Process",
+            component_id="explicit-proc-id",
+            config={"name": "Legacy Process"},  # no process_kind → legacy path
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["update_mode"] == "full_xml_replace"
+        assert step["preserves_unknown_xml"] is False
+
+
+class TestCodexR9Followups:
+    """Codex r9 P2 regressions."""
+
+    @patch(_PATCH_TARGET)
+    def test_non_string_profile_type_does_not_crash_plan(self, mock_pag):
+        """Codex r9 P2: profile.db update with body fields and a
+        non-string profile_type (e.g. JSON int) used to crash
+        ``_build_plan`` with AttributeError on ``.lower()``. Now it
+        returns a clean plan with a structured validation error."""
+        comp = IntegrationComponentSpec(
+            key="bad_profile",
+            type="profile.db",
+            action="update",
+            name="Existing Profile",
+            component_id="explicit-id",
+            config={
+                "component_type": "profile.db",
+                "profile_type": 123,  # int, not str — would crash .lower()
+                "query": "SELECT 1",
+                "output_fields": [{"name": "x"}],
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        assert plan["_success"] is True
+        step = plan["steps"][0]
+        # Should be a clean error envelope, not a crash.
+        assert step["planned_action"] in (
+            "error_database_validation",
+            "error_generated_profile_validation",
+        )
+        assert "validation_error" in step
+
+
+class TestCodexR11Followups:
+    """Codex r11 P2: connector body update with unsupported connector_type
+    must surface a structured error, not silently smart-merge metadata."""
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_connector_type_with_body_fields_raises_structured_error(self, mock_pag):
+        # connector_type='http' is not in CONNECTOR_BUILDERS (M2 supports
+        # database + rest only). Body fields (base_url, auth) signal
+        # structured-builder intent; falling through to update_connector
+        # would silently smart-merge metadata only.
+        from src.boomi_mcp.categories.integration_builder import _execute_component
+        boomi_client = MagicMock()
+        comp = IntegrationComponentSpec(
+            key="http_conn", type="connector-settings", action="update",
+            name="HTTP", component_id="explicit-id",
+            config={
+                "connector_type": "http",  # unsupported in M2
+                "base_url": "https://example.com",
+                "auth": "NONE",
+            },
+        )
+        result = _execute_component(
+            boomi_client, "dev", comp, comp.config, target_id="explicit-id",
+        )
+        assert result["_success"] is False
+        assert result["error_code"] == "UPDATE_PRESERVATION_POLICY_UNSUPPORTED"
+        assert "structured builder" in result["error"].lower()
+
+
+class TestCodexR12Followups:
+    """Codex r12 P2: plan-time guard against unsupported-connector body updates."""
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_connector_body_update_surfaces_at_plan(self, mock_pag):
+        """connector_type='http' with body fields used to be reported as
+        update_mode='metadata_smart_merge' at plan time, but apply
+        rejected with UPDATE_PRESERVATION_POLICY_UNSUPPORTED. The plan
+        must now surface the same error so a multi-step apply doesn't
+        mutate earlier components before failing here."""
+        comp = IntegrationComponentSpec(
+            key="http_conn",
+            type="connector-settings",
+            action="update",
+            name="HTTP",
+            component_id="explicit-id",
+            config={
+                "connector_type": "http",  # unsupported in M2
+                "base_url": "https://example.com",
+                "auth": "NONE",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        assert plan["_success"] is True
+        step = plan["steps"][0]
+        assert step["planned_action"] != "update"
+        assert "validation_error" in step
+        assert (
+            step["validation_error"]["error_code"]
+            == "UPDATE_PRESERVATION_POLICY_UNSUPPORTED"
+        )
+        # update_mode should NOT have been set to metadata_smart_merge:
+        # the step is now an error step, not a planned update.
+        assert step.get("update_mode") != "metadata_smart_merge"
+
+    @patch(_PATCH_TARGET)
+    def test_supported_database_connector_body_update_still_plans_clean(self, mock_pag):
+        """The r12 guard must NOT fire for supported builders."""
+        comp = _db_comp(action="update")
+        comp.component_id = "explicit-id"
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "update"
+        assert step.get("update_mode") == "read_merge_write"
+
+
+class TestCodexR13Followups:
+    """Codex r13 P2: error_unsupported_structured_update must trigger fail-fast in _apply_plan."""
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_structured_update_fail_fast_blocks_apply(self, mock_pag):
+        """Codex r13 P2: when a multi-step plan contains an
+        error_unsupported_structured_update step, _apply_plan must
+        refuse to execute ANY component (fail-fast). Pre-fix it would
+        execute earlier components before hitting the unsupported
+        step's runtime check."""
+        # An unsupported connector update should land in the fail-fast set.
+        bad = IntegrationComponentSpec(
+            key="http_conn",
+            type="connector-settings",
+            action="update",
+            name="HTTP",
+            component_id="explicit-id",
+            config={
+                "connector_type": "http",  # unsupported in M2
+                "base_url": "https://example.com",
+                "auth": "NONE",
+            },
+        )
+        config = _build_config([bad])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        # Apply must refuse to execute and return the unresolvable_steps
+        # diagnostic envelope instead of partial success.
+        assert result["_success"] is False
+        assert "unresolvable_steps" in result
+        assert any(
+            s["key"] == "http_conn"
+            and s["planned_action"] == "error_unsupported_structured_update"
+            for s in result["unresolvable_steps"]
+        )
+
+
+class TestCodexR14Followups:
+    """Codex r14 P2: legacy process update with config.xml must route through
+    update_component_raw, not update_process."""
+
+    @patch(_PATCH_TARGET)
+    def test_legacy_process_raw_xml_update_routes_through_update_component(self, mock_pag):
+        """When type='process' update carries config.xml without
+        process_kind, plan reports update_mode='full_xml_replace' AND
+        apply must route through update_component (which calls
+        update_component_raw) — NOT update_process (which parses
+        payload as JSON and fails on xml-only payload)."""
+        from src.boomi_mcp.categories.integration_builder import _execute_component
+        boomi_client = MagicMock()
+        comp = IntegrationComponentSpec(
+            key="legacy_proc",
+            type="process",
+            action="update",
+            name="Legacy Process",
+            component_id="explicit-proc-id",
+            config={
+                "name": "Legacy Process",
+                "xml": "<bns:Component>...pre-built XML...</bns:Component>",
+                # no process_kind → legacy linear path
+            },
+        )
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.update_component"
+        ) as mock_update_component, patch(
+            "src.boomi_mcp.categories.integration_builder.update_process"
+        ) as mock_update_process:
+            mock_update_component.return_value = {"_success": True}
+            _execute_component(
+                boomi_client, "dev", comp, comp.config, target_id="explicit-proc-id",
+            )
+        # update_component must be invoked (which handles config.xml).
+        mock_update_component.assert_called_once()
+        # update_process must NOT be invoked for raw-XML path.
+        mock_update_process.assert_not_called()
+
+    @patch(_PATCH_TARGET)
+    def test_legacy_process_json_update_still_routes_through_update_process(self, mock_pag):
+        """Legacy process update WITHOUT config.xml still uses
+        update_process (JSON rebuild) — the r14 fix is gated on
+        payload.get('xml')."""
+        from src.boomi_mcp.categories.integration_builder import _execute_component
+        boomi_client = MagicMock()
+        comp = IntegrationComponentSpec(
+            key="legacy_proc",
+            type="process",
+            action="update",
+            name="Legacy Process",
+            component_id="explicit-proc-id",
+            config={"name": "Legacy Process"},  # no xml, no process_kind
+        )
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.update_component"
+        ) as mock_update_component, patch(
+            "src.boomi_mcp.categories.integration_builder.update_process"
+        ) as mock_update_process:
+            mock_update_process.return_value = {"_success": True}
+            _execute_component(
+                boomi_client, "dev", comp, comp.config, target_id="explicit-proc-id",
+            )
+        mock_update_process.assert_called_once()
+        mock_update_component.assert_not_called()
+
+
+class TestCodexR15Followups:
+    """Codex r15 P3: error_unsupported_structured_update entries in
+    _apply_plan unresolvable_steps must surface a non-empty error detail."""
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_structured_update_emits_actionable_error_detail(self, mock_pag):
+        bad = IntegrationComponentSpec(
+            key="http_conn",
+            type="connector-settings",
+            action="update",
+            name="HTTP",
+            component_id="explicit-id",
+            config={
+                "connector_type": "http",
+                "base_url": "https://example.com",
+                "auth": "NONE",
+            },
+        )
+        config = _build_config([bad])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is False
+        assert len(result.get("details", [])) >= 1
+        # The detail string should reference the failing component AND
+        # carry the structured error_code so callers can grep.
+        assert any(
+            "http_conn" in d
+            or "UPDATE_PRESERVATION_POLICY_UNSUPPORTED" in d
+            for d in result["details"]
+        )
+
+
+class TestCodexR16Followups:
+    """Codex r16 P2: DB Get op non-string operation_mode guard + REST op
+    profile-binding preservation on path-only updates."""
+
+    @patch(_PATCH_TARGET)
+    def test_non_string_operation_mode_does_not_crash_plan(self, mock_pag):
+        """Codex r16 P2: DB Get op update with body fields and a
+        non-string operation_mode used to crash _build_plan via
+        DatabaseGetOperationBuilder.validate_config calling .lower()
+        on an int. Now it returns a clean structured envelope."""
+        comp = IntegrationComponentSpec(
+            key="bad_op",
+            type="connector-action",
+            action="update",
+            name="Bad Op",
+            component_id="explicit-id",
+            config={
+                "connector_type": "database",
+                "operation_mode": 123,  # int, not str — used to crash
+                "component_name": "Bad Op",
+                "read_profile_id": "5fe35b85-d8f4-409d-8197-03eee5c0c129",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        # Should not raise; plan completes (validation envelope OK).
+        assert plan["_success"] is True
+
+    @patch(_PATCH_TARGET)
+    def test_rest_op_policy_owned_attrs_only_contains_method(self, mock_pag):
+        """Codex r16 P2 trade-off: REST op owned_attrs is narrowed to
+        the always-explicit method attrs. Profile-related attrs
+        (requestProfile, responseProfile, *ProfileType) are NOT in
+        owned_attrs — they preserve live values on path-only updates.
+        Documented limitation: explicit-clear of profile bindings via
+        structured update no longer works; use raw-XML escape hatch."""
+        from src.boomi_mcp.categories.components.builders.connector_builder import (
+            _REST_CLIENT_OPERATION_POLICY,
+        )
+        cfg = next(
+            op
+            for op in _REST_CLIENT_OPERATION_POLICY.owned_paths
+            if op.mode == "key_merge"
+        )
+        assert cfg.owned_attrs is not None
+        # Always-emitted method attrs are owned.
+        assert "customOperationType" in cfg.owned_attrs
+        assert "operationType" in cfg.owned_attrs
+        # Profile attrs are NOT owned (Codex r16 trade-off).
+        assert "requestProfile" not in cfg.owned_attrs
+        assert "requestProfileType" not in cfg.owned_attrs
+        assert "responseProfile" not in cfg.owned_attrs
+        assert "responseProfileType" not in cfg.owned_attrs
+
+
+class TestCodexR18Followups:
+    """Codex r18 P2: connection_ref_key as metadata-only + profile type
+    additive semantics."""
+
+    @patch(_PATCH_TARGET)
+    def test_connection_ref_key_in_metadata_only_set(self, mock_pag):
+        """Codex r18 P2: a rename payload that includes connection_ref_key
+        (routing-only key, not emitted to XML) must route through
+        smart-merge, not invoke the structured operation builder."""
+        comp = IntegrationComponentSpec(
+            key="rest_op",
+            type="connector-action",
+            action="update",
+            name="Op",
+            component_id="explicit-id",
+            config={
+                "connector_type": "rest",
+                "operation_mode": "execute",
+                "connection_ref_key": "some_conn_ref",
+                "component_name": "Renamed Op",
+                "description": "rename only",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "update"
+        assert step["update_mode"] == "metadata_smart_merge"
+        assert "validation_error" not in step
+
+
+class TestCodexR19Followups:
+    """Codex r19 P2: connector_type whitespace tolerance in plan-time guard."""
+
+    @patch(_PATCH_TARGET)
+    def test_whitespace_padded_connector_type_plans_clean(self, mock_pag):
+        """Codex r19 P2: connector_type=' rest ' (with whitespace) is
+        accepted by _resolve_rest_connector_type and normalized at
+        apply. The plan-time guard must also strip+lowercase so it
+        doesn't false-flag as UPDATE_PRESERVATION_POLICY_UNSUPPORTED."""
+        comp = IntegrationComponentSpec(
+            key="rest_conn",
+            type="connector-settings",
+            action="update",
+            name="REST",
+            component_id="explicit-id",
+            config={
+                "connector_type": " rest ",  # padded alias
+                "base_url": "https://example.com",
+                "auth": "NONE",
+            },
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        # Must not be the unsupported-update error — should resolve to
+        # the REST builder and either plan clean or surface a
+        # builder-specific validation error (depending on payload).
+        assert step["planned_action"] != "error_unsupported_structured_update"
