@@ -287,6 +287,282 @@ def test_over_cap_supersedes_oldest_stream(caplog):
     assert "superseded" in close_reasons
 
 
+def test_concurrent_get_admission_never_exceeds_cap():
+    # Reconnect burst: many concurrent same-identity GETs must not slip past the
+    # cap. With atomic check-and-insert, active count stays <= cap at all times.
+    async def scenario():
+        cap = 2
+        state = McpStreamGuardState(
+            cfg(max_get_streams_per_identity=cap, work_idle_seconds=0.3, supersede_wait_seconds=1.0)
+        )
+        scope = make_scope("GET", client_id="burst")
+        observed = {"max": 0}
+        stop = anyio.Event()
+
+        async def monitor():
+            while not stop.is_set():
+                observed["max"] = max(observed["max"], await state.count_get_streams("client:burst"))
+                await anyio.sleep(0.005)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(monitor)
+            for _ in range(6):
+                tg.start_soon(
+                    McpStreamGuardMiddleware(make_repeating_sse_app(0.05, PING), state),
+                    scope,
+                    _idle_receive,
+                    Recorder(),
+                )
+            await anyio.sleep(0.3)
+            stop.set()
+            tg.cancel_scope.cancel()
+        return observed["max"], cap
+
+    observed_max, cap = anyio.run(scenario)
+    assert observed_max <= cap, f"active GET streams reached {observed_max}, exceeding cap {cap}"
+
+
+def test_rejected_post_on_unknown_session_creates_no_activity():
+    # The orphan-spam threat: a client loops POSTs with a stale/unknown session
+    # id that FastMCP rejects (4xx). It must never gain activity credit — not at
+    # arrival (session not tracked) and not on the rejected response.
+    async def scenario():
+        state = McpStreamGuardState(cfg())  # no tracked sessions
+        await McpStreamGuardMiddleware(make_simple_app(status=404, body=b"no session"), state)(
+            make_scope("POST", headers=[(b"mcp-session-id", b"ghost")]),
+            _idle_receive,
+            Recorder(),
+        )
+        return state
+
+    state = anyio.run(scenario)
+    assert "ghost" not in state.sessions  # never credited
+    assert state.inflight.get("ghost", 0) == 0  # transient in-flight marker cleared
+
+
+def test_rejected_post_on_tracked_session_does_not_refresh_activity():
+    # Even for an already-tracked session, a rejected POST (4xx) must not refresh
+    # persistent activity — only the transient in-flight marker, which clears on
+    # return. Otherwise a client looping rejected POSTs could keep a GET stream
+    # alive / block reaping on a desynced session.
+    async def scenario():
+        state = McpStreamGuardState(cfg())
+        state.sessions["tracked"] = 5.0  # established, old timestamp
+        await McpStreamGuardMiddleware(make_simple_app(status=400, body=b"bad"), state)(
+            make_scope("POST", headers=[(b"mcp-session-id", b"tracked")]),
+            _idle_receive,
+            Recorder(),
+        )
+        return state
+
+    state = anyio.run(scenario)
+    assert state.sessions["tracked"] == 5.0  # unchanged despite being tracked
+    assert state.inflight.get("tracked", 0) == 0  # in-flight cleared after return
+
+
+def test_inflight_post_keeps_correlated_get_stream_open():
+    # The round-3 guarantee: while a long-running POST on a session is in flight,
+    # a correlated GET stream is NOT closed as work_idle even though the GET
+    # channel itself only carries pings.
+    async def scenario():
+        state = McpStreamGuardState(cfg(work_idle_seconds=0.15, max_age_seconds=10))
+        gate = anyio.Event()
+        observed = {}
+
+        async def slow_post(scope, receive, send):
+            await send(
+                {"type": "http.response.start", "status": 200, "headers": [(b"mcp-session-id", b"live")]}
+            )
+            await gate.wait()  # stays in flight
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                McpStreamGuardMiddleware(slow_post, state),
+                make_scope("POST", headers=[(b"mcp-session-id", b"live")]),
+                _idle_receive,
+                Recorder(),
+            )
+            while not state.has_inflight("live"):
+                await anyio.sleep(0.005)
+            # GET on the same session, ping-only (would normally close at work_idle).
+            tg.start_soon(
+                McpStreamGuardMiddleware(make_repeating_sse_app(0.03, PING), state),
+                make_scope("GET", client_id="c", headers=[(b"mcp-session-id", b"live")]),
+                _idle_receive,
+                Recorder(),
+            )
+            await anyio.sleep(0.5)  # >> work_idle (0.15)
+            observed["open_during_inflight"] = await state.count_get_streams("client:c")
+            gate.set()  # let the POST finish
+            tg.cancel_scope.cancel()
+        return observed
+
+    observed = anyio.run(scenario)
+    assert observed["open_during_inflight"] >= 1  # GET held open by the in-flight POST
+
+
+def test_inflight_tracks_session_from_response_header():
+    # An accepted POST that ESTABLISHES the session via the response header (no
+    # request session id — e.g. initialize returning an SSE stream) must mark
+    # that returned session in flight, so a GET stream opened for it mid-request
+    # is not closed as work_idle while the POST is still streaming.
+    async def scenario():
+        state = McpStreamGuardState(cfg(work_idle_seconds=0.15, max_age_seconds=10))
+        gate = anyio.Event()
+        observed = {}
+
+        async def slow_init(scope, receive, send):
+            await send(
+                {"type": "http.response.start", "status": 200, "headers": [(b"mcp-session-id", b"newsess")]}
+            )
+            await gate.wait()  # response stream stays open (in flight)
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        async with anyio.create_task_group() as tg:
+            # POST with NO request session id; session is created in the response.
+            tg.start_soon(
+                McpStreamGuardMiddleware(slow_init, state),
+                make_scope("POST"),
+                _idle_receive,
+                Recorder(),
+            )
+            with anyio.fail_after(2):
+                while not state.has_inflight("newsess"):
+                    await anyio.sleep(0.005)
+            # GET opened for the returned session while the POST is still in flight.
+            tg.start_soon(
+                McpStreamGuardMiddleware(make_repeating_sse_app(0.03, PING), state),
+                make_scope("GET", client_id="g", headers=[(b"mcp-session-id", b"newsess")]),
+                _idle_receive,
+                Recorder(),
+            )
+            await anyio.sleep(0.5)  # >> work_idle (0.15)
+            observed["open"] = await state.count_get_streams("client:g")
+            gate.set()
+            tg.cancel_scope.cancel()
+        return observed
+
+    observed = anyio.run(scenario)
+    assert observed["open"] >= 1  # GET held open by the in-flight response-session POST
+
+
+def test_inflight_cleared_when_post_is_cancelled():
+    # A long streaming POST whose task is cancelled (client disconnect / shutdown)
+    # must still clear its in-flight marker — the shielded finalizer guarantees it,
+    # so the session does not become permanently un-reapable.
+    async def scenario():
+        state = McpStreamGuardState(cfg())
+        started = anyio.Event()
+
+        async def hanging_post(scope, receive, send):
+            await send(
+                {"type": "http.response.start", "status": 200, "headers": [(b"mcp-session-id", b"cx")]}
+            )
+            started.set()
+            await anyio.sleep_forever()  # never completes; gets cancelled
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                McpStreamGuardMiddleware(hanging_post, state),
+                make_scope("POST", headers=[(b"mcp-session-id", b"cx")]),
+                _idle_receive,
+                Recorder(),
+            )
+            await started.wait()
+            assert state.has_inflight("cx")  # in flight while processing
+            tg.cancel_scope.cancel()  # cancel the POST mid-stream
+        return state
+
+    state = anyio.run(scenario)
+    assert state.inflight.get("cx", 0) == 0  # cleared despite cancellation
+
+
+def test_terminate_clears_session_readded_during_termination():
+    # Finding 2: if a racing accepted POST re-adds local tracking while
+    # terminate() is pending, the post-terminate cleanup drops the stale entry so
+    # the guard does not treat a dead (SDK-404) session as established.
+    async def scenario():
+        state = McpStreamGuardState(cfg(session_idle_seconds=0.2))
+
+        class _ReAddTransport:
+            def __init__(self):
+                self.terminated = False
+
+            async def terminate(self):
+                self.terminated = True
+                # simulate a racing accepted POST re-adding tracking mid-terminate
+                state.sessions["s7"] = anyio.current_time()
+                state.inflight["s7"] = 1
+
+        transport = _ReAddTransport()
+        manager = _FakeManager({"s7": transport})
+        state._session_manager = manager
+        state.sessions["s7"] = anyio.current_time() - 10  # stale
+        await state._terminate_session("s7")
+        return state, transport
+
+    state, transport = anyio.run(scenario)
+    assert transport.terminated is True
+    assert "s7" not in state.sessions  # stale re-add cleared post-terminate
+    assert "s7" not in state.inflight
+
+
+def test_accepted_post_refreshes_activity_before_app_returns():
+    # A long-running accepted POST must refresh session activity as soon as the
+    # response is accepted (response.start), not only after the app returns, so
+    # correlated GET streams / the session are not closed/reaped mid-work.
+    async def scenario():
+        state = McpStreamGuardState(cfg())
+        state.sessions["live"] = 1.0  # stale sentinel
+        proceed = anyio.Event()
+        observed = {}
+
+        async def slow_app(scope, receive, send):
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"mcp-session-id", b"live")],
+                }
+            )
+            # By now the guard should have refreshed activity at response.start.
+            observed["after_start"] = state.sessions["live"]
+            await proceed.wait()  # simulate long-running work still in flight
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        mw = McpStreamGuardMiddleware(slow_app, state)
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                mw, make_scope("POST", headers=[(b"mcp-session-id", b"live")]), _idle_receive, Recorder()
+            )
+            while "after_start" not in observed:
+                await anyio.sleep(0.005)
+            proceed.set()
+        return observed
+
+    observed = anyio.run(scenario)
+    assert observed["after_start"] != 1.0  # refreshed before the app returned
+
+
+def test_terminate_skips_session_that_became_fresh():
+    # Reaper TOCTOU guard: a session refreshed after the stale snapshot must not
+    # be terminated when _terminate_session re-checks freshness under the lock.
+    async def scenario():
+        state = McpStreamGuardState(cfg(session_idle_seconds=0.3))
+        transport = _FakeTransport()
+        manager = _FakeManager({"s9": transport})
+        state._session_manager = manager
+        state.sessions["s9"] = anyio.current_time()  # fresh (just-arrived POST)
+        await state._terminate_session("s9")
+        return state, transport, manager
+
+    state, transport, manager = anyio.run(scenario)
+    assert transport.terminated is False
+    assert "s9" in state.sessions
+    assert "s9" in manager._server_instances
+
+
 def test_returns_429_when_victim_cannot_be_closed_in_time():
     async def scenario():
         state = McpStreamGuardState(
