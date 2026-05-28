@@ -59,11 +59,17 @@ def cfg(**over) -> McpStreamGuardConfig:
 
 
 def make_scope(method, path="/mcp", headers=None, client_id=None, client=("203.0.113.9", 5555)):
+    hdrs = list(headers or [])
+    # Standalone GET streams require Accept: text/event-stream. Default it for GET
+    # scopes (the guard now only manages real standalone-SSE GETs) unless the test
+    # supplied its own Accept header (e.g. to exercise the malformed-GET path).
+    if method == "GET" and not any(k.lower() == b"accept" for k, _ in hdrs):
+        hdrs.append((b"accept", b"text/event-stream"))
     scope = {
         "type": "http",
         "method": method,
         "path": path,
-        "headers": list(headers or []),
+        "headers": hdrs,
         "client": client,
     }
     if client_id is not None:
@@ -186,6 +192,48 @@ def test_identity_falls_back_to_ip_and_ua_when_unauthenticated():
         headers=[(b"cf-connecting-ip", b"198.51.100.7"), (b"user-agent", b"curl/8.4")],
     )
     assert mw._identity_key(scope) == "anon:198.51.100.7|curl/8.4"
+
+
+class _FakeIssuer:
+    def __init__(self, payload=None, raises=False):
+        self._payload = payload or {}
+        self._raises = raises
+
+    def verify_token(self, token):
+        if self._raises:
+            raise ValueError("invalid token")
+        return self._payload
+
+
+def test_identity_prefers_jwt_client_id_over_shared_audience():
+    # The JWT client_id is the per-DCR client; scope["user"].access_token.client_id
+    # is the shared Google audience on the proxy path and must NOT win.
+    state = McpStreamGuardState(cfg())
+    state.jwt_issuer = _FakeIssuer({"client_id": "dcr-abc", "sub": "user-1"})
+    mw = McpStreamGuardMiddleware(None, state)
+    scope = make_scope("GET", headers=[(b"authorization", b"Bearer the.jwt.token")])
+    tok = type("Tok", (), {"client_id": "shared-google-audience"})()
+    scope["user"] = type("User", (), {"access_token": tok})()
+    assert mw._identity_key(scope) == "client:dcr-abc"
+
+
+def test_identity_falls_back_to_scope_user_when_jwt_decode_fails():
+    state = McpStreamGuardState(cfg())
+    state.jwt_issuer = _FakeIssuer(raises=True)
+    mw = McpStreamGuardMiddleware(None, state)
+    scope = make_scope("GET", headers=[(b"authorization", b"Bearer bad")])
+    tok = type("Tok", (), {"client_id": "fallback-aud"})()
+    scope["user"] = type("User", (), {"access_token": tok})()
+    assert mw._identity_key(scope) == "client:fallback-aud"
+
+
+def test_identity_uses_jwt_only_when_bearer_present():
+    # With an issuer bound but no Authorization header, fall back to scope user.
+    state = McpStreamGuardState(cfg())
+    state.jwt_issuer = _FakeIssuer({"client_id": "should-not-be-used"})
+    mw = McpStreamGuardMiddleware(None, state)
+    scope = make_scope("GET", client_id="scope-client")
+    assert mw._identity_key(scope) == "client:scope-client"
 
 
 def test_logs_redact_full_client_id_and_token(caplog):
@@ -561,6 +609,194 @@ def test_terminate_skips_session_that_became_fresh():
     assert transport.terminated is False
     assert "s9" in state.sessions
     assert "s9" in manager._server_instances
+
+
+def test_is_standalone_sse_get_preconditions():
+    mw = McpStreamGuardMiddleware(None, McpStreamGuardState(cfg()))
+    assert mw._is_standalone_sse_get(make_scope("GET")) is True  # default accept added
+    no_sse = make_scope("GET", headers=[(b"accept", b"application/json")])
+    assert mw._is_standalone_sse_get(no_sse) is False
+    multi = make_scope("GET", headers=[(b"accept", b"application/json, text/event-stream")])
+    assert mw._is_standalone_sse_get(multi) is True  # comma-split token matches
+    sneaky = make_scope("GET", headers=[(b"accept", b"application/x-text/event-stream")])
+    assert mw._is_standalone_sse_get(sneaky) is False  # not a startswith match -> FastMCP 406s
+    wrong_case = make_scope("GET", headers=[(b"accept", b"TEXT/EVENT-STREAM")])
+    assert mw._is_standalone_sse_get(wrong_case) is False  # FastMCP is case-sensitive
+    replay = make_scope("GET", headers=[(b"accept", b"text/event-stream"), (b"last-event-id", b"42")])
+    assert mw._is_standalone_sse_get(replay) is False
+    bad_version = make_scope(
+        "GET", headers=[(b"accept", b"text/event-stream"), (b"mcp-protocol-version", b"1999-01-01")]
+    )
+    assert mw._is_standalone_sse_get(bad_version) is False
+    good_version = make_scope(
+        "GET", headers=[(b"accept", b"text/event-stream"), (b"mcp-protocol-version", b"2025-06-18")]
+    )
+    assert mw._is_standalone_sse_get(good_version) is True
+
+
+def test_unauthenticated_bearer_not_trusted_for_identity():
+    # A signed-but-unauthenticated request (no authenticated scope["user"]) must
+    # NOT be budgeted by its JWT client_id — the auth provider rejected it, and
+    # RequireAuthMiddleware will 401 it downstream. Falls back to IP + UA.
+    state = McpStreamGuardState(cfg())
+    state.jwt_issuer = _FakeIssuer({"client_id": "should-not-trust"})
+    mw = McpStreamGuardMiddleware(None, state)
+    scope = make_scope(
+        "GET",
+        headers=[
+            (b"authorization", b"Bearer sig.ok.token"),
+            (b"cf-connecting-ip", b"9.9.9.9"),
+            (b"user-agent", b"ua"),
+        ],
+    )  # no scope["user"] -> unauthenticated
+    assert mw._identity_key(scope) == "anon:9.9.9.9|ua"
+
+
+def test_malformed_duplicate_get_does_not_supersede_healthy_stream():
+    # A GET with the same session id but WITHOUT a text/event-stream Accept is not
+    # a valid standalone-SSE replacement: it must pass through to the app (which
+    # 406s it) and must NOT cancel the existing healthy stream.
+    async def scenario():
+        state = McpStreamGuardState(
+            cfg(work_idle_seconds=0.3, max_age_seconds=10, supersede_wait_seconds=1.0)
+        )
+        sess = (b"mcp-session-id", b"sessZ")
+        healthy_scope = make_scope(
+            "GET", client_id="cid", headers=[sess, (b"accept", b"text/event-stream")]
+        )
+        bad_scope = make_scope("GET", client_id="cid", headers=[sess, (b"accept", b"application/json")])
+
+        async def app406(scope, receive, send):
+            await send({"type": "http.response.start", "status": 406, "headers": []})
+            await send({"type": "http.response.body", "body": b"Not Acceptable"})
+
+        observed = {}
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                McpStreamGuardMiddleware(make_repeating_sse_app(0.05, PING), state),
+                healthy_scope,
+                _idle_receive,
+                Recorder(),
+            )
+            while await state.count_get_streams("client:cid") < 1:
+                await anyio.sleep(0.01)
+            bad_rec = Recorder()
+            await McpStreamGuardMiddleware(app406, state)(bad_scope, _idle_receive, bad_rec)
+            observed["bad_status"] = bad_rec.status
+            observed["healthy_open"] = await state.count_get_streams("client:cid")
+            tg.cancel_scope.cancel()
+        return observed
+
+    observed = anyio.run(scenario)
+    assert observed["bad_status"] == 406  # malformed GET passed through, rejected by app
+    assert observed["healthy_open"] >= 1  # healthy stream NOT superseded
+
+
+def test_duplicate_session_different_identity_does_not_supersede():
+    # A GET carrying the same session id but a DIFFERENT identity (e.g. a reconnect
+    # that dropped its Authorization header) must not tear down another identity's
+    # healthy stream.
+    async def scenario():
+        state = McpStreamGuardState(
+            cfg(work_idle_seconds=0.3, max_age_seconds=10, supersede_wait_seconds=1.0)
+        )
+        sess = (b"mcp-session-id", b"sessQ")
+        a_scope = make_scope("GET", headers=[sess, (b"cf-connecting-ip", b"1.1.1.1"), (b"user-agent", b"A")])
+        b_scope = make_scope("GET", headers=[sess, (b"cf-connecting-ip", b"2.2.2.2"), (b"user-agent", b"B")])
+        observed = {}
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                McpStreamGuardMiddleware(make_repeating_sse_app(0.05, PING), state),
+                a_scope,
+                _idle_receive,
+                Recorder(),
+            )
+            while await state.count_get_streams("anon:1.1.1.1|A") < 1:
+                await anyio.sleep(0.01)
+            # different identity, same session -> must NOT supersede A. B returns
+            # immediately (hang=False) so we check A before its own work_idle.
+            await McpStreamGuardMiddleware(make_sse_app(hang=False), state)(
+                b_scope, _idle_receive, Recorder()
+            )
+            observed["a_open"] = await state.count_get_streams("anon:1.1.1.1|A")
+            tg.cancel_scope.cancel()
+        return observed
+
+    observed = anyio.run(scenario)
+    assert observed["a_open"] >= 1  # different-identity duplicate did not supersede A
+
+
+def test_duplicate_same_session_get_supersedes_within_cap(caplog):
+    # A second GET for the SAME session id must supersede the first even when the
+    # per-identity cap (2) is not exceeded — otherwise FastMCP 409s the duplicate
+    # and the old stream stays alive.
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+
+    async def scenario():
+        state = McpStreamGuardState(
+            cfg(max_get_streams_per_identity=2, work_idle_seconds=0.2, supersede_wait_seconds=1.0)
+        )
+        scope = make_scope("GET", client_id="cid", headers=[(b"mcp-session-id", b"sessA")])
+        rec_new = Recorder()
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                McpStreamGuardMiddleware(make_repeating_sse_app(0.05, PING), state),
+                scope,
+                _idle_receive,
+                Recorder(),
+            )
+            while await state.count_get_streams("client:cid") < 1:
+                await anyio.sleep(0.01)
+            # second GET, SAME session — must supersede the first (cap not hit)
+            await McpStreamGuardMiddleware(make_sse_app(), state)(scope, _idle_receive, rec_new)
+            tg.cancel_scope.cancel()
+        return rec_new
+
+    rec_new = anyio.run(scenario)
+    assert rec_new.status == 200  # new same-session GET admitted
+    supersedes = [m for m in _messages(caplog, "MCP_STREAM_SUPERSEDE") if "duplicate_session" in m]
+    assert supersedes, "duplicate-session supersede not logged"
+    close_reasons = [
+        re.search(r"reason=(\S+)", m).group(1) for m in _messages(caplog, "MCP_STREAM_CLOSE")
+    ]
+    assert "superseded" in close_reasons  # the old same-session stream was closed
+
+
+def test_concurrent_same_session_replacements_never_coexist():
+    # Concurrent replacement GETs for the SAME session must never both be admitted
+    # (which would trip FastMCP's 409). At most one stream per session id is active
+    # at any instant — the duplicate check and insert are atomic per session.
+    async def scenario():
+        state = McpStreamGuardState(
+            cfg(max_get_streams_per_identity=2, work_idle_seconds=0.3, supersede_wait_seconds=1.0)
+        )
+        scope = make_scope("GET", client_id="cid", headers=[(b"mcp-session-id", b"sX")])
+        observed = {"max": 0}
+        stop = anyio.Event()
+
+        async def monitor():
+            while not stop.is_set():
+                async with state._lock:
+                    n = sum(1 for r in state.active_streams.values() if r.session_id == "sX")
+                observed["max"] = max(observed["max"], n)
+                await anyio.sleep(0.003)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(monitor)
+            for _ in range(4):
+                tg.start_soon(
+                    McpStreamGuardMiddleware(make_repeating_sse_app(0.05, PING), state),
+                    scope,
+                    _idle_receive,
+                    Recorder(),
+                )
+            await anyio.sleep(0.3)
+            stop.set()
+            tg.cancel_scope.cancel()
+        return observed["max"]
+
+    max_same_session = anyio.run(scenario)
+    assert max_same_session <= 1, f"{max_same_session} streams for one session active at once"
 
 
 def test_returns_429_when_victim_cannot_be_closed_in_time():

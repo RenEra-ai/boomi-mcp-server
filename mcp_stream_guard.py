@@ -28,6 +28,13 @@ from typing import Optional
 
 import anyio
 
+try:  # mirror FastMCP's pre-409 protocol-version validation precisely
+    from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS as _SUPPORTED_PROTOCOL_VERSIONS
+    from mcp.types import DEFAULT_NEGOTIATED_VERSION as _DEFAULT_NEGOTIATED_VERSION
+except Exception:  # pragma: no cover - defensive; treat any version as acceptable
+    _SUPPORTED_PROTOCOL_VERSIONS = None
+    _DEFAULT_NEGOTIATED_VERSION = None
+
 logger = logging.getLogger("boomi.mcp_stream_guard")
 
 # Default streamable-http path mounted by FastMCP.
@@ -128,6 +135,9 @@ class McpStreamGuardState:
         # returns regardless of the response status.
         self.inflight: dict[str, int] = {}
         self._session_manager = None  # bound post-construction
+        # FastMCP OAuth-proxy JWT issuer, bound post-construction. Used to decode
+        # the raw bearer JWT and budget by the per-DCR-client client_id.
+        self.jwt_issuer = None
         self._lock = anyio.Lock()
         self._salt = config.identity_salt.encode()
 
@@ -299,12 +309,82 @@ class McpStreamGuardMiddleware:
         self.config = state.config
 
     # -- identity ------------------------------------------------------------ #
+    @staticmethod
+    def _bearer_token(scope) -> Optional[str]:
+        auth = _header(scope, b"authorization")
+        if auth and auth[:7].lower() == "bearer ":
+            token = auth[7:].strip()
+            return token or None
+        return None
+
+    @staticmethod
+    def _is_standalone_sse_get(scope) -> bool:
+        """Mirror FastMCP's full set of preconditions for establishing a NEW
+        standalone GET SSE stream (mcp/server/streamable_http.py
+        handle_get_request) before its duplicate (409) check. A GET only reaches
+        that 409 — and thus is a genuine replacement worth tracking/superseding —
+        when ALL of these hold; otherwise FastMCP 406/400/404s it or treats it as
+        a replay, so the guard must pass it through untouched rather than cancel a
+        healthy stream for a request the inner app will reject:
+
+          * Accept includes text/event-stream (else 406).
+          * No Last-Event-ID (else FastMCP replays events without creating a
+            standalone stream).
+          * Supported mcp-protocol-version (else 400). Absent header = default.
+
+        Session-id validation (_validate_session) is covered implicitly: the
+        duplicate supersede only fires when an existing tracked stream has the
+        SAME session id, which is exactly what FastMCP's session check requires.
+        """
+        # Mirror FastMCP's _check_accept_headers exactly: comma-split, strip, then
+        # a CASE-SENSITIVE startswith per token. A substring/lowercased match is
+        # more permissive (e.g. "application/x-text/event-stream" or different
+        # casing) and would supersede a stream FastMCP then 406s.
+        accept_header = _header(scope, b"accept") or ""
+        accept_types = [media_type.strip() for media_type in accept_header.split(",")]
+        if not any(media_type.startswith("text/event-stream") for media_type in accept_types):
+            return False
+        if _header(scope, b"last-event-id"):
+            return False
+        if _SUPPORTED_PROTOCOL_VERSIONS is not None:
+            version = _header(scope, b"mcp-protocol-version") or _DEFAULT_NEGOTIATED_VERSION
+            if version not in _SUPPORTED_PROTOCOL_VERSIONS:
+                return False
+        return True
+
     def _identity_key(self, scope) -> str:
+        # Only trust a client identity from a request the auth layer FULLY
+        # accepted. This middleware runs after AuthenticationMiddleware, whose
+        # BearerAuthBackend sets scope["user"].access_token only when the provider's
+        # verify_token (incl. the OAuth-proxy JTI lookup + upstream token swap)
+        # succeeded. A JWT that is merely signed/unexpired but rejected upstream
+        # (revoked, missing JTI) leaves access None — we must NOT decode/budget it,
+        # or an unauthenticated request could supersede a healthy stream before
+        # RequireAuthMiddleware 401s it downstream.
         user = scope.get("user")
         access = getattr(user, "access_token", None)
-        client_id = getattr(access, "client_id", None)
-        if client_id:
-            return f"client:{client_id}"
+        if access is not None:
+            # Primary: the per-DCR MCP client_id from the FastMCP-issued JWT. On the
+            # GoogleProvider OAuth-proxy path, access.client_id is the SHARED
+            # upstream Google audience (identical for every client), which would
+            # collapse all clients into one global budget. The raw bearer is the
+            # FastMCP JWT, whose payload carries the real DCR client_id.
+            issuer = self.state.jwt_issuer
+            if issuer is not None:
+                token = self._bearer_token(scope)
+                if token:
+                    try:
+                        payload = issuer.verify_token(token)
+                        client_id = payload.get("client_id")
+                        if client_id:
+                            return f"client:{client_id}"
+                    except Exception:
+                        pass  # fall through to the authenticated principal below
+            client_id = getattr(access, "client_id", None)
+            if client_id:
+                return f"client:{client_id}"
+
+        # Unauthenticated / local: key by edge IP + user agent.
         cf_ip = _header(scope, b"cf-connecting-ip")
         if not cf_ip:
             client = scope.get("client")
@@ -395,6 +475,15 @@ class McpStreamGuardMiddleware:
             )
             return
 
+        # Only manage GETs that will actually establish a standalone SSE stream.
+        # Malformed GETs (no text/event-stream Accept) and event replays
+        # (Last-Event-ID) are not standalone streams in FastMCP, so pass them
+        # through untouched — admitting/superseding on them could cancel a
+        # healthy stream for a request the inner app will 406 or replay.
+        if not self._is_standalone_sse_get(scope):
+            await self.app(scope, receive, send)
+            return
+
         now = anyio.current_time()
         record = StreamRecord(
             stream_id=secrets.token_hex(8),
@@ -475,41 +564,65 @@ class McpStreamGuardMiddleware:
             self._log("MCP_STREAM_CLOSE", scope=scope, record=record, reason=reason, age_ms=age_ms)
 
     async def _admit_get(self, record: StreamRecord, scope) -> bool:
-        """Enforce the per-identity GET cap. Supersede the oldest stream when
-        over budget; reject the new stream only if the old one will not close.
+        """Admit a standalone GET stream, enforcing two invariants atomically:
 
-        Check-and-insert is performed atomically under a single lock acquisition
-        so a concurrent reconnect burst for the same identity cannot all observe
-        room and insert past the cap. When over budget we supersede the oldest
-        stream, then loop back and re-check under the lock before inserting.
+          1. Per-session uniqueness — FastMCP allows only ONE standalone GET per
+             session (a duplicate returns 409 and leaves the OLD stream alive, the
+             cost-holding behavior this guard removes).
+          2. Per-identity concurrency cap.
+
+        Both the duplicate-session check AND the cap check are evaluated in the
+        SAME locked section as the insertion, so concurrent reconnect bursts —
+        whether same-session replacements or same-identity floods — cannot all
+        observe room and insert past the invariant. When a duplicate or over-cap
+        condition is found, the victim is superseded outside the lock and the loop
+        re-checks under the lock before inserting.
         """
         cfg = self.config
         cap = cfg.max_get_streams_per_identity
         while True:
             async with self.state._lock:
-                same = [
+                same_identity = [
                     r for r in self.state.active_streams.values()
                     if r.identity_key == record.identity_key
                 ]
-                if cap <= 0 or len(same) < cap:
-                    # Reserve the slot atomically under the lock that saw room.
+                dup = None
+                if record.session_id:
+                    dup = next(
+                        (
+                            r for r in same_identity
+                            if r.session_id == record.session_id
+                            and r.stream_id != record.stream_id
+                        ),
+                        None,
+                    )
+                if dup is None and (cap <= 0 or len(same_identity) < cap):
+                    # No same-session duplicate and under the identity cap:
+                    # reserve atomically under the lock that observed both.
                     self.state.active_streams[record.stream_id] = record
                     return True
-                victim = min(same, key=lambda r: r.started_at)
-                over_count = len(same)
+                if dup is not None:
+                    victim, duplicate = dup, True
+                else:
+                    victim, duplicate = min(same_identity, key=lambda r: r.started_at), False
+                over_count = len(same_identity)
 
-            self._log(
-                "MCP_STREAM_THRESHOLD",
-                scope=scope,
-                record=record,
-                reason="get_cap_exceeded",
-                active_get_count=over_count,
-                level=logging.WARNING,
-            )
+            if duplicate:
+                self._log("MCP_STREAM_SUPERSEDE", scope=scope, record=record, reason="duplicate_session")
+            else:
+                self._log(
+                    "MCP_STREAM_THRESHOLD",
+                    scope=scope,
+                    record=record,
+                    reason="get_cap_exceeded",
+                    active_get_count=over_count,
+                    level=logging.WARNING,
+                )
             victim.cancel_event.set()
             if not await self._wait_until_gone(victim.stream_id, cfg.supersede_wait_seconds):
                 return False
-            self._log("MCP_STREAM_SUPERSEDE", scope=scope, record=record, reason="superseded_victim")
+            if not duplicate:
+                self._log("MCP_STREAM_SUPERSEDE", scope=scope, record=record, reason="superseded_victim")
 
     async def _wait_until_gone(self, stream_id: str, timeout: float) -> bool:
         deadline = anyio.current_time() + max(0.0, timeout)
@@ -638,6 +751,36 @@ def bind_fastmcp_session_manager(app, state: McpStreamGuardState) -> bool:
         "session reaping will only clear local tracking"
     )
     return False
+
+
+def bind_auth_jwt_issuer(app, state: McpStreamGuardState) -> bool:
+    """Bind the FastMCP OAuth-proxy JWT issuer so the guard can decode the raw
+    bearer JWT and budget by the per-DCR-client ``client_id``. Returns True on
+    success. No-op when there is no auth provider (e.g. local mode) — identity
+    then falls back to the authenticated principal or edge IP + user agent.
+
+    The authenticated scope's ``access_token.client_id`` is the SHARED upstream
+    audience on the GoogleProvider proxy path, so it cannot be used for
+    per-client budgeting; the JWT ``client_id`` claim is the real DCR client id.
+    """
+    server = getattr(getattr(app, "state", None), "fastmcp_server", None)
+    provider = getattr(server, "auth", None)
+    if provider is None:
+        logger.info("MCP_STREAM_GUARD no auth provider; budgeting by fallback identity")
+        return False
+    try:
+        issuer = provider.jwt_issuer
+    except Exception:
+        logger.warning(
+            "MCP_STREAM_GUARD auth provider exposes no JWT issuer; "
+            "budgeting by fallback identity"
+        )
+        return False
+    if issuer is None:
+        return False
+    state.jwt_issuer = issuer
+    logger.info("MCP_STREAM_GUARD bound JWT issuer for per-client budgeting")
+    return True
 
 
 def install_reaper_lifespan(app, state: McpStreamGuardState) -> None:
