@@ -310,3 +310,94 @@ def test_create_connector_dispatcher_surfaces_link_element_rejection_through_val
     result = create_connector(boomi_client, "dev", cfg)
     assert result["_success"] is False
     assert result["error_code"] == "UNSUPPORTED_DB_GET_FIELD"
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_database_get_operation_preservation_policy_attached():
+    policy = DatabaseGetOperationBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "connector-action"
+    assert policy.subtype == "database"
+    paths = {op.path for op in policy.owned_paths}
+    assert paths == {"bns:object/Operation/Configuration/DatabaseGetAction"}
+
+
+def test_database_get_operation_update_preserves_tracking_caching_archiving():
+    """Operation-level Archiving / Tracking / Caching are NOT owned —
+    builder emits empty placeholders but live current values must survive."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = _build_minimal(read_profile_id="new-profile-id", batch_count=500)
+    current = _build_minimal(read_profile_id="old-profile-id", batch_count=100)
+    # Replace placeholders in current with realistic configured values
+    current = current.replace(
+        '<Archiving directory="" enabled="false"/>',
+        '<Archiving directory="/var/log/boomi/archive" enabled="true"/>',
+    )
+    current = current.replace(
+        '<Tracking><TrackedFields/></Tracking>',
+        '<Tracking><TrackedFields><TrackedField name="custom" path="//x"/></TrackedFields></Tracking>',
+    )
+    current = current.replace(
+        '<Caching/>',
+        '<Caching enabled="true" ttl="3600"/>',
+    )
+
+    merged = merge_for_update(
+        current, desired, DatabaseGetOperationBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    # Action subtree was replaced from desired
+    action = root.find("bns:object/Operation/Configuration/DatabaseGetAction", NS)
+    assert action is not None
+    assert action.attrib["batchCount"] == "500"
+    assert action.find("ReadProfile").attrib["profileId"] == "new-profile-id"
+    # But the Operation envelope siblings survive verbatim
+    archiving = root.find("bns:object/Operation/Archiving", NS)
+    assert archiving.attrib["directory"] == "/var/log/boomi/archive"
+    assert archiving.attrib["enabled"] == "true"
+    tracking = root.find("bns:object/Operation/Tracking/TrackedFields/TrackedField", NS)
+    assert tracking is not None
+    assert tracking.attrib["name"] == "custom"
+    caching = root.find("bns:object/Operation/Caching", NS)
+    assert caching.attrib.get("ttl") == "3600"
+
+
+def test_database_get_operation_update_preserves_unknown_attr_inside_action():
+    """Review follow-up: DatabaseGetAction uses subtree_merge, so unknown
+    attrs/children on the action element survive a structured update
+    while owned batch attrs + ReadProfile still update."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = _build_minimal(read_profile_id="new-profile", batch_count=500)
+    current = _build_minimal(read_profile_id="old-profile", batch_count=100)
+    # Inject unknown attr + child onto DatabaseGetAction.
+    current = current.replace(
+        '<DatabaseGetAction batchCount="100" maxRows=',
+        '<DatabaseGetAction futureAttr="opaque" batchCount="100" maxRows=',
+        1,
+    )
+    current = current.replace(
+        "</DatabaseGetAction>",
+        '<FutureBlock retained="yes"/></DatabaseGetAction>',
+        1,
+    )
+
+    merged = merge_for_update(
+        current, desired, DatabaseGetOperationBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    action = root.find("bns:object/Operation/Configuration/DatabaseGetAction", NS)
+    # Owned attr + ReadProfile updated.
+    assert action.attrib["batchCount"] == "500"
+    assert action.find("ReadProfile").attrib["profileId"] == "new-profile"
+    # Unknown attr + child preserved.
+    assert action.attrib.get("futureAttr") == "opaque"
+    assert action.find("FutureBlock") is not None

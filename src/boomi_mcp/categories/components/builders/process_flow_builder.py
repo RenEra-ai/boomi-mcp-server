@@ -20,6 +20,7 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import (
     BuilderValidationError,
     REST_CLIENT_SUBTYPE,
@@ -880,6 +881,18 @@ def _walk_scalars(value: Any, _path: Tuple[str, ...] = ()) -> Iterable[Tuple[Tup
 PROCESS_FLOW_BUILDERS: Dict[str, type] = {
     ProcessFlowBuilder.PROCESS_KIND: ProcessFlowBuilder,
 }
+
+
+# Issue #45 — update-preservation policy. The builder owns the entire
+# `<process>` subtree (shapes/transitions/etc.). The sibling
+# `<bns:processOverrides>` (which Boomi populates with per-environment
+# override values via UI) is NOT in owned_paths, so it survives a
+# structured update. bns:encryptedValues and any unknown
+# bns:Component-level children are also preserved.
+ProcessFlowBuilder.PRESERVATION_POLICY = PreservationPolicy(
+    component_type="process",
+    owned_paths=(OwnedPath(path="bns:object/process"),),
+)
 
 
 def get_process_flow_builder(process_kind: Optional[str]):

@@ -14,7 +14,12 @@ so creation uses raw Serializer POST (see connectors.py _create_component_raw).
 """
 
 import re
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
+from boomi_mcp.categories.components.builders._preservation_policy import (
+    OwnedPath,
+    PreservationPolicy,
+)
 
 
 class BuilderValidationError(ValueError):
@@ -101,6 +106,254 @@ def _format_xml_value(value: Any) -> str:
     if isinstance(value, int):
         return str(value)
     return _escape_xml(str(value))
+
+
+_DATABASE_CONNECTOR_POLICY = PreservationPolicy(
+    component_type="connector-settings",
+    subtype="database",
+    owned_paths=(
+        # Review follow-up: granular subtree_merge instead of wholesale
+        # replace, so unknown/future attrs or children Boomi/UI may add
+        # to DatabaseConnectionSettings survive a structured update.
+        # The builder owns these 9 attrs + the WriteOptions /
+        # AdapterPoolInfo child blocks; everything else is preserved.
+        OwnedPath(
+            path="bns:object/DatabaseConnectionSettings",
+            mode="subtree_merge",
+            owned_attrs=(
+                "additional",
+                "className",
+                "dbname",
+                "driverId",
+                "host",
+                "isPoolEnabled",
+                "port",
+                "urlFormat",
+                "username",
+            ),
+            owned_child_tags=("WriteOptions", "AdapterPoolInfo"),
+        ),
+    ),
+    # Codex r7 P2: builder emits an encryptedValue marker at the
+    # password xpath. If auth changes away from password mode (none
+    # supported in M2 yet, but future-proofed) the merge prunes the
+    # stale slot.
+    owned_encrypted_paths=(
+        "//DatabaseConnectionSettings/@password",
+    ),
+)
+
+_DATABASE_GET_OPERATION_POLICY = PreservationPolicy(
+    component_type="connector-action",
+    subtype="database",
+    owned_paths=(
+        # Owns the action subtree — preserves Operation-level Archiving /
+        # Tracking / Caching / future siblings. Review follow-up:
+        # subtree_merge instead of wholesale replace so unknown/future
+        # attrs or children on DatabaseGetAction survive. Builder owns
+        # batchCount/maxRows + the ReadProfile child block.
+        OwnedPath(
+            path="bns:object/Operation/Configuration/DatabaseGetAction",
+            mode="subtree_merge",
+            owned_attrs=("batchCount", "maxRows"),
+            owned_child_tags=("ReadProfile",),
+        ),
+    ),
+)
+
+# Every field id RestClientConnectionBuilder.build() can emit. owned_keys on
+# the GenericConnectionConfig OwnedPath uses this enumeration so updates that
+# omit a builder-emitted id (e.g. an auth-mode switch dropping oauth-specific
+# fields) clear stale current entries instead of preserving them as unknown.
+# This list must stay in sync with the builder; see lines 2180+ in
+# RestClientConnectionBuilder.build() for the canonical emission list.
+_REST_CLIENT_CONNECTION_OWNED_FIELD_IDS = (
+    "url",
+    "auth",
+    "username",
+    "password",
+    "domain",
+    "workstation",
+    "customAuthCredentials",
+    "preemptive",
+    # AWS skeleton fields — always emitted with empty values when AWS
+    # auth isn't selected. Match _REST_CLIENT_AWS_FIELDS exactly.
+    "awsAccessKey",
+    "awsSecretKey",
+    "awsService",
+    "customAwsService",
+    "awsRegion",
+    "customAwsRegion",
+    "awsProfileArn",
+    "awsRoleArn",
+    "awsTrustAnchorArn",
+    "awsRolesAnywhereRegion",
+    "awsRolesAnywhereCustomRegion",
+    "awsSessionName",
+    "awsDuration",
+    "awsPublicCertificate",
+    "awsPrivateKey",
+    "oauthContext",
+    "privateCertificate",
+    "publicCertificate",
+    "connectTimeout",
+    "readTimeout",
+    "cookieScope",
+    "enableConnectionPooling",
+    "maxTotal",
+    "idleTimeout",
+)
+
+
+# Codex r7 P1 / r6 P1 trade-off, M2.6d known limitation:
+#
+# REST Client OAuth2 token cache (accessToken/accessTokenKey) lives
+# inside the <field id="oauthContext"> XML, which Boomi populates at
+# OAuth handshake time and the builder unconditionally emits as a
+# token-not-set skeleton. Two competing concerns:
+#   - Codex r6 P1: preserving the whole oauthContext field would keep
+#     the live token cache across unrelated structured updates
+#     (e.g. timeout / pooling changes).
+#   - Codex r7 P1: preserving the whole oauthContext field also
+#     prevents legitimate auth-mode changes (NONE/BASIC → OAUTH2)
+#     from landing the desired clientId / endpoints / scope — the
+#     update succeeds with auth="OAUTH2" but no OAuth config applied,
+#     which is a silent functional failure.
+#
+# A correct fix needs sub-element merging inside the oauthContext field
+# (preserve runtime-populated accessToken/accessTokenKey while taking
+# clientId/endpoints/scope/grantType from desired). That's out of scope
+# for M2.6d.
+#
+# Trade-off picked here: oauthContext is fully OWNED — structured REST
+# connection updates that touch any field reset the connection to
+# token-not-set, requiring re-authorization. This matches the pre-#45
+# baseline (where structured connector updates didn't invoke the
+# builder at all and so token cache loss was a non-issue because the
+# body wasn't touched) and avoids the silent auth-mode-change failure.
+# Users who only want to rename / re-describe / re-folder a REST
+# connection use the metadata-only smart-merge path (no builder
+# invocation, no XML rewrite). See the connector update_note in
+# meta_tools.py for the user-facing documentation.
+
+_REST_CLIENT_CONNECTION_POLICY = PreservationPolicy(
+    component_type="connector-settings",
+    subtype="officialboomi-X3979C-rest-prod",
+    owned_paths=(
+        # Field-id-keyed merge: builder-owned ids replace; ids in
+        # owned_keys but absent from desired are cleared (auth-mode
+        # switch case); unknown ids (and unknown siblings) preserved.
+        OwnedPath(
+            path="bns:object/GenericConnectionConfig",
+            mode="key_merge",
+            key_attr="id",
+            owned_keys=_REST_CLIENT_CONNECTION_OWNED_FIELD_IDS,
+        ),
+    ),
+    # Codex r7 P2: builder emits encryptedValue markers depending on
+    # auth mode (OAUTH2 → clientSecret xpath; BASIC/NTLM/etc →
+    # password xpath; NONE → empty placeholder). On auth-mode change
+    # the previously-emitted entry must be PRUNED from current so
+    # stale credential slots don't survive the structured update.
+    # Both possible markers are declared as builder-owned.
+    owned_encrypted_paths=(
+        "//GenericConnectionConfig/field/OAuth2Config/credentials/@clientSecret",
+        "//GenericConnectionConfig/field[@type='password']",
+    ),
+)
+
+_REST_CLIENT_OPERATION_POLICY = PreservationPolicy(
+    component_type="connector-action",
+    subtype="officialboomi-X3979C-rest-prod",
+    owned_paths=(
+        # Operation envelope owns return_application_errors and
+        # track_response attributes (the builder always emits both).
+        OwnedPath(
+            path="bns:object/Operation",
+            mode="attrs_only",
+            owned_attrs=("returnApplicationErrors", "trackResponse"),
+        ),
+        # GenericOperationConfig owns customOperationType + operationType
+        # (always explicitly emitted by the builder and meaningful to
+        # users — method changes).
+        #
+        # Codex r16 P2 trade-off: profile-related attrs
+        # (requestProfile, requestProfileType, responseProfile,
+        # responseProfileType) were ALSO in the closed owned_attrs set
+        # in r4 P2 to make explicit-clear (request_profile_type=NONE)
+        # land. But that broke path-only / method-only updates on live
+        # operations with existing profile bindings — the builder emits
+        # default `requestProfileType="xml"` without `requestProfile`,
+        # which the closed-set merge then forced onto current, dropping
+        # the live profile UUID. Common case (path/method tweaks)
+        # matters more than the rare case (explicit profile-binding
+        # clear). For explicit clears, use the raw-XML escape hatch
+        # via manage_component / manage_connector.
+        #
+        # owned_keys enumerates every builder-emitted <field id="..."/>
+        # so a key absent from desired (e.g. followRedirects omitted on
+        # method=PATCH) is cleared from current instead of preserved as
+        # "unknown".
+        OwnedPath(
+            path="bns:object/Operation/Configuration/GenericOperationConfig",
+            mode="key_merge",
+            key_attr="id",
+            owned_attrs=(
+                "customOperationType",
+                "operationType",
+            ),
+            # requestProfile / responseProfile are genuinely conditional
+            # (builder emits them only when the caller supplies a profile
+            # id), so additive semantics preserve a live binding on a
+            # path-only update and apply a new one when supplied.
+            owned_attrs_additive=(
+                "requestProfile",
+                "responseProfile",
+            ),
+            # Review follow-up (supersedes r18 trade-off): the builder
+            # ALWAYS emits requestProfileType / responseProfileType with
+            # default "xml", so they can't be additive without clobbering
+            # a live JSON type on a path-only update. Couple each type to
+            # its profile binding — apply the type only when the matching
+            # profile id is present in desired; otherwise preserve the
+            # live type. So setting a binding applies its type, and a
+            # path/method-only update leaves the live binding+type intact.
+            coupled_attr_groups=(
+                ("requestProfile", ("requestProfileType",)),
+                ("responseProfile", ("responseProfileType",)),
+            ),
+            owned_keys=(
+                "path",
+                "followRedirects",
+                "queryParameters",
+                "requestHeaders",
+            ),
+            # Codex r8 P2: queryParameters and requestHeaders both
+            # emit empty `<customProperties/>` placeholders when the
+            # caller omits them. Without this guard a path-only or
+            # method-only structured update would wipe UI-added
+            # encrypted custom properties (which the builder rejects
+            # in JSON, so callers cannot round-trip them).
+            #
+            # Known limitation (Codex r10 P2 trade-off): the builder
+            # currently emits the same empty placeholder whether the
+            # caller omits the field OR explicitly passes
+            # ``query_parameters={}`` / ``request_headers={}`` to
+            # clear it. preserve_when_desired_empty therefore also
+            # blocks the rare "explicit clear" case — the merge keeps
+            # live custom props instead of clearing them. The clean
+            # fix is builder-side conditional emission (skip
+            # ``<field>`` entirely when caller omits) but that touches
+            # the builder plus several existing shape tests for low
+            # benefit. Workaround for explicit clears: use the raw-XML
+            # escape hatch via manage_component / manage_connector.
+            preserve_when_desired_empty=(
+                "queryParameters",
+                "requestHeaders",
+            ),
+        ),
+    ),
+)
 
 
 class DatabaseConnectorBuilder:
@@ -1077,7 +1330,12 @@ class DatabaseGetOperationBuilder:
             return secret_err
 
         # 2) operation_mode must be 'get'; 'send' is explicit issue-#32 deferral.
-        operation_mode = (config.get("operation_mode") or "").lower()
+        # Codex r16 P2: guard against non-string operation_mode (e.g. an
+        # int from malformed JSON) before calling .lower(), so the
+        # builder returns a structured validation error instead of an
+        # AttributeError crash inside _build_plan.
+        _om_raw = config.get("operation_mode")
+        operation_mode = _om_raw.lower() if isinstance(_om_raw, str) else ""
         if operation_mode in cls.UNSUPPORTED_OPERATION_MODES:
             return BuilderValidationError(
                 f"operation_mode={operation_mode!r} is not supported in issue #23",
@@ -2730,6 +2988,15 @@ CONNECTOR_BUILDERS: Dict[str, type] = {
     "rest_client": RestClientConnectionBuilder,
     REST_CLIENT_SUBTYPE.lower(): RestClientConnectionBuilder,
 }
+
+
+# Issue #45: declare each builder's update-preservation policy. Attached
+# here (rather than inside each class body) so the policy constants stay
+# near the registry for discoverability.
+DatabaseConnectorBuilder.PRESERVATION_POLICY = _DATABASE_CONNECTOR_POLICY
+DatabaseGetOperationBuilder.PRESERVATION_POLICY = _DATABASE_GET_OPERATION_POLICY
+RestClientConnectionBuilder.PRESERVATION_POLICY = _REST_CLIENT_CONNECTION_POLICY
+RestClientOperationBuilder.PRESERVATION_POLICY = _REST_CLIENT_OPERATION_POLICY
 
 
 def get_connector_builder(connector_type: str):

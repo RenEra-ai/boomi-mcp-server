@@ -1424,3 +1424,89 @@ def test_port_validator_never_raises_bare_value_error():
         assert isinstance(err, BuilderValidationError)
         assert err.error_code == "DATABASE_CONNECTOR_VALIDATION_FAILED"
         assert err.field == "port"
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_database_connector_preservation_policy_attached():
+    policy = DatabaseConnectorBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "connector-settings"
+    assert policy.subtype == "database"
+    assert any(
+        op.path == "bns:object/DatabaseConnectionSettings"
+        for op in policy.owned_paths
+    )
+
+
+def test_database_connector_update_preserves_unknown_root_attr_and_secret():
+    """Live current XML carries an unknown root attr and a populated
+    encryptedValue (isSet=true). After read-merge-write, both must
+    survive, even though the builder always emits isSet=false."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = _build_minimal(component_name="renamed")
+    current = _build_minimal(component_name="original")
+    current = current.replace(
+        'name="original"',
+        'name="original" futureRootAttr="opaque"',
+    )
+    current = current.replace(
+        '<bns:encryptedValue path="//DatabaseConnectionSettings/@password" isSet="false"/>',
+        (
+            '<bns:encryptedValue path="//DatabaseConnectionSettings/@password" isSet="true"/>'
+            '<bns:encryptedValue path="//DatabaseConnectionSettings/@futureSecret" isSet="true"/>'
+        ),
+    )
+
+    merged = merge_for_update(
+        current, desired, DatabaseConnectorBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    assert root.attrib.get("futureRootAttr") == "opaque"
+    assert root.attrib["name"] == "renamed"  # owned attr was replaced
+    ev_paths = {
+        entry.attrib.get("path"): entry.attrib.get("isSet")
+        for entry in root.findall("bns:encryptedValues/bns:encryptedValue", NS)
+    }
+    assert ev_paths["//DatabaseConnectionSettings/@password"] == "true"
+    assert ev_paths["//DatabaseConnectionSettings/@futureSecret"] == "true"
+
+
+def test_database_connector_update_preserves_unknown_attr_and_child_inside_settings():
+    """Review follow-up: the DB connector policy uses subtree_merge, not
+    wholesale replace, so unknown/future attributes or child blocks on
+    DatabaseConnectionSettings (where Boomi/UI adds driver/auth/pooling
+    fields) survive a structured update while owned fields still update."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = _build_minimal(dbname="NewDB")
+    current = _build_minimal(dbname="OldDB")
+    # Inject an unknown attr + unknown child onto the live
+    # DatabaseConnectionSettings element.
+    current = current.replace(
+        ' username="sa">',
+        ' username="sa" futureBoomiAttr="opaque">'
+        '<FutureBlock retained="yes"/>',
+        1,
+    )
+
+    merged = merge_for_update(
+        current, desired, DatabaseConnectorBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    settings = root.find("bns:object/DatabaseConnectionSettings", NS)
+    # Owned attr updated.
+    assert settings.attrib["dbname"] == "NewDB"
+    # Unknown attr + child preserved (would be lost under wholesale replace).
+    assert settings.attrib.get("futureBoomiAttr") == "opaque"
+    assert settings.find("FutureBlock") is not None
+    # Owned child blocks still present (replaced from desired).
+    assert settings.find("WriteOptions") is not None
+    assert settings.find("AdapterPoolInfo") is not None

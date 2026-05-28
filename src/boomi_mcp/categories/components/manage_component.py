@@ -198,8 +198,14 @@ def update_component(
         root = ET.fromstring(raw_xml)
 
         changed = False
-        if config.get('name'):
-            root.set('name', config['name'])
+        # `name` is the canonical key; `component_name` is the schema-template
+        # field name used by build_integration configs. Accept either so a
+        # metadata-only structured update (e.g. profile.db rename via
+        # build_integration which only carries `component_name`) actually
+        # renames the component. Codex r4 P2 follow-up.
+        new_name = config.get('name') or config.get('component_name')
+        if new_name:
+            root.set('name', new_name)
             changed = True
         if config.get('folder_id'):
             root.set('folderId', config['folder_id'])

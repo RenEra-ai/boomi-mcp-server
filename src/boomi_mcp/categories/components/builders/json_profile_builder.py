@@ -54,6 +54,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import BuilderValidationError, _escape_xml
 from .profile_generation import (
     DUPLICATE_PROFILE_FIELD_PATH,
@@ -552,3 +553,12 @@ def _emit_object_entry(
         field=f"{logical_path}.kind",
         details={"kind": kind, "path": logical_path},
     )
+
+
+# Issue #45 — update-preservation policy. The builder owns the
+# `<JSONProfile><DataElements>` subtree; unknown JSONProfile siblings
+# (e.g., tagLists, ProfileProperties extras) survive the merge.
+JSONGeneratedProfileBuilder.PRESERVATION_POLICY = PreservationPolicy(
+    component_type="profile.json",
+    owned_paths=(OwnedPath(path="bns:object/JSONProfile/DataElements"),),
+)

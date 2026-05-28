@@ -54,6 +54,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import BuilderValidationError, _escape_xml
 from .profile_generation import (
     PROFILE_FIELD_VALIDATION_FAILED,
@@ -473,3 +474,12 @@ def _emit_xml_element(
             "<QualifierList/>"
             "</XMLElement>"
         )
+
+
+# Issue #45 — update-preservation policy. The builder owns the
+# `<XMLProfile><DataElements>` subtree; XMLProfile siblings like
+# `Namespaces`, `ProfileProperties` extras, and `tagLists` survive.
+XMLGeneratedProfileBuilder.PRESERVATION_POLICY = PreservationPolicy(
+    component_type="profile.xml",
+    owned_paths=(OwnedPath(path="bns:object/XMLProfile/DataElements"),),
+)

@@ -589,3 +589,34 @@ class TestAntiMarkerPolicy:
                 f"Live-reference identifier {marker!r} appears in the "
                 f"builder's executable class attributes."
             )
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_database_sp_read_profile_preservation_policy_attached():
+    policy = DatabaseStoredProcedureReadProfileBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "profile.db"
+
+
+def test_database_sp_read_profile_update_preserves_profile_properties():
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+    import xml.etree.ElementTree as ET
+
+    desired = _build_minimal(component_name="renamed")
+    current = _build_minimal(component_name="original")
+    current = current.replace(
+        "</DataElements>",
+        '</DataElements><FutureSection retained="yes"/>',
+    )
+    merged = merge_for_update(
+        current, desired, DatabaseStoredProcedureReadProfileBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    profile = root.find("bns:object/DatabaseProfile", NS)
+    assert profile.find("ProfileProperties") is not None
+    assert profile.find("FutureSection") is not None

@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from uuid import uuid4
 
 # Matches `subType="database"` and `subType='database'` with any (or no)
@@ -40,6 +40,10 @@ from boomi.models import (
 
 from ..models.integration_models import IntegrationComponentSpec, IntegrationSpecV1
 from .components._shared import component_get_xml, paginate_metadata
+from .components.builders._preservation_policy import (
+    OwnedPath,
+    PreservationPolicy,
+)
 from .components.builders import (
     BuilderValidationError,
     DatabaseConnectorBuilder,
@@ -52,6 +56,8 @@ from .components.builders import (
     ProcessFlowBuilder,
     PROFILE_BUILDERS,
     PROCESS_FLOW_BUILDERS,
+    get_connector_action_builder,
+    get_connector_builder,
     get_process_flow_builder,
     get_profile_builder,
 )
@@ -67,6 +73,7 @@ from .components.builders.transform_function_wrapper_builder import (
     TransformFunctionWrapperBuilder,
     get_transform_function_wrapper_builder,
 )
+from .components.component_update_preservation import merge_for_update
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
 from .components.processes import create_process, update_process
@@ -758,6 +765,165 @@ def _format_actual_role(comp: IntegrationComponentSpec) -> str:
     return effective
 
 
+# Issue #45 — metadata-only smart-merge detection.
+#
+# Updates whose config carries ONLY metadata fields
+# (name/description/folder) are routed through the existing smart-merge
+# metadata path of update_connector or update_component: parse current
+# XML, edit the named attributes in place, write back. The structured
+# builder is skipped — invoking it would fail required-field validation
+# (missing host/dbname for DB connector, base_url/auth for REST,
+# query/output_fields for profile.db, etc.). Smart-merge already
+# preserves the body XML, so no read-merge-write step is needed.
+#
+# Fields in this set are routing/identity keys plus the metadata
+# attributes the standalone update helpers know how to smart-merge.
+# Any other key in the payload signals structured-builder intent and
+# routes through the read-merge-write flow. Codex r2 P2 introduced
+# this for connector-{settings,action}; Codex r3 P2 extended it to
+# profile.db (which previously routed metadata-only updates through
+# generic update_component but now hits a new structured-builder
+# branch in _execute_component).
+_METADATA_ONLY_KEYS = frozenset({
+    "name",
+    "component_name",
+    "description",
+    "folder_name",
+    "folder_id",
+    # Routing / identity keys — present in build_integration payloads
+    # but not consumed by structured builders for body changes.
+    "component_id",
+    "type",
+    "action",
+    "key",
+    "depends_on",
+    "connector_type",
+    "operation_mode",
+    "component_type",
+    "profile_type",
+    # Codex r18 P2: connection_ref_key is a connector-action routing
+    # key used for dependency resolution / id substitution. It is NOT
+    # emitted into the operation XML. Treat as metadata-only so a
+    # rename payload like {component_name, connection_ref_key} routes
+    # through update_connector smart-merge instead of invoking the
+    # structured builder (which would fail on missing path/method).
+    "connection_ref_key",
+})
+
+
+def _is_metadata_only_update(payload: Dict[str, Any]) -> bool:
+    """True when every payload key is in _METADATA_ONLY_KEYS."""
+    return all(k in _METADATA_ONLY_KEYS for k in payload.keys())
+
+
+def _safe_lower(value: Any) -> str:
+    """Strip + lowercase a user-supplied JSON value if it's a string, else ''.
+
+    Codex r4/r9 P2: callers like ``(raw_config.get('profile_type') or '').lower()``
+    crashed on non-string JSON values (``profile_type=123``) because
+    ``123 or ''`` returns ``123`` and ``int.lower`` is undefined.
+    Use this helper instead so a structured validation envelope is
+    returned to the caller rather than an AttributeError.
+
+    Codex r19 P2: also strip surrounding whitespace so a value like
+    ``connector_type=" rest "`` plans the same way it applies —
+    ``_resolve_rest_connector_type`` already normalizes whitespace,
+    so the plan-time guard must too.
+    """
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
+# Backwards-compat alias for code/tests that imported the old name.
+_is_connector_metadata_only_update = _is_metadata_only_update
+_CONNECTOR_METADATA_ONLY_KEYS = _METADATA_ONLY_KEYS
+
+
+# Issue #45: resolve the preservation policy for a planned step. Returns
+# None when the route does not invoke a structured builder (raw-XML
+# updates, trading_partner JSON updates, legacy process JSON-to-XML
+# updates, or connector metadata-only updates), in which case the plan
+# surfaces ``update_mode="metadata_smart_merge"`` or
+# ``update_mode="full_xml_replace"`` instead.
+def _resolve_preservation_policy(
+    comp: "IntegrationComponentSpec",
+    raw_config: Dict[str, Any],
+) -> Optional[PreservationPolicy]:
+    if raw_config.get("xml"):
+        # Raw-XML escape hatch bypasses the structured builder entirely.
+        return None
+    if comp.type == "process":
+        process_kind = (
+            str(raw_config.get("process_kind") or raw_config.get("process_type") or "")
+            .strip()
+            .lower()
+        )
+        if not process_kind:
+            # Legacy linear JSON-to-XML path has no structured builder.
+            return None
+        builder_cls = get_process_flow_builder(process_kind)
+        return getattr(builder_cls, "PRESERVATION_POLICY", None) if builder_cls else None
+    if comp.type == "connector-settings":
+        if _is_connector_metadata_only_update(raw_config):
+            return None  # smart-merge metadata path
+        # Codex r4 P2: guard against non-string connector_type (e.g. an
+        # int from a malformed spec). Pre-fix code called .lower() on
+        # whatever raw_config returned, which crashed planning with a
+        # generic AttributeError instead of a structured response.
+        ct_raw = raw_config.get("connector_type")
+        connector_type = ct_raw.lower() if isinstance(ct_raw, str) else ""
+        canonical_rest = _resolve_rest_connector_type(connector_type)
+        if canonical_rest is not None:
+            return RestClientConnectionBuilder.PRESERVATION_POLICY
+        if connector_type == "database":
+            return DatabaseConnectorBuilder.PRESERVATION_POLICY
+        return None
+    if comp.type == "connector-action":
+        if _is_connector_metadata_only_update(raw_config):
+            return None  # smart-merge metadata path
+        ct_raw = raw_config.get("connector_type")
+        connector_type = ct_raw.lower() if isinstance(ct_raw, str) else ""
+        if _resolve_rest_connector_type(connector_type) is not None:
+            return RestClientOperationBuilder.PRESERVATION_POLICY
+        if connector_type == "database":
+            return DatabaseGetOperationBuilder.PRESERVATION_POLICY
+        return None
+    if comp.type == "profile.db":
+        # Codex r3 P2: metadata-only updates skip the builder; the
+        # plan should reflect metadata_smart_merge, not read_merge_write.
+        if _is_metadata_only_update(raw_config):
+            return None
+        profile_type = _safe_lower(raw_config.get("profile_type"))
+        builder_instance = get_profile_builder("profile.db", profile_type)
+        if builder_instance is None:
+            return None
+        return getattr(type(builder_instance), "PRESERVATION_POLICY", None)
+    if comp.type == "profile.json":
+        return JSONGeneratedProfileBuilder.PRESERVATION_POLICY
+    if comp.type == "profile.xml":
+        return XMLGeneratedProfileBuilder.PRESERVATION_POLICY
+    if comp.type == "transform.map":
+        return DirectMapBuilder.PRESERVATION_POLICY  # all map flavors share it
+    if comp.type == "script.mapping":
+        return ScriptMappingBuilder.PRESERVATION_POLICY
+    if comp.type == "transform.function":
+        return TransformFunctionWrapperBuilder.PRESERVATION_POLICY
+    return None
+
+
+# Issue #45: top-level XML nodes the preservation merge always keeps from
+# the live current XML, regardless of policy. Surfaced in plan output so
+# callers know which subtrees survive a structured update.
+_PRESERVATION_ALWAYS_PRESERVED_PATHS: Tuple[str, ...] = (
+    "bns:encryptedValues",
+    "bns:processOverrides",
+)
+
+
+def _enumerate_preserved_paths(policy: PreservationPolicy) -> List[str]:
+    """Surface the conservative "always preserved" set in plan output."""
+    return list(_PRESERVATION_ALWAYS_PRESERVED_PATHS)
+
+
 # Issue #26: resolve the field index for a transform.map's source / target
 # profile reference. Returns None when the reference is a literal UUID or
 # points at an unknown / non-profile component — in those cases the map
@@ -1340,6 +1506,91 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
     return cloned
 
 
+# Issue #45: read-merge-write helper for structured-builder updates.
+# Replaces the old `update_component({"xml": built_xml})` call site —
+# fetches the current live XML, merges the builder's owned subtrees into
+# it (preserving bns:encryptedValues, bns:processOverrides, unknown root
+# attributes, and unknown <bns:object> siblings), then pushes the merged
+# XML via update_component_raw.
+def _apply_structured_update(
+    boomi_client: Boomi,
+    profile: str,
+    target_id: str,
+    comp: IntegrationComponentSpec,
+    built_xml: str,
+    policy: Optional[PreservationPolicy],
+) -> Dict[str, Any]:
+    if policy is None:
+        return {
+            "_success": False,
+            "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+            "error": (
+                f"No preservation policy registered for builder route "
+                f"{comp.type!r}. Structured updates require a policy so "
+                "the merge engine knows which XML the builder owns."
+            ),
+            "field": "component_type",
+            "hint": (
+                "Use the raw-XML escape hatch (config.xml on manage_component "
+                "or manage_connector) to update via full XML replacement, or "
+                "open an issue to add a builder/policy for this route."
+            ),
+        }
+    try:
+        current = component_get_xml(boomi_client, target_id)
+    except Exception as exc:
+        return {
+            "_success": False,
+            "error_code": "UPDATE_PRESERVATION_FETCH_FAILED",
+            "error": (
+                f"Failed to fetch current XML for component {target_id!r}: "
+                f"{exc}"
+            ),
+            "field": "component_id",
+            "hint": (
+                "Verify the component_id is correct, the profile has read "
+                "access, and the component has not been soft-deleted. Run "
+                "query_components action='get' to confirm visibility."
+            ),
+        }
+    try:
+        merged_xml = merge_for_update(current["xml"], built_xml, policy)
+    except BuilderValidationError as exc:
+        envelope: Dict[str, Any] = {
+            "_success": False,
+            "error_code": exc.error_code,
+            "error": str(exc),
+            "field": exc.field,
+            "hint": exc.hint,
+        }
+        if exc.details:
+            envelope["details"] = exc.details
+        return envelope
+    try:
+        boomi_client.component.update_component_raw(target_id, merged_xml)
+    except Exception as exc:
+        return {
+            "_success": False,
+            "error": (
+                f"Failed to push merged XML for component {target_id!r}: "
+                f"{exc}"
+            ),
+            "exception_type": type(exc).__name__,
+        }
+    return {
+        "_success": True,
+        "message": (
+            f"Updated component {target_id!r} via read-merge-write "
+            f"(policy: {policy.component_type}"
+            f"{('/' + policy.subtype) if policy.subtype else ''})."
+        ),
+        "component_id": target_id,
+        "profile": profile,
+        "update_mode": "read_merge_write",
+        "preserves_unknown_xml": True,
+    }
+
+
 def _execute_component(
     boomi_client: Boomi,
     profile: str,
@@ -1453,12 +1704,30 @@ def _execute_component(
                     "_success": False,
                     "error": f"Missing process_id for update of component '{comp.key}'",
                 }
-            return update_component(boomi_client, profile, target_id, {"xml": xml})
+            # Issue #45: read-merge-write update so bns:processOverrides
+            # and any UI-added unknown XML survive the builder's owned
+            # subtree replacement.
+            return _apply_structured_update(
+                boomi_client,
+                profile,
+                target_id,
+                comp,
+                xml,
+                getattr(builder_cls, "PRESERVATION_POLICY", None),
+            )
 
         if comp.action == "create":
             return create_process(boomi_client, profile, payload)
         if not target_id:
             return {"_success": False, "error": f"Missing process_id for update of component '{comp.key}'"}
+        # Codex r14 P2: when a legacy process update carries
+        # `config.xml` (raw-XML escape hatch), the plan reports
+        # update_mode="full_xml_replace". Honor that — update_process
+        # would otherwise parse the payload as process-JSON and fail
+        # on the xml field. update_component handles config.xml by
+        # routing straight to update_component_raw.
+        if payload.get("xml"):
+            return update_component(boomi_client, profile, target_id, payload)
         return update_process(boomi_client, profile, target_id, payload)
 
     if comp.type in ("connector-settings", "connector-action"):
@@ -1484,6 +1753,79 @@ def _execute_component(
             return create_connector(boomi_client, profile, payload)
         if not target_id:
             return {"_success": False, "error": f"Missing component_id for update of connector '{comp.key}'"}
+        # Issue #45 — connector update routing:
+        #
+        # 1. Raw XML (config["xml"]) → full-replace via update_connector
+        #    (escape hatch; preserves nothing by design).
+        # 2. Metadata-only update (only name/description/folder fields) →
+        #    update_connector's existing smart-merge metadata path. The
+        #    builder would fail required-field validation here, so we
+        #    skip it entirely. Smart-merge edits the live XML in place
+        #    and so already preserves the connector body.
+        # 3. Structured-builder update (body fields present like host,
+        #    base_url, oauth2 block, method/path) → invoke the builder
+        #    to produce desired XML, then read-merge-write via
+        #    _apply_structured_update so unknown live XML survives.
+        if not payload.get("xml") and not _is_connector_metadata_only_update(payload):
+            builder_instance = None
+            if comp.type == "connector-settings":
+                builder_instance = get_connector_builder(connector_type or "")
+            else:
+                operation_mode = payload.get("operation_mode") or ""
+                builder_instance = get_connector_action_builder(
+                    connector_type or "", operation_mode
+                )
+            if builder_instance is not None:
+                try:
+                    built_xml = builder_instance.build(**payload)
+                except BuilderValidationError as exc:
+                    return {
+                        "_success": False,
+                        "error_code": exc.error_code,
+                        "error": str(exc),
+                        "field": exc.field,
+                        "hint": exc.hint,
+                    }
+                return _apply_structured_update(
+                    boomi_client,
+                    profile,
+                    target_id,
+                    comp,
+                    built_xml,
+                    getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+                )
+            # Codex r11 P2: non-metadata connector update for an
+            # unsupported connector_type/operation_mode (e.g. http,
+            # AS2). Falling through to update_connector would silently
+            # smart-merge only metadata and ignore body fields. Surface
+            # the unsupported state explicitly so the caller knows the
+            # structured update did not happen.
+            return {
+                "_success": False,
+                "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+                "error": (
+                    f"No structured builder registered for connector "
+                    f"type {connector_type!r}"
+                    + (
+                        f" operation_mode {payload.get('operation_mode') or ''!r}"
+                        if comp.type == "connector-action"
+                        else ""
+                    )
+                    + ". Structured body-field updates require a builder."
+                ),
+                "field": (
+                    "operation_mode"
+                    if comp.type == "connector-action"
+                    else "connector_type"
+                ),
+                "hint": (
+                    "Use the raw-XML escape hatch (config.xml on "
+                    "manage_connector / manage_component) for "
+                    "unsupported connector types, or restrict the "
+                    "config to metadata-only fields (name, description, "
+                    "folder_name, folder_id) for a smart-merge update."
+                ),
+            }
         return update_connector(boomi_client, profile, target_id, payload)
 
     if comp.type == "trading_partner":
@@ -1529,7 +1871,14 @@ def _execute_component(
                     f"Missing component_id for update of wrapper '{comp.key}'"
                 ),
             }
-        return update_component(boomi_client, profile, target_id, envelope)
+        return _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            comp,
+            built_xml,
+            getattr(wrapper_cls, "PRESERVATION_POLICY", None),
+        )
 
     # Issue #41: structured script.mapping routes through ScriptMappingBuilder.
     # Raw-XML bypass preserved — when payload['xml'] is set, the build()
@@ -1565,14 +1914,77 @@ def _execute_component(
                     f"Missing component_id for update of script '{comp.key}'"
                 ),
             }
-        return update_component(boomi_client, profile, target_id, envelope)
+        return _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            comp,
+            built_xml,
+            getattr(builder_class, "PRESERVATION_POLICY", None),
+        )
+
+    # Issue #26 + #45: profile.db update path. Like profile.json/.xml below,
+    # profile.db structured updates run the builder + read-merge-write so
+    # the DatabaseProfile/DataElements subtree changes actually land (the
+    # generic update_component would only smart-merge metadata). Create
+    # paths still go through manage_component.create_component, which
+    # already dispatches profile.db through the profile builder registry.
+    #
+    # Codex r3 P2 follow-up: metadata-only updates (name/description/folder
+    # only) bypass the builder and fall through to update_component's
+    # smart-merge metadata path. The builder would fail required-field
+    # validation otherwise.
+    if (
+        comp.type == "profile.db"
+        and comp.action == "update"
+        and not payload.get("xml")
+        and not _is_metadata_only_update(payload)
+    ):
+        profile_type = _safe_lower(payload.get("profile_type"))
+        builder_instance = get_profile_builder("profile.db", profile_type)
+        if builder_instance is None:
+            return {
+                "_success": False,
+                "error_code": "UNSUPPORTED_PROFILE_GENERATION_MODE",
+                "error": (
+                    f"profile_type {profile_type!r} is not supported for "
+                    f"profile.db."
+                ),
+                "field": "profile_type",
+            }
+        try:
+            built_xml = builder_instance.build(**payload)
+        except BuilderValidationError as exc:
+            return {
+                "_success": False,
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "field": exc.field,
+                "hint": exc.hint,
+            }
+        if not target_id:
+            return {
+                "_success": False,
+                "error": (
+                    f"Missing component_id for update of profile.db "
+                    f"'{comp.key}'"
+                ),
+            }
+        return _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            comp,
+            built_xml,
+            getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+        )
 
     # Issue #26: generated profile.json / profile.xml route through the
     # profile-builder registry. Raw-XML bypass is preserved — when
     # payload['xml'] is set, the build() call is skipped and the raw XML
     # is used verbatim by create_component / update_component.
     if comp.type in ("profile.json", "profile.xml") and not payload.get("xml"):
-        profile_type = (payload.get("profile_type") or "").lower()
+        profile_type = _safe_lower(payload.get("profile_type"))
         builder_instance = get_profile_builder(comp.type, profile_type)
         if builder_instance is None:
             return {
@@ -1604,7 +2016,14 @@ def _execute_component(
                     f"Missing component_id for update of profile '{comp.key}'"
                 ),
             }
-        return update_component(boomi_client, profile, target_id, envelope)
+        return _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            comp,
+            built_xml,
+            getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+        )
 
     # Issue #26: transform.map routes through the direct-map builder. Source
     # and target field indexes are computed from the in-spec profile
@@ -1680,7 +2099,14 @@ def _execute_component(
                     f"Missing component_id for update of map '{comp.key}'"
                 ),
             }
-        return update_component(boomi_client, profile, target_id, envelope)
+        return _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            comp,
+            built_xml,
+            getattr(type(map_builder_instance), "PRESERVATION_POLICY", None),
+        )
 
     if comp.action == "create":
         return create_component(boomi_client, profile, payload)
@@ -1827,12 +2253,37 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             comp.type == "connector-action"
             and (raw_config.get("connector_type") or "").lower() == "database"
         )
+        # Builder invocation gating. Codex r2 P2 follow-up:
+        # ``update`` now invokes the builder too (the structured-update
+        # branches in _execute_component for connector-settings,
+        # connector-action, and profile.db) — so plan-time validation
+        # must run there or apply can fail after earlier steps mutated.
+        # The two exceptions: raw-XML updates and connector
+        # metadata-only updates skip the builder.
+        # Codex r3 P2: metadata-only exemption extended to profile.db
+        # (it now has the same structured-update branch in
+        # _execute_component, so the bypass needs to mirror).
+        update_invokes_builder = (
+            planned_action == "update"
+            and not xml_payload
+            and not (
+                comp.type in (
+                    "connector-settings",
+                    "connector-action",
+                    "profile.db",
+                )
+                and _is_metadata_only_update(raw_config)
+            )
+        )
         will_invoke_builder = (
             (is_database_connector_settings
              or is_database_read_profile
              or is_database_get_operation)
             and not xml_payload
-            and planned_action in ("create", "create_clone")
+            and (
+                planned_action in ("create", "create_clone")
+                or update_invokes_builder
+            )
         )
         db_err: Optional[BuilderValidationError] = None
         secret_scanner_cls = None
@@ -1857,8 +2308,11 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     # scan contract but have statement-specific validation
                     # rules. If profile_type is missing/unknown, surface a
                     # unified UNSUPPORTED_DB_PROFILE_MODE error that lists
-                    # all supported protocols.
-                    profile_type = (effective_config.get("profile_type") or "").lower()
+                    # all supported protocols. _safe_lower guards against
+                    # non-string profile_type values (e.g. profile_type=123
+                    # from malformed JSON) so the plan returns a structured
+                    # envelope instead of an AttributeError. Codex r9 P2.
+                    profile_type = _safe_lower(effective_config.get("profile_type"))
                     builder_instance = get_profile_builder("profile.db", profile_type)
                     if builder_instance is None:
                         valid = sorted({
@@ -1942,7 +2396,10 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         will_invoke_rest_builder = (
             (is_rest_connector_settings or is_rest_send_operation)
             and not xml_payload
-            and planned_action in ("create", "create_clone")
+            and (
+                planned_action in ("create", "create_clone")
+                or update_invokes_builder
+            )
         )
         rest_err: Optional[BuilderValidationError] = None
         rest_scanner_cls = None
@@ -1993,6 +2450,67 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # preserve valid GUIDs so the caller can correct unrelated
             # errors without losing the cert binding. Codex review round-5 P2.
             _redact_malformed_cert_refs(raw_config)
+
+        # Codex r12 P2: plan-time guard for non-metadata connector updates
+        # whose connector_type / operation_mode doesn't resolve to a
+        # supported builder (e.g. connector_type="http" + base_url). The
+        # apply path now rejects these with
+        # UPDATE_PRESERVATION_POLICY_UNSUPPORTED; surface the same error
+        # at plan time so a multi-step apply doesn't mutate earlier
+        # components before failing here.
+        if (
+            validation_error is None
+            and db_err is None
+            and rest_err is None
+            and planned_action == "update"
+            and not xml_payload
+            and comp.type in ("connector-settings", "connector-action")
+            and not _is_metadata_only_update(raw_config)
+        ):
+            ct = raw_config.get("connector_type")
+            ct_lower = _safe_lower(ct)
+            _has_connector_builder = False
+            if comp.type == "connector-settings":
+                _has_connector_builder = get_connector_builder(ct_lower) is not None
+            else:
+                op_mode = _safe_lower(raw_config.get("operation_mode"))
+                _has_connector_builder = (
+                    get_connector_action_builder(ct_lower, op_mode) is not None
+                )
+            if not _has_connector_builder:
+                planned_action = (
+                    "error_rest_validation"
+                    if _resolve_rest_connector_type(ct_lower) is not None
+                    else "error_database_validation"
+                    if ct_lower == "database"
+                    else "error_unsupported_structured_update"
+                )
+                validation_error = {
+                    "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+                    "error": (
+                        f"No structured builder registered for connector "
+                        f"type {ct!r}"
+                        + (
+                            f" operation_mode "
+                            f"{raw_config.get('operation_mode')!r}"
+                            if comp.type == "connector-action"
+                            else ""
+                        )
+                        + ". Structured body-field updates require a builder."
+                    ),
+                    "field": (
+                        "operation_mode"
+                        if comp.type == "connector-action"
+                        else "connector_type"
+                    ),
+                    "hint": (
+                        "Use the raw-XML escape hatch (config.xml on "
+                        "manage_connector / manage_component) for "
+                        "unsupported connector types, or restrict the "
+                        "config to metadata-only fields (name, description, "
+                        "folder_name, folder_id) for a smart-merge update."
+                    ),
+                }
 
         # Process-flow builder preflight (issue #25, M2.5). Two-tier like
         # the database / REST blocks above:
@@ -2210,8 +2728,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     effective_config.setdefault("component_name", comp.name)
                 # profile.json / profile.xml — straightforward validation.
                 if is_generated_json_profile:
-                    profile_type = (
-                        (effective_config.get("profile_type") or "").lower()
+                    profile_type = _safe_lower(
+                        effective_config.get("profile_type")
                     )
                     builder_instance = get_profile_builder(
                         "profile.json", profile_type
@@ -2232,8 +2750,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                             builder_instance
                         ).validate_config(effective_config)
                 elif is_generated_xml_profile:
-                    profile_type = (
-                        (effective_config.get("profile_type") or "").lower()
+                    profile_type = _safe_lower(
+                        effective_config.get("profile_type")
                     )
                     builder_instance = get_profile_builder(
                         "profile.xml", profile_type
@@ -2766,6 +3284,52 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             "route": route,
         }
 
+        # Issue #45 — surface update-preservation metadata so callers can
+        # see, at plan time, which apply path the step will take:
+        #   - "full_xml_replace": raw-XML escape hatch (config.xml set) or
+        #     legacy process JSON-to-XML rebuild via update_process. No
+        #     preservation — caller-supplied XML / regenerated XML wins.
+        #   - "read_merge_write": structured builder + merge engine.
+        #     Preserves bns:encryptedValues, bns:processOverrides, and
+        #     unknown XML siblings.
+        #   - "metadata_smart_merge": update_component / update_connector /
+        #     update_trading_partner smart-merge — parses current
+        #     XML/JSON, edits only the named metadata fields in place,
+        #     writes back. Body XML/JSON survives untouched because the
+        #     helper never re-emits it. Covers connector/profile.db
+        #     metadata-only updates (caught by _resolve_preservation_policy
+        #     returning None) plus generic `type='component'` and
+        #     `trading_partner` updates.
+        # Codex r5 P2: the prior fallback labeled smart-merge updates as
+        # full_xml_replace, which misrepresented the apply behaviour.
+        if planned_action == "update":
+            if raw_config.get("xml"):
+                step["update_mode"] = "full_xml_replace"
+                step["preserves_unknown_xml"] = False
+            else:
+                _preservation_policy = _resolve_preservation_policy(comp, raw_config)
+                if _preservation_policy is not None:
+                    step["update_mode"] = "read_merge_write"
+                    step["preserves_unknown_xml"] = True
+                    step["owned_paths"] = [
+                        op.path for op in _preservation_policy.owned_paths
+                    ]
+                    step["preserved_paths"] = _enumerate_preserved_paths(
+                        _preservation_policy
+                    )
+                elif comp.type == "process":
+                    # Legacy linear process: update_process re-runs
+                    # ComponentOrchestrator.build_process from the JSON
+                    # config and writes the regenerated XML wholesale.
+                    step["update_mode"] = "full_xml_replace"
+                    step["preserves_unknown_xml"] = False
+                else:
+                    # Smart-merge path: update_component /
+                    # update_connector / update_trading_partner edit
+                    # metadata fields in place, preserving the body.
+                    step["update_mode"] = "metadata_smart_merge"
+                    step["preserves_unknown_xml"] = True
+
         if candidates:
             step["candidates"] = [
                 {
@@ -2891,6 +3455,10 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             "error_rest_validation",
             "error_process_validation",
             "error_generated_profile_validation",
+            # Codex r13 P2: unsupported-structured-update planned_action
+            # introduced by r12 P2 must also fail fast — otherwise earlier
+            # components mutate before apply hits the unsupported step.
+            "error_unsupported_structured_update",
         )
     ]
     if unresolvable_steps:
@@ -2939,6 +3507,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' failed "
                     f"generated profile / map validation: "
                     f"{ve.get('error_code', 'PROFILE_FIELD_VALIDATION_FAILED')} "
+                    f"on field {ve.get('field')!r}."
+                )
+            elif step["planned_action"] == "error_unsupported_structured_update":
+                # Codex r15 P3: surface the unsupported-update reason so
+                # callers see why the plan refused to execute rather than
+                # an empty details entry.
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed "
+                    f"structured update validation: "
+                    f"{ve.get('error_code', 'UPDATE_PRESERVATION_POLICY_UNSUPPORTED')} "
                     f"on field {ve.get('field')!r}."
                 )
         return {

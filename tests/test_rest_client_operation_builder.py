@@ -1172,3 +1172,72 @@ def test_none_operation_flag_accepted_as_default(bool_field):
         "track_response": "trackResponse",
     }[bool_field]
     assert op.attrib[attr_name] == "true"
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_rest_client_operation_preservation_policy_attached():
+    policy = RestClientOperationBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "connector-action"
+    assert policy.subtype == REST_CLIENT_SUBTYPE
+    paths_by_mode = {op.mode: op for op in policy.owned_paths}
+    # Operation envelope owns specific attrs (returnApplicationErrors,
+    # trackResponse) — Codex r1 P2 follow-up.
+    op_envelope = paths_by_mode["attrs_only"]
+    assert op_envelope.path == "bns:object/Operation"
+    assert "returnApplicationErrors" in op_envelope.owned_attrs
+    assert "trackResponse" in op_envelope.owned_attrs
+    # GenericOperationConfig owns its attrs + keyed children. owned_keys
+    # is required so a method change (GET→PATCH dropping followRedirects)
+    # actually clears the stale field — Codex r1 P2 follow-up.
+    cfg = paths_by_mode["key_merge"]
+    assert cfg.path == "bns:object/Operation/Configuration/GenericOperationConfig"
+    assert cfg.key_attr == "id"
+    assert "followRedirects" in cfg.owned_keys
+
+
+def test_rest_client_operation_update_preserves_unknown_operation_fields_and_siblings():
+    """Operation envelope siblings (Tracking, Caching) and unknown field
+    ids inside GenericOperationConfig must survive a builder-driven update."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = _build_get(path="/v1/items/new")
+    current = _build_get(path="/v1/items/old")
+    # Inject Tracking config + an unknown field id in current
+    current = current.replace(
+        "<Tracking><TrackedFields/></Tracking>",
+        "<Tracking><TrackedFields><TrackedField name=\"x\" path=\"//y\"/></TrackedFields></Tracking>",
+    )
+    current = current.replace(
+        "                </GenericOperationConfig>",
+        (
+            '                    <field id="futureRestField" type="string" value="opaque"/>\n'
+            "                </GenericOperationConfig>"
+        ),
+    )
+
+    merged = merge_for_update(
+        current, desired, RestClientOperationBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    # Builder-owned `path` field was replaced
+    fields = {
+        f.attrib.get("id"): f.attrib.get("value")
+        for f in root.findall(
+            "bns:object/Operation/Configuration/GenericOperationConfig/field", NS
+        )
+    }
+    assert fields.get("path") == "/v1/items/new"
+    # Unknown future field id preserved
+    assert fields.get("futureRestField") == "opaque"
+    # Operation envelope Tracking sibling preserved
+    tracked = root.find(
+        "bns:object/Operation/Tracking/TrackedFields/TrackedField", NS
+    )
+    assert tracked is not None
+    assert tracked.attrib["name"] == "x"

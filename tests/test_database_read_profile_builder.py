@@ -418,3 +418,44 @@ def test_validate_config_returns_first_error_without_raising():
     err = DatabaseReadProfileBuilder.validate_config(_minimal_config(query=""))
     assert err is not None
     assert err.error_code == "MISSING_DB_QUERY"
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_database_read_profile_preservation_policy_attached():
+    policy = DatabaseReadProfileBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "profile.db"
+    assert any(
+        op.path == "bns:object/DatabaseProfile/DataElements"
+        for op in policy.owned_paths
+    )
+
+
+def test_database_read_profile_update_preserves_profile_properties_and_siblings():
+    """The builder owns only `DataElements`; `ProfileProperties` and any
+    unknown DatabaseProfile siblings must survive a structured update."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = _build_minimal(component_name="renamed")
+    current = _build_minimal(component_name="original")
+    # Inject a future-Boomi sibling inside DatabaseProfile
+    current = current.replace(
+        "</DataElements>",
+        '</DataElements><FutureSection retained="yes"/>',
+    )
+
+    merged = merge_for_update(
+        current, desired, DatabaseReadProfileBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    profile = root.find("bns:object/DatabaseProfile", NS)
+    assert profile is not None
+    assert profile.find("ProfileProperties") is not None
+    assert profile.find("FutureSection") is not None
+    assert profile.find("FutureSection").attrib["retained"] == "yes"
+    assert root.attrib["name"] == "renamed"

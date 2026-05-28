@@ -443,3 +443,42 @@ def test_build_raises_for_invalid_config():
             }
         )
     assert excinfo.value.error_code == "UNSUPPORTED_PROFILE_FIELD_TYPE"
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_json_profile_preservation_policy_attached():
+    policy = JSONGeneratedProfileBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "profile.json"
+    paths = {op.path for op in policy.owned_paths}
+    assert paths == {"bns:object/JSONProfile/DataElements"}
+
+
+def test_json_profile_update_preserves_taglists_and_unknown_siblings():
+    """JSONProfile siblings such as `tagLists` and any unknown future
+    sections must survive a structured update — only `DataElements` is owned."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired_xml = JSONGeneratedProfileBuilder().build(**_flat_config())
+    current_xml = JSONGeneratedProfileBuilder().build(**_flat_config())
+    # Inject a custom tagLists entry + future section
+    current_xml = current_xml.replace(
+        "<tagLists/>",
+        '<tagLists><tagList key="custom" name="user-added"/></tagLists>'
+        '<FutureSection retained="yes"/>',
+    )
+
+    merged = merge_for_update(
+        current_xml, desired_xml, JSONGeneratedProfileBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    profile = root.find("bns:object/JSONProfile", NS)
+    tag_list = profile.find("tagLists/tagList")
+    assert tag_list is not None
+    assert tag_list.attrib["key"] == "custom"
+    assert profile.find("FutureSection") is not None

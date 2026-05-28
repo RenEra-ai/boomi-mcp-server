@@ -1234,10 +1234,18 @@ _COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER = {
         "5. Deploy via manage_deployment.",
     ],
     "update_note": (
-        "Field-level update via JSON config is not yet supported for database "
-        "connectors (HTTP only). Use manage_connector update with config.xml=... "
-        "to replace the XML, or edit in the UI. Raw-XML escape hatch remains "
-        "unchanged in M2.2."
+        "Structured updates via build_integration action='update' use "
+        "read-merge-write semantics (issue #45): the builder produces "
+        "desired XML, the current live XML is fetched, and the merge "
+        "updates only the builder-owned DatabaseConnectionSettings attrs "
+        "(host/dbname/driver/pooling/etc.) and the WriteOptions / "
+        "AdapterPoolInfo child blocks. Unknown/future attributes or child "
+        "elements on DatabaseConnectionSettings — plus bns:encryptedValues "
+        "(e.g. the password slot), unknown root attributes, and unknown "
+        "<bns:object> siblings — are preserved. Direct manage_connector "
+        "action='update' with config.xml remains a full XML replacement "
+        "(no preservation); its JSON smart-merge supports only "
+        "name/description/folder fields."
     ),
     "example": {
         "connector_type": "database",
@@ -1448,9 +1456,21 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
         "add this connection's key to depends_on plus connection_ref_key.",
     ],
     "update_note": (
-        "manage_connector action='update' supports a smart-merge of "
-        "name/description/folder_name. Field-level edits inside "
-        "GenericConnectionConfig require the raw-XML escape hatch."
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): GenericConnectionConfig "
+        "<field id=\"...\"> children owned by the builder are replaced "
+        "while unknown field ids and unknown siblings survive. "
+        "bns:encryptedValues entries are merged by xpath — existing "
+        "isSet=true secret slots survive; auth-mode changes (e.g. "
+        "BASIC → NONE) prune the stale credential slot. KNOWN "
+        "LIMITATION (Codex r6/r7 trade-off): structured updates reset "
+        "the live OAuth2 token cache (accessToken/accessTokenKey live "
+        "inside <field id=\"oauthContext\">, which the builder emits as "
+        "a token-not-set skeleton) — re-authorize after a structured "
+        "update. Use metadata-only build_integration update (only "
+        "name/description/folder fields) or direct manage_connector "
+        "action='update' to rename/move without touching the body, "
+        "which keeps the token cache intact."
     ),
     "example": {
         "key": "target_rest_connection",
@@ -1776,8 +1796,13 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
         "(database.get) — depends_on the read profile key from the operation.",
     ],
     "update_note": (
-        "Field-level update is not yet supported for profile.db. To revise a "
-        "profile, recreate it or use the raw-XML escape hatch."
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned "
+        "DatabaseProfile/DataElements statement subtree is replaced while "
+        "ProfileProperties, Namespaces, tagLists, and any unknown future "
+        "DatabaseProfile siblings survive the update. Direct "
+        "manage_component action='update' with config.xml remains a full "
+        "XML replacement (no preservation)."
     ),
     "example": {
         "key": "db_read_profile",
@@ -1965,8 +1990,13 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ = {
         "(database.get) — depends_on the read profile key from the operation.",
     ],
     "update_note": (
-        "Field-level update is not yet supported for profile.db. To revise a "
-        "profile, recreate it or use the raw-XML escape hatch."
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned "
+        "DatabaseProfile/DataElements statement subtree is replaced while "
+        "ProfileProperties, Namespaces, tagLists, and any unknown future "
+        "DatabaseProfile siblings survive the update. Direct "
+        "manage_component action='update' with config.xml remains a full "
+        "XML replacement (no preservation)."
     ),
     "example": {
         "key": "db_sp_read_profile",
@@ -2139,8 +2169,14 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
         "4. Apply — $ref is resolved to the read profile's component_id from the id_registry.",
     ],
     "update_note": (
-        "Field-level update is not yet supported for connector-action database "
-        "Get operations. To revise, recreate or use the raw-XML escape hatch."
+        "Structured updates via build_integration action='update' use "
+        "read-merge-write semantics (issue #45): inside DatabaseGetAction "
+        "the merge updates only the owned batchCount/maxRows attrs and the "
+        "ReadProfile child, preserving unknown/future attrs or children on "
+        "the action element. Operation-level Archiving, Tracking, Caching, "
+        "and any unknown future siblings also survive. Direct "
+        "manage_component action='update' with config.xml remains a full "
+        "XML replacement (no preservation)."
     ),
     "example": {
         "key": "db_query_operation",
@@ -2293,8 +2329,12 @@ _COMPONENT_CREATE_PROFILE_JSON_GENERATED = {
         "and exposes a per-leaf path index for downstream maps.",
     ],
     "update_note": (
-        "Field-level updates are not supported yet. To revise, recreate via "
-        "manage_component or use the raw-XML escape hatch."
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned "
+        "JSONProfile/DataElements subtree is replaced while JSONProfile "
+        "siblings such as tagLists and any unknown future sections survive. "
+        "Direct manage_component action='update' with config.xml remains a "
+        "full XML replacement (no preservation)."
     ),
     "example": {
         "key": "request_json_profile",
@@ -2466,8 +2506,13 @@ _COMPONENT_CREATE_PROFILE_XML_GENERATED = {
         "per-leaf path index for downstream maps.",
     ],
     "update_note": (
-        "Field-level updates are not supported yet. To revise, recreate via "
-        "manage_component or use the raw-XML escape hatch."
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned "
+        "XMLProfile/DataElements subtree is replaced while XMLProfile "
+        "siblings such as Namespaces, ProfileProperties extras, tagLists, "
+        "and any unknown future sections survive. Direct manage_component "
+        "action='update' with config.xml remains a full XML replacement "
+        "(no preservation)."
     ),
     "example": {
         "key": "shipping_xml_profile",
@@ -2682,8 +2727,13 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         "emitted with deterministic fromKey/toKey path references.",
     ],
     "update_note": (
-        "Field-level updates are not supported yet. To revise, recreate via "
-        "manage_component or use the raw-XML escape hatch."
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned <Map> "
+        "subtree (mappings, functions, defaults) is replaced while "
+        "bns:encryptedValues entries and unknown bns:Component-level "
+        "children/attributes survive. Direct manage_component "
+        "action='update' with config.xml remains a full XML replacement "
+        "(no preservation)."
     ),
     "example": {
         "key": "db_to_json_map",
@@ -3098,8 +3148,12 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         "across repeated builds.",
     ],
     "update_note": (
-        "Field-level updates are not supported yet. To revise, recreate via "
-        "manage_component or use the raw-XML escape hatch (config.xml)."
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned <Map> "
+        "subtree (mappings, FunctionSteps, defaults) is replaced while "
+        "bns:encryptedValues and unknown bns:Component-level children/"
+        "attributes survive. Direct manage_component action='update' with "
+        "config.xml remains a full XML replacement (no preservation)."
     ),
     "example": {
         "key": "db_to_json_function_map",
@@ -3180,6 +3234,15 @@ _COMPONENT_CREATE_SCRIPT_MAPPING = {
         "<Output> variable before returning. The component is referenced "
         "from a transform.map via map_type='script' and "
         "script_mappings[].script_component_id."
+    ),
+    "update_note": (
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned "
+        "<MappingScript> subtree (script body, declared Input/Output "
+        "ports, language/preserveOrder/useCache attrs) is replaced while "
+        "bns:encryptedValues, unknown bns:Component-level children, and "
+        "any unknown <bns:object> siblings survive. Direct manage_component "
+        "action='update' with config.xml remains a full XML replacement."
     ),
     "template": {
         "component_type": "script.mapping",
@@ -3374,6 +3437,15 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
         "Source/target profile refs follow the same '$ref:KEY' rule as "
         "direct and function maps; literal existing-profile UUIDs are "
         "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (deferred to #47)."
+    ),
+    "update_note": (
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned <Map> "
+        "subtree (mappings, FunctionSteps including userdefined script "
+        "refs, defaults) is replaced while bns:encryptedValues and unknown "
+        "bns:Component-level children/attributes survive. Direct "
+        "manage_component action='update' with config.xml remains a full "
+        "XML replacement (no preservation)."
     ),
     "template": {
         "component_type": "transform.map",
@@ -3892,9 +3964,33 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         "IDs via the id_registry.",
     ],
     "update_note": (
-        "Field-level edits are not yet supported for connector-action "
-        "rest.operation components. To revise an operation, recreate it "
-        "or use the raw-XML escape hatch."
+        "Structured updates via build_integration action='update' now use "
+        "read-merge-write semantics (issue #45): the builder-owned "
+        "GenericOperationConfig <field id=\"...\"> children and owned "
+        "attributes (customOperationType, path, requestProfile/"
+        "responseProfile refs) are merged into the live XML, while "
+        "unknown field ids, Operation-level Archiving/Tracking/Caching, "
+        "and any future siblings survive. UI-added live query parameters "
+        "and request headers survive a path-only or method-only update "
+        "(Codex r8 P2). Profile bindings travel as a unit: "
+        "requestProfileType/responseProfileType follow their "
+        "requestProfile/responseProfile id, so a path/method-only update "
+        "preserves the live profile type and a binding change applies the "
+        "new id+type together. KNOWN LIMITATION (Codex r20 P2): a "
+        "type-only update (request_profile_type/response_profile_type "
+        "without the matching request_profile_id/response_profile_id) is a "
+        "no-op on update — the live type is preserved. The builder always "
+        "emits a default profile type, so the merge keys the type on its "
+        "id to avoid clobbering live JSON/XML bindings on path-only "
+        "updates; supply the profile id to change the type, or use the "
+        "raw-XML escape hatch (conditional-emission fix tracked in #50). "
+        "KNOWN LIMITATION (Codex r10 P2): an "
+        "explicit ``query_parameters={}`` / ``request_headers={}`` to "
+        "clear all live custom properties is indistinguishable from "
+        "omitting those fields, so the live props survive — use the "
+        "raw-XML escape hatch via manage_component to force-clear. Direct "
+        "manage_component action='update' with config.xml remains a full "
+        "XML replacement."
     ),
     "example": {
         "key": "target_rest_operation",

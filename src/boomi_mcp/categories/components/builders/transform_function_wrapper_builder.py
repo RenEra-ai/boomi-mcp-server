@@ -114,6 +114,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import BuilderValidationError, _escape_xml
 from .profile_generation import (
     SCRIPT_MAPPING_BODY_REQUIRED,
@@ -535,6 +536,16 @@ class TransformFunctionWrapperBuilder:
 TRANSFORM_FUNCTION_WRAPPER_BUILDERS: Dict[str, type] = {
     "transform.function": TransformFunctionWrapperBuilder,
 }
+
+
+# Issue #45 — update-preservation policy. The wrapper builder owns the
+# entire `<Function>` subtree (Inputs, Outputs, Steps, Mappings); everything
+# else inside the component (encryptedValues, processOverrides, unknown
+# bns:Component children) is preserved.
+TransformFunctionWrapperBuilder.PRESERVATION_POLICY = PreservationPolicy(
+    component_type="transform.function",
+    owned_paths=(OwnedPath(path="bns:object/Function"),),
+)
 
 
 def get_transform_function_wrapper_builder(

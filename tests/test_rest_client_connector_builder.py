@@ -2104,3 +2104,52 @@ def test_oauth2_parameter_blocks_absent_accepted(param_field):
     cfg = _minimal_oauth2_config()
     cfg["oauth2"].pop(param_field, None)
     assert RestClientConnectionBuilder.validate_config(cfg) is None
+
+
+# ============================================================================
+# Issue #45 — Component XML update preservation
+# ============================================================================
+
+
+def test_rest_client_connection_preservation_policy_attached():
+    policy = RestClientConnectionBuilder.PRESERVATION_POLICY
+    assert policy.component_type == "connector-settings"
+    assert policy.subtype == REST_CLIENT_SUBTYPE
+    owned = policy.owned_paths
+    assert len(owned) == 1
+    assert owned[0].path == "bns:object/GenericConnectionConfig"
+    assert owned[0].mode == "key_merge"
+    assert owned[0].key_attr == "id"
+
+
+def test_rest_client_connection_update_preserves_unknown_field_ids():
+    """Live current XML may carry future Boomi-added <field id="..."/>
+    entries that the builder doesn't know about. The key-merge policy
+    must preserve them."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    desired = _build_minimal()
+    current = _build_minimal()
+    # Inject an unknown field id into current. Builder emits these inside
+    # GenericConnectionConfig — anchor on the closing tag.
+    current = current.replace(
+        "        </GenericConnectionConfig>",
+        (
+            '            <field id="futureFieldFromBoomi" type="string" value="opaque"/>\n'
+            "        </GenericConnectionConfig>"
+        ),
+    )
+
+    merged = merge_for_update(
+        current, desired, RestClientConnectionBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    field_ids = {
+        f.attrib.get("id")
+        for f in root.findall("bns:object/GenericConnectionConfig/field", NS)
+    }
+    assert "futureFieldFromBoomi" in field_ids
+    # And builder-owned ids are still present
+    assert "url" in field_ids
