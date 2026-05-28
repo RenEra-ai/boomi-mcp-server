@@ -167,6 +167,7 @@ def test_authoring_workflow_preserved_when_all_referenced_tools_present():
         "get_integration_archetype",
         "build_from_archetype",
         "build_integration",
+        "review_transformation",
     }
     catalog = list_capabilities_action(available_tools=only)
     assert "build_integration_from_description" in catalog["workflows"]
@@ -204,6 +205,7 @@ def test_workflow_fallback_dropped_when_schema_template_absent():
         "get_integration_archetype",
         "build_from_archetype",
         "build_integration",
+        "review_transformation",
     }
     catalog = list_capabilities_action(available_tools=only)
     wf = catalog["workflows"].get("build_integration_from_description")
@@ -221,6 +223,7 @@ def test_workflow_fallback_preserved_when_all_referenced_tools_present():
         "get_integration_archetype",
         "build_from_archetype",
         "build_integration",
+        "review_transformation",
         "get_schema_template",
     }
     catalog = list_capabilities_action(available_tools=only)

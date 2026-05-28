@@ -5609,3 +5609,29 @@ class TestCodexR19Followups:
         # the REST builder and either plan clean or surface a
         # builder-specific validation error (depending on payload).
         assert step["planned_action"] != "error_unsupported_structured_update"
+
+
+def test_synthesize_wrappers_non_string_map_type_does_not_raise():
+    """Bug #133: a transform.map with a non-string map_type must not crash
+    _synthesize_script_function_wrappers on .strip() — it should be skipped so
+    the validator later reports UNSUPPORTED_TRANSFORM_ROUTE."""
+    from src.boomi_mcp.models.integration_models import IntegrationSpecV1
+    from src.boomi_mcp.categories.integration_builder import (
+        _synthesize_script_function_wrappers,
+    )
+
+    for bad in (42, True, ["script"], {"k": "v"}):
+        spec = IntegrationSpecV1(
+            name="t",
+            components=[
+                IntegrationComponentSpec(
+                    key="m", type="transform.map", action="create", name="M",
+                    config={"map_type": bad, "script_mappings": [{"script_component_id": "$ref:s"}]},
+                )
+            ],
+        )
+        before = len(spec.components)
+        # Must not raise.
+        _synthesize_script_function_wrappers(spec)
+        # Non-script (coerced) map_type → no wrapper synthesized.
+        assert len(spec.components) == before
