@@ -8,8 +8,17 @@ This properly exposes OAuth routes at root level alongside MCP endpoint.
 import os
 import secrets
 import uvicorn
+from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
+
+from mcp_stream_guard import (
+    McpStreamGuardConfig,
+    McpStreamGuardMiddleware,
+    McpStreamGuardState,
+    bind_fastmcp_session_manager,
+    install_reaper_lifespan,
+)
 
 if __name__ == "__main__":
     # Import mcp from server module (ensures OAuth provider is initialized)
@@ -41,8 +50,29 @@ if __name__ == "__main__":
     print("For MCP clients: Use auth='oauth' when connecting")
     print(f"{'='*60}\n")
 
-    # Create the HTTP app with all routes (MCP + OAuth)
-    app = mcp.http_app()
+    # Create the HTTP app with all routes (MCP + OAuth).
+    # The MCP stream cost guard is bound through http_app(middleware=[...]) so it
+    # runs INSIDE the FastMCP auth middleware (bearer token already on the scope)
+    # but still wraps /mcp request handling. Do NOT use app.add_middleware() for
+    # it — that prepends as outermost, before auth.
+    guard_config = McpStreamGuardConfig.from_env()
+    guard_state = McpStreamGuardState(guard_config)
+    if guard_config.enabled:
+        print(
+            f"[INFO] MCP stream guard enabled (get_mode={guard_config.get_mode}, "
+            f"work_idle={guard_config.work_idle_seconds}s, "
+            f"max_age={guard_config.max_age_seconds}s, "
+            f"max_get/identity={guard_config.max_get_streams_per_identity}, "
+            f"session_idle={guard_config.session_idle_seconds}s)"
+        )
+        app = mcp.http_app(
+            middleware=[Middleware(McpStreamGuardMiddleware, state=guard_state)]
+        )
+        bind_fastmcp_session_manager(app, guard_state)
+        install_reaper_lifespan(app, guard_state)
+    else:
+        print("[INFO] MCP stream guard disabled (BOOMI_MCP_STREAM_GUARD_ENABLED=false)")
+        app = mcp.http_app()
 
     # Mount static files directory
     static_dir = os.path.join(os.path.dirname(__file__), "static")
