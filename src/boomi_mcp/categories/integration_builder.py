@@ -65,6 +65,10 @@ from .components.builders.connector_builder import _resolve_rest_connector_type
 from .components.builders.json_profile_builder import JSONGeneratedProfileBuilder
 from .components.builders.xml_profile_builder import XMLGeneratedProfileBuilder
 from .components.builders.map_builder import DirectMapBuilder, get_map_builder
+from .components.builders.transform_map_validation import (
+    resolve_map_profile_index,
+    validate_transform_map,
+)
 from .components.builders.script_mapping_builder import (
     ScriptMappingBuilder,
     get_script_mapping_builder,
@@ -294,7 +298,11 @@ def _synthesize_script_function_wrappers(spec: IntegrationSpecV1) -> None:
     for comp in spec.components:
         if comp.type != "transform.map":
             continue
-        map_type = ((comp.config or {}).get("map_type") or "").strip().lower()
+        # Guard non-string map_type (matches validate_transform_map) — a JSON
+        # number/bool here would crash .strip() before the validator runs and
+        # reports UNSUPPORTED_TRANSFORM_ROUTE.
+        raw_map_type = (comp.config or {}).get("map_type")
+        map_type = raw_map_type.strip().lower() if isinstance(raw_map_type, str) else ""
         if map_type not in ("script", "map_script"):
             continue
         script_mappings = (comp.config or {}).get("script_mappings")
@@ -409,120 +417,6 @@ def _build_auto_wrapper_spec(
         config=wrapper_config,
         depends_on=[script_key],
     )
-
-
-# Codex r5 P1 #2 helpers — extract the external port surface from a
-# referenced script.mapping or transform.function wrapper so we can
-# cross-validate the calling map's script_mappings entry against it.
-def _ref_target_input_names(
-    target_comp: IntegrationComponentSpec,
-) -> List[str]:
-    """Return the ordered list of input names exposed by the referenced
-    component's external port surface."""
-    cfg = target_comp.config or {}
-    return [
-        str(entry.get("name") or "").strip()
-        for entry in (cfg.get("inputs") or [])
-        if isinstance(entry, Mapping) and entry.get("name")
-    ]
-
-
-def _ref_target_output_names(
-    target_comp: IntegrationComponentSpec,
-) -> List[str]:
-    """Return the ordered list of output names exposed by the referenced
-    component's external port surface."""
-    cfg = target_comp.config or {}
-    return [
-        str(entry.get("name") or "").strip()
-        for entry in (cfg.get("outputs") or [])
-        if isinstance(entry, Mapping) and entry.get("name")
-    ]
-
-
-def _check_port_shape_alignment(
-    *,
-    sm_idx: int,
-    ref_key: str,
-    target_type: str,
-    expected_inputs: List[str],
-    actual_inputs: List[str],
-    expected_outputs: List[str],
-    actual_outputs: List[str],
-) -> Optional[BuilderValidationError]:
-    """Return a structured error if the map's script_mappings entry port
-    shape diverges from the referenced component's declarations.
-
-    Required: ordered list equality across both ``inputs`` and
-    ``outputs`` (count + names + order). Boomi binds the calling map's
-    FunctionStep input/output ports to the wrapper's external ports by
-    numeric ``key`` (position), not by name — port names are for editor
-    display only. A reordered list with the same name set would emit
-    syntactically valid XML but misroute values at runtime, so set
-    membership alone is insufficient.
-
-    The error code is ``SCRIPT_MAPPING_VARIABLE_INVALID`` since the
-    mismatch always boils down to a variable-name / port mismatch on
-    the calling side.
-    """
-    field_prefix = f"script_mappings[{sm_idx}]"
-
-    # Codex r7 P1: ordered equality, not set membership. Boomi binds the
-    # map's FunctionStep ports to the wrapper's external ports by numeric
-    # ``key`` (position), not by name — name is for editor display only.
-    # If actual_inputs=['inB','inA'] and expected_inputs=['inA','inB'],
-    # the emitted map XML sends source-profile value-for-inA into the
-    # wrapper port at key=1 (which the wrapper labels "inA") but the
-    # FunctionStep declares that key=1 is "inB", and the wrapper-side
-    # binding silently misroutes inputs/outputs at runtime. Require the
-    # caller's declaration order to match the referenced component's
-    # external port declaration order verbatim.
-    if actual_inputs != expected_inputs:
-        return BuilderValidationError(
-            f"{field_prefix}.inputs port order / names do not match the "
-            f"referenced {target_type} component {ref_key!r}; map XML "
-            "wires ports positionally by key, so the declared order "
-            "must mirror the referenced component's external inputs",
-            error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
-            field=f"{field_prefix}.inputs",
-            hint=(
-                f"Required ordered input port names: "
-                + (", ".join(expected_inputs) or "(none)")
-                + ". Reorder script_mappings inputs[] to match — Boomi "
-                "binds map FunctionStep input port at key=1 to the "
-                "referenced component's external port at key=1, key=2 "
-                "to key=2, and so on."
-            ),
-            details={
-                "script_mappings_index": sm_idx,
-                "ref_key": ref_key,
-                "expected_inputs": expected_inputs,
-                "actual_inputs": actual_inputs,
-            },
-        )
-
-    if actual_outputs != expected_outputs:
-        return BuilderValidationError(
-            f"{field_prefix}.outputs port order / names do not match the "
-            f"referenced {target_type} component {ref_key!r}; map XML "
-            "wires ports positionally by key, so the declared order "
-            "must mirror the referenced component's external outputs",
-            error_code="SCRIPT_MAPPING_VARIABLE_INVALID",
-            field=f"{field_prefix}.outputs",
-            hint=(
-                f"Required ordered output port names: "
-                + (", ".join(expected_outputs) or "(none)")
-                + ". Reorder script_mappings outputs[] to match."
-            ),
-            details={
-                "script_mappings_index": sm_idx,
-                "ref_key": ref_key,
-                "expected_outputs": expected_outputs,
-                "actual_outputs": actual_outputs,
-            },
-        )
-
-    return None
 
 
 def _topological_order(spec: IntegrationSpecV1) -> List[str]:
@@ -922,55 +816,6 @@ _PRESERVATION_ALWAYS_PRESERVED_PATHS: Tuple[str, ...] = (
 def _enumerate_preserved_paths(policy: PreservationPolicy) -> List[str]:
     """Surface the conservative "always preserved" set in plan output."""
     return list(_PRESERVATION_ALWAYS_PRESERVED_PATHS)
-
-
-# Issue #26: resolve the field index for a transform.map's source / target
-# profile reference. Returns None when the reference is a literal UUID or
-# points at an unknown / non-profile component — in those cases the map
-# builder's validator raises MAP_PROFILE_INDEX_UNAVAILABLE.
-def _resolve_map_profile_index(
-    profile_id: Any,
-    components_by_key: Optional[Dict[str, "IntegrationComponentSpec"]],
-) -> Optional[Dict[str, Dict[str, Any]]]:
-    if components_by_key is None:
-        return None
-    if not isinstance(profile_id, str) or not profile_id.startswith("$ref:"):
-        return None
-    ref_key = profile_id[len("$ref:") :]
-    target_comp = components_by_key.get(ref_key)
-    if target_comp is None:
-        return None
-    raw_config = target_comp.config or {}
-    builder_cls = None
-    if target_comp.type == "profile.json":
-        builder_cls = JSONGeneratedProfileBuilder
-    elif target_comp.type == "profile.xml":
-        builder_cls = XMLGeneratedProfileBuilder
-    elif target_comp.type == "profile.db":
-        builder_cls = DatabaseReadProfileBuilder
-    if builder_cls is None:
-        return None
-    # Mirror _execute_component's comp.name → component_name fallback. A
-    # profile that supplies only the top-level IntegrationComponentSpec.name
-    # (and omits config.component_name) is valid — _execute_component
-    # injects the default before invoking the builder. Without the same
-    # injection here, the validate_config inside build_field_index would
-    # fail with "component_name is required" and the map would erroneously
-    # surface MAP_PROFILE_INDEX_UNAVAILABLE. Codex r1 P2 finding #2.
-    effective_config = dict(raw_config)
-    if target_comp.name and not effective_config.get("component_name"):
-        effective_config["component_name"] = target_comp.name
-    try:
-        # DatabaseReadProfileBuilder.build_field_index doesn't run a
-        # validate_config gate, so a malformed DB profile here would still
-        # raise — caller treats the None return as "no index available".
-        return builder_cls.build_field_index(effective_config)
-    except BuilderValidationError:
-        return None
-    except Exception:
-        # Defense-in-depth: an unexpected error in index-building shouldn't
-        # crash the plan loop. Map validation will surface MAP_PROFILE_INDEX_UNAVAILABLE.
-        return None
 
 
 def _check_database_get_dependencies(
@@ -2053,11 +1898,11 @@ def _execute_component(
                 ),
             }
         raw_comp_config = comp.config or {}
-        source_index = _resolve_map_profile_index(
+        source_index = resolve_map_profile_index(
             raw_comp_config.get("source_profile_id"),
             components_by_key,
         )
-        target_index = _resolve_map_profile_index(
+        target_index = resolve_map_profile_index(
             raw_comp_config.get("target_profile_id"),
             components_by_key,
         )
@@ -2772,397 +2617,11 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                             builder_instance
                         ).validate_config(effective_config)
                 elif is_direct_map:
-                    # transform.map: thread source / target field indexes from
-                    # the in-spec profile components so MAP_FIELD_NOT_FOUND
-                    # fires at plan time when a $ref:KEY target maps to a
-                    # missing leaf in the referenced profile.
-                    source_index = _resolve_map_profile_index(
-                        effective_config.get("source_profile_id"),
+                    gen_profile_err = validate_transform_map(
+                        effective_config,
+                        comp.depends_on,
                         components_by_key,
                     )
-                    target_index = _resolve_map_profile_index(
-                        effective_config.get("target_profile_id"),
-                        components_by_key,
-                    )
-                    map_type = (effective_config.get("map_type") or "").lower()
-                    map_builder_instance = get_map_builder(
-                        "transform.map", map_type
-                    )
-                    if map_builder_instance is None:
-                        gen_profile_err = BuilderValidationError(
-                            f"map_type {map_type!r} is not supported for "
-                            "transform.map. Supported: direct, function, "
-                            "map_function, script, map_script.",
-                            error_code="UNSUPPORTED_TRANSFORM_ROUTE",
-                            field="map_type",
-                            hint=(
-                                "Use map_type='direct' for profile-to-profile "
-                                "mappings, map_type='function' for structured "
-                                "map-function primitives (#40), or "
-                                "map_type='script' for in-map calls to "
-                                "reusable script.mapping components (#41). "
-                                "XSLT remains tracked by #42."
-                            ),
-                        )
-                    else:
-                        # depends_on coverage check (Codex r1 P2 finding #4).
-                        # _apply_plan's _resolve_dependency_tokens substitutes
-                        # $ref:KEY from id_registry, which is populated as
-                        # components apply in topological order. If a map
-                        # references a profile via $ref but that profile key
-                        # isn't in the map's depends_on, the topo sort may
-                        # place the map before the profile and apply will
-                        # crash with unresolved $ref tokens. Require explicit
-                        # declaration to keep ordering safe.
-                        declared_deps = set(comp.depends_on or [])
-                        for side in ("source", "target"):
-                            ref_value = effective_config.get(
-                                f"{side}_profile_id"
-                            )
-                            if (
-                                isinstance(ref_value, str)
-                                and ref_value.startswith("$ref:")
-                            ):
-                                ref_key = ref_value[len("$ref:") :]
-                                if ref_key not in declared_deps:
-                                    gen_profile_err = BuilderValidationError(
-                                        f"{side}_profile_id $ref target must "
-                                        f"also appear in depends_on so the "
-                                        f"profile runs before the map",
-                                        error_code="MAP_PROFILE_REF_REQUIRED",
-                                        field="depends_on",
-                                        hint=(
-                                            f"Add the {side} profile key to "
-                                            "depends_on so the execution "
-                                            "order builds the profile before "
-                                            "the map."
-                                        ),
-                                        details={
-                                            "side": side,
-                                            "ref_key": ref_key,
-                                        },
-                                    )
-                                    break
-
-                        # Issue #41: script_mappings[].script_component_id
-                        # $ref targets must also appear in depends_on so the
-                        # referenced script.mapping component applies before
-                        # the calling map (same topo-sort safety rule that
-                        # applies to source/target profile $refs), AND the
-                        # referenced component must actually be a
-                        # script.mapping — otherwise apply resolves the
-                        # $ref to a non-script UUID and emits a userdefined
-                        # FunctionStep whose ``id`` points at the wrong
-                        # component type (Codex r1 P2 finding #4).
-                        if (
-                            gen_profile_err is None
-                            and map_type in ("script", "map_script")
-                        ):
-                            sm_list = effective_config.get("script_mappings") or []
-                            if isinstance(sm_list, list):
-                                for sm_idx, sm in enumerate(sm_list):
-                                    if not isinstance(sm, Mapping):
-                                        continue
-                                    ref_value = sm.get("script_component_id")
-                                    # Codex r5 P1 #1: literal componentIds
-                                    # (non-$ref strings) bypass wrapper
-                                    # synthesis. The map's FunctionStep
-                                    # ``id`` would point directly at
-                                    # whatever UUID the caller supplied —
-                                    # if that UUID is a script.mapping
-                                    # rather than a transform.function
-                                    # wrapper, Boomi cannot bind script
-                                    # inputs/outputs at runtime. Reject
-                                    # literal IDs until live-fetch lets
-                                    # us auto-create wrappers for
-                                    # existing-script reuse.
-                                    if (
-                                        isinstance(ref_value, str)
-                                        and ref_value.strip()
-                                        and not ref_value.startswith("$ref:")
-                                    ):
-                                        gen_profile_err = BuilderValidationError(
-                                            f"script_mappings[{sm_idx}]."
-                                            "script_component_id must be a "
-                                            "'$ref:KEY' pointing at an in-spec "
-                                            "script.mapping (auto-synth wrapper) "
-                                            "or transform.function wrapper. "
-                                            "Literal componentId values are "
-                                            "not supported in #41 — Boomi "
-                                            "requires the map FunctionStep "
-                                            "id to point at a transform.function "
-                                            "wrapper, which the system can "
-                                            "only synthesize from in-spec "
-                                            "components.",
-                                            error_code="SCRIPT_MAPPING_REF_REQUIRED",
-                                            field=(
-                                                f"script_mappings[{sm_idx}]."
-                                                "script_component_id"
-                                            ),
-                                            hint=(
-                                                "For existing-Boomi script "
-                                                "reuse: declare a "
-                                                "transform.function wrapper "
-                                                "as an in-spec component "
-                                                "(component_type="
-                                                "'transform.function' with "
-                                                "script_component_id referencing "
-                                                "the existing script.mapping "
-                                                "key) and reference it via "
-                                                "'$ref:<wrapper_key>'. For "
-                                                "in-spec script.mappings, use "
-                                                "'$ref:<script_key>' and the "
-                                                "wrapper is synthesized "
-                                                "automatically."
-                                            ),
-                                            details={
-                                                "script_mappings_index": sm_idx,
-                                            },
-                                        )
-                                        break
-                                    if not (
-                                        isinstance(ref_value, str)
-                                        and ref_value.startswith("$ref:")
-                                    ):
-                                        continue
-                                    ref_key = ref_value[len("$ref:") :]
-                                    if ref_key not in declared_deps:
-                                        gen_profile_err = BuilderValidationError(
-                                            f"script_mappings[{sm_idx}]."
-                                            "script_component_id $ref "
-                                            "target must also appear in "
-                                            "depends_on so the script.mapping "
-                                            "applies before this map",
-                                            error_code="SCRIPT_MAPPING_REF_REQUIRED",
-                                            field="depends_on",
-                                            hint=(
-                                                "Add the script.mapping "
-                                                "component key to "
-                                                "depends_on so the "
-                                                "execution order builds "
-                                                "the script component "
-                                                "before the map."
-                                            ),
-                                            details={
-                                                "script_mappings_index": sm_idx,
-                                                "ref_key": ref_key,
-                                            },
-                                        )
-                                        break
-
-                                    # Reject $refs that don't target a
-                                    # script.mapping or a transform.function
-                                    # wrapper. After plan-time synthesis,
-                                    # ``script_mappings[].script_component_id``
-                                    # references the wrapper component
-                                    # (type=transform.function); caller-
-                                    # declared refs may still target a
-                                    # script.mapping directly (synthesis
-                                    # handles the rewrite). Other types
-                                    # would resolve to a wrong UUID and
-                                    # Boomi would fail to bind inputs/
-                                    # outputs at runtime.
-                                    target_comp = (
-                                        components_by_key.get(ref_key)
-                                        if components_by_key is not None
-                                        else None
-                                    )
-                                    target_type = (
-                                        target_comp.type
-                                        if target_comp is not None
-                                        else None
-                                    )
-                                    if target_type not in (
-                                        "script.mapping",
-                                        "transform.function",
-                                    ):
-                                        gen_profile_err = BuilderValidationError(
-                                            f"script_mappings[{sm_idx}]."
-                                            f"script_component_id $ref "
-                                            f"target {ref_key!r} resolves "
-                                            f"to a {target_type!r} "
-                                            "component, not a script.mapping "
-                                            "or transform.function wrapper",
-                                            error_code="SCRIPT_MAPPING_REF_REQUIRED",
-                                            field=(
-                                                f"script_mappings[{sm_idx}]."
-                                                "script_component_id"
-                                            ),
-                                            hint=(
-                                                "Use '$ref:<script_key>' "
-                                                "for an in-spec script.mapping "
-                                                "(auto-synth wrapper) or "
-                                                "'$ref:<wrapper_key>' for an "
-                                                "in-spec transform.function "
-                                                "wrapper. Literal componentIds "
-                                                "are not accepted at this "
-                                                "level — Boomi requires the "
-                                                "map FunctionStep id to point "
-                                                "at a wrapper, which the "
-                                                "system can only synthesize "
-                                                "from in-spec components."
-                                            ),
-                                            details={
-                                                "script_mappings_index": sm_idx,
-                                                "ref_key": ref_key,
-                                                "target_component_type": target_type,
-                                            },
-                                        )
-                                        break
-
-                                    # Codex r5 P1 #2: cross-validate the
-                                    # map's port surface against the
-                                    # referenced script.mapping (or
-                                    # transform.function wrapper). Boomi
-                                    # binds map FunctionStep inputs/outputs
-                                    # to the referenced component by name
-                                    # AND by position; if counts or names
-                                    # diverge, the map calls the wrapper
-                                    # with incompatible ports at runtime.
-                                    #
-                                    # Codex r6 P2: skip the cross-check when
-                                    # inputs/outputs aren't lists yet —
-                                    # MapScriptBuilder.validate_config below
-                                    # will surface the structural error
-                                    # (e.g. ``inputs: true``,
-                                    # ``outputs: 1``) as a structured
-                                    # PROFILE_FIELD_VALIDATION_FAILED.
-                                    # Iterating a non-list here used to
-                                    # crash _build_plan with a raw
-                                    # TypeError instead.
-                                    raw_inputs = sm.get("inputs")
-                                    raw_outputs = sm.get("outputs")
-                                    if not isinstance(raw_inputs, list) or not isinstance(
-                                        raw_outputs, list
-                                    ):
-                                        continue
-                                    expected_input_names = _ref_target_input_names(
-                                        target_comp
-                                    )
-                                    expected_output_names = _ref_target_output_names(
-                                        target_comp
-                                    )
-                                    actual_input_names = [
-                                        str(entry.get("input_name") or "").strip()
-                                        for entry in raw_inputs
-                                        if isinstance(entry, Mapping)
-                                    ]
-                                    actual_output_names = [
-                                        str(entry.get("output_name") or "").strip()
-                                        for entry in raw_outputs
-                                        if isinstance(entry, Mapping)
-                                    ]
-                                    port_err = _check_port_shape_alignment(
-                                        sm_idx=sm_idx,
-                                        ref_key=ref_key,
-                                        target_type=target_type,
-                                        expected_inputs=expected_input_names,
-                                        actual_inputs=actual_input_names,
-                                        expected_outputs=expected_output_names,
-                                        actual_outputs=actual_output_names,
-                                    )
-                                    if port_err is not None:
-                                        gen_profile_err = port_err
-                                        break
-
-                        if gen_profile_err is None:
-                            gen_profile_err = type(
-                                map_builder_instance
-                            ).validate_config(
-                                effective_config,
-                                source_index=source_index,
-                                target_index=target_index,
-                            )
-                        # Codex r1 P2 finding #3: a $ref pointing at a non-
-                        # profile, missing, or otherwise unindexable component
-                        # produces source_index/target_index == None. The map
-                        # builder's validate_config skips path-existence checks
-                        # when an index is None, so without this guard the
-                        # plan would succeed and apply would fail. Treat
-                        # unindexable $ref refs as plan-time failures, even
-                        # though their syntax (starting with $ref:) looks
-                        # superficially valid.
-                        if gen_profile_err is None:
-                            for side, side_index in (
-                                ("source", source_index),
-                                ("target", target_index),
-                            ):
-                                ref_value = effective_config.get(
-                                    f"{side}_profile_id"
-                                )
-                                if (
-                                    isinstance(ref_value, str)
-                                    and ref_value.startswith("$ref:")
-                                    and side_index is None
-                                ):
-                                    ref_key = ref_value[len("$ref:") :]
-                                    target_comp = (
-                                        components_by_key.get(ref_key)
-                                        if components_by_key is not None
-                                        else None
-                                    )
-                                    target_type = (
-                                        target_comp.type
-                                        if target_comp is not None
-                                        else None
-                                    )
-                                    gen_profile_err = BuilderValidationError(
-                                        f"{side}_profile_id $ref target "
-                                        "could not be indexed — the referenced "
-                                        "component is missing, malformed, or "
-                                        "not a profile (profile.db / "
-                                        "profile.json / profile.xml).",
-                                        error_code="MAP_PROFILE_INDEX_UNAVAILABLE",
-                                        field=f"{side}_profile_id",
-                                        hint=(
-                                            "Confirm the referenced key exists "
-                                            "in the spec and is a profile "
-                                            "component the map builder can "
-                                            "index. Non-profile component "
-                                            "types cannot be referenced as "
-                                            "map endpoints in M2."
-                                        ),
-                                        details={
-                                            "side": side,
-                                            "ref_key": ref_key,
-                                            "target_component_type": target_type,
-                                        },
-                                    )
-                                    break
-
-                        # Literal-UUID profile refs (no $ref) can't be indexed
-                        # in M2 — #47 owns existing-profile discovery. Reject
-                        # at plan time so the caller knows what to fix.
-                        if gen_profile_err is None:
-                            for side in ("source", "target"):
-                                ref_value = effective_config.get(
-                                    f"{side}_profile_id"
-                                )
-                                if (
-                                    isinstance(ref_value, str)
-                                    and not ref_value.startswith("$ref:")
-                                ):
-                                    gen_profile_err = BuilderValidationError(
-                                        f"{side}_profile_id is a literal "
-                                        "existing-profile reference without "
-                                        "an in-spec generated profile "
-                                        "component — the map builder has no "
-                                        "field index to validate against.",
-                                        error_code="MAP_PROFILE_INDEX_UNAVAILABLE",
-                                        field=f"{side}_profile_id",
-                                        hint=(
-                                            f"Either declare the {side} "
-                                            "profile as an in-spec "
-                                            "profile.json / profile.xml / "
-                                            "profile.db component and "
-                                            f"reference it via '$ref:KEY', "
-                                            "or wait for issue #47 "
-                                            "(existing-profile schema "
-                                            "discovery)."
-                                        ),
-                                        details={"side": side},
-                                    )
-                                    break
                 elif is_script_mapping_component:
                     # Issue #41: script.mapping has no source/target profile
                     # refs to thread — it is profile-agnostic. Just run the
@@ -3417,6 +2876,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 transform_summary["script_slots_used"] = script_slots_seen
                 transform_summary["script_languages_used"] = script_langs_seen
             step["transform_summary"] = transform_summary
+            # Issue #46: point plan readers at the read-only pre-apply review
+            # surface. Purely informational — does not change apply behaviour.
+            step["review_hint"] = (
+                "Run review_transformation(action='validate_unmapped', "
+                "config='{\"integration_spec\": <this spec>}') before apply to "
+                "catch unmapped/invalid mappings."
+            )
 
         steps.append(step)
 

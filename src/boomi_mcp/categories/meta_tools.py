@@ -5535,6 +5535,23 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'build_from_archetype(name="stub_minimal_integration", parameters={"integration_name": "demo"})',
             ],
         },
+        "review_transformation": {
+            "category": "Integration Authoring",
+            "description": "Inspect a transform spec BEFORE build_integration(action='apply'): list fields, find unmapped/invalid mappings, diff mappings, generate synthetic test skeletons, and compare expected-vs-actual payloads. Read-only, never calls Boomi, never exposes raw SQL/XML/credentials/script bodies.",
+            "actions": ["list_fields", "validate_unmapped", "mapping_diff", "generate_test_payload", "compare_expected_actual"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "action": "str (required) — list_fields | validate_unmapped | mapping_diff | generate_test_payload | compare_expected_actual",
+                "config": "JSON str (optional) — {integration_spec, previous_spec, expected_payload, actual_payload, ignored_paths, allow_extra, strict_types}",
+            },
+            "examples": [
+                'review_transformation(action="validate_unmapped", config=\'{"integration_spec": {...}}\')',
+                'review_transformation(action="list_fields", config=\'{"integration_spec": {...}}\')',
+                'review_transformation(action="mapping_diff", config=\'{"integration_spec": {...}, "previous_spec": {...}}\')',
+                'review_transformation(action="compare_expected_actual", config=\'{"expected_payload": {...}, "actual_payload": {...}}\')',
+            ],
+        },
         "build_integration": {
             "category": "Execution",
             "description": "High-level orchestrator for building integrations from component-oriented JSON specs",
@@ -5988,8 +6005,9 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "2. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
                 "3. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
                 "4. build_integration(action='plan', config='{\"integration_spec\": <spec from step 3>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
-                "5. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 3>, ...}') → execute ordered component creation/update",
-                "6. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
+                "5. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 3>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
+                "6. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 3>, ...}') → execute ordered component creation/update",
+                "7. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
             ],
             "fallback": {
                 "when": "No archetype fits — e.g., an integration shape not yet covered by the registry.",

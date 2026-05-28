@@ -344,6 +344,14 @@ except ImportError as e:
     get_integration_archetype_action = None
     build_from_archetype_action = None
 
+# --- Transformation Review Tool (Issue #46) ---
+try:
+    from boomi_mcp.categories.transformation_review import review_transformation_action
+    print("[INFO] Transformation review tool loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import transformation review tool: {e}")
+    review_transformation_action = None
+
 
 def _sanitize_error_msg(msg: str) -> str:
     """Strip URLs and file paths from error messages to prevent information leaks."""
@@ -1833,6 +1841,69 @@ if list_integration_archetypes_action:
         return build_from_archetype_action(name=name, parameters=parameters)
 
     print("[INFO] build_from_archetype tool registered successfully")
+
+
+# --- Transformation Review MCP Tool (Issue #46) ---
+if review_transformation_action:
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def review_transformation(action: str, config: str = None):
+        """Inspect a transform spec BEFORE build_integration(action='apply').
+
+        Read-only. Does NOT call Boomi, mutate anything, or expose raw
+        SQL/XML/credentials/script bodies. Operates on an IntegrationSpecV1
+        produced by build_from_archetype / build_integration (either a
+        database_to_api_sync transform flow or in-spec transform.map +
+        generated profile components).
+
+        Args:
+            action: One of: list_fields | validate_unmapped | mapping_diff |
+                generate_test_payload | compare_expected_actual
+            config: JSON string with action-specific configuration.
+
+        Actions and config:
+
+            list_fields - source/target fields with path + type metadata:
+                config='{"integration_spec": {...}}'
+
+            validate_unmapped - find mapping gaps (unknown/non-mappable fields,
+                duplicate targets, required leaves left unmapped, unsupported
+                routes, map_function arity/parameter problems). Returns
+                valid=false with structured issues; the tool call still
+                succeeds when the review itself runs:
+                config='{"integration_spec": {...}}'
+
+            mapping_diff - normalize current mappings and optionally diff them
+                against a previous spec:
+                config='{"integration_spec": {...}, "previous_spec": {...}}'
+
+            generate_test_payload - deterministic synthetic input/output
+                skeletons from declared profile fields only:
+                config='{"integration_spec": {...}}'
+
+            compare_expected_actual - structural diff of two caller payloads:
+                config='{"expected_payload": {...}, "actual_payload": {...},
+                         "ignored_paths": [], "allow_extra": false,
+                         "strict_types": true}'
+
+        Returns:
+            Action result with _success, read_only/boomi_mutation/
+            raw_xml_exposed flags, and action-specific data/issues.
+        """
+        # Keep the safety flags on wrapper parse errors too, so EVERY response
+        # from this tool honors the advertised read-only contract.
+        _flags = {"read_only": True, "boomi_mutation": False, "raw_xml_exposed": False}
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {"_success": False, "action": action, **_flags, "error": f"Invalid config (must be a JSON string): {e}"}
+            if not isinstance(config_data, dict):
+                return {"_success": False, "action": action, **_flags, "error": "config must be a JSON object, not " + type(config_data).__name__}
+        return review_transformation_action(action, config=config_data)
+
+    print("[INFO] review_transformation tool registered successfully")
 
 
 # --- Folder Management MCP Tools ---
