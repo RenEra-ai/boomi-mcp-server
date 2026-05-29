@@ -99,21 +99,28 @@ def test_template_deferred_fields_lists_unimplemented_surface(template):
     them for working surface area.
 
     Issue #28 added primitives that PRODUCE these fields as process fragments,
-    but ProcessFlowBuilder still does not consume them — so they remain
-    deferred. `tracked_by` now points at the issue that will wire each field
-    into the executable process (#29 assembly; #51 verified Try/Catch)."""
+    and issue #29 REPRESENTS them as build_from_archetype operational_intent
+    metadata — but ProcessFlowBuilder still does not consume them into process
+    XML, so they remain deferred. `tracked_by` now points at the milestone/issue
+    that will wire each field into the executable process (M3 schedule
+    activation; #51 verified Try/Catch + dynamic operation-property wiring)."""
     deferred = {entry["field"]: entry["tracked_by"] for entry in template["deferred_fields"]}
-    assert deferred.get("execution.trigger") == "#29"
-    assert deferred.get("execution.run_metadata") == "#29"
+    assert deferred.get("execution.trigger") == "M3 (deploy + schedule activation)"
+    assert deferred.get("execution.run_metadata") == "#51 (run-metadata / dynamic process-property wiring)"
     assert deferred.get("reliability.on_failure") == "#51"
 
-    # Each deferred field names the issue-#28 primitive that produces it, so
-    # callers understand the fragment exists even though the process builder
-    # does not yet read it.
+    # Each deferred field names the issue-#28 primitive that produces it and the
+    # #29 surface that now represents it, so callers understand the field exists
+    # as metadata even though the process builder does not yet read it.
     produced_by = {entry["field"]: entry.get("produced_by", "") for entry in template["deferred_fields"]}
     assert "schedule_envelope" in produced_by["execution.trigger"]
     assert "run_metadata" in produced_by["execution.run_metadata"]
     assert "dlq_writer" in produced_by["reliability.on_failure"]
+
+    represented_by = {entry["field"]: entry.get("represented_by", "") for entry in template["deferred_fields"]}
+    for field in ("execution.trigger", "execution.run_metadata", "reliability.on_failure"):
+        assert "#29" in represented_by[field], field
+        assert "operational_intent" in represented_by[field], field
 
 
 def test_template_optional_fields_excludes_deferred(template):

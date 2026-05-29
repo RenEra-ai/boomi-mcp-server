@@ -4759,26 +4759,33 @@ _PROCESS_FLOW_PROTOCOLS = {
         ],
         # Issue #28 added primitives that PRODUCE these fields as process
         # fragments (schedule_envelope, run_metadata, dlq_writer,
-        # error_classifier), but ProcessFlowBuilder still does NOT consume
-        # them — so they remain deferred, not optional. Promoting them to
+        # error_classifier). Issue #29 now REPRESENTS them as metadata under
+        # build_from_archetype's validation_rules.operational_intent — but
+        # ProcessFlowBuilder still does NOT consume them into process XML, so
+        # they remain deferred here (not optional). Promoting them to
         # optional_fields would repeat the Codex r3 P2 "silently ignored"
-        # lie. `produced_by` names the issue-#28 primitive; `tracked_by`
-        # names the issue that will wire the field into the executable
-        # process (#29 assembly; #51 verified Try/Catch retry/DLQ emission).
+        # lie. `produced_by` names the issue-#28 primitive; `represented_by`
+        # names where #29 surfaces the field as metadata; `tracked_by` names
+        # the issue/milestone that will wire it into the executable process
+        # (M3 schedule activation; #51 verified Try/Catch retry/DLQ +
+        # dynamic operation-property wiring).
         "deferred_fields": [
             {
                 "field": "execution.trigger",
                 "produced_by": "schedule_envelope primitive (#28)",
-                "tracked_by": "#29",
+                "represented_by": "build_from_archetype operational_intent metadata (#29)",
+                "tracked_by": "M3 (deploy + schedule activation)",
             },
             {
                 "field": "execution.run_metadata",
                 "produced_by": "run_metadata primitive (#28)",
-                "tracked_by": "#29",
+                "represented_by": "build_from_archetype operational_intent metadata (#29)",
+                "tracked_by": "#51 (run-metadata / dynamic process-property wiring)",
             },
             {
                 "field": "reliability.on_failure",
                 "produced_by": "dlq_writer / error_classifier primitives (#28)",
+                "represented_by": "build_from_archetype operational_intent metadata (#29)",
                 "tracked_by": "#51",
             },
         ],
@@ -5541,7 +5548,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         },
         "build_from_archetype": {
             "category": "Integration Authoring",
-            "description": "Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi. Pass the returned spec to build_integration(action='plan') to preview steps.",
+            "description": "Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi. Pass the returned spec to build_integration(action='plan') to preview steps. The database_to_api_sync archetype emits executable component specs (DB source, JSON transform, REST target, structured process); deployment/scheduling and verified retry/DLQ remain M3 / #51.",
             "actions": ["(single action — emits an IntegrationSpecV1 only)"],
             "read_only": True,
             "no_boomi_mutation": True,
@@ -5551,6 +5558,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             },
             "examples": [
                 'build_from_archetype(name="stub_minimal_integration", parameters={"integration_name": "demo"})',
+                'build_from_archetype(name="database_to_api_sync", parameters={...}) → executable spec for build_integration(action=\'plan\')',
             ],
         },
         "review_transformation": {

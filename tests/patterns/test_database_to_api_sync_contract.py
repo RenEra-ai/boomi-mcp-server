@@ -152,13 +152,8 @@ def _valid_full() -> Dict[str, Any]:
         },
         "target": {
             "binding": {
-                "mode": "create",
-                "settings": {
-                    "base_url": "https://api.example.com",
-                    "auth_mode": "bearer_token",
-                    "credential_ref": "secrets/rest/bearer",
-                    "default_headers": {"Accept": "application/json"},
-                },
+                "mode": "reuse",
+                "component_id": "<<existing REST connection id>>",
             },
             "send_request": {
                 "method": "POST",
@@ -210,23 +205,20 @@ def _valid_full() -> Dict[str, Any]:
                 },
                 {
                     "operation_type": "map_function",
-                    "function_type": "trim",
+                    "function_type": "date_format",
                     "inputs": ["source_b"],
                     "target_path": "Root/target_b",
-                },
-                {
-                    "operation_type": "map_script",
-                    "script_slot": "enrich_row",
-                    "language": "groovy2",
-                    "inputs": ["source_c"],
-                    "outputs": ["Root/list[]/target_c"],
+                    "parameters": {
+                        "input_format": "<<source datetime format>>",
+                        "output_format": "<<target datetime format>>",
+                    },
                 },
             ],
         },
         "execution": {
             "trigger": {
                 "mode": "scheduled",
-                "schedule": {"cron": "<<cron expression>>", "timezone": "UTC"},
+                "schedule": {"cron": "0 2 * * *", "timezone": "UTC"},
             },
             "watermark": {
                 "field": "source_b",
@@ -336,30 +328,37 @@ def test_valid_full_fixture_validates():
     assert isinstance(params, DatabaseToApiSyncParameters)
 
 
-def test_valid_build_emits_zero_component_contract_spec():
+def test_valid_build_emits_executable_component_spec():
+    """Issue #29: the minimal payload now emits an executable IntegrationSpecV1
+    (DB source + JSON transform + REST target + structured process), still with
+    no Boomi mutation and no raw XML exposed."""
     result = build_from_archetype_action("database_to_api_sync", _valid_minimal())
     assert result["_success"] is True, result
     assert result["boomi_mutation"] is False
     assert result["raw_xml_exposed"] is False
     spec = result["integration_spec"]
-    assert spec["components"] == []
     assert spec["mode"] == "redesign"
+    keys = [c["key"] for c in spec["components"]]
+    assert keys == [
+        "source_db_connection",
+        "source_db_read_profile",
+        "source_db_get_operation",
+        "transform_target_profile",
+        "transform_transform_map",
+        "target_rest_connection",
+        "target_rest_operation",
+        "main_process",
+    ]
     rules = spec["validation_rules"]
-    assert rules["contract_only"] is True
-    assert rules["component_count"] == 0
+    assert rules["contract_only"] is False
+    assert rules["component_count"] == len(spec["components"]) == 8
     assert rules["raw_xml_exposed"] is False
     assert rules["boomi_mutation"] is False
-    assert rules["requires_m2_9_for_executable_components"] is True
-    # Issue #44 M2.1a additions:
-    assert rules["metadata_version"] == "0.2.0"
+    # Issue #29 removed the zero-component marker.
+    assert "requires_m2_9_for_executable_components" not in rules
+    assert rules["metadata_version"] == "0.3.0"
     assert "caller-declared" in rules["profile_schema_strategy"]
     assert "caller-supplied" in rules["profile_schema_strategy"]
-    assert rules["transform_routes"] == {
-        "direct": "#26",
-        "map_function": "#40",
-        "map_script": "#41",
-        "xslt": "#42 (rejected in M2)",
-    }
     assert spec["name"] == "demo-db-to-api-sync"
 
 
@@ -390,66 +389,56 @@ def test_valid_build_emits_transform_flow_with_typed_metadata():
     assert leaf_paths == {"Root/target_a", "Root/target_b", "Root/list[]/target_c"}
 
     ops = transform_flow["operations"]
-    assert len(ops) == 3
+    # _valid_full() is a single-route (direct + map_function) executable payload;
+    # mixing map_function with map_script is rejected at emit (#29), so the
+    # full executable fixture uses one map route. map_script summary/route
+    # coverage lives in the dedicated map_script tests below.
+    assert len(ops) == 2
     by_type = {op["operation_type"]: op for op in ops}
     # direct: keeps source_field, target_path, and the documentation hint.
     assert by_type["direct"]["future_builder_issue"] == "#26"
     assert by_type["direct"]["source_field"] == "source_a"
     assert by_type["direct"]["target_path"] == "Root/target_a"
     assert by_type["direct"]["documentation_hint"] == "carry first column verbatim"
-    # map_function: codex review P2a — emit full operand structure (inputs[],
-    # target_path) so #40 can compile from the spec without re-reading the
-    # original archetype payload.
+    # map_function: emit full operand structure (inputs[], target_path,
+    # parameters) so the flow summary round-trips the operand for review.
     assert by_type["map_function"]["future_builder_issue"] == "#40"
-    assert by_type["map_function"]["function_type"] == "trim"
+    assert by_type["map_function"]["function_type"] == "date_format"
     assert by_type["map_function"]["inputs"] == ["source_b"]
     assert by_type["map_function"]["input_count"] == 1
     assert by_type["map_function"]["target_path"] == "Root/target_b"
-    # map_script: same — emit inputs[], outputs[], script_component_ref so
-    # #41 can compile from the spec. Inline script_body is rejected by the
-    # contract (codex review r2 P2) and therefore can never appear in the
-    # spec — caller routes scripts via script_component_ref.
-    assert by_type["map_script"]["future_builder_issue"] == "#41"
-    assert by_type["map_script"]["script_slot"] == "enrich_row"
-    assert by_type["map_script"]["language"] == "groovy2"
-    assert by_type["map_script"]["inputs"] == ["source_c"]
-    assert by_type["map_script"]["outputs"] == ["Root/list[]/target_c"]
-    assert by_type["map_script"]["input_count"] == 1
-    assert by_type["map_script"]["output_count"] == 1
-    # Defense-in-depth: the spec must never echo executable script bodies
-    # nor any presence flag for a field the contract rejects outright.
-    assert "script_body" not in by_type["map_script"]
-    assert "has_script_body" not in by_type["map_script"]
-    # script_component_ref was not supplied in the fixture, so it's omitted.
-    assert "script_component_ref" not in by_type["map_script"]
+    assert "input_format" in by_type["map_function"]["parameters"]
+    assert "map_script" not in by_type
 
 
 def test_map_function_summary_surfaces_inputs_and_parameters():
     """Codex review P2a follow-up: when map_function declares inputs and a
     parameters dict, both must round-trip into the spec for #40 to compile."""
     payload = _valid_minimal()
-    payload["source"]["read_operation"]["result_schema"]["fields"] = [
-        {"name": "source_a", "data_type": "character"},
-        {"name": "source_b", "data_type": "character"},
-    ]
     payload["transform"]["operations"] = [
         {
             "operation_type": "map_function",
-            "function_type": "concat",
-            "inputs": ["source_a", "source_b"],
+            "function_type": "date_format",
+            "inputs": ["source_a"],
             "target_path": "Root/target_a",
-            "parameters": {"separator": ", "},
+            "parameters": {
+                "input_format": "<<source datetime format>>",
+                "output_format": "<<target datetime format>>",
+            },
         },
     ]
     result = _build(payload)
-    assert result["_success"] is True
+    assert result["_success"] is True, result
     transform_flow = next(
         f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
     )
     op = transform_flow["operations"][0]
-    assert op["inputs"] == ["source_a", "source_b"]
-    assert op["input_count"] == 2
-    assert op["parameters"] == {"separator": ", "}
+    assert op["inputs"] == ["source_a"]
+    assert op["input_count"] == 1
+    assert op["parameters"] == {
+        "input_format": "<<source datetime format>>",
+        "output_format": "<<target datetime format>>",
+    }
 
 
 def test_map_script_summary_surfaces_script_component_ref():
@@ -464,16 +453,19 @@ def test_map_script_summary_surfaces_script_component_ref():
             "language": "groovy2",
             "inputs": ["source_a"],
             "outputs": ["Root/target_a"],
-            "script_component_ref": "scripts/enrich_row",
+            # Issue #29 assembles an executable script-route map, so the ref must
+            # be a '$ref:KEY' to an in-spec script component (literal IDs are
+            # rejected with SCRIPT_MAPPING_REF_REQUIRED).
+            "script_component_ref": "$ref:enrich_row",
         },
     ]
     result = _build(payload)
-    assert result["_success"] is True
+    assert result["_success"] is True, result
     transform_flow = next(
         f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
     )
     op = transform_flow["operations"][0]
-    assert op["script_component_ref"] == "scripts/enrich_row"
+    assert op["script_component_ref"] == "$ref:enrich_row"
     # script_body wasn't supplied — the presence boolean reports False.
     # The body itself never appears in the summary regardless.
     assert op["script_body_present"] is False
@@ -662,8 +654,8 @@ def test_issue_43_transform_flow_carries_target_profile_generation():
 def test_issue_43_transform_flow_direct_field_mappings_excludes_non_direct():
     transform_flow = _transform_flow(_valid_full())
     direct = transform_flow["direct_field_mappings"]
-    # _valid_full() has 1 direct + 1 map_function + 1 map_script operation;
-    # only the direct one is normalized into direct_field_mappings.
+    # _valid_full() has 1 direct + 1 map_function operation; only the direct
+    # one is normalized into direct_field_mappings.
     assert direct == [
         {
             "route": "direct",
@@ -673,14 +665,14 @@ def test_issue_43_transform_flow_direct_field_mappings_excludes_non_direct():
             "target_data_type": "character",
         },
     ]
-    # The existing operations summary still carries all three operation types.
+    # The operations summary carries both the direct and map_function entries.
     op_types = {op["operation_type"] for op in transform_flow["operations"]}
-    assert op_types == {"direct", "map_function", "map_script"}
+    assert op_types == {"direct", "map_function"}
 
 
 def test_issue_43_existing_transform_flow_keys_intact():
-    """Regression: issues #40/#41/#42 operation metadata must remain untouched
-    on the transform flow when issue #43 keys are added."""
+    """Regression: issue #40 operation metadata must remain untouched on the
+    transform flow when issue #43 keys are added."""
     transform_flow = _transform_flow(_valid_full())
     # Issue #44 keys still present and well-formed.
     assert "source_schema" in transform_flow
@@ -689,16 +681,18 @@ def test_issue_43_existing_transform_flow_keys_intact():
     by_type = {op["operation_type"]: op for op in transform_flow["operations"]}
     assert by_type["map_function"]["inputs"] == ["source_b"]
     assert by_type["map_function"]["target_path"] == "Root/target_b"
-    assert by_type["map_script"]["inputs"] == ["source_c"]
-    assert by_type["map_script"]["outputs"] == ["Root/list[]/target_c"]
 
 
-def test_issue_43_contract_only_components_remain_empty():
-    """Issue #43 must not introduce executable components into the spec."""
+def test_issue_29_full_payload_emits_executable_components():
+    """Issue #29: the full payload emits executable components (it no longer
+    returns a zero-component contract spec)."""
     result = build_from_archetype_action("database_to_api_sync", _valid_full())
-    assert result["_success"] is True
+    assert result["_success"] is True, result
     assert result["boomi_mutation"] is False
-    assert result["integration_spec"]["components"] == []
+    keys = [c["key"] for c in result["integration_spec"]["components"]]
+    assert "main_process" in keys
+    assert "source_db_connection" in keys
+    assert "target_rest_operation" in keys
 
 
 def test_issue_43_generation_metadata_does_not_echo_sql_or_description():
@@ -870,13 +864,22 @@ def test_windows_integrated_auth_rejects_unused_credential_ref():
     )
 
 
-def test_windows_integrated_auth_validates_when_unused_fields_omitted():
+def test_windows_integrated_auth_accepted_by_contract_rejected_at_assembly():
+    """The parameter contract accepts auth_mode='windows_integrated' (a valid
+    literal) when the unused fields are omitted, but issue #29 cannot assemble a
+    create-mode DB connection for it — the DatabaseConnectorBuilder only
+    supports 'username_password', so emit returns a structured
+    UNSUPPORTED_DB_AUTH_MODE (use connection reuse instead)."""
     payload = _valid_minimal()
     payload["source"]["binding"]["settings"]["auth_mode"] = "windows_integrated"
     payload["source"]["binding"]["settings"].pop("username")
     payload["source"]["binding"]["settings"].pop("credential_ref")
+    # Parameter contract accepts the auth-mode shape.
+    DatabaseToApiSyncArchetype.validate_parameters(payload)
+    # Assembly rejects it with a structured error.
     result = _build(payload)
-    assert result["_success"] is True, result
+    assert result["_success"] is False, result
+    assert result["error_code"] == "UNSUPPORTED_DB_AUTH_MODE"
 
 
 def test_rest_auth_none_rejects_unused_credential_ref():
@@ -940,14 +943,15 @@ def test_watermark_consistency_error_does_not_echo_query_param_names():
 
 
 def test_full_fixture_round_trip_includes_typed_operation_summaries():
-    """The full fixture's three operation types (direct, map_function,
-    map_script) must validate and round-trip into the emitted spec metadata
-    with the right future-builder pointers."""
+    """The full fixture's operation types (direct, map_function) validate and
+    round-trip into the emitted spec metadata with the right future-builder
+    pointers. (map_function + map_script cannot share one executable map, so the
+    full executable fixture uses a single map route.)"""
     params = DatabaseToApiSyncArchetype.validate_parameters(_valid_full())
     spec = DatabaseToApiSyncArchetype.emit_spec(params)
     transform_flow = next(f for f in spec.flows if f["key"] == "transform")
     op_types = {op["operation_type"]: op["future_builder_issue"] for op in transform_flow["operations"]}
-    assert op_types == {"direct": "#26", "map_function": "#40", "map_script": "#41"}
+    assert op_types == {"direct": "#26", "map_function": "#40"}
 
 
 def test_map_function_operation_validates_with_only_required_fields():
@@ -979,11 +983,12 @@ def test_map_function_operation_validates_with_only_required_fields():
     assert "parameters" not in op
 
 
-def test_map_script_operation_validates_without_inline_script():
-    """A map_script operation without script_component_ref must validate;
-    the emitted spec metadata must surface the operand details but never
-    invent a default body or component ref. Inline script_body is rejected
-    outright (codex r2 P2)."""
+def test_map_script_without_body_or_ref_accepted_by_contract_rejected_at_assembly():
+    """Issue #29 boundary: a map_script op with neither script_body nor
+    script_component_ref is still accepted by the parameter contract (it is a
+    valid contract shape), but it cannot be assembled into an executable map —
+    emit returns a clean structured ARCHETYPE_PARAM_INVALID error (not the
+    opaque ARCHETYPE_BUILD_FAILED), without echoing caller values."""
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
         {
@@ -994,24 +999,13 @@ def test_map_script_operation_validates_without_inline_script():
             "outputs": ["Root/target_a"],
         },
     ]
+    # Parameter contract accepts the bodyless/refless map_script op.
+    DatabaseToApiSyncArchetype.validate_parameters(payload)
+    # Assembly rejects it with a clean structured error.
     result = _build(payload)
-    assert result["_success"] is True, result
-    transform_flow = next(
-        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
-    )
-    assert len(transform_flow["operations"]) == 1
-    op = transform_flow["operations"][0]
-    assert op["operation_type"] == "map_script"
-    assert op["future_builder_issue"] == "#41"
-    assert op["script_slot"] == "enrich_row"
-    assert op["language"] == "groovy2"
-    assert op["inputs"] == ["source_a"]
-    assert op["outputs"] == ["Root/target_a"]
-    # script_body is rejected outright and was never accepted as a field;
-    # script_component_ref omitted from the input -> omitted from the summary.
-    assert "script_body" not in op
-    assert "has_script_body" not in op
-    assert "script_component_ref" not in op
+    assert result["_success"] is False, result
+    assert result["error_code"] == "ARCHETYPE_PARAM_INVALID"
+    assert "exactly one" in result["error"] or "script_body" in result["error"]
 
 
 def test_documentation_hint_is_accepted_but_not_executable():
@@ -1298,27 +1292,25 @@ def test_map_function_parameters_rejection_does_not_echo_offending_value():
 
 def test_map_function_parameters_accepts_non_secret_keys():
     """Regression: legitimate parameter keys (e.g. 'separator', 'precision',
-    'locale') must continue to validate."""
+    'locale') must pass the contract's secret-shaped-key scan. This is a
+    parameter-contract guarantee — independent of which keys a specific map
+    function builder ultimately accepts."""
     payload = _map_function_payload_with_parameters(
         {"separator": ", ", "locale": "en-US", "precision": 4}
     )
-    result = _build(payload)
-    assert result["_success"] is True, result
-    transform_flow = next(
-        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
-    )
-    op = transform_flow["operations"][0]
-    assert op["parameters"] == {"separator": ", ", "locale": "en-US", "precision": 4}
+    # No secret-shaped-key rejection at parameter validation.
+    params = DatabaseToApiSyncArchetype.validate_parameters(payload)
+    assert isinstance(params, DatabaseToApiSyncParameters)
 
 
 def test_map_function_parameters_accepts_credential_ref_style_keys():
     """`credential_ref` carries an opaque URI reference (not the secret
-    itself); the scan must NOT reject `*_ref` style keys."""
+    itself); the contract's secret scan must NOT reject `*_ref` style keys."""
     payload = _map_function_payload_with_parameters(
         {"credential_ref": "secrets/rest/bearer", "settings_ref": "configs/x"}
     )
-    result = _build(payload)
-    assert result["_success"] is True, result
+    params = DatabaseToApiSyncArchetype.validate_parameters(payload)
+    assert isinstance(params, DatabaseToApiSyncParameters)
 
 
 # ---------------------------------------------------------------------------
@@ -1514,6 +1506,9 @@ def test_required_target_leaf_mapped_via_map_script_succeeds():
             "language": "groovy2",
             "inputs": ["source_a"],
             "outputs": ["Root/required_b"],
+            # Issue #29 assembles an executable script-route map, so an inline
+            # body (or a '$ref:KEY') is required.
+            "script_body": "<<task-authored fill script>>",
         },
     ]
     result = _build(payload)

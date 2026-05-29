@@ -25,13 +25,81 @@ from __future__ import annotations
 import re
 from typing import Annotated, Any, Dict, List, Literal, Optional, Set, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
+from ...categories.components.builders.connector_builder import (
+    BuilderValidationError,
+)
 from ...categories.components.builders.profile_generation import (
     build_profile_generation_artifacts,
 )
-from ...models.integration_models import IntegrationSpecV1
-from ..base import ArchetypePattern, PatternExample, PatternKind, PatternMetadata
+from ...models.integration_models import (
+    IntegrationComponentSpec,
+    IntegrationSpecV1,
+)
+from ..base import (
+    ArchetypePattern,
+    PatternExample,
+    PatternKind,
+    PatternMetadata,
+    PrimitiveBuildContext,
+)
+from ..primitives._helpers import (
+    ROLE_DB_CONNECTION,
+    ROLE_DB_GET_OPERATION,
+    ROLE_DB_READ_PROFILE,
+    ROLE_REST_CONNECTION,
+    ROLE_REST_OPERATION,
+    ROLE_TARGET_PROFILE,
+    ROLE_TRANSFORM_MAP,
+    primitive_component_key,
+)
+from ..primitives.db_extract import DbExtractParameters, DbExtractPrimitive
+from ..primitives.field_map import FieldMapParameters, FieldMapPrimitive
+from ..primitives.operational import (
+    DlqWriterParameters,
+    DlqWriterPrimitive,
+    ErrorClassifierParameters,
+    ErrorClassifierPrimitive,
+    RunMetadataParameters,
+    RunMetadataPrimitive,
+    ScheduleEnvelopeParameters,
+    ScheduleEnvelopePrimitive,
+    WatermarkStateParameters,
+    WatermarkStatePrimitive,
+)
+from ..primitives.rest_send import (
+    RestSendWithRetryParameters,
+    RestSendWithRetryPrimitive,
+)
+
+# ---------------------------------------------------------------------------
+# Assembly constants (issue #29)
+# ---------------------------------------------------------------------------
+
+# Stable primitive key prefixes — the emitted component keys are
+# ``{prefix}_{role}`` (e.g. ``source_db_connection``, ``transform_transform_map``,
+# ``target_rest_operation``). The archetype assembles its $ref wiring from these
+# deterministic keys, so they must stay stable across releases.
+_SOURCE_PREFIX = "source"
+_TRANSFORM_PREFIX = "transform"
+_TARGET_PREFIX = "target"
+_MAIN_PROCESS_KEY = "main_process"
+
+# REST create-mode auth: M2 only emits an unauthenticated created connection.
+# Secured auth (basic / bearer / oauth2) requires an existing connection via
+# binding.mode='reuse' — the contract carries no username, OAuth2 sub-block, or
+# bearer header surface, and the REST Client builder rejects those modes without
+# them. The error code mirrors RestClientConnectionBuilder's vocabulary.
+_REST_CREATE_AUTH_MAP = {"none": "NONE"}
+UNSUPPORTED_REST_AUTH_MODE = "UNSUPPORTED_REST_AUTH_MODE"
 
 
 # ---------------------------------------------------------------------------
@@ -1779,25 +1847,598 @@ class DatabaseToApiSyncParameters(BaseModel):
 _EXAMPLE_SQL_SENTINEL = "<<user-authored DB read statement>>"
 
 
+# ---------------------------------------------------------------------------
+# Issue #29 assembly helpers
+# ---------------------------------------------------------------------------
+#
+# These turn the validated archetype contract into primitive parameter objects
+# and a structured main_process component. Every byte of XML and all structured
+# component validation is delegated to the existing builders through the #27/#28
+# primitives — the archetype only maps fields and wires deterministic $ref keys.
+# Fields the current builders cannot emit are metadata-deferred (never silently
+# dropped) under validation_rules.operational_intent.deferred.
+
+
+def _coerce_primitive_params(model_cls, data: Dict[str, Any], *, field: str):
+    """Build a primitive parameter model, converting a pydantic
+    ``ValidationError`` into a clean, secret-safe ``BuilderValidationError``.
+
+    The archetype contract is intentionally laxer than some primitive param
+    models (e.g. ``Schedule.cron`` accepts any string but ScheduleEnvelope
+    requires a 5-part cron; a map_script op may omit both body and ref at the
+    contract layer but field_map requires exactly one). Without this, such a
+    caller error surfaces as the opaque ``ARCHETYPE_BUILD_FAILED`` last-resort
+    envelope. We rebuild the message from each error's ``loc`` + ``msg`` only —
+    never the ``input`` value — so caller-supplied (possibly sensitive) values
+    are never echoed.
+    """
+    try:
+        return model_cls.model_validate(data)
+    except ValidationError as exc:
+        problems = "; ".join(
+            ": ".join(
+                part
+                for part in (
+                    ".".join(str(p) for p in err.get("loc", ())),
+                    str(err.get("msg", "")),
+                )
+                if part
+            )
+            for err in exc.errors()
+        )
+        raise BuilderValidationError(
+            f"{field} could not be assembled from the archetype parameters: "
+            f"{problems}",
+            error_code="ARCHETYPE_PARAM_INVALID",
+            field=field,
+            hint=(
+                "Adjust the archetype parameters so the primitive can validate "
+                "them — e.g. a 5-part cron for scheduled triggers, or exactly "
+                "one of script_body / script_component_ref ('$ref:KEY') per "
+                "map_script operation."
+            ),
+        ) from exc
+
+
+def _component_names(naming: "NamingConfig") -> Dict[str, str]:
+    """Caller component-name overrides, keyed by emitted component key."""
+    return dict(naming.component_names or {})
+
+
+def _named(overrides: Dict[str, str], *keys: str) -> Optional[str]:
+    """First non-blank override among ``keys`` (emitted component keys)."""
+    for key in keys:
+        value = overrides.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _build_db_extract_params(
+    parameters: "DatabaseToApiSyncParameters", overrides: Dict[str, str]
+) -> DbExtractParameters:
+    source = parameters.source
+    binding = source.binding
+    read = source.read_operation
+
+    if binding.mode == "create":
+        settings = binding.settings  # guaranteed present by the contract validator
+        connection: Dict[str, Any] = {
+            "mode": "create",
+            # driver maps 1:1 onto DatabaseConnectorBuilder.SUPPORTED_DRIVER_IDS
+            # ('microsoft_jdbc' is a recognized alias of 'sqlserver').
+            "driver_id": settings.driver,
+            # 'windows_integrated' is rejected by DatabaseConnectorBuilder
+            # (UNSUPPORTED_DB_AUTH_MODE) — passed through so the builder, not the
+            # archetype, owns the auth-mode vocabulary.
+            "auth_mode": settings.auth_mode,
+            "host": settings.host,
+            "port": settings.port,
+            "dbname": settings.database,
+        }
+        if settings.username is not None:
+            connection["username"] = settings.username
+        if settings.credential_ref is not None:
+            connection["credential_ref"] = settings.credential_ref
+        # jdbc_options (Dict[str,str]) is metadata-deferred (see
+        # _deferred_intent): the contract carries no verbatim JDBC suffix, and
+        # synthesizing one would violate the no-template rule.
+    else:
+        connection = {"mode": "reuse"}
+        if binding.component_id:
+            connection["component_id"] = binding.component_id
+        if binding.component_name:
+            connection["component_name"] = binding.component_name
+
+    output_fields = [
+        {"name": f.name, "data_type": f.data_type, "mandatory": f.required}
+        for f in read.result_schema.fields
+    ]
+    read_profile: Dict[str, Any] = {"query": read.sql, "output_fields": output_fields}
+    if read.parameters:
+        # The Select read profile takes name + mappability; sql_type/direction
+        # are not builder-supported and are metadata-deferred. 'in' parameters
+        # are the mappable bind inputs.
+        read_profile["parameters"] = [
+            {"name": p.name, "mappable": (p.direction == "in")}
+            for p in read.parameters
+        ]
+
+    operation: Dict[str, Any] = {}
+    if read.batch_size is not None:
+        operation["batch_count"] = read.batch_size
+    if read.max_rows is not None:
+        operation["max_rows"] = read.max_rows
+    # fetch_size / link_element have no DB Get operation builder field — deferred.
+
+    component_names: Dict[str, str] = {}
+    conn_name = _named(overrides, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_CONNECTION))
+    if conn_name:
+        component_names["connection"] = conn_name
+    read_name = _named(overrides, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_READ_PROFILE))
+    if read_name:
+        component_names["read_profile"] = read_name
+    op_name = _named(overrides, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_GET_OPERATION))
+    if op_name:
+        component_names["get_operation"] = op_name
+
+    return _coerce_primitive_params(
+        DbExtractParameters,
+        {
+            "key_prefix": _SOURCE_PREFIX,
+            "connection": connection,
+            "read_profile": read_profile,
+            "operation": operation,
+            "component_names": component_names,
+        },
+        field="source",
+    )
+
+
+def _build_field_map_params(
+    parameters: "DatabaseToApiSyncParameters", overrides: Dict[str, str]
+) -> FieldMapParameters:
+    read = parameters.source.read_operation
+    transform = parameters.transform
+
+    # The DB Select result fields are the source leaf index; their logical path
+    # is the field name (a flat result set), matching the transform.map
+    # source_path the direct/function/script routes emit.
+    source_field_index = {
+        f.name: {"data_type": f.data_type, "mappable": True}
+        for f in read.result_schema.fields
+    }
+    source_profile_key = primitive_component_key(_SOURCE_PREFIX, ROLE_DB_READ_PROFILE)
+
+    direct: List[Dict[str, Any]] = []
+    map_function: List[Dict[str, Any]] = []
+    map_script: List[Dict[str, Any]] = []
+    for op in transform.operations:
+        if isinstance(op, DirectTransformOperation):
+            direct.append({"source_field": op.source_field, "target_path": op.target_path})
+        elif isinstance(op, MapFunctionTransformOperation):
+            entry: Dict[str, Any] = {
+                "function_type": op.function_type,
+                "inputs": list(op.inputs),
+                "target_path": op.target_path,
+            }
+            if op.parameters:
+                entry["parameters"] = dict(op.parameters)
+            map_function.append(entry)
+        elif isinstance(op, MapScriptTransformOperation):
+            # The contract's inputs are source field names and outputs are
+            # target leaf paths; field_map's MapScriptOp needs named ports, so
+            # derive input_name from the field name and output_name from the
+            # leaf segment. field_map enforces exactly-one of script_body /
+            # script_component_ref and rejects literal (non-$ref) refs.
+            script_entry: Dict[str, Any] = {
+                "inputs": [{"source_path": name, "input_name": name} for name in op.inputs],
+                "outputs": [
+                    {"output_name": path.rsplit("/", 1)[-1], "target_path": path}
+                    for path in op.outputs
+                ],
+                "language": op.language,
+            }
+            if op.script_body is not None:
+                script_entry["script_body"] = op.script_body
+            if op.script_component_ref is not None:
+                script_entry["script_component_ref"] = op.script_component_ref
+            map_script.append(script_entry)
+
+    component_names: Dict[str, str] = {}
+    target_profile_name = _named(
+        overrides, primitive_component_key(_TRANSFORM_PREFIX, ROLE_TARGET_PROFILE)
+    )
+    if target_profile_name:
+        component_names["target_profile"] = target_profile_name
+    map_name = _named(
+        overrides, primitive_component_key(_TRANSFORM_PREFIX, ROLE_TRANSFORM_MAP)
+    )
+    if map_name:
+        component_names["transform_map"] = map_name
+    script_prefix = _named(overrides, f"{_TRANSFORM_PREFIX}_script")
+    if script_prefix:
+        component_names["script_prefix"] = script_prefix
+
+    return _coerce_primitive_params(
+        FieldMapParameters,
+        {
+            "key_prefix": _TRANSFORM_PREFIX,
+            "source": {
+                "source_profile_id": f"$ref:{source_profile_key}",
+                "source_profile_type": "profile.db",
+                "source_field_index": source_field_index,
+            },
+            "target_payload_profile": parameters.target.payload_profile.model_dump(),
+            "direct": direct,
+            "map_function": map_function,
+            "map_script": map_script,
+            "component_names": component_names,
+        },
+        field="transform",
+    )
+
+
+def _build_rest_send_params(
+    parameters: "DatabaseToApiSyncParameters", overrides: Dict[str, str]
+) -> RestSendWithRetryParameters:
+    target = parameters.target
+    binding = target.binding
+    send = target.send_request
+
+    if binding.mode == "create":
+        settings = binding.settings  # guaranteed present by the contract validator
+        auth = _REST_CREATE_AUTH_MAP.get(settings.auth_mode)
+        if auth is None:
+            raise BuilderValidationError(
+                "REST create-mode auth is not supported for executable "
+                "assembly in M2 (only an unauthenticated connection can be "
+                "created); use an existing connection instead.",
+                error_code=UNSUPPORTED_REST_AUTH_MODE,
+                field="target.binding.settings.auth_mode",
+                hint=(
+                    "Set target.binding.mode='reuse' with an existing REST "
+                    "Client connection (component_id or component_name) for "
+                    "secured auth, or wait for a verified connector-auth "
+                    "extension (#51). The archetype never echoes credentials."
+                ),
+            )
+        connection: Dict[str, Any] = {
+            "mode": "create",
+            "base_url": settings.base_url,
+            "auth": auth,
+        }
+        # default_headers has no RestConnectionCreate field — metadata-deferred.
+    else:
+        connection = {"mode": "reuse"}
+        if binding.component_id:
+            connection["component_id"] = binding.component_id
+        if binding.component_name:
+            connection["component_name"] = binding.component_name
+
+    target_profile_key = primitive_component_key(_TRANSFORM_PREFIX, ROLE_TARGET_PROFILE)
+    operation: Dict[str, Any] = {
+        "method": send.method,
+        "path": send.path,
+        # Bind the operation request body to the generated JSON payload profile.
+        "request_profile_id": f"$ref:{target_profile_key}",
+        "request_profile_type": "json",
+    }
+    # Only literal query parameters are emitted onto the operation. Watermark-
+    # sourced parameters need dynamic operation-property wiring (#51) and are
+    # represented as operational intent, never as static query parameters.
+    literal_qp = {
+        qp.name: qp.literal_value
+        for qp in send.query_parameters
+        if qp.value_source == "literal" and qp.literal_value is not None
+    }
+    if literal_qp:
+        operation["query_parameters"] = literal_qp
+
+    component_names: Dict[str, str] = {}
+    conn_name = _named(overrides, primitive_component_key(_TARGET_PREFIX, ROLE_REST_CONNECTION))
+    if conn_name:
+        component_names["connection"] = conn_name
+    op_name = _named(overrides, primitive_component_key(_TARGET_PREFIX, ROLE_REST_OPERATION))
+    if op_name:
+        component_names["operation"] = op_name
+
+    return _coerce_primitive_params(
+        RestSendWithRetryParameters,
+        {
+            "key_prefix": _TARGET_PREFIX,
+            "connection": connection,
+            "operation": operation,
+            "component_names": component_names,
+        },
+        field="target",
+    )
+
+
+def _build_main_process(
+    parameters: "DatabaseToApiSyncParameters", overrides: Dict[str, str]
+) -> IntegrationComponentSpec:
+    naming = parameters.naming
+    send = parameters.target.send_request
+
+    db_conn_key = primitive_component_key(_SOURCE_PREFIX, ROLE_DB_CONNECTION)
+    db_op_key = primitive_component_key(_SOURCE_PREFIX, ROLE_DB_GET_OPERATION)
+    map_key = primitive_component_key(_TRANSFORM_PREFIX, ROLE_TRANSFORM_MAP)
+    rest_conn_key = primitive_component_key(_TARGET_PREFIX, ROLE_REST_CONNECTION)
+    rest_op_key = primitive_component_key(_TARGET_PREFIX, ROLE_REST_OPERATION)
+
+    process_name = (
+        _named(overrides, _MAIN_PROCESS_KEY)
+        or f"{naming.component_prefix} DB to API Sync"
+    )
+
+    config: Dict[str, Any] = {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "database",
+            "connection_id": f"$ref:{db_conn_key}",
+            "operation_id": f"$ref:{db_op_key}",
+            "action_type": "Get",
+        },
+        "transform": {"mode": "map_ref", "map_ref": f"$ref:{map_key}"},
+        "target": {
+            "connector_type": "rest",
+            "connection_id": f"$ref:{rest_conn_key}",
+            "operation_id": f"$ref:{rest_op_key}",
+            "action_type": send.method,
+        },
+        # Retry/DLQ stay disabled in the emitted process XML until verified
+        # Try/Catch emission lands (#51); requested retry/DLQ intent lives only
+        # in validation_rules.operational_intent. This keeps ProcessFlowBuilder's
+        # PROCESS_RETRY_UNVERIFIED gate satisfied.
+        "reliability": {"retry_count": 0, "dlq": {"mode": "disabled"}},
+    }
+    if naming.folder_path:
+        config["folder_name"] = naming.folder_path
+
+    # depends_on must contain exactly the keys referenced by $ref tokens in the
+    # process config (ProcessFlowBuilder enforces this). The read profile and
+    # target profile are depended transitively by the operation/map components.
+    return IntegrationComponentSpec(
+        key=_MAIN_PROCESS_KEY,
+        type="process",
+        action="create",
+        name=process_name,
+        config=config,
+        depends_on=[db_conn_key, db_op_key, map_key, rest_conn_key, rest_op_key],
+    )
+
+
+def _watermark_intent(
+    watermark: "Optional[Watermark]", context: PrimitiveBuildContext
+) -> Dict[str, Any]:
+    """Watermark strategy as metadata only (no executable update wiring in M2)."""
+    if watermark is None:
+        fragment = WatermarkStatePrimitive.emit_fragment(
+            context,
+            _coerce_primitive_params(
+                WatermarkStateParameters, {"enabled": False}, field="execution.watermark"
+            ),
+        )
+        return fragment["metadata"]["watermark"]
+
+    if watermark.persistence == "dpp":
+        params = _coerce_primitive_params(
+            WatermarkStateParameters,
+            {
+                "enabled": True,
+                "field": watermark.field,
+                "kind": watermark.kind,
+                "persistence": "dpp",
+                "initial_value": watermark.initial_value,
+            },
+            field="execution.watermark",
+        )
+        fragment = WatermarkStatePrimitive.emit_fragment(context, params)
+        return fragment["metadata"]["watermark"]
+
+    # external_store: the contract carries no store_ref, so the primitive cannot
+    # validate it. Represent the intent as metadata; store wiring is deferred.
+    intent: Dict[str, Any] = {
+        "enabled": True,
+        "field": watermark.field,
+        "kind": watermark.kind,
+        "persistence": "external_store",
+        "deferred_to": "#51",
+        "note": "external-store watermark wiring (store reference) is deferred",
+    }
+    if watermark.initial_value is not None:
+        intent["initial_value"] = watermark.initial_value
+    return intent
+
+
+def _deferred_intent(parameters: "DatabaseToApiSyncParameters") -> Dict[str, Any]:
+    """Caller intent the current builders cannot emit — recorded, not dropped.
+
+    Records only counts + notes (never the caller-authored keys/values) so the
+    metadata can never echo a header value or JDBC option that might be
+    sensitive.
+    """
+    deferred: Dict[str, Any] = {}
+    sbind = parameters.source.binding
+    if sbind.mode == "create" and sbind.settings and sbind.settings.jdbc_options:
+        deferred["jdbc_options"] = {
+            "count": len(sbind.settings.jdbc_options),
+            "note": (
+                "JDBC option map is not serialized onto the created connection "
+                "in M2; use binding.mode='reuse' for connections needing JDBC "
+                "URL options."
+            ),
+        }
+    read = parameters.source.read_operation
+    read_deferred: Dict[str, Any] = {}
+    if read.fetch_size is not None:
+        read_deferred["fetch_size"] = "metadata-only (no DB Get operation builder field in M2)"
+    if read.link_element is not None:
+        read_deferred["link_element"] = "metadata-only (no DB Get operation builder field in M2)"
+    if read_deferred:
+        deferred["read_operation"] = read_deferred
+    tbind = parameters.target.binding
+    if tbind.mode == "create" and tbind.settings and tbind.settings.default_headers:
+        deferred["default_headers"] = {
+            "count": len(tbind.settings.default_headers),
+            "note": "REST default headers are not emitted onto the created connection in M2.",
+        }
+    return deferred
+
+
+def _build_operational_intent(
+    parameters: "DatabaseToApiSyncParameters", context: PrimitiveBuildContext
+) -> Dict[str, Any]:
+    """Compose the operational primitives' fragments into metadata-only intent.
+
+    None of this changes the emitted process component's gated reliability —
+    retry/DLQ stay disabled in process XML until #51.
+    """
+    execution = parameters.execution
+    reliability = parameters.reliability
+    send = parameters.target.send_request
+    intent: Dict[str, Any] = {}
+
+    # --- execution trigger (schedule) ---
+    trigger = execution.trigger
+    if trigger.mode == "scheduled" and trigger.schedule is not None:
+        schedule_params = _coerce_primitive_params(
+            ScheduleEnvelopeParameters,
+            {
+                "mode": "scheduled",
+                "cron": trigger.schedule.cron,
+                "timezone": trigger.schedule.timezone,
+            },
+            field="execution.trigger",
+        )
+    else:
+        schedule_params = _coerce_primitive_params(
+            ScheduleEnvelopeParameters, {"mode": "manual"}, field="execution.trigger"
+        )
+    schedule_fragment = ScheduleEnvelopePrimitive.emit_fragment(context, schedule_params)
+
+    exec_intent: Dict[str, Any] = {}
+    trigger_fragment = (
+        schedule_fragment.get("process_config", {})
+        .get("execution", {})
+        .get("trigger")
+    )
+    if trigger_fragment:
+        exec_intent["trigger"] = trigger_fragment
+    schedule_meta = schedule_fragment.get("metadata", {}).get("schedule")
+    if schedule_meta:
+        intent["schedule"] = schedule_meta
+
+    # --- run metadata ---
+    if execution.run_metadata:
+        run_fragment = RunMetadataPrimitive.emit_fragment(
+            context,
+            _coerce_primitive_params(
+                RunMetadataParameters,
+                {"static_metadata": dict(execution.run_metadata)},
+                field="execution.run_metadata",
+            ),
+        )
+        run_exec = run_fragment.get("process_config", {}).get("execution", {})
+        if "run_metadata" in run_exec:
+            exec_intent["run_metadata"] = run_exec["run_metadata"]
+        dpp = run_fragment.get("metadata", {}).get("dynamic_process_properties")
+        if dpp:
+            exec_intent["dynamic_process_properties"] = dpp
+    if exec_intent:
+        intent["execution"] = exec_intent
+
+    # --- watermark (metadata only) ---
+    intent["watermark"] = _watermark_intent(execution.watermark, context)
+
+    # --- reliability (error classifier + requested retry/DLQ intent) ---
+    reliability_intent: Dict[str, Any] = {}
+    classifier_fragment = ErrorClassifierPrimitive.emit_fragment(
+        context,
+        _coerce_primitive_params(
+            ErrorClassifierParameters,
+            {
+                "retriable_status_codes": list(
+                    reliability.error_classifier.retriable_status_codes
+                ),
+                "terminal_status_codes": list(
+                    reliability.error_classifier.terminal_status_codes
+                ),
+                "custom_rules": list(reliability.error_classifier.custom_rules),
+            },
+            field="reliability.error_classifier",
+        ),
+    )
+    classifier = (
+        classifier_fragment.get("process_config", {})
+        .get("reliability", {})
+        .get("error_classifier")
+    )
+    if classifier:
+        reliability_intent["error_classifier"] = classifier
+
+    # Requested retry is recorded as intent only; the process stays retry_count=0.
+    retry_intent: Dict[str, Any] = {
+        "requested_max_attempts": reliability.retry.max_attempts,
+        "backoff": reliability.retry.backoff,
+        "process_retry_count": 0,
+        "deferred_to": "#51",
+    }
+    if reliability.retry.initial_interval_seconds is not None:
+        retry_intent["initial_interval_seconds"] = reliability.retry.initial_interval_seconds
+    reliability_intent["retry"] = retry_intent
+
+    # DLQ wiring stays disabled (DlqWriterPrimitive invoked disabled).
+    dlq_fragment = DlqWriterPrimitive.emit_fragment(
+        context,
+        _coerce_primitive_params(
+            DlqWriterParameters, {"mode": "disabled"}, field="reliability.dlq"
+        ),
+    )
+    reliability_intent["dlq"] = dlq_fragment["process_config"]["reliability"]["dlq"]
+    if reliability.dlq.enabled:
+        dlq_requested: Dict[str, Any] = {"requested": True, "deferred_to": "#51"}
+        if reliability.dlq.target is not None:
+            # Only the routing kind (folder/topic/queue) — never the address,
+            # which can carry caller-specific or sensitive content.
+            dlq_requested["target_kind"] = reliability.dlq.target.kind
+        reliability_intent["dlq_requested"] = dlq_requested
+    intent["reliability"] = reliability_intent
+
+    # --- expected status codes + deferred fields ---
+    intent["expected_status_codes"] = list(send.expected_status_codes)
+    deferred = _deferred_intent(parameters)
+    if deferred:
+        intent["deferred"] = deferred
+
+    return intent
+
+
 class DatabaseToApiSyncArchetype(ArchetypePattern):
     metadata = PatternMetadata(
         name="database_to_api_sync",
-        version="0.2.0",
+        version="0.3.0",
         kind=PatternKind.ARCHETYPE,
         description=(
-            "Contract-only archetype for replicating SQL Server records to a "
-            "REST API on a manual or scheduled trigger. Validates parameters "
-            "(including caller-declared DB result fields, a caller-supplied "
-            "JSON payload profile tree, and typed transform operations) and "
-            "emits a non-executable IntegrationSpecV1. Executable component "
-            "emission is owned by issues #43 / #26 / #40 / #41 / #29."
+            "Archetype for replicating SQL Server records to a REST API on a "
+            "manual or scheduled trigger. Validates parameters (caller-declared "
+            "DB result fields, a caller-supplied JSON payload profile tree, and "
+            "typed transform operations) and emits an executable "
+            "IntegrationSpecV1 — DB source, JSON transform, REST target, and a "
+            "structured process — suitable for build_integration(action='plan'). "
+            "Every byte of XML is produced by the existing component builders; "
+            "the archetype emits JSON component specs only and never calls "
+            "Boomi. Retry/DLQ process emission, schedule activation, watermark "
+            "update, and dynamic operation-property wiring remain deferred "
+            "(#51 / M3)."
         ),
         tags=[
             "database",
             "rest",
             "sync",
             "m2",
-            "contract-only",
+            "executable",
             "sql-server",
             "no-boomi-mutation",
         ],
@@ -1808,7 +2449,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         not_for=[
             "bidirectional sync",
             "real-time change-data-capture",
-            "executable component emission before downstream builders ship",
+            "deploying, scheduling, or executing the process (M3)",
         ],
     )
     parameters_model = DatabaseToApiSyncParameters
@@ -1817,17 +2458,22 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "Discoverable, fully-typed parameter contract for a SQL Server -> REST sync.",
         "Strict per-field validation surfaces structured PARAM_VALIDATION_FAILED errors.",
         "Caller-declared DB result schema and caller-supplied JSON profile tree are the M2 source of truth.",
-        "Typed transform operations route to issue #26 (direct), #40 (map_function), or #41 (map_script).",
-        "Credentials cross the contract only as opaque credential_ref values.",
-        "Emits a zero-component IntegrationSpecV1; downstream issues own executable component emission.",
+        "Emits executable component specs (DB source, JSON transform, REST target, process) for build_integration(action='plan').",
+        "All XML is produced by the existing component builders; the archetype emits JSON component specs only.",
+        "Credentials cross the contract only as opaque credential_ref values and are never echoed in errors.",
     ]
     limitations = [
-        "Emits no executable Boomi components and performs no Boomi mutation.",
-        "Does not expose or generate raw XML.",
+        "Emits JSON component specs only; performs no Boomi mutation and exposes no raw XML.",
+        "Process retry/DLQ stay disabled in the emitted process XML; verified Try/Catch + DLQ emission is deferred (#51).",
+        "Schedule intent is represented as metadata only; deployment and schedule activation are M3.",
+        "Watermark is represented as metadata only; watermark-update and dynamic operation-property wiring are deferred (#51).",
+        "REST create-mode emits only auth='none'; secured auth (basic / bearer / oauth2) requires binding.mode='reuse'.",
+        "DB create-mode supports auth_mode='username_password' only; 'windows_integrated' requires reuse (#51).",
+        "jdbc_options and REST default_headers are metadata-deferred (no builder field in M2); use reuse for connections needing them.",
+        "Does not mix map_function and map_script in one call (UNSUPPORTED_TRANSFORM_ROUTE); split into separate maps.",
         "Does not infer DB result fields from SQL, browse, metadata, or row samples (issue #47 owns discovery).",
         "Does not import existing integrations (issue #48 owns import / draft).",
         "operation_type='xslt' is rejected; the XSLT decision is owned by issue #42.",
-        "SQL Server is the only supported database family in M2.1; Postgres / Oracle / Snowflake are deferred.",
         "credential_ref values are opaque end-to-end; the contract never resolves or validates secrets.",
     ]
     examples = [
@@ -1919,13 +2565,14 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             name="scheduled_with_watermark",
             description=(
                 "Fuller payload: reuse-mode DB connection by component id with "
-                "two declared result fields, create-mode REST target with "
-                "bearer-token credential_ref and a nested JSON payload profile, "
-                "two transform operations (one direct, one map_function), "
-                "scheduled trigger, timestamp watermark, retry, DLQ enabled, "
-                "and run metadata. Examples deliberately exclude map_script "
-                "declarations to keep the published payload free of language "
-                "tokens covered by the hygiene-marker guard."
+                "two declared result fields, reuse-mode REST target by "
+                "component id (secured REST auth uses connection reuse in M2) "
+                "and a nested JSON payload profile, two transform operations "
+                "(one direct, one map_function), scheduled trigger, timestamp "
+                "watermark, retry, DLQ enabled, and run metadata. Examples "
+                "deliberately exclude map_script declarations to keep the "
+                "published payload free of language tokens covered by the "
+                "hygiene-marker guard."
             ),
             parameters={
                 "naming": {
@@ -1965,13 +2612,8 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 },
                 "target": {
                     "binding": {
-                        "mode": "create",
-                        "settings": {
-                            "base_url": "https://api.example.com",
-                            "auth_mode": "bearer_token",
-                            "credential_ref": "secrets/rest/bearer",
-                            "default_headers": {"Accept": "application/json"},
-                        },
+                        "mode": "reuse",
+                        "component_id": "<<existing REST connection id>>",
                     },
                     "send_request": {
                         "method": "POST",
@@ -2014,9 +2656,13 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                         },
                         {
                             "operation_type": "map_function",
-                            "function_type": "trim",
+                            "function_type": "date_format",
                             "inputs": ["source_b"],
                             "target_path": "Root/target_b",
+                            "parameters": {
+                                "input_format": "<<source datetime format>>",
+                                "output_format": "<<target datetime format>>",
+                            },
                         },
                     ],
                 },
@@ -2024,7 +2670,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "trigger": {
                         "mode": "scheduled",
                         "schedule": {
-                            "cron": "<<cron expression>>",
+                            "cron": "0 2 * * *",
                             "timezone": "UTC",
                         },
                     },
@@ -2274,17 +2920,53 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         )
         runtime_block: Dict[str, Any] = dict(naming.runtime_hints or {})
 
+        # ---- Issue #29: executable component assembly --------------------
+        # Compose the shipped #27 (db_extract, field_map) and #28
+        # (rest_send_with_retry) primitives into the component list, then append
+        # the structured process. Any BuilderValidationError raised here
+        # (UNSUPPORTED_REST_AUTH_MODE, UNSUPPORTED_DB_AUTH_MODE,
+        # UNSUPPORTED_TRANSFORM_ROUTE, SCRIPT_MAPPING_REF_REQUIRED, …) propagates
+        # to the authoring layer, which returns a structured PatternError
+        # without echoing caller parameters.
+        overrides = _component_names(naming)
+        context = PrimitiveBuildContext(
+            integration_name=naming.integration_name,
+            component_prefix=naming.component_prefix,
+            folder_path=naming.folder_path,
+        )
+
+        components: List[IntegrationComponentSpec] = []
+        components.extend(
+            DbExtractPrimitive.emit_components(
+                context, _build_db_extract_params(parameters, overrides)
+            )
+        )
+        components.extend(
+            FieldMapPrimitive.emit_components(
+                context, _build_field_map_params(parameters, overrides)
+            )
+        )
+        components.extend(
+            RestSendWithRetryPrimitive.emit_components(
+                context, _build_rest_send_params(parameters, overrides)
+            )
+        )
+        components.append(_build_main_process(parameters, overrides))
+
+        operational_intent = _build_operational_intent(parameters, context)
+
         return IntegrationSpecV1(
             version="1.0",
             name=naming.integration_name,
             mode="redesign",
-            components=[],
+            components=components,
             goals=[
                 "Replicate data from a SQL Server source to a REST target on a "
                 "manual or scheduled trigger.",
-                "Executable Boomi components are deferred to downstream "
-                "builders (#43 / #26 / #40 / #41 / #29); this build emits the "
-                "contract only.",
+                "Emit executable component specs (DB source, JSON transform, "
+                "REST target, structured process) for build_integration("
+                "action='plan'); deployment, schedule activation, and verified "
+                "retry/DLQ process emission remain M3 / #51.",
             ],
             endpoints=[db_endpoint, rest_endpoint],
             flows=flows,
@@ -2292,12 +2974,43 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             folders=folders_block,
             runtime=runtime_block,
             validation_rules={
-                "contract_only": True,
-                "component_count": 0,
+                "contract_only": False,
+                "component_count": len(components),
                 "raw_xml_exposed": False,
                 "boomi_mutation": False,
-                "requires_m2_9_for_executable_components": True,
-                "metadata_version": "0.2.0",
+                "metadata_version": "0.3.0",
+                # Metadata-only representation of trigger / schedule / watermark /
+                # retry intent / DLQ intent / error classifier / run metadata /
+                # expected status codes / deferred follow-up notes. None of this
+                # un-gates the process component's reliability.
+                "operational_intent": operational_intent,
+                "transform_review": {
+                    "supported_actions": [
+                        "list_fields",
+                        "validate_unmapped",
+                        "mapping_diff",
+                        "generate_test_payload",
+                        "compare_expected_actual",
+                    ],
+                    "recommended_before_apply": [
+                        "validate_unmapped",
+                        "generate_test_payload",
+                    ],
+                },
+                "limitations": {
+                    "schedule_activation": "M3 (deploy to a runtime first)",
+                    "process_retry_dlq": "#51 (verified Try/Catch + DLQ emission)",
+                    "watermark_update": "#51 (dynamic operation-property wiring)",
+                    "db_create_auth": (
+                        "username_password only; windows_integrated requires reuse"
+                    ),
+                    "rest_create_auth": (
+                        "auth='none' only; secured auth requires reuse"
+                    ),
+                    "jdbc_options_and_default_headers": (
+                        "metadata-deferred; no builder field in M2 (use reuse)"
+                    ),
+                },
                 "profile_schema_strategy": (
                     "M2 uses caller-declared DB read result fields and a "
                     "caller-supplied JSON profile tree for the REST target; "

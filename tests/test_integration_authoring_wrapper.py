@@ -444,6 +444,10 @@ def test_call_tool_build_database_to_api_sync_minimal_succeeds():
     assert payload["boomi_mutation"] is False
     assert payload["raw_xml_exposed"] is False
     spec = payload["integration_spec"]
-    assert spec["components"] == []
+    # Issue #29: the archetype now emits executable component specs (no Boomi
+    # mutation, no raw XML) instead of a zero-component contract spec.
+    keys = [c["key"] for c in spec["components"]]
+    assert "main_process" in keys
     assert spec["mode"] == "redesign"
-    assert spec["validation_rules"]["contract_only"] is True
+    assert spec["validation_rules"]["contract_only"] is False
+    assert spec["validation_rules"]["component_count"] == len(spec["components"])
