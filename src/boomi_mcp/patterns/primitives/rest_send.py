@@ -25,7 +25,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from ...categories.components.builders.connector_builder import (
     RestClientConnectionBuilder,
@@ -81,8 +88,11 @@ class RestConnectionCreate(BaseModel):
     oauth2: Optional[Dict[str, Any]] = Field(
         default=None, description="OAuth2 sub-block; client_secret_ref must be a credential reference"
     )
-    connect_timeout_ms: Optional[int] = Field(default=None)
-    read_timeout_ms: Optional[int] = Field(default=None)
+    # StrictInt: reject bool/str/float at the param boundary so they cannot
+    # coerce (e.g. True->1, "5"->5) and bypass RestClientConnectionBuilder's
+    # timeout type check, which would otherwise emit an altered timeout value.
+    connect_timeout_ms: Optional[StrictInt] = Field(default=None)
+    read_timeout_ms: Optional[StrictInt] = Field(default=None)
     cookie_scope: Optional[str] = Field(default=None)
     connection_pooling: Optional[Dict[str, Any]] = Field(default=None)
     description: Optional[str] = Field(default=None)
@@ -168,8 +178,9 @@ class RestRetryPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # Mirrors the Boomi Try/Catch Retry Count range (0..5) so the recorded
-    # intent stays inside what the platform can express.
-    max_attempts: Optional[int] = Field(default=None, ge=0, le=5)
+    # intent stays inside what the platform can express. StrictInt rejects
+    # bool/str so e.g. max_attempts=True can't coerce to 1.
+    max_attempts: Optional[StrictInt] = Field(default=None, ge=0, le=5)
     description: Optional[str] = Field(default=None)
 
 

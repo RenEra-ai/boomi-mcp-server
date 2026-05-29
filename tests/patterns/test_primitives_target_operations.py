@@ -303,6 +303,40 @@ class TestRestSendComponents:
             assert step.get("validation_error") is None
             assert step["planned_action"] == "create"
 
+    @pytest.mark.parametrize("bad_timeout", [True, False, "5", 1.5])
+    def test_non_int_timeout_rejected_at_param_boundary(self, bad_timeout):
+        # Codex P2: Optional[int] coerced bool/str (True->1) and bypassed the
+        # builder's timeout type check, emitting an altered timeout. StrictInt
+        # rejects them before the value can reach the builder.
+        with pytest.raises(ValidationError):
+            RestSendWithRetryPrimitive.validate_parameters(
+                _rest_create_params(
+                    connection={
+                        "mode": "create",
+                        "base_url": "https://api.invalid",
+                        "auth": "NONE",
+                        "connect_timeout_ms": bad_timeout,
+                    }
+                )
+            )
+
+    def test_negative_timeout_accepted(self):
+        # Negative / zero = "wait indefinitely" per Boomi; must still be valid.
+        comps = _emit(
+            RestSendWithRetryPrimitive,
+            _rest_create_params(
+                connection={
+                    "mode": "create",
+                    "base_url": "https://api.invalid",
+                    "auth": "NONE",
+                    "connect_timeout_ms": -1,
+                    "read_timeout_ms": 0,
+                }
+            ),
+        )
+        assert comps[0].config["connect_timeout_ms"] == -1
+        assert comps[0].config["read_timeout_ms"] == 0
+
 
 class TestRestSendFragment:
     def test_target_fragment_shape(self):
@@ -334,6 +368,13 @@ class TestRestSendFragment:
         with pytest.raises(ValidationError):
             RestSendWithRetryPrimitive.validate_parameters(
                 _rest_create_params(retry_policy={"max_attempts": 6})
+            )
+
+    @pytest.mark.parametrize("bad", [True, "3"])
+    def test_retry_policy_attempts_rejects_non_int(self, bad):
+        with pytest.raises(ValidationError):
+            RestSendWithRetryPrimitive.validate_parameters(
+                _rest_create_params(retry_policy={"max_attempts": bad})
             )
 
 
@@ -377,6 +418,13 @@ class TestScheduleEnvelope:
         with pytest.raises(ValidationError):
             ScheduleEnvelopePrimitive.validate_parameters(
                 {"mode": "scheduled", "cron": "0 * * * *", "max_retry": 6}
+            )
+
+    @pytest.mark.parametrize("bad", [True, "2"])
+    def test_max_retry_rejects_non_int(self, bad):
+        with pytest.raises(ValidationError):
+            ScheduleEnvelopePrimitive.validate_parameters(
+                {"mode": "scheduled", "cron": "0 * * * *", "max_retry": bad}
             )
 
 
