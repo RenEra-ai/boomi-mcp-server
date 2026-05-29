@@ -29,6 +29,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     StrictInt,
     field_validator,
     model_validator,
@@ -82,7 +83,9 @@ class RestConnectionCreate(BaseModel):
     )
     domain: Optional[str] = Field(default=None)
     workstation: Optional[str] = Field(default=None)
-    preemptive: Optional[bool] = Field(default=None)
+    # StrictBool: reject string/int (e.g. "false", 1) at the param boundary so
+    # they cannot coerce and bypass RestClientConnectionBuilder's non-bool check.
+    preemptive: Optional[StrictBool] = Field(default=None)
     private_certificate_ref: Optional[str] = Field(default=None)
     public_certificate_ref: Optional[str] = Field(default=None)
     oauth2: Optional[Dict[str, Any]] = Field(
@@ -162,8 +165,10 @@ class RestOperationParams(BaseModel):
     request_profile_type: Optional[str] = Field(default=None, description="none | xml | json")
     response_profile_type: Optional[str] = Field(default=None, description="none | xml | json")
     follow_redirects: Optional[str] = Field(default=None, description="NONE | STRICT | LAX")
-    return_application_errors: Optional[bool] = Field(default=None)
-    track_response: Optional[bool] = Field(default=None)
+    # StrictBool: reject string/int (e.g. "false", 1) at the param boundary so
+    # they cannot coerce and bypass RestClientOperationBuilder's non-bool check.
+    return_application_errors: Optional[StrictBool] = Field(default=None)
+    track_response: Optional[StrictBool] = Field(default=None)
 
 
 class RestRetryPolicy(BaseModel):

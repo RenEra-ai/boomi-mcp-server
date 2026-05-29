@@ -337,6 +337,47 @@ class TestRestSendComponents:
         assert comps[0].config["connect_timeout_ms"] == -1
         assert comps[0].config["read_timeout_ms"] == 0
 
+    @pytest.mark.parametrize("bad", ["false", "true", 1, 0])
+    def test_non_bool_preemptive_rejected(self, bad):
+        # Codex P2: Optional[bool] coerced "false"/1 past the builder's non-bool
+        # check; StrictBool rejects them at the param boundary.
+        with pytest.raises(ValidationError):
+            RestSendWithRetryPrimitive.validate_parameters(
+                _rest_create_params(
+                    connection={
+                        "mode": "create",
+                        "base_url": "https://api.invalid",
+                        "auth": "BASIC",
+                        "username": "u",
+                        "credential_ref": "credential://x",
+                        "preemptive": bad,
+                    }
+                )
+            )
+
+    @pytest.mark.parametrize("field", ["return_application_errors", "track_response"])
+    @pytest.mark.parametrize("bad", ["false", 1])
+    def test_non_bool_operation_flags_rejected(self, field, bad):
+        with pytest.raises(ValidationError):
+            RestSendWithRetryPrimitive.validate_parameters(
+                _rest_create_params(operation={"method": "GET", "path": "/x", field: bad})
+            )
+
+    def test_real_bool_operation_flags_accepted(self):
+        comps = _emit(
+            RestSendWithRetryPrimitive,
+            _rest_create_params(
+                operation={
+                    "method": "GET",
+                    "path": "/x",
+                    "return_application_errors": False,
+                    "track_response": True,
+                }
+            ),
+        )
+        assert comps[1].config["return_application_errors"] is False
+        assert comps[1].config["track_response"] is True
+
 
 class TestRestSendFragment:
     def test_target_fragment_shape(self):
@@ -414,6 +455,19 @@ class TestScheduleEnvelope:
         assert frag["metadata"]["schedule"]["applies_after_deploy"] is True
         assert frag["metadata"]["schedule"]["max_retry"] == 2
 
+    def test_blank_timezone_treated_as_absent(self):
+        # Codex P3: blank optional strings must not be emitted verbatim.
+        frag = _fragment(
+            ScheduleEnvelopePrimitive,
+            {"mode": "scheduled", "cron": "0 * * * *", "timezone": "  "},
+        )
+        assert "timezone" not in frag["process_config"]["execution"]["trigger"]
+
+    def test_blank_timezone_allowed_in_manual(self):
+        # Blank == absent, so manual mode accepts it (a real timezone does not).
+        frag = _fragment(ScheduleEnvelopePrimitive, {"mode": "manual", "timezone": ""})
+        assert frag["process_config"]["execution"]["trigger"] == {"mode": "manual"}
+
     def test_max_retry_bounded(self):
         with pytest.raises(ValidationError):
             ScheduleEnvelopePrimitive.validate_parameters(
@@ -468,6 +522,20 @@ class TestWatermarkState:
         assert wm["persistence"] == "dpp"
         assert wm["dpp_name"] == "wm"
         assert wm["initial_value"] == "0"
+
+    def test_blank_dpp_name_treated_as_absent(self):
+        # Codex P3: a blank dpp_name must not be emitted as "".
+        frag = _fragment(
+            WatermarkStatePrimitive,
+            {
+                "enabled": True,
+                "field": "updated_at",
+                "kind": "timestamp",
+                "persistence": "dpp",
+                "dpp_name": "  ",
+            },
+        )
+        assert "dpp_name" not in frag["metadata"]["watermark"]
 
     def test_external_store_requires_store_ref(self):
         with pytest.raises(ValidationError):

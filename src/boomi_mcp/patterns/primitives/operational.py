@@ -94,6 +94,16 @@ class ScheduleEnvelopeParameters(BaseModel):
         default=None, ge=0, le=5, description="Optional retry-schedule maximum (0..5)"
     )
 
+    @field_validator("timezone", mode="before")
+    @classmethod
+    def _blank_to_none(cls, value: Any) -> Any:
+        # Treat a blank / whitespace-only timezone as absent so it is neither
+        # emitted as a meaningless "" nor mistaken for a real schedule field in
+        # manual mode (matches the issue #27 blank-binding convention).
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
     @model_validator(mode="after")
     def _check_mode(self) -> "ScheduleEnvelopeParameters":
         if self.mode == "manual":
@@ -187,6 +197,16 @@ class WatermarkStateParameters(BaseModel):
     dpp_name: Optional[str] = Field(default=None, description="Dynamic process property name for dpp persistence")
     initial_value: Optional[str] = Field(default=None, description="Opaque initial watermark value")
     store_ref: Optional[str] = Field(default=None, description="Opaque external-store reference")
+
+    @field_validator("dpp_name", mode="before")
+    @classmethod
+    def _blank_to_none(cls, value: Any) -> Any:
+        # Treat a blank / whitespace-only dpp_name as absent so it is not
+        # emitted as a meaningless "" into the watermark fragment (a blank
+        # property name would be a bad #29 assembly input).
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
     @model_validator(mode="after")
     def _check_state(self) -> "WatermarkStateParameters":
