@@ -203,10 +203,10 @@ class NamingConfig(BaseModel):
     component_prefix: str = Field(
         ...,
         description=(
-            "Prefix applied to every emitted Boomi component name once executable "
-            "builders ship. Recorded under spec.naming.component_prefix; the "
-            "contract emits zero components, so this is reserved for the "
-            "executable stage."
+            "Prefix applied to every emitted Boomi component's default display "
+            "name (e.g. '<prefix> DB Connection'). Recorded under "
+            "spec.naming.component_prefix. Per-role overrides via component_names "
+            "take precedence over the prefixed default."
         ),
     )
     component_names: Optional[Dict[str, str]] = Field(

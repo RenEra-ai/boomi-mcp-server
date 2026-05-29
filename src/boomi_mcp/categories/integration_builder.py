@@ -1980,6 +1980,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # references. Live Boomi requires the indirection — see
     # _synthesize_script_function_wrappers docstring.
     _synthesize_script_function_wrappers(spec)
+    # Wrapper synthesis can add components (a transform.function per script-route
+    # map), so keep an archetype-authored validation_rules.component_count in
+    # sync with the planned component list. Otherwise the dumped plan spec is
+    # internally inconsistent (count < len(components)) for script-route specs.
+    # No-op when the field is absent (e.g. hand-built specs) or already matches.
+    if isinstance(spec.validation_rules, dict) and "component_count" in spec.validation_rules:
+        spec.validation_rules["component_count"] = len(spec.components)
     conflict_policy = (config.get("conflict_policy") or "reuse").lower()
     if conflict_policy not in ("reuse", "clone", "fail"):
         return {
