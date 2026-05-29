@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...categories.components.builders.connector_builder import (
     DatabaseConnectorBuilder,
@@ -85,7 +85,14 @@ class DbConnectionCreate(BaseModel):
 
 
 class DbConnectionReuse(BaseModel):
-    """Reference an existing database connection without mutating it."""
+    """Reference an existing database connection without mutating it.
+
+    Resolution-by-``component_name`` trusts the in-spec ``connector_type``
+    marker and matches by component metadata type + name; it does not fetch
+    the live connector to verify the resolved component is actually a database
+    connector (live subtype verification is discovery, deferred to issue #47).
+    Prefer ``component_id`` when the exact connection is known.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -97,12 +104,24 @@ class DbConnectionReuse(BaseModel):
         default=None, description="Existing connector-settings display name (resolved to exactly one component)"
     )
 
+    @field_validator("component_id", "component_name", mode="before")
+    @classmethod
+    def _blank_to_none(cls, value: Any) -> Any:
+        # Treat a blank / whitespace-only binding as absent so it cannot pass
+        # the exactly-one check below and become a fake component id (a "  "
+        # id would otherwise survive as a truthy top-level component_id and be
+        # planned as reuse). Real values are stripped.
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
     @model_validator(mode="after")
     def _require_exactly_one_binding(self) -> "DbConnectionReuse":
         if bool(self.component_id) == bool(self.component_name):
             raise ValueError(
-                "reuse connection requires exactly one of component_id or "
-                "component_name"
+                "reuse connection requires exactly one non-blank component_id "
+                "or component_name"
             )
         return self
 
