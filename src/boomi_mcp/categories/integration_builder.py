@@ -1996,7 +1996,28 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
 
         planned_action = comp.action
 
-        if comp.action == "create":
+        # Issue #27: reference-only reuse. A component flagged
+        # config.reference_only=true models an EXISTING component the spec
+        # depends on (e.g. a shared database connection) without creating or
+        # mutating it. Independent of conflict_policy it resolves to a reuse,
+        # so the apply path exposes the existing id for $ref resolution and
+        # the builder-validation gate below never fires (a reused connection
+        # carries no driver/host/credential body to validate). Missing or
+        # ambiguous matches fail fast like an update with no resolvable target.
+        reference_only = isinstance(comp.config, dict) and bool(
+            comp.config.get("reference_only")
+        )
+
+        if reference_only and comp.action == "create":
+            # existing_id is already comp.component_id (explicit id) or the
+            # single resolved candidate's id from the block above.
+            if comp.component_id or len(candidates) == 1:
+                planned_action = "reuse"
+            elif len(candidates) == 0:
+                planned_action = "error_missing_target"
+            else:
+                planned_action = "error_ambiguous_match"
+        elif comp.action == "create":
             if len(candidates) > 1:
                 if conflict_policy == "clone":
                     # Clone creates a new component with a suffix — no targeting risk.
@@ -2939,10 +2960,21 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Supply an explicit component_id to disambiguate."
                 )
             elif step["planned_action"] == "error_missing_target":
-                errors.append(
-                    f"Component '{step.get('name') or step['key']}' has action=update "
-                    f"but no matching component was found and no component_id was provided."
-                )
+                # error_missing_target is reachable two ways: an update with no
+                # resolvable target, OR (issue #27) a reference_only create
+                # whose existing component couldn't be resolved by name. Tailor
+                # the message to the declared action so the cause is accurate.
+                if step.get("declared_action") == "create":
+                    errors.append(
+                        f"Component '{step.get('name') or step['key']}' is "
+                        f"reference_only but no existing component matched by "
+                        f"name and no component_id was provided."
+                    )
+                else:
+                    errors.append(
+                        f"Component '{step.get('name') or step['key']}' has action=update "
+                        f"but no matching component was found and no component_id was provided."
+                    )
             elif step["planned_action"] == "error_database_validation":
                 ve = step.get("validation_error") or {}
                 errors.append(
@@ -3015,8 +3047,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         existing_id = existing_ids.get(key)
         resolved_config = _resolve_dependency_tokens(comp.config, id_registry)
 
+        # Issue #27: a reference-only component always reuses the existing
+        # component, independent of conflict_policy — it describes a
+        # dependency on something that already exists, never a create or
+        # clone. The "fail"/"clone" branches below would otherwise misfire on
+        # a deliberately-reused connection.
+        reference_only = isinstance(comp.config, dict) and bool(
+            comp.config.get("reference_only")
+        )
+
         if comp.action == "create" and existing_id:
-            if conflict_policy == "reuse":
+            if reference_only or conflict_policy == "reuse":
                 results[key] = {
                     "status": "reused",
                     "component_id": existing_id,
