@@ -318,6 +318,49 @@ def test_load_synthesizes_refresh_token_on_valid_alias(monkeypatch, restore_oaut
     assert any("rt_recovery_load_ok" in m for m in _diag(caplog))
 
 
+def test_load_expired_metadata_falls_through_to_recovery(monkeypatch, restore_oauth_proxy, caplog):
+    # Frozen-TTL window: orig returns a present-but-EXPIRED RefreshToken. The
+    # MCP handler would reject it pre-exchange, so recovery must fall through
+    # and synthesize a fresh (non-expired) token from a valid alias instead.
+    OAuthProxy = restore_oauth_proxy
+    issuer = _FakeIssuer()
+    issuer.payloads["STALE"] = {"jti": "j", "client_id": "client-A", "token_use": "refresh", "exp": time.time() + 99}
+    expired_row = RefreshToken(token="STALE", client_id="client-A", scopes=["openid"],
+                               expires_at=int(time.time()) - 50)
+
+    async def orig_load(self, client, refresh_token):
+        return expired_row
+
+    backend = _mem_recovery_backend()
+    succ_exp = int(time.time()) + 4321
+    _run(backend.put_alias(_hash_token("STALE"), _alias(successor_expires_at=succ_exp), 600))
+    _apply(monkeypatch, OAuthProxy, backend, orig_load=orig_load)
+    self = _make_self(issuer)
+    with caplog.at_level(logging.INFO, logger="boomi.refresh_token_recovery"):
+        out = _run(OAuthProxy.load_refresh_token(self, CLIENT, "STALE"))
+    assert isinstance(out, RefreshToken)
+    assert out.expires_at == succ_exp  # fresh successor expiry, not the expired one
+    assert any("rt_recovery_expired_metadata" in m for m in _diag(caplog))
+
+
+def test_load_expired_metadata_returned_as_is_when_recovery_disabled(monkeypatch, restore_oauth_proxy):
+    # Recovery off: preserve prior behavior -- the expired row is returned
+    # unchanged (the handler then rejects it as expired).
+    OAuthProxy = restore_oauth_proxy
+    issuer = _FakeIssuer()
+    expired_row = RefreshToken(token="STALE", client_id="client-A", scopes=["openid"],
+                               expires_at=int(time.time()) - 50)
+
+    async def orig_load(self, client, refresh_token):
+        return expired_row
+
+    _apply(monkeypatch, OAuthProxy, None, orig_load=orig_load,
+           env={"BOOMI_RT_SLIDING_REFRESH_EXPIRY": "true"})  # sliding on so patch installs
+    self = _make_self(issuer)
+    out = _run(OAuthProxy.load_refresh_token(self, CLIENT, "STALE"))
+    assert out is expired_row
+
+
 def test_load_backend_error_degrades_to_none(monkeypatch, restore_oauth_proxy, caplog):
     OAuthProxy = restore_oauth_proxy
     issuer = _FakeIssuer()

@@ -461,7 +461,17 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
     async def patched_load_refresh_token(self, client, refresh_token):
         result = await orig_load_refresh_token(self, client, refresh_token)
         if result is not None:
-            return result
+            # A present-but-expired metadata row is the frozen-TTL window
+            # before Mongo physically sweeps it. If returned as-is, the MCP
+            # token handler rejects it ("refresh token has expired") BEFORE
+            # exchange_refresh_token runs (token.py refresh-grant path) -- so
+            # recovery would never fire for the exact stale-but-valid case it
+            # targets. When recovery is enabled, fall through to the alias path
+            # for that case; otherwise return unchanged (prior behavior).
+            expired = bool(result.expires_at and result.expires_at < time.time())
+            if not (recovery_enabled and expired):
+                return result
+            _log_rt_event("rt_recovery_expired_metadata", level="info")
         if not recovery_enabled:
             return None
         try:
