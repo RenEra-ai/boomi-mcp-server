@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from .components.builders.connector_builder import BuilderValidationError
 from ..patterns import (
     PatternError,
     PatternKind,
@@ -107,6 +108,25 @@ def build_from_archetype_action(
 
     try:
         spec = cls.emit_spec(params_obj)
+    except BuilderValidationError as exc:
+        # A primitive/builder rejected the assembly (e.g. UNSUPPORTED_REST_AUTH_MODE,
+        # UNSUPPORTED_TRANSFORM_ROUTE, SCRIPT_MAPPING_REF_REQUIRED). These errors
+        # are already structured and secret-safe — they name the offending field
+        # and never echo caller values — so surface them verbatim instead of the
+        # opaque ARCHETYPE_BUILD_FAILED envelope.
+        context: dict[str, Any] = {"archetype": name}
+        if exc.field:
+            context["field"] = exc.field
+        if exc.details:
+            context["details"] = exc.details
+        return PatternError(
+            error_code=exc.error_code or "ARCHETYPE_BUILD_VALIDATION_FAILED",
+            error=str(exc),
+            suggestion=exc.hint
+            or f"Adjust the {name} archetype parameters to satisfy the builder.",
+            retryable=False,
+            context=context,
+        ).to_dict()
     except Exception as exc:  # noqa: BLE001 — last-line defense; do not leak parameters
         return PatternError(
             error_code="ARCHETYPE_BUILD_FAILED",
