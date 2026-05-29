@@ -1,4 +1,6 @@
-"""Tests for the contract-only database_to_api_sync archetype (issues #21, #44).
+"""Tests for the database_to_api_sync archetype contract surface
+(issues #21, #44; executable assembly is exercised in
+test_database_to_api_sync_assembly.py per #29).
 
 Issue #44 (M2.1a) replaced the legacy ``transform.mappings`` /
 ``transform.payload_template`` / ``transform.script_slots`` surface with:
@@ -8,8 +10,9 @@ Issue #44 (M2.1a) replaced the legacy ``transform.mappings`` /
   * caller-supplied JSON profile tree under ``target.payload_profile``, and
   * discriminated typed transform operations under ``transform.operations``.
 
-The fixtures + tests below cover both the legacy contract guarantees (kept
-intact by issue #44) and the new typed schema surface.
+Issue #29 turned the archetype from contract-only into an executable assembly,
+so these tests now also assert the emitted component graph and the lax-contract
+/ strict-assembly boundaries (unsupported auth, mixed routes, etc.).
 """
 
 from __future__ import annotations

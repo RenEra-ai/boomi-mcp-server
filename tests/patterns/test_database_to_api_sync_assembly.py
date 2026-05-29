@@ -442,6 +442,33 @@ class TestPlanner:
             assert step.get("validation_error") in (None, {}), step
 
     @patch(_PAGINATE_TARGET)
+    def test_script_route_plan_component_count_stays_consistent(self, mock_pag):
+        """The planner injects a transform.function wrapper for a script-route
+        map, so the returned plan spec's validation_rules.component_count must
+        match the (now larger) component list — not the pre-synthesis count."""
+        mock_pag.return_value = []
+        payload = _minimal()
+        payload["transform"]["operations"] = [
+            {
+                "operation_type": "map_script",
+                "script_slot": "enrich",
+                "language": "groovy2",
+                "inputs": ["source_a"],
+                "outputs": ["Root/target_a"],
+                "script_body": "<<task-authored script body>>",
+            }
+        ]
+        emitted = _spec(payload)
+        # The archetype itself emits a self-consistent 9-component script spec.
+        assert emitted["validation_rules"]["component_count"] == len(emitted["components"]) == 9
+        plan = _build_plan(MagicMock(), {"integration_spec": emitted})
+        assert plan["_success"] is True, plan
+        planned = plan["integration_spec"]
+        # The planner added the transform.function wrapper, and the count tracks it.
+        assert any(c["type"] == "transform.function" for c in planned["components"])
+        assert planned["validation_rules"]["component_count"] == len(planned["components"]) == 10
+
+    @patch(_PAGINATE_TARGET)
     def test_requested_retry_dlq_do_not_reach_process_builder(self, mock_pag):
         """Even when the caller requests retry>1 + DLQ enabled, the emitted
         process keeps retry_count=0 / dlq disabled, so the plan succeeds and
