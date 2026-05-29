@@ -169,6 +169,38 @@ class PrimitivePattern(PatternBase):
         ...
 
     @classmethod
+    def emit_fragment(
+        cls,
+        context: PrimitiveBuildContext,
+        parameters: BaseModel,
+    ) -> Dict[str, Any]:
+        """Return a structured planning fragment for issue #29 assembly.
+
+        Default is an empty dict, so component-emitting primitives (issue #27)
+        stay source-compatible without overriding this method. Operation
+        primitives — schedule, watermark, error classifier, DLQ, run metadata —
+        override it to describe process/archetype intent *without* inventing
+        placeholder Boomi components.
+
+        The returned dict is a free-form fragment; recognized top-level keys
+        (all optional) are:
+
+          * ``components``    — list of ``IntegrationComponentSpec`` when the
+                                primitive also materializes real components
+                                (a target primitive may set both this and
+                                ``process_config``).
+          * ``process_config``— a process-component config fragment keyed by
+                                ``source`` / ``target`` / ``execution`` /
+                                ``reliability`` / ``transform``.
+          * ``depends_on``    — component keys the ``process_config`` references.
+          * ``metadata``      — primitive-specific planning metadata.
+
+        It is representation only: emitting a ``reliability`` fragment never
+        un-gates ``ProcessFlowBuilder``'s ``PROCESS_RETRY_UNVERIFIED`` check.
+        """
+        return {}
+
+    @classmethod
     def describe(cls) -> Dict[str, Any]:
         described = super().describe()
         described["input_contract"] = (

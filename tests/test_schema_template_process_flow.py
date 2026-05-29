@@ -95,12 +95,25 @@ def test_template_lists_optional_fields(template):
 def test_template_deferred_fields_lists_unimplemented_surface(template):
     """Codex review r3 P2: execution.* and reliability.on_failure were
     advertised as accepted optional fields but silently ignored by the
-    builder. They must instead be documented as deferred so callers can't
-    mistake them for working surface area."""
+    builder. They must stay documented as deferred so callers can't mistake
+    them for working surface area.
+
+    Issue #28 added primitives that PRODUCE these fields as process fragments,
+    but ProcessFlowBuilder still does not consume them — so they remain
+    deferred. `tracked_by` now points at the issue that will wire each field
+    into the executable process (#29 assembly; #51 verified Try/Catch)."""
     deferred = {entry["field"]: entry["tracked_by"] for entry in template["deferred_fields"]}
-    assert deferred.get("execution.trigger") == "#28"
-    assert deferred.get("execution.run_metadata") == "#28"
-    assert deferred.get("reliability.on_failure") == "#28"
+    assert deferred.get("execution.trigger") == "#29"
+    assert deferred.get("execution.run_metadata") == "#29"
+    assert deferred.get("reliability.on_failure") == "#51"
+
+    # Each deferred field names the issue-#28 primitive that produces it, so
+    # callers understand the fragment exists even though the process builder
+    # does not yet read it.
+    produced_by = {entry["field"]: entry.get("produced_by", "") for entry in template["deferred_fields"]}
+    assert "schedule_envelope" in produced_by["execution.trigger"]
+    assert "run_metadata" in produced_by["execution.run_metadata"]
+    assert "dlq_writer" in produced_by["reliability.on_failure"]
 
 
 def test_template_optional_fields_excludes_deferred(template):

@@ -4757,15 +4757,30 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.dlq",
             "reliability.dlq.mode",
         ],
-        # Codex review r3 P2: execution.* and reliability.on_failure are
-        # planned for issue #28 (run metadata + error handling). Listing
-        # them as optional_fields here would have been a lie — the builder
-        # silently ignored them. They are documented as deferred so callers
-        # know the surface area exists but is not yet wired.
+        # Issue #28 added primitives that PRODUCE these fields as process
+        # fragments (schedule_envelope, run_metadata, dlq_writer,
+        # error_classifier), but ProcessFlowBuilder still does NOT consume
+        # them — so they remain deferred, not optional. Promoting them to
+        # optional_fields would repeat the Codex r3 P2 "silently ignored"
+        # lie. `produced_by` names the issue-#28 primitive; `tracked_by`
+        # names the issue that will wire the field into the executable
+        # process (#29 assembly; #51 verified Try/Catch retry/DLQ emission).
         "deferred_fields": [
-            {"field": "execution.trigger", "tracked_by": "#28"},
-            {"field": "execution.run_metadata", "tracked_by": "#28"},
-            {"field": "reliability.on_failure", "tracked_by": "#28"},
+            {
+                "field": "execution.trigger",
+                "produced_by": "schedule_envelope primitive (#28)",
+                "tracked_by": "#29",
+            },
+            {
+                "field": "execution.run_metadata",
+                "produced_by": "run_metadata primitive (#28)",
+                "tracked_by": "#29",
+            },
+            {
+                "field": "reliability.on_failure",
+                "produced_by": "dlq_writer / error_classifier primitives (#28)",
+                "tracked_by": "#51",
+            },
         ],
         "supported_transform_modes": ["passthrough", "message", "map_ref"],
         "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
@@ -4795,8 +4810,11 @@ _PROCESS_FLOW_PROTOCOLS = {
         ],
         "notes": [
             "retry_count > 0 and dlq.mode != 'disabled' return PROCESS_RETRY_UNVERIFIED "
-            "for now; Try/Catch wrapper lands in a follow-up issue after live "
+            "for now; the verified Try/Catch wrapper lands in issue #51 after live "
             "Try/Catch XML is captured.",
+            "Issue #28 primitives (schedule_envelope, run_metadata, dlq_writer, "
+            "error_classifier) PRODUCE execution/reliability fragments, but "
+            "ProcessFlowBuilder does not yet consume them — see deferred_fields.",
             "Map components are referenced by id or $ref token only; map creation "
             "is tracked by issue #26.",
             "Schedule activation, deployment, and execution remain M3 scope.",
