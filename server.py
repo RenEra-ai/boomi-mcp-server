@@ -427,7 +427,9 @@ if not LOCAL_MODE:
     from consent_csp_patch import apply_consent_csp_patch
     from loopback_redirect_patch import apply_loopback_redirect_patch
     from refresh_token_grace_patch import apply_refresh_token_grace_patch
+    from refresh_token_recovery_patch import apply_refresh_token_recovery_patch
     from rt_grace_shared_backend import initialize_shared_grace_backend
+    from rt_recovery_backend import initialize_refresh_token_recovery_backend
     from token_cache_patch import apply_token_verifier_cache_patch
 
     apply_consent_csp_patch()
@@ -516,6 +518,26 @@ if not LOCAL_MODE:
                 f"[WARNING] GRACE_BACKEND_INIT_FAILED: {type(exc).__name__}: {exc} "
                 "-- falling back to per-process-only refresh-token grace"
             )
+
+        # Durable stale-token recovery: build the encrypted alias ledger
+        # (same MongoDB + MultiFernet as OAuth state). Degrade gracefully if
+        # initialization fails -- recovery simply stays off.
+        recovery_backend = None
+        try:
+            recovery_backend = initialize_refresh_token_recovery_backend(
+                mongodb_uri=mongodb_uri,
+                fernet=_fernet,
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade gracefully
+            print(
+                f"[WARNING] RT_RECOVERY_INIT_FAILED: {type(exc).__name__}: {exc} "
+                "-- durable stale-token recovery disabled"
+            )
+
+        # Apply the recovery + sliding-expiry patch BEFORE the grace patch so
+        # monkeypatch nesting is grace(recovery(fastmcp)): the 60s replay cache
+        # stays the OUTER fast path, recovery sits between it and real rotation.
+        apply_refresh_token_recovery_patch(recovery_backend=recovery_backend)
 
         # Apply the refresh-token grace patch now that _fernet (and thus
         # the optional shared backend) is ready.

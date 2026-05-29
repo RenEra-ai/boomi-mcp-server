@@ -237,6 +237,12 @@ tuning Google call volume.
 | `BOOMI_RT_GRACE_DISTRIBUTED_LOCK` | `false` | Opt-in Fix D.2 cross-instance singleflight via the `mcp-rt-inflight-locks` collection. | Set to `false` |
 | `BOOMI_RT_GRACE_LOCK_TTL_SECONDS` | `30` | Safety bound on Fix D.2 lock rows. A crashed leader auto-releases via the collection's TTL index. | — |
 | `BOOMI_RT_GRACE_LOCK_POLL_MS` | `100` | Fix D.2 follower polling interval against the shared cache. | — |
+| `BOOMI_RT_RECOVERY_ENABLED` | `true` | Durable recovery of stale-but-valid refresh JWTs whose storage rows were deleted (hours/days later), via the encrypted `mcp-rt-recovery` alias ledger. | Set to `false` |
+| `BOOMI_RT_RECOVERY_MAX_AGE_SECONDS` | `604800` (7d) | Max durable alias lifetime. Stale tokens older than this must re-authenticate. | — |
+| `BOOMI_RT_RECOVERY_COLLECTION` | `mcp-rt-recovery` | Alias-ledger collection name override; unlikely to need outside tests. | — |
+| `BOOMI_RT_RECOVERY_MAX_HOPS` | `16` | Max alias-chain depth walked when resolving a stale token to its latest live successor. | — |
+| `BOOMI_RT_SLIDING_REFRESH_EXPIRY` | `true` | When upstream omits `refresh_expires_in`, stamp the new FastMCP refresh token with a fresh sliding window (fixes FastMCP's frozen 30-day expiry). | Set to `false` |
+| `BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS` | `2592000` (30d) | Sliding FastMCP refresh-token lifetime used when upstream does not return `refresh_expires_in`. | — |
 
 ### New MongoDB collections
 
@@ -248,8 +254,18 @@ tuning Google call volume.
   across the fleet, auto-evicted via a TTL index on `expires_at` so a
   crashed leader instance does not deadlock subsequent refreshes
   longer than `BOOMI_RT_GRACE_LOCK_TTL_SECONDS`.
+- `mcp-rt-recovery` — durable stale-refresh-token recovery. Fernet-encrypted
+  alias ledger keyed by `sha256(old_refresh_token)`. Each row maps a rotated
+  token to its latest live successor (successor refresh-token hash + JTI +
+  upstream-token id). Stores only hashes/metadata — never a raw token. Rows
+  auto-evict via TTL bounded by `min(BOOMI_RT_RECOVERY_MAX_AGE_SECONDS,
+  successor_expires_at - now)`. The patch (`refresh_token_recovery_patch`) is
+  applied **inside** the grace cache; recovery mints a fresh access/refresh
+  pair and never replays an old cached `OAuthToken`. Watch
+  `RT_DIAG event=rt_recovery_hit` (a stale client recovered) and
+  `event=rt_recovery_miss` (alias resolved but successor no longer live).
 
-Both collections live in the same `boomi_mcp` database. Neither needs
+All three collections live in the same `boomi_mcp` database. None need
 explicit cleanup — they grow proportional to refresh-token rotation
 volume and auto-evict via TTL.
 
@@ -275,8 +291,11 @@ Recommended phases (matching `docs/plans/oauth_token_verifier_cache_plan.json`):
 
 Per-fix off-switches: set `BOOMI_TOKEN_CACHE_DISABLE=true`,
 `BOOMI_RT_GRACE_SHARED=false`, or `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=false`.
-Full rollback: `git revert <merge_commit>`. The two new MongoDB
-collections auto-evict via TTL; explicit cleanup is optional.
+For the durable recovery layer, set `BOOMI_RT_RECOVERY_ENABLED=false` (disables
+stale-token recovery) or `BOOMI_RT_SLIDING_REFRESH_EXPIRY=false` (restores
+FastMCP's fixed-window refresh expiry). Full rollback: `git revert
+<merge_commit>`. The new MongoDB collections (including `mcp-rt-recovery`)
+auto-evict via TTL; explicit cleanup is optional.
 
 ## Self-heal circuit-breaker alert (Fix C.2 safety)
 
@@ -545,3 +564,46 @@ instructions earlier in this runbook that direct you to set
 `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true` — the 2026-05-18 third-pass
 section, its rollout step, and its one-shot-enable example — are
 **superseded by this entry**.
+
+## Durable refresh-token recovery + Motor event-loop fix (2026-05-29)
+
+### Why
+
+Two follow-on issues remained after the 2026-05-22 Stage 1:
+
+1. **Stale-token gap.** The 60-second grace cache only covers immediate
+   replays. A client returning hours/days later with a still-valid FastMCP
+   refresh JWT whose `mcp-jti-mappings` + `mcp-refresh-tokens` rows were
+   already deleted (one-time-use rotation or TTL) got `invalid_grant` and had
+   to fully re-authenticate. Compounded by FastMCP's frozen 30-day refresh
+   expiry: the new refresh JWT got a fresh 30-day `exp`, but its JTI mapping /
+   metadata row TTL counted down to the original auth-code deadline.
+2. **The Motor loop-binding bug** that forced Fix D.2 off (above).
+
+### What changed
+
+- **Durable recovery** (`rt_recovery_backend.py` + `refresh_token_recovery_patch.py`):
+  an encrypted `mcp-rt-recovery` alias ledger lets a stale token resolve to its
+  latest live successor and mint a fresh access/refresh pair. Applied **inside**
+  the grace cache (`apply_refresh_token_recovery_patch` before
+  `apply_refresh_token_grace_patch` in `server.py`). Never replays a cached
+  `OAuthToken`. Cross-client use fails closed (client_id checked at load and
+  exchange). Backend failures degrade to the normal `invalid_grant`, never 500.
+- **Sliding refresh expiry**: the normal path pre-seeds
+  `upstream_token_set.refresh_token_expires_at = now + BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS`
+  before delegating to FastMCP, so FastMCP's own `refresh_ttl` slides. Upstream's
+  explicit `refresh_expires_in` always wins when present.
+- **Motor fix**: `rt_grace_shared_backend.initialize_shared_grace_backend` no
+  longer builds any client at startup. When `BOOMI_RT_GRACE_DISTRIBUTED_LOCK` is
+  enabled it stores only config (`lock_uri`/`lock_db_name`/`lock_collection_name`);
+  the async client (now pymongo's native `AsyncMongoClient`), collection, and TTL
+  index are built **lazily on the running serving loop** inside `try_claim_lock`.
+  This removes the "Future attached to a different loop" failure.
+
+### Deploy stance
+
+`BOOMI_RT_GRACE_DISTRIBUTED_LOCK` **stays pinned `false`** in `cloudbuild.yaml`
+and `k8s/deployment.yaml`. The lazy fix only makes enabling it *safe*; durable
+recovery works across replicas via the shared ledger without needing the lock,
+so there is no reason to flip it on as part of this change. The new recovery /
+sliding env vars are pinned to their defaults in `cloudbuild.yaml`.
