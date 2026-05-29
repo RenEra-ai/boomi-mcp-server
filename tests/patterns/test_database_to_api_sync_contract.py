@@ -441,10 +441,12 @@ def test_map_function_summary_surfaces_inputs_and_parameters():
     }
 
 
-def test_map_script_summary_surfaces_script_component_ref():
-    """Codex review r1 P2a: when map_script declares script_component_ref,
-    it must round-trip into the emitted spec so #41 can compile from the
-    spec metadata alone."""
+def test_map_script_script_component_ref_accepted_by_contract_rejected_at_assembly():
+    """The parameter contract accepts map_script.script_component_ref (it is a
+    valid contract field), but issue #29 cannot materialize the referenced
+    script component into the spec — the planned spec would carry a dangling
+    dependency. Assembly rejects it with a structured UNSUPPORTED_SCRIPT_
+    COMPONENT_REF, directing callers to inline script_body instead."""
     payload = _valid_minimal()
     payload["transform"]["operations"] = [
         {
@@ -453,23 +455,15 @@ def test_map_script_summary_surfaces_script_component_ref():
             "language": "groovy2",
             "inputs": ["source_a"],
             "outputs": ["Root/target_a"],
-            # Issue #29 assembles an executable script-route map, so the ref must
-            # be a '$ref:KEY' to an in-spec script component (literal IDs are
-            # rejected with SCRIPT_MAPPING_REF_REQUIRED).
             "script_component_ref": "$ref:enrich_row",
         },
     ]
+    # Parameter contract accepts the field.
+    DatabaseToApiSyncArchetype.validate_parameters(payload)
+    # Assembly rejects it.
     result = _build(payload)
-    assert result["_success"] is True, result
-    transform_flow = next(
-        f for f in result["integration_spec"]["flows"] if f["key"] == "transform"
-    )
-    op = transform_flow["operations"][0]
-    assert op["script_component_ref"] == "$ref:enrich_row"
-    # script_body wasn't supplied — the presence boolean reports False.
-    # The body itself never appears in the summary regardless.
-    assert op["script_body_present"] is False
-    assert "script_body" not in op
+    assert result["_success"] is False, result
+    assert result["error_code"] == "UNSUPPORTED_SCRIPT_COMPONENT_REF"
 
 
 def test_map_script_accepts_inline_script_body_after_41_ships():

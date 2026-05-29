@@ -295,6 +295,10 @@ class TestOperationalIntent:
             "field": "source_b",
             "kind": "timestamp",
             "persistence": "dpp",
+            # The contract has no dpp_name; a deterministic default is generated
+            # for #51 dynamic process-property wiring.
+            "dpp_name": "watermark_source_b",
+            "dpp_name_generated": True,
         }
         assert oi["execution"]["run_metadata"] == {"owner": "crm-team"}
         assert oi["expected_status_codes"] == [200, 202]
@@ -532,7 +536,12 @@ class TestNegativeAndSecret:
         assert result["_success"] is False
         assert result["error_code"] == "UNSUPPORTED_DB_AUTH_MODE"
 
-    def test_literal_script_ref_rejected(self):
+    @pytest.mark.parametrize("ref", ["literal-not-a-ref", "$ref:enrich_row"])
+    def test_script_component_ref_rejected(self, ref):
+        """Any script_component_ref (literal or $ref) is rejected: the archetype
+        cannot materialize the referenced component into the spec, so the plan
+        would carry a dangling dependency. Inline script_body is the supported
+        path."""
         payload = _minimal()
         payload["transform"]["operations"] = [
             {
@@ -541,12 +550,37 @@ class TestNegativeAndSecret:
                 "language": "groovy2",
                 "inputs": ["source_a"],
                 "outputs": ["Root/target_a"],
-                "script_component_ref": "literal-not-a-ref",
+                "script_component_ref": ref,
             }
         ]
         result = _build(payload)
         assert result["_success"] is False
-        assert result["error_code"] == "SCRIPT_MAPPING_REF_REQUIRED"
+        assert result["error_code"] == "UNSUPPORTED_SCRIPT_COMPONENT_REF"
+
+    def test_inline_script_body_spec_is_plannable(self):
+        """The supported map-script path (inline body) materializes the
+        script.mapping in-spec, so the emitted spec has no dangling dependency
+        and orders topologically."""
+        from boomi_mcp.categories.integration_builder import (
+            _normalize_to_spec,
+            _topological_order,
+        )
+
+        payload = _minimal()
+        payload["transform"]["operations"] = [
+            {
+                "operation_type": "map_script",
+                "script_slot": "enrich",
+                "language": "groovy2",
+                "inputs": ["source_a"],
+                "outputs": ["Root/target_a"],
+                "script_body": "<<task-authored script body>>",
+            }
+        ]
+        spec = _spec(payload)
+        normalized = _normalize_to_spec({"integration_spec": spec})
+        order = _topological_order(normalized)  # must not raise on a dangling ref
+        assert "main_process" in order
 
     def test_invalid_cron_returns_clean_structured_error(self):
         payload = _minimal()

@@ -1,10 +1,15 @@
-"""Issue #44: contract-only database_to_api_sync archetype (M2.1a).
+"""database_to_api_sync archetype (M2.1a contract + M2.9 executable assembly).
 
 Exposes a strict Pydantic parameter contract for a SQL Server source -> REST
-target sync. The archetype validates the schema and emits a non-executable
-IntegrationSpecV1 (zero components). Executable component emission is owned
-by later milestones; this file deliberately does not touch any builder,
-profile, or live Boomi account.
+target sync. Issue #29 turned this from contract-only output into an executable
+assembly: it now composes the shipped #27 (db_extract, field_map) and #28
+(rest_send_with_retry + operational) primitives into an executable
+IntegrationSpecV1 (DB source, JSON transform, REST target, structured process)
+suitable for build_integration(action='plan'). Every byte of XML is produced by
+the existing component builders through those primitives; this file emits JSON
+component specs only and never calls a live Boomi account. Process retry/DLQ,
+schedule activation, watermark update, and dynamic operation-property wiring
+remain represented as metadata only and are deferred (#51 / M3).
 
 M2.1a (issue #44) replaces the legacy ``transform.mappings`` /
 ``transform.payload_template`` / ``transform.script_slots`` surface with:
@@ -101,6 +106,12 @@ _MAIN_PROCESS_KEY = "main_process"
 # them. The error code mirrors RestClientConnectionBuilder's vocabulary.
 _REST_CREATE_AUTH_MAP = {"none": "NONE"}
 UNSUPPORTED_REST_AUTH_MODE = "UNSUPPORTED_REST_AUTH_MODE"
+
+# A map_script's script_component_ref points at a script component that the
+# archetype does not (and cannot) emit into the spec, so the planned spec would
+# carry a dangling dependency. M2 materializes scripts only via inline
+# script_body; external script-component reuse is deferred (#51).
+UNSUPPORTED_SCRIPT_COMPONENT_REF = "UNSUPPORTED_SCRIPT_COMPONENT_REF"
 
 
 # ---------------------------------------------------------------------------
@@ -1234,15 +1245,15 @@ class MapScriptTransformOperation(_BaseTransformOperation):
     script_body: Optional[str] = Field(
         default=None,
         description=(
-            "Caller-authored script source. The M2 archetype layer accepts "
-            "the field but does NOT auto-emit a script.mapping component "
-            "into the IntegrationSpec components list — the archetype "
-            "stays contract-only. After issue #41 r3, the emitted "
-            "operation summary round-trips the full body verbatim "
-            "(alongside ``script_body_present``) so downstream "
-            "build_integration / wrapper-synthesis tooling can materialise "
-            "the matching script.mapping component without re-reading the "
-            "original archetype payload."
+            "Caller-authored script source. Issue #29 materializes an inline "
+            "script_body into an in-spec script.mapping component (referenced "
+            "by the transform.map), so an inline body is the supported way to "
+            "route a map script through this archetype. The emitted operation "
+            "summary still round-trips the full body verbatim (alongside "
+            "``script_body_present``). script_component_ref (external reuse) is "
+            "rejected at assembly because the referenced component is not part "
+            "of the emitted spec — provide script_body instead (#51 owns "
+            "external script-component reuse)."
         ),
     )
 
@@ -2043,11 +2054,30 @@ def _build_field_map_params(
                 entry["parameters"] = dict(op.parameters)
             map_function.append(entry)
         elif isinstance(op, MapScriptTransformOperation):
+            # script_component_ref points at a script component the archetype
+            # cannot emit into this spec, so it would plan with a dangling
+            # dependency (build_integration would reject it). M2 materializes a
+            # map script only from an inline script_body (which field_map emits
+            # as an in-spec script.mapping). Reject the ref with a clear error
+            # instead of producing a non-plannable "executable" spec.
+            if op.script_component_ref is not None:
+                raise BuilderValidationError(
+                    "map_script.script_component_ref is not supported by this "
+                    "archetype — the referenced script component is not part of "
+                    "the emitted spec, so the plan cannot resolve it.",
+                    error_code=UNSUPPORTED_SCRIPT_COMPONENT_REF,
+                    field="transform.operations.script_component_ref",
+                    hint=(
+                        "Provide the script inline via map_script.script_body so "
+                        "the archetype materializes the script.mapping component "
+                        "in the spec. External script-component reuse is deferred "
+                        "to #51."
+                    ),
+                )
             # The contract's inputs are source field names and outputs are
             # target leaf paths; field_map's MapScriptOp needs named ports, so
             # derive input_name from the field name and output_name from the
-            # leaf segment. field_map enforces exactly-one of script_body /
-            # script_component_ref and rejects literal (non-$ref) refs.
+            # leaf segment. field_map enforces that script_body is present.
             script_entry: Dict[str, Any] = {
                 "inputs": [{"source_path": name, "input_name": name} for name in op.inputs],
                 "outputs": [
@@ -2058,8 +2088,6 @@ def _build_field_map_params(
             }
             if op.script_body is not None:
                 script_entry["script_body"] = op.script_body
-            if op.script_component_ref is not None:
-                script_entry["script_component_ref"] = op.script_component_ref
             map_script.append(script_entry)
 
     # Role-keyed overrides (e.g. 'target_profile', 'transform_map', 'script'),
@@ -2234,6 +2262,18 @@ def _build_main_process(
     )
 
 
+def _default_dpp_name(field: str) -> str:
+    """Deterministic default Dynamic Process Property name for a DPP watermark.
+
+    The #29 contract carries no caller dpp_name, but #51 needs a stable property
+    name to wire the watermark. Derived from the tracked field (sanitized to an
+    identifier-safe token); marked ``dpp_name_generated`` in the metadata so a
+    follow-up can honor or override it.
+    """
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", field).strip("_") or "field"
+    return f"watermark_{safe}"
+
+
 def _watermark_intent(
     watermark: "Optional[Watermark]", context: PrimitiveBuildContext
 ) -> Dict[str, Any]:
@@ -2255,12 +2295,17 @@ def _watermark_intent(
                 "field": watermark.field,
                 "kind": watermark.kind,
                 "persistence": "dpp",
+                # The contract has no dpp_name; supply a deterministic default so
+                # #51 has a property name to wire (flagged generated below).
+                "dpp_name": _default_dpp_name(watermark.field),
                 "initial_value": watermark.initial_value,
             },
             field="execution.watermark",
         )
         fragment = WatermarkStatePrimitive.emit_fragment(context, params)
-        return fragment["metadata"]["watermark"]
+        intent = fragment["metadata"]["watermark"]
+        intent["dpp_name_generated"] = True
+        return intent
 
     # external_store: the contract carries no store_ref, so the primitive cannot
     # validate it. Represent the intent as metadata; store wiring is deferred.
