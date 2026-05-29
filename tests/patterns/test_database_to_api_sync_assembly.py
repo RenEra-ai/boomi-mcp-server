@@ -248,15 +248,31 @@ class TestAssembly:
         assert by_key["source_db_read_profile"]["config"]["folder_name"] == "Integrations/CRM/Sync"
         assert by_key["main_process"]["config"]["folder_name"] == "Integrations/CRM/Sync"
 
-    def test_component_name_overrides_apply(self):
+    def test_component_name_overrides_apply_by_role_key(self):
+        # The public schema documents component_names as role-keyed.
         payload = _minimal()
         payload["naming"]["component_names"] = {
-            "source_db_connection": "Custom DB Conn",
-            "main_process": "Custom Process",
+            "db_connection": "Custom DB Conn",
+            "transform_map": "Custom Map",
+            "rest_connection": "Custom REST Conn",
+            "process": "Custom Process",
         }
         by_key = _by_key(_spec(payload))
         assert by_key["source_db_connection"]["name"] == "Custom DB Conn"
+        assert by_key["transform_transform_map"]["name"] == "Custom Map"
+        assert by_key["target_rest_connection"]["name"] == "Custom REST Conn"
         assert by_key["main_process"]["name"] == "Custom Process"
+
+    def test_component_name_overrides_apply_by_emitted_key_fallback(self):
+        # The prefixed emitted key is also honored as a fallback.
+        payload = _minimal()
+        payload["naming"]["component_names"] = {
+            "source_db_connection": "Emitted-Key DB Conn",
+            "main_process": "Emitted-Key Process",
+        }
+        by_key = _by_key(_spec(payload))
+        assert by_key["source_db_connection"]["name"] == "Emitted-Key DB Conn"
+        assert by_key["main_process"]["name"] == "Emitted-Key Process"
 
 
 # ---------------------------------------------------------------------------
@@ -298,16 +314,39 @@ class TestOperationalIntent:
 
     def test_watermark_query_param_is_intent_not_static(self):
         """A watermark-sourced query parameter must NOT be emitted as a static
-        REST operation query parameter (dynamic operation-property wiring is
-        deferred to #51)."""
-        rest_op = _by_key(_spec(_full_reuse()))["target_rest_operation"]
+        REST operation query parameter, but its name must be preserved as
+        operational intent (dynamic operation-property wiring is deferred to
+        #51) — it must not be silently dropped."""
+        spec = _spec(_full_reuse())
+        rest_op = _by_key(spec)["target_rest_operation"]
         assert "since" not in (rest_op["config"].get("query_parameters") or {})
+        oi = spec["validation_rules"]["operational_intent"]
+        wqp = oi["watermark_query_parameters"]
+        assert {p["name"] for p in wqp} == {"since"}
+        assert all(p["bound_to"] == "watermark" for p in wqp)
+        assert all(p["deferred_to"] == "#51" for p in wqp)
 
     def test_dlq_address_not_echoed(self):
         """The DLQ target address (caller-specific) must never appear in the
         emitted spec — only the routing kind is recorded."""
         result = _build(_full_reuse())
         assert "<<dlq queue address>>" not in json.dumps(result)
+
+    def test_bind_parameter_typing_preserved_as_deferred_intent(self):
+        """The Select read profile only carries name + mappability, so a bind
+        parameter's sql_type / non-default direction is preserved as deferred
+        intent rather than silently dropped."""
+        payload = _minimal()
+        payload["source"]["read_operation"]["parameters"] = [
+            {"name": "p_since", "direction": "in", "sql_type": "TIMESTAMP"},
+            {"name": "p_out", "direction": "out"},
+        ]
+        oi = _spec(payload)["validation_rules"]["operational_intent"]
+        typed = oi["deferred"]["read_operation"]["bind_parameter_typing"]
+        by_name = {p["name"]: p for p in typed}
+        assert by_name["p_since"]["sql_type"] == "TIMESTAMP"
+        assert by_name["p_since"]["direction"] == "in"
+        assert by_name["p_out"]["direction"] == "out"
 
 
 # ---------------------------------------------------------------------------

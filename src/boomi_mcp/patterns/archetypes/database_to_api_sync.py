@@ -57,6 +57,7 @@ from ..primitives._helpers import (
     ROLE_DB_READ_PROFILE,
     ROLE_REST_CONNECTION,
     ROLE_REST_OPERATION,
+    ROLE_SCRIPT,
     ROLE_TARGET_PROFILE,
     ROLE_TRANSFORM_MAP,
     primitive_component_key,
@@ -1901,12 +1902,20 @@ def _coerce_primitive_params(model_cls, data: Dict[str, Any], *, field: str):
 
 
 def _component_names(naming: "NamingConfig") -> Dict[str, str]:
-    """Caller component-name overrides, keyed by emitted component key."""
+    """Caller component-name overrides.
+
+    Keyed by component role per the public schema (``db_connection``,
+    ``db_read_profile``, ``db_get_operation``, ``target_profile``,
+    ``transform_map``, ``script``, ``rest_connection``, ``rest_operation``,
+    ``process``). The prefixed emitted key (e.g. ``source_db_connection``) is
+    also honored as a fallback.
+    """
     return dict(naming.component_names or {})
 
 
 def _named(overrides: Dict[str, str], *keys: str) -> Optional[str]:
-    """First non-blank override among ``keys`` (emitted component keys)."""
+    """First non-blank override among ``keys`` (role key first, then the
+    prefixed emitted key as a fallback)."""
     for key in keys:
         value = overrides.get(key)
         if isinstance(value, str) and value.strip():
@@ -1971,14 +1980,22 @@ def _build_db_extract_params(
         operation["max_rows"] = read.max_rows
     # fetch_size / link_element have no DB Get operation builder field — deferred.
 
+    # Overrides are keyed by the documented component role (e.g. 'db_connection');
+    # the prefixed emitted key ('source_db_connection') is accepted as a fallback.
     component_names: Dict[str, str] = {}
-    conn_name = _named(overrides, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_CONNECTION))
+    conn_name = _named(
+        overrides, ROLE_DB_CONNECTION, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_CONNECTION)
+    )
     if conn_name:
         component_names["connection"] = conn_name
-    read_name = _named(overrides, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_READ_PROFILE))
+    read_name = _named(
+        overrides, ROLE_DB_READ_PROFILE, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_READ_PROFILE)
+    )
     if read_name:
         component_names["read_profile"] = read_name
-    op_name = _named(overrides, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_GET_OPERATION))
+    op_name = _named(
+        overrides, ROLE_DB_GET_OPERATION, primitive_component_key(_SOURCE_PREFIX, ROLE_DB_GET_OPERATION)
+    )
     if op_name:
         component_names["get_operation"] = op_name
 
@@ -2045,18 +2062,20 @@ def _build_field_map_params(
                 script_entry["script_component_ref"] = op.script_component_ref
             map_script.append(script_entry)
 
+    # Role-keyed overrides (e.g. 'target_profile', 'transform_map', 'script'),
+    # with the prefixed emitted key accepted as a fallback.
     component_names: Dict[str, str] = {}
     target_profile_name = _named(
-        overrides, primitive_component_key(_TRANSFORM_PREFIX, ROLE_TARGET_PROFILE)
+        overrides, ROLE_TARGET_PROFILE, primitive_component_key(_TRANSFORM_PREFIX, ROLE_TARGET_PROFILE)
     )
     if target_profile_name:
         component_names["target_profile"] = target_profile_name
     map_name = _named(
-        overrides, primitive_component_key(_TRANSFORM_PREFIX, ROLE_TRANSFORM_MAP)
+        overrides, ROLE_TRANSFORM_MAP, primitive_component_key(_TRANSFORM_PREFIX, ROLE_TRANSFORM_MAP)
     )
     if map_name:
         component_names["transform_map"] = map_name
-    script_prefix = _named(overrides, f"{_TRANSFORM_PREFIX}_script")
+    script_prefix = _named(overrides, ROLE_SCRIPT, f"{_TRANSFORM_PREFIX}_{ROLE_SCRIPT}")
     if script_prefix:
         component_names["script_prefix"] = script_prefix
 
@@ -2135,11 +2154,17 @@ def _build_rest_send_params(
     if literal_qp:
         operation["query_parameters"] = literal_qp
 
+    # Role-keyed overrides (e.g. 'rest_connection', 'rest_operation'), with the
+    # prefixed emitted key accepted as a fallback.
     component_names: Dict[str, str] = {}
-    conn_name = _named(overrides, primitive_component_key(_TARGET_PREFIX, ROLE_REST_CONNECTION))
+    conn_name = _named(
+        overrides, ROLE_REST_CONNECTION, primitive_component_key(_TARGET_PREFIX, ROLE_REST_CONNECTION)
+    )
     if conn_name:
         component_names["connection"] = conn_name
-    op_name = _named(overrides, primitive_component_key(_TARGET_PREFIX, ROLE_REST_OPERATION))
+    op_name = _named(
+        overrides, ROLE_REST_OPERATION, primitive_component_key(_TARGET_PREFIX, ROLE_REST_OPERATION)
+    )
     if op_name:
         component_names["operation"] = op_name
 
@@ -2168,7 +2193,7 @@ def _build_main_process(
     rest_op_key = primitive_component_key(_TARGET_PREFIX, ROLE_REST_OPERATION)
 
     process_name = (
-        _named(overrides, _MAIN_PROCESS_KEY)
+        _named(overrides, "process", _MAIN_PROCESS_KEY)
         or f"{naming.component_prefix} DB to API Sync"
     )
 
@@ -2276,6 +2301,18 @@ def _deferred_intent(parameters: "DatabaseToApiSyncParameters") -> Dict[str, Any
         read_deferred["fetch_size"] = "metadata-only (no DB Get operation builder field in M2)"
     if read.link_element is not None:
         read_deferred["link_element"] = "metadata-only (no DB Get operation builder field in M2)"
+    # The Select read profile only carries name + mappability; sql_type and a
+    # non-default ('out') direction have no builder field, so the caller's
+    # typing intent is preserved here rather than silently dropped. Bind
+    # parameter names/types are SQL identifiers (not credentials), consistent
+    # with how result-field names already surface in the contract flow summary.
+    typed_parameters = [
+        {"name": p.name, "sql_type": p.sql_type, "direction": p.direction}
+        for p in (read.parameters or [])
+        if p.sql_type is not None or p.direction != "in"
+    ]
+    if typed_parameters:
+        read_deferred["bind_parameter_typing"] = typed_parameters
     if read_deferred:
         deferred["read_operation"] = read_deferred
     tbind = parameters.target.binding
@@ -2406,8 +2443,23 @@ def _build_operational_intent(
         reliability_intent["dlq_requested"] = dlq_requested
     intent["reliability"] = reliability_intent
 
-    # --- expected status codes + deferred fields ---
+    # --- expected status codes ---
     intent["expected_status_codes"] = list(send.expected_status_codes)
+
+    # --- watermark-sourced query parameters (metadata only) ---
+    # Watermark-bound query parameters are NOT emitted as static REST operation
+    # query parameters; they need dynamic operation-property wiring (#51). Their
+    # names are preserved here so the caller's intent is not lost between
+    # build_from_archetype and the #51 follow-up.
+    watermark_query_parameters = [
+        {"name": qp.name, "bound_to": "watermark", "deferred_to": "#51"}
+        for qp in send.query_parameters
+        if qp.value_source == "watermark"
+    ]
+    if watermark_query_parameters:
+        intent["watermark_query_parameters"] = watermark_query_parameters
+
+    # --- deferred fields ---
     deferred = _deferred_intent(parameters)
     if deferred:
         intent["deferred"] = deferred
