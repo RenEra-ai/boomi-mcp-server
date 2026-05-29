@@ -291,7 +291,34 @@ BOOMI_RT_GRACE_DISTRIBUTED_LOCK     # default false. Opt-in cross-instance
                                     # orig_exchange calls within ms.
 BOOMI_RT_GRACE_LOCK_TTL_SECONDS     # default 30. Auto-release safety bound.
 BOOMI_RT_GRACE_LOCK_POLL_MS         # default 100. Follower poll interval.
+
+BOOMI_RT_RECOVERY_ENABLED           # default true. Durable recovery of stale
+                                    # refresh JWTs that still verify but whose
+                                    # storage rows were deleted (hours/days
+                                    # later). Uses an encrypted alias ledger
+                                    # (mcp-rt-recovery) to mint fresh tokens.
+BOOMI_RT_RECOVERY_MAX_AGE_SECONDS   # default 604800 (7d). Max durable alias
+                                    # lifetime; older stale tokens must re-auth.
+BOOMI_RT_RECOVERY_COLLECTION        # default mcp-rt-recovery.
+BOOMI_RT_RECOVERY_MAX_HOPS          # default 16. Max alias-chain depth walked.
+BOOMI_RT_SLIDING_REFRESH_EXPIRY     # default true. When upstream omits
+                                    # refresh_expires_in, stamp the new FastMCP
+                                    # refresh token with a fresh sliding window
+                                    # (fixes the frozen 30-day expiry).
+BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS # default 2592000 (30d). Sliding lifetime.
 ```
+
+The durable recovery layer (`refresh_token_recovery_patch`) is applied
+**inside** the 60-second grace cache: the grace cache still serves immediate
+replays, recovery handles hours/days-later stale tokens, and only then does the
+real FastMCP rotation run. Recovery never replays an old cached access token —
+it always mints a fresh access/refresh pair. Diagnostic events (logger
+`boomi.refresh_token_recovery`): `RT_DIAG event=rt_recovery_hit` (a stale client
+recovered) and `event=rt_recovery_miss` (an alias resolved but its successor
+token is no longer live). To roll back, set `BOOMI_RT_RECOVERY_ENABLED=false`
+(disables recovery) or `BOOMI_RT_SLIDING_REFRESH_EXPIRY=false` (restores
+FastMCP's fixed-window behavior); `mcp-rt-recovery` entries expire via TTL, so
+no data migration is needed.
 
 #### User Credentials Storage
 

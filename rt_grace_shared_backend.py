@@ -29,6 +29,7 @@ caller falls back to PR #33's per-process-only behavior).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any, Optional
@@ -37,6 +38,19 @@ logger = logging.getLogger("boomi.rt_grace_shared")
 
 DEFAULT_COLLECTION = "mcp-rt-grace"
 DEFAULT_LOCK_COLLECTION = "mcp-rt-inflight-locks"
+
+
+def _default_lock_client_factory(mongodb_uri: str):
+    """Build the async MongoDB client used for the distributed lock.
+
+    Uses pymongo's native ``AsyncMongoClient`` (4.9+) rather than Motor: the
+    native client does not carry Motor's event-loop-binding footguns, so it can
+    be constructed lazily on the running serving loop. Module-level so tests can
+    monkeypatch it with a fake (no real Mongo).
+    """
+    from pymongo import AsyncMongoClient
+
+    return AsyncMongoClient(mongodb_uri)
 
 
 class SharedGraceBackend:
@@ -52,14 +66,34 @@ class SharedGraceBackend:
     on write are logged WARNING and swallowed (the in-process L1 cache still
     serves the local caller).
 
-    The optional `lock_collection` argument is a motor collection (raw
-    MongoDB client) used by `try_claim_lock`/`release_lock` for atomic
-    insert-or-fail semantics. When None, lock methods raise — callers
-    must check `supports_locks` before invoking them. Locks are only
-    needed when Fix D.2 is enabled (env BOOMI_RT_GRACE_DISTRIBUTED_LOCK).
+    Distributed locking (Fix D.2) is configured one of two ways:
+
+    * `lock_collection` — a ready async collection (raw MongoDB client),
+      used directly. This back-compat path is mainly for tests that inject
+      a fake collection.
+    * `lock_uri` / `lock_db_name` / `lock_collection_name` — lazy config.
+      The async client + collection + TTL index are built on FIRST USE inside
+      `try_claim_lock`/`release_lock`, on the running serving event loop. This
+      avoids binding a client to the wrong/closed loop at startup (the bug this
+      module previously had with a startup-time AsyncIOMotorClient). An
+      optional `lock_client_factory(uri)` overrides the default client builder
+      (tests inject a fake).
+
+    When neither is configured, lock methods raise — callers must check
+    `supports_locks` first. Locks are only needed when Fix D.2 is enabled
+    (env BOOMI_RT_GRACE_DISTRIBUTED_LOCK).
     """
 
-    def __init__(self, key_value_store, lock_collection=None) -> None:
+    def __init__(
+        self,
+        key_value_store,
+        lock_collection=None,
+        *,
+        lock_uri: Optional[str] = None,
+        lock_db_name: Optional[str] = None,
+        lock_collection_name: Optional[str] = None,
+        lock_client_factory=None,
+    ) -> None:
         # Deferred import so this module can be imported without the
         # encryption stack present (tests can pass in any AsyncKeyValue).
         from key_value.aio.errors import DecryptionError, DeserializationError
@@ -67,10 +101,56 @@ class SharedGraceBackend:
         self._store = key_value_store
         self._read_swallowed = (DecryptionError, DeserializationError)
         self._lock_collection = lock_collection
+        self._lock_uri = lock_uri
+        self._lock_db_name = lock_db_name
+        self._lock_collection_name = lock_collection_name
+        self._lock_client_factory = lock_client_factory
+        self._lock_init_lock: Optional[asyncio.Lock] = None
 
     @property
     def supports_locks(self) -> bool:
-        return self._lock_collection is not None
+        return self._lock_collection is not None or self._lock_uri is not None
+
+    async def _ensure_lock_collection(self):
+        """Return the lock collection, lazily building it on the running loop.
+
+        Builds the async client + collection + TTL index exactly once, on first
+        use, single-flighted by an asyncio.Lock created on the running loop.
+        Index-creation failures are logged and tolerated (slower TTL reap, not a
+        crash). A directly-injected `lock_collection` is returned as-is (no index
+        creation — preserves the test/back-compat path).
+        """
+        if self._lock_collection is not None:
+            return self._lock_collection
+        if self._lock_uri is None:
+            raise RuntimeError(
+                "Distributed lock requested but SharedGraceBackend has no lock "
+                "configuration. Enable Fix D.2 via BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true."
+            )
+        if self._lock_init_lock is None:
+            # asyncio.Lock() creation is synchronous; no await between the None
+            # check and assignment, so this is race-free under cooperative
+            # single-threaded asyncio.
+            self._lock_init_lock = asyncio.Lock()
+        async with self._lock_init_lock:
+            if self._lock_collection is None:
+                factory = self._lock_client_factory or _default_lock_client_factory
+                client = factory(self._lock_uri)
+                coll = client[self._lock_db_name][self._lock_collection_name]
+                # TTL index so crashed leaders auto-release. expireAfterSeconds=0
+                # means "expire when expires_at is in the past". Best-effort.
+                try:
+                    await coll.create_index(
+                        "expires_at", expireAfterSeconds=0, background=True
+                    )
+                except Exception as exc:  # noqa: BLE001 — degrade, don't crash
+                    logger.warning(
+                        "lazy lock TTL index creation failed (%s: %s); proceeding",
+                        type(exc).__name__,
+                        exc,
+                    )
+                self._lock_collection = coll
+        return self._lock_collection
 
     async def get(self, key: str) -> Optional[dict[str, Any]]:
         try:
@@ -131,15 +211,25 @@ class SharedGraceBackend:
         `expires_at`, so a crashed leader auto-releases after at most
         ttl_seconds + one Mongo TTL-sweep cycle.
         """
-        if self._lock_collection is None:
+        if not self.supports_locks:
             raise RuntimeError(
                 "try_claim_lock called but SharedGraceBackend has no lock_collection. "
                 "Enable Fix D.2 via BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true."
             )
+        try:
+            lock_collection = await self._ensure_lock_collection()
+        except Exception as exc:  # noqa: BLE001 — degrade to "no lock held"
+            logger.warning(
+                "lock collection init failed for key=%s (%s: %s); degrading to no-lock",
+                key[:16] + "..." if key and len(key) > 16 else key,
+                type(exc).__name__,
+                exc,
+            )
+            return True
         from datetime import datetime, timedelta, timezone
         from pymongo.errors import DuplicateKeyError
         try:
-            await self._lock_collection.insert_one({
+            await lock_collection.insert_one({
                 "_id": key,
                 "instance": instance,
                 "expires_at": datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds),
@@ -169,10 +259,14 @@ class SharedGraceBackend:
         ambiguous insert failure (the degrade-to-no-lock fallthrough):
         the non-owner caller would otherwise unlock a real owner.
         """
-        if self._lock_collection is None:
+        if not self.supports_locks:
             return
         try:
-            await self._lock_collection.delete_one(
+            lock_collection = await self._ensure_lock_collection()
+        except Exception:  # noqa: BLE001 — nothing to release if init fails
+            return
+        try:
+            await lock_collection.delete_one(
                 {"_id": key, "instance": instance}
             )
         except Exception as exc:  # noqa: BLE001
@@ -251,46 +345,26 @@ def initialize_shared_grace_backend(
     )
     encrypted = FernetEncryptionWrapper(key_value=mongo_store, fernet=fernet)
 
-    lock_collection = None
+    lock_kwargs: dict[str, Any] = {}
     if distributed_lock_enabled:
-        # Fix D.2: stand up a raw motor collection for atomic upsert-as-lock
-        # semantics that the key_value abstraction doesn't expose. Best
-        # effort -- if motor can't be imported or the index can't be
-        # created, log WARNING and downgrade to grace-cache-only.
-        try:
-            from motor.motor_asyncio import AsyncIOMotorClient
-            client = AsyncIOMotorClient(mongodb_uri)
-            db = client[db_name]
-            lock_collection = db[DEFAULT_LOCK_COLLECTION]
-            # Ensure TTL index on expires_at so crashed leaders auto-release.
-            # expireAfterSeconds=0 means "expire when expires_at is in the past".
-            import asyncio as _asyncio
-            try:
-                _asyncio.get_event_loop().run_until_complete(
-                    lock_collection.create_index(
-                        "expires_at", expireAfterSeconds=0, background=True
-                    )
-                )
-            except RuntimeError:
-                # No running event loop at startup; the index is created
-                # opportunistically on the first lock attempt instead.
-                pass
-            logger.info(
-                "Distributed grace lock ENABLED (collection=%s)",
-                DEFAULT_LOCK_COLLECTION,
-            )
-        except Exception as exc:  # noqa: BLE001 — degrade gracefully
-            logger.warning(
-                "Distributed grace lock init failed (%s: %s); "
-                "falling back to L2-cache-only",
-                type(exc).__name__,
-                exc,
-            )
-            lock_collection = None
+        # Fix D.2: configure the distributed lock LAZILY. The async client +
+        # collection + TTL index are built on first use inside try_claim_lock,
+        # on the running serving event loop -- never at startup, which would
+        # bind the client to the wrong/closed loop ("Future attached to a
+        # different loop"). Only inert config strings are stored here.
+        lock_kwargs = dict(
+            lock_uri=mongodb_uri,
+            lock_db_name=db_name,
+            lock_collection_name=DEFAULT_LOCK_COLLECTION,
+        )
+        logger.info(
+            "Distributed grace lock ENABLED (lazy init; collection=%s)",
+            DEFAULT_LOCK_COLLECTION,
+        )
     else:
         logger.info("Distributed grace lock DISABLED")
 
-    backend = SharedGraceBackend(encrypted, lock_collection=lock_collection)
+    backend = SharedGraceBackend(encrypted, **lock_kwargs)
     logger.info(
         "Shared grace cache backend ENABLED (collection=%s, encryption=fernet)",
         collection,
