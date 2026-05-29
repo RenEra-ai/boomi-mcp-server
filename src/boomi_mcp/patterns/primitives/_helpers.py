@@ -13,10 +13,12 @@ No Boomi API calls. No XML emission. No SQL / payload / mapping templates.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, Iterable, List, Optional
 
 from ...categories.components.builders.connector_builder import (
     BuilderValidationError,
+    DatabaseConnectorBuilder,
+    RestClientOperationBuilder,
 )
 
 _REF_PREFIX = "$ref:"
@@ -32,11 +34,24 @@ ROLE_TARGET_PROFILE = "target_profile"
 ROLE_TRANSFORM_MAP = "transform_map"
 ROLE_SCRIPT = "script"
 
+# Issue #28 — REST target component roles. The operational primitives
+# (schedule / watermark / dlq / error classifier / run metadata) emit process
+# fragments rather than components, so they need no component-key roles.
+ROLE_REST_CONNECTION = "rest_connection"
+ROLE_REST_OPERATION = "rest_operation"
+
 
 # Error code raised when a source field data type has no script.mapping input
 # equivalent. Lives here (not in profile_generation) because the bridge is a
 # primitive-layer concern.
 UNSUPPORTED_SCRIPT_INPUT_TYPE = "UNSUPPORTED_SCRIPT_INPUT_TYPE"
+
+# Issue #28 error codes for operational-primitive parameter validation. These
+# are primitive-layer concerns (no builder owns them) so they live here.
+INVALID_STATUS_CODE = "INVALID_STATUS_CODE"
+STATUS_CODE_OVERLAP = "STATUS_CODE_OVERLAP"
+SECRET_SHAPED_KEY = "SECRET_SHAPED_KEY"
+SECRET_SHAPED_VALUE = "SECRET_SHAPED_VALUE"
 
 
 # Source (DB read profile) data type -> script.mapping <Input> data type.
@@ -136,3 +151,189 @@ def raise_for_builder_error(error: Optional[BuilderValidationError]) -> None:
     """
     if error is not None:
         raise error
+
+
+def nonblank_str(*values: Any) -> Optional[str]:
+    """Return the first stripped non-blank string among ``values``, else None.
+
+    Mirrors ``integration_builder._first_nonblank_str`` / the issue #27
+    ``_blank_to_none`` reuse behavior so a ``"  "`` binding can never survive
+    as a truthy-but-meaningless component id or lookup name.
+    """
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def validate_status_codes(
+    codes: Iterable[Any], field: str
+) -> List[int]:
+    """Validate one HTTP-status-code set; return it normalized to a list.
+
+    Each entry must be a real ``int`` (``bool`` is rejected — ``True``/``False``
+    are ints in Python but never status codes), in the 100..599 range, and
+    unique within the set. Cross-set overlap is checked separately by
+    :func:`reject_status_code_overlap`. Raises ``BuilderValidationError`` so the
+    primitive surfaces the same structured-error envelope as the builders.
+    """
+    seen: set[int] = set()
+    result: List[int] = []
+    for code in codes:
+        if isinstance(code, bool) or not isinstance(code, int):
+            raise BuilderValidationError(
+                f"{field} entries must be integer HTTP status codes, got "
+                f"{type(code).__name__}",
+                error_code=INVALID_STATUS_CODE,
+                field=field,
+                hint="Use integers in the 100..599 range (e.g. 503).",
+                details={"offending_type": type(code).__name__},
+            )
+        if not (100 <= code <= 599):
+            raise BuilderValidationError(
+                f"{field} entry {code} is outside the HTTP status range",
+                error_code=INVALID_STATUS_CODE,
+                field=field,
+                hint="HTTP status codes are 100..599.",
+                details={"offending_code": code},
+            )
+        if code in seen:
+            raise BuilderValidationError(
+                f"{field} contains duplicate status code {code}",
+                error_code=INVALID_STATUS_CODE,
+                field=field,
+                hint="Each status code may appear at most once per set.",
+                details={"offending_code": code},
+            )
+        seen.add(code)
+        result.append(code)
+    return result
+
+
+def reject_status_code_overlap(
+    retriable: Iterable[int], terminal: Iterable[int]
+) -> None:
+    """Reject a status code that is in both the retriable and terminal sets.
+
+    A code cannot be both retried and treated as terminal — the classifier
+    would be ambiguous. Raises ``BuilderValidationError`` on any overlap.
+    """
+    overlap = sorted(set(retriable) & set(terminal))
+    if overlap:
+        raise BuilderValidationError(
+            f"status codes {overlap} appear in both retriable and terminal sets",
+            error_code=STATUS_CODE_OVERLAP,
+            field="retriable_status_codes",
+            hint=(
+                "A status code must be classified as either retriable or "
+                "terminal, not both. Remove the overlap."
+            ),
+            details={"overlap": overlap},
+        )
+
+
+# Secret-shaped key/value vocabulary reused from the existing builders: the
+# operation builder's header/query-param key regex, its secret-value patterns,
+# and the connector builders' exact forbidden-field set. The builder regexes
+# are anchored (``^...$``) so they only match a key whose WHOLE name is a known
+# secret word — composite names like ``secret_key`` / ``db_password`` /
+# ``aws_secret_access_key`` would slip through. ``_SECRET_KEY_STEMS`` closes
+# that gap with substring matching over the separator-stripped key.
+_SECRET_KEY_RE = RestClientOperationBuilder._SECRET_PROPERTY_KEY_RE
+_FORBIDDEN_SECRET_FIELDS = frozenset(DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS)
+_NONALNUM_RE = re.compile(r"[^a-z0-9]+")
+# Substrings matched against the lowercased, separator-stripped key. Chosen to
+# catch composite credential names without flagging benign ``*_key`` metadata
+# (sort_key / partition_key / idempotency_key) — bare ``key`` is NOT a stem;
+# only credential-qualified ``*key`` forms (privatekey / signingkey / …) are.
+_SECRET_KEY_STEMS = (
+    "password",
+    "passwd",
+    "passphrase",
+    "secret",
+    "credential",
+    "token",
+    "bearer",
+    "apikey",
+    "oauth",
+    "privatekey",
+    "signingkey",
+    "encryptionkey",
+    "accesskey",
+    "authkey",
+)
+
+
+def _key_looks_secret(key: str) -> bool:
+    """True when a caller-authored key name looks like a credential."""
+    lowered = key.strip().lower()
+    if lowered in _FORBIDDEN_SECRET_FIELDS or _SECRET_KEY_RE.match(lowered):
+        return True
+    normalized = _NONALNUM_RE.sub("", lowered)
+    return any(stem in normalized for stem in _SECRET_KEY_STEMS)
+
+
+def value_looks_secret(value: Any) -> bool:
+    """True when a value looks like secret material.
+
+    Reuses the REST operation builder's value patterns (JWT shape, long base64,
+    ``[encrypted]`` prefix, HTTP auth-scheme prefixes) so the rule stays
+    consistent with connector custom-property validation.
+    """
+    return isinstance(value, str) and RestClientOperationBuilder._value_looks_secret(value)
+
+
+def scan_secret_keys(mapping: Any, field: str) -> None:
+    """Reject secret-shaped keys in an arbitrary metadata mapping.
+
+    Operation primitives (run_metadata, dynamic process properties) accept
+    caller-authored key names; a key that looks like a credential
+    (``password`` / ``secret_key`` / ``db_password`` / ``api_key`` / …) must be
+    rejected before it lands in process metadata. Reuses the existing builder
+    secret vocabulary, extended with substring stems for composite names.
+    Non-dict input is a no-op (the caller's param model already type-checks it).
+    """
+    if not isinstance(mapping, dict):
+        return
+    for key in mapping:
+        if not isinstance(key, str):
+            continue
+        if _key_looks_secret(key):
+            raise BuilderValidationError(
+                f"{field} key {key!r} matches a secret-shaped name — "
+                "credentials must not be stored as run/process metadata",
+                error_code=SECRET_SHAPED_KEY,
+                field=field,
+                hint=(
+                    "Remove the credential-shaped key. Model secrets on the "
+                    "connection auth (credential_ref / OAuth2) so Boomi injects "
+                    "them from the encrypted credential store, never as "
+                    "plaintext metadata."
+                ),
+                details={"offending_key": key},
+            )
+
+
+def scan_secret_values(mapping: Any, field: str) -> None:
+    """Reject secret-shaped values in an arbitrary metadata mapping.
+
+    A value backstop for caller metadata: even when the key name is innocuous,
+    a JWT / long-base64 / encrypted-marker / auth-scheme-prefixed value must
+    not be stored as plaintext metadata. Non-dict input is a no-op.
+    """
+    if not isinstance(mapping, dict):
+        return
+    for key, value in mapping.items():
+        if value_looks_secret(value):
+            raise BuilderValidationError(
+                f"{field} value for {key!r} looks like secret material "
+                "(JWT / long base64 / encrypted-marker / auth-scheme prefix)",
+                error_code=SECRET_SHAPED_VALUE,
+                field=field,
+                hint=(
+                    "Do not store credential material as run/process metadata. "
+                    "Model secrets on the connection auth so Boomi injects them "
+                    "from the encrypted credential store."
+                ),
+                details={"offending_key": key},
+            )
