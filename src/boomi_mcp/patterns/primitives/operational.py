@@ -27,7 +27,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from ...categories.components.builders.connector_builder import (
     BuilderValidationError,
@@ -83,7 +90,7 @@ class ScheduleEnvelopeParameters(BaseModel):
         default=None, description="5-part cron expression; required for scheduled mode"
     )
     timezone: Optional[str] = Field(default=None, description="Optional schedule timezone metadata")
-    max_retry: Optional[int] = Field(
+    max_retry: Optional[StrictInt] = Field(
         default=None, ge=0, le=5, description="Optional retry-schedule maximum (0..5)"
     )
 
