@@ -375,7 +375,10 @@ class TestFieldMap:
         )
         assert [c.type for c in comps] == ["profile.json", "transform.map"]
         assert comps[1].config["map_type"] == "direct"
-        assert comps[1].depends_on == ["cust_target_profile"]
+        assert set(comps[1].depends_on) == {
+            "cust_target_profile",
+            "cust_db_read_profile",
+        }
 
     def test_direct_plus_function_emits_function_map(self):
         comps = _emit(
@@ -556,6 +559,50 @@ class TestFieldMap:
         with pytest.raises(ValidationError):
             FieldMapPrimitive.validate_parameters(_field_map_params(direct=[]))
 
+    def test_source_ref_added_to_map_depends_on(self):
+        # A $ref source profile must appear in the map's depends_on so
+        # build_integration can order it first (MAP_PROFILE_REF_REQUIRED).
+        comps = _emit(FieldMapPrimitive, _field_map_params())
+        the_map = next(c for c in comps if c.type == "transform.map")
+        assert "cust_db_read_profile" in the_map.depends_on
+        assert "cust_target_profile" in the_map.depends_on
+
+    def test_literal_source_profile_not_added_to_depends_on(self):
+        comps = _emit(
+            FieldMapPrimitive,
+            _field_map_params(
+                source={
+                    "source_profile_id": "literal-uuid-123",
+                    "source_profile_type": "profile.db",
+                    "source_field_index": _source_index(_DEFAULT_SRC_FIELDS),
+                }
+            ),
+        )
+        the_map = next(c for c in comps if c.type == "transform.map")
+        assert the_map.depends_on == ["cust_target_profile"]
+
+    def test_script_route_depends_on_includes_source_and_scripts(self):
+        comps = _emit(
+            FieldMapPrimitive,
+            _field_map_params(
+                direct=[],
+                map_script=[
+                    {
+                        "language": "groovy2",
+                        "script_body": "out0 = in0.toUpperCase()",
+                        "inputs": [{"source_path": "name", "input_name": "in0"}],
+                        "outputs": [
+                            {"output_name": "out0", "target_path": "Root/fullName"}
+                        ],
+                    }
+                ],
+            ),
+        )
+        the_map = next(c for c in comps if c.type == "transform.map")
+        assert "cust_target_profile" in the_map.depends_on
+        assert "cust_db_read_profile" in the_map.depends_on
+        assert "cust_script_0" in the_map.depends_on
+
 
 # ===========================================================================
 # xml_json_convert
@@ -656,6 +703,21 @@ class TestXmlJsonConvert:
         with pytest.raises(ValidationError):
             XmlJsonConvertPrimitive.validate_parameters(params)
 
+    def test_ref_profiles_added_to_depends_on(self):
+        # Both $ref profiles must be declared as map dependencies.
+        comps = _emit(XmlJsonConvertPrimitive, _convert_params())
+        assert set(comps[0].depends_on) == {"xmlp", "jsonp"}
+
+    def test_literal_profiles_have_empty_depends_on(self):
+        comps = _emit(
+            XmlJsonConvertPrimitive,
+            _convert_params(
+                source_profile_id="lit-xml-uuid",
+                target_profile_id="lit-json-uuid",
+            ),
+        )
+        assert comps[0].depends_on == []
+
 
 # ===========================================================================
 # build_integration reference_only regression
@@ -750,3 +812,74 @@ class TestReferenceOnlyBuildIntegration:
             s["planned_action"] == "error_ambiguous_match"
             for s in res["unresolvable_steps"]
         )
+
+    def test_reference_only_config_only_component_id_plans_reuse(self):
+        # Binding supplied only inside config (no top-level component_id).
+        comp = IntegrationComponentSpec(
+            key="c",
+            type="connector-settings",
+            action="create",
+            config={
+                "reference_only": True,
+                "connector_type": "database",
+                "component_id": "cfg-id-1",
+            },
+        )
+        plan = _plan([comp])
+        step = plan["steps"][0]
+        assert step["planned_action"] == "reuse"
+        assert step["existing_component_id"] == "cfg-id-1"
+        assert step.get("validation_error") is None
+
+    def test_reference_only_config_only_name_resolves(self):
+        # Binding name supplied only inside config (no top-level name).
+        comp = IntegrationComponentSpec(
+            key="c",
+            type="connector-settings",
+            action="create",
+            config={
+                "reference_only": True,
+                "connector_type": "database",
+                "component_name": "Shared DB",
+            },
+        )
+        match = [
+            {"component_id": "r-1", "name": "Shared DB", "type": "connector-settings"}
+        ]
+        plan = _plan([comp], existing=match)
+        step = plan["steps"][0]
+        assert step["planned_action"] == "reuse"
+        assert step["existing_component_id"] == "r-1"
+
+
+# ===========================================================================
+# Composition: db_extract + field_map through build_integration plan
+# ===========================================================================
+
+
+class TestComposition:
+    def test_db_extract_plus_field_map_passes_build_plan(self):
+        """The intended issue #29 composition must plan cleanly: the field_map
+        transform.map references db_extract's read profile via $ref, so the
+        source-profile dependency must be declared (else MAP_PROFILE_REF_REQUIRED)."""
+        db_comps = _emit(DbExtractPrimitive, _db_create_params())
+        fm_comps = _emit(
+            FieldMapPrimitive,
+            _field_map_params(
+                source={
+                    "source_profile_id": "$ref:cust_db_read_profile",
+                    "source_profile_type": "profile.db",
+                    "source_field_index": _source_index(_DEFAULT_SRC_FIELDS),
+                },
+                direct=[
+                    {"source_field": "id", "target_path": "Root/id"},
+                    {"source_field": "name", "target_path": "Root/fullName"},
+                ],
+            ),
+        )
+        plan = _plan(db_comps + fm_comps)
+        assert plan["_success"] is True
+        for step in plan["steps"]:
+            assert step.get("validation_error") is None, step
+        map_step = next(s for s in plan["steps"] if s["key"] == "cust_transform_map")
+        assert map_step["planned_action"] == "create"

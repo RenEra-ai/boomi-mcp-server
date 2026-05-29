@@ -53,6 +53,7 @@ from ._helpers import (
     ROLE_TRANSFORM_MAP,
     primitive_component_key,
     raise_for_builder_error,
+    ref_key,
     script_slot_key,
     source_type_to_script_input_type,
 )
@@ -279,21 +280,32 @@ class FieldMapPrimitive(PrimitivePattern):
             map_common["folder_path"] = folder
         source_index = params.source.source_field_index
 
+        # When the source profile is referenced by $ref to an in-spec
+        # component (e.g. db_extract's read profile), the map must depend on
+        # it — build_integration rejects a map whose source/target $ref is
+        # absent from depends_on (MAP_PROFILE_REF_REQUIRED). The target
+        # profile $ref is always in-spec; the source may be a $ref or a
+        # literal (literals are not in-spec keys and so are not dependencies).
+        profile_deps = [target_key]
+        source_ref = ref_key(params.source.source_profile_id)
+        if source_ref:
+            profile_deps.append(source_ref)
+
         if route == "direct":
             map_component = cls._emit_direct_map(
-                map_common, params, source_index, target_index, map_key, target_key
+                map_common, params, source_index, target_index, map_key, profile_deps
             )
             return [target_profile, map_component]
 
         if route == "function":
             map_component = cls._emit_function_map(
-                map_common, params, source_index, target_index, map_key, target_key
+                map_common, params, source_index, target_index, map_key, profile_deps
             )
             return [target_profile, map_component]
 
         # script route
         script_components, map_component = cls._emit_script_map(
-            context, map_common, params, source_index, target_index, map_key, target_key, folder
+            context, map_common, params, source_index, target_index, map_key, profile_deps, folder
         )
         return [target_profile, *script_components, map_component]
 
@@ -378,7 +390,7 @@ class FieldMapPrimitive(PrimitivePattern):
         source_index: Dict[str, Dict[str, Any]],
         target_index: Dict[str, Dict[str, Any]],
         map_key: str,
-        target_key: str,
+        profile_deps: List[str],
     ) -> IntegrationComponentSpec:
         config = dict(map_common)
         config["map_type"] = "direct"
@@ -394,7 +406,7 @@ class FieldMapPrimitive(PrimitivePattern):
             action="create",
             name=config["component_name"],
             config=config,
-            depends_on=[target_key],
+            depends_on=list(profile_deps),
         )
 
     @classmethod
@@ -405,7 +417,7 @@ class FieldMapPrimitive(PrimitivePattern):
         source_index: Dict[str, Dict[str, Any]],
         target_index: Dict[str, Dict[str, Any]],
         map_key: str,
-        target_key: str,
+        profile_deps: List[str],
     ) -> IntegrationComponentSpec:
         config = dict(map_common)
         config["map_type"] = "function"
@@ -423,7 +435,7 @@ class FieldMapPrimitive(PrimitivePattern):
             action="create",
             name=config["component_name"],
             config=config,
-            depends_on=[target_key],
+            depends_on=list(profile_deps),
         )
 
     @classmethod
@@ -435,7 +447,7 @@ class FieldMapPrimitive(PrimitivePattern):
         source_index: Dict[str, Dict[str, Any]],
         target_index: Dict[str, Dict[str, Any]],
         map_key: str,
-        target_key: str,
+        profile_deps: List[str],
         folder: Optional[str],
     ):
         # 1) Resolve a script ref per op (inline -> emit later; external -> $ref).
@@ -531,8 +543,8 @@ class FieldMapPrimitive(PrimitivePattern):
                 )
             )
 
-        # 5) depends_on: target profile + every referenced script key.
-        depends_on = [target_key]
+        # 5) depends_on: source/target profiles + every referenced script key.
+        depends_on = list(profile_deps)
         for ref in script_refs:
             depends_on.append(ref[len(_REF_PREFIX):])
 
