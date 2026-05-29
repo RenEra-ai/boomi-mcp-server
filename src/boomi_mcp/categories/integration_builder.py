@@ -1986,16 +1986,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     for key in execution_order:
         comp = components_by_key[key]
 
-        # If the caller supplied an explicit component_id, skip ambiguity checking
-        if comp.component_id:
-            candidates: List[Dict[str, Any]] = []
-            existing_id: Optional[str] = comp.component_id
-        else:
-            candidates = _resolve_existing_components(boomi_client, comp)
-            existing_id = candidates[0].get("component_id") if len(candidates) == 1 else None
-
-        planned_action = comp.action
-
         # Issue #27: reference-only reuse. A component flagged
         # config.reference_only=true models an EXISTING component the spec
         # depends on (e.g. a shared database connection) without creating or
@@ -2004,14 +1994,46 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         # the builder-validation gate below never fires (a reused connection
         # carries no driver/host/credential body to validate). Missing or
         # ambiguous matches fail fast like an update with no resolvable target.
+        #
+        # The reuse binding may live on the top-level spec OR inside config
+        # (the documented reference_only config_shape: {reference_only,
+        # component_id?, component_name?}). Resolve an effective id / name
+        # honouring both, with the top-level surface taking precedence.
         reference_only = isinstance(comp.config, dict) and bool(
             comp.config.get("reference_only")
         )
+        effective_component_id = comp.component_id
+        effective_name = comp.name
+        if reference_only:
+            if not effective_component_id:
+                _cfg_id = comp.config.get("component_id")
+                if isinstance(_cfg_id, str) and _cfg_id.strip():
+                    effective_component_id = _cfg_id.strip()
+            if not effective_name:
+                _cfg_name = comp.config.get("component_name")
+                if isinstance(_cfg_name, str) and _cfg_name.strip():
+                    effective_name = _cfg_name.strip()
+
+        # If an explicit component_id is available, skip ambiguity checking.
+        if effective_component_id:
+            candidates: List[Dict[str, Any]] = []
+            existing_id: Optional[str] = effective_component_id
+        else:
+            # Resolve by the effective name; a reference_only binding can carry
+            # its name in config.component_name even when the top-level name is
+            # unset, so resolve against that name when it differs.
+            resolve_comp = (
+                comp.model_copy(update={"name": effective_name})
+                if effective_name != comp.name
+                else comp
+            )
+            candidates = _resolve_existing_components(boomi_client, resolve_comp)
+            existing_id = candidates[0].get("component_id") if len(candidates) == 1 else None
+
+        planned_action = comp.action
 
         if reference_only and comp.action == "create":
-            # existing_id is already comp.component_id (explicit id) or the
-            # single resolved candidate's id from the block above.
-            if comp.component_id or len(candidates) == 1:
+            if effective_component_id or len(candidates) == 1:
                 planned_action = "reuse"
             elif len(candidates) == 0:
                 planned_action = "error_missing_target"

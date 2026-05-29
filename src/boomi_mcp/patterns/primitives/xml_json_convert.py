@@ -34,6 +34,7 @@ from ._helpers import (
     ROLE_TRANSFORM_MAP,
     primitive_component_key,
     raise_for_builder_error,
+    ref_key,
 )
 
 # Only XML and JSON profile families participate — profile.db / unknown
@@ -152,6 +153,18 @@ class XmlJsonConvertPrimitive(PrimitivePattern):
                 target_index=params.target_field_index,
             )
         )
+        # Each in-spec profile referenced by $ref must appear in depends_on so
+        # build_integration orders the profiles before the map and resolves the
+        # tokens (MAP_PROFILE_REF_REQUIRED otherwise). Literal UUIDs are
+        # external and are not added as dependencies.
+        depends_on = [
+            key
+            for key in (
+                ref_key(params.source_profile_id),
+                ref_key(params.target_profile_id),
+            )
+            if key
+        ]
         return [
             IntegrationComponentSpec(
                 key=map_key,
@@ -159,6 +172,7 @@ class XmlJsonConvertPrimitive(PrimitivePattern):
                 action="create",
                 name=component_name,
                 config=config,
+                depends_on=depends_on,
             )
         ]
 

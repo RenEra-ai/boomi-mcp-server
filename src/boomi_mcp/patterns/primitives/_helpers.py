@@ -13,11 +13,13 @@ No Boomi API calls. No XML emission. No SQL / payload / mapping templates.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from ...categories.components.builders.connector_builder import (
     BuilderValidationError,
 )
+
+_REF_PREFIX = "$ref:"
 
 # ---------------------------------------------------------------------------
 # Stable component-role keys (used to build deterministic component keys).
@@ -78,6 +80,22 @@ def primitive_component_key(key_prefix: str, role: str) -> str:
 def script_slot_key(key_prefix: str, slot: int) -> str:
     """Deterministic key for the Nth inline ``script.mapping`` component."""
     return f"{slugify(key_prefix)}_{ROLE_SCRIPT}_{slot}"
+
+
+def ref_key(value: Any) -> Optional[str]:
+    """Return the in-spec component key from a ``'$ref:KEY'`` token.
+
+    Returns ``None`` for a literal UUID or any non-ref value. A transform.map
+    that references an in-spec profile via ``$ref`` must list that key in its
+    ``depends_on`` so build_integration orders the profile before the map and
+    resolves the token (``validate_transform_map`` enforces this with
+    ``MAP_PROFILE_REF_REQUIRED``). Literal UUIDs are external and never added
+    as dependencies.
+    """
+    if isinstance(value, str) and value.startswith(_REF_PREFIX):
+        key = value[len(_REF_PREFIX):].strip()
+        return key or None
+    return None
 
 
 def source_type_to_script_input_type(data_type: Optional[str]) -> str:
