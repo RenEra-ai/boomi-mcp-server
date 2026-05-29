@@ -314,6 +314,32 @@ class TestDbExtract:
                 )
             )
 
+    def test_reuse_rejects_whitespace_only_binding(self):
+        # A whitespace-only component_id must not pass as a fake binding.
+        with pytest.raises(ValidationError):
+            DbExtractPrimitive.validate_parameters(
+                _db_create_params(connection={"mode": "reuse", "component_id": "   "})
+            )
+
+    def test_reuse_strips_binding_whitespace(self):
+        # Trailing/leading whitespace on a real binding is stripped, and a
+        # blank id alongside a real name normalizes to name-only reuse.
+        params = DbExtractPrimitive.validate_parameters(
+            _db_create_params(connection={"mode": "reuse", "component_id": " real-id "})
+        )
+        assert params.connection.component_id == "real-id"
+        params2 = DbExtractPrimitive.validate_parameters(
+            _db_create_params(
+                connection={
+                    "mode": "reuse",
+                    "component_id": "  ",
+                    "component_name": "Shared DB",
+                }
+            )
+        )
+        assert params2.connection.component_id is None
+        assert params2.connection.component_name == "Shared DB"
+
     def test_plaintext_secret_key_rejected_before_emission(self):
         params = _db_create_params()
         params["connection"]["password"] = "hunter2"
@@ -850,6 +876,37 @@ class TestReferenceOnlyBuildIntegration:
         step = plan["steps"][0]
         assert step["planned_action"] == "reuse"
         assert step["existing_component_id"] == "r-1"
+
+    def test_reference_only_whitespace_top_level_id_is_not_fake_reuse(self):
+        # A blank top-level component_id must not become a fake existing id.
+        comp = IntegrationComponentSpec(
+            key="c",
+            type="connector-settings",
+            action="create",
+            component_id="   ",
+            config={"reference_only": True, "connector_type": "database"},
+        )
+        plan = _plan([comp])
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_missing_target"
+        assert step["existing_component_id"] is None
+
+    def test_reference_only_blank_top_level_falls_back_to_config_id(self):
+        comp = IntegrationComponentSpec(
+            key="c",
+            type="connector-settings",
+            action="create",
+            component_id="  ",
+            config={
+                "reference_only": True,
+                "connector_type": "database",
+                "component_id": "real-9",
+            },
+        )
+        plan = _plan([comp])
+        step = plan["steps"][0]
+        assert step["planned_action"] == "reuse"
+        assert step["existing_component_id"] == "real-9"
 
 
 # ===========================================================================

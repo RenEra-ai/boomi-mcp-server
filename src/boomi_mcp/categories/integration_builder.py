@@ -1960,6 +1960,19 @@ def _execute_component(
     return update_component(boomi_client, profile, target_id, payload)
 
 
+def _first_nonblank_str(*values: Any) -> Optional[str]:
+    """Return the first stripped non-blank string among ``values``, else None.
+
+    Used to resolve a reference_only reuse binding while treating blank /
+    whitespace-only ids and names as absent — so a "  " value can't survive as
+    a truthy (but meaningless) component id / lookup name.
+    """
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     spec = _normalize_to_spec(config)
     # Issue #41 r3: inject transform.function wrappers between any
@@ -2005,14 +2018,15 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         effective_component_id = comp.component_id
         effective_name = comp.name
         if reference_only:
-            if not effective_component_id:
-                _cfg_id = comp.config.get("component_id")
-                if isinstance(_cfg_id, str) and _cfg_id.strip():
-                    effective_component_id = _cfg_id.strip()
-            if not effective_name:
-                _cfg_name = comp.config.get("component_name")
-                if isinstance(_cfg_name, str) and _cfg_name.strip():
-                    effective_name = _cfg_name.strip()
+            # Resolve the binding from top-level then config, treating blank /
+            # whitespace as absent so a "  " id/name can't become a fake reuse
+            # target (top-level precedence preserved by argument order).
+            effective_component_id = _first_nonblank_str(
+                comp.component_id, comp.config.get("component_id")
+            )
+            effective_name = _first_nonblank_str(
+                comp.name, comp.config.get("component_name")
+            )
 
         # If an explicit component_id is available, skip ambiguity checking.
         if effective_component_id:
