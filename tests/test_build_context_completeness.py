@@ -49,15 +49,16 @@ def test_no_tracked_file_dropped_from_build_context():
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         pytest.skip(f"could not compute build-context file lists: {exc}")
 
-    # Distinguish "gcloud listing is unreliable in this environment" from "a real drop",
-    # using OVERLAP magnitude (not the presence of specific files — a genuinely dropped
-    # core file must still FAIL, not skip). A working listing overlaps almost entirely
-    # with the tracked set; an empty or differently-formatted listing (other gcloud
-    # version/config, exit 0) overlaps ~nothing. Skip only in the latter case.
-    if len(tracked & uploaded) < len(tracked) // 2:
+    # Reliability is judged by the listing's FORMAT, independent of how many files it
+    # omits — so a genuine large drop (e.g. all of src/ and tests/) still FAILS rather
+    # than being mistaken for a broken tool. A working `gcloud meta list-files-for-upload`
+    # emits git-relative paths, so its entries are recognizable as tracked files; an empty
+    # or differently-formatted listing (other gcloud version/config, exit 0) is not. Skip
+    # only when the listing itself is unusable, never when it validly reports omissions.
+    if not uploaded or len(uploaded - tracked) > len(uploaded) // 2:
         pytest.skip(
-            "gcloud upload listing looks unreliable here "
-            f"({len(uploaded)} entries, {len(tracked & uploaded)}/{len(tracked)} overlap with tracked)"
+            "gcloud upload listing looks unusable here "
+            f"({len(uploaded)} entries, {len(uploaded & tracked)} recognized as tracked paths)"
         )
 
     dropped = tracked - uploaded - _UPLOAD_ALLOWLIST
