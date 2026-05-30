@@ -2,10 +2,14 @@
 #
 # It INHERITS .gitignore via `#!include:.gitignore` so every local-only path git already
 # ignores (.mcp.json, .env/secrets, caches, venvs, docs/archive, agents/, tasks/,
-# setup scripts, incident bundles, ...) is also kept out of the build context — and out
-# of any locally-built image (.dockerignore does NOT strip many of these, e.g. .mcp.json
-# and docs/archive/*.json, so a hand-maintained exclusion list would silently leak them).
-# Inheriting avoids keeping a second copy of git's exclusions that can drift out of sync.
+# setup scripts, incident bundles, ...) is kept out of the `gcloud builds submit` UPLOAD
+# context. Inheriting avoids keeping a second copy of git's exclusions that can drift.
+#
+# SCOPE: this governs the UPLOAD only. What ends up INSIDE an image is decided by
+# .dockerignore at `docker build` time (a direct `docker build .` never consults this
+# file). The same local-only/secret paths are therefore ALSO listed in .dockerignore so
+# they never enter an image regardless of build path (direct docker build, gcloud builds
+# submit, or git-triggered Cloud Build).
 #
 # Why inheriting .gitignore is SAFE here (it was the original bug's mechanism): the
 # scratch-script rule in .gitignore is now ANCHORED (`/analyze_*.py`), so it no longer
