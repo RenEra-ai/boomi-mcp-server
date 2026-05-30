@@ -36,10 +36,14 @@ confidence beyond the mocked local suite.
 
 ## Tooling note
 
-All calls below use the `.fn()` pattern against the unified `server.py`
-(see `docs/QA_REVIEW_MANUAL.md`). Example shape:
+The unified `server.py` registers each MCP tool as a plain module-level
+function, so call them directly — `server.build_integration(...)`, not
+`server.build_integration.fn(...)`. Every tool takes its `profile`/`action`
+arguments explicitly, and `config` is a JSON **string** (use `json.dumps`),
+while `build_from_archetype` takes `parameters` as a dict. Example shape:
 
 ```python
+import json
 import os
 os.environ["BOOMI_LOCAL"] = "true"  # or your live MCP wiring
 import server
@@ -51,15 +55,19 @@ PROFILE = "reneraai-5RO3DD"
 
 ### 1. Confirm reference components
 
+`bulk_get` returns metadata only (no connector XML / secrets) for up to 5 ids,
+so it confirms the reuse-by-id targets directly:
+
 ```python
-server.query_components.fn(
+refs = server.query_components(
     profile=PROFILE,
-    config='{"type": "connector-settings", "name": "MS SQL Server Orders DB"}',
+    action="bulk_get",
+    component_ids=json.dumps([
+        "107aaef1-cb1e-4975-be44-69d120803864",  # MS SQL Server Orders DB
+        "7f7e0730-1152-4467-b912-e3a8ed12782a",  # REST None
+    ]),
 )
-server.query_components.fn(
-    profile=PROFILE,
-    config='{"type": "connector-settings", "name": "REST None"}',
-)
+assert refs["_success"] is True and refs["total_count"] == 2
 ```
 
 Confirm both component_ids above still resolve. If either is missing, **stop**
@@ -74,7 +82,7 @@ Author a `database_to_api_sync` parameter payload with:
 - caller-authored SQL, REST path, source/target schema, and field mappings.
 
 ```python
-spec_result = server.build_from_archetype.fn("database_to_api_sync", PARAMS)
+spec_result = server.build_from_archetype("database_to_api_sync", PARAMS)
 assert spec_result["_success"] is True
 assert spec_result["boomi_mutation"] is False
 assert spec_result["raw_xml_exposed"] is False
@@ -84,8 +92,7 @@ spec = spec_result["integration_spec"]
 ### 3. Review the transformation (read-only)
 
 ```python
-import json
-review = server.review_transformation.fn(
+review = server.review_transformation(
     action="validate_unmapped",
     config=json.dumps({"integration_spec": spec}),
 )
@@ -98,7 +105,7 @@ planning.
 ### 4. Plan (no mutation)
 
 ```python
-plan = server.build_integration.fn(
+plan = server.build_integration(
     profile=PROFILE,
     action="plan",
     config=json.dumps({"integration_spec": spec, "conflict_policy": "fail"}),
@@ -111,7 +118,7 @@ assert plan["_success"] is True
 ### 5. Dry-run apply (no mutation)
 
 ```python
-dry = server.build_integration.fn(
+dry = server.build_integration(
     profile=PROFILE,
     action="apply",
     config=json.dumps({"integration_spec": spec, "conflict_policy": "fail"}),
@@ -124,7 +131,7 @@ assert dry["dry_run"] is True
 Only after an operator approves mutation of `reneraai-5RO3DD`:
 
 ```python
-applied = server.build_integration.fn(
+applied = server.build_integration(
     profile=PROFILE,
     action="apply",
     config=json.dumps({
@@ -141,7 +148,7 @@ build_id = applied["build_id"]
 ### 7. Verify
 
 ```python
-verified = server.build_integration.fn(
+verified = server.build_integration(
     profile=PROFILE,
     action="verify",
     config=json.dumps({"build_id": build_id}),
