@@ -23,6 +23,7 @@ os.environ["BOOMI_DOCS_DB_PATH"] = get_fixture_corpus()
 os.environ["BOOMI_DOCS_COLLECTION"] = "boomi_docs"
 
 import server  # noqa: E402
+from boomi_mcp.kb import warmup as warmup_mod  # noqa: E402
 
 CORPUS_URI = "kb://boomi-docs/corpus"
 
@@ -55,3 +56,26 @@ def test_corpus_resource_reads_as_coverage_map():
     assert "EDI (5)" in body
     assert "Known exclusions:" in body
     assert "search_boomi_docs" in body
+
+
+def test_resource_is_independent_of_warmup_state():
+    """The resource renders from the cheap bootstrap manifest, not a live
+    KbService, so it must return the same coverage map in EVERY warmup state —
+    not-yet-built, warming, ready, and failed. State is saved/restored so this
+    does not pollute the warmup shared with other modules in the same process."""
+    expected = _read_resource_text(CORPUS_URI)
+    assert expected.startswith("# Boomi Documentation Corpus")
+
+    w = server._kb_warmup
+    with w._lock:
+        saved = (w._state, w._error_type, w._service)
+    try:
+        for state in (warmup_mod.IDLE, warmup_mod.WARMING,
+                      warmup_mod.READY, warmup_mod.FAILED):
+            with w._lock:
+                w._state = state
+                w._error_type = "KbStartupError" if state == warmup_mod.FAILED else None
+            assert _read_resource_text(CORPUS_URI) == expected, state
+    finally:
+        with w._lock:
+            w._state, w._error_type, w._service = saved
