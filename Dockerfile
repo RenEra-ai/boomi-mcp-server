@@ -61,6 +61,17 @@ RUN mkdir -p /app/kb && chown -R appuser:appuser /app/kb
 # Switch to non-root user
 USER appuser
 
+# Build-time guard: fail the build if any high-value tool module is missing from the
+# build context. Regression guard for the .gcloudignore/.gitignore upload-exclusion bug
+# that silently shipped images without analyze_component and disabled 4 tool categories
+# (manage_trading_partner, analyze_component, manage_connector, build_integration).
+# Imports each required module explicitly so it catches any of them going missing,
+# independent of the components package __init__. Lightweight (boomi SDK + stdlib, no
+# torch/chromadb) and unconditional, so it runs on every build and fails in seconds —
+# before the expensive KB steps below.
+RUN PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app/src python -c "import boomi_mcp.categories.components.analyze_component; import boomi_mcp.categories.components.trading_partners; import boomi_mcp.categories.components.connectors; import boomi_mcp.categories.integration_builder" \
+ || (echo '[BUILD ERROR] Required tool module failed to import - likely dropped from the build context by a .gcloudignore/.gitignore upload exclusion. Verify src/boomi_mcp/** is present in the uploaded build context.' >&2; exit 1)
+
 # KB corpus + model cache: fetched only when a release tag is provided at build
 # time. With KB_RELEASE_TAG empty these are no-ops and the image is unchanged;
 # runtime must then keep BOOMI_DOCS_ENABLED=false or startup fails fast.
