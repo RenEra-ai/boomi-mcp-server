@@ -20,8 +20,19 @@ STALE_DICT = {"access_token": "at-OLD", "refresh_token": "rt-OLD", "expires_in":
 
 
 def _run(coro):
-    """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run an async coroutine synchronously.
+
+    Uses a private event loop that is never registered as the thread's current
+    loop. asyncio.run() (used by other test modules) clears the current loop on
+    exit, so the legacy asyncio.get_event_loop() call this previously used would
+    raise "no current event loop" once those modules ran first in a full-suite
+    run. Mirrors the _run_async helper in tests/test_integration_authoring_wrapper.py.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class TestVerifiedStorage:

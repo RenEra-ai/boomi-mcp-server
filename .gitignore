@@ -96,6 +96,7 @@ docs/*
 !docs/MCP_TOOL_DESIGN.md
 !docs/INTEGRATION_AUTHORING_ROADMAP.md
 !docs/oauth-migration-runbook.md
+!docs/M2_DATABASE_TO_API_SYNC_LIVE_QA.md
 !docs/superpowers/
 !docs/superpowers/specs/
 !docs/superpowers/specs/2026-04-13-boomi-docs-kb-design.md
