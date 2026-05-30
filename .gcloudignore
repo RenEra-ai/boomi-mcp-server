@@ -1,0 +1,80 @@
+# .gcloudignore — controls what `gcloud builds submit` uploads as the Cloud Build context.
+#
+# Intentionally STANDALONE: it does NOT use `#!include:.gitignore`. When this file is
+# absent, gcloud auto-generates one containing `#!include:.gitignore`, so dual-purpose
+# .gitignore hygiene patterns (e.g. an unanchored `analyze_*.py`) silently drop TRACKED
+# source from the uploaded build context — which shipped an image missing
+# analyze_component.py and disabled 4 tool categories. Decoupling uploads from .gitignore
+# kills that whole class of bug. List ONLY sensitive/heavy/local-only paths below —
+# never source patterns. Anything not listed here IS uploaded.
+#
+# NOTE: this only affects local `gcloud builds submit`. The Cloud Build git trigger
+# checks out tracked files and is unaffected either way.
+
+# VCS / tooling
+.git/
+.gcloudignore
+.github/
+
+# Python caches & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.eggs/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets / local credentials — must never reach the build context
+.env
+.env.local
+.env.*.local
+.env.cloud
+.env.cloud.deployed
+.env.token.temp
+secrets/
+secrets.sqlite
+*.sqlite
+*.sqlite3
+*.db
+credentials.db
+*.key
+*.pem
+*.crt
+*_local_secrets.json
+.boomi_mcp_local_secrets.json
+
+# Logs / runtime
+*.log
+logs/
+server.pid
+.~lock.*
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local-only workspaces / bundles / vendored clones (not needed in the image)
+.claude/
+.codex/
+agents/
+tasks/
+docs/plans/
+incident-*/
+fastmcp/
+mcp-streamable-http/
+boomi-python/

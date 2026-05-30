@@ -9,49 +9,48 @@ This category contains tools for managing Boomi components:
 - Component Analysis (where_used, dependencies, compare_versions)
 """
 
-from .trading_partners import (
-    create_trading_partner,
-    get_trading_partner,
-    list_trading_partners,
-    update_trading_partner,
-    delete_trading_partner,
-    analyze_trading_partner_usage,
-    manage_trading_partner_action
-)
+# Lazy submodule exports (PEP 562). These names used to be imported EAGERLY here,
+# which meant importing ANY components submodule (or integration_builder) ran this
+# __init__ first and pulled in every sibling — so one broken submodule (e.g. a missing
+# analyze_component.py) cascaded into a "No module named ...analyze_component" failure
+# for all four tool categories. Lazy access isolates such a failure to the single
+# category that actually uses the broken submodule. Nothing imports these package-level
+# re-exports today, but they are preserved (lazily) for backward compatibility.
+import importlib
 
-from .processes import (
-    list_processes,
-    get_process,
-    create_process,
-    update_process,
-    delete_process,
-    manage_process_action
-)
-
-from .query_components import query_components_action
-from .manage_component import manage_component_action
-from .analyze_component import analyze_component_action
-from .connectors import manage_connector_action
-
-__all__ = [
+_LAZY_EXPORTS = {
     # Trading Partners
-    'create_trading_partner',
-    'get_trading_partner',
-    'list_trading_partners',
-    'update_trading_partner',
-    'delete_trading_partner',
-    'analyze_trading_partner_usage',
-    'manage_trading_partner_action',
+    'create_trading_partner': 'trading_partners',
+    'get_trading_partner': 'trading_partners',
+    'list_trading_partners': 'trading_partners',
+    'update_trading_partner': 'trading_partners',
+    'delete_trading_partner': 'trading_partners',
+    'analyze_trading_partner_usage': 'trading_partners',
+    'manage_trading_partner_action': 'trading_partners',
     # Processes
-    'list_processes',
-    'get_process',
-    'create_process',
-    'update_process',
-    'delete_process',
-    'manage_process_action',
+    'list_processes': 'processes',
+    'get_process': 'processes',
+    'create_process': 'processes',
+    'update_process': 'processes',
+    'delete_process': 'processes',
+    'manage_process_action': 'processes',
     # Component Tools
-    'query_components_action',
-    'manage_component_action',
-    'analyze_component_action',
-    'manage_connector_action',
-]
+    'query_components_action': 'query_components',
+    'manage_component_action': 'manage_component',
+    'analyze_component_action': 'analyze_component',
+    'manage_connector_action': 'connectors',
+}
+
+__all__ = list(_LAZY_EXPORTS)
+
+
+def __getattr__(name):
+    """Import the owning submodule on first access (PEP 562)."""
+    submodule = _LAZY_EXPORTS.get(name)
+    if submodule is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(importlib.import_module(f".{submodule}", __name__), name)
+
+
+def __dir__():
+    return sorted(set(__all__) | set(globals()))
