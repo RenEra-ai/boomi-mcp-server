@@ -19,11 +19,7 @@ for _p in (_HERE, _SRC, _ROOT):
         sys.path.insert(0, _p)
 
 from boomi_mcp.kb.errors import KbStartupError
-from boomi_mcp.kb.warmup import (
-    KB_UNAVAILABLE_RETRY_AFTER,
-    WARMING_UP_RETRY_AFTER,
-    KbWarmup,
-)
+from boomi_mcp.kb.warmup import WARMING_UP_RETRY_AFTER, KbWarmup
 
 
 # --- warming_up -> ready ------------------------------------------------------
@@ -59,12 +55,15 @@ def test_failed_build_returns_sanitized_kb_unavailable():
     def builder(_bootstrap):
         raise KbStartupError("BOOMI_DOCS_DB_PATH does not exist: /app/kb/secret")
 
-    w = KbWarmup(bootstrap=None, builder=builder)
+    w = KbWarmup(bootstrap=None, builder=builder, retry_cooldown_seconds=30.0)
     assert w.get(wait_seconds=5) is None
     resp = w.not_ready_response()
     assert resp["error"] == "kb_unavailable"
     assert resp["error_type"] == "KbStartupError"
-    assert resp["retry_after_seconds"] == KB_UNAVAILABLE_RETRY_AFTER
+    # retry hint is derived from the (default 30s) cooldown — a positive int no
+    # larger than the configured cooldown.
+    assert isinstance(resp["retry_after_seconds"], int)
+    assert 1 <= resp["retry_after_seconds"] <= 30
     assert resp["message"] == (
         "Boomi Docs KB is temporarily unavailable. Please retry shortly."
     )
@@ -72,6 +71,33 @@ def test_failed_build_returns_sanitized_kb_unavailable():
     blob = repr(resp)
     assert "/app/kb/secret" not in blob
     assert "BOOMI_DOCS_DB_PATH" not in blob
+
+
+def test_kb_unavailable_retry_after_tracks_configured_cooldown():
+    """The failed-state retry hint must reflect the configured cooldown (and
+    shrink as it elapses), not a hard-coded default — otherwise a tuned-up
+    BOOMI_DOCS_WARMUP_RETRY_COOLDOWN leaves clients retrying into kb_unavailable
+    before a re-kick is even possible."""
+    clock = {"t": 1000.0}
+
+    def builder(_bootstrap):
+        raise KbStartupError("transient")
+
+    w = KbWarmup(
+        bootstrap=None,
+        builder=builder,
+        retry_cooldown_seconds=300.0,
+        time_fn=lambda: clock["t"],
+    )
+    assert w.get(wait_seconds=5) is None
+    # Right after the failure: the full 300s cooldown, not 30.
+    assert w.not_ready_response()["retry_after_seconds"] == 300
+    # Halfway through the cooldown: the REMAINING time.
+    clock["t"] = 1150.0
+    assert w.not_ready_response()["retry_after_seconds"] == 150
+    # Past the cooldown: clamped to "retry now" (>= 1).
+    clock["t"] = 2000.0
+    assert w.not_ready_response()["retry_after_seconds"] == 1
 
 
 # --- get() triggers kick() ----------------------------------------------------

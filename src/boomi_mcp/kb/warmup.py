@@ -22,6 +22,7 @@ Design notes:
   the full exception detail is logged server-side only.
 """
 import logging
+import math
 import threading
 import time
 
@@ -33,10 +34,12 @@ WARMING = "warming"
 READY = "ready"
 FAILED = "failed"
 
-# Client-facing retry hints (seconds). warming_up matches the default in-request
-# wait; kb_unavailable matches the default failed-build retry cooldown.
+# Client-facing retry hint for warming_up (seconds) — matches the default
+# in-request wait; a short poll interval while the build is in flight. The
+# kb_unavailable hint is NOT a constant: it is derived from the REMAINING retry
+# cooldown (see not_ready_response), so a tuned BOOMI_DOCS_WARMUP_RETRY_COOLDOWN
+# never leaves clients retrying before a re-kick is even possible.
 WARMING_UP_RETRY_AFTER = 5
-KB_UNAVAILABLE_RETRY_AFTER = 30
 
 # Build-running-longer-than this logs a STUCK warning (detection only — Python
 # cannot force-kill the thread; the bounded get() wait already prevents any
@@ -146,6 +149,7 @@ class KbWarmup:
         with self._lock:
             state = self._state
             error_type = self._error_type
+            retry_after = self._remaining_cooldown_locked()
         if state == FAILED:
             logger.info("KB_RESPONSE status=kb_unavailable error_type=%s", error_type)
             return {
@@ -153,7 +157,10 @@ class KbWarmup:
                 "error": "kb_unavailable",
                 "message": "Boomi Docs KB is temporarily unavailable. Please retry shortly.",
                 "error_type": error_type or "KbStartupError",
-                "retry_after_seconds": KB_UNAVAILABLE_RETRY_AFTER,
+                # Soonest a retry could change state = when the cooldown lets the
+                # next get() re-kick. Tracks the configured cooldown, not a fixed
+                # default, so clients don't retry into kb_unavailable.
+                "retry_after_seconds": retry_after,
             }
         # IDLE or WARMING (incl. a retry build in flight) -> still loading.
         logger.info("KB_RESPONSE status=warming_up")
@@ -198,6 +205,22 @@ class KbWarmup:
                 type(error).__name__,
                 error,
             )
+
+    def _remaining_cooldown_locked(self):
+        """Seconds until a failed build may re-attempt, as an int >= 1.
+
+        Caller must hold the lock. Returns the remaining slice of the configured
+        retry cooldown since the last failure (or the full cooldown right after a
+        failure); clamped to >= 1 so the client always gets a positive retry hint
+        and an already-elapsed cooldown reads as "retry now".
+
+        Rounds UP (ceil): this is the soonest a retry can CHANGE state, so a hint
+        that rounded a fractional remainder down (e.g. 2.4 -> 2) would have the
+        client retry before kick()'s cooldown elapses and get another
+        kb_unavailable. Ceiling lands the retry at or just past the boundary.
+        """
+        remaining = self._retry_cooldown - (self._time() - (self._failed_at or 0.0))
+        return max(1, math.ceil(remaining))
 
     def _maybe_log_stuck_locked(self):
         """Log once if the in-flight build has exceeded the stuck threshold.
