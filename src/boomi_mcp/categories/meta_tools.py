@@ -5795,7 +5795,11 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "note": (
                 "Use this before answering factual Boomi platform behavior, "
                 "connector, configuration, deployment/runtime, scripting, EDI/API, "
-                "or error-message questions."
+                "or error-message questions. After a scale-to-zero cold start the "
+                "first call may return error 'warming_up' (the KB is still "
+                "loading — wait retry_after_seconds and retry the same call) or "
+                "'kb_unavailable' (temporarily unavailable — report that rather "
+                "than inventing facts; a later retry may succeed)."
             ),
         },
         "read_boomi_doc_page": {
@@ -6144,7 +6148,9 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         hints["boomi_docs"] = (
             "For factual Boomi product behavior, connector/configuration semantics, "
             "runtime behavior, EDI/API behavior, scripting, or error messages, "
-            "start with search_boomi_docs()."
+            "start with search_boomi_docs(). On a cold start it may return "
+            "'warming_up' (wait retry_after_seconds and retry) or 'kb_unavailable' "
+            "(temporarily unavailable — don't invent facts)."
         )
     # Only recommend the archetype-first flow when the entry-point tool is
     # actually registered; otherwise the hint points at a tool the catalog

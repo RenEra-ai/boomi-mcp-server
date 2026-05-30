@@ -70,22 +70,53 @@ RUN if [ -n "$KB_RELEASE_TAG" ]; then \
         tar -xzf /tmp/kb.tgz -C /app/kb && \
         rm /tmp/kb.tgz; \
     fi
+# Embedding-model cache location. Set BEFORE the preload so the model is baked
+# under an explicit, appuser-owned path (no mkdir/chown needed — /home/appuser is
+# already owned by appuser) that both the build-time validation below and the
+# runtime warmup resolve under HF_HUB_OFFLINE. NOT the offline flags yet: the
+# preload must reach Hugging Face to download the model.
+ENV HF_HOME=/home/appuser/.cache/huggingface \
+    SENTENCE_TRANSFORMERS_HOME=/home/appuser/.cache/sentence_transformers
+
 RUN if [ -n "$KB_RELEASE_TAG" ]; then \
         python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"; \
     fi
 
+# Build-time KB validation gate (Workstream C): run the full build_kb_service()
+# against the baked corpus with the offline flags set INLINE on this RUN. This
+# proves the corpus opens AND the embedding model resolves from the baked cache
+# with NO network — so a corrupt corpus / chunk-count mismatch / model-cache miss
+# fails the BUILD here instead of degrading to a runtime kb_unavailable. Backfills
+# the fast-fail guarantee the deferred warmup removed from the import path. Gated
+# by KB_RELEASE_TAG so a non-KB build skips it.
+RUN if [ -n "$KB_RELEASE_TAG" ]; then \
+        HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+        BOOMI_DOCS_ENABLED=true \
+        BOOMI_DOCS_DB_PATH=/app/kb/boomi_knowledge_db \
+        PYTHONPATH=/app/src \
+        python -c "from boomi_mcp.kb.service import build_kb_service; build_kb_service()"; \
+    fi
+
 # Environment variables (can be overridden at runtime)
+# HF_HUB_OFFLINE / TRANSFORMERS_OFFLINE: the model is baked above (build-time
+# validation confirmed a cache hit), so the runtime warmup must NEVER reach the
+# network — an offline lookup is a guaranteed cache hit, while a network fetch on
+# a no-egress cold instance would make warming_up permanent.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     MCP_HOST=0.0.0.0 \
     PORT=8080 \
     MCP_PATH=/mcp \
-    LOG_LEVEL=info
+    LOG_LEVEL=info \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
-# Health check - MCP server responds on /mcp path
-# Cloud Run sets PORT dynamically, default to 8080 for health check
+# Health check - mode-agnostic TCP/port check (NOT GET /mcp, which would 405
+# under the future stateless transport rollout and needs no new endpoint).
+# Cloud Run uses its own TCP startup probe regardless; this covers other
+# runtimes that honor HEALTHCHECK.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8080}/mcp || exit 1
+    CMD python -c "import socket,os,sys; s=socket.socket(); s.settimeout(5); sys.exit(0 if s.connect_ex(('127.0.0.1', int(os.getenv('PORT','8080'))))==0 else 1)"
 
 # Expose port (Cloud Run will override with PORT env var)
 EXPOSE 8080
