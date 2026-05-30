@@ -49,17 +49,16 @@ def test_no_tracked_file_dropped_from_build_context():
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         pytest.skip(f"could not compute build-context file lists: {exc}")
 
-    # Reliability is judged by the listing's FORMAT, independent of how many files it
-    # omits — so a genuine large drop (e.g. all of src/ and tests/) still FAILS rather
-    # than being mistaken for a broken tool. A working `gcloud meta list-files-for-upload`
-    # emits git-relative paths, so its entries are recognizable as tracked files; an empty
-    # or differently-formatted listing (other gcloud version/config, exit 0) is not. Skip
-    # only when the listing itself is unusable, never when it validly reports omissions.
-    if not uploaded or len(uploaded - tracked) > len(uploaded) // 2:
-        pytest.skip(
-            "gcloud upload listing looks unusable here "
-            f"({len(uploaded)} entries, {len(uploaded & tracked)} recognized as tracked paths)"
-        )
+    # Skip ONLY when gcloud genuinely produced nothing here (e.g. an unconfigured gcloud /
+    # sandbox emitting empty output at exit 0). Deliberately do NOT try to heuristically
+    # judge a NON-empty listing as "unreliable": every such heuristic (sentinel presence,
+    # overlap count, untracked-ratio) can be fooled into SKIPPING a real regression, which
+    # is the dangerous direction for a guard. A non-empty listing is asserted as-is — a
+    # malformed listing would surface as a loud, investigable failure rather than silently
+    # masking a dropped tracked file. Untracked extras in `uploaded` are harmless here:
+    # they simply don't appear in `tracked - uploaded`.
+    if not uploaded:
+        pytest.skip("gcloud meta list-files-for-upload produced no output in this environment")
 
     dropped = tracked - uploaded - _UPLOAD_ALLOWLIST
     assert not dropped, (
