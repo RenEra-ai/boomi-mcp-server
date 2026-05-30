@@ -13,6 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
 from mcp_stream_guard import (
+    DEFAULT_MCP_PATH,
     McpStreamGuardConfig,
     McpStreamGuardMiddleware,
     McpStreamGuardState,
@@ -21,8 +22,72 @@ from mcp_stream_guard import (
     install_reaper_lifespan,
 )
 
+
+class FirstRequestWarmupMiddleware:
+    """One-shot ASGI hook: kick the deferred KB warmup on the first AUTHENTICATED
+    /mcp request.
+
+    Composed INTO ``mcp.http_app(middleware=[...])`` (NOT app.add_middleware /
+    an outer wrapper), so it runs as APP-LEVEL middleware: after the auth
+    provider has parsed the bearer principal onto the scope, but BEFORE the
+    route-level RequireAuthMiddleware that enforces the 401. It is therefore NOT
+    behind the 401 — an unauthenticated /mcp request still reaches it — so it
+    must self-check the authenticated principal and kick ONLY when authenticated.
+    That keeps the expensive ML warmup from running for unauthenticated callers.
+
+    Gating:
+      * scope['type'] == 'http' — pass through 'lifespan' (sent pre-bind;
+        kicking there would recreate the import-time contention this avoids) and
+        any other scope.
+      * path is the /mcp endpoint — never web UI / OAuth / static traffic.
+      * the parsed principal is authenticated (mirrors the route-level 401's
+        ``isinstance(scope['user'], AuthenticatedUser)`` via the Starlette
+        ``user.is_authenticated`` contract).
+
+    Eager warmup is opportunistic only; correctness rests on KbWarmup.get() at
+    the first tool call. The single-build guarantee is KbWarmup.kick()'s
+    lock-guarded idempotency, so a benign race between two first requests (or the
+    unsynchronized _fired flag) cannot start two builds.
+    """
+
+    def __init__(self, app, warmup, mcp_path=DEFAULT_MCP_PATH):
+        self.app = app
+        self._warmup = warmup
+        self._mcp_path = (mcp_path or DEFAULT_MCP_PATH).rstrip("/") or DEFAULT_MCP_PATH
+        self._fired = False
+
+    def _is_mcp_path(self, scope):
+        return (scope.get("path") or "").rstrip("/") == self._mcp_path
+
+    @staticmethod
+    def _is_authenticated(scope):
+        # Starlette's AuthenticationMiddleware (added by the FastMCP auth
+        # provider) sets scope['user']; AuthenticatedUser.is_authenticated is
+        # True, UnauthenticatedUser.is_authenticated is False. Absent user
+        # (no auth configured) -> treat as unauthenticated and do not kick.
+        return bool(getattr(scope.get("user"), "is_authenticated", False))
+
+    async def __call__(self, scope, receive, send):
+        if (
+            not self._fired
+            and scope.get("type") == "http"
+            and self._is_mcp_path(scope)
+            and self._is_authenticated(scope)
+        ):
+            self._fired = True
+            try:
+                self._warmup.kick()
+            except Exception as e:  # noqa: BLE001 — never break request handling
+                print(f"[WARNING] eager KB warmup kick failed: {e}")
+        await self.app(scope, receive, send)
+
+
 if __name__ == "__main__":
-    # Import mcp from server module (ensures OAuth provider is initialized)
+    # Import mcp from server module (ensures OAuth provider is initialized).
+    # `import server` (not just the from-import) lets us reach the optional
+    # _kb_warmup / _kb_warmup_eager attributes, which exist only when
+    # BOOMI_DOCS_ENABLED is set.
+    import server
     from server import mcp
 
     # Get configuration from environment
@@ -52,10 +117,25 @@ if __name__ == "__main__":
     print(f"{'='*60}\n")
 
     # Create the HTTP app with all routes (MCP + OAuth).
-    # The MCP stream cost guard is bound through http_app(middleware=[...]) so it
-    # runs INSIDE the FastMCP auth middleware (bearer token already on the scope)
-    # but still wraps /mcp request handling. Do NOT use app.add_middleware() for
-    # it — that prepends as outermost, before auth.
+    # The MCP stream cost guard and the eager KB warmup hook are bound through
+    # http_app(middleware=[...]) so they run INSIDE the FastMCP auth middleware
+    # (bearer token already parsed onto the scope) but still wrap /mcp request
+    # handling. Do NOT use app.add_middleware() for them — that prepends as
+    # outermost, before auth, so the warmup hook could not see the principal and
+    # could fire for unauthenticated callers.
+    #
+    # Eager warmup hook: installed only when the KB is enabled (warmup present)
+    # AND BOOMI_DOCS_WARMUP_EAGER is on. It is opportunistic — get() at the first
+    # tool call remains the correctness path. Placed first (outermost custom
+    # middleware) so it observes every authenticated /mcp request before the
+    # guard, then forwards untouched.
+    _kb_warmup = getattr(server, "_kb_warmup", None)
+    _kb_warmup_eager = getattr(server, "_kb_warmup_eager", False)
+    warmup_mw = []
+    if _kb_warmup is not None and _kb_warmup_eager:
+        warmup_mw = [Middleware(FirstRequestWarmupMiddleware, warmup=_kb_warmup)]
+        print("[INFO] Eager KB warmup hook enabled (first authenticated /mcp request)")
+
     guard_config = McpStreamGuardConfig.from_env()
     guard_state = McpStreamGuardState(guard_config)
     if guard_config.enabled:
@@ -67,14 +147,15 @@ if __name__ == "__main__":
             f"session_idle={guard_config.session_idle_seconds}s)"
         )
         app = mcp.http_app(
-            middleware=[Middleware(McpStreamGuardMiddleware, state=guard_state)]
+            middleware=warmup_mw
+            + [Middleware(McpStreamGuardMiddleware, state=guard_state)]
         )
         bind_fastmcp_session_manager(app, guard_state)
         bind_auth_jwt_issuer(app, guard_state)
         install_reaper_lifespan(app, guard_state)
     else:
         print("[INFO] MCP stream guard disabled (BOOMI_MCP_STREAM_GUARD_ENABLED=false)")
-        app = mcp.http_app()
+        app = mcp.http_app(middleware=warmup_mw)
 
     # Mount static files directory
     static_dir = os.path.join(os.path.dirname(__file__), "static")

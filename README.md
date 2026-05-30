@@ -131,6 +131,18 @@ and embedded into the image at build time via
 [`deploy/kb-release.env`](deploy/kb-release.env). See
 [KB Release Promotion](#kb-release-promotion) below.
 
+**Cold-start behavior (operators).** The heavy KB build (Chroma + embedding
+model load) is deferred off the import path so the server binds its HTTP port
+immediately — the docs tools are registered *before* the KB is ready. On a
+scale-to-zero cold start the first call(s) may return a bounded
+`error: warming_up` (still loading — clients should wait `retry_after_seconds`
+and retry) or `error: kb_unavailable` (temporary build failure — self-heals on a
+later call after a cooldown). A docs call no longer hangs while the corpus loads.
+Tuning env vars: `BOOMI_DOCS_WARMUP_WAIT_SECONDS` (default 5 — max seconds a call
+blocks waiting for warmup), `BOOMI_DOCS_WARMUP_EAGER` (default true — kick the
+build on the first authenticated `/mcp` request), `BOOMI_DOCS_WARMUP_RETRY_COOLDOWN`
+(default 30 — seconds before a failed build re-attempts).
+
 ---
 
 ## Deployment

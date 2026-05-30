@@ -65,7 +65,13 @@ KB_INSTRUCTIONS = (
     "consult `search_boomi_docs` before answering from model memory. Prefer "
     "retrieved KB evidence over parametric knowledge because Boomi documentation "
     "changes. If search returns `low_confidence` or `no_match`, say the KB does "
-    "not provide enough support rather than inventing details."
+    "not provide enough support rather than inventing details. If a docs tool "
+    "returns `error: warming_up`, the knowledge base is still loading after a "
+    "cold start — wait `retry_after_seconds` and retry the same call rather than "
+    "treating it as a failure or answering from memory. If it returns "
+    "`error: kb_unavailable`, documentation retrieval is temporarily unavailable; "
+    "tell the user docs are momentarily unavailable (a later retry may succeed) "
+    "rather than inventing Boomi facts."
 )
 
 
@@ -3823,17 +3829,52 @@ if not LOCAL_MODE:
 
 
 # --- Boomi Docs KB (optional) ---
-# Registered only when BOOMI_DOCS_ENABLED=true. The import below is what pulls in
-# chromadb/sentence-transformers, so a default server never loads the ML stack.
+# Registered only when BOOMI_DOCS_ENABLED=true. The CHEAP validation runs at
+# import (fail-fast for misconfigured corpora); the HEAVY build (chromadb +
+# embedding model) is deferred to KbWarmup so it never blocks the import path or
+# uvicorn's socket bind. The tools/resource register immediately and the first
+# docs call after a cold start returns a bounded warming_up / kb_unavailable
+# instead of hanging.
 if BOOMI_DOCS_ENABLED:
-    from boomi_mcp.kb.service import build_kb_service
+    from boomi_mcp.kb.service import validate_kb_manifest_cheap
+    from boomi_mcp.kb.warmup import KbWarmup
     from boomi_mcp.kb.manifest import render_corpus_resource
 
+    def _kb_env_float(name, default):
+        raw = os.getenv(name)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            print(f"[WARNING] {name}={raw!r} is not a number; using default {default}")
+            return default
+
+    def _kb_env_flag(name, default):
+        return os.getenv(name, default).strip().lower() in ("true", "1", "yes", "on")
+
+    # Cheap, ML-free validation still runs at import so a misconfigured corpus
+    # fails fast (preserves the existing fail-fast contract for the cheap-
+    # detectable problems: missing path, bad/missing manifest, schema/collection
+    # mismatch, missing embedding_model). The heavy chunk-count/probe checks now
+    # run in the deferred build and are backfilled at Docker build time.
     try:
-        _kb_service = build_kb_service()
+        _kb_bootstrap = validate_kb_manifest_cheap()
     except Exception as e:
         print(f"[ERROR] Boomi Docs KB startup failed: {e}")
         sys.exit(1)
+
+    # Max seconds a docs call blocks for warmup before returning warming_up.
+    _WARMUP_WAIT = _kb_env_float("BOOMI_DOCS_WARMUP_WAIT_SECONDS", 5.0)
+    _WARMUP_RETRY_COOLDOWN = _kb_env_float("BOOMI_DOCS_WARMUP_RETRY_COOLDOWN", 30.0)
+    # Read by server_http.py to decide whether to install the eager first-request
+    # warmup hook. Opportunistic only — get() at the first tool call is the
+    # correctness path.
+    _kb_warmup_eager = _kb_env_flag("BOOMI_DOCS_WARMUP_EAGER", "true")
+
+    _kb_warmup = KbWarmup(
+        _kb_bootstrap, retry_cooldown_seconds=_WARMUP_RETRY_COOLDOWN
+    )
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def search_boomi_docs(query: str, top_k: int = None) -> dict:
@@ -3849,12 +3890,27 @@ if BOOMI_DOCS_ENABLED:
         page_key. If results look off-topic, retry with reformulated query terms.
         If the response status is low_confidence or no_match, do not invent
         unsupported Boomi facts; tell the user the KB does not provide enough
-        support. Read-only.
+        support. If the response is error "warming_up", the KB is still loading
+        after a cold start — wait retry_after_seconds and retry the same call. If
+        it is error "kb_unavailable", docs retrieval is temporarily unavailable;
+        report that rather than inventing facts (a later retry may succeed).
+        Read-only.
         """
+        svc = _kb_warmup.get(_WARMUP_WAIT)
+        if svc is None:
+            return _kb_warmup.not_ready_response()
         try:
-            return _kb_service.search(query, top_k)
+            return svc.search(query, top_k)
         except Exception as e:
-            return {"_success": False, "error": "kb_query_error", "message": str(e)}
+            # Sanitize: full detail server-side only; client gets a generic
+            # message + coarse category (KbQueryError text can embed internals).
+            print(f"[ERROR] search_boomi_docs query failed: {e}")
+            return {
+                "_success": False,
+                "error": "kb_query_error",
+                "message": "Boomi Docs KB query failed. Please retry shortly.",
+                "error_type": type(e).__name__,
+            }
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def read_boomi_doc_page(
@@ -3868,12 +3924,24 @@ if BOOMI_DOCS_ENABLED:
         step sequences, or sections adjacent to the matched chunk. Most Boomi doc
         pages fit in a single call (default 15 chunks); if the response has
         "truncated": true, call again with start_chunk_index set to the returned
-        next_chunk_index to continue. Read-only.
+        next_chunk_index to continue. If the response is error "warming_up", the
+        KB is still loading after a cold start — wait retry_after_seconds and
+        retry. If it is error "kb_unavailable", docs retrieval is temporarily
+        unavailable. Read-only.
         """
+        svc = _kb_warmup.get(_WARMUP_WAIT)
+        if svc is None:
+            return _kb_warmup.not_ready_response()
         try:
-            return _kb_service.read_page(page_key, max_chunks, start_chunk_index)
+            return svc.read_page(page_key, max_chunks, start_chunk_index)
         except Exception as e:
-            return {"_success": False, "error": "kb_query_error", "message": str(e)}
+            print(f"[ERROR] read_boomi_doc_page failed: {e}")
+            return {
+                "_success": False,
+                "error": "kb_query_error",
+                "message": "Boomi Docs KB query failed. Please retry shortly.",
+                "error_type": type(e).__name__,
+            }
 
     @mcp.resource("kb://boomi-docs/corpus", mime_type="text/markdown")
     def boomi_docs_corpus() -> str:
@@ -3882,10 +3950,14 @@ if BOOMI_DOCS_ENABLED:
         breakdown, and known exclusions. Static — not the retrieval path; use
         search_boomi_docs and read_boomi_doc_page for lookups.
         """
-        return render_corpus_resource(_kb_service.manifest)
+        # Rendered from the cheap bootstrap manifest, not a live KbService, so
+        # the coverage map is available immediately and regardless of warmup
+        # state (warming or failed).
+        return render_corpus_resource(_kb_bootstrap.manifest)
 
     print("[INFO] Boomi Docs KB registered: tools search_boomi_docs, "
-          "read_boomi_doc_page; resource kb://boomi-docs/corpus")
+          "read_boomi_doc_page; resource kb://boomi-docs/corpus "
+          "(heavy build deferred to first use / eager warmup)")
 
 
 if __name__ == "__main__":
