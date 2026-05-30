@@ -104,6 +104,7 @@ docs/*
 docs/archive/*
 !docs/archive/MCP_TOOL_DESIGN_V2_2026-03-10.md
 !docs/archive/xml_builders_README_legacy_2026-05-15.md
+!docs/archive/issue_30_m2_end_to_end_validation_live_qa_plan.json
 
 # Test files (local only, except anywhere under tests/)
 test_*.py

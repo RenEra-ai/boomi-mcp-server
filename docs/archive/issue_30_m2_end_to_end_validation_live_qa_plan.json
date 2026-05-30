@@ -1,0 +1,210 @@
+{
+  "title": "Issue #30 Plan: M2 End-to-End Validation and Live QA",
+  "issue": {
+    "number": 30,
+    "title": "M2.10 Add M2 end-to-end validation and live QA",
+    "url": "https://github.com/RenEra-ai/boomi-mcp-server/issues/30",
+    "parent_issue": 8,
+    "milestone": "M2 database_to_api_sync Vertical Slice",
+    "depends_on": [
+      29
+    ]
+  },
+  "summary": {
+    "goal": "Harden M2 end-to-end readiness and live Boomi QA for the first database_to_api_sync vertical slice.",
+    "approach": "Add focused local tests and a live QA runbook proving the full M2 path from archetype parameters through build_from_archetype, transformation review, build_integration plan, dry-run/mocked apply, and verify-ready evidence.",
+    "execution_boundary": "This issue validates the shipped M2 create/apply/verify path. It must not implement M3 deploy/test orchestration, schedule activation, runtime execution, execution-log polling, or verified Try/Catch retry/DLQ XML.",
+    "non_goals": [
+      "Do not add new MCP tools or public schemas.",
+      "Do not change database, REST, profile, map, script, or process XML builders unless an end-to-end test exposes a blocking M2 defect.",
+      "Do not un-gate retry_count or DLQ process emission; that remains issue #51.",
+      "Do not deploy packages, attach runtimes, enable schedules, execute processes, fetch runtime logs, or automate failure-row runtime proof; those remain M3.",
+      "Do not commit account-specific raw XML, secrets, payloads, SQL, mappings, or Boomi execution data.",
+      "Do not mutate the work Boomi profile during live QA."
+    ]
+  },
+  "current_state": {
+    "issue_29_status": "Closed. database_to_api_sync emits an executable IntegrationSpecV1 suitable for build_integration(action='plan').",
+    "implemented_path": [
+      "build_from_archetype_action validates database_to_api_sync parameters and emits JSON-only IntegrationSpecV1.",
+      "The archetype composes the #27 source/transform primitives and #28 target/operational primitives.",
+      "build_integration(action='plan') validates deterministic dependency order and builder-routed component configs.",
+      "Inline map_script routes are materialized as script.mapping components and the planner synthesizes the required transform.function wrapper.",
+      "review_transformation can inspect both contract flow metadata and executable profile/map components."
+    ],
+    "known_boundaries": [
+      "Process retry/DLQ stays gated: emitted process reliability remains retry_count=0 and dlq.mode='disabled'. Requested retry/DLQ intent is recorded in validation_rules.operational_intent and deferred to #51.",
+      "Schedule and watermark intent are planning metadata only in M2; actual schedule activation and dynamic operation-property wiring are deferred to M3/#51.",
+      "Live Boomi create/apply can create components, but deploy/run/log/failure-row runtime proof is manual or deferred until M3 orchestration."
+    ],
+    "boomi_docs_facts_used": [
+      {
+        "topic": "Deployment workflow",
+        "source": "Boomi docs search: Automating deployments with packaged components",
+        "facts": [
+          "Automated deployment requires target environments, runtimes attached to environments, deployment privileges, and component IDs for deployable components.",
+          "The documented workflow packages a component version, deploys the package to an environment, then configures environment extensions and schedules."
+        ],
+        "impact": "Issue #30 should not treat deploy/run/schedule activation as part of M2 local validation."
+      },
+      {
+        "topic": "Execution logs",
+        "source": "Boomi docs search: Process and document log viewing",
+        "facts": [
+          "Execution events are logged at process and document levels.",
+          "Logs are stored locally with the runtime, so the runtime must be online for log viewing."
+        ],
+        "impact": "Issue #30 can document runtime-log QA evidence expectations, but automated log retrieval belongs to M3 orchestration."
+      }
+    ],
+    "live_reference_candidates": [
+      {
+        "profile": "reneraai-5RO3DD",
+        "component_id": "107aaef1-cb1e-4975-be44-69d120803864",
+        "name": "MS SQL Server Orders DB",
+        "folder_name": "#Common",
+        "type": "connector-settings",
+        "usage": "Candidate database connection for reuse-mode live QA."
+      },
+      {
+        "profile": "reneraai-5RO3DD",
+        "component_id": "7f7e0730-1152-4467-b912-e3a8ed12782a",
+        "name": "REST None",
+        "folder_name": "#Common",
+        "type": "connector-settings",
+        "usage": "Candidate no-auth REST Client connection for reuse-mode live QA."
+      }
+    ],
+    "known_test_infra_risk": "The full suite may still fail in tests/test_verified_storage.py if earlier async tests clear the current event loop and that file keeps using asyncio.get_event_loop().run_until_complete(coro). If this remains true during #30, fix that helper as test infrastructure required for the full-suite acceptance gate."
+  },
+  "public_interfaces": {
+    "new_mcp_tools": [],
+    "changed_mcp_tools": [],
+    "validated_existing_tools": [
+      {
+        "tool": "build_from_archetype",
+        "purpose": "Read-only archetype assembly for database_to_api_sync."
+      },
+      {
+        "tool": "review_transformation",
+        "purpose": "Pre-apply transformation inspection for source fields, target fields, unmapped validation, and generated test payloads."
+      },
+      {
+        "tool": "build_integration",
+        "purpose": "Plan, dry-run apply, real apply when explicitly approved, and verify created/reused components."
+      }
+    ],
+    "new_docs": [
+      {
+        "path": "docs/M2_DATABASE_TO_API_SYNC_LIVE_QA.md",
+        "purpose": "Tracked live QA runbook and evidence template for M2 database_to_api_sync validation."
+      }
+    ],
+    "gitignore": "If docs/* ignore rules hide the new live QA runbook, add a selective allow rule for docs/M2_DATABASE_TO_API_SYNC_LIVE_QA.md. Keep docs/plans local/ignored unless the project policy changes."
+  },
+  "implementation_changes": [
+    {
+      "area": "end_to_end_test_module",
+      "changes": [
+        "Add a dedicated local E2E test module, for example tests/patterns/test_database_to_api_sync_e2e.py.",
+        "Use reusable payload builders for minimal create-mode DB + create-mode REST none-auth sync, reuse-mode scheduled/incremental sync, inline map_script sync, and invalid/unresolvable plans.",
+        "Keep test data synthetic with sentinel placeholders only; do not use real SQL, real API payloads, real credentials, or live account IDs in local fixtures except documented reusable component IDs in the live QA runbook."
+      ]
+    },
+    {
+      "area": "full_local_chain_tests",
+      "changes": [
+        "Call build_from_archetype_action('database_to_api_sync', parameters) and assert _success true, raw_xml_exposed false, boomi_mutation false, deterministic component keys, and JSON serializability.",
+        "Call review_transformation_action('validate_unmapped', {'integration_spec': spec}) and assert the valid E2E payload is transformation-review clean before planning.",
+        "Call build_integration_action(mock_boomi, profile, 'plan', {'integration_spec': spec, 'conflict_policy': 'reuse'}) with paginate_metadata mocked and assert _success true.",
+        "Assert every emitted component appears exactly once in execution_order, every dependency precedes its dependent, and main_process is last.",
+        "Assert the plan exposes the transform_summary and review_hint for the transform.map step.",
+        "Assert operational intent is present for schedule, watermark, retry request, DLQ request, error_classifier, expected_status_codes, and run_metadata.",
+        "Assert actual process reliability remains gated: retry_count=0 and dlq.mode='disabled', with deferred metadata pointing to #51 or M3 as appropriate."
+      ]
+    },
+    {
+      "area": "apply_path_tests",
+      "changes": [
+        "Test build_integration_action(..., 'apply', config without dry_run=false) returns dry_run true, includes the plan, and does not call _execute_component.",
+        "Test mocked apply with dry_run=false by patching _execute_component to return deterministic component IDs for created components.",
+        "Assert $ref tokens are resolved before the main_process config reaches _execute_component, including source connection/operation, transform map, target connection/operation, and script wrapper dependencies when using map_script.",
+        "For reuse-mode DB and REST connections, mock existing component resolution and assert apply records status='reused', carries the existing component IDs into the registry, and does not call _execute_component for reference_only components.",
+        "Test a fail-fast path where planning returns error_missing_target or validation error, then assert apply returns _success false and _execute_component is never called."
+      ]
+    },
+    {
+      "area": "wrapper_path_tests",
+      "changes": [
+        "Exercise server.build_from_archetype through the wrapper path for database_to_api_sync, mirroring the existing wrapper test style.",
+        "Exercise build_integration through the server wrapper by monkeypatching get_current_user, get_secret, and Boomi so no real credentials or network calls are used.",
+        "Confirm config must be a JSON string at the MCP wrapper boundary and malformed JSON / non-object JSON returns _success false with actionable error text.",
+        "Do not add live-account dependencies to wrapper tests."
+      ]
+    },
+    {
+      "area": "live_qa_runbook",
+      "changes": [
+        "Add docs/M2_DATABASE_TO_API_SYNC_LIVE_QA.md with a step-by-step manual QA workflow.",
+        "Default live QA profile is reneraai-5RO3DD; work profile is read-only reference only.",
+        "Use reuse-mode connections by default: DB component 107aaef1-cb1e-4975-be44-69d120803864 and REST component 7f7e0730-1152-4467-b912-e3a8ed12782a, after confirming they still exist with query_components.",
+        "Use a unique integration/component prefix such as M2QA-<UTC timestamp> and conflict_policy='fail' to avoid accidentally reusing or overwriting previous QA output.",
+        "Document the exact sequence: query reference components, build_from_archetype, review_transformation validate_unmapped, build_integration plan, build_integration apply dry_run=true, optional explicitly approved build_integration apply dry_run=false, and build_integration verify using the returned build_id.",
+        "Include an evidence template capturing profile, timestamp, build_id, execution_order, created/reused component IDs, component names, warnings, validation errors, and blocked prerequisites.",
+        "State that package deploy, runtime attachment, schedule enablement, process execution, execution logs, and failure-row proof are deferred to M3 unless the QA operator performs them manually and records evidence separately."
+      ]
+    },
+    {
+      "area": "roadmap_docs",
+      "changes": [
+        "Update docs/INTEGRATION_AUTHORING_ROADMAP.md under M2 with an M2.10 / Issue #30 note after tests and runbook are added.",
+        "Clarify that M2 validation covers local end-to-end assembly plus Boomi component create/apply/verify readiness.",
+        "Clarify that deploy/test orchestration, schedule activation, runtime execution, execution logs, and failure-row runtime proof remain M3/#51 scope."
+      ]
+    },
+    {
+      "area": "test_infra_if_needed",
+      "changes": [
+        "If full pytest still fails only because tests/test_verified_storage.py uses asyncio.get_event_loop() after async wrapper tests cleared the current loop, replace that helper with a private event loop pattern equivalent to the existing wrapper-test _run_async helper.",
+        "Do not make unrelated behavior changes in verified storage; this is only to unblock the full regression acceptance gate for #30."
+      ]
+    }
+  ],
+  "test_plan": {
+    "focused_commands": [
+      ".venv/bin/python -m pytest tests/patterns/test_database_to_api_sync_e2e.py -q",
+      ".venv/bin/python -m pytest tests/patterns/test_database_to_api_sync_assembly.py tests/patterns/test_database_to_api_sync_contract.py -q",
+      ".venv/bin/python -m pytest tests/test_integration_authoring_wrapper.py tests/test_integration_builder.py tests/test_transformation_review.py tests/test_transformation_review_wrapper.py -q"
+    ],
+    "full_regression": [
+      ".venv/bin/python -m pytest -q",
+      "git diff --check"
+    ],
+    "expected_local_assertions": [
+      "Full local M2 path passes without live Boomi access.",
+      "Dry-run apply never calls _execute_component.",
+      "Mocked real apply resolves $ref dependencies before process execution.",
+      "reference_only reuse components are recorded as reused and do not invoke component creation.",
+      "Requested retry/DLQ/schedule/watermark behavior is visible as intent but not emitted as unsupported process XML.",
+      "Malformed wrapper config returns structured failure.",
+      "No tests echo secret-shaped values, credential refs in failures, raw XML, real SQL, or real payloads."
+    ],
+    "live_qa_validation": [
+      "Run the new runbook against reneraai-5RO3DD.",
+      "Confirm reference DB and REST components still exist before building.",
+      "Record build_from_archetype, review_transformation, plan, dry-run apply, optional explicit apply, and verify outputs.",
+      "Post evidence to issue #30 or project notes: profile, timestamp, build_id, created/reused component IDs, execution order, and any blocked external prerequisites.",
+      "If live mutation is not approved or prerequisites are unavailable, record the block explicitly rather than marking live QA complete."
+    ]
+  },
+  "assumptions": [
+    "Issue #29 is the starting baseline and remains clean.",
+    "Live mutation, if performed, is allowed only in the Renera test profile and only after explicit operator approval.",
+    "The work profile may be used for read-only reference only.",
+    "Live QA uses existing connector references to avoid handling plaintext secrets.",
+    "M2 does not implement deploy/test orchestration; M3 owns package deployment, runtime attachment, schedule activation, execution, polling, and log retrieval.",
+    "Issue #51 owns verified Try/Catch wrapper XML, retry_count un-gating, DLQ catch-path wiring, and related golden process-flow XML tests.",
+    "If #30 E2E tests reveal a blocker in the shipped M2 path, fix that blocker in #30; otherwise file follow-up issues for broader behavior gaps.",
+    "docs/plans remains local/ignored according to current repository policy unless the user explicitly asks to track plan files."
+  ]
+}
