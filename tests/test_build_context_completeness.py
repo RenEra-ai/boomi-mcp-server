@@ -60,9 +60,16 @@ def test_no_tracked_file_dropped_from_build_context():
     if not uploaded:
         pytest.skip("gcloud meta list-files-for-upload produced no output in this environment")
 
-    dropped = tracked - uploaded - _UPLOAD_ALLOWLIST
+    # Flag a tracked file only if it EXISTS on disk yet is absent from the upload — that
+    # is the real ignore-rule exclusion (ignore rules drop files from the upload, they do
+    # not delete them, so the offending file is always present on disk). A tracked file
+    # missing from disk is a partial/odd checkout, not a build-context ignore bug, and is
+    # out of scope for this guard.
+    dropped = sorted(
+        f for f in (tracked - uploaded - _UPLOAD_ALLOWLIST) if (_ROOT / f).exists()
+    )
     assert not dropped, (
         "tracked files are excluded from the gcloud build-context upload — a "
         ".gitignore/.gcloudignore pattern is dropping them, so they would be MISSING "
-        f"from locally-submitted (`gcloud builds submit`) images: {sorted(dropped)}"
+        f"from locally-submitted (`gcloud builds submit`) images: {dropped}"
     )
