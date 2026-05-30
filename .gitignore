@@ -4,6 +4,10 @@ __pycache__/
 *$py.class
 *.so
 .Python
+# Tool caches (also mirrored in .dockerignore; .gcloudignore inherits these)
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 env/
 venv/
 .venv/
