@@ -82,6 +82,96 @@ class FirstRequestWarmupMiddleware:
         await self.app(scope, receive, send)
 
 
+def _flag(name, default):
+    """Read a boolean env flag using the same true-value convention as
+    ``mcp_stream_guard._flag`` / ``server._kb_env_flag`` (case-insensitive,
+    stripped): true, 1, yes, on."""
+    return os.getenv(name, default).strip().lower() in ("true", "1", "yes", "on")
+
+
+def build_mcp_app(
+    mcp,
+    *,
+    kb_warmup=None,
+    kb_warmup_eager=False,
+    stateless_http=False,
+    json_response=False,
+):
+    """Construct the FastMCP HTTP app (the /mcp routes + custom middleware).
+
+    Two transport modes, selected by ``stateless_http``:
+
+    * Stateful (default, ``stateless_http=False``) — preserves the original
+      behavior exactly: the eager KB warmup hook (when enabled) plus the MCP
+      stream cost guard, with ``bind_fastmcp_session_manager``,
+      ``bind_auth_jwt_issuer``, and ``install_reaper_lifespan`` wired onto the
+      app. ``stateless_http=False`` / ``json_response=False`` are passed to
+      ``http_app`` explicitly — these are the FastMCP defaults, so this is
+      behaviorally identical to not passing them.
+
+    * Stateless (``stateless_http=True``) — runs FastMCP streamable HTTP without
+      per-instance session state (eliminates the post-redeploy ``404 Session not
+      found``). The stream guard, session-manager binding, JWT-issuer binding,
+      and session reaper are all skipped — they only make sense for stateful
+      sessions. ``json_response`` is honored only in this mode (it changes POST
+      response framing and must be validated independently).
+
+    The eager warmup hook is installed (outermost custom middleware) in BOTH
+    modes when ``kb_warmup`` is present and ``kb_warmup_eager`` is set.
+    """
+    # Eager warmup hook: installed only when the KB is enabled (warmup present)
+    # AND eager warmup is on. It is opportunistic — get() at the first tool call
+    # remains the correctness path. Placed first (outermost custom middleware)
+    # so it observes every authenticated /mcp request before the guard, then
+    # forwards untouched.
+    warmup_mw = []
+    if kb_warmup is not None and kb_warmup_eager:
+        warmup_mw = [Middleware(FirstRequestWarmupMiddleware, warmup=kb_warmup)]
+        print("[INFO] Eager KB warmup hook enabled (first authenticated /mcp request)")
+
+    if stateless_http:
+        print(
+            f"[INFO] MCP stateless HTTP transport ENABLED "
+            f"(stateless_http=True, json_response={json_response}); stream guard, "
+            f"session-manager binding, JWT-issuer binding, and session reaper are "
+            f"disabled in stateless mode"
+        )
+        return mcp.http_app(
+            stateless_http=True,
+            json_response=json_response,
+            middleware=warmup_mw,
+        )
+
+    print("[INFO] MCP stateful HTTP transport (stateless_http=False)")
+    guard_config = McpStreamGuardConfig.from_env()
+    guard_state = McpStreamGuardState(guard_config)
+    if guard_config.enabled:
+        print(
+            f"[INFO] MCP stream guard enabled (get_mode={guard_config.get_mode}, "
+            f"work_idle={guard_config.work_idle_seconds}s, "
+            f"max_age={guard_config.max_age_seconds}s, "
+            f"max_get/identity={guard_config.max_get_streams_per_identity}, "
+            f"session_idle={guard_config.session_idle_seconds}s)"
+        )
+        app = mcp.http_app(
+            stateless_http=False,
+            json_response=False,
+            middleware=warmup_mw
+            + [Middleware(McpStreamGuardMiddleware, state=guard_state)],
+        )
+        bind_fastmcp_session_manager(app, guard_state)
+        bind_auth_jwt_issuer(app, guard_state)
+        install_reaper_lifespan(app, guard_state)
+    else:
+        print("[INFO] MCP stream guard disabled (BOOMI_MCP_STREAM_GUARD_ENABLED=false)")
+        app = mcp.http_app(
+            stateless_http=False,
+            json_response=False,
+            middleware=warmup_mw,
+        )
+    return app
+
+
 if __name__ == "__main__":
     # Import mcp from server module (ensures OAuth provider is initialized).
     # `import server` (not just the from-import) lets us reach the optional
@@ -124,38 +214,17 @@ if __name__ == "__main__":
     # outermost, before auth, so the warmup hook could not see the principal and
     # could fire for unauthenticated callers.
     #
-    # Eager warmup hook: installed only when the KB is enabled (warmup present)
-    # AND BOOMI_DOCS_WARMUP_EAGER is on. It is opportunistic — get() at the first
-    # tool call remains the correctness path. Placed first (outermost custom
-    # middleware) so it observes every authenticated /mcp request before the
-    # guard, then forwards untouched.
-    _kb_warmup = getattr(server, "_kb_warmup", None)
-    _kb_warmup_eager = getattr(server, "_kb_warmup_eager", False)
-    warmup_mw = []
-    if _kb_warmup is not None and _kb_warmup_eager:
-        warmup_mw = [Middleware(FirstRequestWarmupMiddleware, warmup=_kb_warmup)]
-        print("[INFO] Eager KB warmup hook enabled (first authenticated /mcp request)")
-
-    guard_config = McpStreamGuardConfig.from_env()
-    guard_state = McpStreamGuardState(guard_config)
-    if guard_config.enabled:
-        print(
-            f"[INFO] MCP stream guard enabled (get_mode={guard_config.get_mode}, "
-            f"work_idle={guard_config.work_idle_seconds}s, "
-            f"max_age={guard_config.max_age_seconds}s, "
-            f"max_get/identity={guard_config.max_get_streams_per_identity}, "
-            f"session_idle={guard_config.session_idle_seconds}s)"
-        )
-        app = mcp.http_app(
-            middleware=warmup_mw
-            + [Middleware(McpStreamGuardMiddleware, state=guard_state)]
-        )
-        bind_fastmcp_session_manager(app, guard_state)
-        bind_auth_jwt_issuer(app, guard_state)
-        install_reaper_lifespan(app, guard_state)
-    else:
-        print("[INFO] MCP stream guard disabled (BOOMI_MCP_STREAM_GUARD_ENABLED=false)")
-        app = mcp.http_app(middleware=warmup_mw)
+    # Transport mode is selected by BOOMI_MCP_STATELESS_HTTP (default off).
+    # BOOMI_MCP_JSON_RESPONSE (default off) is honored only in stateless mode.
+    # Both default false, so production behavior is unchanged until the flags are
+    # explicitly enabled (see build_mcp_app for the full contract).
+    app = build_mcp_app(
+        mcp,
+        kb_warmup=getattr(server, "_kb_warmup", None),
+        kb_warmup_eager=getattr(server, "_kb_warmup_eager", False),
+        stateless_http=_flag("BOOMI_MCP_STATELESS_HTTP", "false"),
+        json_response=_flag("BOOMI_MCP_JSON_RESPONSE", "false"),
+    )
 
     # Mount static files directory
     static_dir = os.path.join(os.path.dirname(__file__), "static")
