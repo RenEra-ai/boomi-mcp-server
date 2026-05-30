@@ -1,12 +1,23 @@
 """Boomi docs knowledge base retrieval service.
 
 chromadb and sentence-transformers are imported lazily inside
-``build_kb_service`` so that merely importing this module does not pull in the
-ML stack. server.py only imports this module when ``BOOMI_DOCS_ENABLED`` is
-true, and ``build_kb_service`` is the single entry point that touches the heavy
-dependencies.
+``build_kb_service_heavy`` so that merely importing this module does not pull in
+the ML stack. server.py only imports this module when ``BOOMI_DOCS_ENABLED`` is
+true. The startup sequence is split into two halves so the heavy half can be
+deferred off the import/socket-bind path (see boomi_mcp.kb.warmup):
+
+* ``validate_kb_manifest_cheap`` — pure-stdlib config + manifest validation
+  (no ML imports). Run at import so a misconfigured corpus still fails fast.
+* ``build_kb_service_heavy`` — opens Chroma + loads the embedding model. This is
+  the multi-second cold-start cost; it is the single entry point that touches
+  the heavy dependencies.
+
+``build_kb_service`` composes the two and keeps its original signature/behavior
+(used by the Docker build-time validation gate and the startup test matrix).
 """
 import os
+import time
+from dataclasses import dataclass
 
 from .errors import KbQueryError, KbStartupError
 from .manifest import corpus_version, load_manifest, validate_manifest
@@ -338,12 +349,28 @@ class KbService:
         return result
 
 
-def build_kb_service():
-    """Run the spec §4.3 startup sequence and return a ready KbService.
+@dataclass(frozen=True)
+class KbBootstrap:
+    """Cheap, ML-free startup state produced by ``validate_kb_manifest_cheap``.
 
-    Raises KbStartupError on any validation failure. chromadb and
-    sentence-transformers are imported here (and nowhere else at import time),
-    so a server with BOOMI_DOCS_ENABLED unset never loads the ML stack.
+    Carries both the resolved ``config`` and the parsed ``manifest`` because the
+    heavy build AND KbService need config (db_path/collection/top_k/confidence),
+    not just the manifest. Held by KbWarmup and handed to ``build_kb_service_heavy``
+    when the deferred build runs.
+    """
+
+    config: dict
+    manifest: dict
+
+
+def validate_kb_manifest_cheap():
+    """Run the cheap, pure-stdlib half of the spec §4.3 startup sequence.
+
+    Resolves config, checks the corpus path, loads + validates the manifest, and
+    confirms the embedding_model field is present. Imports NO ML dependencies, so
+    it is safe to run on the import/socket-bind path (server.py runs it at import
+    to preserve fail-fast for cheap-detectable corpus problems). Raises
+    KbStartupError on any failure. Returns a KbBootstrap for build_kb_service_heavy.
     """
     config = _kb_config()
     db_path = config["db_path"]
@@ -357,7 +384,37 @@ def build_kb_service():
     # Steps 3-4: manifest schema version + collection name.
     validate_manifest(manifest, collection_name)
 
+    # Embedding-model presence is a cheap manifest check; fail fast here (moved
+    # ahead of the heavy chromadb import) so a model-less manifest never defers a
+    # build that is guaranteed to fail.
+    if not manifest.get("embedding_model"):
+        raise KbStartupError("KB manifest is missing 'embedding_model'")
+
+    return KbBootstrap(config=config, manifest=manifest)
+
+
+def build_kb_service_heavy(bootstrap):
+    """Run the heavy half of startup and return a ready KbService.
+
+    Opens the Chroma client + collection and loads the SentenceTransformer
+    embedding model — the multi-second cold-start cost. chromadb and
+    sentence-transformers are imported here (and nowhere else at import time),
+    so a server with BOOMI_DOCS_ENABLED unset never loads the ML stack and the
+    deferred warmup thread is the only place this cost is paid in production.
+    Emits per-phase timing logs so the cold-start breakdown is measurable in
+    Cloud Logging. Raises KbStartupError on any failure.
+    """
+    config = bootstrap.config
+    manifest = bootstrap.manifest
+    db_path = config["db_path"]
+    collection_name = config["collection"]
+    embedding_model = manifest.get("embedding_model")
+
+    def _phase(name, start):
+        print(f"[INFO] KB warmup phase={name} seconds={time.monotonic() - start:.2f}")
+
     # Heavy dependencies are imported only after the cheap checks pass.
+    t = time.monotonic()
     try:
         import chromadb
         from chromadb.utils import embedding_functions
@@ -366,34 +423,39 @@ def build_kb_service():
             "KB dependencies are not installed — install requirements-kb.txt "
             f"(chromadb, sentence-transformers): {e}"
         )
+    _phase("import_deps", t)
 
     # Step 5: open the persistent client.
+    t = time.monotonic()
     try:
         client = chromadb.PersistentClient(path=db_path)
     except Exception as e:
         raise KbStartupError(f"Failed to open Chroma client at {db_path}: {e}")
+    _phase("open_client", t)
 
     # Step 8 (before 6): the embedding function is required to re-open the
     # collection so that query_texts work — so build it before get_collection.
-    embedding_model = manifest.get("embedding_model")
-    if not embedding_model:
-        raise KbStartupError("KB manifest is missing 'embedding_model'")
+    t = time.monotonic()
     try:
         ef = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name=embedding_model
         )
     except Exception as e:
         raise KbStartupError(f"Failed to load embedding model {embedding_model!r}: {e}")
+    _phase("load_model", t)
 
     # Step 6: open the collection.
+    t = time.monotonic()
     try:
         collection = client.get_collection(name=collection_name, embedding_function=ef)
     except Exception as e:
         raise KbStartupError(
             f"Failed to open Chroma collection {collection_name!r}: {e}"
         )
+    _phase("open_collection", t)
 
     # Step 7: exact count match guards against incomplete/corrupt artifacts.
+    t = time.monotonic()
     expected_count = manifest.get("chunk_count")
     actual_count = collection.count()
     if actual_count != expected_count:
@@ -401,14 +463,17 @@ def build_kb_service():
             f"KB corpus chunk count mismatch: collection has {actual_count}, "
             f"manifest declares {expected_count}"
         )
+    _phase("count", t)
 
     # Step 9: a probe query must return something.
+    t = time.monotonic()
     try:
         probe = collection.query(query_texts=["probe"], n_results=1)
     except Exception as e:
         raise KbStartupError(f"KB probe query failed: {e}")
     if not (probe.get("ids") and probe["ids"][0]):
         raise KbStartupError("KB probe query returned no results — corpus may be empty")
+    _phase("probe", t)
 
     service = KbService(collection, manifest, config)
     print(
@@ -417,3 +482,14 @@ def build_kb_service():
         f"built={manifest.get('build_timestamp', 'unknown')}"
     )
     return service
+
+
+def build_kb_service():
+    """Run the full spec §4.3 startup sequence and return a ready KbService.
+
+    Thin orchestrator: ``build_kb_service_heavy(validate_kb_manifest_cheap())``.
+    Unchanged public signature/behavior — used by the Docker build-time
+    validation gate and the startup test matrix. Raises KbStartupError on any
+    validation failure.
+    """
+    return build_kb_service_heavy(validate_kb_manifest_cheap())
