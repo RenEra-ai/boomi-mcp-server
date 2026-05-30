@@ -1,80 +1,20 @@
 # .gcloudignore — controls what `gcloud builds submit` uploads as the Cloud Build context.
 #
-# Intentionally STANDALONE: it does NOT use `#!include:.gitignore`. When this file is
-# absent, gcloud auto-generates one containing `#!include:.gitignore`, so dual-purpose
-# .gitignore hygiene patterns (e.g. an unanchored `analyze_*.py`) silently drop TRACKED
-# source from the uploaded build context — which shipped an image missing
-# analyze_component.py and disabled 4 tool categories. Decoupling uploads from .gitignore
-# kills that whole class of bug. List ONLY sensitive/heavy/local-only paths below —
-# never source patterns. Anything not listed here IS uploaded.
+# It INHERITS .gitignore via `#!include:.gitignore` so every local-only path git already
+# ignores (.mcp.json, .env/secrets, caches, venvs, docs/archive, agents/, tasks/,
+# setup scripts, incident bundles, ...) is also kept out of the build context — and out
+# of any locally-built image (.dockerignore does NOT strip many of these, e.g. .mcp.json
+# and docs/archive/*.json, so a hand-maintained exclusion list would silently leak them).
+# Inheriting avoids keeping a second copy of git's exclusions that can drift out of sync.
 #
-# NOTE: this only affects local `gcloud builds submit`. The Cloud Build git trigger
-# checks out tracked files and is unaffected either way.
-
-# VCS / tooling
+# Why inheriting .gitignore is SAFE here (it was the original bug's mechanism): the
+# scratch-script rule in .gitignore is now ANCHORED (`/analyze_*.py`), so it no longer
+# matches the tracked module src/boomi_mcp/categories/components/analyze_component.py and
+# the file is uploaded normally. If a future .gitignore edit re-introduces an unanchored
+# source-matching pattern, the Dockerfile build-time import gate fails the build LOUDLY
+# instead of shipping an image with disabled tool categories.
+#
+# (.git/ and this file are listed explicitly because .gitignore does not ignore them.)
+#!include:.gitignore
 .git/
 .gcloudignore
-.github/
-
-# Python caches & build artifacts
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.eggs/
-*.egg-info/
-build/
-dist/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
-
-# Secrets / local credentials — must never reach the build context
-.env
-.env.local
-.env.*.local
-.env.cloud
-.env.cloud.deployed
-.env.token.temp
-secrets/
-secrets.sqlite
-*.sqlite
-*.sqlite3
-*.db
-credentials.db
-*.key
-*.pem
-*.crt
-*_local_secrets.json
-.boomi_mcp_local_secrets.json
-
-# Logs / runtime
-*.log
-logs/
-server.pid
-.~lock.*
-
-# IDE / OS
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Local-only workspaces / bundles / vendored clones (not needed in the image)
-.claude/
-.codex/
-agents/
-tasks/
-docs/plans/
-incident-*/
-fastmcp/
-mcp-streamable-http/
-boomi-python/
