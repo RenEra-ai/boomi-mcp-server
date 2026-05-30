@@ -35,6 +35,32 @@ secrets.sqlite
 .env
 .env.local
 *.log
+server.pid
+setup_claude_code.sh
+.mcp.json
+.gcloudignore
+.DS_Store
+
+# Secrets / credentials — never bake into an image (mirror of .gitignore)
+.env.*
+secrets/
+*.sqlite
+*.sqlite3
+*.db
+credentials.db
+*.key
+*.pem
+*.crt
+*_local_secrets.json
+.boomi_mcp_local_secrets.json
+
+# Local-only workspaces / docs (not needed at runtime; keep out of the image)
+.claude/
+.codex/
+agents/
+tasks/
+docs/plans/
+docs/archive/
 
 # Documentation
 README.md
