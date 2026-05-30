@@ -360,6 +360,32 @@ When `BOOMI_DOCS_ENABLED` is unset or false, the KB module is not imported,
 the `requirements-kb.txt` dependencies are not loaded, and the KB tools and
 `kb://boomi-docs/corpus` resource are not registered.
 
+#### MCP Stateless Transport (Workstream B — default off)
+
+Both flags **default `false`** and are **not set in `cloudbuild.yaml`**, so
+production runs the stateful streamable-HTTP transport unchanged. They are the
+Workstream B opt-in for running FastMCP streamable HTTP **stateless** to
+eliminate per-instance MCP sessions (the post-redeploy `404 Session not found`).
+
+```bash
+BOOMI_MCP_STATELESS_HTTP   # default false. When true, build the MCP app with
+                           # stateless_http=true and skip the stream guard,
+                           # session-manager binding, JWT-issuer binding, and
+                           # session reaper (none apply without per-instance
+                           # sessions). When false, behavior is unchanged.
+BOOMI_MCP_JSON_RESPONSE    # default false. Honored ONLY in stateless mode;
+                           # passes json_response=true to the MCP app, which
+                           # changes POST response framing. Validate independently.
+```
+
+> ⚠️ **Do not enable in production** until the live Claude Code matrix on
+> `boomi.renera.ai` passes both combinations
+> (`stateless=true / json_response=false` and `stateless=true / json_response=true`),
+> a passing combo is chosen, and the values are pinned in `cloudbuild.yaml` via a
+> separate rollout. After enabling, monitor for `404 Session not found` and
+> auth regressions; rollback is `BOOMI_MCP_STATELESS_HTTP=false` + redeploy.
+> True-value convention: `true`, `1`, `yes`, `on` (case-insensitive).
+
 ---
 
 ## Local Development
