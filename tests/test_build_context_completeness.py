@@ -27,11 +27,6 @@ _ROOT = Path(__file__).resolve().parent.parent
 # .gcloudignore self-excludes (standard gcloud behavior) and is not needed in the build.
 _UPLOAD_ALLOWLIST = {".gcloudignore"}
 
-# Core tracked files that MUST appear in any valid upload listing. If `gcloud meta
-# list-files-for-upload` is missing these, its output is unreliable in this environment
-# (different gcloud version/config) — skip rather than report a false "everything dropped".
-_SENTINELS = {"server.py", "Dockerfile", "requirements.txt"}
-
 
 def _lines(args):
     out = subprocess.run(
@@ -54,13 +49,15 @@ def test_no_tracked_file_dropped_from_build_context():
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         pytest.skip(f"could not compute build-context file lists: {exc}")
 
-    # Only assert when gcloud's output is trustworthy in this environment. A different
-    # gcloud version/config can emit empty or differently-formatted output (exit 0);
-    # without this guard every tracked file would read as "dropped" — a false failure.
-    if not _SENTINELS.issubset(uploaded):
+    # Distinguish "gcloud listing is unreliable in this environment" from "a real drop",
+    # using OVERLAP magnitude (not the presence of specific files — a genuinely dropped
+    # core file must still FAIL, not skip). A working listing overlaps almost entirely
+    # with the tracked set; an empty or differently-formatted listing (other gcloud
+    # version/config, exit 0) overlaps ~nothing. Skip only in the latter case.
+    if len(tracked & uploaded) < len(tracked) // 2:
         pytest.skip(
             "gcloud upload listing looks unreliable here "
-            f"(missing sentinels {sorted(_SENTINELS - uploaded)}; {len(uploaded)} entries)"
+            f"({len(uploaded)} entries, {len(tracked & uploaded)}/{len(tracked)} overlap with tracked)"
         )
 
     dropped = tracked - uploaded - _UPLOAD_ALLOWLIST
