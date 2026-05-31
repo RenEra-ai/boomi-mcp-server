@@ -1,0 +1,176 @@
+"""Issue #47: action-layer + MCP-wrapper tests for ``infer_profile_fields``.
+
+Mirrors the conventions of ``test_integration_authoring_wrapper.py``: forces
+local mode before importing ``server``, resolves/calls the registered tool via
+the FastMCP async API, and proves the discovery tool is read-only and never
+touches Boomi / credentials.
+"""
+
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+os.environ["BOOMI_LOCAL"] = "true"
+
+import server  # noqa: E402
+
+from boomi_mcp.categories.integration_authoring import (  # noqa: E402
+    infer_profile_fields_action as act,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers (copied from test_integration_authoring_wrapper.py)
+# ---------------------------------------------------------------------------
+
+
+def _annotation_value(annotations, key):
+    if annotations is None:
+        return None
+    if hasattr(annotations, key):
+        return getattr(annotations, key)
+    if isinstance(annotations, dict):
+        return annotations.get(key)
+    if hasattr(annotations, "model_dump"):
+        return annotations.model_dump().get(key)
+    raise AssertionError(f"Cannot read annotation {key!r} from {annotations!r}")
+
+
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def _resolve_tool(name):
+    return _run_async(server.mcp.get_tool(name))
+
+
+def _listed_tools():
+    return _run_async(server.mcp.list_tools())
+
+
+def _call_tool(name, args):
+    return _run_async(server.mcp.call_tool(name, args))
+
+
+def _payload(result):
+    assert getattr(result, "content", None), f"call_tool returned no content: {result!r}"
+    return json.loads(result.content[0].text)
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — action layer: envelope, options, dispatch, errors
+# ---------------------------------------------------------------------------
+
+_FLAG_KEYS = ("read_only", "boomi_mutation", "raw_xml_exposed")
+
+
+def _assert_flags(env):
+    assert env["read_only"] is True
+    assert env["boomi_mutation"] is False
+    assert env["raw_xml_exposed"] is False
+
+
+def test_action_success_envelope_flags():
+    r = act("profile_from_sample_json", '{"id":1}')
+    assert r["_success"] is True
+    _assert_flags(r)
+    assert r["generation_mode"] == "profile_from_sample_json"
+    assert r["mappable_paths"] == ["Root/id"]
+
+
+def test_action_dispatch_db_metadata():
+    r = act("profile_from_db_metadata", {"columns": [{"name": "a", "data_type": "varchar"}]})
+    assert r["_success"] is True and r["component_type"] == "profile.db"
+
+
+def test_action_dispatch_xsd_and_xml():
+    xsd = '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="R" type="xs:string"/></xs:schema>'
+    rx = act("profile_from_xsd", xsd)
+    assert rx["_success"] is True and rx["component_type"] == "profile.xml"
+    rs = act("profile_from_sample_xml", "<R><A>v</A></R>")
+    assert rs["_success"] is True and rs["component_type"] == "profile.xml"
+
+
+def test_action_options_json_string_ok():
+    r = act("profile_from_sample_json", '{"id":1}', options='{"component_name":"Demo"}')
+    assert r["_success"] is True and r["component_name"] == "Demo"
+
+
+def test_action_options_dict_ok():
+    r = act("profile_from_sample_json", '{"id":1}', options={"component_name": "Demo2"})
+    assert r["component_name"] == "Demo2"
+
+
+def test_action_bad_options_json():
+    r = act("profile_from_sample_json", '{"id":1}', options="{bad")
+    assert r["_success"] is False
+    assert r["code"] == "PROFILE_INFERENCE_INVALID_INPUT"
+    _assert_flags(r)
+
+
+def test_action_options_non_object_json():
+    r = act("profile_from_sample_json", '{"id":1}', options="[1,2,3]")
+    assert r["_success"] is False and r["code"] == "PROFILE_INFERENCE_INVALID_INPUT"
+
+
+def test_action_unknown_source_type():
+    r = act("profile_from_unicorn", {})
+    assert r["_success"] is False
+    assert r["code"] == "PROFILE_INFERENCE_INVALID_INPUT"
+    assert "profile_from_sample_json" in r["details"]["supported_source_types"]
+    _assert_flags(r)
+
+
+def test_action_oversize_input_char_limit():
+    big = '{"a":"' + ("x" * 50) + '"}'
+    r = act("profile_from_sample_json", big, options={"max_input_chars": 5})
+    assert r["_success"] is False
+    assert r["code"] == "PROFILE_INFERENCE_INPUT_TOO_LARGE"
+    assert r["truncated"] is True
+    assert r["ready_for_builder"] is False
+    assert r["truncation"]["kind"] == "input_chars"
+    # never echo the oversized artifact content
+    assert "x" * 50 not in json.dumps(r)
+
+
+def test_action_oversize_nodes_from_pure_layer():
+    r = act("profile_from_sample_json", '{"a":1,"b":2,"c":3}', options={"max_fields": 2})
+    assert r["_success"] is False and r["code"] == "PROFILE_INFERENCE_INPUT_TOO_LARGE"
+    assert r["truncated"] is True and r["ready_for_builder"] is False
+
+
+def test_action_error_envelope_keeps_flags():
+    r = act("profile_from_sample_json", '"scalar root"')
+    assert r["_success"] is False
+    assert r["code"] == "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"
+    _assert_flags(r)
+
+
+def test_action_propagated_43_error_keeps_flags():
+    r = act(
+        "profile_from_db_metadata",
+        {"columns": [{"name": "a", "data_type": "varchar"}, {"name": "a", "data_type": "int"}]},
+    )
+    assert r["_success"] is False
+    assert r["code"] == "DUPLICATE_PROFILE_FIELD_PATH"
+    _assert_flags(r)
+
+
+def test_action_ambiguous_marks_not_ready_but_succeeds():
+    r = act("profile_from_db_metadata", {"columns": [{"name": "flag", "data_type": "bit"}]})
+    assert r["_success"] is True
+    assert r["ready_for_builder"] is False
+    assert r["fields"][0]["confirmation_required"] is True

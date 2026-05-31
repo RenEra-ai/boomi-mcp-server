@@ -12,6 +12,15 @@ from typing import Any
 from pydantic import ValidationError
 
 from .components.builders.connector_builder import BuilderValidationError
+from .components.builders.profile_inference import (
+    PROFILE_INFERENCE_INPUT_TOO_LARGE,
+    PROFILE_INFERENCE_INVALID_INPUT,
+    _resolve_limits,
+    infer_profile_from_db_metadata,
+    infer_profile_from_sample_json,
+    infer_profile_from_sample_xml,
+    infer_profile_from_xsd,
+)
 from ..patterns import (
     PatternError,
     PatternKind,
@@ -189,3 +198,136 @@ def _normalize_parameters(parameters: dict[str, Any] | str | None) -> dict[str, 
     raise TypeError(
         f"parameters must be dict, JSON string, or None; got {type(parameters).__name__}"
     )
+
+
+# ---- Issue #47: read-only profile inference action -----------------------
+
+# Every response from this action carries these flags so the advertised
+# read-only / no-Boomi-mutation / no-raw-XML contract holds on success AND error.
+_INFERENCE_FLAGS = {"read_only": True, "boomi_mutation": False, "raw_xml_exposed": False}
+
+_INFERENCE_DISPATCH = {
+    "profile_from_db_metadata": infer_profile_from_db_metadata,
+    "profile_from_sample_json": infer_profile_from_sample_json,
+    "profile_from_xsd": infer_profile_from_xsd,
+    "profile_from_sample_xml": infer_profile_from_sample_xml,
+}
+_SUPPORTED_SOURCE_TYPES = list(_INFERENCE_DISPATCH)
+
+
+def _inference_error_envelope(
+    code: str,
+    message: str,
+    *,
+    field: str | None = None,
+    hint: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    env: dict[str, Any] = {
+        "_success": False,
+        **_INFERENCE_FLAGS,
+        "code": code,
+        "error": message,
+    }
+    if field is not None:
+        env["field"] = field
+    if hint is not None:
+        env["hint"] = hint
+    if details is not None:
+        env["details"] = details
+    if code == PROFILE_INFERENCE_INPUT_TOO_LARGE:
+        # Oversize is reported as an error envelope that also carries the
+        # truncation metadata + ready_for_builder=False (never partial output).
+        env["truncated"] = True
+        env["truncation"] = details
+        env["ready_for_builder"] = False
+    return env
+
+
+def _normalize_inference_options(options: dict[str, Any] | str | None) -> dict[str, Any]:
+    if options is None:
+        return {}
+    if isinstance(options, dict):
+        return options
+    if isinstance(options, str):
+        try:
+            parsed = json.loads(options)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"options must be valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                "options JSON must be an object, not " + type(parsed).__name__
+            )
+        return parsed
+    raise TypeError(
+        f"options must be dict, JSON string, or None; got {type(options).__name__}"
+    )
+
+
+def infer_profile_fields_action(
+    source_type: str,
+    artifact: Any,
+    options: dict[str, Any] | str | None = None,
+) -> dict[str, Any]:
+    """Read-only profile-field inference (issue #47).
+
+    Turns a caller-supplied DB metadata summary / sample JSON / XSD / sample XML
+    into an issue-#43 builder-ready profile-field contract WITHOUT calling Boomi,
+    constructing an SDK client, or reading credentials. Every response carries
+    ``read_only=True``, ``boomi_mutation=False``, ``raw_xml_exposed=False``.
+    """
+    try:
+        opts = _normalize_inference_options(options)
+    except (ValueError, TypeError) as exc:
+        return _inference_error_envelope(
+            PROFILE_INFERENCE_INVALID_INPUT,
+            str(exc),
+            field="options",
+            hint="Provide options as a JSON object (dict) or JSON-encoded string.",
+        )
+
+    fn = _INFERENCE_DISPATCH.get(source_type)
+    if fn is None:
+        return _inference_error_envelope(
+            PROFILE_INFERENCE_INVALID_INPUT,
+            f"unknown source_type {source_type!r}",
+            field="source_type",
+            hint="Use one of the supported inference source types.",
+            details={"supported_source_types": _SUPPORTED_SOURCE_TYPES},
+        )
+
+    # Guard oversized string artifacts BEFORE parsing — never echo content.
+    if isinstance(artifact, str):
+        limits = _resolve_limits(opts)
+        if len(artifact) > limits["max_input_chars"]:
+            return _inference_error_envelope(
+                PROFILE_INFERENCE_INPUT_TOO_LARGE,
+                f"artifact length {len(artifact)} exceeds max_input_chars "
+                f"{limits['max_input_chars']}",
+                field="artifact",
+                hint="Reduce the artifact or raise max_input_chars (up to the hard cap).",
+                details={
+                    "kind": "input_chars",
+                    "limit": limits["max_input_chars"],
+                    "observed": len(artifact),
+                },
+            )
+
+    try:
+        result = fn(artifact, options=opts)
+    except BuilderValidationError as exc:
+        return _inference_error_envelope(
+            exc.error_code or PROFILE_INFERENCE_INVALID_INPUT,
+            str(exc),
+            field=exc.field,
+            hint=exc.hint,
+            details=exc.details,
+        )
+    except Exception as exc:  # noqa: BLE001 — last-line defense; never leak the artifact
+        return _inference_error_envelope(
+            PROFILE_INFERENCE_INVALID_INPUT,
+            f"inference failed: {type(exc).__name__}",
+            field="artifact",
+        )
+
+    return {"_success": True, **_INFERENCE_FLAGS, **result}
