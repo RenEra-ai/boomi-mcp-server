@@ -107,3 +107,11 @@ def test_template_out_of_scope_points_at_47():
     result = _call(component_type="profile.xml", protocol="xml.generated")
     oos_blob = " ".join(result["out_of_scope"].values())
     assert "#47" in oos_blob
+
+
+def test_inferred_from_xsd_points_at_infer_tool():
+    result = _call(component_type="profile.xml", protocol="xml.generated")
+    note = result["out_of_scope"]["inferred_from_xsd"]
+    assert "infer_profile_fields" in note
+    assert "profile_from_xsd" in note
+    assert "#47" in note

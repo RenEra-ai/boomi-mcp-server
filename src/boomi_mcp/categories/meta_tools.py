@@ -2364,8 +2364,10 @@ _COMPONENT_CREATE_PROFILE_JSON_GENERATED = {
     },
     "out_of_scope": {
         "inferred_from_sample_json": (
-            "Inferring the field tree from a sample JSON document is tracked "
-            "by issue #47."
+            "Inferring the field tree from a sample JSON document is available "
+            "via infer_profile_fields(source_type='profile_from_sample_json') — "
+            "read-only discovery (issue #47). It returns a builder-ready "
+            "profile.json contract; ambiguous fields are flagged for confirmation."
         ),
         "edi_flatfile_profiles": (
             "EDI and flat-file profile families are deferred to later issues."
@@ -2545,8 +2547,12 @@ _COMPONENT_CREATE_PROFILE_XML_GENERATED = {
     },
     "out_of_scope": {
         "inferred_from_xsd": (
-            "Inferring the element tree from an XSD / sample XML is tracked "
-            "by issue #47."
+            "Inferring the element tree from an XSD or sample XML is available "
+            "via infer_profile_fields(source_type='profile_from_xsd') and "
+            "infer_profile_fields(source_type='profile_from_sample_xml') — "
+            "read-only discovery (issue #47). Both target the element-only "
+            "namespace-less subset; namespaces/attributes/mixed content fail "
+            "with actionable unsupported-shape errors."
         ),
         "attributes_and_namespaces": (
             "Element attributes, mixed content, and namespace declarations "
@@ -4621,7 +4627,139 @@ _VALID_RESOURCE_TYPES = [
     "trading_partner", "process", "component",
     "environment", "package", "execution_request",
     "organization", "folder", "monitoring", "integration",
+    "profile_inference",
 ]
+
+
+# Issue #47 — discovery protocol entry for the read-only infer_profile_fields
+# tool. Documents the four modes, inputs/outputs, safety flags, error codes, and
+# placeholder-only examples (no canned SQL/JSON/XML payloads).
+_PROFILE_INFERENCE_TEMPLATE = {
+    "resource_type": "profile_inference",
+    "tool": "infer_profile_fields(source_type=..., artifact=..., options=...)",
+    "note": (
+        "Read-only DISCOVERY (issue #47). Turns a caller-supplied DB metadata "
+        "summary / sample JSON / XSD / sample XML into an issue-#43 builder-ready "
+        "profile-field contract (profile_config + field_index_by_path + "
+        "mappable_paths) plus a parallel `fields` list carrying confidence / "
+        "ambiguities / confirmation_required. Never calls Boomi, constructs an "
+        "SDK client, reads credentials, requires direct JDBC, or echoes sample "
+        "VALUES. Ambiguous sample-derived fields are flagged "
+        "(confirmation_required=true) and force ready_for_builder=false — confirm "
+        "before passing the contract to a profile/map builder."
+    ),
+    "read_only": True,
+    "boomi_mutation": False,
+    "raw_xml_exposed": False,
+    "supported_source_types": [
+        "profile_from_db_metadata",
+        "profile_from_sample_json",
+        "profile_from_xsd",
+        "profile_from_sample_xml",
+    ],
+    "modes": {
+        "profile_from_db_metadata": {
+            "input": (
+                "artifact = a column summary: a bare list or "
+                "{'columns'|'fields'|'result_columns': [{name, "
+                "data_type|db_type|jdbc_type|type, nullable?/required?/mandatory?/optional?}]}."
+            ),
+            "output_profile": "profile.db / database.read",
+            "notes": (
+                "string→character, numeric→number, date/time/timestamp→datetime; "
+                "boolean/bit and unknown non-binary types are ambiguous candidates "
+                "(mapped to character, confirmation_required); binary/blob/image/"
+                "varbinary are rejected as unsupported."
+            ),
+        },
+        "profile_from_sample_json": {
+            "input": "artifact = a JSON string or already-parsed object / array of objects.",
+            "output_profile": "profile.json / json.generated",
+            "notes": (
+                "object roots map directly; array roots wrap in a synthetic root "
+                "object with one repeating child. Mixed scalar / null-only / "
+                "optional-across-rows leaves are ambiguous; scalar roots, empty / "
+                "scalar / heterogeneous arrays are unsupported-shape errors."
+            ),
+        },
+        "profile_from_xsd": {
+            "input": "artifact = an XSD document string (conservative same-document subset).",
+            "output_profile": "profile.xml / xml.generated",
+            "notes": (
+                "supports xs:element / complexType / sequence / simpleType "
+                "restriction + minOccurs/maxOccurs(unbounded). choice/all/any/"
+                "attributes/mixed/import/include/extension/list/union/substitution "
+                "are unsupported; target/qualified namespaces fail; recursive types "
+                "fail with PROFILE_INFERENCE_RECURSIVE_XML."
+            ),
+        },
+        "profile_from_sample_xml": {
+            "input": "artifact = an XML document string (element-only).",
+            "output_profile": "profile.xml / xml.generated",
+            "notes": (
+                "repeated siblings become max_occurs=-1 with [] descendant paths; "
+                "children missing from some repeated parents become optional. "
+                "attributes / mixed content / namespaced tags / same-name-ancestor "
+                "recursion are rejected; leaf types are inferred from text without "
+                "echoing the text."
+            ),
+        },
+    },
+    "options": {
+        "component_name": "Optional display name copied into the generated contract.",
+        "root_name": "Optional JSON root object name when a synthetic root is needed (default 'Root').",
+        "array_item_name": "Optional name for the synthetic repeating child of a root array (default 'items').",
+        "datetime_detection": "Optional bool (default true) — conservative ISO-like datetime recognition.",
+        "max_input_chars": "Optional input character limit (lowerable; raisable to a hard cap).",
+        "max_nodes": "Optional parsed-node limit (lowerable; raisable to a hard cap).",
+        "max_fields": "Optional inferred-field limit (lowerable; raisable to a hard cap).",
+    },
+    "output_shape": {
+        "_success": True,
+        "read_only": True,
+        "boomi_mutation": False,
+        "raw_xml_exposed": False,
+        "generation_mode": "<<source_type>>",
+        "component_type": "<<profile.db | profile.json | profile.xml>>",
+        "profile_type": "<<database.read | json.generated | xml.generated>>",
+        "profile_config": "<<builder-ready contract — same shape #43 emits>>",
+        "field_index_by_path": "<<path -> field metadata (no #47 keys injected)>>",
+        "mappable_paths": "<<leaf paths>>",
+        "fields": "<<per-path: confidence / ambiguities / confirmation_required>>",
+        "ready_for_builder": "<<bool — false if any field needs confirmation>>",
+        "issues": "<<advisory warnings/inferences>>",
+        "truncated": False,
+        "truncation": None,
+    },
+    "error_codes": [
+        "PROFILE_INFERENCE_INVALID_INPUT",
+        "PROFILE_INFERENCE_INVALID_SAMPLE",
+        "PROFILE_INFERENCE_UNSUPPORTED_SHAPE",
+        "PROFILE_INFERENCE_AMBIGUOUS_SHAPE",
+        "PROFILE_INFERENCE_INPUT_TOO_LARGE",
+        "PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE",
+        "PROFILE_INFERENCE_RECURSIVE_XML",
+    ],
+    "examples": [
+        "infer_profile_fields(source_type='profile_from_db_metadata', "
+        "artifact={'columns': [{'name': '<<col>>', 'data_type': '<<varchar|int|timestamp>>'}]})",
+        "infer_profile_fields(source_type='profile_from_sample_json', artifact='<<sample JSON string>>')",
+        "infer_profile_fields(source_type='profile_from_xsd', artifact='<<XSD document string>>', "
+        "options='{\"component_name\": \"<<name>>\"}')",
+        "infer_profile_fields(source_type='profile_from_sample_xml', artifact='<<sample XML string>>')",
+    ],
+    "out_of_scope": {
+        "existing_profile_index_discovery": (
+            "infer_profile_fields does NOT index arbitrary existing live Boomi "
+            "profile XML for literal-UUID transform.map refs — that remains "
+            "deferred (the transform.map MAP_PROFILE_INDEX_UNAVAILABLE path)."
+        ),
+        "business_mappings": (
+            "Discovery never invents business field mappings, payload templates, "
+            "SQL, scripts, or default values from samples."
+        ),
+    },
+}
 
 
 def get_schema_template_action(
@@ -4644,6 +4782,7 @@ def get_schema_template_action(
         "organization": _get_organization_template,
         "folder": _get_folder_template,
         "monitoring": _get_monitoring_template,
+        "profile_inference": _get_profile_inference_template,
     }
 
     handler = registry.get(resource_type)
@@ -4660,6 +4799,26 @@ def get_schema_template_action(
         component_type=component_type,
         protocol=protocol,
     )
+
+
+def _get_profile_inference_template(operation=None, standard=None, component_type=None, protocol=None, **_):
+    """Issue #47 read-only profile-inference discovery protocol entry.
+
+    ``protocol`` may name one of the four source types to surface that mode's
+    detail; otherwise the full overview is returned.
+    """
+    result = {"_success": True, **_PROFILE_INFERENCE_TEMPLATE}
+    if protocol:
+        modes = _PROFILE_INFERENCE_TEMPLATE["modes"]
+        if protocol not in modes:
+            return {
+                "_success": False,
+                "error": f"Unknown profile_inference source_type: {protocol}",
+                "valid_protocols": list(modes.keys()),
+            }
+        result["filtered_mode"] = protocol
+        result["mode_detail"] = modes[protocol]
+    return result
 
 
 def _get_trading_partner_template(operation=None, standard=None, protocol=None, **_):
@@ -5576,6 +5735,33 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'review_transformation(action="list_fields", config=\'{"integration_spec": {...}}\')',
                 'review_transformation(action="mapping_diff", config=\'{"integration_spec": {...}, "previous_spec": {...}}\')',
                 'review_transformation(action="compare_expected_actual", config=\'{"expected_payload": {...}, "actual_payload": {...}}\')',
+            ],
+        },
+        "infer_profile_fields": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only DISCOVERY (issue #47): infer issue-#43 builder-ready profile-field "
+                "contracts from a DB metadata summary, sample JSON, XSD, or sample XML. Never "
+                "calls Boomi, reads credentials, requires JDBC, or echoes sample values. Ambiguous "
+                "sample-derived fields are flagged confirmation_required=true / ready_for_builder=false."
+            ),
+            "actions": [
+                "profile_from_db_metadata",
+                "profile_from_sample_json",
+                "profile_from_xsd",
+                "profile_from_sample_xml",
+            ],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "source_type": "str (required) — one of profile_from_db_metadata | profile_from_sample_json | profile_from_xsd | profile_from_sample_xml",
+                "artifact": "dict/list or str (required) — the metadata summary / sample / schema to infer from",
+                "options": "JSON str or dict (optional) — {component_name, root_name, array_item_name, datetime_detection, max_input_chars, max_nodes, max_fields}",
+            },
+            "examples": [
+                "infer_profile_fields(source_type=\"profile_from_db_metadata\", artifact={\"columns\": [{\"name\": \"id\", \"data_type\": \"int\"}]})",
+                "infer_profile_fields(source_type=\"profile_from_sample_json\", artifact=\"<sample JSON string>\")",
+                "infer_profile_fields(source_type=\"profile_from_xsd\", artifact=\"<XSD string>\") → profile.xml contract for build_integration",
             ],
         },
         "build_integration": {

@@ -231,3 +231,23 @@ def test_workflow_fallback_preserved_when_all_referenced_tools_present():
     assert "fallback" in wf, "fallback must survive when all referenced tools registered"
     fallback_text = " ".join(wf["fallback"]["steps"])
     assert "get_schema_template" in fallback_text
+
+
+# ---------------------------------------------------------------------------
+# Issue #47 — infer_profile_fields discoverability
+# ---------------------------------------------------------------------------
+
+
+def test_infer_profile_fields_in_capabilities():
+    tools = list_capabilities_action()["tools"]
+    assert "infer_profile_fields" in tools
+    entry = tools["infer_profile_fields"]
+    assert entry["category"] == "Integration Authoring"
+    assert entry["read_only"] is True
+    assert entry.get("no_boomi_mutation") is True
+
+
+def test_infer_profile_fields_filtered_out_when_not_registered():
+    only = {"build_integration"}
+    tools = list_capabilities_action(available_tools=only)["tools"]
+    assert "infer_profile_fields" not in tools
