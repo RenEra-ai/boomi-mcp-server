@@ -217,3 +217,123 @@ def test_db_metadata_no_value_or_node_keys_leak_into_builder_nodes():
         assert "confidence" not in entry
         assert "ambiguities" not in entry
         assert "confirmation_required" not in entry
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — JSON sample inference
+# ---------------------------------------------------------------------------
+
+
+def test_json_nested_object_paths():
+    r = pi.infer_profile_from_sample_json('{"id":1,"name":"x","child":{"leaf":true}}')
+    assert r["generation_mode"] == "profile_from_sample_json"
+    assert r["component_type"] == "profile.json"
+    assert r["profile_type"] == "json.generated"
+    paths = set(r["field_index_by_path"])
+    assert {"Root", "Root/id", "Root/name", "Root/child", "Root/child/leaf"} <= paths
+    by = {f["path"]: f for f in r["fields"]}
+    assert by["Root/id"]["data_type"] == "number"
+    assert by["Root/name"]["data_type"] == "character"
+    assert by["Root/child/leaf"]["data_type"] == "boolean"
+    assert by["Root/child"]["kind"] == "object" and by["Root/child"]["mappable"] is False
+
+
+def test_json_accepts_parsed_dict():
+    r = pi.infer_profile_from_sample_json({"id": 1})
+    assert r["mappable_paths"] == ["Root/id"]
+
+
+def test_json_array_of_objects_uses_brackets_and_optional():
+    r = pi.infer_profile_from_sample_json('[{"a":1,"b":2},{"a":3}]')
+    assert "Root/items[]/a" in r["field_index_by_path"]
+    by = {f["path"]: f for f in r["fields"]}
+    assert by["Root/items[]/a"]["required"] is True
+    assert by["Root/items[]/b"]["required"] is False  # missing in row 2
+    assert by["Root/items[]/b"]["confirmation_required"] is True
+    assert r["ready_for_builder"] is False
+
+
+def test_json_array_item_name_option():
+    r = pi.infer_profile_from_sample_json('[{"a":1}]', options={"array_item_name": "rows", "root_name": "Doc"})
+    assert "Doc/rows[]/a" in r["field_index_by_path"]
+
+
+def test_json_iso_datetime_detection():
+    r = pi.infer_profile_from_sample_json('{"ts":"2026-01-01T00:00:00Z","d":"2026-01-01"}')
+    by = {f["path"]: f for f in r["fields"]}
+    assert by["Root/ts"]["data_type"] == "datetime"
+    assert by["Root/d"]["data_type"] == "datetime"
+
+
+def test_json_datetime_detection_off():
+    r = pi.infer_profile_from_sample_json('{"ts":"2026-01-01T00:00:00Z"}', options={"datetime_detection": False})
+    assert {f["path"]: f for f in r["fields"]}["Root/ts"]["data_type"] == "character"
+
+
+def test_json_numeric_string_stays_character():
+    r = pi.infer_profile_from_sample_json('{"code":"00123"}')
+    assert {f["path"]: f for f in r["fields"]}["Root/code"]["data_type"] == "character"
+
+
+def test_json_mixed_scalar_is_ambiguous_not_error():
+    r = pi.infer_profile_from_sample_json('[{"v":1},{"v":"x"}]')
+    f = {f["path"]: f for f in r["fields"]}["Root/items[]/v"]
+    assert f["confidence"] == "ambiguous"
+    assert f["data_type"] == "character"
+    assert r["ready_for_builder"] is False
+
+
+def test_json_null_only_is_ambiguous():
+    r = pi.infer_profile_from_sample_json('{"maybe":null}')
+    f = {f["path"]: f for f in r["fields"]}["Root/maybe"]
+    assert f["confidence"] == "ambiguous" and f["confirmation_required"] is True
+    assert f["data_type"] == "character"
+
+
+@pytest.mark.parametrize(
+    "sample,code",
+    [
+        ('"just a string"', "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"),  # scalar root
+        ("5", "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"),  # numeric root
+        ("[1,2,3]", "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"),  # array of scalars
+        ("[]", "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"),  # empty array
+        ('[{"a":1}, 5]', "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"),  # object/scalar mix
+        ('{"a":{}}', "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"),  # empty nested object
+        ('{"a":[1,2]}', "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"),  # nested scalar array
+        ("{not json", "PROFILE_INFERENCE_INVALID_SAMPLE"),
+        ("", "PROFILE_INFERENCE_INVALID_SAMPLE"),
+    ],
+)
+def test_json_structural_errors(sample, code):
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_json(sample)
+    assert e.value.error_code == code
+
+
+def test_json_nested_array_of_objects():
+    r = pi.infer_profile_from_sample_json('{"orders":[{"id":1},{"id":2}]}')
+    assert "Root/orders[]/id" in r["field_index_by_path"]
+    assert r["field_index_by_path"]["Root/orders"]["kind"] == "array"
+
+
+def test_json_does_not_echo_values():
+    r = pi.infer_profile_from_sample_json('{"note":"SENSITIVE-VALUE-123"}')
+    assert "SENSITIVE-VALUE-123" not in _json.dumps(r)
+
+
+def test_json_secret_named_key_withheld():
+    r = pi.infer_profile_from_sample_json('{"id":1,"api_key":"x"}')
+    paths = set(r["field_index_by_path"])
+    assert "Root/api_key" not in paths and "Root/id" in paths
+    assert any(i["code"] == pi.PROFILE_INFERENCE_SECRET_FIELD_WITHHELD for i in r["issues"])
+
+
+def test_json_max_nodes_limit():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_json('{"a":1,"b":2,"c":3}', options={"max_fields": 2})
+    assert e.value.error_code == pi.PROFILE_INFERENCE_INPUT_TOO_LARGE
+
+
+def test_json_stable_output():
+    a = '{"id":1,"name":"x"}'
+    assert pi.infer_profile_from_sample_json(a) == pi.infer_profile_from_sample_json(a)
