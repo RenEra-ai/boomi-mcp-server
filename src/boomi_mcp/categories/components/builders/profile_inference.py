@@ -40,7 +40,8 @@ from __future__ import annotations
 
 import json as _json
 import re
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+from xml.etree import ElementTree as ET
 
 from pydantic import BaseModel
 
@@ -49,6 +50,7 @@ from .map_builder import _FORBIDDEN_SECRET_FIELDS
 from .profile_generation import (
     profile_from_db_read_fields,
     profile_from_json_schema,
+    profile_from_xml_schema,
 )
 
 
@@ -756,3 +758,475 @@ def infer_profile_from_sample_json(
         {"format": "json", "root": root_node}, component_name=component_name
     )
     return _assemble(helper_result, "profile_from_sample_json", meta_by_path, issues)
+
+
+# ---------------------------------------------------------------------------
+# Safe XML parsing (shared by XSD + sample-XML modes)
+# ---------------------------------------------------------------------------
+
+# Pre-parse screen: reject DOCTYPE / ENTITY declarations outright. This is the
+# deliberate stdlib-only XXE / billion-laughs mitigation — xml.etree does not
+# expand EXTERNAL entities by default, and rejecting <!DOCTYPE/<!ENTITY also
+# blocks INTERNAL entity-expansion bombs. (No third-party defusedxml needed.)
+_DOCTYPE_RE = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
+
+
+def _require_text_artifact(artifact: Any, what: str) -> str:
+    if not isinstance(artifact, str):
+        raise _err(
+            PROFILE_INFERENCE_INVALID_INPUT,
+            f"{what} artifact must be a string",
+            field="artifact",
+            details={"got": type(artifact).__name__},
+        )
+    return artifact
+
+
+def _safe_fromstring(text: str) -> "ET.Element":
+    if _DOCTYPE_RE.search(text):
+        raise _err(
+            PROFILE_INFERENCE_INVALID_SAMPLE,
+            "DOCTYPE / ENTITY declarations are not allowed",
+            field="artifact",
+            hint="Remove the DOCTYPE/ENTITY declaration; external/internal entities are rejected for safety.",
+        )
+    try:
+        return ET.fromstring(text)
+    except ET.ParseError as exc:
+        raise _err(
+            PROFILE_INFERENCE_INVALID_SAMPLE,
+            f"artifact is not well-formed XML: {exc}",
+            field="artifact",
+        )
+
+
+def _split_qname(tag: str) -> Tuple[Optional[str], str]:
+    """Return ``(namespace_uri, local)`` from an ElementTree tag/attr."""
+    if tag.startswith("{"):
+        uri, _, local = tag[1:].partition("}")
+        return uri, local
+    return None, tag
+
+
+# ---------------------------------------------------------------------------
+# XSD inference (conservative same-document subset)
+# ---------------------------------------------------------------------------
+
+_XSD_NS = "http://www.w3.org/2001/XMLSchema"
+_XSD_BUILTIN_PREFIXES = ("xs", "xsd")
+
+_XSD_STRING_TYPES = {
+    "string", "normalizedstring", "token", "language", "name", "ncname",
+    "nmtoken", "id", "idref", "idrefs", "entity", "anyuri", "qname",
+}
+_XSD_NUMBER_TYPES = {
+    "decimal", "integer", "int", "long", "short", "byte", "nonnegativeinteger",
+    "positiveinteger", "negativeinteger", "nonpositiveinteger", "unsignedint",
+    "unsignedlong", "unsignedshort", "unsignedbyte", "float", "double",
+}
+_XSD_DATETIME_TYPES = {"date", "time", "datetime"}
+_XSD_BOOLEAN_TYPES = {"boolean"}
+
+
+def _xsd_local(el: "ET.Element", field_loc: str) -> str:
+    """Return the XMLSchema-local tag name; reject foreign-namespace elements."""
+    uri, local = _split_qname(el.tag)
+    if uri != _XSD_NS:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: unexpected non-XSD element {el.tag!r}",
+            field="artifact",
+        )
+    return local
+
+
+def _map_xsd_builtin(local_type: str, field_loc: str) -> str:
+    lt = local_type.lower()
+    if lt in _XSD_STRING_TYPES:
+        return "character"
+    if lt in _XSD_NUMBER_TYPES:
+        return "number"
+    if lt in _XSD_DATETIME_TYPES:
+        return "datetime"
+    if lt in _XSD_BOOLEAN_TYPES:
+        return "boolean"
+    raise _err(
+        PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+        f"{field_loc}: XSD built-in type {local_type!r} is not representable "
+        "(only string/number/date-time/boolean families are supported)",
+        field="artifact",
+        details={"xsd_type": local_type},
+    )
+
+
+def _classify_xsd_type_attr(type_qname: str, field_loc: str) -> Tuple[str, str]:
+    """Classify a ``type="..."`` QName. Returns ``(kind, value)`` where kind is
+    ``"builtin"`` (value=data_type) or ``"local"`` (value=local type name).
+    Foreign-namespace prefixes raise UNSUPPORTED_NAMESPACE."""
+    prefix, _, local = type_qname.partition(":") if ":" in type_qname else ("", "", type_qname)
+    if prefix:
+        if prefix in _XSD_BUILTIN_PREFIXES:
+            return "builtin", _map_xsd_builtin(local, field_loc)
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE,
+            f"{field_loc}: type {type_qname!r} references a foreign namespace prefix",
+            field="artifact",
+            hint="Namespace-qualified types are not representable by the namespace-less XML profile builder.",
+            details={"type": type_qname, "prefix": prefix},
+        )
+    return "local", local
+
+
+def _xsd_complex_sequence_elements(
+    ctype: "ET.Element", field_loc: str
+) -> List["ET.Element"]:
+    """Validate a complexType is a plain element-only sequence and return its
+    child xs:element list. Rejects mixed content, attributes, choice/all/any/
+    group, complex/simpleContent, extension/restriction."""
+    if (ctype.get("mixed") or "").strip().lower() in ("true", "1"):
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: mixed content is not supported",
+            field="artifact",
+        )
+    sequence = None
+    for child in list(ctype):
+        local = _xsd_local(child, field_loc)
+        if local == "annotation":
+            continue
+        if local == "sequence":
+            if sequence is not None:
+                raise _err(
+                    PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                    f"{field_loc}: multiple sequences are not supported",
+                    field="artifact",
+                )
+            sequence = child
+        elif local in ("attribute", "anyattribute"):
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: XSD attributes are not supported (element-only)",
+                field="artifact",
+            )
+        else:
+            # choice, all, any, group, complexContent, simpleContent, etc.
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: unsupported complexType construct {local!r} "
+                "(only a plain xs:sequence of elements is supported)",
+                field="artifact",
+                details={"construct": local},
+            )
+    if sequence is None:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: complexType must contain a single xs:sequence",
+            field="artifact",
+        )
+    elements: List["ET.Element"] = []
+    for child in list(sequence):
+        local = _xsd_local(child, field_loc)
+        if local == "annotation":
+            continue
+        if local == "element":
+            elements.append(child)
+        else:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: xs:sequence may only contain xs:element (found {local!r})",
+                field="artifact",
+                details={"construct": local},
+            )
+    return elements
+
+
+def _xsd_simple_type_base(stype: "ET.Element", field_loc: str) -> str:
+    """Resolve a leaf data_type from an inline/named xs:simpleType restriction.
+    Rejects list/union."""
+    restriction = None
+    for child in list(stype):
+        local = _xsd_local(child, field_loc)
+        if local == "annotation":
+            continue
+        if local == "restriction":
+            restriction = child
+        elif local in ("list", "union"):
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: xs:simpleType {local} is not supported",
+                field="artifact",
+            )
+        else:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: unsupported simpleType construct {local!r}",
+                field="artifact",
+            )
+    if restriction is None:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: simpleType must use xs:restriction with a base",
+            field="artifact",
+        )
+    base = restriction.get("base")
+    if not base:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: simpleType restriction must declare a base",
+            field="artifact",
+        )
+    kind, value = _classify_xsd_type_attr(base, field_loc)
+    if kind != "builtin":
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: simpleType base must be a built-in type",
+            field="artifact",
+        )
+    return value
+
+
+def _xsd_occurs(el: "ET.Element", field_loc: str, *, is_root: bool) -> Tuple[int, int]:
+    raw_min = el.get("minOccurs")
+    raw_max = el.get("maxOccurs")
+    min_occurs = 1 if is_root else 0
+    if raw_min is not None:
+        try:
+            min_occurs = int(raw_min)
+        except ValueError:
+            raise _err(
+                PROFILE_INFERENCE_INVALID_SAMPLE,
+                f"{field_loc}: minOccurs must be an integer",
+                field="artifact",
+            )
+    if raw_max is None:
+        max_occurs = 1
+    elif raw_max == "unbounded":
+        max_occurs = -1
+    else:
+        try:
+            max_occurs = int(raw_max)
+        except ValueError:
+            raise _err(
+                PROFILE_INFERENCE_INVALID_SAMPLE,
+                f"{field_loc}: maxOccurs must be an integer or 'unbounded'",
+                field="artifact",
+            )
+    return min_occurs, max_occurs
+
+
+def _xsd_element_to_node(
+    el: "ET.Element",
+    path: str,
+    *,
+    is_root: bool,
+    complex_types: Dict[str, "ET.Element"],
+    simple_types: Dict[str, "ET.Element"],
+    type_path: Tuple[str, ...],
+    counters: _Counters,
+    meta_by_path: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    field_loc = path
+    counters.add_node()
+
+    if el.get("ref"):
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: element references (ref=) / substitution groups are not supported",
+            field="artifact",
+        )
+    if el.get("substitutionGroup"):
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: substitutionGroup is not supported",
+            field="artifact",
+        )
+    name = el.get("name")
+    if not name or not name.strip():
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: element must declare a name",
+            field="artifact",
+        )
+    name = name.strip()
+
+    min_occurs, max_occurs = _xsd_occurs(el, field_loc, is_root=is_root)
+    required = min_occurs >= 1
+    meta_by_path[path] = {"confidence": "high", "ambiguities": [], "confirmation_required": False}
+
+    # Determine leaf vs structural.
+    inline_complex = None
+    inline_simple = None
+    for child in list(el):
+        local = _xsd_local(child, field_loc)
+        if local == "complexType":
+            inline_complex = child
+        elif local == "simpleType":
+            inline_simple = child
+        elif local == "annotation":
+            continue
+        else:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: unsupported element child {local!r}",
+                field="artifact",
+            )
+
+    ctype = inline_complex
+    next_type_path = type_path
+    leaf_data_type: Optional[str] = None
+
+    if ctype is None and inline_simple is not None:
+        leaf_data_type = _xsd_simple_type_base(inline_simple, field_loc)
+    elif ctype is None:
+        type_attr = el.get("type")
+        if not type_attr:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: element has neither a type nor an inline definition",
+                field="artifact",
+            )
+        kind, value = _classify_xsd_type_attr(type_attr, field_loc)
+        if kind == "builtin":
+            leaf_data_type = value
+        else:  # local named type
+            if value in simple_types:
+                leaf_data_type = _xsd_simple_type_base(simple_types[value], field_loc)
+            elif value in complex_types:
+                if value in type_path:
+                    raise _err(
+                        PROFILE_INFERENCE_RECURSIVE_XML,
+                        f"{field_loc}: recursive type reference {value!r}",
+                        field="artifact",
+                        details={"type": value, "type_path": list(type_path)},
+                    )
+                ctype = complex_types[value]
+                next_type_path = type_path + (value,)
+            else:
+                raise _err(
+                    PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                    f"{field_loc}: unknown type {type_attr!r}",
+                    field="artifact",
+                    details={"type": type_attr},
+                )
+
+    if ctype is not None:
+        # Structural element.
+        elements = _xsd_complex_sequence_elements(ctype, field_loc)
+        if not elements:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: complexType sequence has no elements",
+                field="artifact",
+            )
+        segment = f"{path}[]" if max_occurs != 1 else path
+        children: List[Dict[str, Any]] = []
+        for child_el in elements:
+            child_name = (child_el.get("name") or "").strip()
+            child_path = f"{segment}/{child_name}" if child_name else f"{segment}/?"
+            children.append(
+                _xsd_element_to_node(
+                    child_el, child_path, is_root=False,
+                    complex_types=complex_types, simple_types=simple_types,
+                    type_path=next_type_path, counters=counters,
+                    meta_by_path=meta_by_path,
+                )
+            )
+        return {
+            "name": name, "kind": "element", "required": required,
+            "min_occurs": min_occurs, "max_occurs": max_occurs, "children": children,
+        }
+
+    # Leaf element.
+    counters.add_field()
+    return {
+        "name": name, "kind": "element", "data_type": leaf_data_type,
+        "required": required, "min_occurs": min_occurs, "max_occurs": max_occurs,
+    }
+
+
+def infer_profile_from_xsd(artifact: Any, *, options: Optional[Any] = None) -> Dict[str, Any]:
+    """Infer a profile.xml contract from a conservative same-document XSD subset.
+
+    Supports inline/same-document xs:element / complexType / sequence /
+    simpleType-restriction, minOccurs/maxOccurs(+unbounded). Rejects choice/all/
+    any/attributes/mixed/import/include/extension/list/union/substitution with
+    actionable errors; target/qualified namespaces → UNSUPPORTED_NAMESPACE;
+    self-referential types → RECURSIVE_XML.
+    """
+    opts = _coerce_options(options)
+    limits = _resolve_limits(opts)
+    component_name = opts.get("component_name")
+
+    text = _require_text_artifact(artifact, "XSD")
+    root = _safe_fromstring(text)
+
+    uri, local = _split_qname(root.tag)
+    if uri != _XSD_NS or local != "schema":
+        raise _err(
+            PROFILE_INFERENCE_INVALID_SAMPLE,
+            "root element must be an xs:schema",
+            field="artifact",
+        )
+    if root.get("targetNamespace"):
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE,
+            "target namespaces are not representable by the namespace-less XML profile builder",
+            field="artifact",
+            hint="Remove targetNamespace or wait for namespace-aware profile support.",
+        )
+
+    complex_types: Dict[str, "ET.Element"] = {}
+    simple_types: Dict[str, "ET.Element"] = {}
+    top_elements: List["ET.Element"] = []
+    for child in list(root):
+        local = _xsd_local(child, "schema")
+        if local == "annotation":
+            continue
+        if local in ("import", "include", "redefine"):
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"xs:{local} (external schema reference) is not supported",
+                field="artifact",
+                details={"construct": local},
+            )
+        if local == "complexType":
+            ct_name = (child.get("name") or "").strip()
+            if ct_name:
+                complex_types[ct_name] = child
+        elif local == "simpleType":
+            st_name = (child.get("name") or "").strip()
+            if st_name:
+                simple_types[st_name] = child
+        elif local == "element":
+            top_elements.append(child)
+        elif local in ("attribute", "attributegroup", "group"):
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"top-level xs:{local} is not supported",
+                field="artifact",
+            )
+        # other top-level constructs (notation) ignored
+
+    if len(top_elements) != 1:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"expected exactly one top-level xs:element (found {len(top_elements)})",
+            field="artifact",
+            hint="Provide a single root element for the profile.",
+            details={"top_level_elements": len(top_elements)},
+        )
+
+    counters = _Counters(limits)
+    meta_by_path: Dict[str, Dict[str, Any]] = {}
+    root_el = top_elements[0]
+    root_name = (root_el.get("name") or "").strip()
+    root_node = _xsd_element_to_node(
+        root_el, root_name, is_root=True, complex_types=complex_types,
+        simple_types=simple_types, type_path=(), counters=counters,
+        meta_by_path=meta_by_path,
+    )
+
+    helper_result = profile_from_xml_schema(
+        {"format": "xml", "root": root_node}, component_name=component_name
+    )
+    return _assemble(helper_result, "profile_from_xsd", meta_by_path, [])

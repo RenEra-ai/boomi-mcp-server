@@ -337,3 +337,155 @@ def test_json_max_nodes_limit():
 def test_json_stable_output():
     a = '{"id":1,"name":"x"}'
     assert pi.infer_profile_from_sample_json(a) == pi.infer_profile_from_sample_json(a)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — XSD inference
+# ---------------------------------------------------------------------------
+
+_XSD_OK = """<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Order"><xs:complexType><xs:sequence>
+    <xs:element name="Id" type="xs:string"/>
+    <xs:element name="Qty" type="xs:int"/>
+    <xs:element name="When" type="xs:dateTime"/>
+    <xs:element name="Active" type="xs:boolean"/>
+    <xs:element name="Note" type="xs:string" minOccurs="0"/>
+    <xs:element name="Line" maxOccurs="unbounded"><xs:complexType><xs:sequence>
+        <xs:element name="Sku" type="xs:string"/>
+    </xs:sequence></xs:complexType></xs:element>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>"""
+
+
+def _xsd_wrap(fragment):
+    return (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        f"{fragment}"
+        "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+    )
+
+
+def test_xsd_happy_subset():
+    r = pi.infer_profile_from_xsd(_XSD_OK)
+    assert r["generation_mode"] == "profile_from_xsd"
+    assert r["component_type"] == "profile.xml"
+    assert r["profile_type"] == "xml.generated"
+    idx = set(r["field_index_by_path"])
+    assert "Order/Id" in idx
+    assert "Order/Line[]/Sku" in idx  # Line is unbounded → [] for descendants
+    by = {f["path"]: f for f in r["fields"]}
+    assert by["Order/Id"]["data_type"] == "character"
+    assert by["Order/Qty"]["data_type"] == "number"
+    assert by["Order/When"]["data_type"] == "datetime"
+    assert by["Order/Active"]["data_type"] == "boolean"
+    assert by["Order/Note"]["required"] is False  # minOccurs=0
+    assert r["ready_for_builder"] is True
+
+
+def test_xsd_inline_simple_type_restriction():
+    xsd = _xsd_wrap(
+        '<xs:element name="Code"><xs:simpleType>'
+        '<xs:restriction base="xs:string"/></xs:simpleType></xs:element>'
+    )
+    r = pi.infer_profile_from_xsd(xsd)
+    assert {f["path"]: f for f in r["fields"]}["R/Code"]["data_type"] == "character"
+
+
+def test_xsd_non_string_artifact_invalid_input():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd({"not": "a string"})
+    assert e.value.error_code == pi.PROFILE_INFERENCE_INVALID_INPUT
+
+
+def test_xsd_invalid_xml():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd("<xs:schema")
+    assert e.value.error_code == pi.PROFILE_INFERENCE_INVALID_SAMPLE
+
+
+def test_xsd_doctype_rejected():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(
+            '<!DOCTYPE x><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"/>'
+        )
+    assert e.value.error_code == pi.PROFILE_INFERENCE_INVALID_SAMPLE
+
+
+@pytest.mark.parametrize(
+    "frag",
+    [
+        '<xs:choice><xs:element name="a" type="xs:string"/></xs:choice>',
+        '<xs:any/>',
+        '<xs:element name="a" type="xs:string"/></xs:sequence>'
+        '<xs:attribute name="attr" type="xs:string"/><xs:sequence>',
+        '<xs:element name="b" type="xs:base64Binary"/>',  # binary leaf unsupported
+        '<xs:element ref="Other"/>',  # element ref / substitution
+    ],
+)
+def test_xsd_unsupported_constructs(frag):
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(_xsd_wrap(frag))
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xsd_mixed_content_rejected():
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        '<xs:element name="R"><xs:complexType mixed="true"><xs:sequence>'
+        '<xs:element name="a" type="xs:string"/>'
+        "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+    )
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(xsd)
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xsd_target_namespace_rejected():
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:x">'
+        '<xs:element name="R" type="xs:string"/></xs:schema>'
+    )
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(xsd)
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
+
+
+def test_xsd_foreign_type_prefix_rejected_as_namespace():
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:foo="urn:foo">'
+        '<xs:element name="R" type="foo:Thing"/></xs:schema>'
+    )
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(xsd)
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
+
+
+def test_xsd_import_rejected():
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        '<xs:import namespace="urn:y" schemaLocation="y.xsd"/>'
+        '<xs:element name="R" type="xs:string"/></xs:schema>'
+    )
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(xsd)
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xsd_recursive_type():
+    xsd = """<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:element name="Node" type="NodeT"/>
+      <xs:complexType name="NodeT"><xs:sequence>
+        <xs:element name="Child" type="NodeT"/></xs:sequence></xs:complexType></xs:schema>"""
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(xsd)
+    assert e.value.error_code == pi.PROFILE_INFERENCE_RECURSIVE_XML
+
+
+def test_xsd_named_complex_type_reference():
+    xsd = """<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:element name="Order" type="OrderT"/>
+      <xs:complexType name="OrderT"><xs:sequence>
+        <xs:element name="Id" type="xs:string"/></xs:sequence></xs:complexType></xs:schema>"""
+    r = pi.infer_profile_from_xsd(xsd)
+    assert "Order/Id" in r["field_index_by_path"]
