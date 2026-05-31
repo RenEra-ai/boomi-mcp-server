@@ -1,0 +1,24 @@
+# .gcloudignore — controls what `gcloud builds submit` uploads as the Cloud Build context.
+#
+# It INHERITS .gitignore via `#!include:.gitignore` so every local-only path git already
+# ignores (.mcp.json, .env/secrets, caches, venvs, docs/archive, agents/, tasks/,
+# setup scripts, incident bundles, ...) is kept out of the `gcloud builds submit` UPLOAD
+# context. Inheriting avoids keeping a second copy of git's exclusions that can drift.
+#
+# SCOPE: this governs the UPLOAD only. What ends up INSIDE an image is decided by
+# .dockerignore at `docker build` time (a direct `docker build .` never consults this
+# file). The same local-only/secret paths are therefore ALSO listed in .dockerignore so
+# they never enter an image regardless of build path (direct docker build, gcloud builds
+# submit, or git-triggered Cloud Build).
+#
+# Why inheriting .gitignore is SAFE here (it was the original bug's mechanism): the
+# scratch-script rule in .gitignore is now ANCHORED (`/analyze_*.py`), so it no longer
+# matches the tracked module src/boomi_mcp/categories/components/analyze_component.py and
+# the file is uploaded normally. If a future .gitignore edit re-introduces an unanchored
+# source-matching pattern, the Dockerfile build-time import gate fails the build LOUDLY
+# instead of shipping an image with disabled tool categories.
+#
+# (.git/ and this file are listed explicitly because .gitignore does not ignore them.)
+#!include:.gitignore
+.git/
+.gcloudignore
