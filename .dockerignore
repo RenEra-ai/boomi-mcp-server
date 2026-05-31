@@ -3,19 +3,22 @@
 .gitignore
 .github/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+# Python / build artifacts / tool caches — recursive (**/) so NESTED instances are caught.
+# .dockerignore matches the full context-relative path (not gitignore basename semantics),
+# so a bare `__pycache__/` or `*.py[cod]` only matches the context root. Verified: no
+# tracked nested build/, dist/, *.so, or *.egg-info exist, so these are safe to broaden.
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.so
 .Python
-*.egg-info/
-dist/
-build/
-.eggs/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+**/*.egg-info/
+**/dist/
+**/build/
+**/.eggs/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
 
 # Virtual environments
 .venv/
@@ -23,23 +26,56 @@ venv/
 ENV/
 env/
 
-# IDE
+# IDE / editor junk (recursive for swap/backup files at any depth)
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
+**/*.swp
+**/*.swo
+**/*~
 
-# Local development
-secrets.sqlite
+# Local development (root-level runtime/dev files)
 .env
 .env.local
-*.log
+**/*.log
+server.pid
+setup_claude_code.sh
+.mcp.json
+.gcloudignore
 
-# Documentation
-README.md
-README-CLOUD.md
-*.md
+# Secrets / credentials — never bake into an image, at ANY depth. NOTE: .dockerignore
+# matches the full context-relative path (NOT gitignore basename semantics), so a bare
+# `*.pem` would only match the context root. `**/` matches zero or more directories, so
+# these cover both the root and nested files. (Root `.env`/`.env.local` are also listed
+# above as an explicit safety net for the most critical secret.)
+**/.env
+**/.env.*
+**/secrets/
+**/secrets.sqlite
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/credentials.db
+**/*.key
+**/*.pem
+**/*.crt
+**/*_local_secrets.json
+**/.boomi_mcp_local_secrets.json
+
+# macOS metadata at any depth
+**/.DS_Store
+
+# Local-only workspaces / docs / vendored clones (not needed at runtime)
+.claude/
+.codex/
+agents/
+tasks/
+docs/plans/
+docs/archive/
+mcp-streamable-http/
+boomi-python/
+
+# Documentation (not needed at runtime; recursive so nested docs are excluded too)
+**/*.md
 
 # Docker
 Dockerfile

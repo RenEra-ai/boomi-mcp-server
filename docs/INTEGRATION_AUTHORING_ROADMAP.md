@@ -1,7 +1,7 @@
 # Integration Authoring Roadmap
 
 Status: active
-Last updated: 2026-05-23
+Last updated: 2026-05-30
 Parent design: `docs/MCP_TOOL_DESIGN.md`
 
 ## Summary
@@ -12,19 +12,19 @@ Each milestone should be implemented as one project epic with smaller issues und
 
 ## Roadmap Dates
 
-Dates assume one main implementer, code review time, and live Boomi QA buffers. Repository milestones are the source of truth for due dates. This schedule was accelerated after M1 completed on 2026-05-16, ahead of the original 2026-05-29 due date.
+Dates assume one main implementer, code review time, and live Boomi QA buffers. Repository milestones are the source of truth for due dates. This schedule was accelerated again on 2026-05-30 after M2 completed on 2026-05-30, thirteen days ahead of its prior 2026-06-12 due date. The new cadence keeps short QA buffers but removes the old multi-week gaps: M3 and M4 are each one focused week, M5 keeps a two-week window because it introduces new archetype direction and DB-write support, and M6-M8 each get one focused week after their prerequisites land.
 
 | Milestone | Start | Due | Status |
 |---|---:|---:|---|
 | M0 Docs Alignment | 2026-05-15 | 2026-05-15 | Done 2026-05-15 |
 | M1 Archetype Framework Skeleton | 2026-05-15 | 2026-05-16 | Done 2026-05-16 (sub-issues #15-#20 closed; 361 tests passing) |
-| M2 `database_to_api_sync` Vertical Slice | 2026-05-18 | 2026-06-12 | In progress; accelerated after M1 |
-| M3 Deploy and Test Orchestration | 2026-06-15 | 2026-06-26 | Depends on M2 apply path |
-| M4 Agent Ergonomics | 2026-06-29 | 2026-07-10 | Depends on M1/M2 tool surface |
-| M5 API Variants | 2026-07-13 | 2026-08-07 | Depends on M2/M4 |
-| M6 Event and Listener Variants | 2026-08-10 | 2026-08-28 | Depends on M3/M5 |
-| M7 Discovery Tools | 2026-08-31 | 2026-09-18 | Depends on core archetypes |
-| M8 Archetype Composition | 2026-09-21 | 2026-10-09 | Depends on at least 3 stable archetypes |
+| M2 `database_to_api_sync` Vertical Slice | 2026-05-18 | 2026-05-30 | Done 2026-05-30 (#21-#31, #40-#46, #49, and #30 closed; parent #8 closed) |
+| M3 Deploy and Test Orchestration | 2026-05-31 | 2026-06-07 | Next; split into #60-#66 plus reliability follow-up #51 |
+| M4 Agent Ergonomics | 2026-06-08 | 2026-06-12 | Depends on M1/M2 tool surface and M3 workflow handoff |
+| M5 API Variants | 2026-06-15 | 2026-06-26 | Depends on M2/M4; includes #32 and #50 |
+| M6 Event and Listener Variants | 2026-06-29 | 2026-07-03 | Depends on M3/M5 |
+| M7 Discovery Tools | 2026-07-06 | 2026-07-10 | Depends on core archetypes; #47/#48 already staged |
+| M8 Archetype Composition | 2026-07-13 | 2026-07-17 | Depends on at least 2 stable archetypes plus deploy/test orchestration |
 
 ## M0: Docs Alignment
 
@@ -81,6 +81,8 @@ Validation:
 
 ## M2: First Vertical Slice, `database_to_api_sync`
 
+Status: Done 2026-05-30 — parent #8 closed; all M2 sub-issues closed. The shipped path covers archetype emission, plan/dry-run/mocked apply/verify, transformation review, read-merge-write update preservation, cross-component `$ref` validation, and the tracked M2 live QA runbook. Runtime deployment, schedule activation, execution, execution-log retrieval, and verified retry/DLQ process emission moved to M3.
+
 Goal: build the first real archetype end-to-end for scheduled database extraction into a REST API target.
 
 Implementation focus:
@@ -106,7 +108,7 @@ Implementation focus:
   - M2.1a (Issue #44): amend `database_to_api_sync` with explicit source schema, target schema, and typed transform intent before M2.6/M2.7 consume the contract
   - M2.6d (Issue #45, shipped): Component XML read-merge-write preservation for `build_integration action='update'` across builder-generated database/REST connectors and operations, `profile.db`/`profile.json`/`profile.xml`, `transform.map`/`script.mapping`/`transform.function`, and `process` (`database_to_api_sync`). Each structured builder declares a `PRESERVATION_POLICY` listing the XML subtrees it owns; the apply path fetches current live XML via `component_get_xml`, merges only the builder-owned subtrees from the freshly-built desired XML, and pushes the merged XML via `update_component_raw`. `bns:encryptedValues` entries (existing isSet=true secret slots), `bns:processOverrides`, unknown root attributes, and unknown `<bns:object>` siblings survive the update. Raw-XML escape hatches on `manage_component`/`manage_connector` remain explicit full-XML replacement. Plan output surfaces `update_mode`, `preserves_unknown_xml`, `owned_paths`, and `preserved_paths` per step so callers can audit preservation behavior before applying. Connector bodies (`DatabaseConnectionSettings`, `DatabaseGetAction`) merge granularly (`subtree_merge`: owned attrs + named child blocks, unknown attrs/children preserved) and REST operation profile types travel with their bindings. Known follow-up: the transform/profile/process owned cores (`<Map>`, `<process>`, profile `DataElements`, `MappingScript`, `Function`) still wholesale-`replace`, so unknown attrs/children *inside* those objects aren't yet preserved — tracked as "inner-object preservation hardening" (#50, which also covers REST operation conditional emission for profile-binding attrs). Speculative; no unknown inner fields exist in builder-locked exports today.
   - M2.x (Issue #46): MCP transformation review surface for field lists, mapping diffs, unmapped validation, test payloads, and expected/actual comparison
-  - M2.10 (Issue #30): End-to-end validation + live QA for the `database_to_api_sync` vertical slice. Adds a focused local E2E module (`tests/patterns/test_database_to_api_sync_e2e.py`) and `build_integration` wrapper tests (`tests/test_build_integration_wrapper.py`) that prove the full path — `build_from_archetype` → `review_transformation` → `build_integration` plan / dry-run apply / mocked real apply / verify — without live Boomi: dry-run apply never calls `_execute_component`, mocked apply resolves every `$ref` before execution, `reference_only` connections record `status='reused'` without creation, and unresolvable plans fail fast. Ships a tracked live QA runbook (`docs/M2_DATABASE_TO_API_SYNC_LIVE_QA.md`). M2 validation thus covers local end-to-end assembly **plus** Boomi component create/apply/verify readiness. Package deploy, runtime attachment, schedule activation, runtime execution, execution-log retrieval, and failure-row runtime proof remain M3/#51 scope.
+  - M2.10 (Issue #30, shipped 2026-05-30): End-to-end validation + live QA for the `database_to_api_sync` vertical slice. Adds a focused local E2E module (`tests/patterns/test_database_to_api_sync_e2e.py`) and `build_integration` wrapper tests (`tests/test_build_integration_wrapper.py`) that prove the full path — `build_from_archetype` → `review_transformation` → `build_integration` plan / dry-run apply / mocked real apply / verify — without live Boomi: dry-run apply never calls `_execute_component`, mocked apply resolves every `$ref` before execution, `reference_only` connections record `status='reused'` without creation, and unresolvable plans fail fast. Ships a tracked live QA runbook (`docs/M2_DATABASE_TO_API_SYNC_LIVE_QA.md`). M2 validation thus covers local end-to-end assembly **plus** Boomi component create/apply/verify readiness. Package deploy, runtime attachment, schedule activation, runtime execution, execution-log retrieval, and failure-row runtime proof remain M3/#51 scope.
 - Use the transformation escalation ladder:
   - direct map first
   - `transform.function` for supported standard operations
@@ -149,6 +151,8 @@ Validation:
 
 ## M3: Deploy and Test Orchestration
 
+Status: Next — due 2026-06-07. Parent #9 is split into #60-#66. Reliability follow-up #51 is also assigned to M3 because runtime failure proof requires verified Try/Catch/DLQ behavior, but #51 is not a child of #9.
+
 Goal: remove the post-apply manual chain for agents.
 
 Implementation focus:
@@ -157,12 +161,23 @@ Implementation focus:
 - Use existing deployment, runtime attachment, schedule, execution, and monitoring modules.
 - Return a single summary with package IDs, deployment IDs, runtime attachment result, schedule result, execution ID, terminal status, and log excerpts.
 - Add cleanup helper behavior for failed builds only if it can be dry-run by default.
+- Complete verified Try/Catch/DLQ process emission (#51) so runtime failure proof no longer stops at `PROCESS_RETRY_UNVERIFIED`.
+- Follow the issue split:
+  - #60 — `orchestrate_deploy` contract and build-result resolver
+  - #61 — idempotent package creation and deployment stage
+  - #62 — runtime attachment and schedule activation stage
+  - #63 — optional test execution, polling, and log summary stage
+  - #64 — public `orchestrate_deploy` MCP tool and discoverability wiring
+  - #65 — failure/idempotency hardening and cleanup planning
+  - #66 — live QA against the M2 archetype output
+  - #51 — verified Try/Catch + DLQ process emission follow-up
 
 Exit criteria:
 
 - An agent can move from `build_integration apply` to deployed/tested integration with one tool call.
 - The tool is idempotent enough to retry safely when package/deployment already exists.
 - Failed deployment or failed test execution returns structured error codes and diagnostic context.
+- Retry/DLQ process behavior needed for failure-row proof is either verified live through #51 or explicitly blocked with recorded Boomi evidence.
 
 Validation:
 
@@ -199,6 +214,8 @@ Validation:
 
 ## M5: API Variants
 
+Status: Scheduled 2026-06-15 to 2026-06-26. Parent #11 remains the milestone epic. Existing staged issues: #32 for database Send/write profile support and #50 for REST/profile update-preservation hardening before broader API variants stress those builders.
+
 Goal: broaden from DB-to-REST into the main scheduled sync cases.
 
 Implementation focus:
@@ -209,6 +226,7 @@ Implementation focus:
 - Add OData source adapter and `odata_fetch` primitive.
 - Add SOAP source/target adapter support where required by a real task.
 - Keep task-specific OData filters, SOAP operation inputs, REST payloads, and mappings as open parameters.
+- Close update-preservation hardening for REST/profile-heavy paths (#50) before relying on repeated update flows in API variants.
 
 Exit criteria:
 
