@@ -20,7 +20,7 @@ import logging
 import os
 import sys
 from enum import Enum
-from typing import Dict
+from typing import Any, Dict
 from pathlib import Path
 
 # Wire the `boomi.*` logger tree to stderr at INFO so the
@@ -382,6 +382,14 @@ try:
 except ImportError as e:
     print(f"[WARNING] Failed to import transformation review tool: {e}")
     review_transformation_action = None
+
+# --- Profile Inference Discovery Tool (Issue #47) ---
+try:
+    from boomi_mcp.categories.integration_authoring import infer_profile_fields_action
+    print("[INFO] Profile inference tool loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import profile inference tool: {e}")
+    infer_profile_fields_action = None
 
 
 def _sanitize_error_msg(msg: str) -> str:
@@ -2005,6 +2013,53 @@ if review_transformation_action:
         return review_transformation_action(action, config=config_data)
 
     print("[INFO] review_transformation tool registered successfully")
+
+
+# --- Profile Inference Discovery MCP Tool (Issue #47) ---
+if infer_profile_fields_action:
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def infer_profile_fields(source_type: str, artifact: Any, options: str = None):
+        """Infer issue-#43 builder-ready profile fields from a discovered artifact.
+
+        Read-only DISCOVERY. Does NOT call Boomi, mutate anything, construct an
+        SDK client, read credentials, or expose raw XML. Turns a caller-supplied
+        artifact into a profile-field contract (profile_config + field_index +
+        mappable_paths) that profile/map builders can consume, plus a parallel
+        `fields` list with confidence / ambiguity / confirmation_required notes.
+        Sample VALUES are never echoed back.
+
+        Ambiguous sample-derived fields are marked confirmation_required=true and
+        force ready_for_builder=false — confirm them before applying. This tool
+        does NOT index arbitrary existing live Boomi profile XML for literal-UUID
+        transform.map refs (still deferred).
+
+        Args:
+            source_type: One of:
+                profile_from_db_metadata — artifact is a column summary
+                    ({"columns"|"fields"|"result_columns": [{name, data_type|
+                    db_type|jdbc_type|type, nullable?/required?}]} or a bare list).
+                profile_from_sample_json — artifact is a JSON string or a parsed
+                    object/array of objects.
+                profile_from_xsd — artifact is an XSD string (conservative
+                    same-document subset; namespaces/choice/attributes rejected).
+                profile_from_sample_xml — artifact is an XML string (element-only;
+                    attributes/mixed/namespaces rejected).
+            artifact: The metadata/sample/schema to infer from (dict/list or str).
+            options: Optional JSON-object string with: component_name, root_name,
+                array_item_name, datetime_detection (bool), max_input_chars,
+                max_nodes, max_fields.
+
+        Returns:
+            Structured contract with _success, read_only/boomi_mutation/
+            raw_xml_exposed flags, generation_mode, component_type, profile_type,
+            profile_config, field_index_by_path, mappable_paths, fields[],
+            ready_for_builder, issues[], truncated/truncation; or a structured
+            PROFILE_INFERENCE_* error envelope (still carrying the safety flags).
+        """
+        return infer_profile_fields_action(source_type, artifact, options=options)
+
+    print("[INFO] infer_profile_fields tool registered successfully")
 
 
 # --- Folder Management MCP Tools ---
