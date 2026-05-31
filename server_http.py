@@ -5,6 +5,7 @@ HTTP server wrapper for Boomi MCP Server with OAuth routes.
 This properly exposes OAuth routes at root level alongside MCP endpoint.
 """
 
+import contextlib
 import os
 import secrets
 import uvicorn
@@ -89,6 +90,41 @@ def _flag(name, default):
     return os.getenv(name, default).strip().lower() in ("true", "1", "yes", "on")
 
 
+def _compose_strict_probe_lifespan(app):
+    """Wrap the app's lifespan so ``server.run_strict_startup_probes()`` runs on
+    the serving loop at startup, before the app's normal lifespan.
+
+    In strict production this verifies the refresh-token backends can actually
+    reach their Mongo collections; a probe failure raises here, which aborts
+    uvicorn startup (fail fast) rather than booting with a silently-degraded
+    protection. No-op when the probe hook is unavailable (local mode) or no
+    probes are registered. Mirrors ``install_reaper_lifespan``'s wrapping of
+    ``app.router.lifespan_context``."""
+    router = getattr(app, "router", None)
+    original = getattr(router, "lifespan_context", None)
+    if router is None or original is None:
+        return
+
+    @contextlib.asynccontextmanager
+    async def wrapped(app_):
+        # Look up the ALREADY-loaded server module rather than importing it: the
+        # production entrypoint imports `server` before building the app, so the
+        # probe hook is present here. Importing it ourselves would be a heavy
+        # side effect for any non-production caller of build_mcp_app and could
+        # raise SystemExit (server.py exits on missing OIDC/Mongo), which a plain
+        # `except Exception` would not catch.
+        import sys
+
+        _server = sys.modules.get("server")
+        probe = getattr(_server, "run_strict_startup_probes", None) if _server else None
+        if probe is not None:
+            await probe()
+        async with original(app_):
+            yield
+
+    router.lifespan_context = wrapped
+
+
 def build_mcp_app(
     mcp,
     *,
@@ -136,11 +172,13 @@ def build_mcp_app(
             f"session-manager binding, JWT-issuer binding, and session reaper are "
             f"disabled in stateless mode"
         )
-        return mcp.http_app(
+        app = mcp.http_app(
             stateless_http=True,
             json_response=json_response,
             middleware=warmup_mw,
         )
+        _compose_strict_probe_lifespan(app)
+        return app
 
     print("[INFO] MCP stateful HTTP transport (stateless_http=False)")
     guard_config = McpStreamGuardConfig.from_env()
@@ -169,6 +207,7 @@ def build_mcp_app(
             json_response=False,
             middleware=warmup_mw,
         )
+    _compose_strict_probe_lifespan(app)
     return app
 
 

@@ -162,6 +162,30 @@ def test_skips_malformed_record_on_apply():
     assert counts["decryptable"] == 0
 
 
+def test_non_numeric_successor_expires_at_counted_malformed_not_crash():
+    """A corrupted non-numeric successor_expires_at is counted, not raised."""
+    backing = MemoryStore()
+    wrapped = FernetEncryptionWrapper(key_value=backing, fernet=Fernet(_new_key()))
+    now = time.time()
+
+    async def _scenario():
+        bad_str = _alias(now + 20 * 86400)
+        bad_str["successor_expires_at"] = "not-a-number"
+        await wrapped.put(key="bad_str", value=bad_str, ttl=600)
+        bad_obj = _alias(now + 20 * 86400)
+        bad_obj["successor_expires_at"] = {"nested": 1}
+        await wrapped.put(key="bad_obj", value=bad_obj, ttl=600)
+        # Must not raise; both counted malformed, none extended.
+        return await ext.extend_aliases(
+            wrapped, ["bad_str", "bad_obj"], max_age=_THIRTY_DAYS, apply=True, now=now
+        )
+
+    counts = _run(_scenario())
+    assert counts["skipped_malformed"] == 2
+    assert counts["extended"] == 0
+    assert counts["decryptable"] == 0
+
+
 def test_decrypt_failure_counted_as_malformed():
     """A doc encrypted under a non-listed key surfaces as a skip, never a crash."""
     backing = MemoryStore()

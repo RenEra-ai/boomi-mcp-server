@@ -290,13 +290,18 @@ BOOMI_TOKEN_CACHE_SWR               # default false. Opt-in stale-while-
                                     # revalidate against short Google outages.
 BOOMI_TOKEN_CACHE_SWR_WINDOW        # default 30. Seconds before expiry at
                                     # which SWR serves stale + refreshes.
-BOOMI_TOKEN_CACHE_STALE_IF_ERROR_SECONDS  # default 0 (off; Cloud Run pins 60).
-                                    # When the Google verifier fails after a
-                                    # cache entry expired, serve the last
-                                    # positive token for this many seconds past
-                                    # expiry -- but only while the token's own
-                                    # expiry is still in the future. Negative
-                                    # verifier results are never cached/served.
+BOOMI_TOKEN_CACHE_STALE_IF_ERROR_SECONDS  # default 0 (off); Cloud Run pins =0
+                                    # (off). Opt in by raising it. When the
+                                    # Google verifier returns None after a cache
+                                    # entry expired, serve the last positive
+                                    # token for this many seconds past expiry --
+                                    # only while the token's own expiry is still
+                                    # future. Note: the verifier returns None for
+                                    # BOTH transient failures and explicit Google
+                                    # rejections, so enabling this extends the
+                                    # cache's revocation-latency window (see
+                                    # BOOMI_TOKEN_CACHE_TTL_SECONDS) by up to this
+                                    # many seconds. Negatives are never cached.
 
 BOOMI_RT_GRACE_SHARED               # default true. Backs the refresh-token
                                     # grace cache with a MongoDB collection

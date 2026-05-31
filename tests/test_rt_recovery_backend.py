@@ -265,3 +265,32 @@ def test_initialize_routes_to_recovery_collection(monkeypatch):
     backend = initialize_refresh_token_recovery_backend("mongodb://x", Fernet(_new_key()))
     assert backend is not None
     assert recorded.get("default_collection") == DEFAULT_RECOVERY_COLLECTION
+
+
+# ---------- strict-startup probe ----------
+
+def test_probe_succeeds_against_live_store():
+    """A reachable, writable store: probe round-trips and cleans up its sentinel."""
+    backend = _mem_backend()
+    assert _run(backend.probe()) is None
+    # The probe must not leave its sentinel behind.
+    assert _run(backend.get("__rt_recovery_startup_probe__")) is None
+
+
+def test_probe_propagates_write_failure():
+    """Read-only/unwritable store: the probe must NOT swallow -- it raises for
+    fail-fast, even though reads alone would succeed (the write path is what
+    durable recovery actually depends on)."""
+    class _WriteDeniedStore:
+        async def put(self, *, key, value, ttl):
+            raise RuntimeError("write denied")
+
+        async def get(self, *, key):
+            return None
+
+        async def delete(self, *, key):
+            pass
+
+    backend = RefreshTokenRecoveryBackend(_WriteDeniedStore())
+    with pytest.raises(RuntimeError, match="write denied"):
+        _run(backend.probe())

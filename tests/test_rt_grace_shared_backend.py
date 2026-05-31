@@ -453,3 +453,23 @@ def test_release_lock_lazily_inits_if_claim_never_called():
     _run(backend.release_lock("k1", "A"))
     assert factory.state["count"] == 1
     assert coll.delete_calls == 1
+
+
+# ---------- strict-startup probe ----------
+
+def test_probe_succeeds_against_live_store():
+    """A reachable, writable store: probe round-trips and cleans up its sentinel."""
+    wrapped = FernetEncryptionWrapper(key_value=MemoryStore(), fernet=Fernet(_new_key()))
+    backend = SharedGraceBackend(wrapped)
+    assert _run(backend.probe()) is None
+    # The probe must not leave its sentinel behind.
+    assert _run(backend.get("__rt_grace_startup_probe__")) is None
+
+
+def test_probe_propagates_write_failure():
+    """Read-only/unwritable store: the probe must NOT swallow -- it raises for
+    fail-fast, even though reads alone would succeed (the write path is what the
+    shared grace cache actually depends on)."""
+    backend = SharedGraceBackend(_StubStore(put_exc=RuntimeError("write denied")))
+    with pytest.raises(RuntimeError, match="write denied"):
+        _run(backend.probe())
