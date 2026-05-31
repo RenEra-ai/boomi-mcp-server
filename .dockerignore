@@ -3,19 +3,22 @@
 .gitignore
 .github/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+# Python / build artifacts / tool caches — recursive (**/) so NESTED instances are caught.
+# .dockerignore matches the full context-relative path (not gitignore basename semantics),
+# so a bare `__pycache__/` or `*.py[cod]` only matches the context root. Verified: no
+# tracked nested build/, dist/, *.so, or *.egg-info exist, so these are safe to broaden.
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.so
 .Python
-*.egg-info/
-dist/
-build/
-.eggs/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+**/*.egg-info/
+**/dist/
+**/build/
+**/.eggs/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
 
 # Virtual environments
 .venv/
@@ -23,17 +26,17 @@ venv/
 ENV/
 env/
 
-# IDE
+# IDE / editor junk (recursive for swap/backup files at any depth)
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
+**/*.swp
+**/*.swo
+**/*~
 
 # Local development (root-level runtime/dev files)
 .env
 .env.local
-*.log
+**/*.log
 server.pid
 setup_claude_code.sh
 .mcp.json
@@ -71,10 +74,8 @@ docs/archive/
 mcp-streamable-http/
 boomi-python/
 
-# Documentation
-README.md
-README-CLOUD.md
-*.md
+# Documentation (not needed at runtime; recursive so nested docs are excluded too)
+**/*.md
 
 # Docker
 Dockerfile
