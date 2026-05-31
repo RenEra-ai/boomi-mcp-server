@@ -174,3 +174,119 @@ def test_action_ambiguous_marks_not_ready_but_succeeds():
     assert r["_success"] is True
     assert r["ready_for_builder"] is False
     assert r["fields"][0]["confirmation_required"] is True
+
+
+# ---------------------------------------------------------------------------
+# Task 7 — MCP wrapper registration + read-only proof
+# ---------------------------------------------------------------------------
+
+
+def test_infer_tool_registered_and_readonly():
+    t = _resolve_tool("infer_profile_fields")
+    assert t is not None
+    assert _annotation_value(t.annotations, "readOnlyHint") is True
+    assert _annotation_value(t.annotations, "openWorldHint") is False
+
+
+def test_infer_tool_in_list_tools():
+    listed = {t.name for t in _listed_tools()}
+    assert "infer_profile_fields" in listed
+
+
+def test_infer_schema_has_no_profile_param():
+    by = {t.name: t for t in _listed_tools()}
+    props = set(by["infer_profile_fields"].parameters["properties"])
+    assert "profile" not in props
+    assert {"source_type", "artifact"} <= props
+
+
+def test_infer_call_tool_success_and_flags():
+    p = _payload(
+        _call_tool(
+            "infer_profile_fields",
+            {"source_type": "profile_from_sample_json", "artifact": '{"id":1}'},
+        )
+    )
+    assert p["_success"] is True
+    assert p["read_only"] is True
+    assert p["boomi_mutation"] is False
+    assert p["raw_xml_exposed"] is False
+    assert p["generation_mode"] == "profile_from_sample_json"
+
+
+def test_infer_call_tool_structured_artifact():
+    p = _payload(
+        _call_tool(
+            "infer_profile_fields",
+            {
+                "source_type": "profile_from_db_metadata",
+                "artifact": {"columns": [{"name": "a", "data_type": "varchar"}]},
+            },
+        )
+    )
+    assert p["_success"] is True and p["component_type"] == "profile.db"
+
+
+def test_infer_call_tool_options_json_string():
+    p = _payload(
+        _call_tool(
+            "infer_profile_fields",
+            {
+                "source_type": "profile_from_sample_json",
+                "artifact": '{"id":1}',
+                "options": '{"component_name":"Demo"}',
+            },
+        )
+    )
+    assert p["_success"] is True and p["component_name"] == "Demo"
+
+
+def test_infer_call_tool_error_keeps_flags():
+    p = _payload(
+        _call_tool(
+            "infer_profile_fields",
+            {"source_type": "profile_from_sample_json", "artifact": '"scalar root"'},
+        )
+    )
+    assert p["_success"] is False
+    assert p["code"] == "PROFILE_INFERENCE_UNSUPPORTED_SHAPE"
+    assert p["read_only"] is True and p["boomi_mutation"] is False
+
+
+def test_infer_wrapper_no_boomi_or_credentials():
+    with (
+        patch.object(server, "get_current_user") as m_user,
+        patch.object(server, "get_secret") as m_secret,
+        patch.object(server, "Boomi") as m_boomi,
+    ):
+        r = server.infer_profile_fields("profile_from_sample_json", '{"id":1}')
+    assert r["_success"] is True
+    m_user.assert_not_called()
+    m_secret.assert_not_called()
+    m_boomi.assert_not_called()
+
+
+def test_infer_call_tool_path_no_boomi_or_credentials():
+    with (
+        patch.object(server, "get_current_user") as m_user,
+        patch.object(server, "get_secret") as m_secret,
+        patch.object(server, "Boomi") as m_boomi,
+    ):
+        p = _payload(
+            _call_tool(
+                "infer_profile_fields",
+                {"source_type": "profile_from_xsd",
+                 "artifact": '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="R" type="xs:string"/></xs:schema>'},
+            )
+        )
+    assert p["_success"] is True
+    m_user.assert_not_called()
+    m_secret.assert_not_called()
+    m_boomi.assert_not_called()
+
+
+def test_infer_stable_output():
+    a = {"source_type": "profile_from_sample_json", "artifact": '{"id":1,"name":"x"}'}
+    assert _payload(_call_tool("infer_profile_fields", a)) == _payload(
+        _call_tool("infer_profile_fields", a)
+    )
