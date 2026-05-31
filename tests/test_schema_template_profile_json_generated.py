@@ -121,3 +121,11 @@ def test_template_out_of_scope_points_at_47():
     result = _call(component_type="profile.json", protocol="json.generated")
     oos_blob = " ".join(result["out_of_scope"].values())
     assert "#47" in oos_blob
+
+
+def test_inferred_from_sample_json_points_at_infer_tool():
+    result = _call(component_type="profile.json", protocol="json.generated")
+    note = result["out_of_scope"]["inferred_from_sample_json"]
+    assert "infer_profile_fields" in note
+    assert "profile_from_sample_json" in note
+    assert "#47" in note  # issue tag retained
