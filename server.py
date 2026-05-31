@@ -49,6 +49,31 @@ from fastmcp import FastMCP
 # --- Mode Detection ---
 LOCAL_MODE = os.getenv("BOOMI_LOCAL", "").lower() in ("true", "1", "yes")
 
+# Strict-mode startup probes. In production with BOOMI_AUTH_PROTECTION_STRICT on,
+# each enabled refresh-token backend is registered here so the HTTP lifespan can
+# verify its Mongo collection is actually reachable on the serving loop (the
+# backend constructors only build a lazy client; runtime errors are otherwise
+# swallowed). Stays empty in local mode / when no feature is strict+enabled.
+_STRICT_STARTUP_PROBES: list = []
+
+
+async def run_strict_startup_probes() -> None:
+    """Probe each registered (enabled, strict) auth backend with a real Mongo
+    round-trip on the serving loop, raising RuntimeError if one is unreachable.
+
+    Invoked from the HTTP app lifespan (server_http.py) so a strict production
+    deployment fails fast instead of booting with a silently-degraded
+    refresh-token protection. No-op when no probes are registered (local mode,
+    non-strict, or the features are disabled)."""
+    for name, backend in _STRICT_STARTUP_PROBES:
+        try:
+            await backend.probe()
+        except Exception as exc:  # noqa: BLE001 — surface as fail-fast at startup
+            raise RuntimeError(
+                f"{name} startup probe failed (BOOMI_AUTH_PROTECTION_STRICT enabled): "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+
 # --- Boomi Docs KB feature flag ---
 # Master switch for the optional documentation retrieval layer. When false (the
 # default) no KB modules are imported and no KB tools/resource are registered,
@@ -583,6 +608,19 @@ if not LOCAL_MODE:
         # Apply the refresh-token grace patch now that _fernet (and thus
         # the optional shared backend) is ready.
         apply_refresh_token_grace_patch(shared_backend=shared_grace_backend)
+
+        # Register strict-mode startup probes: constructing the backends above
+        # only built their (lazy) Mongo clients -- it does NOT prove the
+        # collections are reachable, and their get/put wrappers swallow runtime
+        # errors. When fail-fast is on and a feature is enabled, probe its
+        # collection on the serving loop (via run_strict_startup_probes, invoked
+        # from the HTTP lifespan) so an unreachable/misconfigured Mongo crashes
+        # startup instead of booting with a silently-degraded protection.
+        if BOOMI_AUTH_PROTECTION_STRICT:
+            if grace_enabled and shared_grace_backend is not None:
+                _STRICT_STARTUP_PROBES.append(("shared_grace_backend", shared_grace_backend))
+            if recovery_enabled and recovery_backend is not None:
+                _STRICT_STARTUP_PROBES.append(("recovery_backend", recovery_backend))
 
         # Create GoogleProvider with encrypted MongoDB storage
         # Upstream v3.1.1 defaults to access_type=offline + prompt=consent

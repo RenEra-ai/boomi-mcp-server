@@ -145,9 +145,16 @@ async def extend_aliases(
             counts["skipped_malformed"] += 1
             continue
         successor_expires_at = value.get("successor_expires_at") if isinstance(value, dict) else None
-        if not successor_expires_at:
+        # Must be a positive real number: a corrupted record could carry a
+        # string/object/bool, which would raise on the comparison/arithmetic
+        # below. Treat anything non-numeric or non-positive as malformed.
+        if (
+            not isinstance(successor_expires_at, (int, float))
+            or isinstance(successor_expires_at, bool)
+            or successor_expires_at <= 0
+        ):
             counts["skipped_malformed"] += 1
-            print(f"  [skip malformed] alias={_fingerprint(key)} (no successor_expires_at)")
+            print(f"  [skip malformed] alias={_fingerprint(key)} (missing/invalid successor_expires_at)")
             continue
         counts["decryptable"] += 1
         if successor_expires_at <= now:

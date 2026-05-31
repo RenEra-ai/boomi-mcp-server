@@ -202,6 +202,24 @@ class SharedGraceBackend:
                 exc,
             )
 
+    async def probe(self) -> None:
+        """Strict-startup health probe: a real write+read+delete round-trip to
+        the shared grace collection.
+
+        The shared grace cache DEPENDS on writes (``put``), so the probe
+        exercises the write path -- a read-only check would pass on a collection
+        the credentials can read but not write, while live cache writes are
+        silently dropped. Unlike ``get``/``put``/``delete`` (which swallow errors
+        so a cache blip never fails a live exchange), this lets exceptions
+        PROPAGATE so a strict production startup fails fast when the collection is
+        unreachable, missing, or not writable. Uses a short-TTL sentinel key and
+        cleans it up.
+        """
+        probe_key = "__rt_grace_startup_probe__"
+        await self._store.put(key=probe_key, value={"probe": True}, ttl=60)
+        await self._store.get(key=probe_key)
+        await self._store.delete(key=probe_key)
+
     # ---- Fix D.2: distributed singleflight via Mongo upsert-as-lock ----
 
     async def try_claim_lock(

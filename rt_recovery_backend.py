@@ -127,6 +127,24 @@ class RefreshTokenRecoveryBackend:
                 exc,
             )
 
+    async def probe(self) -> None:
+        """Strict-startup health probe: a real write+read+delete round-trip to
+        the alias collection.
+
+        Durable recovery DEPENDS on writes (``put_alias``), so the probe
+        exercises the write path -- a read-only check would pass on a collection
+        the credentials can read but not write, while live alias writes are
+        silently dropped. Unlike ``get``/``put_alias``/``delete`` (which swallow
+        errors so a ledger blip never fails a live rotation), this lets
+        exceptions PROPAGATE so a strict production startup fails fast when the
+        collection is unreachable, missing, or not writable. Uses a short-TTL
+        sentinel key and cleans it up.
+        """
+        probe_key = "__rt_recovery_startup_probe__"
+        await self._store.put(key=probe_key, value={"probe": True}, ttl=60)
+        await self._store.get(key=probe_key)
+        await self._store.delete(key=probe_key)
+
     async def resolve_latest(
         self, old_hash: str, max_hops: int
     ) -> tuple[Optional[dict[str, Any]], list[str]]:
