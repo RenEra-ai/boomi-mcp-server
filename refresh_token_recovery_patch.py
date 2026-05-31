@@ -32,7 +32,8 @@ Env:
     on only when a backend is passed)
   BOOMI_RT_RECOVERY_MAX_AGE_SECONDS (default 2592000 = 30d, matching the sliding
     refresh-token lifetime)
-  BOOMI_RT_RECOVERY_MAX_HOPS (default 16)
+  BOOMI_RT_RECOVERY_MAX_HOPS (default 64; scaled with the 30d recovery window so
+    the hop cap is not the binding limit for clients that rotate often)
   BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS (default 60; clock-skew tolerance applied to
     the refresh JWT exp on the durable-recovery path only)
   BOOMI_RT_SLIDING_REFRESH_EXPIRY (default true)
@@ -173,7 +174,12 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
     )
     sliding_ttl = int(os.getenv("BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS", str(_THIRTY_DAYS)))
     max_age = int(os.getenv("BOOMI_RT_RECOVERY_MAX_AGE_SECONDS", str(_THIRTY_DAYS)))
-    max_hops = int(os.getenv("BOOMI_RT_RECOVERY_MAX_HOPS", "16"))
+    # Default scaled with the 30d recovery window (was 16 for the 7d window): a
+    # client rotating often can be many hops behind while still inside the
+    # window, and a too-low cap makes resolve_latest return a dead intermediate
+    # successor. The walk self-heals via chain compaction after the first
+    # recovery, so a higher cap costs at most one cold multi-read walk per chain.
+    max_hops = int(os.getenv("BOOMI_RT_RECOVERY_MAX_HOPS", "64"))
     jwt_leeway = int(os.getenv("BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS", "60"))
     recovery_enabled = recovery_backend is not None
 
