@@ -27,6 +27,14 @@ _ROOT = Path(__file__).resolve().parent.parent
 # .gcloudignore self-excludes (standard gcloud behavior) and is not needed in the build.
 _UPLOAD_ALLOWLIST = {".gcloudignore"}
 
+# Tracked-directory prefixes intentionally excluded from the Cloud Build upload.
+# ``docs/plans/`` is gitignored by design (local planning artifacts), but the
+# /auto-issue workflow force-adds the architect plan JSON there as a durable
+# source-of-truth. Those planning docs are NOT runtime assets and legitimately do
+# not belong in the Cloud Run image — so a drop here is expected, not the
+# dropped-source-file regression this guard exists to catch.
+_UPLOAD_ALLOWLIST_PREFIXES = ("docs/plans/",)
+
 
 def _lines(args):
     out = subprocess.run(
@@ -66,7 +74,10 @@ def test_no_tracked_file_dropped_from_build_context():
     # missing from disk is a partial/odd checkout, not a build-context ignore bug, and is
     # out of scope for this guard.
     dropped = sorted(
-        f for f in (tracked - uploaded - _UPLOAD_ALLOWLIST) if (_ROOT / f).exists()
+        f
+        for f in (tracked - uploaded - _UPLOAD_ALLOWLIST)
+        if (_ROOT / f).exists()
+        and not f.startswith(_UPLOAD_ALLOWLIST_PREFIXES)
     )
     assert not dropped, (
         "tracked files are excluded from the gcloud build-context upload — a "
