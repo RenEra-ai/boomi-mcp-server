@@ -1230,3 +1230,191 @@ def infer_profile_from_xsd(artifact: Any, *, options: Optional[Any] = None) -> D
         {"format": "xml", "root": root_node}, component_name=component_name
     )
     return _assemble(helper_result, "profile_from_xsd", meta_by_path, [])
+
+
+# ---------------------------------------------------------------------------
+# XML sample inference
+# ---------------------------------------------------------------------------
+
+# Integer/decimal recognizer that rejects leading-zero strings (e.g. "00123"
+# stays character, since it is almost certainly an identifier code).
+_XML_NUMBER_RE = re.compile(r"^-?(0|[1-9]\d*)(\.\d+)?$")
+
+
+def _xml_scalar_category(text: str, dt_detect: bool) -> str:
+    t = text.strip()
+    if t == "":
+        return "empty"
+    low = t.lower()
+    if low in ("true", "false"):
+        return "boolean"
+    if dt_detect and _ISO_DATETIME_RE.match(t):
+        return "datetime"
+    if _XML_NUMBER_RE.match(t):
+        return "number"
+    return "character"
+
+
+def _xml_leaf_type(texts: List[str], dt_detect: bool):
+    cats = {_xml_scalar_category(t, dt_detect) for t in texts}
+    non_empty = cats - {"empty"}
+    if not non_empty:
+        return "character", "low", ["empty element(s); type defaulted to character"], False
+    if len(non_empty) == 1:
+        data_type = next(iter(non_empty))
+        ambiguities = ["empty value observed among samples"] if "empty" in cats else []
+        return data_type, "medium", ambiguities, False
+    return (
+        "character",
+        "ambiguous",
+        ["mixed leaf value types across repeated elements; defaulted to character"],
+        True,
+    )
+
+
+def _infer_xml_node(
+    tag: str,
+    instances: List["ET.Element"],
+    path: str,
+    ancestors,
+    *,
+    min_occurs: int,
+    max_occurs: int,
+    required: bool,
+    counters: _Counters,
+    dt_detect: bool,
+    meta_by_path: Dict[str, Dict[str, Any]],
+    issues: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    counters.add_node()
+
+    uri, local = _split_qname(tag)
+    if uri is not None:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE,
+            f"{path}: namespaced element {tag!r} is not representable by the "
+            "namespace-less XML profile builder",
+            field="artifact",
+            details={"tag": tag},
+        )
+    if local in ancestors:
+        raise _err(
+            PROFILE_INFERENCE_RECURSIVE_XML,
+            f"{path}: element {local!r} recurses a same-name ancestor",
+            field="artifact",
+            details={"tag": local, "ancestors": sorted(ancestors)},
+        )
+    for inst in instances:
+        if inst.attrib:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{path}: XML attributes are not supported (element-only)",
+                field="artifact",
+            )
+
+    structural = any(len(list(inst)) > 0 for inst in instances)
+
+    if structural:
+        for inst in instances:
+            if inst.text and inst.text.strip():
+                raise _err(
+                    PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                    f"{path}: mixed content (text alongside child elements) is not supported",
+                    field="artifact",
+                )
+            for child in list(inst):
+                if child.tail and child.tail.strip():
+                    raise _err(
+                        PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                        f"{path}: mixed content (text between child elements) is not supported",
+                        field="artifact",
+                    )
+
+        segment = f"{path}[]" if max_occurs != 1 else path
+        ordered_tags: List[str] = []
+        for inst in instances:
+            for child in list(inst):
+                if child.tag not in ordered_tags:
+                    ordered_tags.append(child.tag)
+
+        children: List[Dict[str, Any]] = []
+        child_ancestors = set(ancestors) | {local}
+        for child_tag in ordered_tags:
+            child_uri, child_local = _split_qname(child_tag)
+            counts = [sum(1 for c in inst if c.tag == child_tag) for inst in instances]
+            present_parents = sum(1 for c in counts if c > 0)
+            child_max = -1 if max(counts) > 1 else 1
+            child_required = present_parents == len(instances)
+            child_min = 1 if child_required else 0
+            name_for_path = child_local if child_uri is None else child_tag
+            child_path = f"{segment}/{name_for_path}"
+            if child_uri is None and _is_secret_named(child_local):
+                issues.append(_secret_withheld_issue(child_path))
+                continue
+            child_instances = [c for inst in instances for c in inst if c.tag == child_tag]
+            children.append(
+                _infer_xml_node(
+                    child_tag, child_instances, child_path, child_ancestors,
+                    min_occurs=child_min, max_occurs=child_max, required=child_required,
+                    counters=counters, dt_detect=dt_detect, meta_by_path=meta_by_path,
+                    issues=issues,
+                )
+            )
+        if not children:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{path}: element has no inferable child elements",
+                field="artifact",
+            )
+        meta_by_path[path] = {"confidence": "high", "ambiguities": [], "confirmation_required": False}
+        return {
+            "name": local, "kind": "element", "required": required,
+            "min_occurs": min_occurs, "max_occurs": max_occurs, "children": children,
+        }
+
+    # Leaf element.
+    counters.add_field()
+    texts = [(inst.text or "") for inst in instances]
+    data_type, confidence, ambiguities, confirm = _xml_leaf_type(texts, dt_detect)
+    meta_by_path[path] = {
+        "confidence": confidence, "ambiguities": ambiguities, "confirmation_required": confirm,
+    }
+    return {
+        "name": local, "kind": "element", "data_type": data_type, "required": required,
+        "min_occurs": min_occurs, "max_occurs": max_occurs,
+    }
+
+
+def infer_profile_from_sample_xml(artifact: Any, *, options: Optional[Any] = None) -> Dict[str, Any]:
+    """Infer a profile.xml contract from a sample XML document (element-only).
+
+    Repeated sibling elements become ``max_occurs=-1`` with ``[]`` descendant
+    paths; children missing from some repeated parents become optional. Leaf
+    types are inferred from text WITHOUT echoing the text. Attributes, mixed
+    content, namespaced tags, and same-name-ancestor recursion are rejected.
+    """
+    opts = _coerce_options(options)
+    limits = _resolve_limits(opts)
+    component_name = opts.get("component_name")
+    dt_detect = opts.get("datetime_detection", True)
+    if dt_detect is None:
+        dt_detect = True
+
+    text = _require_text_artifact(artifact, "XML sample")
+    root = _safe_fromstring(text)
+
+    counters = _Counters(limits)
+    meta_by_path: Dict[str, Dict[str, Any]] = {}
+    issues: List[Dict[str, Any]] = []
+
+    _, root_local = _split_qname(root.tag)
+    root_node = _infer_xml_node(
+        root.tag, [root], root_local, frozenset(),
+        min_occurs=1, max_occurs=1, required=True,
+        counters=counters, dt_detect=dt_detect, meta_by_path=meta_by_path, issues=issues,
+    )
+
+    helper_result = profile_from_xml_schema(
+        {"format": "xml", "root": root_node}, component_name=component_name
+    )
+    return _assemble(helper_result, "profile_from_sample_xml", meta_by_path, issues)

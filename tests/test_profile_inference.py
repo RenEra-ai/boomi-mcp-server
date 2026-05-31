@@ -489,3 +489,107 @@ def test_xsd_named_complex_type_reference():
         <xs:element name="Id" type="xs:string"/></xs:sequence></xs:complexType></xs:schema>"""
     r = pi.infer_profile_from_xsd(xsd)
     assert "Order/Id" in r["field_index_by_path"]
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — XML sample inference
+# ---------------------------------------------------------------------------
+
+# Orders is the single root (no []); Order repeats → [] on Order's descendants.
+_XML_OK = (
+    "<Orders>"
+    "<Order><Id>A1</Id><Qty>5</Qty></Order>"
+    "<Order><Id>A2</Id><Qty>9</Qty><Note>hi</Note></Order>"
+    "</Orders>"
+)
+
+
+def test_xml_sample_repeating_and_optional():
+    r = pi.infer_profile_from_sample_xml(_XML_OK)
+    assert r["generation_mode"] == "profile_from_sample_xml"
+    assert r["component_type"] == "profile.xml"
+    assert r["profile_type"] == "xml.generated"
+    idx = set(r["field_index_by_path"])
+    assert {"Orders", "Orders/Order", "Orders/Order[]/Id", "Orders/Order[]/Qty"} <= idx
+    by = {f["path"]: f for f in r["fields"]}
+    assert by["Orders/Order[]/Id"]["data_type"] == "character"
+    assert by["Orders/Order[]/Qty"]["data_type"] == "number"
+    assert by["Orders/Order[]/Note"]["required"] is False  # missing in first Order
+    # Order itself repeats (2 instances) → max_occurs=-1 in the builder index
+    assert r["field_index_by_path"]["Orders/Order"]["max_occurs"] == -1
+
+
+def test_xml_sample_non_str_invalid_input():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml(123)
+    assert e.value.error_code == pi.PROFILE_INFERENCE_INVALID_INPUT
+
+
+def test_xml_sample_leaf_type_inference():
+    r = pi.infer_profile_from_sample_xml(
+        "<R><s>hello</s><n>42</n><b>true</b><d>2026-01-01T00:00:00Z</d><z>00123</z></R>"
+    )
+    by = {f["path"]: f for f in r["fields"]}
+    assert by["R/s"]["data_type"] == "character"
+    assert by["R/n"]["data_type"] == "number"
+    assert by["R/b"]["data_type"] == "boolean"
+    assert by["R/d"]["data_type"] == "datetime"
+    assert by["R/z"]["data_type"] == "character"  # leading zero → not number
+
+
+def test_xml_sample_attributes_rejected():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml('<R><A x="1">v</A></R>')
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xml_sample_namespaced_rejected():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml('<R xmlns:n="urn:x"><n:A>v</n:A></R>')
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
+
+
+def test_xml_sample_default_namespace_root_rejected():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml('<R xmlns="urn:x"><A>v</A></R>')
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
+
+
+def test_xml_sample_mixed_content_rejected():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml("<R>text<A>v</A></R>")
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xml_sample_recursive_rejected():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml("<Node><Node><leaf>v</leaf></Node></Node>")
+    assert e.value.error_code == pi.PROFILE_INFERENCE_RECURSIVE_XML
+
+
+def test_xml_sample_invalid_xml():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml("<R><A></R>")
+    assert e.value.error_code == pi.PROFILE_INFERENCE_INVALID_SAMPLE
+
+
+def test_xml_sample_doctype_rejected():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml("<!DOCTYPE r><R><A>v</A></R>")
+    assert e.value.error_code == pi.PROFILE_INFERENCE_INVALID_SAMPLE
+
+
+def test_xml_sample_does_not_echo_text():
+    r = pi.infer_profile_from_sample_xml("<R><A>SENSITIVE-XML-TEXT</A></R>")
+    assert "SENSITIVE-XML-TEXT" not in _json.dumps(r)
+
+
+def test_xml_sample_secret_named_element_withheld():
+    r = pi.infer_profile_from_sample_xml("<R><id>1</id><password>x</password></R>")
+    paths = set(r["field_index_by_path"])
+    assert "R/password" not in paths and "R/id" in paths
+    assert any(i["code"] == pi.PROFILE_INFERENCE_SECRET_FIELD_WITHHELD for i in r["issues"])
+
+
+def test_xml_sample_stable_output():
+    assert pi.infer_profile_from_sample_xml(_XML_OK) == pi.infer_profile_from_sample_xml(_XML_OK)
