@@ -30,10 +30,15 @@ the SDK changes.
 Env:
   BOOMI_RT_RECOVERY_ENABLED (default true; the backend honors it -- recovery is
     on only when a backend is passed)
-  BOOMI_RT_RECOVERY_MAX_AGE_SECONDS (default 604800 = 7d)
+  BOOMI_RT_RECOVERY_MAX_AGE_SECONDS (default 2592000 = 30d, matching the sliding
+    refresh-token lifetime)
   BOOMI_RT_RECOVERY_MAX_HOPS (default 16)
+  BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS (default 60; clock-skew tolerance applied to
+    the refresh JWT exp on the durable-recovery path only)
   BOOMI_RT_SLIDING_REFRESH_EXPIRY (default true)
   BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS (default 2592000 = 30d)
+  BOOMI_RT_PATCH_STRICT (default true in production / false in local; when true a
+    FastMCP-contract incompatibility raises instead of silently degrading)
 """
 
 from __future__ import annotations
@@ -97,8 +102,14 @@ def _log_rt_event(event: str, *, level: str = "warning", **fields: Any) -> None:
     getattr(logger, level, logger.warning)("RT_DIAG " + " ".join(parts))
 
 
-def _compat_check(oauth_proxy_cls) -> bool:
-    """Verify the class-level surface the patch depends on still exists."""
+def _compat_check(oauth_proxy_cls, *, strict: bool = False) -> bool:
+    """Verify the class-level surface the patch depends on still exists.
+
+    When ``strict`` (production default) a missing attribute raises RuntimeError
+    instead of returning False, so a FastMCP upgrade that removes the patch's
+    contract fails startup loudly rather than silently dropping durable recovery
+    and sliding expiry.
+    """
     missing = [n for n in _REQUIRED_CLASS_ATTRS if not hasattr(oauth_proxy_cls, n)]
     if missing:
         _log_rt_event(
@@ -107,8 +118,41 @@ def _compat_check(oauth_proxy_cls) -> bool:
             reason="missing_class_attrs",
             missing=",".join(missing),
         )
+        if strict:
+            raise RuntimeError(
+                "refresh_token_recovery_patch: FastMCP OAuthProxy is missing "
+                f"required class attributes {missing}; refusing to start with "
+                "BOOMI_RT_PATCH_STRICT enabled."
+            )
         return False
     return True
+
+
+def _verify_refresh_jwt(issuer, token: str):
+    """Verify a refresh JWT's signature, issuer, and audience, IGNORING ``exp``.
+
+    Mirrors ``JWTIssuer.verify_token`` (authlib HS256 decode + iss/aud checks) but
+    does not reject expired tokens, so callers on the durable-recovery path can
+    apply ``BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS`` to ``exp`` themselves and emit the
+    precise diagnostic. The fast path reuses the public ``verify_token`` for
+    not-yet-expired tokens; an expired-but-otherwise-valid token falls through to
+    the issuer's authlib internals (which still verify the signature) so its claims
+    can be inspected. Returns the decoded payload, or None when the signature,
+    issuer, or audience is invalid (or the SDK internals are unavailable).
+    """
+    try:
+        return issuer.verify_token(token)
+    except Exception:  # noqa: BLE001 — may merely be expired; re-decode below
+        pass
+    try:
+        payload = issuer._jwt.decode(token, issuer._signing_key)
+    except Exception:  # noqa: BLE001 — bad signature/format or SDK drift => reject
+        return None
+    if payload.get("iss") != issuer.issuer:
+        return None
+    if payload.get("aud") != issuer.audience:
+        return None
+    return payload
 
 
 def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
@@ -128,9 +172,20 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
         "no",
     )
     sliding_ttl = int(os.getenv("BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS", str(_THIRTY_DAYS)))
-    max_age = int(os.getenv("BOOMI_RT_RECOVERY_MAX_AGE_SECONDS", "604800"))
+    max_age = int(os.getenv("BOOMI_RT_RECOVERY_MAX_AGE_SECONDS", str(_THIRTY_DAYS)))
     max_hops = int(os.getenv("BOOMI_RT_RECOVERY_MAX_HOPS", "16"))
+    jwt_leeway = int(os.getenv("BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS", "60"))
     recovery_enabled = recovery_backend is not None
+
+    # Patch-contract strictness: when true (production default), a FastMCP
+    # incompatibility raises instead of silently leaving recovery/sliding
+    # unpatched or degrading to the original exchange. Local/test default off so
+    # the suite and dev runs keep the graceful-degradation behavior unless an
+    # operator explicitly opts in via BOOMI_RT_PATCH_STRICT.
+    _local_mode = os.getenv("BOOMI_LOCAL", "").lower() in ("true", "1", "yes")
+    patch_strict = os.getenv(
+        "BOOMI_RT_PATCH_STRICT", "false" if _local_mode else "true"
+    ).lower() in ("true", "1", "yes")
 
     if not recovery_enabled and not sliding_enabled:
         logger.info(
@@ -151,9 +206,10 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
     from mcp.server.auth.provider import RefreshToken, TokenError
     from mcp.shared.auth import OAuthToken
 
-    if not _compat_check(OAuthProxy):
+    if not _compat_check(OAuthProxy, strict=patch_strict):
         # Leave methods unpatched: the grace patch + original FastMCP still
-        # work; only durable recovery and sliding expiry are lost.
+        # work; only durable recovery and sliding expiry are lost. (Strict mode
+        # never reaches here -- _compat_check raises above.)
         return
 
     orig_load_refresh_token = OAuthProxy.load_refresh_token
@@ -177,11 +233,19 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
         return True
 
     def _safe_jti(self, token: str) -> str | None:
-        """Return the refresh JWT's jti, or None if it does not verify."""
-        try:
-            return self.jwt_issuer.verify_token(token).get("jti")
-        except Exception:  # noqa: BLE001 — unverifiable token => no jti
+        """Return the refresh JWT's jti, or None if it does not verify.
+
+        Tolerates ``exp`` within the leeway window so an edge-of-expiry token
+        still resolves to its live jti mapping; a token expired beyond leeway is
+        treated as having no jti (routing it to recovery, as before).
+        """
+        payload = _verify_refresh_jwt(self.jwt_issuer, token)
+        if payload is None:
             return None
+        exp = payload.get("exp")
+        if exp is not None and exp < time.time() - jwt_leeway:
+            return None
+        return payload.get("jti")
 
     async def _refresh_upstream(self, upstream_token_set, scopes):
         oauth_client = AsyncOAuth2Client(
@@ -304,7 +368,13 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
         # Durable alias: consumed presented token -> newly issued successor.
         if recovery_enabled and result is not None and result.refresh_token:
             try:
-                payload = self.jwt_issuer.verify_token(result.refresh_token)
+                payload = _verify_refresh_jwt(self.jwt_issuer, result.refresh_token)
+                if payload is None:
+                    _log_rt_event(
+                        "rt_recovery_alias_write_failed",
+                        reason="successor_jwt_unverifiable",
+                    )
+                    return result
                 new_hash = _hash_token(result.refresh_token)
                 record = _build_alias_record(
                     client.client_id,
@@ -474,12 +544,20 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
             _log_rt_event("rt_recovery_expired_metadata", level="info")
         if not recovery_enabled:
             return None
+        # Instance-contract check runs BEFORE the degrade try so a strict-mode
+        # incompatibility raises (rather than being swallowed by the handler
+        # below). Backend/runtime errors inside the try still degrade to a miss.
+        if not _instance_compatible(self):
+            if patch_strict:
+                raise RuntimeError(
+                    "refresh_token_recovery_patch: OAuthProxy instance missing "
+                    "required attributes during load (FastMCP contract drift); "
+                    "BOOMI_RT_PATCH_STRICT is enabled."
+                )
+            return None
         try:
-            if not _instance_compatible(self):
-                return None
-            try:
-                payload = self.jwt_issuer.verify_token(refresh_token)
-            except Exception:  # noqa: BLE001 — invalid/expired/forged
+            payload = _verify_refresh_jwt(self.jwt_issuer, refresh_token)
+            if payload is None:
                 _log_rt_event("rt_recovery_reject", level="info", reason="jwt_invalid")
                 return None
             if payload.get("token_use") != "refresh":
@@ -489,9 +567,12 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
                 _log_rt_event("rt_recovery_reject", reason="client_mismatch")
                 return None
             exp = payload.get("exp")
-            if exp is not None and exp < time.time():
+            now = time.time()
+            if exp is not None and exp < now - jwt_leeway:
                 _log_rt_event("rt_recovery_reject", level="info", reason="jwt_expired")
                 return None
+            if exp is not None and exp < now:
+                _log_rt_event("rt_recovery_leeway_accepted", level="info")
             record, _visited = await recovery_backend.resolve_latest(
                 _hash_token(refresh_token), max_hops
             )
@@ -518,10 +599,19 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
             return None
 
     async def patched_exchange_refresh_token(self, client, refresh_token, scopes):
+        # Instance-contract check runs BEFORE the detection try so a strict-mode
+        # incompatibility raises (rather than being swallowed by the degrade
+        # handler below). Backend/runtime errors inside the try still degrade.
+        if not _instance_compatible(self):
+            if patch_strict:
+                raise RuntimeError(
+                    "refresh_token_recovery_patch: OAuthProxy instance missing "
+                    "required attributes during exchange (FastMCP contract "
+                    "drift); BOOMI_RT_PATCH_STRICT is enabled."
+                )
+            return await orig_exchange_refresh_token(self, client, refresh_token, scopes)
         # ---- Path detection (guarded; failures degrade to plain orig) ----
         try:
-            if not _instance_compatible(self):
-                return await orig_exchange_refresh_token(self, client, refresh_token, scopes)
             refresh_jti = _safe_jti(self, refresh_token.token)
             jti_mapping = (
                 await self._jti_mapping_store.get(key=refresh_jti) if refresh_jti else None
@@ -562,8 +652,8 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
                 if recovery_enabled:
                     await recovery_backend.delete(_hash_token(token.token))
                 try:
-                    payload = self.jwt_issuer.verify_token(token.token)
-                    jti = payload.get("jti")
+                    payload = _verify_refresh_jwt(self.jwt_issuer, token.token)
+                    jti = payload.get("jti") if payload else None
                     if jti and hasattr(self, "_jti_mapping_store"):
                         await self._jti_mapping_store.delete(key=jti)
                 except Exception:  # noqa: BLE001 — unverifiable token, skip jti delete
@@ -582,10 +672,12 @@ def apply_refresh_token_recovery_patch(*, recovery_backend=None) -> None:
     OAuthProxy.revoke_token = patched_revoke_token
     logger.info(
         "Refresh-token recovery patch ENABLED (recovery=%s, sliding=%s, "
-        "sliding_ttl=%ds, max_age=%ds, max_hops=%d)",
+        "sliding_ttl=%ds, max_age=%ds, max_hops=%d, jwt_leeway=%ds, strict=%s)",
         "on" if recovery_enabled else "off",
         "on" if sliding_enabled else "off",
         sliding_ttl,
         max_age,
         max_hops,
+        jwt_leeway,
+        "on" if patch_strict else "off",
     )

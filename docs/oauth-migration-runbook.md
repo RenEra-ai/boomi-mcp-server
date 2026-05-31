@@ -232,17 +232,21 @@ tuning Google call volume.
 | `BOOMI_TOKEN_CACHE_MAX_SIZE` | `256` | LRU capacity for the verifier cache. | — |
 | `BOOMI_TOKEN_CACHE_SWR` | `false` | Opt-in stale-while-revalidate; serves stale within `BOOMI_TOKEN_CACHE_SWR_WINDOW` and refreshes in the background. | Set to `false` |
 | `BOOMI_TOKEN_CACHE_SWR_WINDOW` | `30` | Seconds before a cached entry's expiry at which SWR returns stale and schedules a refresh. | — |
+| `BOOMI_TOKEN_CACHE_STALE_IF_ERROR_SECONDS` | `0` code / `60` Cloud Run | When the Google verifier returns None after a cache entry expired, serve the last positive token for this many seconds past expiry — but only while the token's own `expires_at` is still in the future. Negative results are never cached/served. Emits `TOKEN_CACHE event=token_cache_stale_if_error`. | Set to `0` |
 | `BOOMI_RT_GRACE_SHARED` | `true` (when `MONGODB_URI` is set) | Enables the Fix D shared MongoDB-backed grace cache (`mcp-rt-grace`). | Set to `false` |
 | `BOOMI_RT_GRACE_SHARED_COLLECTION` | `mcp-rt-grace` | Collection name override; unlikely to need outside tests. | — |
 | `BOOMI_RT_GRACE_DISTRIBUTED_LOCK` | `false` | Opt-in Fix D.2 cross-instance singleflight via the `mcp-rt-inflight-locks` collection. | Set to `false` |
 | `BOOMI_RT_GRACE_LOCK_TTL_SECONDS` | `30` | Safety bound on Fix D.2 lock rows. A crashed leader auto-releases via the collection's TTL index. | — |
 | `BOOMI_RT_GRACE_LOCK_POLL_MS` | `100` | Fix D.2 follower polling interval against the shared cache. | — |
 | `BOOMI_RT_RECOVERY_ENABLED` | `true` | Durable recovery of stale-but-valid refresh JWTs whose storage rows were deleted (hours/days later), via the encrypted `mcp-rt-recovery` alias ledger. | Set to `false` |
-| `BOOMI_RT_RECOVERY_MAX_AGE_SECONDS` | `604800` (7d) | Max durable alias lifetime. Stale tokens older than this must re-authenticate. | — |
+| `BOOMI_RT_RECOVERY_MAX_AGE_SECONDS` | `2592000` (30d) | Max durable alias lifetime, aligned with the sliding refresh-token lifetime. Stale tokens older than this must re-authenticate. | — |
 | `BOOMI_RT_RECOVERY_COLLECTION` | `mcp-rt-recovery` | Alias-ledger collection name override; unlikely to need outside tests. | — |
 | `BOOMI_RT_RECOVERY_MAX_HOPS` | `16` | Max alias-chain depth walked when resolving a stale token to its latest live successor. | — |
+| `BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS` | `60` | Clock-skew tolerance applied to the refresh JWT `exp` on the durable-recovery path only (signature, issuer, audience, `token_use`, and `client_id` are still enforced). | Set to `0` |
 | `BOOMI_RT_SLIDING_REFRESH_EXPIRY` | `true` | When upstream omits `refresh_expires_in`, stamp the new FastMCP refresh token with a fresh sliding window (fixes FastMCP's frozen 30-day expiry). | Set to `false` |
 | `BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS` | `2592000` (30d) | Sliding FastMCP refresh-token lifetime used when upstream does not return `refresh_expires_in`. | — |
+| `BOOMI_AUTH_PROTECTION_STRICT` | `true` prod / `false` local | Fail startup if an ENABLED shared-grace or durable-recovery backend cannot initialize, instead of silently degrading to a healthy-looking server missing a protection. | Set to `false` |
+| `BOOMI_RT_PATCH_STRICT` | `true` prod / `false` local | A FastMCP-contract incompatibility raises instead of silently leaving durable recovery / sliding expiry unpatched or degrading to the original exchange. | Set to `false` |
 
 ### New MongoDB collections
 
@@ -558,9 +562,16 @@ cache collection routing (`MongoDBStore(default_collection="mcp-rt-grace")`).
 
 ### Re-enabling Fix D.2
 
-Do **not** re-enable until the Motor client is created lazily on the
-serving event loop (Stage 2 of the OAuth-disconnect fix). Operator
-instructions earlier in this runbook that direct you to set
+> **Update (2026-05-29):** the event-loop blocker described above is **fixed** —
+> the lock client/collection/TTL index are now built lazily on the serving loop
+> (see the "Durable refresh-token recovery + Motor event-loop fix" entry below).
+> The lock nonetheless **stays pinned `false`** and opt-in pending operational
+> need: durable recovery plus the shared grace cache provide cross-instance
+> correctness without it. The lazy fix only makes enabling it *safe*, not
+> necessary. Enable only if logs show duplicate cross-replica refreshes those
+> layers do not absorb.
+
+Operator instructions earlier in this runbook that direct you to set
 `BOOMI_RT_GRACE_DISTRIBUTED_LOCK=true` — the 2026-05-18 third-pass
 section, its rollout step, and its one-shot-enable example — are
 **superseded by this entry**.
@@ -598,7 +609,10 @@ Two follow-on issues remained after the 2026-05-22 Stage 1:
   enabled it stores only config (`lock_uri`/`lock_db_name`/`lock_collection_name`);
   the async client (now pymongo's native `AsyncMongoClient`), collection, and TTL
   index are built **lazily on the running serving loop** inside `try_claim_lock`.
-  This removes the "Future attached to a different loop" failure.
+  This removes the "Future attached to a different loop" failure. If TTL-index
+  creation fails, the lock now **degrades to no-lock for that attempt** (logs and
+  returns "leader" without inserting a row) rather than leaving an unmanaged lock
+  row that a crashed leader could never auto-release.
 
 ### Deploy stance
 
