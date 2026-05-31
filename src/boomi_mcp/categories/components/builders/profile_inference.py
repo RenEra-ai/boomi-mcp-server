@@ -38,13 +38,18 @@ columns, namespaces, recursion) raise structured ``PROFILE_INFERENCE_*`` errors.
 
 from __future__ import annotations
 
+import json as _json
+import re
 from typing import Any, Dict, List, Mapping, Optional
 
 from pydantic import BaseModel
 
 from .connector_builder import BuilderValidationError
 from .map_builder import _FORBIDDEN_SECRET_FIELDS
-from .profile_generation import profile_from_db_read_fields
+from .profile_generation import (
+    profile_from_db_read_fields,
+    profile_from_json_schema,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -443,3 +448,311 @@ def infer_profile_from_db_metadata(
 
     helper_result = profile_from_db_read_fields(resolved, component_name=component_name)
     return _assemble(helper_result, "profile_from_db_metadata", meta_by_path, issues)
+
+
+# ---------------------------------------------------------------------------
+# JSON sample inference
+# ---------------------------------------------------------------------------
+
+# Conservative ISO-8601-like date / datetime recognizer (no value echo — only
+# the matched/no-match boolean is used).
+_ISO_DATETIME_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}"
+    r"([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$"
+)
+
+
+class _Counters:
+    """Tracks parsed node + inferred field counts against the limits and raises
+    PROFILE_INFERENCE_INPUT_TOO_LARGE on overflow."""
+
+    def __init__(self, limits: Dict[str, int]) -> None:
+        self.nodes = 0
+        self.fields = 0
+        self.limits = limits
+
+    def add_node(self) -> None:
+        self.nodes += 1
+        if self.nodes > self.limits["max_nodes"]:
+            raise _too_large("nodes", self.limits["max_nodes"], self.nodes)
+
+    def add_field(self) -> None:
+        self.fields += 1
+        if self.fields > self.limits["max_fields"]:
+            raise _too_large("fields", self.limits["max_fields"], self.fields)
+
+
+def _json_scalar_category(value: Any, dt_detect: bool) -> str:
+    """Map a JSON scalar to a category: boolean | number | datetime | character
+    | null. ``bool`` is checked before ``int`` (Python ``bool`` ⊂ ``int``)."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        if dt_detect and _ISO_DATETIME_RE.match(value.strip()):
+            return "datetime"
+        return "character"
+    # lists / dicts are handled structurally, never here
+    return "character"
+
+
+def _infer_json_node(
+    name: str,
+    samples: List[Any],
+    path: str,
+    *,
+    required: bool,
+    optional_reason: Optional[str],
+    counters: _Counters,
+    dt_detect: bool,
+    meta_by_path: Dict[str, Dict[str, Any]],
+    issues: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Infer one profile node from ≥1 observed sample values.
+
+    ``samples`` are the values seen for this node (an object value yields one
+    sample; array elements yield many). Returns the normalized tree node the
+    #43 ``profile_from_json_schema`` consumes; records inference metadata at
+    ``meta_by_path[path]``. ``optional_reason`` (set by the parent when the key
+    is missing in some sibling rows) forces the node ambiguous + confirmation.
+    """
+    counters.add_node()
+
+    non_null = [s for s in samples if s is not None]
+    has_dict = any(isinstance(s, dict) for s in non_null)
+    has_list = any(isinstance(s, list) for s in non_null)
+    has_scalar = any(not isinstance(s, (dict, list)) for s in non_null)
+
+    if (has_dict + has_list + has_scalar) > 1:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{path}: incompatible mix of object/array/scalar values across the sample",
+            field="artifact",
+            details={"path": path},
+        )
+
+    def _apply_meta(confidence: str, ambiguities: List[str], confirm: bool):
+        if optional_reason:
+            confidence = "ambiguous"
+            ambiguities = list(ambiguities) + [optional_reason]
+            confirm = True
+        meta_by_path[path] = {
+            "confidence": confidence,
+            "ambiguities": ambiguities,
+            "confirmation_required": confirm,
+        }
+
+    # --- object ---
+    if has_dict:
+        objects = [s for s in non_null if isinstance(s, dict)]
+        children, child_keys = _infer_json_object_children(
+            objects, path, counters=counters, dt_detect=dt_detect,
+            meta_by_path=meta_by_path, issues=issues,
+        )
+        if not children:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{path}: object has no inferable fields",
+                field="artifact",
+                details={"path": path},
+            )
+        _apply_meta("high", [], False)
+        return {"name": name, "kind": "object", "required": required, "children": children}
+
+    # --- array ---
+    if has_list:
+        elements: List[Any] = []
+        for s in non_null:
+            elements.extend(s)
+        element_objects = [e for e in elements if isinstance(e, dict)]
+        if not elements:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{path}: empty array — element shape cannot be inferred",
+                field="artifact",
+                details={"path": path},
+            )
+        if len(element_objects) != len(elements):
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{path}: arrays must contain objects (scalar / mixed arrays are unsupported)",
+                field="artifact",
+                hint="Repeating JSON profiles require an array of homogeneous objects.",
+                details={"path": path},
+            )
+        # array segment appends [] for descendant paths (matches #43 convention)
+        children, _ = _infer_json_object_children(
+            element_objects, f"{path}[]", counters=counters, dt_detect=dt_detect,
+            meta_by_path=meta_by_path, issues=issues,
+        )
+        if not children:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{path}: array objects have no inferable fields",
+                field="artifact",
+                details={"path": path},
+            )
+        _apply_meta("high", [], False)
+        return {"name": name, "kind": "array", "required": required, "children": children}
+
+    # --- scalar leaf ---
+    counters.add_field()
+    cats = {_json_scalar_category(s, dt_detect) for s in samples}
+    non_null_cats = cats - {"null"}
+    has_null = "null" in cats
+    if len(non_null_cats) == 0:
+        data_type, confidence, ambiguities, confirm = (
+            "character", "ambiguous",
+            ["only null values observed; type cannot be inferred"], True,
+        )
+    elif len(non_null_cats) == 1:
+        data_type = next(iter(non_null_cats))
+        if has_null:
+            confidence, ambiguities, confirm = (
+                "medium", ["null observed alongside values"], False,
+            )
+        else:
+            confidence, ambiguities, confirm = "high", [], False
+    else:
+        data_type, confidence, ambiguities, confirm = (
+            "character", "ambiguous",
+            ["mixed scalar types observed; defaulted to character"], True,
+        )
+    _apply_meta(confidence, ambiguities, confirm)
+    return {"name": name, "kind": "simple", "data_type": data_type, "required": required}
+
+
+def _infer_json_object_children(
+    objects: List[Dict[str, Any]],
+    parent_path: str,
+    *,
+    counters: _Counters,
+    dt_detect: bool,
+    meta_by_path: Dict[str, Dict[str, Any]],
+    issues: List[Dict[str, Any]],
+):
+    """Union the keys across ``objects`` (insertion order of first appearance),
+    inferring each child from its observed values. Secret-named keys are
+    withheld. Returns ``(children, kept_keys)``."""
+    ordered_keys: List[str] = []
+    for obj in objects:
+        for key in obj:
+            if key not in ordered_keys:
+                ordered_keys.append(key)
+
+    total = len(objects)
+    children: List[Dict[str, Any]] = []
+    kept: List[str] = []
+    for key in ordered_keys:
+        if not isinstance(key, str) or not key.strip():
+            raise _err(
+                PROFILE_INFERENCE_INVALID_SAMPLE,
+                f"{parent_path}: object keys must be non-blank strings",
+                field="artifact",
+            )
+        child_name = key.strip()
+        child_path = f"{parent_path}/{child_name}"
+        present = [obj[key] for obj in objects if key in obj]
+        if _is_secret_named(child_name):
+            issues.append(_secret_withheld_issue(child_path))
+            continue
+        optional_reason = None
+        child_required = len(present) == total
+        if not child_required:
+            optional_reason = (
+                f"present in only {len(present)}/{total} sampled entries"
+            )
+        children.append(
+            _infer_json_node(
+                child_name, present, child_path,
+                required=child_required, optional_reason=optional_reason,
+                counters=counters, dt_detect=dt_detect,
+                meta_by_path=meta_by_path, issues=issues,
+            )
+        )
+        kept.append(child_name)
+    return children, kept
+
+
+def infer_profile_from_sample_json(
+    artifact: Any, *, options: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Infer a profile.json contract from a sample JSON document.
+
+    Accepts a JSON string (parsed with ``json.loads``) or an already-parsed
+    dict/list. Object roots map directly; array roots are wrapped in a synthetic
+    root object with one repeating child. Sample VALUES are never echoed.
+    """
+    opts = _coerce_options(options)
+    limits = _resolve_limits(opts)
+    component_name = opts.get("component_name")
+    root_name = opts.get("root_name") or "Root"
+    array_item_name = opts.get("array_item_name") or "items"
+    dt_detect = opts.get("datetime_detection", True)
+    if dt_detect is None:
+        dt_detect = True
+
+    if isinstance(artifact, str):
+        try:
+            parsed = _json.loads(artifact)
+        except (ValueError, TypeError) as exc:
+            raise _err(
+                PROFILE_INFERENCE_INVALID_SAMPLE,
+                f"artifact is not valid JSON: {exc}",
+                field="artifact",
+            )
+    else:
+        parsed = artifact
+
+    counters = _Counters(limits)
+    meta_by_path: Dict[str, Dict[str, Any]] = {}
+    issues: List[Dict[str, Any]] = []
+
+    if isinstance(parsed, dict):
+        root_node = _infer_json_node(
+            root_name, [parsed], root_name, required=True, optional_reason=None,
+            counters=counters, dt_detect=dt_detect, meta_by_path=meta_by_path,
+            issues=issues,
+        )
+    elif isinstance(parsed, list):
+        # Synthetic root object wrapping a repeating child built from the array.
+        issues.append(
+            {
+                "severity": "info",
+                "code": "PROFILE_INFERENCE_ROOT_ARRAY_WRAPPED",
+                "field": root_name,
+                "message": (
+                    f"sample root is an array; wrapped in synthetic object "
+                    f"{root_name!r} with repeating child {array_item_name!r}"
+                ),
+            }
+        )
+        counters.add_node()  # synthetic root object
+        array_child = _infer_json_node(
+            array_item_name, [parsed], f"{root_name}/{array_item_name}",
+            required=True, optional_reason=None, counters=counters,
+            dt_detect=dt_detect, meta_by_path=meta_by_path, issues=issues,
+        )
+        meta_by_path[root_name] = {
+            "confidence": "high", "ambiguities": [], "confirmation_required": False,
+        }
+        root_node = {
+            "name": root_name, "kind": "object", "required": True,
+            "children": [array_child],
+        }
+    else:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            "JSON sample root must be an object or an array of objects "
+            "(scalar roots are unsupported)",
+            field="artifact",
+            details={"root_kind": type(parsed).__name__},
+        )
+
+    helper_result = profile_from_json_schema(
+        {"format": "json", "root": root_node}, component_name=component_name
+    )
+    return _assemble(helper_result, "profile_from_sample_json", meta_by_path, issues)
