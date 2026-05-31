@@ -241,7 +241,7 @@ tuning Google call volume.
 | `BOOMI_RT_RECOVERY_ENABLED` | `true` | Durable recovery of stale-but-valid refresh JWTs whose storage rows were deleted (hours/days later), via the encrypted `mcp-rt-recovery` alias ledger. | Set to `false` |
 | `BOOMI_RT_RECOVERY_MAX_AGE_SECONDS` | `2592000` (30d) | Max durable alias lifetime, aligned with the sliding refresh-token lifetime. Stale tokens older than this must re-authenticate. | — |
 | `BOOMI_RT_RECOVERY_COLLECTION` | `mcp-rt-recovery` | Alias-ledger collection name override; unlikely to need outside tests. | — |
-| `BOOMI_RT_RECOVERY_MAX_HOPS` | `16` | Max alias-chain depth walked when resolving a stale token to its latest live successor. | — |
+| `BOOMI_RT_RECOVERY_MAX_HOPS` | `64` | Max alias-chain depth walked when resolving a stale token to its latest live successor. Scaled with the 30d recovery window (was 16 for the 7d window) so the cap is not the binding limit for frequent rotators. | — |
 | `BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS` | `60` | Clock-skew tolerance applied to the refresh JWT `exp` on the durable-recovery path only (signature, issuer, audience, `token_use`, and `client_id` are still enforced). | Set to `0` |
 | `BOOMI_RT_SLIDING_REFRESH_EXPIRY` | `true` | When upstream omits `refresh_expires_in`, stamp the new FastMCP refresh token with a fresh sliding window (fixes FastMCP's frozen 30-day expiry). | Set to `false` |
 | `BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS` | `2592000` (30d) | Sliding FastMCP refresh-token lifetime used when upstream does not return `refresh_expires_in`. | — |

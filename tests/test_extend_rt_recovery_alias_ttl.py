@@ -214,6 +214,14 @@ def test_apply_reencrypts_under_newest_multifernet_key():
         _run(old_only.get(key="k1"))
 
 
+def test_collection_default_honors_env_override(monkeypatch):
+    """--collection must default to the same env-driven collection as the server."""
+    monkeypatch.setenv("BOOMI_RT_RECOVERY_COLLECTION", "custom-recovery-coll")
+    assert ext._default_collection() == "custom-recovery-coll"
+    monkeypatch.delenv("BOOMI_RT_RECOVERY_COLLECTION", raising=False)
+    assert ext._default_collection() == "mcp-rt-recovery"
+
+
 def test_never_logs_token_material(capsys):
     """No raw alias key or successor hash appears in output -- only fingerprints."""
     backing = MemoryStore()

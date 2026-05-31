@@ -320,7 +320,9 @@ BOOMI_RT_RECOVERY_MAX_AGE_SECONDS   # default 2592000 (30d, matches the sliding
                                     # refresh lifetime). Max durable alias
                                     # lifetime; older stale tokens must re-auth.
 BOOMI_RT_RECOVERY_COLLECTION        # default mcp-rt-recovery.
-BOOMI_RT_RECOVERY_MAX_HOPS          # default 16. Max alias-chain depth walked.
+BOOMI_RT_RECOVERY_MAX_HOPS          # default 64 (scaled with the 30d window).
+                                    # Max alias-chain depth walked when resolving
+                                    # a stale token to its latest live successor.
 BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS # default 60. Clock-skew tolerance on the
                                     # refresh JWT exp, durable-recovery path only.
 BOOMI_RT_SLIDING_REFRESH_EXPIRY     # default true. When upstream omits

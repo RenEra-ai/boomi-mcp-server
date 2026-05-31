@@ -79,6 +79,16 @@ def _fingerprint(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
 
 
+def _default_collection() -> str:
+    """The recovery collection the server/backend uses (env-driven).
+
+    rt_recovery_backend resolves the collection from BOOMI_RT_RECOVERY_COLLECTION,
+    so the script must too -- hardcoding the constant would silently scan the
+    wrong collection on deployments that override it.
+    """
+    return os.getenv("BOOMI_RT_RECOVERY_COLLECTION", DEFAULT_RECOVERY_COLLECTION)
+
+
 async def _enumerate_keys(mongodb_uri: str, collection: str) -> list[str]:
     """Return all alias document keys in the recovery collection."""
     from motor.motor_asyncio import AsyncIOMotorClient
@@ -167,8 +177,11 @@ async def main() -> int:
     )
     parser.add_argument(
         "--collection",
-        default=DEFAULT_RECOVERY_COLLECTION,
-        help=f"Recovery alias collection (default: {DEFAULT_RECOVERY_COLLECTION})",
+        default=_default_collection(),
+        help=(
+            "Recovery alias collection. Defaults to $BOOMI_RT_RECOVERY_COLLECTION "
+            f"or {DEFAULT_RECOVERY_COLLECTION}, matching server.py."
+        ),
     )
     args = parser.parse_args()
 
