@@ -297,3 +297,129 @@ def test_swr_returns_stale_and_triggers_background_refresh(monkeypatch, restore_
     assert first.claims["call"] == 1
     assert second.claims["call"] == 1  # stale-while-revalidate
     assert call_count["n"] == 2  # background refresh ran
+
+
+# ---------- stale-if-error ----------
+
+from types import SimpleNamespace as _NS  # noqa: E402
+
+
+def test_ttlcache_stale_serves_recent_positive():
+    """A recently-expired positive entry is served inside the stale window while
+    the token's own expiry is still in the future."""
+    mod = _fresh_module()
+    cache = mod._TTLCache(max_size=4, stale_if_error_seconds=60)
+    now = time.time()
+    value = _NS(expires_at=now + 300)  # token still valid for 5 min
+    _run(cache.set("k1", value, now - 1))  # cache entry already expired
+    assert _run(cache.get("k1")) is None  # gone from the live cache
+    served, action = _run(cache.get_stale("k1"))
+    assert served is value
+    assert action == "used"
+
+
+def test_ttlcache_stale_window_elapsed_not_served():
+    mod = _fresh_module()
+    cache = mod._TTLCache(max_size=4, stale_if_error_seconds=60)
+    now = time.time()
+    value = _NS(expires_at=now + 300)
+    _run(cache.set("k1", value, now - 100))  # stale_deadline = now-40 (elapsed)
+    served, action = _run(cache.get_stale("k1"))
+    assert served is None
+    assert action == "window_elapsed"
+
+
+def test_ttlcache_stale_not_served_when_token_expired():
+    mod = _fresh_module()
+    cache = mod._TTLCache(max_size=4, stale_if_error_seconds=60)
+    now = time.time()
+    value = _NS(expires_at=now - 1)  # token itself already expired
+    _run(cache.set("k1", value, now - 1))  # within stale window, but token dead
+    served, action = _run(cache.get_stale("k1"))
+    assert served is None
+    assert action == "token_expired"
+
+
+def test_ttlcache_stale_disabled_when_zero():
+    mod = _fresh_module()
+    cache = mod._TTLCache(max_size=4, stale_if_error_seconds=0)
+    now = time.time()
+    _run(cache.set("k1", _NS(expires_at=now + 300), now - 1))
+    # No stale tracking when the window is 0 -> nothing recorded, nothing served.
+    assert cache._stale == {}
+    served, action = _run(cache.get_stale("k1"))
+    assert served is None and action is None
+
+
+def test_stale_if_error_serves_last_positive_on_verifier_failure(monkeypatch, restore_verifier):
+    """End-to-end: positive cached, cache TTL elapses, verifier then fails ->
+    the still-valid token is served stale instead of a 401."""
+    monkeypatch.setenv("BOOMI_TOKEN_CACHE_DISABLE", "false")
+    monkeypatch.setenv("BOOMI_TOKEN_CACHE_TTL_SECONDS", "1")  # cache entry ~1s
+    monkeypatch.setenv("BOOMI_TOKEN_CACHE_STALE_IF_ERROR_SECONDS", "60")
+    GoogleTokenVerifier = restore_verifier
+
+    state = {"n": 0}
+    from fastmcp.server.auth.auth import AccessToken
+
+    async def stubbed(self, token):
+        state["n"] += 1
+        if state["n"] == 1:
+            return AccessToken(
+                token=token, client_id="cid", scopes=["openid"],
+                expires_at=int(time.time() + 300), claims={"sub": "u"},
+            )
+        return None  # verifier now failing transiently
+
+    GoogleTokenVerifier.verify_token = stubbed
+    mod = _fresh_module()
+    mod.apply_token_verifier_cache_patch()
+    verifier = SimpleNamespace()
+    tok = _make_token()
+
+    async def _scenario():
+        first = await GoogleTokenVerifier.verify_token(verifier, tok)   # positive, cached
+        await asyncio.sleep(1.1)                                        # cache entry expires
+        second = await GoogleTokenVerifier.verify_token(verifier, tok)  # None -> stale served
+        return first, second
+
+    first, second = _run(_scenario())
+    assert first is not None
+    assert second is not None and second.token == tok
+    assert state["n"] == 2
+
+
+def test_stale_if_error_disabled_by_default(monkeypatch, restore_verifier):
+    """Without the stale window set, a verifier failure after expiry 401s as before."""
+    monkeypatch.setenv("BOOMI_TOKEN_CACHE_DISABLE", "false")
+    monkeypatch.setenv("BOOMI_TOKEN_CACHE_TTL_SECONDS", "1")
+    monkeypatch.delenv("BOOMI_TOKEN_CACHE_STALE_IF_ERROR_SECONDS", raising=False)
+    GoogleTokenVerifier = restore_verifier
+
+    state = {"n": 0}
+    from fastmcp.server.auth.auth import AccessToken
+
+    async def stubbed(self, token):
+        state["n"] += 1
+        if state["n"] == 1:
+            return AccessToken(
+                token=token, client_id="cid", scopes=["openid"],
+                expires_at=int(time.time() + 300), claims={"sub": "u"},
+            )
+        return None
+
+    GoogleTokenVerifier.verify_token = stubbed
+    mod = _fresh_module()
+    mod.apply_token_verifier_cache_patch()
+    verifier = SimpleNamespace()
+    tok = _make_token()
+
+    async def _scenario():
+        first = await GoogleTokenVerifier.verify_token(verifier, tok)
+        await asyncio.sleep(1.1)
+        second = await GoogleTokenVerifier.verify_token(verifier, tok)
+        return first, second
+
+    first, second = _run(_scenario())
+    assert first is not None
+    assert second is None  # no stale-if-error -> normal 401 path

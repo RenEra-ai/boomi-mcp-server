@@ -138,17 +138,24 @@ class SharedGraceBackend:
                 client = factory(self._lock_uri)
                 coll = client[self._lock_db_name][self._lock_collection_name]
                 # TTL index so crashed leaders auto-release. expireAfterSeconds=0
-                # means "expire when expires_at is in the past". Best-effort.
+                # means "expire when expires_at is in the past".
                 try:
                     await coll.create_index(
                         "expires_at", expireAfterSeconds=0, background=True
                     )
-                except Exception as exc:  # noqa: BLE001 — degrade, don't crash
-                    logger.warning(
-                        "lazy lock TTL index creation failed (%s: %s); proceeding",
+                except Exception as exc:  # noqa: BLE001 — TTL index is mandatory
+                    # Without the TTL index a crashed leader's lock row would
+                    # never auto-release. Refuse to use this collection: leave
+                    # _lock_collection unset and raise so try_claim_lock degrades
+                    # to no-lock for this attempt (no row inserted) instead of
+                    # leaving an unmanaged lock behind.
+                    logger.error(
+                        "lazy lock TTL index creation failed (%s: %s); skipping "
+                        "lock-row insert to avoid unmanaged locks",
                         type(exc).__name__,
                         exc,
                     )
+                    raise
                 self._lock_collection = coll
         return self._lock_collection
 

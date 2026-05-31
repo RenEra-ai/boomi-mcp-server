@@ -136,13 +136,14 @@ spec:
         - name: BOOMI_RT_GRACE_SHARED
           value: "true"
 
-        # Distributed grace lock (Fix D.2 from PR #34). DISABLED: the
-        # raw-motor lock has an event-loop binding bug -- AsyncIOMotorClient
-        # is created at startup and then used on the request loop, which
-        # degrades every try_claim_lock to "leader" in production. The
-        # shared grace cache (Fix D, above) still provides cross-instance
-        # correctness on its own. Re-enable only after the Motor client is
-        # created lazily on the serving event loop (Stage 2).
+        # Distributed grace lock (Fix D.2 from PR #34). DISABLED, but the
+        # original blocker is fixed: the async lock client + collection + TTL
+        # index are now built lazily on the serving event loop (2026-05-29), so
+        # the "Future attached to a different loop" Motor bug no longer applies.
+        # The lock stays opt-in pending operational need -- durable recovery
+        # plus the shared grace cache (Fix D, above) already provide
+        # cross-instance correctness without it. Enable only if logs show
+        # duplicate cross-replica refreshes that those layers do not absorb.
         - name: BOOMI_RT_GRACE_DISTRIBUTED_LOCK
           value: "false"
 

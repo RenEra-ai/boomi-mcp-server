@@ -412,7 +412,13 @@ def test_lock_collection_lazily_created_on_serving_loop():
     assert coll.create_index_loop == running_loop
 
 
-def test_lazy_index_creation_failure_degrades_not_crash():
+def test_lazy_index_creation_failure_prevents_lock_insert():
+    """TTL-index creation failure must skip the lock-row insert.
+
+    A lock row without a TTL index would never auto-release if its leader
+    crashed, so the safest degradation is to insert nothing and return True
+    ("no lock held, proceed as leader"), which avoids deadlocking on a stale row.
+    """
     coll = _RecordingLockCollection(index_exc=RuntimeError("index boom"))
     factory = _make_recording_factory(coll)
     backend = SharedGraceBackend(
@@ -422,9 +428,10 @@ def test_lazy_index_creation_failure_degrades_not_crash():
         lock_collection_name="locks",
         lock_client_factory=factory,
     )
-    # Index creation raises, but the claim still proceeds.
+    # Index creation raises -> no insert, degrade to no-lock (return True).
     assert _run(backend.try_claim_lock("k1", 30, "A")) is True
-    assert coll.insert_calls == 1
+    assert coll.create_index_calls == 1
+    assert coll.insert_calls == 0
 
 
 def test_supports_locks_reflects_lazy_config_presence():

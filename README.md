@@ -290,6 +290,13 @@ BOOMI_TOKEN_CACHE_SWR               # default false. Opt-in stale-while-
                                     # revalidate against short Google outages.
 BOOMI_TOKEN_CACHE_SWR_WINDOW        # default 30. Seconds before expiry at
                                     # which SWR serves stale + refreshes.
+BOOMI_TOKEN_CACHE_STALE_IF_ERROR_SECONDS  # default 0 (off; Cloud Run pins 60).
+                                    # When the Google verifier fails after a
+                                    # cache entry expired, serve the last
+                                    # positive token for this many seconds past
+                                    # expiry -- but only while the token's own
+                                    # expiry is still in the future. Negative
+                                    # verifier results are never cached/served.
 
 BOOMI_RT_GRACE_SHARED               # default true. Backs the refresh-token
                                     # grace cache with a MongoDB collection
@@ -309,15 +316,27 @@ BOOMI_RT_RECOVERY_ENABLED           # default true. Durable recovery of stale
                                     # storage rows were deleted (hours/days
                                     # later). Uses an encrypted alias ledger
                                     # (mcp-rt-recovery) to mint fresh tokens.
-BOOMI_RT_RECOVERY_MAX_AGE_SECONDS   # default 604800 (7d). Max durable alias
+BOOMI_RT_RECOVERY_MAX_AGE_SECONDS   # default 2592000 (30d, matches the sliding
+                                    # refresh lifetime). Max durable alias
                                     # lifetime; older stale tokens must re-auth.
 BOOMI_RT_RECOVERY_COLLECTION        # default mcp-rt-recovery.
 BOOMI_RT_RECOVERY_MAX_HOPS          # default 16. Max alias-chain depth walked.
+BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS # default 60. Clock-skew tolerance on the
+                                    # refresh JWT exp, durable-recovery path only.
 BOOMI_RT_SLIDING_REFRESH_EXPIRY     # default true. When upstream omits
                                     # refresh_expires_in, stamp the new FastMCP
                                     # refresh token with a fresh sliding window
                                     # (fixes the frozen 30-day expiry).
 BOOMI_RT_SLIDING_REFRESH_TTL_SECONDS # default 2592000 (30d). Sliding lifetime.
+
+BOOMI_AUTH_PROTECTION_STRICT        # default true in production / false in
+                                    # local. Fail startup if an ENABLED shared-
+                                    # grace or durable-recovery backend cannot
+                                    # initialize, instead of silently degrading.
+BOOMI_RT_PATCH_STRICT               # default true in production / false in
+                                    # local. A FastMCP-contract incompatibility
+                                    # raises instead of silently leaving
+                                    # recovery/sliding unpatched.
 ```
 
 The durable recovery layer (`refresh_token_recovery_patch`) is applied

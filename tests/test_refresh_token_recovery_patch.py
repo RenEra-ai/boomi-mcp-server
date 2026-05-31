@@ -186,6 +186,9 @@ CLIENT = SimpleNamespace(client_id="client-A")
 
 def _apply(monkeypatch, OAuthProxy, recovery_backend, *, orig_load=None, orig_exchange=None,
            orig_revoke=None, env=None):
+    # Tests exercise the graceful-degradation (non-strict) behavior by default;
+    # a test opts into production strictness via env={"BOOMI_RT_PATCH_STRICT": "true"}.
+    monkeypatch.setenv("BOOMI_RT_PATCH_STRICT", "false")
     for k, v in (env or {}).items():
         monkeypatch.setenv(k, v)
 
@@ -291,10 +294,43 @@ def test_load_reject_expired_jwt(monkeypatch, restore_oauth_proxy, caplog):
     issuer = _FakeIssuer()
     # verify_token does NOT raise but exp is in the past -> our explicit check.
     issuer.payloads["EXP"] = {"jti": "j", "client_id": "client-A", "token_use": "refresh", "exp": time.time() - 5}
-    _apply(monkeypatch, OAuthProxy, _mem_recovery_backend())
+    # Pin leeway to 0 so the 5s-expired token is rejected (not absorbed by leeway).
+    _apply(monkeypatch, OAuthProxy, _mem_recovery_backend(),
+           env={"BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS": "0"})
     self = _make_self(issuer)
     with caplog.at_level(logging.INFO, logger="boomi.refresh_token_recovery"):
         out = _run(OAuthProxy.load_refresh_token(self, CLIENT, "EXP"))
+    assert out is None
+    assert any("rt_recovery_reject" in m and "jwt_expired" in m for m in _diag(caplog))
+
+
+def test_load_accepts_jwt_within_leeway(monkeypatch, restore_oauth_proxy, caplog):
+    # A refresh JWT expired by less than the leeway window is still accepted onto
+    # the recovery path (and logs rt_recovery_leeway_accepted).
+    OAuthProxy = restore_oauth_proxy
+    issuer = _FakeIssuer()
+    issuer.payloads["NEAREXP"] = {"jti": "j", "client_id": "client-A", "token_use": "refresh", "exp": time.time() - 30}
+    backend = _mem_recovery_backend()
+    exp = int(time.time()) + 1234
+    _run(backend.put_alias(_hash_token("NEAREXP"), _alias(successor_expires_at=exp), 60))
+    _apply(monkeypatch, OAuthProxy, backend, env={"BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS": "60"})
+    self = _make_self(issuer)
+    with caplog.at_level(logging.INFO, logger="boomi.refresh_token_recovery"):
+        out = _run(OAuthProxy.load_refresh_token(self, CLIENT, "NEAREXP"))
+    assert isinstance(out, RefreshToken)
+    assert any("rt_recovery_leeway_accepted" in m for m in _diag(caplog))
+
+
+def test_load_rejects_jwt_beyond_leeway(monkeypatch, restore_oauth_proxy, caplog):
+    # Expired beyond the leeway window -> rejected with jwt_expired.
+    OAuthProxy = restore_oauth_proxy
+    issuer = _FakeIssuer()
+    issuer.payloads["OLDEXP"] = {"jti": "j", "client_id": "client-A", "token_use": "refresh", "exp": time.time() - 120}
+    _apply(monkeypatch, OAuthProxy, _mem_recovery_backend(),
+           env={"BOOMI_RT_REFRESH_JWT_LEEWAY_SECONDS": "60"})
+    self = _make_self(issuer)
+    with caplog.at_level(logging.INFO, logger="boomi.refresh_token_recovery"):
+        out = _run(OAuthProxy.load_refresh_token(self, CLIENT, "OLDEXP"))
     assert out is None
     assert any("rt_recovery_reject" in m and "jwt_expired" in m for m in _diag(caplog))
 
@@ -641,6 +677,54 @@ def test_exchange_compat_disabled_when_instance_attr_missing(monkeypatch, restor
     assert sentinel["called"] == 1
     assert result.refresh_token == "RT-orig"
     assert any("rt_recovery_compat_disabled" in m for m in _diag(caplog))
+
+
+# ----------------------- patch-contract strictness -----------------------
+
+def test_compat_check_strict_raises_on_missing_class_attr():
+    """Strict mode: a missing class-level contract attr fails loudly."""
+    class _Incompatible:  # lacks every _REQUIRED_CLASS_ATTRS member
+        pass
+
+    with pytest.raises(RuntimeError):
+        patch_mod._compat_check(_Incompatible, strict=True)
+
+
+def test_compat_check_nonstrict_returns_false_on_missing_class_attr(caplog):
+    """Non-strict mode preserves the silent-degradation contract check."""
+    class _Incompatible:
+        pass
+
+    with caplog.at_level(logging.ERROR, logger="boomi.refresh_token_recovery"):
+        assert patch_mod._compat_check(_Incompatible, strict=False) is False
+    assert any("rt_recovery_compat_disabled" in m for m in _diag(caplog))
+
+
+def test_load_strict_raises_on_missing_instance_attr(monkeypatch, restore_oauth_proxy):
+    """Strict mode: an incompatible instance raises during load (no silent miss)."""
+    OAuthProxy = restore_oauth_proxy
+    issuer = _FakeIssuer()
+    _apply(monkeypatch, OAuthProxy, _mem_recovery_backend(),
+           env={"BOOMI_RT_PATCH_STRICT": "true"})
+    self = _make_self(issuer, omit=("_jti_mapping_store",))
+    with pytest.raises(RuntimeError):
+        _run(OAuthProxy.load_refresh_token(self, CLIENT, "TOK"))
+
+
+def test_exchange_strict_raises_on_missing_instance_attr(monkeypatch, restore_oauth_proxy):
+    """Strict mode: an incompatible instance raises during exchange (never orig)."""
+    OAuthProxy = restore_oauth_proxy
+    issuer = _FakeIssuer()
+
+    async def orig_exchange(self, client, refresh_token, scopes):
+        raise AssertionError("orig exchange must not be called in strict mode")
+
+    _apply(monkeypatch, OAuthProxy, _mem_recovery_backend(), orig_exchange=orig_exchange,
+           env={"BOOMI_RT_PATCH_STRICT": "true"})
+    self = _make_self(issuer, omit=("_jti_mapping_store",))
+    rt = SimpleNamespace(token="PRESENTED")
+    with pytest.raises(RuntimeError):
+        _run(OAuthProxy.exchange_refresh_token(self, CLIENT, rt, ["openid"]))
 
 
 # ----------------------------- revoke -----------------------------

@@ -438,6 +438,23 @@ if not LOCAL_MODE:
     from rt_recovery_backend import initialize_refresh_token_recovery_backend
     from token_cache_patch import apply_token_verifier_cache_patch
 
+    # --- Production auth-protection strictness ---
+    # This block runs only in production (BOOMI_LOCAL unset/false). When an
+    # enabled refresh-token protection cannot initialize, the server must fail
+    # fast rather than appear healthy while silently missing a protection that
+    # is now part of refresh-token correctness. Operators opt out per-feature
+    # (disable that feature) or globally (BOOMI_AUTH_PROTECTION_STRICT=false).
+    def _env_true(name: str, default: bool) -> bool:
+        """Truthy env parse: true/1/yes -> True; false/0/no -> False; else default."""
+        value = os.getenv(name, "").strip().lower()
+        if value in ("true", "1", "yes"):
+            return True
+        if value in ("false", "0", "no"):
+            return False
+        return default
+
+    BOOMI_AUTH_PROTECTION_STRICT = _env_true("BOOMI_AUTH_PROTECTION_STRICT", default=True)
+
     apply_consent_csp_patch()
     apply_loopback_redirect_patch()
     apply_token_verifier_cache_patch()
@@ -514,6 +531,7 @@ if not LOCAL_MODE:
         # fails for any reason, log WARNING and fall back to PR #33's
         # per-process-only grace cache rather than crashing startup.
         shared_grace_backend = None
+        grace_enabled = _env_true("BOOMI_RT_GRACE_SHARED", default=True)
         try:
             shared_grace_backend = initialize_shared_grace_backend(
                 mongodb_uri=mongodb_uri,
@@ -524,11 +542,20 @@ if not LOCAL_MODE:
                 f"[WARNING] GRACE_BACKEND_INIT_FAILED: {type(exc).__name__}: {exc} "
                 "-- falling back to per-process-only refresh-token grace"
             )
+            # Fail fast: a healthy-looking server must not silently drop an
+            # enabled cross-instance grace protection.
+            if BOOMI_AUTH_PROTECTION_STRICT and grace_enabled:
+                raise RuntimeError(
+                    "GRACE_BACKEND_INIT_FAILED with BOOMI_AUTH_PROTECTION_STRICT "
+                    "enabled and BOOMI_RT_GRACE_SHARED on: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
 
         # Durable stale-token recovery: build the encrypted alias ledger
         # (same MongoDB + MultiFernet as OAuth state). Degrade gracefully if
         # initialization fails -- recovery simply stays off.
         recovery_backend = None
+        recovery_enabled = _env_true("BOOMI_RT_RECOVERY_ENABLED", default=True)
         try:
             recovery_backend = initialize_refresh_token_recovery_backend(
                 mongodb_uri=mongodb_uri,
@@ -539,6 +566,14 @@ if not LOCAL_MODE:
                 f"[WARNING] RT_RECOVERY_INIT_FAILED: {type(exc).__name__}: {exc} "
                 "-- durable stale-token recovery disabled"
             )
+            # Fail fast: durable stale-token recovery is part of refresh-token
+            # correctness; don't start without it when it is enabled.
+            if BOOMI_AUTH_PROTECTION_STRICT and recovery_enabled:
+                raise RuntimeError(
+                    "RT_RECOVERY_INIT_FAILED with BOOMI_AUTH_PROTECTION_STRICT "
+                    "enabled and BOOMI_RT_RECOVERY_ENABLED on: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
 
         # Apply the recovery + sliding-expiry patch BEFORE the grace patch so
         # monkeypatch nesting is grace(recovery(fastmcp)): the 60s replay cache
