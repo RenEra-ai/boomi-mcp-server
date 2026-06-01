@@ -77,9 +77,10 @@ for computing both indexes from in-spec generated profile components and
 passing them to each builder's ``build()`` at apply time.
 
 Literal existing-profile UUIDs with no caller-supplied index cannot be
-indexed in M2 (#26 does not parse arbitrary Boomi profile XML — issue #47
-owns discovery). Those references fail plan-time with
-``MAP_PROFILE_INDEX_UNAVAILABLE``.
+indexed in M2 (#26 does not parse arbitrary Boomi profile XML; indexing live
+existing-profile XML is separate future work, NOT covered by
+infer_profile_fields, which infers from supplied artifacts). Those references
+fail plan-time with ``MAP_PROFILE_INDEX_UNAVAILABLE``.
 """
 
 from __future__ import annotations
@@ -346,7 +347,8 @@ def _validate_profile_refs(
                     f"Provide an in-spec '$ref:KEY' pointing at a profile "
                     f"component, or a literal existing-profile UUID (note: "
                     f"literal UUIDs require an in-spec generated profile "
-                    f"index — discovery is tracked by #47)."
+                    f"index — indexing live existing-profile XML is separate "
+                    f"future work, not covered by infer_profile_fields)."
                 ),
                 details={"side": side},
             )

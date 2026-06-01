@@ -2568,7 +2568,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "DB create-mode supports auth_mode='username_password' only; 'windows_integrated' requires reuse (#51).",
         "jdbc_options and REST default_headers are metadata-deferred (no builder field in M2); use reuse for connections needing them.",
         "Does not mix map_function and map_script in one call (UNSUPPORTED_TRANSFORM_ROUTE); split into separate maps.",
-        "Does not infer DB result fields from SQL, browse, metadata, or row samples (issue #47 owns discovery).",
+        "Does not infer DB result fields from SQL, browse, metadata, or row samples; run infer_profile_fields (issue #47) separately for read-only inference from supplied metadata summaries / sample JSON / XSD / sample XML.",
         "Does not import existing integrations (issue #48 owns import / draft).",
         "operation_type='xslt' is rejected; the XSLT decision is owned by issue #42.",
         "credential_ref values are opaque end-to-end; the contract never resolves or validates secrets.",

@@ -9,8 +9,8 @@ These helpers are pure:
 * No Boomi API calls.
 * No XML emission. Issue #26 owns profile.json / profile.xml and transform.map
   XML.
-* No discovery / inference. Issue #47 owns metadata / sample JSON / XSD /
-  sample XML inference.
+* No discovery / inference. The infer_profile_fields layer (issue #47) owns
+  metadata / sample JSON / XSD / sample XML inference.
 * No raw SQL or payload-body echo. Anti-template hygiene mirrors the issue #44
   contract's policy of never echoing caller-supplied values back through
   emitted spec metadata.
@@ -83,7 +83,8 @@ _JSON_LEAF_TYPES = ("character", "number", "datetime", "boolean")
 # _flatten_payload_profile_leaves (e.g. "Root/list[]/key").
 _RESERVED_PATH_CHARS = ("/", "[", "]")
 
-# Generation source modes deferred to issue #47 (metadata / sample inference).
+# Generation source modes handled by the infer_profile_fields layer (issue #47),
+# not this #43 explicit-contract path.
 _DEFERRED_GENERATION_MODES = (
     "profile_from_db_metadata",
     "profile_from_sample_json",
@@ -93,7 +94,7 @@ _DEFERRED_GENERATION_MODES = (
 
 _DEFERRED_HINT = (
     "Provide explicit DB result fields or a JSON payload profile tree for M2; "
-    "metadata/sample inference is tracked by issue #47."
+    "metadata/sample inference is available via infer_profile_fields (issue #47)."
 )
 
 
@@ -556,7 +557,9 @@ def profile_from_xml_schema(
             hint=(
                 "M2 XML profiles are element-only. Other XML constructs "
                 "(attributes, mixed content, namespaces) require the raw-XML "
-                "escape hatch or wait for issue #47 (XSD inference)."
+                "escape hatch; infer_profile_fields (issue #47) infers only the "
+                "namespace-less element-only subset from an XSD/sample, not "
+                "these constructs."
             ),
             details={"kind": root_dict.get("kind")},
         )
@@ -897,8 +900,8 @@ def build_profile_generation_artifacts(
       * ``source``  — ``profile_from_db_read_fields`` output.
       * ``target``  — ``profile_from_json_schema`` output.
       * ``direct_mappings`` — list of normalized direct mappings.
-      * ``unsupported_sources`` — static list of deferred generation modes
-        pointing at issue #47; useful for downstream callers that surface a
+      * ``unsupported_sources`` — static list of inference generation modes
+        pointing at infer_profile_fields (issue #47); useful for downstream callers that surface a
         "what M2 does not support" table.
     """
     schema_data = _as_mapping(source_result_schema, "source_result_schema")
@@ -938,10 +941,12 @@ def build_profile_generation_artifacts(
 
 def reject_unsupported_generation_source(generation_mode: str) -> NoReturn:
     """Raise ``UNSUPPORTED_PROFILE_GENERATION_SOURCE`` for any generation
-    mode deferred to issue #47, plus any unrecognized mode name.
+    mode now handled by infer_profile_fields (issue #47), plus any unrecognized
+    mode name.
 
-    Used by future #47 work (or by test scaffolding) when a caller asks for a
-    discovery / inference mode that M2 does not implement.
+    Used when a caller asks this #43 explicit-contract path for a discovery /
+    inference mode it does not implement — those modes live in the
+    infer_profile_fields layer, not here.
     """
     raise BuilderValidationError(
         f"generation_mode={generation_mode!r} is not supported in M2",

@@ -1913,7 +1913,8 @@ def _execute_component(
                 "error": (
                     "Cannot compute source/target field index from in-spec "
                     "profile components. Literal existing-profile UUIDs are "
-                    "not indexable in M2 (#47 owns existing-profile discovery)."
+                    "not indexable in M2 (indexing live existing-profile XML is "
+                    "separate future work, not covered by infer_profile_fields)."
                 ),
                 "hint": (
                     "Reference both source and target profiles as in-spec "

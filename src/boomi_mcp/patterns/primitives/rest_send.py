@@ -107,7 +107,8 @@ class RestConnectionReuse(BaseModel):
     Resolution-by-``component_name`` trusts the in-spec ``connector_type``
     marker and matches by component metadata type + name; it does not fetch the
     live connector to verify the resolved component is actually a REST
-    connector (live subtype verification is discovery, deferred to issue #47).
+    connector (live subtype verification is a separate discovery concern, not
+    covered by issue #47's profile-field inference).
     Prefer ``component_id`` when the exact connection is known.
     """
 

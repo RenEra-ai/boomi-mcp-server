@@ -449,8 +449,9 @@ def validate_transform_map(
                 )
                 break
 
-    # Literal-UUID profile refs (no $ref) can't be indexed in M2 — #47 owns
-    # existing-profile discovery. Reject so the caller knows what to fix.
+    # Literal-UUID profile refs (no $ref) can't be indexed in M2 — indexing
+    # live existing-profile XML is separate future work (NOT infer_profile_fields,
+    # which infers from supplied artifacts). Reject so the caller knows what to fix.
     if gen_profile_err is None:
         for side in ("source", "target"):
             ref_value = effective_config.get(f"{side}_profile_id")
@@ -468,10 +469,10 @@ def validate_transform_map(
                         "profile as an in-spec "
                         "profile.json / profile.xml / "
                         "profile.db component and "
-                        f"reference it via '$ref:KEY', "
-                        "or wait for issue #47 "
-                        "(existing-profile schema "
-                        "discovery)."
+                        f"reference it via '$ref:KEY'. "
+                        "Indexing live existing-profile "
+                        "XML is separate future work, not "
+                        "covered by infer_profile_fields."
                     ),
                     details={"side": side},
                 )
