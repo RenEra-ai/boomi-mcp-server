@@ -18,8 +18,9 @@ These helpers are pure:
 The helpers accept either Pydantic model instances from issue #44
 (``DBResultField`` / ``DBResultSchema`` / ``JSONPayloadProfile`` /
 ``JSONProfileNode`` / ``DirectTransformOperation``) or equivalent dict
-payloads. This lets future #26 / #47 callers reuse the same helpers without
-going through the archetype's full Pydantic surface.
+payloads. This lets the issue #26 (XML emission) and issue #47
+(infer_profile_fields) layers reuse the same helpers without going through the
+archetype's full Pydantic surface.
 """
 
 from __future__ import annotations

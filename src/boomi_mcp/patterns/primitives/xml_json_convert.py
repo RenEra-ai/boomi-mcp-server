@@ -186,8 +186,9 @@ class XmlJsonConvertPrimitive(PrimitivePattern):
                 field=f"{side}_field_index",
                 hint=(
                     "Supply the field index for both profiles. M2 does not "
-                    "parse existing profile XML (discovery is issue #47); the "
-                    "caller provides the per-leaf index."
+                    "parse existing profile XML (indexing live existing-profile "
+                    "XML is separate future work, not covered by "
+                    "infer_profile_fields); the caller provides the per-leaf index."
                 ),
                 details={"side": side},
             )
