@@ -21,8 +21,10 @@ M2.1a (issue #44) replaces the legacy ``transform.mappings`` /
     ``xslt`` is rejected with a pointer to #42).
 
 The archetype does not parse SQL, browse the database, sample rows, infer
-schema, or import existing integrations — those discovery features belong
-to #47 / #48.
+schema, or import existing integrations. Read-only profile-field inference from
+supplied metadata / sample JSON / XSD / sample XML is available separately via
+infer_profile_fields (issue #47); integration import is issue #48; live SQL
+parsing / DB browse / row sampling remain out of scope.
 """
 
 from __future__ import annotations
@@ -2937,7 +2939,8 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         # time we reach emit_spec all the structural validation has already run
         # (Pydantic + _validate_transform_refs), so these helpers are expected to
         # succeed for any payload that passed validate_parameters; they are still
-        # invoked through the same code path issue #26 / #47 will use, so any
+        # invoked through the same code path the issue #26 emission and issue #47
+        # (infer_profile_fields) layers use, so any
         # divergence between the strict contract and the generation helpers
         # surfaces immediately rather than as a downstream builder failure.
         gen_artifacts = build_profile_generation_artifacts(
@@ -3116,8 +3119,8 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "#43 generates deterministic source/target profile field "
                     "indexes and normalized direct mapping metadata on the "
                     "transform flow for downstream profile/map builders "
-                    "(issue #26); metadata/sample inference is deferred to "
-                    "issue #47."
+                    "(issue #26); metadata/sample inference is available "
+                    "separately via infer_profile_fields (issue #47)."
                 ),
                 "transform_routes": {
                     "direct": "#26",

@@ -601,7 +601,10 @@ def _resolve_side_index(
             f"{side}_profile_id could not be indexed — it is a literal "
             "existing-profile id, a missing $ref, or a non-profile component",
             field=f"{side}_profile_id",
-            hint="Existing-profile discovery is future work (#47).",
+            hint=(
+                "Indexing live existing-profile XML is separate future work, "
+                "not covered by infer_profile_fields (issue #47)."
+            ),
             details={"side": side},
         )
 
