@@ -491,6 +491,89 @@ def test_xsd_named_complex_type_reference():
     assert "Order/Id" in r["field_index_by_path"]
 
 
+def test_xsd_element_without_min_occurs_is_required():
+    # Codex P2: XSD element particle default minOccurs is 1 (required), not 0.
+    r = pi.infer_profile_from_xsd(_XSD_OK)
+    by = {f["path"]: f for f in r["fields"]}
+    for required_leaf in ("Order/Id", "Order/Qty", "Order/When", "Order/Active"):
+        assert by[required_leaf]["required"] is True, f"{required_leaf} must default required"
+    # explicit minOccurs=0 still optional
+    assert by["Order/Note"]["required"] is False
+    # builder index agrees
+    assert r["field_index_by_path"]["Order/Id"]["min_occurs"] == 1
+
+
+def test_xsd_secret_named_leaf_root_rejected():
+    # Codex round 2: a secret-named LEAF root would forward a credential field.
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            '<xs:element name="password" type="xs:string"/></xs:schema>'
+        )
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xsd_secret_named_structural_root_rejected():
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            '<xs:element name="credentials"><xs:complexType><xs:sequence>'
+            '<xs:element name="userid" type="xs:string"/>'
+            "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+        )
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xsd_sequence_level_occurrence_rejected():
+    # Codex round 2: group occurrence cannot be represented by the element-only
+    # builder; reject rather than silently mis-marking children.
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        '<xs:element name="R"><xs:complexType><xs:sequence minOccurs="0">'
+        '<xs:element name="A" type="xs:string"/>'
+        "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+    )
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_xsd(xsd)
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xsd_sequence_explicit_default_occurrence_ok():
+    # minOccurs=1/maxOccurs=1 on the sequence == the default → harmless, allowed.
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        '<xs:element name="R"><xs:complexType><xs:sequence minOccurs="1" maxOccurs="1">'
+        '<xs:element name="A" type="xs:string"/>'
+        "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+    )
+    r = pi.infer_profile_from_xsd(xsd)
+    assert {f["path"]: f for f in r["fields"]}["R/A"]["required"] is True
+
+
+def test_xml_sample_secret_named_root_rejected():
+    # Consistency with XSD: a secret-named XML sample root must not forward a secret field.
+    with pytest.raises(BuilderValidationError) as e:
+        pi.infer_profile_from_sample_xml("<password>x</password>")
+    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+
+
+def test_xsd_secret_named_element_withheld():
+    # Codex P2: XSD must withhold credential-named elements like the other modes.
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        '<xs:element name="Acct"><xs:complexType><xs:sequence>'
+        '<xs:element name="id" type="xs:string"/>'
+        '<xs:element name="password" type="xs:string"/>'
+        "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+    )
+    r = pi.infer_profile_from_xsd(xsd)
+    paths = set(r["field_index_by_path"])
+    assert "Acct/id" in paths
+    assert "Acct/password" not in paths
+    assert "Acct/password" not in r["mappable_paths"]
+    assert any(i["code"] == pi.PROFILE_INFERENCE_SECRET_FIELD_WITHHELD for i in r["issues"])
+
+
 # ---------------------------------------------------------------------------
 # Task 5 — XML sample inference
 # ---------------------------------------------------------------------------

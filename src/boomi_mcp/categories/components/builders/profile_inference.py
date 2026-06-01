@@ -923,6 +923,20 @@ def _xsd_complex_sequence_elements(
             f"{field_loc}: complexType must contain a single xs:sequence",
             field="artifact",
         )
+    # Group-level occurrence (minOccurs/maxOccurs on the sequence particle) makes
+    # the WHOLE group optional/repeating — the element-only XML profile builder
+    # models per-element occurrence, not group occurrence, so it cannot be
+    # represented losslessly. Reject rather than silently mis-marking children.
+    seq_min = sequence.get("minOccurs")
+    seq_max = sequence.get("maxOccurs")
+    if (seq_min is not None and seq_min != "1") or (seq_max is not None and seq_max != "1"):
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: sequence-level minOccurs/maxOccurs is not supported "
+            "(element-only profiles model per-element occurrence, not group occurrence)",
+            field="artifact",
+            details={"min_occurs": seq_min, "max_occurs": seq_max},
+        )
     elements: List["ET.Element"] = []
     for child in list(sequence):
         local = _xsd_local(child, field_loc)
@@ -985,10 +999,12 @@ def _xsd_simple_type_base(stype: "ET.Element", field_loc: str) -> str:
     return value
 
 
-def _xsd_occurs(el: "ET.Element", field_loc: str, *, is_root: bool) -> Tuple[int, int]:
+def _xsd_occurs(el: "ET.Element", field_loc: str) -> Tuple[int, int]:
     raw_min = el.get("minOccurs")
     raw_max = el.get("maxOccurs")
-    min_occurs = 1 if is_root else 0
+    # XSD element-particle default minOccurs is 1 (required) for the root AND
+    # every child; an element that omits minOccurs is required exactly once.
+    min_occurs = 1
     if raw_min is not None:
         try:
             min_occurs = int(raw_min)
@@ -1018,12 +1034,12 @@ def _xsd_element_to_node(
     el: "ET.Element",
     path: str,
     *,
-    is_root: bool,
     complex_types: Dict[str, "ET.Element"],
     simple_types: Dict[str, "ET.Element"],
     type_path: Tuple[str, ...],
     counters: _Counters,
     meta_by_path: Dict[str, Dict[str, Any]],
+    issues: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     field_loc = path
     counters.add_node()
@@ -1049,7 +1065,7 @@ def _xsd_element_to_node(
         )
     name = name.strip()
 
-    min_occurs, max_occurs = _xsd_occurs(el, field_loc, is_root=is_root)
+    min_occurs, max_occurs = _xsd_occurs(el, field_loc)
     required = min_occurs >= 1
     meta_by_path[path] = {"confidence": "high", "ambiguities": [], "confirmation_required": False}
 
@@ -1123,13 +1139,25 @@ def _xsd_element_to_node(
         for child_el in elements:
             child_name = (child_el.get("name") or "").strip()
             child_path = f"{segment}/{child_name}" if child_name else f"{segment}/?"
+            # Withhold credential-named elements (uniform with DB/JSON/sample-XML
+            # modes); never forward a secret-named field into the contract.
+            if child_name and _is_secret_named(child_name):
+                issues.append(_secret_withheld_issue(child_path))
+                continue
             children.append(
                 _xsd_element_to_node(
-                    child_el, child_path, is_root=False,
+                    child_el, child_path,
                     complex_types=complex_types, simple_types=simple_types,
                     type_path=next_type_path, counters=counters,
-                    meta_by_path=meta_by_path,
+                    meta_by_path=meta_by_path, issues=issues,
                 )
+            )
+        if not children:
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: complexType has no inferable child elements "
+                "(all children were withheld or empty)",
+                field="artifact",
             )
         return {
             "name": name, "kind": "element", "required": required,
@@ -1218,18 +1246,27 @@ def infer_profile_from_xsd(artifact: Any, *, options: Optional[Any] = None) -> D
 
     counters = _Counters(limits)
     meta_by_path: Dict[str, Dict[str, Any]] = {}
+    issues: List[Dict[str, Any]] = []
     root_el = top_elements[0]
     root_name = (root_el.get("name") or "").strip()
+    if _is_secret_named(root_name):
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"root element {root_name!r} is credential-named; refusing to infer a "
+            "profile that would forward a secret-named field",
+            field="artifact",
+            hint="Rename the root element, or exclude the credential-bearing structure.",
+        )
     root_node = _xsd_element_to_node(
-        root_el, root_name, is_root=True, complex_types=complex_types,
+        root_el, root_name, complex_types=complex_types,
         simple_types=simple_types, type_path=(), counters=counters,
-        meta_by_path=meta_by_path,
+        meta_by_path=meta_by_path, issues=issues,
     )
 
     helper_result = profile_from_xml_schema(
         {"format": "xml", "root": root_node}, component_name=component_name
     )
-    return _assemble(helper_result, "profile_from_xsd", meta_by_path, [])
+    return _assemble(helper_result, "profile_from_xsd", meta_by_path, issues)
 
 
 # ---------------------------------------------------------------------------
@@ -1408,6 +1445,14 @@ def infer_profile_from_sample_xml(artifact: Any, *, options: Optional[Any] = Non
     issues: List[Dict[str, Any]] = []
 
     _, root_local = _split_qname(root.tag)
+    if _is_secret_named(root_local):
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"root element {root_local!r} is credential-named; refusing to infer a "
+            "profile that would forward a secret-named field",
+            field="artifact",
+            hint="Rename the root element, or exclude the credential-bearing structure.",
+        )
     root_node = _infer_xml_node(
         root.tag, [root], root_local, frozenset(),
         min_occurs=1, max_occurs=1, required=True,
