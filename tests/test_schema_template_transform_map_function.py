@@ -222,12 +222,15 @@ def test_template_out_of_scope_points_at_42_47_and_advanced_function_work():
     # carries a "#41" pointer — reusable script-based transforms are
     # supported via map_type='script' (#41). Standalone reusable
     # transform.function wrappers and chained function graphs remain
-    # future work; #42 is XSLT; #47 is existing-profile discovery.
+    # future work; #42 is XSLT. Existing-profile-index discovery is no longer
+    # attributed to #47: issue #47 (infer_profile_fields) infers from supplied
+    # artifacts and does NOT index live profile XML — that stays separate work.
     result = _call(component_type="transform.map", protocol="function")
     oos_blob = " ".join(result["out_of_scope"].values())
     oos_keys = set(result["out_of_scope"].keys())
     assert "#42" in oos_blob
-    assert "#47" in oos_blob
+    assert "infer_profile_fields" in oos_blob
+    assert "separate future work" in oos_blob.lower()
     assert "standalone" in oos_blob.lower() or "reusable" in oos_blob.lower()
     # Multi-step / chained function pipelines are documented as future work.
     assert "chained_function_graphs" in oos_keys

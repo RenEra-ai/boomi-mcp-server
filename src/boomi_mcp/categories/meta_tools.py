@@ -2390,8 +2390,11 @@ _COMPONENT_CREATE_PROFILE_XML_GENERATED = {
         "character, number, datetime, boolean (boolean stores as character "
         "format, mirroring live Boomi XML profile shape). Element-only — "
         "attributes, namespaces, and schema imports are rejected with "
-        "UNSUPPORTED_XML_PROFILE_FEATURE; use the raw-XML escape hatch or "
-        "wait for issue #47 (XSD/sample-XML inference)."
+        "UNSUPPORTED_XML_PROFILE_FEATURE — use the raw-XML escape hatch for "
+        "those. To build this element-only tree from an existing XSD or sample "
+        "XML, run infer_profile_fields (source_type='profile_from_xsd' | "
+        "'profile_from_sample_xml', issue #47) first; it covers the "
+        "namespace-less element-only subset only."
     ),
     "template": {
         "component_type": "profile.xml",
@@ -2457,7 +2460,9 @@ _COMPONENT_CREATE_PROFILE_XML_GENERATED = {
     "unsupported_features_note": (
         "Element-only generation. For complex XML profiles (attributes, "
         "namespaces, schema imports), use the raw-XML escape hatch "
-        "(config={'xml': '...'}) or wait for issue #47."
+        "(config={'xml': '...'}); infer_profile_fields covers only the "
+        "namespace-less element-only subset (issue #47) and cannot represent "
+        "these constructs."
     ),
     "forbidden_secret_fields": [
         "password",
@@ -2584,8 +2589,9 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         "rejected at plan time with structured pointers. Source and target "
         "profile references must point at in-spec profile.json / profile.xml / "
         "profile.db components via '$ref:KEY'; literal existing-profile UUIDs "
-        "are rejected with MAP_PROFILE_INDEX_UNAVAILABLE (issue #47 owns "
-        "existing-profile schema discovery)."
+        "are rejected with MAP_PROFILE_INDEX_UNAVAILABLE (indexing live "
+        "existing-profile XML remains separate future work; infer_profile_fields "
+        "infers only from supplied artifacts, not live profile XML)."
     ),
     "template": {
         "component_type": "transform.map",
@@ -2660,7 +2666,8 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         "profile component runs first.",
         "Both profiles must be in-spec — literal existing-profile UUIDs "
         "produce MAP_PROFILE_INDEX_UNAVAILABLE because issue #26 does not "
-        "parse arbitrary Boomi profile XML (issue #47 owns that path).",
+        "parse arbitrary Boomi profile XML (live-profile-XML indexing remains "
+        "separate future work; not infer_profile_fields).",
     ],
     "forbidden_secret_fields": [
         "password",
@@ -2680,7 +2687,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         ),
         "MAP_PROFILE_INDEX_UNAVAILABLE": (
             "literal existing-profile UUID supplied without an in-spec "
-            "generated profile component to index (deferred to #47)"
+            "generated profile component to index (separate future work; infer_profile_fields does not index live existing-profile XML)"
         ),
         "MAP_FIELD_NOT_FOUND": (
             "source_path or target_path is not declared in the corresponding "
@@ -2785,7 +2792,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         ),
         "existing_profile_index_discovery": (
             "Indexing arbitrary existing-profile XML to support literal-UUID "
-            "profile refs is tracked by issue #47."
+            "profile refs remains separate future work (not infer_profile_fields, which infers from supplied artifacts only)."
         ),
     },
 }
@@ -2815,7 +2822,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         "math. Mixed maps may also declare direct field_mappings alongside "
         "function_mappings. Source/target profile refs follow the same "
         "'$ref:KEY' rule as direct maps; literal existing-profile UUIDs are "
-        "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (deferred to #47). "
+        "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (separate future work; infer_profile_fields does not index live existing-profile XML). "
         "Reusable script-based transforms (Groovy / JavaScript) ship in "
         "map_type='script' (#41). XSLT (#42), standalone reusable "
         "transform.function components, and chained multi-step function "
@@ -3050,8 +3057,8 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         "Include target_profile_id's $ref key in depends_on so the target "
         "profile component runs first.",
         "Both profiles must be in-spec — literal existing-profile UUIDs "
-        "produce MAP_PROFILE_INDEX_UNAVAILABLE (issue #47 owns existing-"
-        "profile schema discovery).",
+        "produce MAP_PROFILE_INDEX_UNAVAILABLE (indexing live existing-profile "
+        "XML remains separate future work; not infer_profile_fields).",
     ],
     "forbidden_secret_fields": [
         "password",
@@ -3072,7 +3079,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         ),
         "MAP_PROFILE_INDEX_UNAVAILABLE": (
             "literal existing-profile UUID supplied without an in-spec "
-            "generated profile component to index (deferred to #47)"
+            "generated profile component to index (separate future work; infer_profile_fields does not index live existing-profile XML)"
         ),
         "MAP_FIELD_NOT_FOUND": (
             "function_mappings[].inputs[] or .target_path is not declared in "
@@ -3216,7 +3223,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         ),
         "existing_profile_index_discovery": (
             "Indexing arbitrary existing-profile XML to support literal-UUID "
-            "profile refs is tracked by issue #47."
+            "profile refs remains separate future work (not infer_profile_fields, which infers from supplied artifacts only)."
         ),
     },
 }
@@ -3442,7 +3449,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
         "also declare direct field_mappings alongside script_mappings. "
         "Source/target profile refs follow the same '$ref:KEY' rule as "
         "direct and function maps; literal existing-profile UUIDs are "
-        "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (deferred to #47)."
+        "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (separate future work; infer_profile_fields does not index live existing-profile XML)."
     ),
     "update_note": (
         "Structured updates via build_integration action='update' now use "
@@ -3591,7 +3598,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
         "depends_on so each referenced script.mapping component runs before "
         "this map.",
         "Both profiles must be in-spec — literal existing-profile UUIDs "
-        "produce MAP_PROFILE_INDEX_UNAVAILABLE (deferred to #47).",
+        "produce MAP_PROFILE_INDEX_UNAVAILABLE (separate future work; infer_profile_fields does not index live existing-profile XML).",
     ],
     "forbidden_secret_fields": [
         "password",
@@ -3612,7 +3619,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
         ),
         "MAP_PROFILE_INDEX_UNAVAILABLE": (
             "literal existing-profile UUID supplied without an in-spec "
-            "generated profile component to index (deferred to #47)"
+            "generated profile component to index (separate future work; infer_profile_fields does not index live existing-profile XML)"
         ),
         "MAP_FIELD_NOT_FOUND": (
             "a script input's source_path or output's target_path is not "
@@ -3747,7 +3754,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
         ),
         "existing_profile_index_discovery": (
             "Indexing arbitrary existing-profile XML to support literal-UUID "
-            "profile refs is tracked by issue #47."
+            "profile refs remains separate future work (not infer_profile_fields, which infers from supplied artifacts only)."
         ),
     },
 }

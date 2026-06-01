@@ -115,3 +115,14 @@ def test_inferred_from_xsd_points_at_infer_tool():
     assert "infer_profile_fields" in note
     assert "profile_from_xsd" in note
     assert "#47" in note
+
+
+def test_unsupported_features_note_does_not_dead_end_at_inference():
+    # Codex review: attributes/namespaces/imports are NOT handled by
+    # infer_profile_fields either, so the note must route those to the raw-XML
+    # escape hatch and explicitly bound infer_profile_fields to the element-only
+    # subset (no dead-end recommendation).
+    result = _call(component_type="profile.xml", protocol="xml.generated")
+    note = result["unsupported_features_note"]
+    assert "raw-XML escape hatch" in note
+    assert "infer_profile_fields covers only" in note

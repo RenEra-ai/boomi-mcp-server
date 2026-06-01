@@ -227,6 +227,35 @@ def test_infer_call_tool_structured_artifact():
     assert p["_success"] is True and p["component_type"] == "profile.db"
 
 
+def test_infer_options_schema_is_constrained_not_any():
+    # Architect/Codex review: options must advertise the dict|str|null contract
+    # in list_tools (not an unconstrained Any that lets clients send arrays/numbers).
+    by = {t.name: t for t in _listed_tools()}
+    opt = by["infer_profile_fields"].parameters["properties"]["options"]
+    types = set()
+    for variant in opt.get("anyOf", [opt]):
+        if "type" in variant:
+            types.add(variant["type"])
+    assert {"object", "string", "null"} <= types, f"options schema not constrained: {opt}"
+
+
+def test_infer_call_tool_options_as_dict():
+    # Architect review: the public contract advertises options: dict | str | None,
+    # so a dict at the MCP boundary must reach the action, not be rejected by the
+    # wrapper's type before the read-only envelope can be produced.
+    p = _payload(
+        _call_tool(
+            "infer_profile_fields",
+            {
+                "source_type": "profile_from_sample_json",
+                "artifact": '{"id":1}',
+                "options": {"component_name": "DemoDict"},
+            },
+        )
+    )
+    assert p["_success"] is True and p["component_name"] == "DemoDict"
+
+
 def test_infer_call_tool_options_json_string():
     p = _payload(
         _call_tool(
