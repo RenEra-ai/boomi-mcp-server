@@ -183,11 +183,15 @@ def test_template_out_of_scope_documents_chained_graphs_future():
     assert "chained_script_graphs" in result["out_of_scope"]
 
 
-def test_template_out_of_scope_keeps_42_47_pointers():
+def test_template_out_of_scope_keeps_42_and_clarifies_existing_profile_index():
+    # #42 (XSLT) stays a future-work pointer. Existing-profile-index discovery
+    # is no longer attributed to #47: infer_profile_fields (issue #47) infers
+    # from supplied artifacts and does NOT index live profile XML.
     result = _call(component_type="transform.map", protocol="script")
     oos_blob = " ".join(result["out_of_scope"].values())
     assert "#42" in oos_blob
-    assert "#47" in oos_blob
+    assert "infer_profile_fields" in oos_blob
+    assert "separate future work" in oos_blob.lower()
 
 
 def test_template_recommended_workflow_lists_script_component_step():

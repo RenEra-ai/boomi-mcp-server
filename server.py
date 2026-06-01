@@ -2019,7 +2019,7 @@ if review_transformation_action:
 if infer_profile_fields_action:
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
-    def infer_profile_fields(source_type: str, artifact: Any, options: str = None):
+    def infer_profile_fields(source_type: str, artifact: Any, options: dict | str | None = None):
         """Infer issue-#43 builder-ready profile fields from a discovered artifact.
 
         Read-only DISCOVERY. Does NOT call Boomi, mutate anything, construct an
@@ -2046,9 +2046,9 @@ if infer_profile_fields_action:
                 profile_from_sample_xml — artifact is an XML string (element-only;
                     attributes/mixed/namespaces rejected).
             artifact: The metadata/sample/schema to infer from (dict/list or str).
-            options: Optional JSON-object string with: component_name, root_name,
-                array_item_name, datetime_detection (bool), max_input_chars,
-                max_nodes, max_fields.
+            options: Optional dict OR JSON-object string with: component_name,
+                root_name, array_item_name, datetime_detection (bool),
+                max_input_chars, max_nodes, max_fields.
 
         Returns:
             Structured contract with _success, read_only/boomi_mutation/
