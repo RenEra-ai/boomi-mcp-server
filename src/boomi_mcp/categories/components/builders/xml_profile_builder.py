@@ -47,7 +47,8 @@ Envelope shape (every emitted profile mirrors these segments):
 
 M2 is element-only — attributes / namespaces / schema imports raise
 ``UNSUPPORTED_XML_PROFILE_FEATURE``. Complex XML profiles use the raw-XML
-escape hatch or wait for issue #47 (XSD inference).
+escape hatch; infer_profile_fields (issue #47) covers only the namespace-less
+element-only subset, not these constructs.
 """
 
 from __future__ import annotations
@@ -91,8 +92,8 @@ _FORBIDDEN_SECRET_FIELDS: Tuple[str, ...] = (
 )
 
 # XML-specific top-level config keys that signal unsupported profile features.
-# Each rejection points callers either at the raw-XML escape hatch or at
-# issue #47 (XSD inference).
+# Each rejection points callers at the raw-XML escape hatch (infer_profile_fields,
+# issue #47, covers only the element-only subset, not these features).
 _UNSUPPORTED_XML_FEATURE_KEYS: Tuple[str, ...] = (
     "attributes",
     "namespaces",
@@ -308,8 +309,9 @@ def _scan_unsupported_xml_features(
                     hint=(
                         "M2 XML profiles are element-only. For attributes, "
                         "namespaces, or schema imports, supply raw XML via "
-                        "config={'xml': '...'} (the escape hatch) or wait for "
-                        "issue #47 (XSD/sample-XML inference)."
+                        "config={'xml': '...'} (the escape hatch); "
+                        "infer_profile_fields (issue #47) covers only the "
+                        "namespace-less element-only subset, not these features."
                     ),
                     details={"unsupported_feature": forbidden},
                 )
