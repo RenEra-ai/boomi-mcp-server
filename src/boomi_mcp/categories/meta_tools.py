@@ -2438,11 +2438,14 @@ _COMPONENT_CREATE_PROFILE_XML_GENERATED = {
         "max_occurs_child": 1,
     },
     "supported_data_types": ["character", "number", "datetime", "boolean"],
-    "supported_kinds": ["element"],
+    "supported_kinds": ["element", "attribute"],
     "field_tree_rules": [
-        "Every node must use kind='element' (M2 is element-only).",
-        "Element with children = structural (no data_type); element without "
-        "children = leaf (data_type required).",
+        "Nodes use kind='element' or kind='attribute'. Attributes are leaf-only "
+        "and emit as <XMLAttribute> before sibling elements; namespaces attach "
+        "via a node-level 'namespace': {uri, prefix?} field.",
+        "An element with child ELEMENTS is structural (no data_type); an element "
+        "with no child elements is a leaf (data_type required) and may still "
+        "carry attribute children.",
         "max_occurs accepts a positive integer or -1 (unbounded). min_occurs "
         "is a non-negative integer.",
         "Reserved characters '/', '[', ']' are not allowed in node names.",
@@ -2458,11 +2461,14 @@ _COMPONENT_CREATE_PROFILE_XML_GENERATED = {
         "schema_import",
     ],
     "unsupported_features_note": (
-        "Element-only generation. For complex XML profiles (attributes, "
-        "namespaces, schema imports), use the raw-XML escape hatch "
-        "(config={'xml': '...'}); infer_profile_fields covers only the "
-        "namespace-less element-only subset (issue #47) and cannot represent "
-        "these constructs."
+        "These raw config KEYS are not how XML structure is expressed: add "
+        "attributes with kind='attribute' child nodes and namespaces with a "
+        "node-level 'namespace': {uri, prefix?} field (both fully supported, "
+        "emitting <XMLAttribute> / <XMLNamespace>+useNamespace). To build the "
+        "tree from an XSD or sample, use infer_profile_fields (profile_from_xsd "
+        "/ profile_from_sample_xml), which handle namespaces and attributes. "
+        "Constructs none of these support — mixed content, choice/all/any/group, "
+        "schema imports — require the raw-XML escape hatch (config={'xml': '...'})."
     ),
     "forbidden_secret_fields": [
         "password",
@@ -2555,13 +2561,16 @@ _COMPONENT_CREATE_PROFILE_XML_GENERATED = {
             "Inferring the element tree from an XSD or sample XML is available "
             "via infer_profile_fields(source_type='profile_from_xsd') and "
             "infer_profile_fields(source_type='profile_from_sample_xml') — "
-            "read-only discovery (issue #47). Both target the element-only "
-            "namespace-less subset; namespaces/attributes/mixed content fail "
-            "with actionable unsupported-shape errors."
+            "read-only discovery (issue #47). Both now support XML namespaces "
+            "(targetNamespace / namespaced sample tags) and attributes; mixed "
+            "content, choice/all/any/group, and foreign-namespace type refs "
+            "still fail with actionable unsupported-shape errors."
         ),
         "attributes_and_namespaces": (
-            "Element attributes, mixed content, and namespace declarations "
-            "are deferred; use the raw-XML escape hatch for now."
+            "Element attributes and namespaces ARE supported: attributes infer "
+            "as kind='attribute' nodes (emit <XMLAttribute>) and namespaces as a "
+            "node-level 'namespace' field (emit <XMLNamespace> + useNamespace). "
+            "Mixed content remains deferred to the raw-XML escape hatch."
         ),
     },
 }
@@ -4694,14 +4703,15 @@ _PROFILE_INFERENCE_TEMPLATE = {
             "output_profile": "profile.xml / xml.generated",
             "notes": (
                 "supports xs:element / complexType / sequence / simpleType "
-                "restriction + minOccurs/maxOccurs(unbounded). choice/all/any/"
-                "attributes/mixed/import/include/extension/list/union/substitution "
-                "are unsupported; target/qualified namespaces fail; recursive types "
-                "fail with PROFILE_INFERENCE_RECURSIVE_XML."
+                "restriction + minOccurs/maxOccurs(unbounded), targetNamespace "
+                "(+ elementFormDefault qualified/unqualified) and xs:attribute. "
+                "choice/all/any/group/mixed/import/include/extension/list/union/"
+                "substitution and foreign-namespace type refs are unsupported; "
+                "recursive types fail with PROFILE_INFERENCE_RECURSIVE_XML."
             ),
         },
         "profile_from_sample_xml": {
-            "input": "artifact = an XML document string (element-only).",
+            "input": "artifact = an XML document string (namespaces + attributes supported).",
             "output_profile": "profile.xml / xml.generated",
             "notes": (
                 "repeated siblings become max_occurs=-1 with [] descendant paths; "

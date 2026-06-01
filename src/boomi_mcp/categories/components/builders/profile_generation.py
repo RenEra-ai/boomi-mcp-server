@@ -589,6 +589,38 @@ def profile_from_xml_schema(
     }
 
 
+def _normalize_namespace(ns_raw: Any, field_loc: str) -> Optional[Dict[str, str]]:
+    """Validate an optional ``namespace`` node dict ``{uri, prefix?}``.
+
+    Returns ``None`` when absent (the node lives in the empty/default
+    namespace), or a normalized ``{"uri": str[, "prefix": str]}`` dict.
+    """
+    if ns_raw is None:
+        return None
+    ns = _as_mapping(ns_raw, f"{field_loc}.namespace")
+    uri = ns.get("uri")
+    if not isinstance(uri, str) or not uri.strip():
+        raise BuilderValidationError(
+            f"{field_loc}.namespace.uri must be a non-empty string",
+            error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+            field=f"{field_loc}.namespace.uri",
+            details={"namespace": ns_raw},
+        )
+    out: Dict[str, str] = {"uri": uri.strip()}
+    prefix = ns.get("prefix")
+    if prefix is not None:
+        if not isinstance(prefix, str):
+            raise BuilderValidationError(
+                f"{field_loc}.namespace.prefix must be a string when provided",
+                error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+                field=f"{field_loc}.namespace.prefix",
+                details={"prefix": prefix},
+            )
+        if prefix.strip():
+            out["prefix"] = prefix.strip()
+    return out
+
+
 def _walk_xml_node(
     node_raw: Any,
     path: str,
@@ -598,25 +630,83 @@ def _walk_xml_node(
     *,
     is_root: bool = False,
 ) -> Dict[str, Any]:
-    """Validate an XML element node at logical ``path``, recurse into
+    """Validate an XML element/attribute node at logical ``path``, recurse into
     children, return the normalized profile_config tree entry."""
     node = _as_mapping(node_raw, field_loc)
     name = _validate_node_name(node.get("name"), field_loc)
 
     kind = node.get("kind")
-    if kind != "element":
+    if kind not in ("element", "attribute"):
         raise BuilderValidationError(
-            f"{field_loc}.kind={kind!r} is not supported; M2 XML profiles are "
-            "element-only",
+            f"{field_loc}.kind={kind!r} is not supported; XML profile nodes "
+            "must be kind='element' or kind='attribute'",
             error_code=PROFILE_GENERATION_VALIDATION_FAILED,
             field=f"{field_loc}.kind",
-            hint="Set kind='element' on every XML profile node.",
+            hint="Set kind='element' (or 'attribute' for XML attributes).",
             details={"kind": kind, "path": path},
         )
 
     children_raw = node.get("children")
     data_type = node.get("data_type")
     required = bool(node.get("required", False))
+    namespace = _normalize_namespace(node.get("namespace"), field_loc)
+
+    if kind == "attribute":
+        if is_root:
+            raise BuilderValidationError(
+                f"{field_loc}.kind='attribute' cannot be the profile root",
+                error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+                field=f"{field_loc}.kind",
+                details={"path": path},
+            )
+        if isinstance(children_raw, list) and children_raw:
+            raise BuilderValidationError(
+                f"{field_loc} is an attribute and must not have children",
+                error_code=PROFILE_GENERATION_VALIDATION_FAILED,
+                field=f"{field_loc}.children",
+                details={"path": path},
+            )
+        if data_type not in _JSON_LEAF_TYPES:
+            raise BuilderValidationError(
+                f"{field_loc}.data_type={data_type!r} is not a supported XML "
+                "attribute data type",
+                error_code=UNSUPPORTED_PROFILE_FIELD_TYPE,
+                field=f"{field_loc}.data_type",
+                hint=(
+                    "Supported XML attribute data types: "
+                    + ", ".join(_JSON_LEAF_TYPES)
+                    + "."
+                ),
+                details={
+                    "data_type": data_type,
+                    "supported": list(_JSON_LEAF_TYPES),
+                    "path": path,
+                },
+            )
+        attr_entry: Dict[str, Any] = {
+            "path": path,
+            "name": name,
+            "kind": "attribute",
+            "data_type": data_type,
+            "required": required,
+            "mappable": True,
+            "profile_component_type": "profile.xml",
+            "source": "xml_schema",
+        }
+        if namespace is not None:
+            attr_entry["namespace"] = namespace
+        field_index[path] = attr_entry
+        mappable_paths.append(path)
+        attr_node: Dict[str, Any] = {
+            "name": name,
+            "kind": "attribute",
+            "data_type": data_type,
+            "required": required,
+        }
+        if namespace is not None:
+            attr_node["namespace"] = namespace
+        return attr_node
+
     min_occurs = node.get("min_occurs", 1 if is_root else 0)
     max_occurs = node.get("max_occurs", 1)
 
@@ -636,18 +726,67 @@ def _walk_xml_node(
             details={"max_occurs": max_occurs, "path": path},
         )
 
-    has_children = isinstance(children_raw, list) and len(children_raw) > 0
     repeating = max_occurs != 1
+    segment = f"{path}[]" if repeating else path
+    children_list = children_raw if isinstance(children_raw, list) else []
+    # Attributes never make an element "structural"; only child ELEMENTS do.
+    element_children = [
+        c
+        for c in children_list
+        if isinstance(c, Mapping) and c.get("kind") != "attribute"
+    ]
+    has_element_children = len(element_children) > 0
 
-    if has_children:
+    def _normalize_xml_children() -> List[Dict[str, Any]]:
+        seen_child_names: Dict[str, int] = {}
+        normalized: List[Dict[str, Any]] = []
+        for child_index, child_raw in enumerate(children_list):
+            child_field_loc = f"{field_loc}.children[{child_index}]"
+            child_data = _as_mapping(child_raw, child_field_loc)
+            child_name = _validate_node_name(child_data.get("name"), child_field_loc)
+            child_seg = (
+                f"@{child_name}"
+                if child_data.get("kind") == "attribute"
+                else child_name
+            )
+            if child_seg in seen_child_names:
+                raise BuilderValidationError(
+                    f"{child_field_loc}.name duplicates an earlier sibling",
+                    error_code=DUPLICATE_PROFILE_FIELD_PATH,
+                    field=f"{child_field_loc}.name",
+                    hint=(
+                        "Sibling XML elements/attributes must use unique names; "
+                        "logical paths would otherwise collide."
+                    ),
+                    details={
+                        "path": f"{segment}/{child_seg}",
+                        "parent_path": path,
+                        "first_index": seen_child_names[child_seg],
+                        "duplicate_index": child_index,
+                    },
+                )
+            seen_child_names[child_seg] = child_index
+            child_path = f"{segment}/{child_seg}"
+            normalized.append(
+                _walk_xml_node(
+                    child_raw,
+                    child_path,
+                    child_field_loc,
+                    field_index,
+                    mappable_paths,
+                )
+            )
+        return normalized
+
+    if has_element_children:
         if data_type is not None:
             raise BuilderValidationError(
-                f"{field_loc} has children and must not declare data_type",
+                f"{field_loc} has child elements and must not declare data_type",
                 error_code=PROFILE_GENERATION_VALIDATION_FAILED,
                 field=f"{field_loc}.data_type",
                 details={"path": path},
             )
-        field_index[path] = {
+        struct_entry: Dict[str, Any] = {
             "path": path,
             "name": name,
             "kind": "element",
@@ -659,41 +798,9 @@ def _walk_xml_node(
             "profile_component_type": "profile.xml",
             "source": "xml_schema",
         }
-
-        segment = f"{path}[]" if repeating else path
-        seen_child_names: Dict[str, int] = {}
-        normalized_children: List[Dict[str, Any]] = []
-        for child_index, child_raw in enumerate(children_raw):
-            child_field_loc = f"{field_loc}.children[{child_index}]"
-            child_data = _as_mapping(child_raw, child_field_loc)
-            child_name = _validate_node_name(child_data.get("name"), child_field_loc)
-            if child_name in seen_child_names:
-                raise BuilderValidationError(
-                    f"{child_field_loc}.name duplicates an earlier sibling",
-                    error_code=DUPLICATE_PROFILE_FIELD_PATH,
-                    field=f"{child_field_loc}.name",
-                    hint=(
-                        "Sibling XML elements must use unique names; logical "
-                        "paths would otherwise collide."
-                    ),
-                    details={
-                        "path": f"{segment}/{child_name}",
-                        "parent_path": path,
-                        "first_index": seen_child_names[child_name],
-                        "duplicate_index": child_index,
-                    },
-                )
-            seen_child_names[child_name] = child_index
-            child_path = f"{segment}/{child_name}"
-            normalized_children.append(
-                _walk_xml_node(
-                    child_raw,
-                    child_path,
-                    child_field_loc,
-                    field_index,
-                    mappable_paths,
-                )
-            )
+        if namespace is not None:
+            struct_entry["namespace"] = namespace
+        field_index[path] = struct_entry
 
         normalized_node: Dict[str, Any] = {
             "name": name,
@@ -701,11 +808,14 @@ def _walk_xml_node(
             "required": required,
             "min_occurs": min_occurs,
             "max_occurs": max_occurs,
-            "children": normalized_children,
+            "children": _normalize_xml_children(),
         }
+        if namespace is not None:
+            normalized_node["namespace"] = namespace
         return normalized_node
 
-    # Leaf element — must have a data_type.
+    # Leaf element (no child elements) — must have a data_type. It MAY still
+    # carry attribute children (e.g. <Hours unit="h">7.5</Hours>).
     if data_type not in _JSON_LEAF_TYPES:
         raise BuilderValidationError(
             f"{field_loc}.data_type={data_type!r} is not a supported XML leaf "
@@ -723,7 +833,7 @@ def _walk_xml_node(
                 "path": path,
             },
         )
-    field_index[path] = {
+    leaf_entry: Dict[str, Any] = {
         "path": path,
         "name": name,
         "kind": "element",
@@ -735,8 +845,12 @@ def _walk_xml_node(
         "profile_component_type": "profile.xml",
         "source": "xml_schema",
     }
+    if namespace is not None:
+        leaf_entry["namespace"] = namespace
+    field_index[path] = leaf_entry
     mappable_paths.append(path)
-    return {
+    leaf_attr_children = _normalize_xml_children()
+    leaf_node: Dict[str, Any] = {
         "name": name,
         "kind": "element",
         "data_type": data_type,
@@ -744,6 +858,11 @@ def _walk_xml_node(
         "min_occurs": min_occurs,
         "max_occurs": max_occurs,
     }
+    if leaf_attr_children:
+        leaf_node["children"] = leaf_attr_children
+    if namespace is not None:
+        leaf_node["namespace"] = namespace
+    return leaf_node
 
 
 # ---------------------------------------------------------------------------

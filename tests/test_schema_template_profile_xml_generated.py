@@ -50,9 +50,9 @@ def test_template_documents_required_fields():
         assert expected in required
 
 
-def test_template_supported_kinds_is_element_only():
+def test_template_supported_kinds_include_element_and_attribute():
     result = _call(component_type="profile.xml", protocol="xml.generated")
-    assert result["supported_kinds"] == ["element"]
+    assert result["supported_kinds"] == ["element", "attribute"]
 
 
 def test_template_lists_supported_data_types():
@@ -118,11 +118,12 @@ def test_inferred_from_xsd_points_at_infer_tool():
 
 
 def test_unsupported_features_note_does_not_dead_end_at_inference():
-    # Codex review: attributes/namespaces/imports are NOT handled by
-    # infer_profile_fields either, so the note must route those to the raw-XML
-    # escape hatch and explicitly bound infer_profile_fields to the element-only
-    # subset (no dead-end recommendation).
+    # The raw config keys (attributes/namespaces/...) are the wrong SHAPE, but
+    # attributes/namespaces ARE supported (via kind='attribute' / the node
+    # 'namespace' field and via infer_profile_fields). The note routes there,
+    # and to the raw-XML escape hatch only for the truly unsupported constructs.
     result = _call(component_type="profile.xml", protocol="xml.generated")
     note = result["unsupported_features_note"]
     assert "raw-XML escape hatch" in note
-    assert "infer_profile_fields covers only" in note
+    assert "infer_profile_fields" in note
+    assert "kind='attribute'" in note and "namespace" in note

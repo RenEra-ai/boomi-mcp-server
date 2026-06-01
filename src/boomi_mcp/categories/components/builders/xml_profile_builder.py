@@ -231,7 +231,7 @@ class XMLGeneratedProfileBuilder:
         validation_err = cls.validate_config(config)
         if validation_err is not None:
             raise validation_err
-        _, index = _walk_root_for_emit(config["root"], emit=False)
+        _, index, _ = _walk_root_for_emit(config["root"], emit=False)
         return index
 
     # ------------------------------------------------------------------
@@ -248,7 +248,7 @@ class XMLGeneratedProfileBuilder:
         folder_path = config.get("folder_path")
         description = config.get("description") or ""
 
-        body_xml, _ = _walk_root_for_emit(config["root"], emit=True)
+        body_xml, _, namespaces_xml = _walk_root_for_emit(config["root"], emit=True)
 
         folder_attr = (
             f' folderFullPath="{_escape_xml(str(folder_path))}"'
@@ -274,9 +274,7 @@ class XMLGeneratedProfileBuilder:
             "<DataElements>"
             f"{body_xml}"
             "</DataElements>"
-            "<Namespaces>"
-            '<XMLNamespace key="-1" name="Empty Namespace"><Types/></XMLNamespace>'
-            "</Namespaces>"
+            f"{namespaces_xml}"
             "<tagLists/>"
             "</XMLProfile>"
             "</bns:object>"
@@ -330,14 +328,87 @@ def _scan_unsupported_xml_features(
 
 
 # ---------------------------------------------------------------------------
+# Namespace registry — collects distinct namespace URIs and assigns keys/prefixes
+# ---------------------------------------------------------------------------
+
+# The reserved W3C XML namespace (xml:lang etc.) always uses the 'xml' prefix.
+_XML_NAMESPACE_URI = "http://www.w3.org/XML/1998/namespace"
+
+
+def _collect_namespaces(root: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Pre-order walk collecting distinct ``namespace.uri`` values (in encounter
+    order) and assigning each a stable integer key (1..N) and a prefix.
+
+    Provided prefixes are preserved when unique; otherwise an ``nsN`` prefix is
+    generated. The reserved XML namespace always maps to prefix ``xml``.
+    """
+    ordered_uris: List[str] = []
+    hints: Dict[str, Optional[str]] = {}
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, Mapping):
+            return
+        ns = node.get("namespace")
+        if isinstance(ns, Mapping):
+            uri = ns.get("uri")
+            if isinstance(uri, str) and uri.strip():
+                uri = uri.strip()
+                if uri not in hints:
+                    ordered_uris.append(uri)
+                    hints[uri] = ns.get("prefix")
+        for child in node.get("children") or []:
+            visit(child)
+
+    visit(root)
+
+    registry: Dict[str, Dict[str, Any]] = {}
+    used_prefixes: set = set()
+    for key, uri in enumerate(ordered_uris, start=1):
+        if uri == _XML_NAMESPACE_URI:
+            prefix = "xml"
+        else:
+            hint = hints.get(uri)
+            prefix = hint.strip() if isinstance(hint, str) and hint.strip() else f"ns{key}"
+        base, bump = prefix, 1
+        while prefix in used_prefixes:
+            bump += 1
+            prefix = f"{base}{bump}"
+        used_prefixes.add(prefix)
+        registry[uri] = {"key": key, "prefix": prefix}
+    return registry
+
+
+def _use_namespace(node: Mapping[str, Any], ns_registry: Mapping[str, Dict[str, Any]]) -> str:
+    """Return the useNamespace key string for a node ('-1' if unqualified)."""
+    ns = node.get("namespace")
+    if isinstance(ns, Mapping):
+        uri = ns.get("uri")
+        if isinstance(uri, str) and uri.strip() in ns_registry:
+            return str(ns_registry[uri.strip()]["key"])
+    return "-1"
+
+
+def _emit_namespaces_xml(ns_registry: Mapping[str, Dict[str, Any]]) -> str:
+    parts = ['<XMLNamespace key="-1" name="Empty Namespace"><Types/></XMLNamespace>']
+    for uri, meta in ns_registry.items():
+        parts.append(
+            f'<XMLNamespace key="{meta["key"]}" name="{_escape_xml(uri)}" '
+            f'prefix="{_escape_xml(meta["prefix"])}"/>'
+        )
+    return "<Namespaces>" + "".join(parts) + "</Namespaces>"
+
+
+# ---------------------------------------------------------------------------
 # Shared walker — emits XML and/or builds the field index in one pre-order pass
 # ---------------------------------------------------------------------------
 
 
 def _walk_root_for_emit(
     root: Mapping[str, Any], *, emit: bool
-) -> Tuple[str, Dict[str, Dict[str, Any]]]:
-    state: Dict[str, Any] = {"next_key": 0}
+) -> Tuple[str, Dict[str, Dict[str, Any]], str]:
+    ns_registry = _collect_namespaces(root)
+    # Node keys start after the namespace keys so the two never collide.
+    state: Dict[str, Any] = {"next_key": len(ns_registry)}
 
     def alloc() -> int:
         state["next_key"] += 1
@@ -355,9 +426,11 @@ def _walk_root_for_emit(
         index=index,
         alloc=alloc,
         emit=emit,
+        ns_registry=ns_registry,
         is_root=True,
     )
-    return "".join(lines), index
+    namespaces_xml = _emit_namespaces_xml(ns_registry) if emit else ""
+    return "".join(lines), index, namespaces_xml
 
 
 def _emit_xml_element(
@@ -370,21 +443,46 @@ def _emit_xml_element(
     index: Dict[str, Dict[str, Any]],
     alloc,
     emit: bool,
+    ns_registry: Mapping[str, Dict[str, Any]],
     is_root: bool = False,
 ) -> None:
     name = str(node["name"]).strip()
     kind = node["kind"]
-    if kind != "element":
+    if kind not in ("element", "attribute"):
         raise BuilderValidationError(
-            f"element kind={kind!r} is not supported",
+            f"node kind={kind!r} is not supported",
             error_code=PROFILE_FIELD_VALIDATION_FAILED,
             field="kind",
             details={"kind": kind, "path": parent_logical_path or name},
         )
 
+    if kind == "attribute":
+        _emit_xml_attribute(
+            node,
+            name=name,
+            parent_key_path=parent_key_path,
+            parent_name_path=parent_name_path,
+            parent_logical_path=parent_logical_path,
+            lines=lines,
+            index=index,
+            alloc=alloc,
+            emit=emit,
+            ns_registry=ns_registry,
+        )
+        return
+
     required = bool(node.get("required", False))
     children_raw = node.get("children")
-    has_children = isinstance(children_raw, list) and len(children_raw) > 0
+    children_list = children_raw if isinstance(children_raw, list) else []
+    # Attributes never make an element "structural"; only child ELEMENTS do.
+    has_element_children = any(
+        isinstance(c, Mapping) and c.get("kind") != "attribute" for c in children_list
+    )
+    attribute_children = [
+        c
+        for c in children_list
+        if isinstance(c, Mapping) and c.get("kind") == "attribute"
+    ]
     min_occurs = node.get("min_occurs", 1 if is_root else 0)
     max_occurs = node.get("max_occurs", 1)
 
@@ -394,9 +492,10 @@ def _emit_xml_element(
     key_path = parent_key_path + [f"*[@key='{element_key}']"]
 
     is_root_attr = ' isRoot="true"' if is_root else ""
+    use_ns = _use_namespace(node, ns_registry)
 
-    if has_children:
-        # Structural element
+    if has_element_children:
+        # Structural element (has child elements; may also carry attributes).
         index[logical_path] = {
             "path": logical_path,
             "name": name,
@@ -416,7 +515,7 @@ def _emit_xml_element(
                 f'isNode="true"{is_root_attr} key="{element_key}" '
                 f'loopingOption="unique" maxOccurs="{max_occurs}" '
                 f'minOccurs="{min_occurs}" name="{_escape_xml(name)}" '
-                f'useNamespace="-1" validateData="false">'
+                f'useNamespace="{use_ns}" validateData="false">'
                 "<DataFormat><ProfileCharacterFormat/></DataFormat>"
                 "<QualifierList/>"
             )
@@ -425,7 +524,15 @@ def _emit_xml_element(
         children_logical_segment = (
             f"{logical_path}[]" if max_occurs != 1 else logical_path
         )
-        for child in children_raw:
+        # Boomi lays attributes out before sibling elements; emit in that order
+        # (stable within each group) regardless of caller-supplied order.
+        ordered_children = sorted(
+            children_list,
+            key=lambda c: 0
+            if (isinstance(c, Mapping) and c.get("kind") == "attribute")
+            else 1,
+        )
+        for child in ordered_children:
             _emit_xml_element(
                 child,
                 parent_key_path=key_path,
@@ -435,6 +542,7 @@ def _emit_xml_element(
                 index=index,
                 alloc=alloc,
                 emit=emit,
+                ns_registry=ns_registry,
             )
 
         if emit:
@@ -465,16 +573,82 @@ def _emit_xml_element(
         "mappable": True,
     }
 
+    children_logical_segment = (
+        f"{logical_path}[]" if max_occurs != 1 else logical_path
+    )
     if emit:
         lines.append(
             f'<XMLElement dataType="{data_type}" isMappable="true" '
             f'isNode="true"{is_root_attr} key="{element_key}" '
             f'loopingOption="unique" maxOccurs="{max_occurs}" '
             f'minOccurs="{min_occurs}" name="{_escape_xml(name)}" '
-            f'useNamespace="-1" validateData="false">'
+            f'useNamespace="{use_ns}" validateData="false">'
             f"{_DATA_FORMAT_TAG[data_type]}"
             "<QualifierList/>"
-            "</XMLElement>"
+        )
+    for child in attribute_children:
+        _emit_xml_element(
+            child,
+            parent_key_path=key_path,
+            parent_name_path=name_path,
+            parent_logical_path=children_logical_segment,
+            lines=lines,
+            index=index,
+            alloc=alloc,
+            emit=emit,
+            ns_registry=ns_registry,
+        )
+    if emit:
+        lines.append("</XMLElement>")
+
+
+def _emit_xml_attribute(
+    node: Mapping[str, Any],
+    *,
+    name: str,
+    parent_key_path: List[str],
+    parent_name_path: List[str],
+    parent_logical_path: str,
+    lines: List[str],
+    index: Dict[str, Dict[str, Any]],
+    alloc,
+    emit: bool,
+    ns_registry: Mapping[str, Dict[str, Any]],
+) -> None:
+    """Emit an <XMLAttribute> leaf node (no occurrence attributes) and index it
+    under the parent's logical path with an ``@name`` segment."""
+    data_type = node.get("data_type")
+    logical_path = f"{parent_logical_path}/@{name}"
+    if data_type not in _SUPPORTED_LEAF_TYPES:
+        raise BuilderValidationError(
+            f"{logical_path}.data_type={data_type!r} is not supported",
+            error_code=UNSUPPORTED_PROFILE_FIELD_TYPE,
+            field=f"{logical_path}.data_type",
+            details={"data_type": data_type, "path": logical_path},
+        )
+    required = bool(node.get("required", False))
+    use_ns = _use_namespace(node, ns_registry)
+    attr_key = alloc()
+    name_path = parent_name_path + [f"@{name}"]
+    key_path = parent_key_path + [f"*[@key='{attr_key}']"]
+    index[logical_path] = {
+        "path": logical_path,
+        "name": name,
+        "key": attr_key,
+        "key_path": "/".join(key_path),
+        "name_path": "/".join(name_path),
+        "data_type": data_type,
+        "kind": "attribute",
+        "required": required,
+        "mappable": True,
+    }
+    if emit:
+        lines.append(
+            f'<XMLAttribute dataType="{data_type}" isMappable="true" '
+            f'isNode="true" key="{attr_key}" name="{_escape_xml(name)}" '
+            f'required="{"true" if required else "false"}" useNamespace="{use_ns}">'
+            f"{_DATA_FORMAT_TAG[data_type]}"
+            "</XMLAttribute>"
         )
 
 

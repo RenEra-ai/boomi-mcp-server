@@ -441,14 +441,14 @@ def test_xsd_mixed_content_rejected():
     assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
 
 
-def test_xsd_target_namespace_rejected():
+def test_xsd_target_namespace_supported():
+    # A global element is always qualified to the schema targetNamespace.
     xsd = (
         '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:x">'
         '<xs:element name="R" type="xs:string"/></xs:schema>'
     )
-    with pytest.raises(BuilderValidationError) as e:
-        pi.infer_profile_from_xsd(xsd)
-    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
+    r = pi.infer_profile_from_xsd(xsd)
+    assert r["field_index_by_path"]["R"]["namespace"]["uri"] == "urn:x"
 
 
 def test_xsd_foreign_type_prefix_rejected_as_namespace():
@@ -620,22 +620,30 @@ def test_xml_sample_leaf_type_inference():
     assert by["R/z"]["data_type"] == "character"  # leading zero → not number
 
 
-def test_xml_sample_attributes_rejected():
-    with pytest.raises(BuilderValidationError) as e:
-        pi.infer_profile_from_sample_xml('<R><A x="1">v</A></R>')
-    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_SHAPE
+def test_xml_sample_attributes_supported():
+    # Attributes are now inferred as kind='attribute' child nodes (@name path).
+    r = pi.infer_profile_from_sample_xml('<R><A x="1">v</A></R>')
+    idx = r["field_index_by_path"]
+    assert "R/A/@x" in idx
+    assert idx["R/A/@x"]["kind"] == "attribute"
+    assert idx["R/A/@x"]["mappable"] is True
+    # the text-bearing element keeps its leaf data type
+    assert idx["R/A"]["kind"] == "element" and idx["R/A"]["data_type"] is not None
 
 
-def test_xml_sample_namespaced_rejected():
-    with pytest.raises(BuilderValidationError) as e:
-        pi.infer_profile_from_sample_xml('<R xmlns:n="urn:x"><n:A>v</n:A></R>')
-    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
+def test_xml_sample_namespaced_supported():
+    r = pi.infer_profile_from_sample_xml('<R xmlns:n="urn:x"><n:A>v</n:A></R>')
+    idx = r["field_index_by_path"]
+    assert idx["R/A"]["namespace"]["uri"] == "urn:x"
+    # the prefix-declaring root itself is unqualified here
+    assert "namespace" not in idx["R"]
 
 
-def test_xml_sample_default_namespace_root_rejected():
-    with pytest.raises(BuilderValidationError) as e:
-        pi.infer_profile_from_sample_xml('<R xmlns="urn:x"><A>v</A></R>')
-    assert e.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
+def test_xml_sample_default_namespace_supported():
+    r = pi.infer_profile_from_sample_xml('<R xmlns="urn:x"><A>v</A></R>')
+    idx = r["field_index_by_path"]
+    assert idx["R"]["namespace"]["uri"] == "urn:x"
+    assert idx["R/A"]["namespace"]["uri"] == "urn:x"
 
 
 def test_xml_sample_mixed_content_rejected():

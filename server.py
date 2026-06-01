@@ -2042,9 +2042,11 @@ if infer_profile_fields_action:
                 profile_from_sample_json — artifact is a JSON string or a parsed
                     object/array of objects.
                 profile_from_xsd — artifact is an XSD string (conservative
-                    same-document subset; namespaces/choice/attributes rejected).
-                profile_from_sample_xml — artifact is an XML string (element-only;
-                    attributes/mixed/namespaces rejected).
+                    same-document subset; targetNamespace + xs:attribute
+                    supported; choice/all/any/group/mixed/extension and
+                    foreign-namespace type refs rejected).
+                profile_from_sample_xml — artifact is an XML string; namespaces
+                    and attributes are supported (mixed content rejected).
             artifact: The metadata/sample/schema to infer from (dict/list or str).
             options: Optional dict OR JSON-object string with: component_name,
                 root_name, array_item_name, datetime_detection (bool),

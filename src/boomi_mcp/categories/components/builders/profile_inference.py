@@ -31,9 +31,12 @@ Safety contract (this layer is pure):
 Ambiguity is non-fatal: an ambiguous field is kept with a safe fallback type,
 ``confidence="ambiguous"``, ``confirmation_required=True`` and forces the
 response ``ready_for_builder=False`` — the caller must confirm before applying.
-Structural shapes that cannot be represented in the #43 contract at all (scalar
-JSON root, empty/heterogeneous arrays, XML attributes, XSD choice, binary DB
-columns, namespaces, recursion) raise structured ``PROFILE_INFERENCE_*`` errors.
+XML namespaces and attributes ARE supported (emitted by the #26 builder as
+``<XMLNamespace>``/``useNamespace`` and ``<XMLAttribute>`` nodes). Structural
+shapes that still cannot be represented in the #43 contract (scalar JSON root,
+empty/heterogeneous arrays, XSD choice/all/any/group, mixed content, binary DB
+columns, foreign-namespace type references, recursion) raise structured
+``PROFILE_INFERENCE_*`` errors.
 """
 
 from __future__ import annotations
@@ -877,12 +880,64 @@ def _classify_xsd_type_attr(type_qname: str, field_loc: str) -> Tuple[str, str]:
     return "local", local
 
 
-def _xsd_complex_sequence_elements(
+def _xsd_attribute_to_node(
+    attr_el: "ET.Element", field_loc: str
+) -> Optional[Dict[str, Any]]:
+    """Build a kind='attribute' node from an xs:attribute declaration, or None
+    when use='prohibited'. Rejects ref= and non-built-in/complex attribute types.
+    Local attributes are unqualified, so no namespace is attached."""
+    if attr_el.get("ref"):
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: xs:attribute ref= is not supported",
+            field="artifact",
+        )
+    name = (attr_el.get("name") or "").strip()
+    if not name:
+        raise _err(
+            PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+            f"{field_loc}: xs:attribute must declare a name",
+            field="artifact",
+        )
+    use = (attr_el.get("use") or "optional").strip().lower()
+    if use == "prohibited":
+        return None
+    type_attr = attr_el.get("type")
+    if type_attr:
+        kind, value = _classify_xsd_type_attr(type_attr, field_loc)
+        if kind != "builtin":
+            raise _err(
+                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
+                f"{field_loc}: attribute type {type_attr!r} must be a built-in type",
+                field="artifact",
+            )
+        data_type = value
+    else:
+        inline = None
+        for c in list(attr_el):
+            local = _xsd_local(c, field_loc)
+            if local == "simpleType":
+                inline = c
+            elif local == "annotation":
+                continue
+        data_type = (
+            _xsd_simple_type_base(inline, field_loc) if inline is not None else "character"
+        )
+    return {
+        "name": name,
+        "kind": "attribute",
+        "data_type": data_type,
+        "required": use == "required",
+    }
+
+
+def _xsd_complex_children(
     ctype: "ET.Element", field_loc: str
-) -> List["ET.Element"]:
-    """Validate a complexType is a plain element-only sequence and return its
-    child xs:element list. Rejects mixed content, attributes, choice/all/any/
-    group, complex/simpleContent, extension/restriction."""
+) -> Tuple[List["ET.Element"], List["ET.Element"]]:
+    """Validate a complexType is a plain element-only sequence (optionally with
+    xs:attribute declarations) and return ``(sequence_elements, attribute_els)``.
+    Rejects mixed content, anyAttribute, choice/all/any/group, complex/
+    simpleContent, extension/restriction."""
     if (ctype.get("mixed") or "").strip().lower() in ("true", "1"):
         raise _err(
             PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
@@ -890,6 +945,7 @@ def _xsd_complex_sequence_elements(
             field="artifact",
         )
     sequence = None
+    attribute_els: List["ET.Element"] = []
     for child in list(ctype):
         local = _xsd_local(child, field_loc)
         if local == "annotation":
@@ -902,10 +958,12 @@ def _xsd_complex_sequence_elements(
                     field="artifact",
                 )
             sequence = child
-        elif local in ("attribute", "anyattribute"):
+        elif local == "attribute":
+            attribute_els.append(child)
+        elif local == "anyattribute":
             raise _err(
                 PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
-                f"{field_loc}: XSD attributes are not supported (element-only)",
+                f"{field_loc}: xs:anyAttribute is not supported",
                 field="artifact",
             )
         else:
@@ -913,7 +971,8 @@ def _xsd_complex_sequence_elements(
             raise _err(
                 PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
                 f"{field_loc}: unsupported complexType construct {local!r} "
-                "(only a plain xs:sequence of elements is supported)",
+                "(only a plain xs:sequence of elements with optional xs:attribute "
+                "declarations is supported)",
                 field="artifact",
                 details={"construct": local},
             )
@@ -951,7 +1010,7 @@ def _xsd_complex_sequence_elements(
                 field="artifact",
                 details={"construct": local},
             )
-    return elements
+    return elements, attribute_els
 
 
 def _xsd_simple_type_base(stype: "ET.Element", field_loc: str) -> str:
@@ -1040,6 +1099,9 @@ def _xsd_element_to_node(
     counters: _Counters,
     meta_by_path: Dict[str, Dict[str, Any]],
     issues: List[Dict[str, Any]],
+    node_ns: Optional[str] = None,
+    target_ns: Optional[str] = None,
+    qualified: bool = False,
 ) -> Dict[str, Any]:
     field_loc = path
     counters.add_node()
@@ -1126,8 +1188,8 @@ def _xsd_element_to_node(
                 )
 
     if ctype is not None:
-        # Structural element.
-        elements = _xsd_complex_sequence_elements(ctype, field_loc)
+        # Structural element (xs:sequence + optional xs:attribute declarations).
+        elements, attribute_els = _xsd_complex_children(ctype, field_loc)
         if not elements:
             raise _err(
                 PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
@@ -1135,6 +1197,25 @@ def _xsd_element_to_node(
                 field="artifact",
             )
         segment = f"{path}[]" if max_occurs != 1 else path
+        # Local nested elements are qualified only when elementFormDefault=qualified.
+        child_ns = target_ns if qualified else None
+
+        attr_children: List[Dict[str, Any]] = []
+        for attr_el in attribute_els:
+            a_name = (attr_el.get("name") or "").strip()
+            a_path = f"{segment}/@{a_name}" if a_name else f"{segment}/@?"
+            if a_name and _is_secret_named(a_name):
+                issues.append(_secret_withheld_issue(a_path))
+                continue
+            attr_node = _xsd_attribute_to_node(attr_el, a_path)
+            if attr_node is None:  # use="prohibited"
+                continue
+            counters.add_field()
+            meta_by_path[a_path] = {
+                "confidence": "high", "ambiguities": [], "confirmation_required": False,
+            }
+            attr_children.append(attr_node)
+
         children: List[Dict[str, Any]] = []
         for child_el in elements:
             child_name = (child_el.get("name") or "").strip()
@@ -1150,35 +1231,44 @@ def _xsd_element_to_node(
                     complex_types=complex_types, simple_types=simple_types,
                     type_path=next_type_path, counters=counters,
                     meta_by_path=meta_by_path, issues=issues,
+                    node_ns=child_ns, target_ns=target_ns, qualified=qualified,
                 )
             )
-        if not children:
+        if not children and not attr_children:
             raise _err(
                 PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
                 f"{field_loc}: complexType has no inferable child elements "
                 "(all children were withheld or empty)",
                 field="artifact",
             )
-        return {
+        node: Dict[str, Any] = {
             "name": name, "kind": "element", "required": required,
-            "min_occurs": min_occurs, "max_occurs": max_occurs, "children": children,
+            "min_occurs": min_occurs, "max_occurs": max_occurs,
+            "children": attr_children + children,
         }
+        if node_ns:
+            node["namespace"] = {"uri": node_ns}
+        return node
 
     # Leaf element.
     counters.add_field()
-    return {
+    leaf: Dict[str, Any] = {
         "name": name, "kind": "element", "data_type": leaf_data_type,
         "required": required, "min_occurs": min_occurs, "max_occurs": max_occurs,
     }
+    if node_ns:
+        leaf["namespace"] = {"uri": node_ns}
+    return leaf
 
 
 def infer_profile_from_xsd(artifact: Any, *, options: Optional[Any] = None) -> Dict[str, Any]:
     """Infer a profile.xml contract from a conservative same-document XSD subset.
 
     Supports inline/same-document xs:element / complexType / sequence /
-    simpleType-restriction, minOccurs/maxOccurs(+unbounded). Rejects choice/all/
-    any/attributes/mixed/import/include/extension/list/union/substitution with
-    actionable errors; target/qualified namespaces → UNSUPPORTED_NAMESPACE;
+    simpleType-restriction, minOccurs/maxOccurs(+unbounded), targetNamespace
+    (+ elementFormDefault qualified/unqualified), and xs:attribute declarations.
+    Rejects choice/all/any/group/mixed/import/include/extension/list/union/
+    substitution and foreign-namespace type references with actionable errors;
     self-referential types → RECURSIVE_XML.
     """
     opts = _coerce_options(options)
@@ -1195,13 +1285,10 @@ def infer_profile_from_xsd(artifact: Any, *, options: Optional[Any] = None) -> D
             "root element must be an xs:schema",
             field="artifact",
         )
-    if root.get("targetNamespace"):
-        raise _err(
-            PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE,
-            "target namespaces are not representable by the namespace-less XML profile builder",
-            field="artifact",
-            hint="Remove targetNamespace or wait for namespace-aware profile support.",
-        )
+    target_ns = (root.get("targetNamespace") or "").strip() or None
+    qualified = (
+        (root.get("elementFormDefault") or "unqualified").strip().lower() == "qualified"
+    )
 
     complex_types: Dict[str, "ET.Element"] = {}
     simple_types: Dict[str, "ET.Element"] = {}
@@ -1261,6 +1348,7 @@ def infer_profile_from_xsd(artifact: Any, *, options: Optional[Any] = None) -> D
         root_el, root_name, complex_types=complex_types,
         simple_types=simple_types, type_path=(), counters=counters,
         meta_by_path=meta_by_path, issues=issues,
+        node_ns=target_ns, target_ns=target_ns, qualified=qualified,
     )
 
     helper_result = profile_from_xml_schema(
@@ -1309,6 +1397,55 @@ def _xml_leaf_type(texts: List[str], dt_detect: bool):
     )
 
 
+def _infer_xml_attributes(
+    instances: List["ET.Element"],
+    parent_path: str,
+    parent_max_occurs: int,
+    *,
+    counters: _Counters,
+    meta_by_path: Dict[str, Dict[str, Any]],
+    issues: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Infer attribute child nodes (kind='attribute') from element instances.
+
+    ``xmlns`` declarations are not part of ``element.attrib`` (ElementTree
+    strips them), so only real attributes are considered. Attribute values
+    default to 'character' (matching Boomi's sample import); credential-named
+    attributes are withheld.
+    """
+    segment = f"{parent_path}[]" if parent_max_occurs != 1 else parent_path
+    ordered: List[str] = []
+    for inst in instances:
+        for qname in inst.attrib.keys():
+            if qname not in ordered:
+                ordered.append(qname)
+    total = len(instances)
+    attr_nodes: List[Dict[str, Any]] = []
+    for qname in ordered:
+        a_uri, a_local = _split_qname(qname)
+        a_path = f"{segment}/@{a_local}"
+        if _is_secret_named(a_local):
+            issues.append(_secret_withheld_issue(a_path))
+            continue
+        counters.add_field()
+        present = sum(1 for inst in instances if qname in inst.attrib)
+        meta_by_path[a_path] = {
+            "confidence": "medium",
+            "ambiguities": [],
+            "confirmation_required": False,
+        }
+        node: Dict[str, Any] = {
+            "name": a_local,
+            "kind": "attribute",
+            "data_type": "character",
+            "required": present == total,
+        }
+        if a_uri:
+            node["namespace"] = {"uri": a_uri}
+        attr_nodes.append(node)
+    return attr_nodes
+
+
 def _infer_xml_node(
     tag: str,
     instances: List["ET.Element"],
@@ -1326,14 +1463,7 @@ def _infer_xml_node(
     counters.add_node()
 
     uri, local = _split_qname(tag)
-    if uri is not None:
-        raise _err(
-            PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE,
-            f"{path}: namespaced element {tag!r} is not representable by the "
-            "namespace-less XML profile builder",
-            field="artifact",
-            details={"tag": tag},
-        )
+    namespace = {"uri": uri} if uri else None
     if local in ancestors:
         raise _err(
             PROFILE_INFERENCE_RECURSIVE_XML,
@@ -1341,13 +1471,11 @@ def _infer_xml_node(
             field="artifact",
             details={"tag": local, "ancestors": sorted(ancestors)},
         )
-    for inst in instances:
-        if inst.attrib:
-            raise _err(
-                PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
-                f"{path}: XML attributes are not supported (element-only)",
-                field="artifact",
-            )
+
+    attr_children = _infer_xml_attributes(
+        instances, path, max_occurs,
+        counters=counters, meta_by_path=meta_by_path, issues=issues,
+    )
 
     structural = any(len(list(inst)) > 0 for inst in instances)
 
@@ -1374,22 +1502,21 @@ def _infer_xml_node(
                 if child.tag not in ordered_tags:
                     ordered_tags.append(child.tag)
 
-        children: List[Dict[str, Any]] = []
+        element_children: List[Dict[str, Any]] = []
         child_ancestors = set(ancestors) | {local}
         for child_tag in ordered_tags:
-            child_uri, child_local = _split_qname(child_tag)
+            _child_uri, child_local = _split_qname(child_tag)
             counts = [sum(1 for c in inst if c.tag == child_tag) for inst in instances]
             present_parents = sum(1 for c in counts if c > 0)
             child_max = -1 if max(counts) > 1 else 1
             child_required = present_parents == len(instances)
             child_min = 1 if child_required else 0
-            name_for_path = child_local if child_uri is None else child_tag
-            child_path = f"{segment}/{name_for_path}"
-            if child_uri is None and _is_secret_named(child_local):
+            child_path = f"{segment}/{child_local}"
+            if _is_secret_named(child_local):
                 issues.append(_secret_withheld_issue(child_path))
                 continue
             child_instances = [c for inst in instances for c in inst if c.tag == child_tag]
-            children.append(
+            element_children.append(
                 _infer_xml_node(
                     child_tag, child_instances, child_path, child_ancestors,
                     min_occurs=child_min, max_occurs=child_max, required=child_required,
@@ -1397,29 +1524,38 @@ def _infer_xml_node(
                     issues=issues,
                 )
             )
-        if not children:
+        if not element_children and not attr_children:
             raise _err(
                 PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
-                f"{path}: element has no inferable child elements",
+                f"{path}: element has no inferable child elements or attributes",
                 field="artifact",
             )
         meta_by_path[path] = {"confidence": "high", "ambiguities": [], "confirmation_required": False}
-        return {
+        node: Dict[str, Any] = {
             "name": local, "kind": "element", "required": required,
-            "min_occurs": min_occurs, "max_occurs": max_occurs, "children": children,
+            "min_occurs": min_occurs, "max_occurs": max_occurs,
+            "children": attr_children + element_children,
         }
+        if namespace is not None:
+            node["namespace"] = namespace
+        return node
 
-    # Leaf element.
+    # Leaf element (may still carry attributes).
     counters.add_field()
     texts = [(inst.text or "") for inst in instances]
     data_type, confidence, ambiguities, confirm = _xml_leaf_type(texts, dt_detect)
     meta_by_path[path] = {
         "confidence": confidence, "ambiguities": ambiguities, "confirmation_required": confirm,
     }
-    return {
+    leaf: Dict[str, Any] = {
         "name": local, "kind": "element", "data_type": data_type, "required": required,
         "min_occurs": min_occurs, "max_occurs": max_occurs,
     }
+    if attr_children:
+        leaf["children"] = attr_children
+    if namespace is not None:
+        leaf["namespace"] = namespace
+    return leaf
 
 
 def infer_profile_from_sample_xml(artifact: Any, *, options: Optional[Any] = None) -> Dict[str, Any]:
@@ -1427,8 +1563,9 @@ def infer_profile_from_sample_xml(artifact: Any, *, options: Optional[Any] = Non
 
     Repeated sibling elements become ``max_occurs=-1`` with ``[]`` descendant
     paths; children missing from some repeated parents become optional. Leaf
-    types are inferred from text WITHOUT echoing the text. Attributes, mixed
-    content, namespaced tags, and same-name-ancestor recursion are rejected.
+    types are inferred from text WITHOUT echoing the text. Namespaces (recorded
+    per node from the parsed URIs) and attributes (emitted as ``<XMLAttribute>``)
+    are supported; mixed content and same-name-ancestor recursion are rejected.
     """
     opts = _coerce_options(options)
     limits = _resolve_limits(opts)
