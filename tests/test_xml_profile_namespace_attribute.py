@@ -338,3 +338,29 @@ def test_xsd_explicitly_foreign_xs_binding_is_rejected():
     with pytest.raises(BuilderValidationError) as exc:
         pi.infer_profile_from_xsd(xsd)
     assert exc.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
+
+
+def test_xsd_per_element_form_override():
+    # elementFormDefault=unqualified, but a child overrides form="qualified".
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:po" '
+        'elementFormDefault="unqualified">'
+        '<xs:element name="Order"><xs:complexType><xs:sequence>'
+        '<xs:element name="Id" type="xs:string" form="qualified"/>'
+        '<xs:element name="Note" type="xs:string"/>'
+        '</xs:sequence></xs:complexType></xs:element></xs:schema>'
+    )
+    idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
+    assert idx["Order"]["namespace"]["uri"] == "urn:po"      # global root
+    assert idx["Order/Id"]["namespace"]["uri"] == "urn:po"   # form="qualified" override
+    assert "namespace" not in idx["Order/Note"]              # schema default unqualified
+
+
+def test_sample_xml_same_localname_different_namespace_rejected_clearly():
+    # <a:Id> and <b:Id> siblings: distinct namespaces but the same local name.
+    # Namespace-less logical paths cannot disambiguate them, so this is rejected
+    # with a message that explains the namespace collision (not a bare dup-name).
+    xml = '<Parent xmlns:a="urn:a" xmlns:b="urn:b"><a:Id>1</a:Id><b:Id>2</b:Id></Parent>'
+    with pytest.raises(BuilderValidationError) as exc:
+        pi.infer_profile_from_sample_xml(xml)
+    assert "namespace" in str(exc.value).lower()

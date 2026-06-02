@@ -738,7 +738,8 @@ def _walk_xml_node(
     has_element_children = len(element_children) > 0
 
     def _normalize_xml_children() -> List[Dict[str, Any]]:
-        seen_child_names: Dict[str, int] = {}
+        # child_seg -> (first_index, namespace_uri-or-None)
+        seen_child_names: Dict[str, Any] = {}
         normalized: List[Dict[str, Any]] = []
         for child_index, child_raw in enumerate(children_list):
             child_field_loc = f"{field_loc}.children[{child_index}]"
@@ -749,7 +750,31 @@ def _walk_xml_node(
                 if child_data.get("kind") == "attribute"
                 else child_name
             )
+            child_ns_uri = (child_data.get("namespace") or {}).get("uri")
             if child_seg in seen_child_names:
+                first_index, first_ns_uri = seen_child_names[child_seg]
+                if child_ns_uri != first_ns_uri:
+                    # Same local name in DIFFERENT namespaces. The #43 logical-path
+                    # model is namespace-less (paths use local names), so these
+                    # cannot be disambiguated — reject explicitly rather than with
+                    # a misleading bare duplicate-name error.
+                    raise BuilderValidationError(
+                        f"{child_field_loc}: sibling local name {child_name!r} appears "
+                        f"in different namespaces ({first_ns_uri!r} vs {child_ns_uri!r}); "
+                        "namespace-less logical paths cannot disambiguate same-named "
+                        "siblings across namespaces",
+                        error_code=DUPLICATE_PROFILE_FIELD_PATH,
+                        field=f"{child_field_loc}.namespace",
+                        hint=(
+                            "Rename one sibling or restructure; the issue-#43 "
+                            "logical-path model does not qualify paths by namespace."
+                        ),
+                        details={
+                            "path": f"{segment}/{child_seg}",
+                            "parent_path": path,
+                            "namespaces": [first_ns_uri, child_ns_uri],
+                        },
+                    )
                 raise BuilderValidationError(
                     f"{child_field_loc}.name duplicates an earlier sibling",
                     error_code=DUPLICATE_PROFILE_FIELD_PATH,
@@ -761,11 +786,11 @@ def _walk_xml_node(
                     details={
                         "path": f"{segment}/{child_seg}",
                         "parent_path": path,
-                        "first_index": seen_child_names[child_seg],
+                        "first_index": first_index,
                         "duplicate_index": child_index,
                     },
                 )
-            seen_child_names[child_seg] = child_index
+            seen_child_names[child_seg] = (child_index, child_ns_uri)
             child_path = f"{segment}/{child_seg}"
             normalized.append(
                 _walk_xml_node(

@@ -1283,8 +1283,6 @@ def _xsd_element_to_node(
                 field="artifact",
             )
         segment = f"{path}[]" if max_occurs != 1 else path
-        # Local nested elements are qualified only when elementFormDefault=qualified.
-        child_ns = target_ns if qualified else None
 
         attr_children: List[Dict[str, Any]] = []
         for attr_el in attribute_els:
@@ -1315,6 +1313,15 @@ def _xsd_element_to_node(
             if child_name and _is_secret_named(child_name):
                 issues.append(_secret_withheld_issue(child_path))
                 continue
+            # A local element is qualified per its own `form` override, else the
+            # schema's elementFormDefault.
+            child_form = (child_el.get("form") or "").strip().lower()
+            child_qualified = (
+                child_form == "qualified"
+                if child_form in ("qualified", "unqualified")
+                else qualified
+            )
+            child_ns = target_ns if child_qualified else None
             children.append(
                 _xsd_element_to_node(
                     child_el, child_path,
