@@ -140,7 +140,10 @@ and retry) or `error: kb_unavailable` (temporary build failure — self-heals on
 later call after a cooldown). A docs call no longer hangs while the corpus loads.
 Tuning env vars: `BOOMI_DOCS_WARMUP_WAIT_SECONDS` (default 5 — max seconds a call
 blocks waiting for warmup), `BOOMI_DOCS_WARMUP_EAGER` (default true — kick the
-build on the first authenticated `/mcp` request), `BOOMI_DOCS_WARMUP_RETRY_COOLDOWN`
+build on the first authenticated `/mcp` request; **pinned `false` in
+`cloudbuild.yaml` since 2026-06-01** so the heavy model load defers to the first
+docs call and never contends with non-docs tools on a cold 1-vCPU instance),
+`BOOMI_DOCS_WARMUP_RETRY_COOLDOWN`
 (default 30 — seconds before a failed build re-attempts).
 
 ---
@@ -386,31 +389,38 @@ When `BOOMI_DOCS_ENABLED` is unset or false, the KB module is not imported,
 the `requirements-kb.txt` dependencies are not loaded, and the KB tools and
 `kb://boomi-docs/corpus` resource are not registered.
 
-#### MCP Stateless Transport (Workstream B — default off)
+#### MCP Stateless Transport (Workstream B — ENABLED in production)
 
-Both flags **default `false`** and are **not set in `cloudbuild.yaml`**, so
-production runs the stateful streamable-HTTP transport unchanged. They are the
-Workstream B opt-in for running FastMCP streamable HTTP **stateless** to
-eliminate per-instance MCP sessions (the post-redeploy `404 Session not found`).
+`BOOMI_MCP_STATELESS_HTTP=true` is **pinned in `cloudbuild.yaml`** (since
+2026-06-01). Production runs FastMCP streamable HTTP **stateless**, which
+eliminates per-instance MCP sessions and the failure they caused: on a cold
+start a stateful tool-call POST could lose its server→client response channel
+(reaped, or stranded when a reconnect 404'd onto a second instance) and hang
+until Cloud Run's 300s request timeout killed it. Statelessly each POST is a
+self-contained request→response→terminate, so that hang and the post-redeploy
+`404 Session not found` cannot occur.
 
 ```bash
-BOOMI_MCP_STATELESS_HTTP   # default false. When true, build the MCP app with
-                           # stateless_http=true and skip the stream guard,
+BOOMI_MCP_STATELESS_HTTP   # PINNED true in cloudbuild.yaml. Builds the MCP app
+                           # with stateless_http=true and skips the stream guard,
                            # session-manager binding, JWT-issuer binding, and
                            # session reaper (none apply without per-instance
-                           # sessions). When false, behavior is unchanged.
-BOOMI_MCP_JSON_RESPONSE    # default false. Honored ONLY in stateless mode;
-                           # passes json_response=true to the MCP app, which
-                           # changes POST response framing. Validate independently.
+                           # sessions). Set false to revert to stateful.
+BOOMI_MCP_JSON_RESPONSE    # default false (unset). Honored ONLY in stateless
+                           # mode; passes json_response=true (single-JSON POST
+                           # framing instead of SSE-on-POST). Validated working,
+                           # but Combo A (false / SSE-on-POST) is the chosen default.
 ```
 
-> ⚠️ **Do not enable in production** until the live Claude Code matrix on
-> `boomi.renera.ai` passes both combinations
-> (`stateless=true / json_response=false` and `stateless=true / json_response=true`),
-> a passing combo is chosen, and the values are pinned in `cloudbuild.yaml` via a
-> separate rollout. After enabling, monitor for `404 Session not found` and
-> auth regressions; rollback is `BOOMI_MCP_STATELESS_HTTP=false` + redeploy.
-> True-value convention: `true`, `1`, `yes`, `on` (case-insensitive).
+> ✅ **Live matrix passed (2026-06-01, `boomi.renera.ai`).** Both combinations
+> were validated against the real Claude Code client —
+> `stateless=true / json_response=false` (**chosen**) and
+> `stateless=true / json_response=true` (validated fallback). Connect, initialize,
+> tools/list, `query_components` get, and lazy docs warmup all succeeded with
+> **zero `404 Session not found`** and no 300s held-open POSTs; the client works
+> purely over POST (no server→client GET channel needed, so the stateless
+> `GET /mcp → 405` is harmless). Rollback is `BOOMI_MCP_STATELESS_HTTP=false` +
+> redeploy. True-value convention: `true`, `1`, `yes`, `on` (case-insensitive).
 
 ---
 
