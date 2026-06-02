@@ -364,3 +364,26 @@ def test_sample_xml_same_localname_different_namespace_rejected_clearly():
     with pytest.raises(BuilderValidationError) as exc:
         pi.infer_profile_from_sample_xml(xml)
     assert "namespace" in str(exc.value).lower()
+
+
+def test_malformed_namespace_value_raises_structured_error():
+    # A non-mapping `namespace` (e.g. a bare string) must surface as a structured
+    # BuilderValidationError via _normalize_namespace, not an AttributeError from
+    # the sibling-collision URI lookup.
+    from boomi_mcp.categories.components.builders.profile_generation import (
+        profile_from_xml_schema,
+    )
+
+    bad = {
+        "format": "xml",
+        "root": {
+            "name": "R", "kind": "element", "required": True,
+            "min_occurs": 1, "max_occurs": 1,
+            "children": [
+                {"name": "A", "kind": "element", "data_type": "character",
+                 "namespace": "urn:po"},
+            ],
+        },
+    }
+    with pytest.raises(BuilderValidationError):
+        profile_from_xml_schema(bad)

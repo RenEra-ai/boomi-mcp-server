@@ -750,7 +750,13 @@ def _walk_xml_node(
                 if child_data.get("kind") == "attribute"
                 else child_name
             )
-            child_ns_uri = (child_data.get("namespace") or {}).get("uri")
+            # Only peek the URI for a well-formed mapping; a malformed namespace
+            # value is left for _walk_xml_node()/_normalize_namespace() to reject
+            # with a structured error (don't crash with AttributeError here).
+            _child_ns = child_data.get("namespace")
+            child_ns_uri = (
+                _child_ns.get("uri") if isinstance(_child_ns, Mapping) else None
+            )
             if child_seg in seen_child_names:
                 first_index, first_ns_uri = seen_child_names[child_seg]
                 if child_ns_uri != first_ns_uri:
