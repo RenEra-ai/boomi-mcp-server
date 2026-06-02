@@ -11,6 +11,11 @@ from __future__ import annotations
 
 from xml.etree import ElementTree as ET
 
+import pytest
+
+from boomi_mcp.categories.components.builders.connector_builder import (
+    BuilderValidationError,
+)
 from boomi_mcp.categories.components.builders import profile_inference as pi
 from boomi_mcp.categories.components.builders.xml_profile_builder import (
     XMLGeneratedProfileBuilder,
@@ -318,16 +323,18 @@ def test_xsd_rebound_xs_prefix_resolves_via_binding():
     assert "Order/Id" in idx
 
 
-def test_xsd_conventional_prefix_builtin_resolves_despite_nonxsd_binding():
-    # Pathological-but-legal: 'xs' is bound to a non-XSD URI document-wide while
-    # the schema uses 'xsd' for XML Schema. A recognized built-in local name
-    # under the conventional xs/xsd prefix still resolves as built-in (no full
-    # element-scope resolver needed), so the valid schema is NOT rejected.
+def test_xsd_explicitly_foreign_xs_binding_is_rejected():
+    # When 'xs' is EXPLICITLY bound to a non-XSD URI, type="xs:string" is a
+    # foreign-namespace type (a 'string' in urn:other), NOT the XSD built-in.
+    # Prefixes are arbitrary, so we reject conservatively rather than
+    # misclassify it as a character field (only an UNBOUND xs/xsd prefix falls
+    # back to the XSD namespace).
     xsd = (
         '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xs="urn:other">'
         '<xsd:element name="R"><xsd:complexType><xsd:sequence>'
         '<xsd:element name="A" type="xs:string"/>'
         '</xsd:sequence></xsd:complexType></xsd:element></xsd:schema>'
     )
-    idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
-    assert idx["R/A"]["data_type"] == "character"
+    with pytest.raises(BuilderValidationError) as exc:
+        pi.infer_profile_from_xsd(xsd)
+    assert exc.value.error_code == pi.PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE
