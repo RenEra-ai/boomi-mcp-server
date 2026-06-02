@@ -299,3 +299,20 @@ def test_xsd_attribute_unqualified_by_default():
     )
     idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
     assert "namespace" not in idx["Order/@rev"]
+
+
+def test_xsd_rebound_xs_prefix_resolves_via_binding():
+    # 'xs' is (unconventionally) bound to the targetNamespace while the XML
+    # Schema namespace uses 'xsd'. type="xs:OrderType" is a same-document ref,
+    # not a built-in — prefixes are arbitrary, so the URI binding decides.
+    xsd = (
+        '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" '
+        'xmlns:xs="urn:po" targetNamespace="urn:po">'
+        '<xsd:element name="Order" type="xs:OrderType"/>'
+        '<xsd:complexType name="OrderType"><xsd:sequence>'
+        '<xsd:element name="Id" type="xsd:string"/></xsd:sequence></xsd:complexType>'
+        '</xsd:schema>'
+    )
+    idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
+    assert idx["Order"]["namespace"]["uri"] == "urn:po"
+    assert "Order/Id" in idx

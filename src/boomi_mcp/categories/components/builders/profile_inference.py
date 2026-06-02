@@ -899,13 +899,16 @@ def _classify_xsd_type_attr(
     else:
         prefix, local = "", type_qname
     if prefix:
-        if prefix in _XSD_BUILTIN_PREFIXES:
-            return "builtin", _map_xsd_builtin(local, field_loc)
+        # XML prefixes are arbitrary — resolve the prefix to its bound URI
+        # first; only fall back to the conventional xs/xsd names when the
+        # prefix has no explicit xmlns binding captured.
         uri = prefix_map.get(prefix)
         if uri == _XSD_NS:
             return "builtin", _map_xsd_builtin(local, field_loc)
         if uri is not None and target_ns is not None and uri == target_ns:
             return "local", local
+        if uri is None and prefix in _XSD_BUILTIN_PREFIXES:
+            return "builtin", _map_xsd_builtin(local, field_loc)
         raise _err(
             PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE,
             f"{field_loc}: type {type_qname!r} references a foreign namespace prefix",
