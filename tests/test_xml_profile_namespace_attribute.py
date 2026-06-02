@@ -316,3 +316,18 @@ def test_xsd_rebound_xs_prefix_resolves_via_binding():
     idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
     assert idx["Order"]["namespace"]["uri"] == "urn:po"
     assert "Order/Id" in idx
+
+
+def test_xsd_conventional_prefix_builtin_resolves_despite_nonxsd_binding():
+    # Pathological-but-legal: 'xs' is bound to a non-XSD URI document-wide while
+    # the schema uses 'xsd' for XML Schema. A recognized built-in local name
+    # under the conventional xs/xsd prefix still resolves as built-in (no full
+    # element-scope resolver needed), so the valid schema is NOT rejected.
+    xsd = (
+        '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xs="urn:other">'
+        '<xsd:element name="R"><xsd:complexType><xsd:sequence>'
+        '<xsd:element name="A" type="xs:string"/>'
+        '</xsd:sequence></xsd:complexType></xsd:element></xsd:schema>'
+    )
+    idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
+    assert idx["R/A"]["data_type"] == "character"

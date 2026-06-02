@@ -843,6 +843,17 @@ def _xsd_local(el: "ET.Element", field_loc: str) -> str:
     return local
 
 
+def _xsd_local_is_builtin(local: str) -> bool:
+    """True if ``local`` is a recognized XSD built-in type local name."""
+    lt = local.lower()
+    return (
+        lt in _XSD_STRING_TYPES
+        or lt in _XSD_NUMBER_TYPES
+        or lt in _XSD_DATETIME_TYPES
+        or lt in _XSD_BOOLEAN_TYPES
+    )
+
+
 def _map_xsd_builtin(local_type: str, field_loc: str) -> str:
     lt = local_type.lower()
     if lt in _XSD_STRING_TYPES:
@@ -907,7 +918,13 @@ def _classify_xsd_type_attr(
             return "builtin", _map_xsd_builtin(local, field_loc)
         if uri is not None and target_ns is not None and uri == target_ns:
             return "local", local
-        if uri is None and prefix in _XSD_BUILTIN_PREFIXES:
+        if prefix in _XSD_BUILTIN_PREFIXES and (
+            uri is None or _xsd_local_is_builtin(local)
+        ):
+            # Conventional xs/xsd prefix: an unbound prefix, or a recognized
+            # built-in local name even under a non-XSD document-wide binding
+            # (covers scoped redeclaration without a full element-scope resolver,
+            # which real schemas never require).
             return "builtin", _map_xsd_builtin(local, field_loc)
         raise _err(
             PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE,
