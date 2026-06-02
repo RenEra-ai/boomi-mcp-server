@@ -351,20 +351,26 @@ def test_xml_profile_preservation_policy_attached():
     policy = XMLGeneratedProfileBuilder.PRESERVATION_POLICY
     assert policy.component_type == "profile.xml"
     paths = {op.path for op in policy.owned_paths}
-    assert paths == {"bns:object/XMLProfile/DataElements"}
+    # The dynamic <Namespaces> table is owned alongside <DataElements> so the
+    # regenerated useNamespace keys stay in sync on a structured update.
+    assert paths == {
+        "bns:object/XMLProfile/DataElements",
+        "bns:object/XMLProfile/Namespaces",
+    }
 
 
-def test_xml_profile_update_preserves_namespaces_and_taglists():
-    """XMLProfile siblings such as `Namespaces` and `tagLists` must
-    survive a structured update — only `DataElements` is owned."""
+def test_xml_profile_update_replaces_namespaces_preserves_taglists():
+    """The dynamic `Namespaces` table is OWNED (replaced on update) so its keys
+    stay in sync with the regenerated `useNamespace` refs; other XMLProfile
+    siblings such as `tagLists` still survive."""
     from boomi_mcp.categories.components.component_update_preservation import (
         merge_for_update,
     )
 
     desired_xml = XMLGeneratedProfileBuilder().build(**_config())
     current_xml = XMLGeneratedProfileBuilder().build(**_config())
-    # Replace the empty default namespace with a customized one and
-    # inject a future section
+    # Inject a user-customized namespace + a future section into the CURRENT
+    # (live) profile.
     current_xml = current_xml.replace(
         '<Namespaces><XMLNamespace key="-1" name="Empty Namespace"><Types/></XMLNamespace></Namespaces>',
         (
@@ -385,7 +391,10 @@ def test_xml_profile_update_preserves_namespaces_and_taglists():
     root = ET.fromstring(merged)
     profile = root.find("bns:object/XMLProfile", NS)
     namespaces = profile.findall("Namespaces/XMLNamespace")
-    assert any(ns.attrib.get("name") == "custom" for ns in namespaces)
+    # The stale custom namespace is gone — the regenerated table replaced it.
+    assert not any(ns.attrib.get("name") == "custom" for ns in namespaces)
+    assert any(ns.attrib.get("name") == "Empty Namespace" for ns in namespaces)
+    # tagLists is NOT owned, so the user-added section still survives.
     tag_list = profile.find("tagLists/tagList")
     assert tag_list is not None
     assert tag_list.attrib["key"] == "future"

@@ -862,26 +862,70 @@ def _map_xsd_builtin(local_type: str, field_loc: str) -> str:
     )
 
 
-def _classify_xsd_type_attr(type_qname: str, field_loc: str) -> Tuple[str, str]:
+def _xsd_namespace_prefixes(text: str) -> Dict[str, str]:
+    """Map xmlns prefixes to URIs for an XSD document. ElementTree discards
+    these from element tags/attrs, so capture them via ``start-ns`` events. The
+    default namespace uses the empty-string prefix. Safe: callers parse the same
+    text with ``_safe_fromstring`` first, which rejects DOCTYPE/entities."""
+    import io
+
+    out: Dict[str, str] = {}
+    try:
+        for _event, (prefix, uri) in ET.iterparse(
+            io.StringIO(text), events=("start-ns",)
+        ):
+            out.setdefault(prefix, uri)
+    except ET.ParseError:
+        pass
+    return out
+
+
+def _classify_xsd_type_attr(
+    type_qname: str,
+    field_loc: str,
+    *,
+    prefix_map: Optional[Dict[str, str]] = None,
+    target_ns: Optional[str] = None,
+) -> Tuple[str, str]:
     """Classify a ``type="..."`` QName. Returns ``(kind, value)`` where kind is
     ``"builtin"`` (value=data_type) or ``"local"`` (value=local type name).
-    Foreign-namespace prefixes raise UNSUPPORTED_NAMESPACE."""
-    prefix, _, local = type_qname.partition(":") if ":" in type_qname else ("", "", type_qname)
+
+    A prefix bound to the XML Schema namespace resolves as built-in; a prefix
+    bound to the schema's own targetNamespace resolves as a same-document
+    (``local``) type. Other (foreign) prefixes raise UNSUPPORTED_NAMESPACE."""
+    prefix_map = prefix_map or {}
+    if ":" in type_qname:
+        prefix, _, local = type_qname.partition(":")
+    else:
+        prefix, local = "", type_qname
     if prefix:
         if prefix in _XSD_BUILTIN_PREFIXES:
             return "builtin", _map_xsd_builtin(local, field_loc)
+        uri = prefix_map.get(prefix)
+        if uri == _XSD_NS:
+            return "builtin", _map_xsd_builtin(local, field_loc)
+        if uri is not None and target_ns is not None and uri == target_ns:
+            return "local", local
         raise _err(
             PROFILE_INFERENCE_UNSUPPORTED_NAMESPACE,
             f"{field_loc}: type {type_qname!r} references a foreign namespace prefix",
             field="artifact",
-            hint="Namespace-qualified types are not representable by the namespace-less XML profile builder.",
-            details={"type": type_qname, "prefix": prefix},
+            hint=(
+                "Namespace-qualified types must reference built-in (xs:) types "
+                "or same-document targetNamespace types."
+            ),
+            details={"type": type_qname, "prefix": prefix, "uri": uri},
         )
     return "local", local
 
 
 def _xsd_attribute_to_node(
-    attr_el: "ET.Element", field_loc: str
+    attr_el: "ET.Element",
+    field_loc: str,
+    *,
+    prefix_map: Optional[Dict[str, str]] = None,
+    target_ns: Optional[str] = None,
+    attr_qualified: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Build a kind='attribute' node from an xs:attribute declaration, or None
     when use='prohibited'. Rejects ref= and non-built-in/complex attribute types.
@@ -904,7 +948,9 @@ def _xsd_attribute_to_node(
         return None
     type_attr = attr_el.get("type")
     if type_attr:
-        kind, value = _classify_xsd_type_attr(type_attr, field_loc)
+        kind, value = _classify_xsd_type_attr(
+            type_attr, field_loc, prefix_map=prefix_map, target_ns=target_ns
+        )
         if kind != "builtin":
             raise _err(
                 PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
@@ -921,14 +967,27 @@ def _xsd_attribute_to_node(
             elif local == "annotation":
                 continue
         data_type = (
-            _xsd_simple_type_base(inline, field_loc) if inline is not None else "character"
+            _xsd_simple_type_base(
+                inline, field_loc, prefix_map=prefix_map, target_ns=target_ns
+            )
+            if inline is not None
+            else "character"
         )
-    return {
+    # Local attributes are unqualified unless attributeFormDefault / the
+    # attribute-level form is 'qualified', in which case they live in target_ns.
+    form = (attr_el.get("form") or "").strip().lower()
+    effective_qualified = (
+        form == "qualified" if form in ("qualified", "unqualified") else attr_qualified
+    )
+    node: Dict[str, Any] = {
         "name": name,
         "kind": "attribute",
         "data_type": data_type,
         "required": use == "required",
     }
+    if effective_qualified and target_ns:
+        node["namespace"] = {"uri": target_ns}
+    return node
 
 
 def _xsd_complex_children(
@@ -1013,7 +1072,13 @@ def _xsd_complex_children(
     return elements, attribute_els
 
 
-def _xsd_simple_type_base(stype: "ET.Element", field_loc: str) -> str:
+def _xsd_simple_type_base(
+    stype: "ET.Element",
+    field_loc: str,
+    *,
+    prefix_map: Optional[Dict[str, str]] = None,
+    target_ns: Optional[str] = None,
+) -> str:
     """Resolve a leaf data_type from an inline/named xs:simpleType restriction.
     Rejects list/union."""
     restriction = None
@@ -1048,7 +1113,9 @@ def _xsd_simple_type_base(stype: "ET.Element", field_loc: str) -> str:
             f"{field_loc}: simpleType restriction must declare a base",
             field="artifact",
         )
-    kind, value = _classify_xsd_type_attr(base, field_loc)
+    kind, value = _classify_xsd_type_attr(
+        base, field_loc, prefix_map=prefix_map, target_ns=target_ns
+    )
     if kind != "builtin":
         raise _err(
             PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
@@ -1102,6 +1169,8 @@ def _xsd_element_to_node(
     node_ns: Optional[str] = None,
     target_ns: Optional[str] = None,
     qualified: bool = False,
+    prefix_map: Optional[Dict[str, str]] = None,
+    attr_qualified: bool = False,
 ) -> Dict[str, Any]:
     field_loc = path
     counters.add_node()
@@ -1154,7 +1223,9 @@ def _xsd_element_to_node(
     leaf_data_type: Optional[str] = None
 
     if ctype is None and inline_simple is not None:
-        leaf_data_type = _xsd_simple_type_base(inline_simple, field_loc)
+        leaf_data_type = _xsd_simple_type_base(
+            inline_simple, field_loc, prefix_map=prefix_map, target_ns=target_ns
+        )
     elif ctype is None:
         type_attr = el.get("type")
         if not type_attr:
@@ -1163,12 +1234,17 @@ def _xsd_element_to_node(
                 f"{field_loc}: element has neither a type nor an inline definition",
                 field="artifact",
             )
-        kind, value = _classify_xsd_type_attr(type_attr, field_loc)
+        kind, value = _classify_xsd_type_attr(
+            type_attr, field_loc, prefix_map=prefix_map, target_ns=target_ns
+        )
         if kind == "builtin":
             leaf_data_type = value
         else:  # local named type
             if value in simple_types:
-                leaf_data_type = _xsd_simple_type_base(simple_types[value], field_loc)
+                leaf_data_type = _xsd_simple_type_base(
+                    simple_types[value], field_loc,
+                    prefix_map=prefix_map, target_ns=target_ns,
+                )
             elif value in complex_types:
                 if value in type_path:
                     raise _err(
@@ -1207,7 +1283,11 @@ def _xsd_element_to_node(
             if a_name and _is_secret_named(a_name):
                 issues.append(_secret_withheld_issue(a_path))
                 continue
-            attr_node = _xsd_attribute_to_node(attr_el, a_path)
+            attr_node = _xsd_attribute_to_node(
+                attr_el, a_path,
+                prefix_map=prefix_map, target_ns=target_ns,
+                attr_qualified=attr_qualified,
+            )
             if attr_node is None:  # use="prohibited"
                 continue
             counters.add_field()
@@ -1232,6 +1312,7 @@ def _xsd_element_to_node(
                     type_path=next_type_path, counters=counters,
                     meta_by_path=meta_by_path, issues=issues,
                     node_ns=child_ns, target_ns=target_ns, qualified=qualified,
+                    prefix_map=prefix_map, attr_qualified=attr_qualified,
                 )
             )
         if not children and not attr_children:
@@ -1289,6 +1370,11 @@ def infer_profile_from_xsd(artifact: Any, *, options: Optional[Any] = None) -> D
     qualified = (
         (root.get("elementFormDefault") or "unqualified").strip().lower() == "qualified"
     )
+    attr_qualified = (
+        (root.get("attributeFormDefault") or "unqualified").strip().lower()
+        == "qualified"
+    )
+    prefix_map = _xsd_namespace_prefixes(text)
 
     complex_types: Dict[str, "ET.Element"] = {}
     simple_types: Dict[str, "ET.Element"] = {}
@@ -1349,6 +1435,7 @@ def infer_profile_from_xsd(artifact: Any, *, options: Optional[Any] = None) -> D
         simple_types=simple_types, type_path=(), counters=counters,
         meta_by_path=meta_by_path, issues=issues,
         node_ns=target_ns, target_ns=target_ns, qualified=qualified,
+        prefix_map=prefix_map, attr_qualified=attr_qualified,
     )
 
     helper_result = profile_from_xml_schema(

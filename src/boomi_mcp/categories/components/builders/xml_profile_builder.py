@@ -653,9 +653,15 @@ def _emit_xml_attribute(
 
 
 # Issue #45 — update-preservation policy. The builder owns the
-# `<XMLProfile><DataElements>` subtree; XMLProfile siblings like
-# `Namespaces`, `ProfileProperties` extras, and `tagLists` survive.
+# `<XMLProfile><DataElements>` subtree AND the `<Namespaces>` table: the
+# emitted `useNamespace` keys are regenerated from the contract, so the
+# namespace table must be replaced in lockstep on a structured update (else the
+# preserved table's keys no longer match the new DataElements). Other XMLProfile
+# siblings (`ProfileProperties` extras, `tagLists`) still survive.
 XMLGeneratedProfileBuilder.PRESERVATION_POLICY = PreservationPolicy(
     component_type="profile.xml",
-    owned_paths=(OwnedPath(path="bns:object/XMLProfile/DataElements"),),
+    owned_paths=(
+        OwnedPath(path="bns:object/XMLProfile/DataElements"),
+        OwnedPath(path="bns:object/XMLProfile/Namespaces"),
+    ),
 )

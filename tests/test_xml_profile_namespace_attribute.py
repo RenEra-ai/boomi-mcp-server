@@ -247,3 +247,55 @@ def test_infer_soap_sample_end_to_end_matches_golden_structure():
     narrative = tc.find("XMLElement[@name='Narrative']")
     lang = narrative.find("XMLAttribute[@name='lang']")
     assert lang is not None and lang.attrib["useNamespace"] == ns_by_name[XML_NS]
+
+
+def test_preservation_policy_owns_namespaces_table():
+    # Codex P2: dynamic <Namespaces> must be replaced on structured update,
+    # else regenerated useNamespace keys point at a stale preserved table.
+    paths = [p.path for p in XMLGeneratedProfileBuilder.PRESERVATION_POLICY.owned_paths]
+    assert "bns:object/XMLProfile/DataElements" in paths
+    assert "bns:object/XMLProfile/Namespaces" in paths
+
+
+def test_xsd_target_namespace_prefixed_type_ref_resolves():
+    # Codex P2: type="tns:OrderType" where tns == targetNamespace is a
+    # same-document reference, not a foreign one.
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="urn:po" '
+        'targetNamespace="urn:po">'
+        '<xs:element name="Order" type="tns:OrderType"/>'
+        '<xs:complexType name="OrderType"><xs:sequence>'
+        '<xs:element name="Id" type="xs:string"/></xs:sequence></xs:complexType>'
+        '</xs:schema>'
+    )
+    idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
+    assert idx["Order"]["namespace"]["uri"] == "urn:po"
+    assert "Order/Id" in idx
+
+
+def test_xsd_attribute_form_qualified_namespaces_attribute():
+    # Codex P2: attributeFormDefault="qualified" puts local attributes in the
+    # target namespace.
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:po" '
+        'attributeFormDefault="qualified">'
+        '<xs:element name="Order"><xs:complexType>'
+        '<xs:sequence><xs:element name="Id" type="xs:string"/></xs:sequence>'
+        '<xs:attribute name="rev" type="xs:string"/>'
+        '</xs:complexType></xs:element></xs:schema>'
+    )
+    idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
+    assert idx["Order/@rev"]["namespace"]["uri"] == "urn:po"
+
+
+def test_xsd_attribute_unqualified_by_default():
+    # Default attributeFormDefault=unqualified -> attribute stays unqualified.
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:po">'
+        '<xs:element name="Order"><xs:complexType>'
+        '<xs:sequence><xs:element name="Id" type="xs:string"/></xs:sequence>'
+        '<xs:attribute name="rev" type="xs:string"/>'
+        '</xs:complexType></xs:element></xs:schema>'
+    )
+    idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
+    assert "namespace" not in idx["Order/@rev"]
