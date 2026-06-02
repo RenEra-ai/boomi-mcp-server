@@ -387,3 +387,41 @@ def test_malformed_namespace_value_raises_structured_error():
     }
     with pytest.raises(BuilderValidationError):
         profile_from_xml_schema(bad)
+
+
+def test_xsd_attribute_named_simpletype_resolves():
+    # An attribute typed by a same-document named simpleType (tns:CodeType)
+    # should resolve to the simpleType's base, like element types do — not be
+    # rejected as "must be a built-in type".
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="urn:po" '
+        'targetNamespace="urn:po">'
+        '<xs:element name="Order"><xs:complexType>'
+        '<xs:sequence><xs:element name="Id" type="xs:string"/></xs:sequence>'
+        '<xs:attribute name="code" type="tns:CodeType"/>'
+        '</xs:complexType></xs:element>'
+        '<xs:simpleType name="CodeType"><xs:restriction base="xs:string">'
+        '<xs:maxLength value="3"/></xs:restriction></xs:simpleType>'
+        '</xs:schema>'
+    )
+    idx = pi.infer_profile_from_xsd(xsd)["field_index_by_path"]
+    assert idx["Order/@code"]["kind"] == "attribute"
+    assert idx["Order/@code"]["data_type"] == "character"  # CodeType restricts xs:string
+
+
+def test_xsd_attribute_complex_local_type_still_rejected():
+    # A local ref that is a complexType (not a simpleType) remains unsupported
+    # for an attribute.
+    xsd = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="urn:po" '
+        'targetNamespace="urn:po">'
+        '<xs:element name="Order"><xs:complexType>'
+        '<xs:sequence><xs:element name="Id" type="xs:string"/></xs:sequence>'
+        '<xs:attribute name="code" type="tns:Nested"/>'
+        '</xs:complexType></xs:element>'
+        '<xs:complexType name="Nested"><xs:sequence>'
+        '<xs:element name="X" type="xs:string"/></xs:sequence></xs:complexType>'
+        '</xs:schema>'
+    )
+    with pytest.raises(BuilderValidationError):
+        pi.infer_profile_from_xsd(xsd)

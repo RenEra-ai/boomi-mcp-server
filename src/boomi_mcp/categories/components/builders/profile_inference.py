@@ -936,6 +936,7 @@ def _xsd_attribute_to_node(
     prefix_map: Optional[Dict[str, str]] = None,
     target_ns: Optional[str] = None,
     attr_qualified: bool = False,
+    simple_types: Optional[Dict[str, "ET.Element"]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build a kind='attribute' node from an xs:attribute declaration, or None
     when use='prohibited'. Rejects ref= and non-built-in/complex attribute types.
@@ -961,13 +962,22 @@ def _xsd_attribute_to_node(
         kind, value = _classify_xsd_type_attr(
             type_attr, field_loc, prefix_map=prefix_map, target_ns=target_ns
         )
-        if kind != "builtin":
+        if kind == "builtin":
+            data_type = value
+        elif simple_types is not None and value in simple_types:
+            # Same-document named simpleType (e.g. an enum/restriction) — resolve
+            # to its base, mirroring how element local-type refs are handled.
+            data_type = _xsd_simple_type_base(
+                simple_types[value], field_loc,
+                prefix_map=prefix_map, target_ns=target_ns,
+            )
+        else:
             raise _err(
                 PROFILE_INFERENCE_UNSUPPORTED_SHAPE,
-                f"{field_loc}: attribute type {type_attr!r} must be a built-in type",
+                f"{field_loc}: attribute type {type_attr!r} must be a built-in or "
+                "same-document simpleType",
                 field="artifact",
             )
-        data_type = value
     else:
         inline = None
         for c in list(attr_el):
@@ -1294,7 +1304,7 @@ def _xsd_element_to_node(
             attr_node = _xsd_attribute_to_node(
                 attr_el, a_path,
                 prefix_map=prefix_map, target_ns=target_ns,
-                attr_qualified=attr_qualified,
+                attr_qualified=attr_qualified, simple_types=simple_types,
             )
             if attr_node is None:  # use="prohibited"
                 continue
