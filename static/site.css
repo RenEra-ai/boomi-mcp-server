@@ -129,11 +129,11 @@ img { display: block; max-width: 100%; }
     gap: 24px;
     max-width: var(--max);
     margin: 0 auto;
-    padding: 16px var(--pad);
+    padding: 18px var(--pad);
 }
 .nav__brand { display: inline-flex; align-items: center; }
 .nav__logo {
-    height: 52px;
+    height: 64px;
     width: auto;
     border-radius: 10px;
     opacity: 0.92;
