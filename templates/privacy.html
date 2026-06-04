@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0a0612">
+    <meta name="robots" content="index, follow">
+    <title>Privacy Notice — Boomi MCP Server · RenEra.ai</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/site.css?v=2">
+</head>
+<body>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="mesh" aria-hidden="true">
+        <span class="mesh-blob mesh-blob--1"></span>
+        <span class="mesh-blob mesh-blob--2"></span>
+        <span class="mesh-blob mesh-blob--3"></span>
+    </div>
+
+    <header class="nav" role="banner">
+        <div class="nav__inner">
+            <a class="nav__brand" href="https://renera.ai" aria-label="RenEra.ai home">
+                <img src="/static/renera-logo.png" alt="RenEra.ai" class="nav__logo">
+            </a>
+            <nav class="nav__links" aria-label="Primary">
+                <a href="/">Home</a>
+            </nav>
+            <a class="nav__cta" href="https://renera.ai" target="_blank" rel="noopener">
+                <span>RenEra.ai</span>
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M4.5 3.5h6a1 1 0 0 1 1 1v6a.75.75 0 0 1-1.5 0V6.31L4.78 12.03a.75.75 0 1 1-1.06-1.06L9.44 5.25H5.5a.75.75 0 0 1 0-1.5h-1Z"/></svg>
+            </a>
+        </div>
+    </header>
+
+    <main class="wrap--narrow">
+        <section style="padding-top:clamp(48px,7vh,90px);">
+            <div class="section__label"><span class="rule"></span><span>Legal</span></div>
+            <h1 class="section__title">Privacy &amp; data notice.</h1>
+            <p class="section__lead">How the Boomi MCP Server collects, uses, stores, and protects your personal data — and the rights you have over it.</p>
+
+            <div class="legal">
+                <p class="legal__meta">Last updated: 3 June 2026 · Controller: RenEra.ai · Contact: <a href="mailto:hello@renera.ai">hello@renera.ai</a></p>
+
+                <p>This notice explains how <strong>RenEra.ai</strong> (&ldquo;we&rdquo;, &ldquo;us&rdquo;, the &ldquo;operator&rdquo;) processes personal data when you use the Boomi MCP Server hosted at <strong>boomi.renera.ai</strong> (the &ldquo;Service&rdquo;). It is written to align with the EU/UK General Data Protection Regulation (GDPR) as a baseline standard, regardless of where you are located. For the purposes of the GDPR, RenEra.ai is the <em>data controller</em> for the personal data described below.</p>
+
+                <p>The Service is a Model Context Protocol (MCP) server that lets AI agents operate your Boomi AtomSphere account on your behalf. To do this, it stores credentials that you choose to provide. Please read this notice before signing in or saving any credentials.</p>
+
+                <h2><span class="num">1</span>Who we are</h2>
+                <p>The Service is operated by RenEra.ai. For any privacy question or to exercise your rights, contact us at <a href="mailto:hello@renera.ai">hello@renera.ai</a>. We will respond to data-subject requests without undue delay and, in any case, within the timeframes required by applicable law (generally one month under the GDPR).</p>
+
+                <h2><span class="num">2</span>What data we collect</h2>
+                <ul>
+                    <li><strong>Account identity.</strong> When you sign in with Google, we receive your <strong>Google account email address</strong> and a stable Google account identifier (the OpenID <code style="font-family:var(--mono);font-size:12px;">sub</code>). These are held in an encrypted, cryptographically signed session cookie.</li>
+                    <li><strong>Boomi credentials you choose to store.</strong> When you save a profile, we store your <strong>Boomi Account ID</strong>, <strong>Boomi account username</strong> (your email, prefixed with a token marker), your <strong>Boomi API token</strong>, and a <strong>profile label</strong> you supply.</li>
+                    <li><strong>Operational logs.</strong> Standard server and access logs — such as IP address, timestamps, request metadata, and error traces — are generated via Google Cloud Logging for security, debugging, and audit purposes.</li>
+                </ul>
+                <p>We do not intentionally collect special-category data, and you should not enter any into the Service. We do not use advertising cookies or third-party trackers.</p>
+
+                <h2><span class="num">3</span>Why we process it, and our lawful basis</h2>
+                <ul>
+                    <li><strong>To authenticate you and maintain your session</strong> — necessary to provide the Service you have requested (GDPR Art. 6(1)(b), performance of a contract / service).</li>
+                    <li><strong>To store and use your Boomi credentials</strong> so the Service can call the Boomi API on your behalf when your agent invokes a tool — carried out on the basis of your <strong>explicit consent</strong>, which you give via the checkbox on the credentials page, and to provide the Service you request (Art. 6(1)(a) and 6(1)(b)).</li>
+                    <li><strong>To keep security, audit, and operational logs</strong> — our legitimate interest in securing the Service, preventing abuse, and ensuring reliability, and to meet our legal obligations (Art. 6(1)(f) and 6(1)(c)).</li>
+                </ul>
+                <p>We do <strong>not</strong> sell your data, share it for any party's independent purposes, or use it for advertising, profiling, or automated decision-making that produces legal or similarly significant effects.</p>
+
+                <h2><span class="num">4</span>Where and how it is stored</h2>
+                <ul>
+                    <li>Your Boomi credentials are stored in <strong>Google Cloud Secret Manager</strong>, <strong>encrypted at rest and in transit (TLS)</strong>.</li>
+                    <li>Access is <strong>IAM-controlled</strong>, <strong>isolated per user</strong>, and <strong>audit-logged</strong>. Credentials are <strong>validated against Boomi before</strong> they are saved, and each user is limited to a small number of stored profiles.</li>
+                    <li>The website and the MCP endpoint are served <strong>over HTTPS only</strong>.</li>
+                </ul>
+                <p>No method of transmission or storage is completely secure. You provide credentials at your own risk. We strongly recommend storing a <strong>scoped, least-privilege Boomi API token</strong> rather than a primary account password, and revoking the token in Boomi if you suspect it has been compromised.</p>
+
+                <h2><span class="num">5</span>Who we share it with (recipients &amp; processors)</h2>
+                <ul>
+                    <li><strong>Google Cloud Platform</strong> — hosting, Secret Manager, and logging, acting as our data processor.</li>
+                    <li><strong>Google LLC</strong> — Google Sign-In (OAuth) for authentication.</li>
+                    <li><strong>Boomi (Dell Technologies)</strong> — when your agent uses a tool, we transmit your stored credentials and the request to Boomi's API to fulfil it. Your use of Boomi is governed by your own agreement with Boomi.</li>
+                    <li><strong>Legal authorities</strong> — only where we are required to disclose by law.</li>
+                </ul>
+
+                <h2><span class="num">6</span>International transfers</h2>
+                <p>The Service is hosted on Google Cloud infrastructure in the <strong>United States</strong>. If you access it from the European Economic Area, the United Kingdom, or elsewhere, your personal data is transferred to and processed in the United States. Where required, such transfers rely on appropriate safeguards offered by our infrastructure provider, including Standard Contractual Clauses.</p>
+
+                <h2><span class="num">7</span>How long we keep it</h2>
+                <ul>
+                    <li><strong>Stored Boomi credentials</strong> are kept until you delete the profile (using the &ldquo;Delete&rdquo; control on your credentials page) or ask us to delete them. Deletion removes the corresponding secret from Secret Manager.</li>
+                    <li><strong>Session data</strong> expires automatically.</li>
+                    <li><strong>Operational logs</strong> are retained for a limited period under standard Google Cloud Logging retention, after which they are deleted.</li>
+                </ul>
+
+                <h2><span class="num">8</span>Your rights</h2>
+                <p>Subject to applicable law, you have the right to: <strong>access</strong> your data; <strong>rectify</strong> inaccurate data; <strong>erase</strong> your data; <strong>restrict</strong> or <strong>object</strong> to processing; <strong>data portability</strong>; and to <strong>withdraw consent</strong> at any time (without affecting processing already carried out). You can exercise erasure yourself at any time by deleting your profiles and signing out. For any other request, email <a href="mailto:hello@renera.ai">hello@renera.ai</a>.</p>
+                <p>You also have the right to lodge a complaint with your local data-protection supervisory authority if you believe your data has been handled unlawfully.</p>
+
+                <h2><span class="num">9</span>Your responsibilities</h2>
+                <p>Only store credentials that <strong>you are authorised to use</strong>. Do not store other people's personal data or credentials without a lawful basis and their knowledge. You are responsible for ensuring your use of the Service and of Boomi complies with your own organisation's policies and applicable law.</p>
+
+                <h2><span class="num">10</span>Children</h2>
+                <p>The Service is intended for professional use and is not directed to anyone under the age of 16. We do not knowingly collect data from children.</p>
+
+                <h2><span class="num">11</span>Trademarks &amp; affiliation</h2>
+                <p>&ldquo;Boomi&rdquo; is a trademark of Boomi, LP. &ldquo;Google&rdquo; and &ldquo;Google Cloud&rdquo; are trademarks of Google LLC. RenEra.ai is an independent project and is <strong>not affiliated with, endorsed by, or sponsored by</strong> Boomi or Google.</p>
+
+                <h2><span class="num">12</span>Changes to this notice</h2>
+                <p>We may update this notice from time to time. The &ldquo;Last updated&rdquo; date at the top reflects the current version. Material changes will be reflected here before they take effect.</p>
+
+                <h2><span class="num">13</span>Contact</h2>
+                <p>Questions, requests, or concerns about this notice or your data: <a href="mailto:hello@renera.ai">hello@renera.ai</a>.</p>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="footer__row">
+            <span class="mono">© 2026 RenEra.ai · Boomi MCP Server</span>
+            <div class="footer__links">
+                <a href="https://renera.ai" target="_blank" rel="noopener">RenEra.ai</a>
+                <a href="https://github.com/RenEra-ai/boomi-mcp-server" target="_blank" rel="noopener">GitHub</a>
+                <a href="/">Home</a>
+                <a href="mailto:hello@renera.ai">Contact</a>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

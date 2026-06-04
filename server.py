@@ -3842,6 +3842,13 @@ if not LOCAL_MODE:
 
         return HTMLResponse(html)
 
+    @mcp.custom_route("/privacy", methods=["GET"])
+    async def privacy_page(request: Request):
+        """Serve the public privacy / data-processing notice (no auth required)."""
+        template_path = Path(__file__).parent / "templates" / "privacy.html"
+        html = template_path.read_text()
+        return HTMLResponse(html)
+
     @mcp.custom_route("/api/credentials/validate", methods=["POST"])
     async def api_validate_credentials(request: Request):
         """API endpoint to validate Boomi credentials before saving."""
