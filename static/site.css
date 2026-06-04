@@ -591,6 +591,17 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
 }
 .user-chip .dot { background: var(--grass); }
 .user-chip strong { color: var(--ink); font-weight: 600; }
+.chip-signout {
+    padding-left: 11px;
+    border-left: 1px solid var(--line-strong);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    transition: color .2s ease;
+}
+.chip-signout:hover { color: var(--brand); }
 
 .field { margin-bottom: 18px; }
 .field > label {
@@ -720,6 +731,41 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
     transition: background .2s ease, color .2s ease, border-color .2s ease;
 }
 .btn-delete:hover { background: rgba(248,113,113,0.14); color: #fecaca; border-color: var(--danger); }
+
+/* Disable/Enable toggle — same pill geometry as .btn-delete, neutral/brand color */
+.btn-toggle {
+    background: transparent;
+    color: var(--ink-soft);
+    border: 1px solid var(--line-strong);
+    padding: 7px 14px;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .2s ease, color .2s ease, border-color .2s ease;
+}
+.btn-toggle:hover { background: rgba(192,132,252,0.10); color: var(--brand-hi); border-color: var(--brand); }
+
+/* "Disabled" status pill on a profile row */
+.badge--off {
+    flex-shrink: 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(90,82,122,0.16);
+    color: var(--ink-quiet);
+    border: 1px solid var(--line);
+}
+
+/* Dim a disabled profile's name */
+.profile-item.is-disabled .profile-name { color: var(--ink-quiet); opacity: 0.6; }
+
 .no-profiles { text-align: center; color: var(--ink-quiet); padding: 18px; font-style: italic; font-size: 14px; }
 
 /* ---------------------------- Legal / privacy doc ---------------------------- */

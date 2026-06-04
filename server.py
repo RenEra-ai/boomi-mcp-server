@@ -442,9 +442,42 @@ def put_secret(sub: str, profile: str, payload: Dict[str, str]):
     print(f"[INFO] Stored credentials for {sub}:{profile} (username: {payload.get('username', '')[:10]}***)")
 
 
-def get_secret(sub: str, profile: str) -> Dict[str, str]:
-    """Retrieve credentials for a user profile."""
-    return secrets_backend.get_secret(sub, profile)
+class DisabledProfileError(ValueError):
+    """Raised when a disabled profile is requested for MCP/API use.
+
+    Subclasses ``ValueError`` so callers that already handle ``ValueError``
+    (e.g. boomi_account_info) keep working.
+    """
+
+
+def get_secret(sub: str, profile: str, allow_disabled: bool = False) -> Dict[str, str]:
+    """Retrieve credentials for a user profile.
+
+    Disabled profiles are rejected (raise ``DisabledProfileError``) unless
+    ``allow_disabled=True``. MCP tools call this with the default, so a profile
+    the user disabled can never be resolved into a Boomi client; the web portal's
+    read/toggle paths pass ``allow_disabled=True`` to read it anyway.
+    """
+    creds = secrets_backend.get_secret(sub, profile)
+    if creds.get("disabled") and not allow_disabled:
+        raise DisabledProfileError(
+            _sanitize_error_msg(
+                f"Profile '{profile}' is disabled. Re-enable it in the web portal to use it."
+            )
+        )
+    return creds
+
+
+def _is_profile_disabled(sub: str, profile: str) -> bool:
+    """Best-effort check of a profile's disabled flag for listing.
+
+    Defaults to False on any read error so a transient fault never silently
+    hides a profile from the user.
+    """
+    try:
+        return bool(secrets_backend.get_secret(sub, profile).get("disabled"))
+    except Exception:
+        return False
 
 
 def list_profiles(sub: str):
@@ -739,6 +772,9 @@ def list_boomi_profiles():
         print(f"[INFO] list_boomi_profiles called by user: {subject}")
 
         profiles = list_profiles(subject)
+        # Hide disabled profiles from the LLM entirely — a disabled profile must
+        # not be visible to or usable by MCP.
+        profiles = [p for p in profiles if not _is_profile_disabled(subject, p["profile"])]
         print(f"[INFO] Found {len(profiles)} profiles for {subject}")
 
         if not profiles:
@@ -824,6 +860,12 @@ def boomi_account_info(profile: str):
         creds = get_secret(subject, profile)
         print(f"[INFO] Successfully retrieved stored credentials for {subject}:{profile}")
         print(f"[INFO] Account ID: {creds.get('account_id')}, Username: {creds.get('username', '')[:20]}...")
+    except DisabledProfileError as e:
+        print(f"[INFO] Profile '{profile}' is disabled for {subject}")
+        return {
+            "_success": False,
+            "error": str(e),
+        }
     except ValueError as e:
         print(f"[ERROR] Profile '{profile}' not found for user {subject}: {e}")
 
@@ -3851,6 +3893,13 @@ if not LOCAL_MODE:
 
         return HTMLResponse(html)
 
+    @mcp.custom_route("/web/logout", methods=["GET"])
+    async def web_logout(request: Request):
+        """Clear the web session and return to the login page."""
+        if hasattr(request, "session"):
+            request.session.clear()
+        return RedirectResponse("/")
+
     @mcp.custom_route("/privacy", methods=["GET"])
     async def privacy_page(request: Request):
         """Serve the public privacy / data-processing notice (no auth required)."""
@@ -3951,9 +4000,14 @@ if not LOCAL_MODE:
             return JSONResponse({"error": "Authentication required"}, status_code=401)
 
         profiles_data = list_profiles(subject)
-        profile_names = [p["profile"] for p in profiles_data]
+        # Web UI sees ALL profiles, each annotated with its disabled state
+        # (unlike the LLM tool, which hides disabled profiles entirely).
+        profiles = [
+            {"name": p["profile"], "disabled": _is_profile_disabled(subject, p["profile"])}
+            for p in profiles_data
+        ]
 
-        return JSONResponse({"profiles": profile_names})
+        return JSONResponse({"profiles": profiles})
 
     @mcp.custom_route("/api/profiles/{profile}", methods=["DELETE"])
     async def api_delete_profile(request: Request):
@@ -3972,6 +4026,33 @@ if not LOCAL_MODE:
             })
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+
+    @mcp.custom_route("/api/profiles/{profile}/disabled", methods=["POST"])
+    async def api_set_profile_disabled(request: Request):
+        """Enable/disable a profile for LLM/MCP access without deleting it.
+
+        Body: {"disabled": true|false}. A disabled profile stays stored but is
+        hidden from list_boomi_profiles and rejected by get_secret.
+        """
+        subject = get_authenticated_user(request)
+        if not subject:
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
+
+        profile = request.path_params["profile"]
+
+        try:
+            body = await request.json()
+            disabled = bool(body.get("disabled"))
+            # Read even when currently disabled so an enable can read it back.
+            creds = dict(get_secret(subject, profile, allow_disabled=True))
+            creds["disabled"] = disabled
+            put_secret(subject, profile, creds)
+            return JSONResponse({
+                "success": True,
+                "message": f"Profile '{profile}' {'disabled' if disabled else 'enabled'}",
+            })
+        except Exception as e:
+            return JSONResponse({"error": _sanitize_error_msg(str(e))}, status_code=400)
 
 
 # --- Boomi Docs KB (optional) ---
