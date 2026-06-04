@@ -1,7 +1,7 @@
 # Integration Authoring Roadmap
 
 Status: active
-Last updated: 2026-05-30
+Last updated: 2026-06-04
 Parent design: `docs/MCP_TOOL_DESIGN.md`
 
 ## Summary
@@ -21,7 +21,7 @@ Dates assume one main implementer, code review time, and live Boomi QA buffers. 
 | M2 `database_to_api_sync` Vertical Slice | 2026-05-18 | 2026-05-30 | Done 2026-05-30 (#21-#31, #40-#46, #49, and #30 closed; parent #8 closed) |
 | M3 Deploy and Test Orchestration | 2026-05-31 | 2026-06-07 | Next; split into #60-#66 plus reliability follow-up #51 |
 | M4 Agent Ergonomics | 2026-06-08 | 2026-06-12 | Depends on M1/M2 tool surface and M3 workflow handoff |
-| M5 API Variants | 2026-06-15 | 2026-06-26 | Depends on M2/M4; includes #32 and #50 |
+| M5 API Variants | 2026-06-15 | 2026-06-26 | Depends on M2/M4; semantic sync_pipeline foundation first, then API/DB presets (M5.0–M5.9 under #11; includes #32, #50) |
 | M6 Event and Listener Variants | 2026-06-29 | 2026-07-03 | Depends on M3/M5 |
 | M7 Discovery Tools | 2026-07-06 | 2026-07-10 | Depends on core archetypes; #47/#48 already staged |
 | M8 Archetype Composition | 2026-07-13 | 2026-07-17 | Depends on at least 2 stable archetypes plus deploy/test orchestration |
@@ -212,33 +212,48 @@ Validation:
 - MCP tests for `list_capabilities` workflow block.
 - `rg` over examples confirms anti-template labeling.
 
-## M5: API Variants
+## M5: API Variants Over a Semantic Sync Pipeline
 
-Status: Scheduled 2026-06-15 to 2026-06-26. Parent #11 remains the milestone epic. Existing staged issues: #32 for database Send/write profile support and #50 for REST/profile update-preservation hardening before broader API variants stress those builders.
+Status: Scheduled 2026-06-15 to 2026-06-26. Parent #11 is the milestone epic. M5 builds a reusable semantic `sync_pipeline` foundation first, then adds API/database variants as thin presets over it — not as new source/destination-pair archetypes.
 
-Goal: broaden from DB-to-REST into the main scheduled sync cases.
+Goal: add a reusable semantic pipeline layer, connector-operation primitives, and backward-compatible presets for API/database variants. The stable abstraction is stage semantics (read, fetch, lookup, map, send, write, finalize); connector direction is preset metadata, not the architecture.
 
-Implementation focus:
+Ordering (pipeline foundation before variants):
 
-- Add `api_to_database_sync`.
-- Add `api_to_api_sync`.
-- Add REST fetch and pagination support.
-- Add OData source adapter and `odata_fetch` primitive.
-- Add SOAP source/target adapter support where required by a real task.
-- Keep task-specific OData filters, SOAP operation inputs, REST payloads, and mappings as open parameters.
-- Close update-preservation hardening for REST/profile-heavy paths (#50) before relying on repeated update flows in API variants.
+1. M5.0 — Update design docs and issue DAG for the semantic sync pipeline.
+2. M5.1 — Add the PipelineSpec stage model and semantic validator (internal stage graph; no new Boomi XML; `IntegrationSpecV1` stays backward-compatible).
+3. M5.2 — Add the `sync_pipeline` process builder for verified linear flows.
+4. M5.3 — Preserve `database_to_api_sync` as a compatibility adapter over `sync_pipeline` (no public behavior change; no mandatory audit/reliability shell injected into legacy output).
+5. M5.4 — Add the REST fetch/source primitive.
+6. M5.5 (#50) — Complete inner-object preservation hardening and REST conditional emission.
+7. M5.6 (#32) — Add database Send/write operation and write profile support (component-level only, not a full preset).
+8. M5.7 — Add the `api_to_api_sync` preset (REST fetch → transform → REST send).
+9. M5.8 — Add the `api_to_database_sync` preset (REST fetch → transform → database write).
+10. M5.9 — Live QA for the new `sync_pipeline` presets via live MCP calls and deploy/test orchestration when M3 is available.
+
+New child issues M5.0–M5.4 and M5.7–M5.9 are tracked under parent #11; existing issues #50 and #32 are reordered into the sequence as M5.5 and M5.6.
+
+Constraints:
+
+- `database_to_api_sync` stays backward-compatible; `sync_pipeline` is internal process-builder vocabulary, not a public archetype name.
+- Audit/provenance is opt-in metadata in v1, not a mandatory always-on shell.
+- Try/Catch, DLQ, Branch, Process Call, and retry behavior stay gated until their Boomi XML and live behavior are verified through the reliability follow-up #51 (or a follow-up live-XML issue).
+- Keep task-specific OData filters, SOAP operation inputs, REST payloads, and field mappings as open parameters. No canned SQL, payloads, maps, SOAP envelopes, OData filters, or raw Boomi XML templates.
+- Expand primitives before presets: `rest_fetch` before `api_to_api_sync`; `db_write` (#32) before `api_to_database_sync`.
+- OData and SOAP source/target adapters are follow-on primitives over the same pipeline contract, added after the REST presets are validated — not as separate pairwise archetypes.
 
 Exit criteria:
 
-- REST-to-DB, REST-to-REST, OData-to-REST, and one SOAP-involved scenario can emit valid `IntegrationSpecV1`.
-- Protocol-specific builders are introduced only where required by these archetypes.
-- No product-specific archetype forks are introduced for Elite 3e, Aderant, Microsoft Graph, Dynamics, or similar systems.
+- A `sync_pipeline` builder emits the same linear shape currently used for `database_to_api_sync`, and existing `database_to_api_sync` tests stay green.
+- `api_to_api_sync` and `api_to_database_sync` are implemented as thin presets that map to `sync_pipeline` stages, inspectable through existing MCP planning/review flows.
+- No raw XML or canned payload templates are exposed; no product-specific archetype forks (Elite 3e, Aderant, Microsoft Graph, Dynamics, or similar) are introduced.
+- Try/Catch, DLQ, and retry behavior remain gated unless verified live through #51.
 
 Validation:
 
-- Golden-spec tests for each new archetype.
-- Builder tests for REST, OData, and SOAP payload emission.
-- Live Boomi QA for at least one REST-to-DB and one API-to-API flow.
+- Validator unit tests reject duplicate stage keys, unknown refs, cycles, invalid side-effect ordering, and unsupported failure modes.
+- Builder tests cover linear `sync_pipeline` emission and `database_to_api_sync` adapter equivalence; retry/DLQ/Branch/Process Call paths fail closed until verified.
+- Live Boomi QA for at least one REST-to-REST and one REST-to-DB flow once the presets exist; deploy/test QA uses `orchestrate_deploy` when M3 is complete.
 
 ## M6: Event and Listener Variants
 
@@ -277,14 +292,14 @@ Implementation focus:
   - `discover_odata_metadata`
   - `discover_db_schema`
   - `infer_profile_fields` for DB metadata, sample JSON, XSD, and sample XML (Issue #47)
-  - `import_existing_integration` for migration artifacts/descriptions to `IntegrationSpecV1` drafts (Issue #48)
+  - `import_existing_integration` for migration artifacts/descriptions to pipeline drafts / preset parameters and `IntegrationSpecV1` drafts (Issue #48) — imports yield pipeline drafts and preset parameters, not source/destination-pair templates
 - Return structured schema/spec summaries suitable for LLM reasoning.
 - Keep discovery separate from archetype building. Discovery suggests possible values but does not create hidden templates.
 
 Exit criteria:
 
 - The LLM can inspect source/target schema information before filling archetype parameters.
-- Existing integration artifacts or descriptions can be converted into reviewable `IntegrationSpecV1` drafts before normal build workflow.
+- Existing integration artifacts or descriptions can be converted into reviewable pipeline drafts / preset parameters (`IntegrationSpecV1`) before normal build workflow.
 - Discovery tools do not mutate Boomi or customer systems.
 - DB discovery does not require direct customer JDBC access from the MCP host.
 
@@ -296,7 +311,7 @@ Validation:
 
 ## M8: Archetype Composition
 
-Goal: support larger integrations by composing stable standalone archetypes.
+Goal: support larger integrations by composing stable presets/archetypes after the semantic `sync_pipeline` foundation exists — advanced composition covering branching, fanout, subprocesses, and complex orchestration.
 
 Implementation focus:
 

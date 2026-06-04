@@ -2,7 +2,7 @@
 
 Status: active
 Version: 3.0
-Last updated: 2026-05-23
+Last updated: 2026-06-04
 Supersedes: `docs/archive/MCP_TOOL_DESIGN_V2_2026-03-10.md`
 
 ## 1. Purpose
@@ -139,6 +139,18 @@ Planned tool:
 
 This tool should package, deploy, attach runtime, apply schedule when needed, execute a test run when requested, poll until terminal state, fetch logs, and return a concise deployment/test summary.
 
+### Semantic sync pipeline foundation (M5 direction)
+
+From M5 onward, integration authoring is framed as **presets over reusable semantic stages**, not as source/destination-pair templates. The layering is: preset selection → pipeline stages → reusable primitives → `IntegrationSpecV1`. The stable abstraction is stage semantics (read, fetch, lookup, map, send, write, finalize); connector direction is preset metadata, not the architecture.
+
+- A **preset** (for example `database_to_api_sync`) is a thin adapter that selects a stage graph. Presets differ by the stages and primitives they choose, not by duplicated per-pair process XML.
+- `sync_pipeline` is the **internal** process-builder kind that compiles a verified linear stage graph. It is not a public archetype name unless deliberately exposed later.
+- `database_to_api_sync` stays the public preset/archetype name and a backward-compatible compatibility adapter over `sync_pipeline`. `IntegrationSpecV1` is not replaced.
+- Each stage declares its execution semantics — cardinality, context effect, side effect, and failure behavior — so the validator checks correctness before any process XML or component planning runs.
+- **Audit/provenance is opt-in metadata in v1**, not a mandatory always-on shell. Try/Catch, DLQ, Branch, Process Call, and retry behavior stay gated until their Boomi XML and live behavior are verified (see `docs/INTEGRATION_AUTHORING_ROADMAP.md` M5 and the reliability follow-up #51).
+
+API/database variants (`api_to_api_sync`, `api_to_database_sync`) are added as thin presets over this foundation once the REST fetch source and database write primitives exist, rather than as independent pairwise archetypes.
+
 ## 5. Archetype Contract
 
 An archetype is implemented as a Python class under a future `src/boomi_mcp/patterns/archetypes/` package.
@@ -193,7 +205,11 @@ Allowed in archetype source:
 
 This lets one archetype handle Elite 3e, Aderant, Microsoft Graph, Dynamics, SAP OData, generic SOAP, and generic REST cases through different parameter values instead of different hardcoded product patterns.
 
+Presets extend this principle to connector pairs: they compose the same reusable stages and primitives and must not duplicate per-pair process XML or ship per-pair content templates. A new connector pair is a new parameter set over the shared `sync_pipeline` foundation, not a new hardcoded builder.
+
 ## 7. Initial Archetype Families
+
+`database_to_api_sync` is the reference preset. The API/database variants below are **thin presets over the shared `sync_pipeline` foundation** (see §4), reusing the `rest_fetch` and `db_write` primitives — not independent pairwise builders.
 
 ### `database_to_api_sync`
 
@@ -229,6 +245,8 @@ can swap one for the other without changing the rest of the spec.
 
 ### `api_to_database_sync`
 
+Thin preset over `sync_pipeline` (REST fetch → transform → database write), gated on the `rest_fetch` source primitive and `db_write` operation support.
+
 Scheduled API extraction into a database target.
 
 Typical sources:
@@ -240,6 +258,8 @@ Typical sources:
 Typical target: database insert/upsert operation.
 
 ### `api_to_api_sync`
+
+Thin preset over `sync_pipeline` (REST fetch → transform → REST send), gated on the `rest_fetch` source primitive.
 
 Scheduled or manually triggered API-to-API flow with optional transform.
 
