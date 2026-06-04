@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import sys
+from html import escape as html_escape
 from enum import Enum
 from typing import Any, Dict
 from pathlib import Path
@@ -3842,7 +3843,10 @@ if not LOCAL_MODE:
         display_email = subject
         if hasattr(request, "session"):
             display_email = request.session.get("user_email") or subject
-        html = html.replace("{{ user_email }}", display_email)
+        # Escape for the HTML context the value is rendered into (the
+        # "Signed in as" chip). The email originates from the OIDC token, which
+        # is decoded without signature verification, so never interpolate it raw.
+        html = html.replace("{{ user_email }}", html_escape(display_email))
         html = html.replace("{{ server_url }}", server_url)
 
         return HTMLResponse(html)
