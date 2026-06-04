@@ -3836,8 +3836,13 @@ if not LOCAL_MODE:
 
         server_url = f"{base_url}/mcp"
 
-        # Replace template variables
-        html = html.replace("{{ user_email }}", subject)
+        # Replace template variables. `subject` is the Google `sub` (used for
+        # auth + per-user secret scoping); for display, prefer the human-readable
+        # email captured at login, falling back to the subject if unavailable.
+        display_email = subject
+        if hasattr(request, "session"):
+            display_email = request.session.get("user_email") or subject
+        html = html.replace("{{ user_email }}", display_email)
         html = html.replace("{{ server_url }}", server_url)
 
         return HTMLResponse(html)
