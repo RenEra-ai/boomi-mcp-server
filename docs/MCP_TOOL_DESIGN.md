@@ -320,7 +320,7 @@ Initial primitive set:
 - `map_script_transform`
 - `xml_json_convert`
 - `rest_send_with_retry`
-- `db_upsert`
+- `db_write`
 - `soap_send`
 - `schedule_envelope`
 - `watermark_state`
