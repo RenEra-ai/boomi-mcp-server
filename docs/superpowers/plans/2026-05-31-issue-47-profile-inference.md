@@ -12,7 +12,7 @@
 
 ## Relationship to the architect plan JSON (source of truth) + intentional deviations
 
-Source of truth: `docs/plans/issue_47_profile_inference_discovery_plan.json`. This plan realizes that intent. **Two conscious deviations (flagged for the plan-reviewer / architect):**
+Originally driven by the issue #47 architect plan JSON (since removed now that the work is merged). This plan documents how that intent was realized. **Two conscious deviations (flagged for the plan-reviewer / architect):**
 
 1. **File layout.** The architect JSON puts the action at `src/boomi_mcp/categories/profile_inference.py` and says helpers may live "in `profile_generation.py` or a sibling helper". The **user's explicit instruction** (and the resume-state memory) places the pure inference fns in a new **`src/boomi_mcp/categories/components/builders/profile_inference.py`** (sibling of `profile_generation.py`) and the **action `infer_profile_fields_action` in `integration_authoring.py`**. User instruction outranks the JSON on module placement; the *intent* (pure layer + read-only wrapper, reuse #43) is unchanged. Chosen layout:
    - `…/components/builders/profile_inference.py` — `PROFILE_INFERENCE_*` codes + 4 pure `infer_profile_*` fns (parse → delegate).
