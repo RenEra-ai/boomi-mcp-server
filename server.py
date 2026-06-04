@@ -3769,6 +3769,10 @@ if not LOCAL_MODE:
             "state": state,
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
+            # Always show Google's account chooser so a user who signed out can
+            # pick a DIFFERENT Google account. Without this, Google silently
+            # reuses its active session and re-logs the previous account.
+            "prompt": "select_account",
         }
 
         auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(auth_params)
