@@ -869,14 +869,19 @@ def boomi_account_info(profile: str):
     except ValueError as e:
         print(f"[ERROR] Profile '{profile}' not found for user {subject}: {e}")
 
-        # List available profiles
-        available_profiles = list_profiles(subject)
-        print(f"[INFO] Available profiles for {subject}: {[p['profile'] for p in available_profiles]}")
+        # List available profiles, excluding disabled ones — disabled profiles
+        # are hidden from MCP, so they must not leak through this suggestion list.
+        available_profiles = [
+            p["profile"]
+            for p in list_profiles(subject)
+            if not _is_profile_disabled(subject, p["profile"])
+        ]
+        print(f"[INFO] Available profiles for {subject}: {available_profiles}")
 
         result = {
             "_success": False,
             "error": f"Profile '{profile}' not found. {'Use set_boomi_credentials to add credentials.' if LOCAL_MODE else 'Please store credentials at the web portal first.'}",
-            "available_profiles": [p["profile"] for p in available_profiles],
+            "available_profiles": available_profiles,
         }
         if not LOCAL_MODE:
             result["web_portal"] = "https://boomi-mcp-server-126964451821.us-central1.run.app/"

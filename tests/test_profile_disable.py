@@ -123,3 +123,22 @@ def test_boomi_account_info_rejects_disabled_profile():
         result = _call_tool(server.boomi_account_info, profile="prod")
     assert result["_success"] is False
     assert "disabled" in result["error"].lower()
+
+
+def test_account_info_notfound_hides_disabled_from_suggestions():
+    """A not-found response must not leak disabled profile names via available_profiles."""
+    store = {"enabledP": _ENABLED, "disabledP": _DISABLED}
+
+    def backend_get(sub, profile):
+        if profile not in store:
+            raise ValueError(f"Profile '{profile}' not found")
+        return dict(store[profile])
+
+    with patch.object(server, "get_current_user", return_value="sub"), \
+         patch.object(server, "list_profiles",
+                      return_value=[{"profile": "enabledP"}, {"profile": "disabledP"}]), \
+         patch.object(server.secrets_backend, "get_secret", side_effect=backend_get):
+        result = _call_tool(server.boomi_account_info, profile="ghost")
+    assert result["_success"] is False
+    assert result["available_profiles"] == ["enabledP"]
+    assert "disabledP" not in result["available_profiles"]
