@@ -24,7 +24,7 @@ Dates assume one main implementer, code review time, and live Boomi QA buffers. 
 | M5 API Variants | 2026-06-15 | 2026-06-26 | Depends on M2/M4; semantic sync_pipeline foundation first, then API/DB presets (M5.0–M5.9 under #11; includes #32, #50) |
 | M6 Event and Listener Variants | 2026-06-29 | 2026-07-03 | Depends on M3/M5 |
 | M7 Discovery Tools | 2026-07-06 | 2026-07-10 | Depends on core archetypes; #47/#48 already staged |
-| M8 Archetype Composition | 2026-07-13 | 2026-07-17 | Depends on at least 2 stable archetypes plus deploy/test orchestration |
+| M8 Archetype Composition | 2026-07-13 | 2026-07-17 | Depends on the semantic sync_pipeline foundation, at least 2 stable presets, plus deploy/test orchestration |
 
 ## M0: Docs Alignment
 
@@ -315,7 +315,7 @@ Goal: support larger integrations by composing stable presets/archetypes after t
 
 Implementation focus:
 
-- Add `compose_archetypes(parts)` after at least three standalone archetypes are proven.
+- Add `compose_archetypes(parts)` after at least two standalone presets are proven over the semantic `sync_pipeline` foundation.
 - Add document handoff primitive for linking parts.
 - Add validation that output contracts from one part match input contracts of the next.
 - Add at least one composed flow, such as DB source -> transform stage -> multi-target API fanout.
