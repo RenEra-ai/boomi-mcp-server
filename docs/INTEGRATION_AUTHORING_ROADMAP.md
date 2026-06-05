@@ -1,7 +1,7 @@
 # Integration Authoring Roadmap
 
 Status: active
-Last updated: 2026-06-04
+Last updated: 2026-06-05
 Parent design: `docs/MCP_TOOL_DESIGN.md`
 
 ## Summary
@@ -12,19 +12,19 @@ Each milestone should be implemented as one project epic with smaller issues und
 
 ## Roadmap Dates
 
-Dates assume one main implementer, code review time, and live Boomi QA buffers. Repository milestones are the source of truth for due dates. This schedule was accelerated again on 2026-05-30 after M2 completed on 2026-05-30, thirteen days ahead of its prior 2026-06-12 due date. The new cadence keeps short QA buffers but removes the old multi-week gaps: M3 and M4 are each one focused week, M5 keeps a two-week window because it introduces new archetype direction and DB-write support, and M6-M8 each get one focused week after their prerequisites land.
+Dates assume one main implementer, code review time, and live Boomi QA buffers. Repository milestones are the source of truth for due dates. This schedule was accelerated again on 2026-05-30 after M2 completed on 2026-05-30, thirteen days ahead of its prior 2026-06-12 due date. The new cadence keeps short QA buffers but removes the old multi-week gaps: M3 and M4 are each one focused week, M5 keeps a two-week window because it introduces new archetype direction and DB-write support, and M6-M8 each get one focused week after their prerequisites land. On 2026-06-05 the remaining schedule was shifted to start M3 on Monday 2026-06-08, placing each later milestone on a clean Monday-Friday week (M5 spanning two weeks); M0-M2 dates are historical and unchanged.
 
 | Milestone | Start | Due | Status |
 |---|---:|---:|---|
 | M0 Docs Alignment | 2026-05-15 | 2026-05-15 | Done 2026-05-15 |
 | M1 Archetype Framework Skeleton | 2026-05-15 | 2026-05-16 | Done 2026-05-16 (sub-issues #15-#20 closed; 361 tests passing) |
 | M2 `database_to_api_sync` Vertical Slice | 2026-05-18 | 2026-05-30 | Done 2026-05-30 (#21-#31, #40-#46, #49, and #30 closed; parent #8 closed) |
-| M3 Deploy and Test Orchestration | 2026-05-31 | 2026-06-07 | Next; split into #60-#66 plus reliability follow-up #51 |
-| M4 Agent Ergonomics | 2026-06-08 | 2026-06-12 | Depends on M1/M2 tool surface and M3 workflow handoff |
-| M5 API Variants | 2026-06-15 | 2026-06-26 | Depends on M2/M4; semantic sync_pipeline foundation first, then API/DB presets (M5.0–M5.9 under #11; includes #32, #50) |
-| M6 Event and Listener Variants | 2026-06-29 | 2026-07-03 | Depends on M3/M5 |
-| M7 Discovery Tools | 2026-07-06 | 2026-07-10 | Depends on core archetypes; #47/#48 already staged |
-| M8 Archetype Composition | 2026-07-13 | 2026-07-17 | Depends on the semantic sync_pipeline foundation, at least 2 stable presets, plus deploy/test orchestration |
+| M3 Deploy and Test Orchestration | 2026-06-08 | 2026-06-12 | Next; split into #60-#66 plus reliability follow-up #51 |
+| M4 Agent Ergonomics | 2026-06-15 | 2026-06-19 | Depends on M1/M2 tool surface and M3 workflow handoff |
+| M5 API Variants | 2026-06-22 | 2026-07-03 | Depends on M2/M4; semantic sync_pipeline foundation first, then API/DB presets (M5.0–M5.9 under #11; includes #32, #50) |
+| M6 Event and Listener Variants | 2026-07-06 | 2026-07-10 | Depends on M3/M5 |
+| M7 Discovery Tools | 2026-07-13 | 2026-07-17 | Depends on core archetypes; #47/#48 already staged |
+| M8 Archetype Composition | 2026-07-20 | 2026-07-24 | Depends on the semantic sync_pipeline foundation, at least 2 stable presets, plus deploy/test orchestration |
 
 ## M0: Docs Alignment
 
@@ -151,7 +151,7 @@ Validation:
 
 ## M3: Deploy and Test Orchestration
 
-Status: Next — due 2026-06-07. Parent #9 is split into #60-#66. Reliability follow-up #51 is also assigned to M3 because runtime failure proof requires verified Try/Catch/DLQ behavior, but #51 is not a child of #9.
+Status: Next — due 2026-06-12. Parent #9 is split into #60-#66. Reliability follow-up #51 is also assigned to M3 because runtime failure proof requires verified Try/Catch/DLQ behavior, but #51 is not a child of #9.
 
 Goal: remove the post-apply manual chain for agents.
 
@@ -214,7 +214,7 @@ Validation:
 
 ## M5: API Variants Over a Semantic Sync Pipeline
 
-Status: Scheduled 2026-06-15 to 2026-06-26. Parent #11 is the milestone epic. M5 builds a reusable semantic `sync_pipeline` foundation first, then adds API/database variants as thin presets over it — not as new source/destination-pair archetypes.
+Status: Scheduled 2026-06-22 to 2026-07-03. Parent #11 is the milestone epic. M5 builds a reusable semantic `sync_pipeline` foundation first, then adds API/database variants as thin presets over it — not as new source/destination-pair archetypes.
 
 Goal: add a reusable semantic pipeline layer, connector-operation primitives, and backward-compatible presets for API/database variants. The stable abstraction is stage semantics (read, fetch, lookup, map, send, write, finalize); connector direction is preset metadata, not the architecture.
 
