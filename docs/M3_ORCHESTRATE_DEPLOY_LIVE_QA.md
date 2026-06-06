@@ -153,6 +153,15 @@ process completes without an external dependency.
 
 ```python
 spec = server.build_from_archetype("database_to_api_sync", PARAMS)["integration_spec"]
+
+# Dry-run the build apply FIRST (Core rule 4 / AC "dry-run first") — no mutation.
+dry = server.build_integration(
+    profile=PROFILE, action="apply",
+    config=json.dumps({"integration_spec": spec, "conflict_policy": "fail"}),  # dry_run defaults true
+)
+assert dry["dry_run"] is True and dry["_success"] is True
+
+# Then the real apply (dry_run=false) — creates the components, returns the build_id.
 applied = server.build_integration(
     profile=PROFILE, action="apply",
     config=json.dumps({"integration_spec": spec, "conflict_policy": "fail", "dry_run": False}),
@@ -225,11 +234,19 @@ Runtime:       6bbff870-c270-43f3-a2ac-5c8893e2b379 (renera-local-atom, ONLINE_R
 
 Step 0  target confirm ........ PASS (Sandbox=TEST, runtime ONLINE_RUNNING)
 Step 1  build_from_archetype ... PASS (_success, boomi_mutation=false, 8 component specs)
-        build_integration apply (dry-run) ... PASS (dry_run=true)
+        build_integration apply (dry-run) ... PASS (dry_run=true, _success=true)
         build_integration apply (real) ...... PASS
           build_id:      caa425aa-0972-40af-b844-0a914e78ce89
-          created:       6 components (DB read profile, DB Get op, Target Profile,
-                         REST Send op, Field Map, main process) + 2 reused connections
+          created components (6):
+            profile.db        DB Read Profile  4f38cb83-9351-42bc-916b-edd6e23f6b95
+            connector-action  DB Get           61083805-344f-4340-a3f7-57404b2d8109
+            profile.json      Target Profile   0d021ff0-75c1-4c75-a05d-38eec5384a67
+            connector-action  REST Send        2a93d37d-ff9e-43c2-9bab-328aaac7cb4e
+            transform.map     Field Map        0b529101-4c7b-4365-9aa0-c9c4b4bbd191
+            process           DB to API Sync   3b878b83-9fa0-40ad-b388-2daa46ebc7c4
+          reused connections (2):
+            connector-settings  MS SQL Server Orders DB  107aaef1-cb1e-4975-be44-69d120803864
+            connector-settings  REST None                7f7e0730-1152-4467-b912-e3a8ed12782a
 Step 2  orchestrate_deploy dry-run ... PASS (_success, plan_only=true; all stages "planned")
 Step 3  orchestrate_deploy real (run_test=false) ... PASS (_success=true)
           package:       created   3acd5ef7-1d60-4c40-b85b-fbf5f6b3d20a (version caa425aa…)
@@ -245,9 +262,21 @@ Step 4  orchestrate_deploy real (run_test=true) ... PASS (_success=true)
           download_url:  https://platform.boomi.com/account/reneraai-5RO3DD/api/download/ProcessLog-…
 Step 5  controlled failure (invalid build_id) ... PASS
           _success=false, errors[0].code = BUILD_ID_UNKNOWN, no resources created
-Step 6  cleanup ... PASS (undeploy + delete_package + 6 component deletes all _success;
-          env / runtime / reused connections untouched)
+Step 6  cleanup ... PASS (every call _success=true; reverse creation order)
+          manage_deployment  undeploy        deployment 577afecb-3a51-405d-a951-70c39632daf8  -> ok
+          manage_deployment  delete_package  package    3acd5ef7-1d60-4c40-b85b-fbf5f6b3d20a  -> ok
+          manage_component   delete          3b878b83-9fa0-40ad-b388-2daa46ebc7c4 (process)   -> ok
+          manage_component   delete          0b529101-4c7b-4365-9aa0-c9c4b4bbd191 (map)       -> ok
+          manage_component   delete          2a93d37d-ff9e-43c2-9bab-328aaac7cb4e (REST Send) -> ok
+          manage_component   delete          0d021ff0-75c1-4c75-a05d-38eec5384a67 (Target Pf) -> ok
+          manage_component   delete          61083805-344f-4340-a3f7-57404b2d8109 (DB Get)    -> ok
+          manage_component   delete          4f38cb83-9351-42bc-916b-edd6e23f6b95 (DB Read Pf)-> ok
+          left untouched: environment, runtime, both reused connections
 ```
+
+All evidence above was produced by the documented `server.*(...)` tool calls
+(Steps 0–6 of the workflow) against profile `reneraai-5RO3DD`; the reused-by-id
+connections mean no plaintext credentials were authored.
 
 Run-test log excerpt (Step 4) — the process ran on the runtime and completed:
 

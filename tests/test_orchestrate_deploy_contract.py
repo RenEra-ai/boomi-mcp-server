@@ -991,6 +991,44 @@ def test_real_run_skips_process_atom_leg_on_environment_account(registry, monkey
     assert result.get("failed_stage") is None
 
 
+def test_real_run_skips_process_atom_leg_when_attach_returns_environment_signal(registry, monkeypatch):
+    """Companion to the list-failure case: the environment-account signal can also surface from the
+    ``attach_process_atom`` call (when the list succeeds with no matching attachment, so an attach is
+    attempted). The fix detects the signal on ``error.message`` regardless of which sub-call raised
+    it, so the leg is still recorded ``not_required`` and the stage succeeds."""
+    bid = registry("b-rt-envacct2", _single_process_entry(process_id="CID-1"))
+    deployment = {
+        **_deploy_ok(bid),
+        # runtime<->env + process<->env reuse; process<->atom list succeeds EMPTY -> attach is tried.
+        **_process_attachments("rt-1", "env-1", "CID-1", atom_attached=False),
+    }
+    deployment["attach_process_atom"] = {
+        "_success": False,
+        "error": ("Action 'attach_process_atom' failed: This account uses environments. "
+                  "Please use ComponentEnvironmentAttachment"),
+    }
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment=deployment,
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=True),
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    rta = result["runtime_attachment"]
+    assert rta["status"] == "reused"
+    assert rta["process_runtime_attachment_status"] == "not_required"
+    assert rta["process_runtime_attachment_id"] is None
+    # The attach WAS attempted (list returned empty) and returned the environment signal.
+    assert "attach_process_atom" in dep.actions_called()
+    assert result["schedule"]["status"] == "not_required"
+    assert result.get("failed_stage") is None
+
+
 def test_runtime_attachment_api_failure_is_structured_and_blocks_schedule(registry, monkeypatch):
     bid = registry("b-rt-fail", _single_process_entry(process_id="CID-1"))
     runtimes = _ok_runtime("rt-1", "env-1", attached=False)
