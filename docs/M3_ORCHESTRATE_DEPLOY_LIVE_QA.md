@@ -83,6 +83,18 @@ runtime via the environment. This is corroborated directly by the live platform 
 Boomi's own API returns the message above, and the post-fix run executed the
 process to `COMPLETE` (evidence below).
 
+**Confirmed by Boomi documentation.** The Boomi developer docs mark the
+`Process Atom Attachment` object as *"Legacy deployment, Deprecated… a deprecated
+API and should no longer be used. Non-environment functionality was removed… all
+accounts are changed to utilize Environments. Therefore, Boomi recommends that you
+take advantage of the API functionality provided by the Process Environment
+Attachment object instead."* (the same is stated for `Component Atom Attachment`).
+So the direct process↔atom binding is deprecated platform-wide, and the
+process↔environment attachment the engine already performs is the correct,
+recommended binding — the fix matches Boomi's documented direction, not just this
+account's behavior. Refs: Boomi *Process Atom Attachment object (Legacy
+deployment, Deprecated)* and *Environment Atom Attachment object*.
+
 ## Tooling note
 
 The unified `server.py` registers each MCP tool as a plain module-level function,
