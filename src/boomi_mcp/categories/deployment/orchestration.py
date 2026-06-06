@@ -38,7 +38,7 @@ registry and breaks build resolution.
 
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, StrictBool, ValidationError
 
 from .. import integration_builder  # registry accessed at call time — see module docstring
 from .packages import manage_deployment_action  # sibling action reused for package/deploy
@@ -145,10 +145,13 @@ class OrchestrateDeployRequest(BaseModel):
     run_test: bool = False
     dry_run: bool = True
     package_version: Optional[str] = None
-    # Failure-recovery input (issue #65). Plain ``bool`` to match ``dry_run``/``run_test``; the
-    # non-bool guard lives in the server.py wrapper. Only consulted on failed real-run paths:
-    # False (default) returns a dry-run cleanup PLAN; True executes the planned cleanup.
-    cleanup_on_failure: bool = False
+    # Failure-recovery input (issue #65). ``StrictBool`` (not plain ``bool``) because this flag
+    # TRIGGERS DESTRUCTION: True executes undeploy/delete/detach. Plain ``bool`` lax-coerces
+    # ``"yes"``/``1``/``"true"`` to True, so a direct engine caller bypassing the wrapper's bool
+    # guard could silently opt into destructive cleanup. StrictBool rejects non-bool with a
+    # structured INVALID_REQUEST at request construction, before any SDK call. Only consulted on
+    # failed real-run paths: False (default) returns a dry-run cleanup PLAN; True executes it.
+    cleanup_on_failure: StrictBool = False
     # Run-test stage inputs (issue #63). Only consulted when run_test=True on a real run.
     test_timeout_seconds: int = 300
     test_dynamic_properties: Optional[Dict[str, Any]] = None

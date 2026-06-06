@@ -2389,3 +2389,22 @@ def test_cleanup_on_failure_true_records_failed_operation(registry, monkeypatch)
     assert cleanup["results"][0]["_success"] is False
     assert cleanup["results"][0]["error_code"] == "CLEANUP_OPERATION_FAILED"
     assert cleanup["warnings"]
+
+
+def test_cleanup_on_failure_non_bool_rejected_without_any_dispatch(registry, monkeypatch):
+    # cleanup_on_failure is StrictBool: a coercible non-bool ("yes"/1/"true") must NOT silently opt
+    # into destructive cleanup on a DIRECT engine call (which bypasses the wrapper's bool guard). It
+    # returns a structured INVALID_REQUEST at request construction, before any SDK/router call.
+    bid = registry("b65-strictbool", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({})  # empty responses -> any router call would raise
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    for bad in ("yes", 1, "true"):
+        result = orchestrate_deploy_action(
+            boomi_client=MagicMock(), build_id=bid,
+            environment_id="env-1", runtime_id="rt-1",
+            cleanup_on_failure=bad, dry_run=False,
+        )
+        assert result["_success"] is False, f"cleanup_on_failure={bad!r} must be rejected"
+        assert _codes(result) == ["INVALID_REQUEST"]
+        assert result["errors"][0]["field"] == "cleanup_on_failure"
+        assert fake.calls == []  # rejected before any router/cleanup dispatch
