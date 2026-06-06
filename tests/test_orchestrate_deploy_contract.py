@@ -1534,6 +1534,35 @@ def _logs_fail(error="Runtime unavailable — the Atom may be offline", *, statu
     return {"_success": False, "status_code": status_code, "message": "", "error": error}
 
 
+def _logs_download_failed(*, download_url="https://logs.example/dl",
+                          error="Download failed with HTTP 500 after polling"):
+    """A log result whose URL was created (202) but content download/extract failed.
+
+    ``handle_execution_logs`` merges ``_download_and_extract_zip``'s ``{_downloaded: False, error}``
+    onto an already ``_success: True`` dict, so ``_success`` stays True while content failed.
+    """
+    return {
+        "_success": True,
+        "status_code": 202,
+        "message": "Log download initiated",
+        "download_url": download_url,
+        "_downloaded": False,
+        "error": error,
+    }
+
+
+def _artifacts_download_failed(*, download_url="https://artifacts.example/dl",
+                               error="ZIP too large (… bytes, limit …)"):
+    return {
+        "_success": True,
+        "status_code": 200,
+        "message": "",
+        "download_url": download_url,
+        "_downloaded": False,
+        "error": error,
+    }
+
+
 def _artifacts_ok(download_url="https://artifacts.example/dl", *, status_code=200):
     return {
         "_success": True,
@@ -1805,6 +1834,38 @@ def test_run_test_log_fetch_unavailable_is_diagnostic_not_execution_failure(regi
     assert not any(c.startswith("TEST_") for c in _codes(result))
     assert result["summary"]["test"]["logs_status"] == "unavailable"
     assert result["summary"]["test"]["log_error"]
+
+
+def test_run_test_log_content_download_failure_is_unavailable_not_false_retrieved(registry, monkeypatch):
+    # The log/artifact URL was created (202) but the ZIP download/extract failed: handle_*
+    # returns _success=True with _downloaded=False + error. This must NOT look like a clean
+    # "retrieved" — the error has to survive, with the download_url preserved for manual retry.
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-dlfail")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction({
+        "execution_logs": _logs_download_failed(),
+        "execution_artifacts": _artifacts_download_failed(),
+    })
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    # A content-download failure is diagnostic only — overall run still succeeds.
+    assert result["_success"] is True
+    assert result["execution"]["status"] == "completed"
+    logs = result["logs"]
+    assert logs["status"] == "unavailable"
+    assert logs["error"]
+    assert logs["download_url"] == "https://logs.example/dl"  # pointer preserved for manual retry
+    assert logs["downloaded"] is False
+    assert not logs["log_excerpts"]  # no misleading empty "retrieved" excerpts
+    assert logs["artifact_status"] == "unavailable"
+    assert logs["artifact_error"]
+    assert logs["artifact_download_url"] == "https://artifacts.example/dl"
+    assert result["summary"]["test"]["logs_status"] == "unavailable"
+    assert result["summary"]["test"]["log_error"]
+    assert not any(c.startswith("TEST_") for c in _codes(result))
 
 
 def test_run_test_dynamic_and_process_properties_pass_through(registry, monkeypatch):

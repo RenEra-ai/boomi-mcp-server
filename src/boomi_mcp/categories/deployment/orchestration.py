@@ -1424,6 +1424,18 @@ def _bounded_log_excerpts(log_result: Dict[str, Any]) -> List[str]:
     return excerpts
 
 
+def _content_download_failed(result: Dict[str, Any]) -> bool:
+    """True when the monitor created the URL but the content download/extract failed.
+
+    ``handle_execution_logs``/``handle_execution_artifacts`` return ``_success=True`` even when
+    ``_download_and_extract_zip`` fails — it merges ``{"_downloaded": False, "error": ...}`` onto
+    the already-True result. A *pointer-only* result (content fetch skipped: no ``creds`` or
+    ``fetch_content=False``) has no ``_downloaded`` key and is NOT a failure. So the reliable
+    failure signal is an explicit ``_downloaded is False``.
+    """
+    return result.get("_downloaded") is False
+
+
 def _logs_stage_from_results(
     log_result: Optional[Dict[str, Any]],
     artifact_result: Optional[Dict[str, Any]],
@@ -1435,8 +1447,10 @@ def _logs_stage_from_results(
 ) -> LogsStage:
     """Normalize log + artifact monitor results into a ``LogsStage``.
 
-    A failed/absent log fetch is *diagnostic only* (``status="unavailable"``) — it never turns a
-    successful test execution into a failed orchestration. The artifact leg is independent.
+    A failed/absent log fetch — including a created URL whose content download/extract failed
+    (``_success=True`` but ``_downloaded=False``) — is *diagnostic only* (``status="unavailable"``,
+    error surfaced, ``download_url`` preserved for manual retry). It never turns a successful test
+    execution into a failed orchestration. The artifact leg is independent.
     """
     stage = LogsStage(
         status="not_required",
@@ -1446,7 +1460,11 @@ def _logs_stage_from_results(
     warnings: List[str] = []
 
     if fetch_logs:
-        if log_result is not None and log_result.get("_success"):
+        if (
+            log_result is not None
+            and log_result.get("_success")
+            and not _content_download_failed(log_result)
+        ):
             stage.status = "retrieved"
             stage.status_code = log_result.get("status_code")
             stage.message = log_result.get("message")
@@ -1461,13 +1479,20 @@ def _logs_stage_from_results(
                 stage.status_code = log_result.get("status_code")
                 stage.message = log_result.get("message")
                 stage.download_url = log_result.get("download_url")
+                stage.downloaded = (
+                    bool(log_result.get("_downloaded")) if "_downloaded" in log_result else None
+                )
                 stage.error = log_result.get("error") or "Log retrieval failed."
             else:
                 stage.error = "Log retrieval failed."
             warnings.append("Test execution succeeded but log retrieval was unavailable.")
 
     if fetch_artifacts:
-        if artifact_result is not None and artifact_result.get("_success"):
+        if (
+            artifact_result is not None
+            and artifact_result.get("_success")
+            and not _content_download_failed(artifact_result)
+        ):
             stage.artifact_status = "retrieved"
             stage.artifact_status_code = artifact_result.get("status_code")
             stage.artifact_message = artifact_result.get("message")
@@ -1477,6 +1502,7 @@ def _logs_stage_from_results(
             if artifact_result is not None:
                 stage.artifact_status_code = artifact_result.get("status_code")
                 stage.artifact_message = artifact_result.get("message")
+                stage.artifact_download_url = artifact_result.get("download_url")
                 stage.artifact_error = (
                     artifact_result.get("error") or "Artifact retrieval failed."
                 )
