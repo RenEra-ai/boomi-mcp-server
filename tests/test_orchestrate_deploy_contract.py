@@ -1370,3 +1370,508 @@ def test_error_code_constants_match_module():
     assert orchestration.RUNTIME_ENV_ATTACHMENT_CREATE_FAILED == "RUNTIME_ENV_ATTACHMENT_CREATE_FAILED"
     assert orchestration.SCHEDULE_OVERRIDE_INVALID == "SCHEDULE_OVERRIDE_INVALID"
     assert orchestration.SCHEDULE_UPDATE_FAILED == "SCHEDULE_UPDATE_FAILED"
+    # Run-test stage codes (issue #63).
+    assert orchestration.TEST_EXECUTION_FAILED == "TEST_EXECUTION_FAILED"
+    assert orchestration.TEST_EXECUTION_TIMEOUT == "TEST_EXECUTION_TIMEOUT"
+    assert orchestration.TEST_REQUEST_ID_MISSING == "TEST_REQUEST_ID_MISSING"
+
+
+# ===========================================================================
+# Run-test stage (issue #63): optional execution + log/artifact diagnostics
+# ===========================================================================
+class _FakeExecuteAction:
+    """Records ``execute_process_action`` calls and returns one canned response dict.
+
+    Mirrors the real ``execute_process_action`` keyword shape
+    (``sdk, profile, process_id, environment_id, atom_id, config_data``) so orchestration's
+    run-test stage exercises the dict-inspection contract without a live SDK.
+    """
+
+    def __init__(self, result, *, order_log=None):
+        self.result = result
+        self.order_log = order_log
+        self.calls = []
+
+    def __call__(self, sdk=None, profile=None, process_id=None,
+                 environment_id=None, atom_id=None, config_data=None, **kwargs):
+        self.calls.append({
+            "process_id": process_id,
+            "environment_id": environment_id,
+            "atom_id": atom_id,
+            "config_data": config_data,
+        })
+        if self.order_log is not None:
+            self.order_log.append(("execute", "execute_process"))
+        return self.result
+
+
+class _FakeMonitorAction:
+    """Records ``monitor_platform_action`` calls keyed by action and returns canned responses."""
+
+    def __init__(self, responses, *, order_log=None):
+        self.responses = responses
+        self.order_log = order_log
+        self.calls = []
+
+    def __call__(self, boomi_client=None, profile=None, action=None,
+                 config_data=None, creds=None, **kwargs):
+        self.calls.append({"action": action, "config_data": config_data, "creds": creds})
+        if self.order_log is not None:
+            self.order_log.append(("monitor", action))
+        if action not in self.responses:
+            raise AssertionError(f"unexpected monitor action call: {action}")
+        return self.responses[action]
+
+    def actions_called(self):
+        return [c["action"] for c in self.calls]
+
+
+def _patch_test_actions(monkeypatch, *, execute, monitor):
+    """Patch ``orchestration.execute_process_action`` and ``orchestration.monitor_platform_action``."""
+    monkeypatch.setattr(orchestration, "execute_process_action", execute)
+    monkeypatch.setattr(orchestration, "monitor_platform_action", monitor)
+    return execute, monitor
+
+
+def _exec_complete(execution_id="ex-1", *, status="COMPLETE", request_id="req-1",
+                   docs=(1, 1, 0), elapsed=3.0, poll_count=2):
+    """An ``execute_process_action`` (wait=True) response for a terminal COMPLETE/COMPLETE_WARN run."""
+    success = status.upper() not in ("ERROR", "ABORTED")
+    result = {
+        "_success": success,
+        "request_id": request_id,
+        "process_id": "CID-1",
+        "environment_id": "env-1",
+        "atom_id": "rt-1",
+        "execution_result": {
+            "poll_status": "COMPLETED",
+            "elapsed_seconds": elapsed,
+            "poll_count": poll_count,
+            "execution_id": execution_id,
+            "status": status,
+            "inbound_document_count": docs[0],
+            "outbound_document_count": docs[1],
+            "inbound_error_document_count": docs[2],
+            "error": None,
+        },
+    }
+    if execution_id:
+        result["execution_id"] = execution_id
+    return result
+
+
+def _exec_warn(execution_id="ex-warn", **kwargs):
+    return _exec_complete(execution_id=execution_id, status="COMPLETE_WARN", **kwargs)
+
+
+def _exec_failed(status="ERROR", *, execution_id="ex-err", request_id="req-1",
+                 error="boom", docs=(1, 0, 1)):
+    """A failed terminal run (ERROR/ABORTED): ``_success=False`` but an execution_id exists."""
+    return {
+        "_success": False,
+        "error": error,
+        "request_id": request_id,
+        "process_id": "CID-1",
+        "environment_id": "env-1",
+        "atom_id": "rt-1",
+        "execution_id": execution_id,
+        "execution_result": {
+            "poll_status": "COMPLETED",
+            "elapsed_seconds": 2.0,
+            "poll_count": 1,
+            "execution_id": execution_id,
+            "status": status,
+            "inbound_document_count": docs[0],
+            "outbound_document_count": docs[1],
+            "inbound_error_document_count": docs[2],
+            "error": error,
+        },
+    }
+
+
+def _exec_timeout(*, request_id="req-1", message="Timed out after 300s waiting",
+                  elapsed=300.0, poll_count=10):
+    """A timeout response: poll_status TIMEOUT, no execution_id."""
+    return {
+        "_success": False,
+        "error": message,
+        "request_id": request_id,
+        "process_id": "CID-1",
+        "environment_id": "env-1",
+        "atom_id": "rt-1",
+        "execution_result": {
+            "poll_status": "TIMEOUT",
+            "elapsed_seconds": elapsed,
+            "poll_count": poll_count,
+            "message": message,
+        },
+    }
+
+
+def _exec_no_request_id():
+    """The early ``execute_process_action`` failure: no request_id, no execution_result."""
+    return {
+        "_success": False,
+        "error": "Execution request accepted but no request_id returned.",
+    }
+
+
+def _logs_ok(files=None, *, status_code=202, download_url="https://logs.example/dl",
+             downloaded=True):
+    if files is None:
+        files = {"process.log": "line1\nline2\nline3"}
+    return {
+        "_success": True,
+        "status_code": status_code,
+        "message": "Log download initiated",
+        "download_url": download_url,
+        "_downloaded": downloaded,
+        "files": files,
+    }
+
+
+def _logs_fail(error="Runtime unavailable — the Atom may be offline", *, status_code=504):
+    return {"_success": False, "status_code": status_code, "message": "", "error": error}
+
+
+def _artifacts_ok(download_url="https://artifacts.example/dl", *, status_code=200):
+    return {
+        "_success": True,
+        "status_code": status_code,
+        "message": "",
+        "download_url": download_url,
+        "_downloaded": True,
+        "files": {"artifact.json": "{}"},
+    }
+
+
+def _monitor_ok():
+    """A monitor fake serving successful logs + artifacts."""
+    return _FakeMonitorAction(
+        {"execution_logs": _logs_ok(), "execution_artifacts": _artifacts_ok()}
+    )
+
+
+def _seed_real_run(registry, monkeypatch, bid, *, order_log=None, schedules=None):
+    """Seed a single-process build and patch all routers for a clean real run that reaches 3g."""
+    seeded = registry(bid, _single_process_entry(process_id="CID-1"))
+    _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(seeded), **_process_attachments("rt-1", "env-1", "CID-1")},
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=True),
+        schedules=schedules if schedules is not None else {},
+        order_log=order_log,
+    )
+    return seeded
+
+
+def test_run_test_false_real_run_skips_execution_and_logs(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-false")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=False, dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["execution"]["status"] == "skipped"
+    assert result["logs"]["status"] == "skipped"
+    assert execute.calls == []
+    assert monitor.calls == []
+    # No run-test stage ran -> no test sub-summary.
+    assert "test" not in result["summary"]
+
+
+def test_run_test_dry_run_plans_without_execution_or_log_calls(registry, monkeypatch):
+    bid = registry("b-rt-dry", _single_process_entry(process_id="CID-1"))
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=_ExplodingClient(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=True,
+    )
+    assert result["_success"] is True
+    assert result["dry_run"] is True
+    assert result["execution"]["status"] == "planned"
+    assert result["execution"]["run_test"] is True
+    assert result["logs"]["status"] == "planned"
+    assert execute.calls == []
+    assert monitor.calls == []
+
+
+def test_run_test_success_executes_after_schedule_and_fetches_diagnostics(registry, monkeypatch):
+    order = []
+    bid = _seed_real_run(
+        registry, monkeypatch, "b-rt-ok", order_log=order,
+        schedules={
+            "update": {"_success": True, "schedule": _sched("sch-1")},
+            "enable": {"_success": True, "status": _status("sst-1", True)},
+        },
+    )
+    execute = _FakeExecuteAction(_exec_complete(docs=(2, 3, 0)), order_log=order)
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_ok(), "execution_artifacts": _artifacts_ok()},
+        order_log=order,
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, run_test=True, dry_run=False,
+    )
+    assert result["_success"] is True
+    ex = result["execution"]
+    assert ex["status"] == "completed"
+    assert ex["terminal_status"] == "COMPLETE"
+    assert ex["request_id"] == "req-1"
+    assert ex["execution_id"] == "ex-1"
+    assert ex["document_counts"] == {"inbound": 2, "outbound": 3, "inbound_error": 0}
+    logs = result["logs"]
+    assert logs["status"] == "retrieved"
+    assert logs["log_excerpts"]  # non-empty
+    assert logs["artifact_download_url"] == "https://artifacts.example/dl"
+    # Execute called once, with the resolved process/runtime and forced wait.
+    assert len(execute.calls) == 1
+    call = execute.calls[0]
+    assert call["process_id"] == "CID-1"
+    assert call["atom_id"] == "rt-1"
+    assert call["config_data"]["wait"] is True
+    assert call["config_data"]["timeout"] == 300
+    # Both diagnostics fetched once with the resolved execution_id.
+    assert monitor.actions_called().count("execution_logs") == 1
+    assert monitor.actions_called().count("execution_artifacts") == 1
+    assert monitor.calls[0]["config_data"]["execution_id"] == "ex-1"
+    # Execution ran strictly after every schedule call.
+    last_sched = max(i for i, (label, _a) in enumerate(order) if label == "schedules")
+    first_exec = min(i for i, (label, _a) in enumerate(order) if label == "execute")
+    assert first_exec > last_sched
+    # Summary surfaces the test outcome.
+    assert result["summary"]["test"]["execution_status"] == "completed"
+    assert result["summary"]["test"]["logs_status"] == "retrieved"
+
+
+def test_run_test_complete_warn_is_success_with_warning_summary(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-warn")
+    execute = _FakeExecuteAction(_exec_warn())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is True
+    ex = result["execution"]
+    assert ex["status"] == "warning"
+    assert ex["terminal_status"] == "COMPLETE_WARN"
+    assert ex["warnings"]  # a COMPLETE_WARN warning surfaced on the stage
+    assert result["warnings"]  # and bubbled to the top-level warnings
+    # COMPLETE_WARN is still a non-failing terminal status -> diagnostics fetched.
+    assert result["logs"]["status"] == "retrieved"
+    assert result["summary"]["test"]["execution_status"] == "warning"
+    assert result["summary"]["test"]["terminal_status"] == "COMPLETE_WARN"
+
+
+@pytest.mark.parametrize("status", ["ERROR", "ABORTED"])
+def test_run_test_error_and_aborted_fail_with_terminal_details(registry, monkeypatch, status):
+    bid = _seed_real_run(registry, monkeypatch, f"b-rt-{status.lower()}")
+    execute = _FakeExecuteAction(_exec_failed(status=status, error="kaboom", docs=(1, 0, 1)))
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "TEST_EXECUTION_FAILED" in _codes(result)
+    ex = result["execution"]
+    assert ex["status"] == "failed"
+    assert ex["terminal_status"] == status
+    assert ex["error"] == "kaboom"
+    assert ex["document_counts"] == {"inbound": 1, "outbound": 0, "inbound_error": 1}
+    # Prior stages preserved (not blocked) — only the test stage failed.
+    assert result["package"]["status"] in ("reused", "created", "deployed")
+    assert result["deployment"]["status"] in ("reused", "deployed")
+    assert result["runtime_attachment"]["status"] in ("reused", "attached")
+    # Logs are the whole point of a failed test run — fetched since an execution_id exists.
+    assert result["logs"]["status"] == "retrieved"
+    assert monitor.actions_called().count("execution_logs") == 1
+
+
+def test_run_test_timeout_fails_and_does_not_fetch_logs_without_execution_id(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-timeout")
+    execute = _FakeExecuteAction(_exec_timeout())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "TEST_EXECUTION_TIMEOUT" in _codes(result)
+    ex = result["execution"]
+    assert ex["status"] == "timeout"
+    assert ex["poll_status"] == "TIMEOUT"
+    assert ex["execution_id"] is None
+    assert ex["elapsed_seconds"] == 300.0
+    assert result["logs"]["status"] == "blocked"
+    assert monitor.calls == []  # nothing to fetch without an execution_id
+
+
+def test_run_test_no_execution_id_skips_log_fetch_but_keeps_request_id(registry, monkeypatch):
+    # Variant A: the request was never accepted -> no request_id -> hard failure.
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-noreq")
+    execute = _FakeExecuteAction(_exec_no_request_id())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "TEST_REQUEST_ID_MISSING" in _codes(result)
+    assert result["execution"]["status"] == "failed"
+    assert result["logs"]["status"] == "blocked"
+    assert monitor.calls == []
+
+    # Variant B: completed terminal status but no execution_id -> request_id kept, logs not fetched.
+    bid2 = _seed_real_run(registry, monkeypatch, "b-rt-noexecid")
+    execute2 = _FakeExecuteAction(_exec_complete(execution_id=None))
+    monitor2 = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute2, monitor=monitor2)
+    result2 = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid2,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result2["_success"] is True
+    assert result2["execution"]["status"] == "completed"
+    assert result2["execution"]["request_id"] == "req-1"
+    assert result2["execution"]["execution_id"] is None
+    assert result2["logs"]["status"] != "retrieved"
+    assert monitor2.calls == []  # can't fetch logs without an execution_id
+    assert result2["summary"]["test"]["request_id"] == "req-1"
+    assert result2["summary"]["test"]["execution_id"] is None
+
+
+def test_run_test_log_fetch_success_is_bounded(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-bounded")
+    big_lines = "\n".join(f"line {i}" for i in range(200))  # > 80 lines
+    long_line = "x" * 9000  # > 8000 chars in a single line
+    files = {
+        "a.log": big_lines,
+        "b.log": long_line,
+        "c.log": "small",
+        "d.log": "dropped-1",  # 4th + 5th file are dropped (max 3)
+        "e.log": "dropped-2",
+    }
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_ok(files=files), "execution_artifacts": _artifacts_ok()}
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    excerpts = result["logs"]["log_excerpts"]
+    assert len(excerpts) == 3  # capped to _RUN_TEST_LOG_MAX_FILES
+    # Line-bounded excerpt: at most 80 content lines + name prefix + truncation marker.
+    assert len(excerpts[0].splitlines()) <= 80 + 2
+    assert "[truncated]" in excerpts[0]
+    # Char-bounded excerpt: content clipped to ~8000 chars (+ small prefix/suffix).
+    assert len(excerpts[1]) < 8100
+    assert "[truncated]" in excerpts[1]
+    assert result["summary"]["test"]["log_excerpt_count"] == 3
+
+
+def test_run_test_log_fetch_unavailable_is_diagnostic_not_execution_failure(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-logfail")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_fail(), "execution_artifacts": _artifacts_ok()}
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    # The test execution succeeded; a log-fetch failure is diagnostic, never an exec failure.
+    assert result["_success"] is True
+    assert result["execution"]["status"] == "completed"
+    assert result["logs"]["status"] == "unavailable"
+    assert result["logs"]["error"]
+    assert not any(c.startswith("TEST_") for c in _codes(result))
+    assert result["summary"]["test"]["logs_status"] == "unavailable"
+    assert result["summary"]["test"]["log_error"]
+
+
+def test_run_test_dynamic_and_process_properties_pass_through(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-props")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    dyn = {"ENV": "prod"}
+    proc = {"CID-1": {"retries": "3"}}
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+        test_dynamic_properties=dyn, test_process_properties=proc,
+        test_timeout_seconds=120,
+    )
+    assert result["_success"] is True
+    config = execute.calls[0]["config_data"]
+    assert config["dynamic_properties"] == dyn
+    assert config["process_properties"] == proc
+    assert config["wait"] is True
+    assert config["timeout"] == 120
+
+
+def _patch_stage_failure(monkeypatch, bid, which):
+    """Patch the four routers so that ``which`` stage fails (earlier stages succeed)."""
+    deployment = {**_deploy_ok(bid), **_process_attachments("rt-1", "env-1", "CID-1")}
+    environments = _ok_env("env-1")
+    runtimes = _ok_runtime("rt-1", "env-1", attached=True)
+    schedules = {
+        "update": {"_success": True, "schedule": _sched("sch-1")},
+        "enable": {"_success": True, "status": _status("sst-1", True)},
+    }
+    if which == "package":
+        deployment = {"list_packages": {"_success": False, "error": "pkg boom"}}
+    elif which == "deploy":
+        deployment = {
+            "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+            "list_deployments": {"_success": True, "deployments": []},
+            "deploy": {"_success": False, "error": "deploy boom"},
+        }
+    elif which == "runtime":
+        runtimes = _ok_runtime("rt-1", "env-1", attached=False)
+        runtimes["attach"] = {"_success": False, "error": "attach boom"}
+    elif which == "schedule":
+        schedules = {"update": {"_success": False, "error": "sched boom"}}
+    _patch_all(
+        monkeypatch, deployment=deployment, environments=environments,
+        runtimes=runtimes, schedules=schedules,
+    )
+
+
+@pytest.mark.parametrize("which", ["package", "deploy", "runtime", "schedule"])
+def test_prior_stage_failures_block_run_test_without_execute_or_monitor(registry, monkeypatch, which):
+    bid = registry(f"b-rt-block-{which}", _single_process_entry(process_id="CID-1"))
+    _patch_stage_failure(monkeypatch, bid, which)
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, run_test=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert result["execution"]["status"] == "blocked"
+    assert result["logs"]["status"] == "blocked"
+    # The run-test stage never ran.
+    assert execute.calls == []
+    assert monitor.calls == []
+    assert "test" not in result["summary"]

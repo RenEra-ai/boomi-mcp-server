@@ -5,7 +5,8 @@ prior ``build_integration(action='apply')`` build (recorded in the in-memory
 ``_BUILD_REGISTRY``) down to exactly one process component.
 
 Issue #60 introduced the plan-only contract. Issue #61 added the package + deploy stages.
-Issue #62 adds the runtime-attachment + schedule-activation stages:
+Issue #62 added the runtime-attachment + schedule-activation stages. Issue #63 adds the
+optional ``run_test`` execution + log/artifact summary stage:
 - ``dry_run=True`` (the DEFAULT) preserves issue-#60 behavior exactly — **no Boomi SDK
   calls**; every stage is reported as it *would* run.
 - ``dry_run=False`` performs idempotent work through the sibling action routers: it
@@ -15,7 +16,11 @@ Issue #62 adds the runtime-attachment + schedule-activation stages:
   process↔environment, process↔runtime) that make the process runnable, then applies the
   optional ``schedule_override`` (create/update + enable/disable, or clear/disable). Each
   stage runs strictly in order; a failure returns structured error codes and blocks every
-  later stage. Execution/log/cleanup remain placeholders for #future M3.4.
+  later stage. When ``run_test=True``, a final optional stage executes the resolved process
+  (polling to a terminal status) and fetches bounded log excerpts/artifact metadata for
+  diagnostics; a failed test execution is surfaced as ``_success=False`` with the prior
+  stages preserved, while a log/artifact fetch failure is diagnostic only. Cleanup remains a
+  placeholder. The run-test stage never runs in dry-run or after any prior-stage failure.
 
 It is intentionally not wired into ``server.py`` as a public MCP tool; public wiring is
 deferred to issue #64.
@@ -40,6 +45,8 @@ from .packages import manage_deployment_action  # sibling action reused for pack
 from ..environments import manage_environments_action  # verify environment exists
 from ..runtimes import manage_runtimes_action  # runtime verify + runtime<->env attachment
 from ..schedules import manage_schedules_action  # schedule update/delete/enable/disable
+from ..execution import execute_process_action  # test-run execution (issue #63)
+from ..monitoring import monitor_platform_action  # test-run log/artifact retrieval (issue #63)
 
 StageStatus = Literal[
     "planned",
@@ -52,6 +59,11 @@ StageStatus = Literal[
     "updated",
     "enabled",
     "disabled",
+    "completed",
+    "warning",
+    "timeout",
+    "retrieved",
+    "unavailable",
     "failed",
     "blocked",
 ]
@@ -96,6 +108,11 @@ SCHEDULE_ENABLE_FAILED = "SCHEDULE_ENABLE_FAILED"
 SCHEDULE_DISABLE_FAILED = "SCHEDULE_DISABLE_FAILED"
 SCHEDULE_ID_MISSING = "SCHEDULE_ID_MISSING"
 
+# Run-test stage error codes (issue #63).
+TEST_EXECUTION_FAILED = "TEST_EXECUTION_FAILED"
+TEST_EXECUTION_TIMEOUT = "TEST_EXECUTION_TIMEOUT"
+TEST_REQUEST_ID_MISSING = "TEST_REQUEST_ID_MISSING"
+
 
 # ---------------------------------------------------------------------------
 # Typed contracts
@@ -120,6 +137,14 @@ class OrchestrateDeployRequest(BaseModel):
     run_test: bool = False
     dry_run: bool = True
     package_version: Optional[str] = None
+    # Run-test stage inputs (issue #63). Only consulted when run_test=True on a real run.
+    test_timeout_seconds: int = 300
+    test_dynamic_properties: Optional[Dict[str, Any]] = None
+    test_process_properties: Optional[Dict[str, Any]] = None
+    test_log_level: str = "ALL"
+    test_fetch_logs: bool = True
+    test_fetch_artifacts: bool = True
+    test_log_fetch_content: bool = True
 
 
 class ComponentSummaryEntry(BaseModel):
@@ -219,11 +244,38 @@ class ExecutionStage(BaseModel):
     status: StageStatus
     execution_id: Optional[str] = None
     run_test: bool = False
+    # Run-test execution detail (issue #63); all null on plan/skipped/blocked placeholders.
+    request_id: Optional[str] = None
+    terminal_status: Optional[str] = None  # COMPLETE / COMPLETE_WARN / ERROR / ABORTED
+    poll_status: Optional[str] = None  # COMPLETED / TIMEOUT
+    elapsed_seconds: Optional[float] = None
+    poll_count: Optional[int] = None
+    process_id: Optional[str] = None
+    environment_id: Optional[str] = None
+    atom_id: Optional[str] = None
+    document_counts: Optional[Dict[str, int]] = None  # inbound/outbound/inbound_error
+    error: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
 
 
 class LogsStage(BaseModel):
     status: StageStatus
     log_ids: Optional[List[str]] = None
+    # Run-test diagnostics (issue #63); all null on plan/skipped/blocked placeholders.
+    execution_id: Optional[str] = None
+    log_level: Optional[str] = None
+    status_code: Optional[int] = None
+    message: Optional[str] = None
+    download_url: Optional[str] = None
+    downloaded: Optional[bool] = None
+    log_excerpts: Optional[List[str]] = None  # bounded, first _RUN_TEST_LOG_MAX_FILES files
+    artifact_status: Optional[StageStatus] = None
+    artifact_status_code: Optional[int] = None
+    artifact_message: Optional[str] = None
+    artifact_download_url: Optional[str] = None
+    error: Optional[str] = None
+    artifact_error: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
 
 
 class CleanupStage(BaseModel):
@@ -532,6 +584,53 @@ def _call_schedule_action(
         profile=profile,
         action=action,
         config_data=config_data,
+    )
+
+
+def _call_execute_process_action(
+    boomi_client: Any,
+    profile: Optional[str],
+    *,
+    process_id: str,
+    environment_id: Optional[str],
+    atom_id: Optional[str],
+    config_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Invoke ``execute_process_action`` for the run-test stage (issue #63).
+
+    Unlike the ``manage_*`` routers, ``execute_process_action`` takes ``process_id`` positionally
+    (not a ``(sdk, profile, action, config_data)`` shape), so this wrapper passes
+    ``process_id``/``environment_id``/``atom_id`` explicitly. The action swallows ``ApiError``/
+    ``Exception`` into ``{"_success": False, "error": ...}``, so callers inspect the returned dict.
+    """
+    return execute_process_action(
+        sdk=boomi_client,
+        profile=profile,
+        process_id=process_id,
+        environment_id=environment_id,
+        atom_id=atom_id,
+        config_data=config_data,
+    )
+
+
+def _call_monitor_action(
+    boomi_client: Any,
+    profile: Optional[str],
+    action: str,
+    config_data: Dict[str, Any],
+    creds: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Invoke ``monitor_platform_action`` for log/artifact retrieval (issue #63).
+
+    Matches the router shape plus ``creds`` (needed to download + extract log/artifact content;
+    without it only a ``download_url`` is returned). The router swallows exceptions into dicts.
+    """
+    return monitor_platform_action(
+        boomi_client=boomi_client,
+        profile=profile,
+        action=action,
+        config_data=config_data,
+        creds=creds,
     )
 
 
@@ -954,6 +1053,14 @@ _SCHEDULE_ALLOWED_KEYS = {"mode", "cron", "enabled", "max_retry"}
 _SCHEDULE_SCHEDULED_MODES = {"scheduled"}
 _SCHEDULE_DISABLED_MODES = {"manual", "disabled"}
 
+# Run-test stage bounds (issue #63). Poll interval / max-polls stay delegated to
+# ``execute_process_action`` (2s until 30s, then 5s, bounded by ``test_timeout_seconds``).
+_RUN_TEST_TIMEOUT_SECONDS = 300
+_RUN_TEST_LOG_LEVEL = "ALL"
+_RUN_TEST_LOG_EXCERPT_LINES = 80
+_RUN_TEST_LOG_EXCERPT_CHARS = 8000
+_RUN_TEST_LOG_MAX_FILES = 3
+
 
 def _normalize_schedule_override(
     schedule_override: Optional[Dict[str, Any]],
@@ -1184,6 +1291,285 @@ def _apply_schedule_override(
 
 
 # ---------------------------------------------------------------------------
+# Run-test stage helpers (issue #63)
+# ---------------------------------------------------------------------------
+def _build_test_execution_config(request: "OrchestrateDeployRequest") -> Dict[str, Any]:
+    """Config for ``execute_process_action``: force wait+timeout, pass optional properties.
+
+    ``dynamic_properties``/``process_properties`` are only included when supplied, so the
+    execute action's own empty-default builders apply when the caller omits them.
+    """
+    config: Dict[str, Any] = {
+        "wait": True,
+        "timeout": request.test_timeout_seconds,
+    }
+    if request.test_dynamic_properties is not None:
+        config["dynamic_properties"] = request.test_dynamic_properties
+    if request.test_process_properties is not None:
+        config["process_properties"] = request.test_process_properties
+    return config
+
+
+def _execution_stage_from_result(
+    exec_result: Dict[str, Any],
+    *,
+    run_test: bool,
+    process_id: str,
+    environment_id: Optional[str],
+    atom_id: Optional[str],
+) -> Tuple[ExecutionStage, Optional[OrchestrateDeployError]]:
+    """Map an ``execute_process_action`` (wait=True) response into an ``ExecutionStage``.
+
+    Returns ``(stage, None)`` for a non-failing terminal status (COMPLETE / COMPLETE_WARN) or
+    ``(stage, error)`` for ERROR/ABORTED (``TEST_EXECUTION_FAILED``), TIMEOUT
+    (``TEST_EXECUTION_TIMEOUT``), or a missing request id (``TEST_REQUEST_ID_MISSING``).
+    """
+    request_id = exec_result.get("request_id")
+    poll = exec_result.get("execution_result")
+    base_kwargs: Dict[str, Any] = dict(
+        run_test=bool(run_test),
+        request_id=request_id,
+        process_id=process_id,
+        environment_id=exec_result.get("environment_id") or environment_id,
+        atom_id=exec_result.get("atom_id") or atom_id,
+    )
+
+    # No poll result means the request was never accepted (execute_process_action returned its
+    # early failure before the wait branch). A blank request id is the canonical "no request_id".
+    if poll is None:
+        if not request_id:
+            message = exec_result.get("error") or "Execution request returned no request_id."
+            stage = ExecutionStage(status="failed", error=message, **base_kwargs)
+            return stage, _error(TEST_REQUEST_ID_MISSING, message, field="run_test")
+        message = exec_result.get("error") or "Execution produced no terminal result."
+        stage = ExecutionStage(status="failed", error=message, **base_kwargs)
+        return stage, _error(TEST_EXECUTION_FAILED, message, field="run_test")
+
+    poll_status = poll.get("poll_status")
+    elapsed = poll.get("elapsed_seconds")
+    poll_count = poll.get("poll_count")
+
+    if poll_status == "TIMEOUT":
+        message = poll.get("message") or exec_result.get("error") or "Execution timed out."
+        stage = ExecutionStage(
+            status="timeout",
+            poll_status=poll_status,
+            elapsed_seconds=elapsed,
+            poll_count=poll_count,
+            error=message,
+            **base_kwargs,
+        )
+        return stage, _error(TEST_EXECUTION_TIMEOUT, message, field="run_test")
+
+    terminal = str(poll.get("status") or "").upper()
+    document_counts = {
+        "inbound": poll.get("inbound_document_count"),
+        "outbound": poll.get("outbound_document_count"),
+        "inbound_error": poll.get("inbound_error_document_count"),
+    }
+    common: Dict[str, Any] = dict(
+        execution_id=exec_result.get("execution_id") or poll.get("execution_id"),
+        terminal_status=poll.get("status"),
+        poll_status=poll_status,
+        elapsed_seconds=elapsed,
+        poll_count=poll_count,
+        document_counts=document_counts,
+        **base_kwargs,
+    )
+
+    if terminal == "COMPLETE":
+        return ExecutionStage(status="completed", **common), None
+    if terminal == "COMPLETE_WARN":
+        return (
+            ExecutionStage(
+                status="warning",
+                warnings=["Test execution completed with warnings (COMPLETE_WARN)."],
+                **common,
+            ),
+            None,
+        )
+    # ERROR / ABORTED / any other terminal status is a failed test run.
+    message = poll.get("error") or f"Execution ended with status: {poll.get('status')}"
+    stage = ExecutionStage(status="failed", error=message, **common)
+    return stage, _error(TEST_EXECUTION_FAILED, message, field="run_test")
+
+
+def _bounded_log_excerpts(log_result: Dict[str, Any]) -> List[str]:
+    """Bounded, human-readable log excerpts from an ``execution_logs`` result.
+
+    The monitoring content is either a ``files`` dict (name -> text, extracted from the ZIP) or a
+    single ``content`` string. Take at most ``_RUN_TEST_LOG_MAX_FILES`` files and cap each excerpt
+    to ``_RUN_TEST_LOG_EXCERPT_LINES`` lines and ``_RUN_TEST_LOG_EXCERPT_CHARS`` chars.
+    """
+    items: List[Tuple[str, str]] = []
+    files = log_result.get("files")
+    if isinstance(files, dict):
+        for name, text in files.items():
+            items.append((str(name), text if isinstance(text, str) else str(text)))
+    else:
+        content = log_result.get("content")
+        if isinstance(content, str):
+            items.append(("log", content))
+
+    excerpts: List[str] = []
+    for name, text in items[:_RUN_TEST_LOG_MAX_FILES]:
+        lines = text.splitlines()
+        truncated = len(lines) > _RUN_TEST_LOG_EXCERPT_LINES
+        clipped = "\n".join(lines[:_RUN_TEST_LOG_EXCERPT_LINES])
+        if len(clipped) > _RUN_TEST_LOG_EXCERPT_CHARS:
+            clipped = clipped[:_RUN_TEST_LOG_EXCERPT_CHARS]
+            truncated = True
+        suffix = "\n... [truncated]" if truncated else ""
+        excerpts.append(f"{name}:\n{clipped}{suffix}")
+    return excerpts
+
+
+def _logs_stage_from_results(
+    log_result: Optional[Dict[str, Any]],
+    artifact_result: Optional[Dict[str, Any]],
+    *,
+    execution_id: Optional[str],
+    log_level: str,
+    fetch_logs: bool,
+    fetch_artifacts: bool,
+) -> LogsStage:
+    """Normalize log + artifact monitor results into a ``LogsStage``.
+
+    A failed/absent log fetch is *diagnostic only* (``status="unavailable"``) — it never turns a
+    successful test execution into a failed orchestration. The artifact leg is independent.
+    """
+    stage = LogsStage(
+        status="not_required",
+        execution_id=execution_id,
+        log_level=log_level if fetch_logs else None,
+    )
+    warnings: List[str] = []
+
+    if fetch_logs:
+        if log_result is not None and log_result.get("_success"):
+            stage.status = "retrieved"
+            stage.status_code = log_result.get("status_code")
+            stage.message = log_result.get("message")
+            stage.download_url = log_result.get("download_url")
+            stage.downloaded = (
+                bool(log_result.get("_downloaded")) if "_downloaded" in log_result else None
+            )
+            stage.log_excerpts = _bounded_log_excerpts(log_result)
+        else:
+            stage.status = "unavailable"
+            if log_result is not None:
+                stage.status_code = log_result.get("status_code")
+                stage.message = log_result.get("message")
+                stage.download_url = log_result.get("download_url")
+                stage.error = log_result.get("error") or "Log retrieval failed."
+            else:
+                stage.error = "Log retrieval failed."
+            warnings.append("Test execution succeeded but log retrieval was unavailable.")
+
+    if fetch_artifacts:
+        if artifact_result is not None and artifact_result.get("_success"):
+            stage.artifact_status = "retrieved"
+            stage.artifact_status_code = artifact_result.get("status_code")
+            stage.artifact_message = artifact_result.get("message")
+            stage.artifact_download_url = artifact_result.get("download_url")
+        else:
+            stage.artifact_status = "unavailable"
+            if artifact_result is not None:
+                stage.artifact_status_code = artifact_result.get("status_code")
+                stage.artifact_message = artifact_result.get("message")
+                stage.artifact_error = (
+                    artifact_result.get("error") or "Artifact retrieval failed."
+                )
+            else:
+                stage.artifact_error = "Artifact retrieval failed."
+
+    stage.warnings = warnings
+    return stage
+
+
+def _run_test_stage(
+    boomi_client: Any,
+    profile: Optional[str],
+    request: "OrchestrateDeployRequest",
+    *,
+    target: ResolvedBuildTarget,
+    environment_id: Optional[str],
+    runtime_id: Optional[str],
+    creds: Optional[Dict[str, str]] = None,
+) -> Tuple[ExecutionStage, LogsStage, Optional[OrchestrateDeployError]]:
+    """Execute the resolved process (wait=True), then fetch bounded diagnostics by execution id.
+
+    Diagnostics (logs + artifacts) are fetched whenever an ``execution_id`` resolved — including
+    on ERROR/ABORTED, where the logs are the whole point of the stage. TIMEOUT and a missing
+    request id never produce an ``execution_id``, so there is nothing to fetch and logs are
+    ``blocked``. Returns ``(execution_stage, logs_stage, error)`` where ``error`` is non-None only
+    for a *failed test execution* (not for a diagnostic log/artifact fetch failure).
+    """
+    exec_result = _call_execute_process_action(
+        boomi_client,
+        profile,
+        process_id=target.process_component_id,
+        environment_id=environment_id,
+        atom_id=runtime_id,
+        config_data=_build_test_execution_config(request),
+    )
+    execution_stage, execution_error = _execution_stage_from_result(
+        exec_result,
+        run_test=request.run_test,
+        process_id=target.process_component_id,
+        environment_id=environment_id,
+        atom_id=runtime_id,
+    )
+
+    execution_id = execution_stage.execution_id
+    if not execution_id:
+        # No execution id (timeout / missing request id / completed-without-id): nothing to fetch.
+        logs_stage = LogsStage(
+            status="blocked" if execution_error is not None else "not_required",
+            execution_id=None,
+        )
+        return execution_stage, logs_stage, execution_error
+
+    fetch_logs = bool(request.test_fetch_logs)
+    fetch_artifacts = bool(request.test_fetch_artifacts)
+    log_result: Optional[Dict[str, Any]] = None
+    artifact_result: Optional[Dict[str, Any]] = None
+    if fetch_logs:
+        log_result = _call_monitor_action(
+            boomi_client,
+            profile,
+            "execution_logs",
+            {
+                "execution_id": execution_id,
+                "log_level": request.test_log_level,
+                "fetch_content": request.test_log_fetch_content,
+            },
+            creds=creds,
+        )
+    if fetch_artifacts:
+        artifact_result = _call_monitor_action(
+            boomi_client,
+            profile,
+            "execution_artifacts",
+            {
+                "execution_id": execution_id,
+                "fetch_content": request.test_log_fetch_content,
+            },
+            creds=creds,
+        )
+
+    logs_stage = _logs_stage_from_results(
+        log_result,
+        artifact_result,
+        execution_id=execution_id,
+        log_level=request.test_log_level,
+        fetch_logs=fetch_logs,
+        fetch_artifacts=fetch_artifacts,
+    )
+    return execution_stage, logs_stage, execution_error
+
+
+# ---------------------------------------------------------------------------
 # Response assembly
 # ---------------------------------------------------------------------------
 def _stage_summary(
@@ -1191,9 +1577,16 @@ def _stage_summary(
     deployment: DeploymentStage,
     runtime_attachment: RuntimeAttachmentStage,
     schedule: ScheduleStage,
+    *,
+    execution: Optional[ExecutionStage] = None,
+    logs: Optional[LogsStage] = None,
 ) -> Dict[str, Any]:
-    """Flat summary of the package/deploy/runtime/schedule outcome at the top of the response."""
-    return {
+    """Flat summary of the package/deploy/runtime/schedule outcome at the top of the response.
+
+    When a real run-test stage ran, ``execution``/``logs`` are supplied and a ``test`` sub-summary
+    is added (issue #63). Plan / blocked / run_test=False paths omit it.
+    """
+    summary: Dict[str, Any] = {
         "package_id": package.package_id,
         "package_version": package.package_version,
         "deployment_id": deployment.deployment_id,
@@ -1221,6 +1614,26 @@ def _stage_summary(
             "schedule": list(schedule.warnings),
         },
     }
+    if execution is not None and logs is not None:
+        summary["test"] = {
+            "run_test": execution.run_test,
+            "request_id": execution.request_id,
+            "execution_id": execution.execution_id,
+            "execution_status": execution.status,
+            "terminal_status": execution.terminal_status,
+            "poll_status": execution.poll_status,
+            "elapsed_seconds": execution.elapsed_seconds,
+            "poll_count": execution.poll_count,
+            "document_counts": execution.document_counts,
+            "execution_error": execution.error,
+            "logs_status": logs.status,
+            "log_download_url": logs.download_url,
+            "log_excerpt_count": len(logs.log_excerpts or []),
+            "artifact_download_url": logs.artifact_download_url,
+            "log_error": logs.error,
+            "artifact_error": logs.artifact_error,
+        }
+    return summary
 
 
 def _execution_log_cleanup_stages(run_test: bool, *, blocked: bool) -> Dict[str, Any]:
@@ -1454,6 +1867,57 @@ def _runtime_or_schedule_failed_response(
     )
 
 
+def _real_run_with_test_response(
+    *,
+    success: bool,
+    profile: Optional[str],
+    build_id: Optional[str],
+    target: ResolvedBuildTarget,
+    package: PackageStage,
+    deployment: DeploymentStage,
+    runtime_attachment: RuntimeAttachmentStage,
+    schedule: ScheduleStage,
+    execution: ExecutionStage,
+    logs: LogsStage,
+    errors: Optional[List[OrchestrateDeployError]] = None,
+    error_message: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Real-run response embedding the concrete run-test execution + logs stages (issue #63).
+
+    Mirrors ``_real_run_response`` but carries the real ``ExecutionStage``/``LogsStage`` (cleanup
+    stays ``not_required``). ``success`` is False for a failed test execution, with the failing
+    stages still embedded for diagnostics; top-level ``warnings`` surface the stages' warnings.
+    """
+    downstream = {
+        "runtime_attachment": runtime_attachment,
+        "schedule": schedule,
+        "execution": execution,
+        "logs": logs,
+        "cleanup": CleanupStage(status="not_required"),
+    }
+    response = _assemble_response(
+        success=success,
+        profile=profile,
+        build_id=build_id,
+        dry_run=False,
+        plan_only=False,
+        target=target,
+        package=package,
+        deployment=deployment,
+        downstream=downstream,
+        summary=_stage_summary(
+            package, deployment, runtime_attachment, schedule,
+            execution=execution, logs=logs,
+        ),
+        errors=errors or [],
+        error_message=error_message,
+    )
+    test_warnings = list(execution.warnings) + list(logs.warnings)
+    if test_warnings:
+        response["warnings"] = test_warnings
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Public internal action
 # ---------------------------------------------------------------------------
@@ -1467,6 +1931,14 @@ def orchestrate_deploy_action(
     run_test: bool = False,
     dry_run: bool = True,
     package_version: Optional[str] = None,
+    test_timeout_seconds: int = 300,
+    test_dynamic_properties: Optional[Dict[str, Any]] = None,
+    test_process_properties: Optional[Dict[str, Any]] = None,
+    test_log_level: str = "ALL",
+    test_fetch_logs: bool = True,
+    test_fetch_artifacts: bool = True,
+    test_log_fetch_content: bool = True,
+    creds: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Resolve a build, then plan (dry-run) or package/deploy/bind/schedule it (#60/#61/#62).
 
@@ -1492,6 +1964,13 @@ def orchestrate_deploy_action(
             run_test=run_test,
             dry_run=dry_run,
             package_version=package_version,
+            test_timeout_seconds=test_timeout_seconds,
+            test_dynamic_properties=test_dynamic_properties,
+            test_process_properties=test_process_properties,
+            test_log_level=test_log_level,
+            test_fetch_logs=test_fetch_logs,
+            test_fetch_artifacts=test_fetch_artifacts,
+            test_log_fetch_content=test_log_fetch_content,
         )
     except ValidationError as exc:
         return _error_response(
@@ -1685,9 +2164,34 @@ def orchestrate_deploy_action(
             error=schedule_error,
         )
 
-    # 3g. Success: package, deploy, runtime binding, and schedule all resolved. Execution/log/
-    #     cleanup remain plan placeholders (#future M3.4).
-    return _real_run_response(
+    # 3g. Success: package, deploy, runtime binding, and schedule all resolved. Without run_test
+    #     the execution/log/cleanup stages stay skipped placeholders; with run_test the optional
+    #     test stage executes the process (wait=True), then fetches bounded log/artifact
+    #     diagnostics. A failed test execution returns _success=False with the prior stages
+    #     preserved; a log/artifact fetch failure stays _success=True (diagnostic only). (#63)
+    if not run_test:
+        return _real_run_response(
+            profile=profile,
+            build_id=build_id,
+            target=target,
+            package=package_stage,
+            deployment=deployment_stage,
+            runtime_attachment=runtime_attachment,
+            schedule=schedule_stage,
+            run_test=run_test,
+        )
+
+    execution_stage, logs_stage, test_error = _run_test_stage(
+        boomi_client,
+        profile,
+        request,
+        target=target,
+        environment_id=environment_id,
+        runtime_id=runtime_id,
+        creds=creds,
+    )
+    return _real_run_with_test_response(
+        success=test_error is None,
         profile=profile,
         build_id=build_id,
         target=target,
@@ -1695,5 +2199,8 @@ def orchestrate_deploy_action(
         deployment=deployment_stage,
         runtime_attachment=runtime_attachment,
         schedule=schedule_stage,
-        run_test=run_test,
+        execution=execution_stage,
+        logs=logs_stage,
+        errors=[test_error] if test_error is not None else [],
+        error_message=test_error.message if test_error is not None else None,
     )
