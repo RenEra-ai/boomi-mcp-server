@@ -150,6 +150,29 @@ def _normalize_type(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def _effective_component_type(comp: Dict[str, Any]) -> str:
+    """Effective (normalized) component type, unwrapping the generic ``component`` wrapper.
+
+    A component authored through the generic ``type == "component"`` escape hatch keeps that
+    literal top-level type in the stored build spec; its real type lives in ``config.type``
+    (preferred) or ``config.component_type``. So a process built that way is recorded with
+    ``type == "component"``, not ``"process"``. Mirror
+    ``integration_builder._effective_component_type`` so a wrapped process resolves the same
+    way a top-level ``type == "process"`` component does. Returns the (normalized) wrapper
+    type unchanged when it cannot be unwrapped.
+    """
+    base = _normalize_type(comp.get("type"))
+    if base != "component":
+        return base
+    config = comp.get("config")
+    if isinstance(config, dict):
+        for cfg_key in ("type", "component_type"):
+            wrapped = config.get(cfg_key)
+            if isinstance(wrapped, str) and wrapped.strip():
+                return _normalize_type(wrapped)
+    return base
+
+
 def _error(
     code: str,
     message: str,
@@ -266,7 +289,7 @@ def _resolve_build_deployment_target(
     process_candidates = [
         comp
         for comp in components
-        if isinstance(comp, dict) and _normalize_type(comp.get("type")) == "process"
+        if isinstance(comp, dict) and _effective_component_type(comp) == "process"
     ]
 
     if not process_candidates:

@@ -239,6 +239,43 @@ def test_process_id_from_spec_fallback(registry):
     assert result["target"]["process_component_id"] == "SPEC-CID"
 
 
+@pytest.mark.parametrize("config_key", ["type", "component_type"])
+def test_wrapped_process_resolves(registry, config_key):
+    # A process authored via the generic "component" wrapper keeps top-level type "component"
+    # in the stored spec; the real type lives in config.type / config.component_type. The
+    # resolver must unwrap it the same way integration_builder does (Codex review #60).
+    entry = _entry(
+        components=[
+            {
+                "key": "proc", "type": "component", "action": "create", "name": "P",
+                "component_id": None, "config": {config_key: "process", "xml": "<process/>"},
+                "depends_on": [],
+            }
+        ],
+        results={"proc": {"status": "created", "component_id": "WPID-1", "type": "component", "name": "P"}},
+    )
+    bid = registry(f"b-wrapped-{config_key}", entry)
+    result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is True
+    assert result["target"]["process_key"] == "proc"
+    assert result["target"]["process_component_id"] == "WPID-1"
+
+
+def test_unwrappable_generic_component_is_not_a_process(registry):
+    # A generic wrapper with no resolvable config type must NOT count as a process.
+    entry = _entry(
+        components=[
+            {"key": "c", "type": "component", "action": "create", "name": "C",
+             "component_id": None, "config": {"xml": "<x/>"}, "depends_on": []}
+        ],
+        results={"c": {"status": "created", "component_id": "CID-X", "type": "component", "name": "C"}},
+    )
+    bid = registry("b-unwrappable", entry)
+    result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is False
+    assert _codes(result) == ["BUILD_PROCESS_NOT_FOUND"]
+
+
 def test_reused_process_resolves(registry):
     # A reused result entry has NO "result" sub-key — confirm we never depend on it.
     entry = _entry(
