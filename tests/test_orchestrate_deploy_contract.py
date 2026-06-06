@@ -1147,6 +1147,9 @@ def test_schedule_api_failure_is_structured_and_blocks_execution(registry, monke
     assert result["_success"] is False
     assert "SCHEDULE_UPDATE_FAILED" in _codes(result)
     assert result["schedule"]["status"] == "failed"
+    # The very first schedule call failed -> nothing mutated -> changed must be False.
+    assert result["schedule"]["changed"] is False
+    assert result["summary"]["resource_changes"]["schedule"] is False
     # Runtime binding completed before the schedule failed -> preserved.
     assert result["runtime_attachment"]["status"] == "reused"
     assert result["execution"]["status"] == "blocked"
@@ -1199,6 +1202,112 @@ def test_deploy_failure_blocks_runtime_and_schedule_without_schedule_calls(regis
     assert env.actions_called() == []
     assert rt.actions_called() == []
     assert sch.actions_called() == []
+
+
+def test_runtime_partial_attachment_preserved_on_later_leg_failure(registry, monkeypatch):
+    # Legs 1 (runtime↔env) and 2 (process↔env) create real attachments, then leg 3
+    # (process↔runtime) fails. The failed stage must still surface the two created ids and
+    # report changed=True so a caller knows a retry/cleanup may be needed.
+    bid = registry("b-rt-partial", _single_process_entry(process_id="CID-1"))
+    deployment = {
+        **_deploy_ok(bid),
+        **_process_attachments("rt-1", "env-1", "CID-1", env_attached=False, atom_attached=False),
+    }
+    deployment["attach_process_atom"] = {
+        "_success": False, "error": "Action 'attach_process_atom' failed: denied",
+    }
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment=deployment,
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=False),
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "PROCESS_RUNTIME_ATTACHMENT_CREATE_FAILED" in _codes(result)
+    rta = result["runtime_attachment"]
+    assert rta["status"] == "failed"
+    assert rta["changed"] is True  # legs 1+2 created real attachments
+    assert rta["reused"] is False
+    assert rta["runtime_env_attachment_id"] == "ea-new"
+    assert rta["runtime_env_attachment_status"] == "attached"
+    assert rta["process_env_attachment_id"] == "pe-new"
+    assert rta["process_env_attachment_status"] == "attached"
+    assert rta["process_runtime_attachment_id"] is None
+    assert rta["attachment_id"] == "ea-new"  # alias preserved on failure
+    assert result["summary"]["resource_changes"]["runtime_attachment"] is True
+    assert result["schedule"]["status"] == "blocked"
+
+
+def test_runtime_attachment_id_missing_after_create_reports_changed(registry, monkeypatch):
+    # The runtime↔env attach SUCCEEDS but returns no id -> *_ID_MISSING. The account was still
+    # mutated, so the failed stage must report changed=True (not silently False).
+    bid = registry("b-rt-idmissing", _single_process_entry(process_id="CID-1"))
+    runtimes = _ok_runtime("rt-1", "env-1", attached=False)
+    runtimes["attach"] = {"_success": True, "attachment": {}}  # created, but no id returned
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env("env-1"),
+        runtimes=runtimes,
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "RUNTIME_ENV_ATTACHMENT_ID_MISSING" in _codes(result)
+    rta = result["runtime_attachment"]
+    assert rta["status"] == "failed"
+    assert rta["changed"] is True
+    assert rta["runtime_env_attachment_status"] == "attached"
+    assert rta["runtime_env_attachment_id"] is None
+    assert result["summary"]["resource_changes"]["runtime_attachment"] is True
+    assert result["schedule"]["status"] == "blocked"
+    assert sch.actions_called() == []
+
+
+def test_schedule_changed_flag_reflects_failed_mutation(registry, monkeypatch):
+    bid = registry("b-sched-changed", _single_process_entry(process_id="CID-1"))
+    # First call (update) fails -> no mutation landed -> changed False.
+    _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={"update": {"_success": False, "error": "denied"}},
+    )
+    r1 = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert "SCHEDULE_UPDATE_FAILED" in _codes(r1)
+    assert r1["schedule"]["changed"] is False
+    assert r1["summary"]["resource_changes"]["schedule"] is False
+
+    # delete succeeds, then disable fails -> a mutation already landed -> changed True.
+    _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={
+            "delete": {"_success": True, "schedule": _sched("sch-1")},
+            "disable": {"_success": False, "error": "denied"},
+        },
+    )
+    r2 = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"mode": "manual"}, dry_run=False,
+    )
+    assert "SCHEDULE_DISABLE_FAILED" in _codes(r2)
+    assert r2["schedule"]["changed"] is True
+    assert r2["summary"]["resource_changes"]["schedule"] is True
 
 
 # ---------------------------------------------------------------------------

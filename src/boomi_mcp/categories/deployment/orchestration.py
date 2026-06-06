@@ -785,7 +785,10 @@ def _resolve_attachment_leg(
         leg_status = "attached"
 
     if not attachment_id:
-        return None, None, _error(
+        # Surface ``leg_status`` even on this error: an "attached" status here means the create
+        # call SUCCEEDED (the account was mutated) but returned no id, so the caller's ``changed``
+        # accounting must still count it. A "reused" status means nothing was mutated.
+        return None, leg_status, _error(
             id_error_code,
             "Attachment resolution returned no attachment id.",
             field=field,
@@ -816,12 +819,29 @@ def _ensure_runtime_attachment(
         "runtime_id": runtime_id,
     }
 
+    # Track each leg's resolved id/status as we go so a later-leg failure still reports the
+    # bindings that DID resolve — including any attachment a prior leg actually created (so
+    # ``changed`` stays accurate for retry/cleanup, not silently reset to False).
+    runtime_env_id = runtime_env_status = None
+    process_env_id = process_env_status = None
+    process_runtime_id = process_runtime_status = None
+
     def _failed_stage() -> RuntimeAttachmentStage:
+        statuses = (runtime_env_status, process_env_status, process_runtime_status)
         return RuntimeAttachmentStage(
             status="failed",
+            attachment_id=runtime_env_id,
             runtime_id=runtime_id,
             environment_id=environment_id,
             process_id=process_id,
+            runtime_env_attachment_id=runtime_env_id,
+            runtime_env_attachment_status=runtime_env_status,
+            process_env_attachment_id=process_env_id,
+            process_env_attachment_status=process_env_status,
+            process_runtime_attachment_id=process_runtime_id,
+            process_runtime_attachment_status=process_runtime_status,
+            reused=False,
+            changed=any(s == "attached" for s in statuses),
         )
 
     # 1. Verify the environment and runtime exist before attaching anything.
@@ -1052,26 +1072,30 @@ def _apply_schedule_override(
             None,
         )
 
-    def _failed_stage(**extra: Any) -> ScheduleStage:
-        return ScheduleStage(status="failed", changed=True, **base_fields, **extra)
+    # ``changed`` reflects whether a schedule mutation actually succeeded — a first-call
+    # failure (update/delete returning ``_success=False``) means the account is untouched, so
+    # those sites pass ``changed=False``; failures AFTER a successful update/delete keep
+    # ``changed=True`` so the summary/cleanup still sees the mutation that landed.
+    def _failed_stage(*, changed: bool, **extra: Any) -> ScheduleStage:
+        return ScheduleStage(status="failed", changed=changed, **base_fields, **extra)
 
     if normalized["mode"] == "disabled":
         deleted = _call_schedule_action(boomi_client, profile, "delete", dict(ids))
         if not deleted.get("_success"):
-            return _failed_stage(), _error(
+            return _failed_stage(changed=False), _error(
                 SCHEDULE_DELETE_FAILED,
                 deleted.get("error") or "Failed to clear schedule.",
                 field="schedule_override", details=ids,
             )
         schedule_id = (deleted.get("schedule") or {}).get("id")
         if not schedule_id:
-            return _failed_stage(), _error(
+            return _failed_stage(changed=True), _error(
                 SCHEDULE_ID_MISSING, "Schedule clear returned no schedule id.",
                 field="schedule_override", details=ids,
             )
         disabled = _call_schedule_action(boomi_client, profile, "disable", dict(ids))
         if not disabled.get("_success"):
-            return _failed_stage(schedule_id=schedule_id), _error(
+            return _failed_stage(changed=True, schedule_id=schedule_id), _error(
                 SCHEDULE_DISABLE_FAILED,
                 disabled.get("error") or "Failed to disable schedule.",
                 field="schedule_override", details=ids,
@@ -1098,14 +1122,14 @@ def _apply_schedule_override(
         {**ids, "cron": cron, "max_retry": max_retry},
     )
     if not updated.get("_success"):
-        return _failed_stage(cron=cron, max_retry=max_retry, enabled=enabled), _error(
+        return _failed_stage(changed=False, cron=cron, max_retry=max_retry, enabled=enabled), _error(
             SCHEDULE_UPDATE_FAILED,
             updated.get("error") or "Failed to update schedule.",
             field="schedule_override", details=ids,
         )
     schedule_id = (updated.get("schedule") or {}).get("id")
     if not schedule_id:
-        return _failed_stage(cron=cron, max_retry=max_retry, enabled=enabled), _error(
+        return _failed_stage(changed=True, cron=cron, max_retry=max_retry, enabled=enabled), _error(
             SCHEDULE_ID_MISSING, "Schedule update returned no schedule id.",
             field="schedule_override", details=ids,
         )
@@ -1121,7 +1145,7 @@ def _apply_schedule_override(
 
     if not status_result.get("_success"):
         return _failed_stage(
-            schedule_id=schedule_id, cron=cron, max_retry=max_retry, enabled=enabled
+            changed=True, schedule_id=schedule_id, cron=cron, max_retry=max_retry, enabled=enabled
         ), _error(
             status_code,
             status_result.get("error") or "Failed to set schedule status.",
