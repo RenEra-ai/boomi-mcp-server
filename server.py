@@ -3032,7 +3032,33 @@ if orchestrate_deploy_action:
             if val is not None:
                 merged[name] = val
 
-        effective_dry_run = merged.get("dry_run", True)
+        # effective_dry_run gates the credential/SDK (mutating) path, so it must be a real
+        # boolean — never branch on the truthiness of a malformed config value. A falsey
+        # non-bool (e.g. config '{"dry_run": []}') would otherwise take the real-run path and,
+        # because step 4 overwrites dry_run with False before the engine sees it, deploy for
+        # real instead of returning an invalid-request error. Fail closed: reject a non-bool.
+        dry_run_value = merged.get("dry_run", True)
+        if not isinstance(dry_run_value, bool):
+            return {
+                "_success": False,
+                "error": (
+                    "config 'dry_run' must be a boolean (true or false), not "
+                    + type(dry_run_value).__name__ + "."
+                ),
+                "errors": [
+                    {
+                        "code": "INVALID_CONFIG_TYPE",
+                        "message": "dry_run must be a boolean.",
+                        "field": "dry_run",
+                    }
+                ],
+                "warnings": [],
+                "next_steps": [
+                    "Pass dry_run as a JSON boolean: dry_run=true to preview the deploy plan, "
+                    "dry_run=false to execute.",
+                ],
+            }
+        effective_dry_run = dry_run_value
         effective_run_test = bool(merged.get("run_test", False))
 
         # 3. Dry-run: no SDK, no credentials — plan only.

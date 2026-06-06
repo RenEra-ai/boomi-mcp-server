@@ -109,6 +109,39 @@ def test_non_object_config_short_circuits(_mock_auth_and_sdk):
     _mock_auth_and_sdk["boomi"].assert_not_called()
 
 
+def test_malformed_dry_run_in_config_fails_closed(_mock_auth_and_sdk):
+    """A non-bool dry_run from config must NOT silently take the real-run/deploy path.
+
+    A falsey non-bool (e.g. []) is rejected with a structured error before any engine call,
+    credential read, or SDK construction — fail closed for a destructive tool."""
+    for bad in ('{"dry_run": []}', '{"dry_run": "false"}', '{"dry_run": 0}', '{"dry_run": null}'):
+        with patch.object(server, "orchestrate_deploy_action") as m_action:
+            result = server.orchestrate_deploy(
+                profile="dev", build_id="b1", environment_id="e1", runtime_id="r1",
+                config=bad,
+            )
+        assert result["_success"] is False, f"dry_run={bad} must be rejected"
+        assert result["errors"][0]["code"] == "INVALID_CONFIG_TYPE"
+        assert result["errors"][0]["field"] == "dry_run"
+        assert "next_steps" in result
+        m_action.assert_not_called()
+        _mock_auth_and_sdk["secret"].assert_not_called()
+        _mock_auth_and_sdk["boomi"].assert_not_called()
+
+
+def test_explicit_bool_dry_run_in_config_is_honored(_mock_auth_and_sdk):
+    """A real boolean dry_run in config still works (true → no creds, plan only)."""
+    plan = {"_success": True, "plan_only": True, "target": {}, "summary": {}, "errors": [], "warnings": []}
+    with patch.object(server, "orchestrate_deploy_action", return_value=plan) as m_action:
+        result = server.orchestrate_deploy(
+            profile="dev", build_id="b1", environment_id="e1", runtime_id="r1",
+            config='{"dry_run": true}',
+        )
+    assert result["_success"] is True
+    assert m_action.call_args.kwargs["dry_run"] is True
+    _mock_auth_and_sdk["secret"].assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # 4. Missing required fields surface before credentials (real engine)
 # ---------------------------------------------------------------------------
