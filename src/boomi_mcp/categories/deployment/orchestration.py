@@ -23,13 +23,14 @@ registry and breaks build resolution.
 
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .. import integration_builder  # registry accessed at call time — see module docstring
 
 StageStatus = Literal["planned", "skipped", "not_required"]
 
 # Structured-error codes (stable contract identifiers).
+INVALID_REQUEST = "INVALID_REQUEST"
 BUILD_ID_REQUIRED = "BUILD_ID_REQUIRED"
 ENVIRONMENT_ID_REQUIRED = "ENVIRONMENT_ID_REQUIRED"
 RUNTIME_ID_REQUIRED = "RUNTIME_ID_REQUIRED"
@@ -180,6 +181,18 @@ def _error(
     details: Optional[Dict[str, Any]] = None,
 ) -> OrchestrateDeployError:
     return OrchestrateDeployError(code=code, message=message, field=field, details=details)
+
+
+def _validation_error_entry(err: Dict[str, Any]) -> OrchestrateDeployError:
+    """Map a single Pydantic error dict into a structured contract error entry."""
+    loc = err.get("loc") or ()
+    field = str(loc[0]) if loc else None
+    return _error(
+        INVALID_REQUEST,
+        err.get("msg", "Invalid value."),
+        field=field,
+        details={"type": err.get("type")},
+    )
 
 
 def _build_component_summary(
@@ -418,6 +431,33 @@ def orchestrate_deploy_action(
     this contract performs no Boomi SDK calls. All inputs are nullable so missing required
     values yield structured failures instead of raising.
     """
+    # 0. Normalize the request through the typed contract so malformed input TYPES
+    #    (e.g. a list build_id, which is unhashable, or a non-dict schedule_override)
+    #    become structured errors instead of raw exceptions at the registry lookup or
+    #    stage-model construction. Blank/None values are still permitted here and handled
+    #    as required-field errors in step 1.
+    try:
+        request = OrchestrateDeployRequest(
+            build_id=build_id,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            profile=profile,
+            schedule_override=schedule_override,
+            run_test=run_test,
+        )
+    except ValidationError as exc:
+        return _error_response(
+            "Invalid orchestrate_deploy request.",
+            [_validation_error_entry(err) for err in exc.errors()],
+        )
+
+    build_id = request.build_id
+    environment_id = request.environment_id
+    runtime_id = request.runtime_id
+    profile = request.profile
+    schedule_override = request.schedule_override
+    run_test = request.run_test
+
     # 1. Required-field validation (collect all missing inputs).
     required_errors: List[OrchestrateDeployError] = []
     if _is_blank(build_id):

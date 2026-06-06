@@ -157,6 +157,51 @@ def test_all_required_missing_collected():
 
 
 # ---------------------------------------------------------------------------
+# Malformed input types -> structured errors, never raw exceptions
+# ---------------------------------------------------------------------------
+def test_invalid_build_id_type_returns_structured_error():
+    # A list build_id is unhashable; it must not raise TypeError at registry lookup.
+    result = orchestrate_deploy_action(build_id=[], environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is False
+    assert _codes(result) == ["INVALID_REQUEST"]
+    assert result["errors"][0]["field"] == "build_id"
+
+
+def test_invalid_schedule_override_type_returns_structured_error(registry):
+    # A non-dict schedule_override must not raise ValidationError out of the function.
+    bid = registry("b-badsched", _single_process_entry())
+    result = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1", schedule_override=[],
+    )
+    assert result["_success"] is False
+    assert _codes(result) == ["INVALID_REQUEST"]
+    assert result["errors"][0]["field"] == "schedule_override"
+
+
+def test_multiple_invalid_types_collected():
+    result = orchestrate_deploy_action(build_id=[], environment_id="env-1", runtime_id="rt-1", schedule_override=[])
+    assert result["_success"] is False
+    assert _codes(result) == ["INVALID_REQUEST", "INVALID_REQUEST"]
+    assert {e["field"] for e in result["errors"]} == {"build_id", "schedule_override"}
+
+
+def test_malformed_input_never_raises(registry):
+    # No combination of mistyped inputs should raise; every call returns a dict.
+    bid = registry("b-noraise", _single_process_entry())
+    for kwargs in (
+        {"build_id": {"x": 1}, "environment_id": "e", "runtime_id": "r"},
+        {"build_id": 123, "environment_id": "e", "runtime_id": "r"},
+        {"build_id": bid, "environment_id": ["e"], "runtime_id": "r"},
+        {"build_id": bid, "environment_id": "e", "runtime_id": "r", "run_test": "banana"},
+        {"build_id": bid, "environment_id": "e", "runtime_id": "r", "profile": []},
+    ):
+        result = orchestrate_deploy_action(**kwargs)
+        assert isinstance(result, dict)
+        assert result["_success"] is False
+        assert result["errors"]
+
+
+# ---------------------------------------------------------------------------
 # Build resolution failures
 # ---------------------------------------------------------------------------
 def test_unknown_build_id():
