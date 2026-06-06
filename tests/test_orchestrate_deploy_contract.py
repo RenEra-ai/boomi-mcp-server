@@ -1,4 +1,10 @@
-"""Contract tests for the plan-only ``orchestrate_deploy_action`` (issue #60).
+"""Contract tests for ``orchestrate_deploy_action`` (issue #60 plan-only + issue #61 deploy).
+
+Issue #60 made the action dry-run/plan-only; issue #61 adds idempotent package + deploy
+stages that run when ``dry_run=False``. The real-run tests monkeypatch
+``orchestration.manage_deployment_action`` with a fake that returns the same dict shapes the
+real router produces, so they exercise orchestration's dict-inspection contract directly
+without a live SDK.
 
 The build registry and the action under test are imported through a single, consistent
 ``src.boomi_mcp...`` prefix. Under this repo's dual-namespace layout (``src.boomi_mcp.*`` vs
@@ -110,6 +116,48 @@ class _ExplodingClient:
 
 def _codes(result):
     return [e["code"] for e in result["errors"]]
+
+
+# ---------------------------------------------------------------------------
+# Real-run (issue #61) fakes & helpers
+# ---------------------------------------------------------------------------
+class _FakeDeploymentAction:
+    """Records ``(action, config_data)`` calls and returns canned dict responses per action.
+
+    Patched in for ``orchestration.manage_deployment_action`` so the real-run tests exercise
+    orchestration's dict-inspection contract (it inspects ``_success``/payload, never catches
+    exceptions) without a live SDK. Mirrors the real router's return shapes.
+    """
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    def __call__(self, sdk=None, profile=None, action=None, config_data=None, **kwargs):
+        self.calls.append({"action": action, "config_data": config_data})
+        if action not in self.responses:
+            raise AssertionError(f"unexpected deployment action call: {action}")
+        return self.responses[action]
+
+    def actions_called(self):
+        return [c["action"] for c in self.calls]
+
+
+def _pkg(package_id, version, created_date="2026-01-01T00:00:00Z"):
+    return {
+        "package_id": package_id,
+        "component_id": "CID-1",
+        "component_type": "process",
+        "package_version": version,
+        "created_date": created_date,
+    }
+
+
+def _dep(deployment_id, active, current_version=None):
+    dep = {"deployment_id": deployment_id, "active": active}
+    if current_version is not None:
+        dep["current_version"] = current_version
+    return dep
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +393,7 @@ def test_full_success_contract(registry):
     expected_keys = {
         "_success", "profile", "build_id", "dry_run", "plan_only", "integration_name",
         "target", "component_summary", "package", "deployment", "runtime_attachment",
-        "schedule", "execution", "logs", "cleanup", "warnings", "errors",
+        "schedule", "execution", "logs", "cleanup", "summary", "warnings", "errors",
     }
     assert set(result.keys()) == expected_keys
 
@@ -378,12 +426,22 @@ def test_full_success_contract(registry):
     assert result["logs"]["status"] == "skipped"
     assert result["cleanup"]["status"] == "not_required"
 
-    # All created-resource stage ids remain null in issue #60.
+    # All created-resource stage ids remain null in a dry-run.
     assert result["package"]["package_id"] is None
     assert result["deployment"]["deployment_id"] is None
     assert result["runtime_attachment"]["attachment_id"] is None
     assert result["schedule"]["schedule_id"] is None
     assert result["execution"]["execution_id"] is None
+
+    # Stable top-level summary (dry-run: ids null, version defaults to build_id).
+    summary = result["summary"]
+    assert summary["package_id"] is None
+    assert summary["deployment_id"] is None
+    assert summary["package_version"] == bid  # defaults to build_id when not provided
+    assert summary["environment_id"] == "env-9"
+    assert summary["deployment_active"] is None
+    assert summary["deployment_current_version"] is None
+    assert summary["stage_warnings"] == {"package": [], "deployment": []}
 
 
 def test_success_with_schedule_and_run_test(registry):
@@ -430,8 +488,201 @@ def test_registry_not_mutated(registry):
 
 
 # ---------------------------------------------------------------------------
+# Real run (issue #61): idempotent package + deploy stages
+# ---------------------------------------------------------------------------
+def test_dry_run_package_deploy_stages_are_planned_and_no_sdk_calls(registry):
+    # Dry-run never touches the client (or manage_deployment_action); stages stay "planned".
+    bid = registry("b-dry61", _single_process_entry())
+    result = orchestrate_deploy_action(
+        boomi_client=_ExplodingClient(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        dry_run=True, package_version="1.2.3",
+    )
+    assert result["_success"] is True
+    assert result["dry_run"] is True
+    assert result["plan_only"] is True
+    assert result["package"]["status"] == "planned"
+    assert result["deployment"]["status"] == "planned"
+    assert result["summary"]["package_version"] == "1.2.3"
+    assert result["summary"]["package_id"] is None
+    assert result["summary"]["deployment_id"] is None
+
+
+def test_real_run_creates_package_when_no_existing_version(registry, monkeypatch):
+    bid = registry("b-create", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": []},
+        "create_package": {"_success": True, "package": _pkg("pkg-new", bid)},
+        "list_deployments": {"_success": True, "deployments": []},
+        "deploy": {"_success": True, "deployment": _dep("dep-new", True, current_version="1")},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["package"]["status"] == "created"
+    assert result["summary"]["package_id"] == "pkg-new"
+    assert fake.actions_called().count("create_package") == 1
+
+
+def test_real_run_reuses_existing_package_for_same_component_and_version(registry, monkeypatch):
+    bid = registry("b-reusepkg", _single_process_entry(process_id="CID-1"))
+    # Two packages match the effective version (=build_id); a third is a different version.
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": [
+            _pkg("pkg-old", bid, created_date="2026-01-01T00:00:00Z"),
+            _pkg("pkg-new", bid, created_date="2026-02-01T00:00:00Z"),
+            _pkg("pkg-other", "9.9.9", created_date="2026-03-01T00:00:00Z"),
+        ]},
+        "list_deployments": {"_success": True, "deployments": []},
+        "deploy": {"_success": True, "deployment": _dep("dep-1", True)},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert "create_package" not in fake.actions_called()
+    assert result["package"]["status"] == "reused"
+    assert result["summary"]["package_id"] == "pkg-new"  # newest by created_date
+    assert result["package"]["warnings"]  # multiple matches -> stage warning
+    assert result["summary"]["stage_warnings"]["package"]
+
+
+def test_real_run_deploys_package_when_no_active_deployment(registry, monkeypatch):
+    bid = registry("b-deploy", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": {"_success": True, "deployments": [_dep("dep-old", False)]},
+        "deploy": {"_success": True, "deployment": _dep("dep-new", True, current_version="2")},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-9", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["deployment"]["status"] == "deployed"
+    assert result["summary"]["deployment_id"] == "dep-new"
+    assert result["summary"]["environment_id"] == "env-9"
+    assert result["summary"]["deployment_active"] is True
+    assert result["summary"]["deployment_current_version"] == "2"
+    assert fake.actions_called().count("deploy") == 1
+
+
+def test_real_run_reuses_existing_active_deployment(registry, monkeypatch):
+    bid = registry("b-reusedep", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": {"_success": True, "deployments": [
+            _dep("dep-active", True, current_version="3"),
+            _dep("dep-inactive", False),
+        ]},
+        "deploy": {"_success": True, "deployment": _dep("should-not-be-used", True)},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert "deploy" not in fake.actions_called()
+    assert result["deployment"]["status"] == "reused"
+    assert result["summary"]["deployment_id"] == "dep-active"
+    assert result["summary"]["deployment_active"] is True
+    assert result["summary"]["deployment_current_version"] == "3"
+    assert result["deployment"]["warnings"]  # an inactive deployment also exists -> warning
+
+
+def test_real_run_deploy_api_failure_is_structured_and_blocks_downstream(registry, monkeypatch):
+    bid = registry("b-deployfail", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": []},
+        "create_package": {"_success": True, "package": _pkg("pkg-1", bid)},
+        "list_deployments": {"_success": True, "deployments": []},
+        "deploy": {
+            "_success": False,
+            "error": "Action 'deploy' failed: Boomi denied deploy (500)",
+            "exception_type": "ApiError",
+        },
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "DEPLOY_CREATE_FAILED" in _codes(result)
+    assert result["package"]["status"] == "created"  # package stage succeeded
+    assert result["deployment"]["status"] == "failed"
+    assert result["runtime_attachment"]["status"] == "blocked"
+    assert result["schedule"]["status"] == "blocked"
+    assert result["execution"]["status"] == "blocked"
+    assert result["logs"]["status"] == "blocked"
+    assert result["cleanup"]["status"] == "blocked"
+
+
+def test_real_run_ambiguous_existing_active_deployments_blocks_redeploy(registry, monkeypatch):
+    bid = registry("b-ambig", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": {"_success": True, "deployments": [
+            _dep("dep-a", True), _dep("dep-b", True),
+        ]},
+        "deploy": {"_success": True, "deployment": _dep("should-not-be-used", True)},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "DEPLOY_AMBIGUOUS_EXISTING" in _codes(result)
+    assert "deploy" not in fake.actions_called()  # never redeploys when ambiguous
+    assert result["deployment"]["status"] == "failed"
+    assert result["runtime_attachment"]["status"] == "blocked"
+    assert result["execution"]["status"] == "blocked"
+
+
+def test_real_run_missing_process_id_from_resolver_never_calls_sdk(registry):
+    # Resolution failure precedes any SDK/manage call, even with dry_run=False.
+    entry = _entry(
+        components=[_component("proc", "process", name="P")],
+        results={"proc": _result(status="created", component_id=None, ctype="process", name="P")},
+    )
+    bid = registry("b-noid61", entry)
+    client = MagicMock()
+    result = orchestrate_deploy_action(
+        boomi_client=client, build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert _codes(result) == ["BUILD_PROCESS_ID_MISSING"]
+    assert client.mock_calls == []
+
+
+def test_real_run_without_client_returns_boomi_client_required(registry):
+    # dry_run=False with no client is a structured failure, not a crash.
+    bid = registry("b-noclient", _single_process_entry(process_id="CID-1"))
+    result = orchestrate_deploy_action(
+        boomi_client=None, build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "BOOMI_CLIENT_REQUIRED" in _codes(result)
+    assert result["package"]["status"] == "failed"
+    assert result["deployment"]["status"] == "blocked"
+    assert result["runtime_attachment"]["status"] == "blocked"
+
+
+# ---------------------------------------------------------------------------
 # Typed-contract sanity
 # ---------------------------------------------------------------------------
 def test_error_code_constants_match_module():
     assert orchestration.BUILD_ID_REQUIRED == "BUILD_ID_REQUIRED"
     assert orchestration.BUILD_MULTIPLE_PROCESS_COMPONENTS == "BUILD_MULTIPLE_PROCESS_COMPONENTS"
+    assert orchestration.DEPLOY_AMBIGUOUS_EXISTING == "DEPLOY_AMBIGUOUS_EXISTING"
+    assert orchestration.PACKAGE_CREATE_FAILED == "PACKAGE_CREATE_FAILED"
