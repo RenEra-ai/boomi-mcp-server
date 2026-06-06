@@ -5656,7 +5656,12 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "apply the optional schedule override and optional test run. Stages run strictly in "
                 "that order (schedules never run before deployment). Returns a single high-level "
                 "summary agents can branch on instead of calling each low-level tool. dry_run=true "
-                "(the default) previews the plan with no Boomi mutation; dry_run=false executes."
+                "(the default) previews the plan with no Boomi mutation; dry_run=false executes. "
+                "Every stage reuses (never duplicates) existing resources, so a retry after a "
+                "partial failure resumes safely. A failed real run returns structured failure "
+                "metadata (error_code, failed_stage, prior_stage_summary, next_step) and a "
+                "dry-run cleanup PLAN naming exactly what would be undeployed/deleted/detached; "
+                "cleanup defaults to no mutation unless cleanup_on_failure=true."
             ),
             "read_only": False,
             "implemented": True,
@@ -5670,15 +5675,18 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "config": (
                     "str (optional) — JSON object for the remaining engine inputs. Allowed keys: "
                     "build_id, environment_id, runtime_id, schedule_override, run_test, dry_run, "
-                    "package_version, test_timeout_seconds, test_dynamic_properties, "
-                    "test_process_properties, test_log_level, test_fetch_logs, test_fetch_artifacts, "
-                    "test_log_fetch_content. Top-level args override matching config values."
+                    "package_version, cleanup_on_failure, test_timeout_seconds, "
+                    "test_dynamic_properties, test_process_properties, test_log_level, "
+                    "test_fetch_logs, test_fetch_artifacts, test_log_fetch_content. Top-level args "
+                    "override matching config values. cleanup_on_failure=false (default) plans "
+                    "cleanup on failure; true executes it (destructive)."
                 ),
             },
             "response_keys": [
                 "_success", "build_id", "process_id", "environment_id", "runtime_id",
                 "package", "deployment", "runtime_attachment", "schedule", "execution", "logs",
-                "summary", "errors", "warnings", "next_steps",
+                "cleanup", "summary", "errors", "warnings", "next_steps",
+                "error_code", "failed_stage", "prior_stage_summary", "next_step",
             ],
             "examples": [
                 'orchestrate_deploy(profile="prod", build_id="<uuid-from-apply>", environment_id="env-1", runtime_id="atom-1", dry_run=true)',

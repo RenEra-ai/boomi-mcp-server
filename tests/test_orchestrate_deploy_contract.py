@@ -564,8 +564,17 @@ def test_full_success_contract(registry):
     assert summary["schedule_id"] is None
     assert summary["schedule_status"] == "not_required"
     assert summary["schedule_enabled"] is None
-    assert summary["resource_reuse"] == {"runtime_attachment": False, "schedule": False}
-    assert summary["resource_changes"] == {"runtime_attachment": False, "schedule": False}
+    assert summary["resource_reuse"] == {
+        "package": False, "deployment": False, "runtime_attachment": False, "schedule": False,
+    }
+    assert summary["resource_changes"] == {
+        "package": False, "deployment": False, "runtime_attachment": False, "schedule": False,
+    }
+    # stage_statuses surfaces each stage's status for at-a-glance recovery (issue #65).
+    assert summary["stage_statuses"] == {
+        "package": "planned", "deployment": "planned",
+        "runtime_attachment": "planned", "schedule": "not_required",
+    }
     assert summary["stage_warnings"] == {
         "package": [], "deployment": [], "runtime_attachment": [], "schedule": [],
     }
@@ -745,7 +754,21 @@ def test_real_run_deploy_api_failure_is_structured_and_blocks_downstream(registr
     assert result["schedule"]["status"] == "blocked"
     assert result["execution"]["status"] == "blocked"
     assert result["logs"]["status"] == "blocked"
-    assert result["cleanup"]["status"] == "blocked"
+    # The package was created (deploy failed after); cleanup PLANS delete_package, dry-run only.
+    assert result["cleanup"]["status"] == "planned"
+    assert result["cleanup"]["dry_run"] is True
+    assert result["cleanup"]["mutation_allowed"] is False
+    ops = result["cleanup"]["operations"]
+    assert [op["action"] for op in ops] == ["delete_package"]
+    assert ops[0]["resource_id"] == "pkg-1"
+    assert ops[0]["destructive"] is True
+    assert "delete_package" not in fake.actions_called()  # plan only — never mutates
+    # Structured failure metadata (issue #65).
+    assert result["error_code"] == "DEPLOY_CREATE_FAILED"
+    assert result["failed_stage"] == "deployment"
+    assert result["prior_stage_summary"]["package"]["status"] == "created"
+    assert result["prior_stage_summary"]["package"]["package_id"] == "pkg-1"
+    assert isinstance(result["next_step"], str) and result["next_step"]
 
 
 def test_real_run_ambiguous_existing_active_deployments_blocks_redeploy(registry, monkeypatch):
@@ -944,7 +967,16 @@ def test_runtime_attachment_api_failure_is_structured_and_blocks_schedule(regist
     assert result["schedule"]["status"] == "blocked"
     assert result["execution"]["status"] == "blocked"
     assert result["logs"]["status"] == "blocked"
-    assert result["cleanup"]["status"] == "blocked"
+    # Package + deployment were REUSED (existing) and the first attach leg failed before anything
+    # was attached, so this attempt created nothing -> cleanup is not_required (a retry reuses).
+    assert result["cleanup"]["status"] == "not_required"
+    assert result["cleanup"]["operations"] == []
+    # Structured failure metadata with prior-stage summary (issue #65).
+    assert result["error_code"] == "RUNTIME_ENV_ATTACHMENT_CREATE_FAILED"
+    assert result["failed_stage"] == "runtime_attachment"
+    assert result["prior_stage_summary"]["package"]["status"] == "reused"
+    assert result["prior_stage_summary"]["deployment"]["status"] == "reused"
+    assert result["next_step"]
     # Schedule never touched; process bindings never reached (runtime<->env is the first leg).
     assert sch.actions_called() == []
     assert "attach_process_environment" not in dep.actions_called()
@@ -1160,7 +1192,15 @@ def test_schedule_api_failure_is_structured_and_blocks_execution(registry, monke
     assert result["runtime_attachment"]["status"] == "reused"
     assert result["execution"]["status"] == "blocked"
     assert result["logs"]["status"] == "blocked"
-    assert result["cleanup"]["status"] == "blocked"
+    # Package/deploy/attachments all reused, and the first schedule call failed (changed=False),
+    # so nothing this attempt created needs undoing -> cleanup not_required.
+    assert result["cleanup"]["status"] == "not_required"
+    assert result["cleanup"]["operations"] == []
+    # Structured failure metadata: schedule stage, with the prior stages summarized (issue #65).
+    assert result["error_code"] == "SCHEDULE_UPDATE_FAILED"
+    assert result["failed_stage"] == "schedule"
+    assert set(result["prior_stage_summary"]) >= {"package", "deployment", "runtime_attachment"}
+    assert result["next_step"]
     assert sch.actions_called() == ["update"]  # failed before enable
 
 
@@ -1374,6 +1414,10 @@ def test_error_code_constants_match_module():
     assert orchestration.TEST_EXECUTION_FAILED == "TEST_EXECUTION_FAILED"
     assert orchestration.TEST_EXECUTION_TIMEOUT == "TEST_EXECUTION_TIMEOUT"
     assert orchestration.TEST_REQUEST_ID_MISSING == "TEST_REQUEST_ID_MISSING"
+    # Failure-hardening + cleanup codes (issue #65).
+    assert orchestration.LOG_RETRIEVAL_FAILED == "LOG_RETRIEVAL_FAILED"
+    assert orchestration.ARTIFACT_RETRIEVAL_FAILED == "ARTIFACT_RETRIEVAL_FAILED"
+    assert orchestration.CLEANUP_OPERATION_FAILED == "CLEANUP_OPERATION_FAILED"
 
 
 # ===========================================================================
@@ -1967,3 +2011,374 @@ def test_prior_stage_failures_block_run_test_without_execute_or_monitor(registry
     assert execute.calls == []
     assert monitor.calls == []
     assert "test" not in result["summary"]
+
+
+# ===========================================================================
+# Failure hardening, idempotency, and cleanup planning (issue #65)
+# ===========================================================================
+def _create_everything_deployment(bid):
+    """Package/deploy/attachment responses where NOTHING pre-exists, so every stage CREATES.
+
+    Used by the cleanup-planning tests: a failure after this run created the package, deployment,
+    and all three attachment legs is exactly the case where cleanup must name every undo operation.
+    """
+    return {
+        "list_packages": {"_success": True, "packages": []},
+        "create_package": {"_success": True, "package": _pkg("pkg-new", bid)},
+        "list_deployments": {"_success": True, "deployments": []},
+        "deploy": {"_success": True, "deployment": _dep("dep-new", True, current_version="1")},
+        **_process_attachments("rt-1", "env-1", "CID-1", env_attached=False, atom_attached=False),
+    }
+
+
+_DESTRUCTIVE_CLEANUP_ACTIONS = {
+    "delete",  # schedule
+    "detach_process_atom", "detach_process_environment", "undeploy", "delete_package",  # deployment
+    "detach",  # runtime<->env
+}
+
+
+def test_deploy_failure_includes_failure_metadata_and_cleanup_plan(registry, monkeypatch):
+    # Package is CREATED, then deploy fails: cleanup must PLAN delete_package (and only that),
+    # dry-run, with full failure metadata. (The package this run created is the one undo target.)
+    bid = registry("b65-deployfail", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": []},
+        "create_package": {"_success": True, "package": _pkg("pkg-new", bid)},
+        "list_deployments": {"_success": True, "deployments": []},
+        "deploy": {"_success": False, "error": "Action 'deploy' failed: denied (500)"},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "DEPLOY_CREATE_FAILED"
+    assert result["failed_stage"] == "deployment"
+    assert result["prior_stage_summary"] == {
+        "package": {"status": "created", "package_id": "pkg-new", "package_version": bid},
+    }
+    assert result["next_step"]
+    cleanup = result["cleanup"]
+    assert cleanup["status"] == "planned"
+    assert cleanup["dry_run"] is True
+    assert cleanup["mutation_allowed"] is False
+    assert cleanup["results"] == []
+    assert [op["action"] for op in cleanup["operations"]] == ["delete_package"]
+    assert cleanup["operations"][0]["resource_id"] == "pkg-new"
+    # Dry-run plan never mutates.
+    assert not (set(fake.actions_called()) & _DESTRUCTIVE_CLEANUP_ACTIONS)
+
+
+def test_attach_failure_cleanup_names_created_legs_and_partial_summary(registry, monkeypatch):
+    # Legs 1 (runtime<->env) + 2 (process<->env) attach, then leg 3 (process<->runtime) fails on a
+    # run that CREATED the package + deployment. Cleanup must name the two created legs + undeploy +
+    # delete_package, in reverse creation order, without mutating anything.
+    bid = registry("b65-attachfail", _single_process_entry(process_id="CID-1"))
+    deployment = _create_everything_deployment(bid)
+    deployment["attach_process_atom"] = {
+        "_success": False, "error": "Action 'attach_process_atom' failed: denied",
+    }
+    dep, env, rt, sch = _patch_all(
+        monkeypatch, deployment=deployment,
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=False),
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "PROCESS_RUNTIME_ATTACHMENT_CREATE_FAILED"
+    assert result["failed_stage"] == "runtime_attachment"
+    # Prior summary shows package + deployment succeeded (created/deployed), with ids.
+    assert result["prior_stage_summary"]["package"]["package_id"] == "pkg-new"
+    assert result["prior_stage_summary"]["deployment"]["deployment_id"] == "dep-new"
+    # Partial-attachment ids stay visible on the failed stage for recovery.
+    rta = result["runtime_attachment"]
+    assert rta["runtime_env_attachment_id"] == "ea-new"
+    assert rta["process_env_attachment_id"] == "pe-new"
+    assert rta["process_runtime_attachment_id"] is None
+    # Cleanup names only the legs THIS run attached (not the never-attached leg 3) + undeploy + del.
+    cleanup = result["cleanup"]
+    assert cleanup["status"] == "planned"
+    assert [op["action"] for op in cleanup["operations"]] == [
+        "detach_process_environment", "detach", "undeploy", "delete_package",
+    ]
+    ids = {op["action"]: op["resource_id"] for op in cleanup["operations"]}
+    assert ids["detach_process_environment"] == "pe-new"
+    assert ids["detach"] == "ea-new"
+    assert ids["undeploy"] == "dep-new"
+    assert ids["delete_package"] == "pkg-new"
+    assert not (set(dep.actions_called()) & _DESTRUCTIVE_CLEANUP_ACTIONS)
+    assert "detach" not in rt.actions_called()
+
+
+def test_schedule_failure_includes_failure_metadata_and_prior_summary(registry, monkeypatch):
+    # Schedule update fails after package/deploy/runtime all succeeded (reuse path): failure
+    # metadata names the schedule stage and summarizes the three prior stages.
+    bid = registry("b65-schedfail", _single_process_entry(process_id="CID-1"))
+    _patch_stage_failure(monkeypatch, bid, "schedule")
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "SCHEDULE_UPDATE_FAILED"
+    assert result["failed_stage"] == "schedule"
+    assert set(result["prior_stage_summary"]) == {"package", "deployment", "runtime_attachment"}
+    assert result["prior_stage_summary"]["runtime_attachment"]["status"] in ("reused", "attached")
+    # First schedule call failed -> nothing this run changed (reuse path) -> cleanup not_required.
+    assert result["cleanup"]["status"] == "not_required"
+    assert "retry" in result["next_step"].lower() or "re-run" in result["next_step"].lower()
+
+
+def test_execution_timeout_includes_failure_metadata_and_prior_summary(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b65-timeout")
+    execute = _FakeExecuteAction(_exec_timeout())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "TEST_EXECUTION_TIMEOUT"
+    assert result["failed_stage"] == "execution"
+    # Every pipeline stage before execution is summarized (package/deploy/runtime/schedule).
+    assert set(result["prior_stage_summary"]) == {
+        "package", "deployment", "runtime_attachment", "schedule",
+    }
+    assert result["logs"]["status"] == "blocked"
+    # All prior resources were reused on this run -> nothing to clean up.
+    assert result["cleanup"]["status"] == "not_required"
+    assert monitor.calls == []
+
+
+def test_log_retrieval_failure_is_structured_diagnostic_with_next_step(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b65-logfail")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_fail(), "execution_artifacts": _artifacts_ok()}
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    # A log-fetch failure is diagnostic only — overall run still succeeds, no top-level failure keys.
+    assert result["_success"] is True
+    assert "error_code" not in result
+    assert "failed_stage" not in result
+    logs = result["logs"]
+    assert logs["status"] == "unavailable"
+    assert logs["error_code"] == "LOG_RETRIEVAL_FAILED"
+    assert logs["failed_stage"] == "logs"
+    assert "monitor_platform" in logs["next_step"]
+    # Mirrored into the test sub-summary.
+    assert result["summary"]["test"]["log_error_code"] == "LOG_RETRIEVAL_FAILED"
+    assert result["summary"]["test"]["log_next_step"]
+
+
+def test_artifact_retrieval_failure_is_structured_diagnostic(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b65-artifactfail")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_ok(), "execution_artifacts": _logs_fail()}
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is True
+    logs = result["logs"]
+    assert logs["artifact_status"] == "unavailable"
+    assert logs["artifact_error_code"] == "ARTIFACT_RETRIEVAL_FAILED"
+    assert logs["artifact_failed_stage"] == "logs"
+    assert result["summary"]["test"]["artifact_error_code"] == "ARTIFACT_RETRIEVAL_FAILED"
+
+
+def test_retry_after_partial_attachment_failure_reuses_prior_successes(registry, monkeypatch):
+    # First attempt creates legs 1+2 then fails on leg 3; the SECOND attempt (with everything now
+    # present) reuses every prior success and creates no duplicates.
+    bid = registry("b65-retry", _single_process_entry(process_id="CID-1"))
+    first = _create_everything_deployment(bid)
+    first["attach_process_atom"] = {"_success": False, "error": "leg 3 boom"}
+    _patch_all(
+        monkeypatch, deployment=first,
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=False),
+        schedules={},
+    )
+    r1 = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert r1["_success"] is False
+    assert r1["failed_stage"] == "runtime_attachment"
+
+    # Second attempt: package + deployment + all three legs already exist.
+    dep2, env2, rt2, sch2 = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments("rt-1", "env-1", "CID-1")},
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=True),
+        schedules={},
+    )
+    r2 = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert r2["_success"] is True
+    # No duplicate provisioning — every stage reused what already exists.
+    called = dep2.actions_called()
+    assert "create_package" not in called
+    assert "deploy" not in called
+    assert "attach_process_environment" not in called
+    assert "attach_process_atom" not in called
+    assert "attach" not in rt2.actions_called()
+    assert r2["summary"]["resource_reuse"] == {
+        "package": True, "deployment": True, "runtime_attachment": True, "schedule": False,
+    }
+
+
+def test_repeated_call_with_existing_resources_does_not_duplicate(registry, monkeypatch):
+    bid = registry("b65-repeat", _single_process_entry(process_id="CID-1"))
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments("rt-1", "env-1", "CID-1")},
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=True),
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["package"]["status"] == "reused"
+    assert result["deployment"]["status"] == "reused"
+    assert result["runtime_attachment"]["status"] == "reused"
+    called = dep.actions_called()
+    assert "create_package" not in called
+    assert "deploy" not in called
+    assert "attach_process_environment" not in called
+    assert "attach_process_atom" not in called
+    assert sch.actions_called() == []  # no schedule requested, never touched
+
+
+def test_cleanup_plan_dry_run_names_exact_operations_without_mutation(registry, monkeypatch):
+    # A run that CREATED package + deployment + all 3 legs + changed the schedule, then the schedule
+    # ENABLE fails. The cleanup plan must name every undo op in reverse creation order, dry-run,
+    # without calling a single destructive action.
+    bid = registry("b65-cleanplan", _single_process_entry(process_id="CID-1"))
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment=_create_everything_deployment(bid),
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=False),
+        schedules={
+            "update": {"_success": True, "schedule": _sched("sch-1")},
+            "enable": {"_success": False, "error": "enable boom"},
+        },
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "SCHEDULE_ENABLE_FAILED"
+    assert result["schedule"]["changed"] is True
+    cleanup = result["cleanup"]
+    assert cleanup["status"] == "planned"
+    assert cleanup["dry_run"] is True
+    assert cleanup["mutation_allowed"] is False
+    assert cleanup["results"] == []
+    assert [op["action"] for op in cleanup["operations"]] == [
+        "delete", "detach_process_atom", "detach_process_environment",
+        "detach", "undeploy", "delete_package",
+    ]
+    assert all(op["destructive"] is True for op in cleanup["operations"])
+    # NOT ONE destructive action was actually called (dry-run plan only).
+    assert not (set(dep.actions_called()) & _DESTRUCTIVE_CLEANUP_ACTIONS)
+    assert "detach" not in rt.actions_called()
+    assert "delete" not in sch.actions_called()
+
+
+def test_cleanup_on_failure_true_executes_destructive_operations(registry, monkeypatch):
+    # Same created-everything + schedule-enable failure, but with cleanup_on_failure=True: every
+    # planned destructive op is executed through the sibling routers and its result recorded.
+    bid = registry("b65-cleanexec", _single_process_entry(process_id="CID-1"))
+    deployment = _create_everything_deployment(bid)
+    deployment.update({
+        "detach_process_atom": {"_success": True},
+        "detach_process_environment": {"_success": True},
+        "undeploy": {"_success": True},
+        "delete_package": {"_success": True},
+    })
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment=deployment,
+        environments=_ok_env("env-1"),
+        runtimes={
+            **_ok_runtime("rt-1", "env-1", attached=False),
+            "detach": {"_success": True},
+        },
+        schedules={
+            "update": {"_success": True, "schedule": _sched("sch-1")},
+            "enable": {"_success": False, "error": "enable boom"},
+            "delete": {"_success": True, "schedule": _sched("sch-1")},
+        },
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, cleanup_on_failure=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    cleanup = result["cleanup"]
+    assert cleanup["status"] == "completed"
+    assert cleanup["dry_run"] is False
+    assert cleanup["mutation_allowed"] is True
+    assert [r["action"] for r in cleanup["results"]] == [
+        "delete", "detach_process_atom", "detach_process_environment",
+        "detach", "undeploy", "delete_package",
+    ]
+    assert all(r["_success"] for r in cleanup["results"])
+    # The destructive ops really were dispatched to the routers.
+    assert "delete" in sch.actions_called()
+    assert "detach" in rt.actions_called()
+    assert {"detach_process_atom", "detach_process_environment", "undeploy", "delete_package"} <= set(
+        dep.actions_called()
+    )
+
+
+def test_cleanup_on_failure_true_records_failed_operation(registry, monkeypatch):
+    # If an executed cleanup op fails, it is recorded with CLEANUP_OPERATION_FAILED and the stage
+    # is "warning" — never raised.
+    bid = registry("b65-cleanexec-fail", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": []},
+        "create_package": {"_success": True, "package": _pkg("pkg-new", bid)},
+        "list_deployments": {"_success": True, "deployments": []},
+        "deploy": {"_success": False, "error": "deploy denied"},
+        "delete_package": {"_success": False, "error": "delete denied"},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        cleanup_on_failure=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    cleanup = result["cleanup"]
+    assert cleanup["status"] == "warning"
+    assert cleanup["results"][0]["action"] == "delete_package"
+    assert cleanup["results"][0]["_success"] is False
+    assert cleanup["results"][0]["error_code"] == "CLEANUP_OPERATION_FAILED"
+    assert cleanup["warnings"]

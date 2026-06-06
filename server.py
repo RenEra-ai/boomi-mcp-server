@@ -2849,6 +2849,7 @@ _ORCH_CONFIG_KEYS = (
     "run_test",
     "dry_run",
     "package_version",
+    "cleanup_on_failure",
     "test_timeout_seconds",
     "test_dynamic_properties",
     "test_process_properties",
@@ -2869,6 +2870,11 @@ def _orchestrate_next_steps(result: dict) -> list:
     if not result.get("_success"):
         codes = {e.get("code") for e in (result.get("errors") or []) if isinstance(e, dict)}
         steps = []
+        # Lead with the engine's stage-specific next_step (issue #65) when present — it is the
+        # most actionable hint for the failed stage; the generic steps below still follow it.
+        engine_next_step = result.get("next_step")
+        if isinstance(engine_next_step, str) and engine_next_step.strip():
+            steps.append(engine_next_step)
         required = codes & {"BUILD_ID_REQUIRED", "ENVIRONMENT_ID_REQUIRED", "RUNTIME_ID_REQUIRED"}
         if required:
             missing = ", ".join(sorted(c.split("_REQUIRED")[0].lower() for c in required))
@@ -2965,9 +2971,11 @@ if orchestrate_deploy_action:
             run_test: After a real deploy, execute the process and fetch log/artifact diagnostics.
             config: JSON object string for the remaining engine inputs. Allowed keys:
                 build_id, environment_id, runtime_id, schedule_override, run_test, dry_run,
-                package_version, test_timeout_seconds, test_dynamic_properties,
-                test_process_properties, test_log_level, test_fetch_logs, test_fetch_artifacts,
-                test_log_fetch_content. Top-level args override the matching config values.
+                package_version, cleanup_on_failure, test_timeout_seconds,
+                test_dynamic_properties, test_process_properties, test_log_level, test_fetch_logs,
+                test_fetch_artifacts, test_log_fetch_content. Top-level args override the matching
+                config values. cleanup_on_failure=false (default) returns a dry-run cleanup PLAN on
+                a failed real run; true executes the planned cleanup (destructive).
 
         Credential behavior:
             dry_run=true (the default) makes NO Boomi SDK call and reads no credentials. A real
@@ -2984,8 +2992,10 @@ if orchestrate_deploy_action:
         Returns:
             High-level summary envelope: _success, build_id, process_id, environment_id,
             runtime_id, package, deployment, runtime_attachment, schedule, execution, logs,
-            summary, errors, warnings, and next_steps. Agents can branch on this single response
-            without calling each low-level tool.
+            cleanup, summary, errors, warnings, and next_steps. A failed real run additionally
+            carries error_code, failed_stage, prior_stage_summary, and next_step, plus a cleanup
+            plan naming exactly what this attempt created (dry-run by default). Agents can branch
+            on this single response without calling each low-level tool.
         """
         # 1. Parse config JSON — wrapper-level errors short-circuit before any auth/SDK/action.
         config_data = {}
@@ -3065,6 +3075,32 @@ if orchestrate_deploy_action:
                 ],
             }
         effective_dry_run = dry_run_value
+
+        # cleanup_on_failure only governs failure-path behavior (plan vs execute cleanup), never
+        # the credential gate, so it is not "dangerous" the way dry_run is. But validate it up
+        # front anyway — a non-bool would silently coerce inside the engine and surprise the
+        # caller; fail closed with the same INVALID_CONFIG_TYPE contract before any SDK call.
+        cleanup_on_failure_value = merged.get("cleanup_on_failure", False)
+        if not isinstance(cleanup_on_failure_value, bool):
+            return {
+                "_success": False,
+                "error": (
+                    "config 'cleanup_on_failure' must be a boolean (true or false), not "
+                    + type(cleanup_on_failure_value).__name__ + "."
+                ),
+                "errors": [
+                    {
+                        "code": "INVALID_CONFIG_TYPE",
+                        "message": "cleanup_on_failure must be a boolean.",
+                        "field": "cleanup_on_failure",
+                    }
+                ],
+                "warnings": [],
+                "next_steps": [
+                    "Pass cleanup_on_failure as a JSON boolean: true to execute the planned "
+                    "cleanup on a failed real run, false (default) to only plan it.",
+                ],
+            }
 
         # 3. Dry-run: no SDK, no credentials — plan only.
         if effective_dry_run:

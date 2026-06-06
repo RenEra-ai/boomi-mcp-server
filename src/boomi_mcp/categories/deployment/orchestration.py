@@ -113,6 +113,14 @@ TEST_EXECUTION_FAILED = "TEST_EXECUTION_FAILED"
 TEST_EXECUTION_TIMEOUT = "TEST_EXECUTION_TIMEOUT"
 TEST_REQUEST_ID_MISSING = "TEST_REQUEST_ID_MISSING"
 
+# Failure-hardening + cleanup-planning codes (issue #65).
+# LOG_RETRIEVAL_FAILED / ARTIFACT_RETRIEVAL_FAILED are *diagnostic* — they annotate the logs
+# stage but never flip ``_success`` to False. CLEANUP_OPERATION_FAILED is recorded only when
+# the caller opts into destructive cleanup (cleanup_on_failure=True) and an operation fails.
+LOG_RETRIEVAL_FAILED = "LOG_RETRIEVAL_FAILED"
+ARTIFACT_RETRIEVAL_FAILED = "ARTIFACT_RETRIEVAL_FAILED"
+CLEANUP_OPERATION_FAILED = "CLEANUP_OPERATION_FAILED"
+
 
 # ---------------------------------------------------------------------------
 # Typed contracts
@@ -137,6 +145,10 @@ class OrchestrateDeployRequest(BaseModel):
     run_test: bool = False
     dry_run: bool = True
     package_version: Optional[str] = None
+    # Failure-recovery input (issue #65). Plain ``bool`` to match ``dry_run``/``run_test``; the
+    # non-bool guard lives in the server.py wrapper. Only consulted on failed real-run paths:
+    # False (default) returns a dry-run cleanup PLAN; True executes the planned cleanup.
+    cleanup_on_failure: bool = False
     # Run-test stage inputs (issue #63). Only consulted when run_test=True on a real run.
     test_timeout_seconds: int = 300
     test_dynamic_properties: Optional[Dict[str, Any]] = None
@@ -275,12 +287,44 @@ class LogsStage(BaseModel):
     artifact_download_url: Optional[str] = None
     error: Optional[str] = None
     artifact_error: Optional[str] = None
+    # Structured diagnostics for a log/artifact retrieval failure (issue #65). These are
+    # diagnostic only — a failed retrieval never flips orchestration ``_success`` to False.
+    error_code: Optional[str] = None
+    failed_stage: Optional[str] = None
+    next_step: Optional[str] = None
+    artifact_error_code: Optional[str] = None
+    artifact_failed_stage: Optional[str] = None
+    artifact_next_step: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
+
+
+class CleanupOperation(BaseModel):
+    """One destructive operation a cleanup would perform, in reverse creation order (issue #65).
+
+    A cleanup *plan* is a list of these named operations; by default nothing is executed. Each
+    operation names the sibling tool/action and the resource it would undeploy/delete/detach.
+    """
+
+    tool: str  # e.g. "manage_deployment" / "manage_runtimes" / "manage_schedules"
+    action: str  # e.g. "undeploy" / "delete_package" / "detach_process_atom" / "detach" / "delete"
+    resource_type: str  # e.g. "package" / "deployment" / "process_runtime_attachment" / "schedule"
+    resource_id: Optional[str] = None
+    config: Dict[str, Any] = Field(default_factory=dict)
+    reason: str
+    destructive: bool = True
 
 
 class CleanupStage(BaseModel):
     status: StageStatus
     cleanup_id: Optional[str] = None
+    # Cleanup planning (issue #65). ``dry_run``/``mutation_allowed`` default to the safe values:
+    # a plan that names operations without mutating. They flip only on explicit opt-in.
+    dry_run: bool = True
+    mutation_allowed: bool = False
+    operations: List[CleanupOperation] = Field(default_factory=list)
+    results: List[Dict[str, Any]] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    next_step: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -1487,6 +1531,13 @@ def _logs_stage_from_results(
                 stage.error = log_result.get("error") or "Log retrieval failed."
             else:
                 stage.error = "Log retrieval failed."
+            # Structured diagnostic metadata (issue #65) — does NOT flip orchestration success.
+            stage.error_code = LOG_RETRIEVAL_FAILED
+            stage.failed_stage = "logs"
+            stage.next_step = (
+                "The test execution itself succeeded; only log retrieval was unavailable. "
+                "Re-fetch via monitor_platform(action='execution_logs', execution_id=...)."
+            )
             warnings.append("Test execution succeeded but log retrieval was unavailable.")
 
     if fetch_artifacts:
@@ -1510,6 +1561,13 @@ def _logs_stage_from_results(
                 )
             else:
                 stage.artifact_error = "Artifact retrieval failed."
+            # Structured diagnostic metadata (issue #65) — does NOT flip orchestration success.
+            stage.artifact_error_code = ARTIFACT_RETRIEVAL_FAILED
+            stage.artifact_failed_stage = "logs"
+            stage.artifact_next_step = (
+                "The test execution itself succeeded; only artifact retrieval was unavailable. "
+                "Re-fetch via monitor_platform(action='execution_artifacts', execution_id=...)."
+            )
 
     stage.warnings = warnings
     return stage
@@ -1627,13 +1685,26 @@ def _stage_summary(
         "schedule_id": schedule.schedule_id,
         "schedule_status": schedule.status,
         "schedule_enabled": schedule.enabled,
+        # ``resource_reuse``/``resource_changes`` let an agent see, per stage, whether this run
+        # reused an existing resource or created/changed one — the signal a safe retry needs to
+        # avoid duplicating packages/deployments/attachments/schedules (issue #65).
         "resource_reuse": {
+            "package": package.status == "reused",
+            "deployment": deployment.status == "reused",
             "runtime_attachment": runtime_attachment.reused,
             "schedule": schedule.reused,
         },
         "resource_changes": {
+            "package": package.status == "created",
+            "deployment": deployment.status == "deployed",
             "runtime_attachment": runtime_attachment.changed,
             "schedule": schedule.changed,
+        },
+        "stage_statuses": {
+            "package": package.status,
+            "deployment": deployment.status,
+            "runtime_attachment": runtime_attachment.status,
+            "schedule": schedule.status,
         },
         "stage_warnings": {
             "package": list(package.warnings),
@@ -1643,6 +1714,8 @@ def _stage_summary(
         },
     }
     if execution is not None and logs is not None:
+        summary["stage_statuses"]["execution"] = execution.status
+        summary["stage_statuses"]["logs"] = logs.status
         summary["test"] = {
             "run_test": execution.run_test,
             "request_id": execution.request_id,
@@ -1660,8 +1733,409 @@ def _stage_summary(
             "artifact_download_url": logs.artifact_download_url,
             "log_error": logs.error,
             "artifact_error": logs.artifact_error,
+            "log_error_code": logs.error_code,
+            "log_next_step": logs.next_step,
+            "artifact_error_code": logs.artifact_error_code,
+            "artifact_next_step": logs.artifact_next_step,
         }
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Failure hardening + cleanup planning (issue #65)
+# ---------------------------------------------------------------------------
+# Map each structured error code to the orchestration stage it belongs to, so a failed
+# response can name the stage that failed without each call site repeating the mapping.
+_ERROR_CODE_STAGES: Dict[str, str] = {
+    BOOMI_CLIENT_REQUIRED: "package",
+    PACKAGE_LIST_FAILED: "package",
+    PACKAGE_CREATE_FAILED: "package",
+    PACKAGE_ID_MISSING: "package",
+    DEPLOY_LIST_FAILED: "deployment",
+    DEPLOY_AMBIGUOUS_EXISTING: "deployment",
+    DEPLOY_CREATE_FAILED: "deployment",
+    DEPLOY_ID_MISSING: "deployment",
+    ENVIRONMENT_VERIFY_FAILED: "runtime_attachment",
+    RUNTIME_VERIFY_FAILED: "runtime_attachment",
+    RUNTIME_ENV_ATTACHMENT_LIST_FAILED: "runtime_attachment",
+    RUNTIME_ENV_ATTACHMENT_CREATE_FAILED: "runtime_attachment",
+    RUNTIME_ENV_ATTACHMENT_ID_MISSING: "runtime_attachment",
+    PROCESS_ENV_ATTACHMENT_LIST_FAILED: "runtime_attachment",
+    PROCESS_ENV_ATTACHMENT_CREATE_FAILED: "runtime_attachment",
+    PROCESS_ENV_ATTACHMENT_ID_MISSING: "runtime_attachment",
+    PROCESS_RUNTIME_ATTACHMENT_LIST_FAILED: "runtime_attachment",
+    PROCESS_RUNTIME_ATTACHMENT_CREATE_FAILED: "runtime_attachment",
+    PROCESS_RUNTIME_ATTACHMENT_ID_MISSING: "runtime_attachment",
+    SCHEDULE_OVERRIDE_INVALID: "schedule",
+    SCHEDULE_UPDATE_FAILED: "schedule",
+    SCHEDULE_DELETE_FAILED: "schedule",
+    SCHEDULE_ENABLE_FAILED: "schedule",
+    SCHEDULE_DISABLE_FAILED: "schedule",
+    SCHEDULE_ID_MISSING: "schedule",
+    TEST_EXECUTION_FAILED: "execution",
+    TEST_EXECUTION_TIMEOUT: "execution",
+    TEST_REQUEST_ID_MISSING: "execution",
+    LOG_RETRIEVAL_FAILED: "logs",
+    ARTIFACT_RETRIEVAL_FAILED: "logs",
+}
+
+# Stage execution order — used to derive the "prior stages" a retry can rely on.
+_STAGE_ORDER = ["package", "deployment", "runtime_attachment", "schedule", "execution", "logs"]
+
+
+def _failed_stage_for_error_code(code: Optional[str]) -> str:
+    """Resolve the orchestration stage name for a structured error code (``"unknown"`` fallback)."""
+    return _ERROR_CODE_STAGES.get(code or "", "unknown")
+
+
+def _prior_stage_summary(
+    failed_stage: str,
+    package: Optional[PackageStage],
+    deployment: Optional[DeploymentStage],
+    runtime_attachment: Optional[RuntimeAttachmentStage],
+    schedule: Optional[ScheduleStage],
+    *,
+    execution: Optional[ExecutionStage] = None,
+) -> Dict[str, Any]:
+    """Compact status + ids of the stages that ran BEFORE ``failed_stage``.
+
+    Lets a calling agent see exactly what already succeeded (and which resource ids now exist) so
+    a retry resumes safely from the failed stage instead of re-creating prior resources.
+    """
+    stage_objs: Dict[str, Any] = {
+        "package": package,
+        "deployment": deployment,
+        "runtime_attachment": runtime_attachment,
+        "schedule": schedule,
+        "execution": execution,
+    }
+    try:
+        cutoff = _STAGE_ORDER.index(failed_stage)
+    except ValueError:
+        cutoff = len(_STAGE_ORDER)
+
+    summary: Dict[str, Any] = {}
+    for name in _STAGE_ORDER[:cutoff]:
+        stage = stage_objs.get(name)
+        if stage is None:
+            continue
+        entry: Dict[str, Any] = {"status": stage.status}
+        if name == "package":
+            entry["package_id"] = stage.package_id
+            entry["package_version"] = stage.package_version
+        elif name == "deployment":
+            entry["deployment_id"] = stage.deployment_id
+            entry["environment_id"] = stage.environment_id
+        elif name == "runtime_attachment":
+            entry["runtime_env_attachment_id"] = stage.runtime_env_attachment_id
+            entry["process_env_attachment_id"] = stage.process_env_attachment_id
+            entry["process_runtime_attachment_id"] = stage.process_runtime_attachment_id
+        elif name == "schedule":
+            entry["schedule_id"] = stage.schedule_id
+        elif name == "execution":
+            entry["execution_id"] = stage.execution_id
+        summary[name] = entry
+    return summary
+
+
+def _next_step_for_failure(error: OrchestrateDeployError, failed_stage: str) -> str:
+    """One actionable next step for a failed stage, specialized by error code where useful."""
+    code = error.code
+    if failed_stage == "package":
+        if code == BOOMI_CLIENT_REQUIRED:
+            return (
+                "A non-dry-run deploy needs an authenticated Boomi client; provide credentials "
+                "and re-run orchestrate_deploy."
+            )
+        return (
+            "Verify the resolved process component exists and is packageable, then re-run "
+            "orchestrate_deploy — the package version defaults to the build_id so a retry reuses "
+            "the same package instead of creating a duplicate."
+        )
+    if failed_stage == "deployment":
+        if code == DEPLOY_AMBIGUOUS_EXISTING:
+            return (
+                "Multiple active deployments already exist for this package/environment; undeploy "
+                "the stale one (manage_deployment undeploy) or pass an explicit package_version, "
+                "then re-run."
+            )
+        return (
+            "Verify the environment_id and that the package can deploy there, then re-run; the "
+            "package created by this run is reused on retry (no duplicate package)."
+        )
+    if failed_stage == "runtime_attachment":
+        return (
+            "Verify the environment and runtime exist and the account may attach them, then re-run "
+            "orchestrate_deploy — already-attached legs are reused, so only the missing binding is "
+            "created."
+        )
+    if failed_stage == "schedule":
+        return (
+            "Fix the schedule_override (or schedule permissions) and re-run orchestrate_deploy; "
+            "package, deploy, and runtime bindings already succeeded and will be reused."
+        )
+    if failed_stage == "execution":
+        if code == TEST_EXECUTION_TIMEOUT:
+            return (
+                "The deployment succeeded but the test run did not finish within "
+                "test_timeout_seconds. Increase test_timeout_seconds or inspect the run via "
+                "monitor_platform, then re-run with run_test=true (prior stages are reused)."
+            )
+        return (
+            "The deployment succeeded but the test execution failed; inspect summary.test/logs, "
+            "fix the process, then re-run with run_test=true (prior stages are reused)."
+        )
+    return "Inspect the errors array and re-run orchestrate_deploy after addressing the failure."
+
+
+def _cleanup_operations_for_failure(
+    package: Optional[PackageStage],
+    deployment: Optional[DeploymentStage],
+    runtime_attachment: Optional[RuntimeAttachmentStage],
+    schedule: Optional[ScheduleStage],
+    *,
+    environment_id: Optional[str],
+    runtime_id: Optional[str],
+    process_id: Optional[str],
+) -> List[CleanupOperation]:
+    """Destructive operations, in reverse creation order, that undo what THIS attempt created.
+
+    Only resources this orchestration attempt actually created/changed are listed — reused or
+    not-required resources are omitted, because a retry reuses them (idempotency) and undoing them
+    would break an already-correct prior state. The result *names* exactly what a caller would
+    undeploy / delete / detach; it performs no mutation by itself.
+    """
+    ops: List[CleanupOperation] = []
+
+    # 1. schedule — delete the schedule this run created/updated.
+    if schedule is not None and schedule.changed:
+        ops.append(CleanupOperation(
+            tool="manage_schedules",
+            action="delete",
+            resource_type="schedule",
+            resource_id=schedule.schedule_id,
+            config={"process_id": process_id, "atom_id": runtime_id},
+            reason=(
+                "This run created/updated the process schedule; delete it to restore the prior "
+                "schedule state before retrying."
+            ),
+        ))
+
+    # 2. process<->runtime attachment.
+    if (
+        runtime_attachment is not None
+        and runtime_attachment.process_runtime_attachment_status == "attached"
+    ):
+        ops.append(CleanupOperation(
+            tool="manage_deployment",
+            action="detach_process_atom",
+            resource_type="process_runtime_attachment",
+            resource_id=runtime_attachment.process_runtime_attachment_id,
+            config={"resource_id": runtime_attachment.process_runtime_attachment_id},
+            reason=(
+                "This run attached the process to the runtime; detach it to undo the new "
+                "process<->runtime binding."
+            ),
+        ))
+
+    # 3. process<->environment attachment.
+    if (
+        runtime_attachment is not None
+        and runtime_attachment.process_env_attachment_status == "attached"
+    ):
+        ops.append(CleanupOperation(
+            tool="manage_deployment",
+            action="detach_process_environment",
+            resource_type="process_env_attachment",
+            resource_id=runtime_attachment.process_env_attachment_id,
+            config={"resource_id": runtime_attachment.process_env_attachment_id},
+            reason=(
+                "This run attached the process to the environment; detach it to undo the new "
+                "process<->environment binding."
+            ),
+        ))
+
+    # 4. runtime<->environment attachment.
+    if (
+        runtime_attachment is not None
+        and runtime_attachment.runtime_env_attachment_status == "attached"
+    ):
+        ops.append(CleanupOperation(
+            tool="manage_runtimes",
+            action="detach",
+            resource_type="runtime_env_attachment",
+            resource_id=runtime_attachment.runtime_env_attachment_id,
+            config={
+                "resource_id": runtime_attachment.runtime_env_attachment_id,
+                "environment_id": environment_id,
+            },
+            reason=(
+                "This run attached the runtime to the environment; detach it to undo the new "
+                "runtime<->environment binding."
+            ),
+        ))
+
+    # 5. deployment — undeploy the package this run deployed.
+    if deployment is not None and deployment.status == "deployed":
+        ops.append(CleanupOperation(
+            tool="manage_deployment",
+            action="undeploy",
+            resource_type="deployment",
+            resource_id=deployment.deployment_id,
+            config={
+                "deployment_id": deployment.deployment_id,
+                "package_id": deployment.package_id,
+                "environment_id": deployment.environment_id or environment_id,
+            },
+            reason="This run deployed the package; undeploy it to undo the new deployment.",
+        ))
+
+    # 6. package — delete the package this run created.
+    if package is not None and package.status == "created":
+        ops.append(CleanupOperation(
+            tool="manage_deployment",
+            action="delete_package",
+            resource_type="package",
+            resource_id=package.package_id,
+            config={"package_id": package.package_id},
+            reason="This run created the package; delete it to undo the new package.",
+        ))
+
+    return ops
+
+
+# Maps a cleanup operation's ``tool`` to the sibling-router wrapper that performs it.
+_CLEANUP_TOOL_DISPATCH = {
+    "manage_deployment": _call_deployment_action,
+    "manage_runtimes": _call_runtime_action,
+    "manage_schedules": _call_schedule_action,
+}
+
+
+def _cleanup_stage_for_failure(
+    package: Optional[PackageStage],
+    deployment: Optional[DeploymentStage],
+    runtime_attachment: Optional[RuntimeAttachmentStage],
+    schedule: Optional[ScheduleStage],
+    *,
+    environment_id: Optional[str],
+    runtime_id: Optional[str],
+    process_id: Optional[str],
+    cleanup_on_failure: bool,
+    boomi_client: Any = None,
+    profile: Optional[str] = None,
+) -> CleanupStage:
+    """Plan (default) or, on explicit opt-in, execute cleanup of resources THIS attempt created.
+
+    Defaults to a dry-run plan (``status="planned"``, ``dry_run=True``, ``mutation_allowed=False``)
+    that names each destructive operation without calling anything. When nothing this attempt
+    created needs undoing, ``status="not_required"``. Destructive cleanup runs only when the caller
+    passes ``cleanup_on_failure=True`` and a client is available; each operation's result is
+    recorded and a failed operation is surfaced (``CLEANUP_OPERATION_FAILED``) without raising.
+    """
+    operations = _cleanup_operations_for_failure(
+        package, deployment, runtime_attachment, schedule,
+        environment_id=environment_id, runtime_id=runtime_id, process_id=process_id,
+    )
+    if not operations:
+        return CleanupStage(
+            status="not_required",
+            dry_run=True,
+            mutation_allowed=bool(cleanup_on_failure),
+            next_step=(
+                "No resources created by this attempt require cleanup; a retry will reuse any "
+                "existing resources."
+            ),
+        )
+
+    if not cleanup_on_failure or boomi_client is None:
+        return CleanupStage(
+            status="planned",
+            dry_run=True,
+            mutation_allowed=False,
+            operations=operations,
+            next_step=(
+                "These destructive cleanup operations are planned only — nothing was mutated. "
+                "Re-run with cleanup_on_failure=true to execute them, or run the named tools "
+                "individually."
+            ),
+        )
+
+    # Explicit opt-in: execute each planned operation in order, recording every result.
+    results: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    all_ok = True
+    for op in operations:
+        caller = _CLEANUP_TOOL_DISPATCH.get(op.tool)
+        if caller is None:
+            all_ok = False
+            warnings.append(f"No cleanup dispatcher registered for tool '{op.tool}'.")
+            results.append({
+                "action": op.action,
+                "resource_type": op.resource_type,
+                "resource_id": op.resource_id,
+                "_success": False,
+                "error_code": CLEANUP_OPERATION_FAILED,
+                "error": f"No cleanup dispatcher registered for tool '{op.tool}'.",
+            })
+            continue
+        result = caller(boomi_client, profile, op.action, dict(op.config))
+        ok = bool(result.get("_success"))
+        if not ok:
+            all_ok = False
+            warnings.append(
+                f"Cleanup operation {op.action} ({op.resource_type} {op.resource_id}) failed: "
+                f"{result.get('error') or 'unknown error'}"
+            )
+        results.append({
+            "action": op.action,
+            "resource_type": op.resource_type,
+            "resource_id": op.resource_id,
+            "_success": ok,
+            "error_code": None if ok else CLEANUP_OPERATION_FAILED,
+            "error": None if ok else result.get("error"),
+        })
+
+    return CleanupStage(
+        status="completed" if all_ok else "warning",
+        dry_run=False,
+        mutation_allowed=True,
+        operations=operations,
+        results=results,
+        warnings=warnings,
+        next_step=(
+            "Cleanup completed; re-run orchestrate_deploy to retry the deployment."
+            if all_ok
+            else "Some cleanup operations failed; inspect cleanup.results/warnings and clean up "
+            "the remaining resources manually before retrying."
+        ),
+    )
+
+
+def _attach_failure_metadata(
+    response: Dict[str, Any],
+    error: OrchestrateDeployError,
+    package: Optional[PackageStage],
+    deployment: Optional[DeploymentStage],
+    runtime_attachment: Optional[RuntimeAttachmentStage],
+    schedule: Optional[ScheduleStage],
+    *,
+    execution: Optional[ExecutionStage] = None,
+) -> Dict[str, Any]:
+    """Add the top-level failure-hardening keys to a failed response envelope (issue #65).
+
+    Every failed real-run response carries ``error_code`` (the structured code), ``failed_stage``
+    (which stage failed), ``prior_stage_summary`` (what already succeeded), and ``next_step`` (one
+    actionable hint). Success responses never gain these keys.
+    """
+    failed_stage = _failed_stage_for_error_code(error.code)
+    response["error_code"] = error.code
+    response["failed_stage"] = failed_stage
+    response["prior_stage_summary"] = _prior_stage_summary(
+        failed_stage, package, deployment, runtime_attachment, schedule, execution=execution,
+    )
+    response["next_step"] = _next_step_for_failure(error, failed_stage)
+    return response
 
 
 def _execution_log_cleanup_stages(run_test: bool, *, blocked: bool) -> Dict[str, Any]:
@@ -1832,13 +2306,30 @@ def _blocked_real_run_response(
     package: PackageStage,
     deployment: DeploymentStage,
     runtime_id: Optional[str],
+    environment_id: Optional[str],
     schedule_override: Optional[Dict[str, Any]],
     run_test: bool,
     error: OrchestrateDeployError,
+    cleanup_on_failure: bool = False,
+    boomi_client: Any = None,
 ) -> Dict[str, Any]:
-    """Failed real-run response: the failing stage is marked, all later stages ``blocked``."""
+    """Failed real-run response: the failing stage is marked, all later stages ``blocked``.
+
+    Only the package/deploy stages ran on this path (runtime binding + schedule never started),
+    so the cleanup plan considers package + deployment only — typically just ``delete_package``
+    when a package was created before the deploy failed (issue #65).
+    """
     downstream = _blocked_downstream_stages(runtime_id, schedule_override, run_test)
-    return _assemble_response(
+    downstream["cleanup"] = _cleanup_stage_for_failure(
+        package, deployment, None, None,
+        environment_id=environment_id,
+        runtime_id=runtime_id,
+        process_id=target.process_component_id,
+        cleanup_on_failure=cleanup_on_failure,
+        boomi_client=boomi_client,
+        profile=profile,
+    )
+    response = _assemble_response(
         success=False,
         profile=profile,
         build_id=build_id,
@@ -1854,6 +2345,7 @@ def _blocked_real_run_response(
         errors=[error],
         error_message=error.message,
     )
+    return _attach_failure_metadata(response, error, package, deployment, None, None)
 
 
 def _runtime_or_schedule_failed_response(
@@ -1867,19 +2359,33 @@ def _runtime_or_schedule_failed_response(
     schedule: ScheduleStage,
     run_test: bool,
     error: OrchestrateDeployError,
+    environment_id: Optional[str] = None,
+    runtime_id: Optional[str] = None,
+    cleanup_on_failure: bool = False,
+    boomi_client: Any = None,
 ) -> Dict[str, Any]:
     """Failed real-run after deploy: a runtime/schedule stage failed; execution onward blocked.
 
     The runtime and schedule stages are passed through verbatim so the response shows exactly
     how far binding got (a failed runtime stage with schedule blocked, or a completed runtime
-    stage with a failed schedule stage).
+    stage with a failed schedule stage). The cleanup plan names exactly the attachment legs /
+    deployment / package this attempt created, in reverse creation order (issue #65).
     """
     downstream = {
         "runtime_attachment": runtime_attachment,
         "schedule": schedule,
         **_execution_log_cleanup_stages(run_test, blocked=True),
     }
-    return _assemble_response(
+    downstream["cleanup"] = _cleanup_stage_for_failure(
+        package, deployment, runtime_attachment, schedule,
+        environment_id=environment_id or deployment.environment_id,
+        runtime_id=runtime_id or runtime_attachment.runtime_id,
+        process_id=target.process_component_id,
+        cleanup_on_failure=cleanup_on_failure,
+        boomi_client=boomi_client,
+        profile=profile,
+    )
+    response = _assemble_response(
         success=False,
         profile=profile,
         build_id=build_id,
@@ -1892,6 +2398,9 @@ def _runtime_or_schedule_failed_response(
         summary=_stage_summary(package, deployment, runtime_attachment, schedule),
         errors=[error],
         error_message=error.message,
+    )
+    return _attach_failure_metadata(
+        response, error, package, deployment, runtime_attachment, schedule
     )
 
 
@@ -1909,19 +2418,37 @@ def _real_run_with_test_response(
     logs: LogsStage,
     errors: Optional[List[OrchestrateDeployError]] = None,
     error_message: Optional[str] = None,
+    environment_id: Optional[str] = None,
+    runtime_id: Optional[str] = None,
+    cleanup_on_failure: bool = False,
+    boomi_client: Any = None,
 ) -> Dict[str, Any]:
     """Real-run response embedding the concrete run-test execution + logs stages (issue #63).
 
-    Mirrors ``_real_run_response`` but carries the real ``ExecutionStage``/``LogsStage`` (cleanup
-    stays ``not_required``). ``success`` is False for a failed test execution, with the failing
-    stages still embedded for diagnostics; top-level ``warnings`` surface the stages' warnings.
+    Mirrors ``_real_run_response`` but carries the real ``ExecutionStage``/``LogsStage``. On
+    SUCCESS the cleanup stage stays ``not_required`` and no failure metadata is added. On a failed
+    test execution (``success=False``) the response gains the issue-#65 failure metadata and a
+    cleanup plan naming what this attempt created (the deployment itself succeeded; cleanup is
+    informational/dry-run by default). Top-level ``warnings`` surface the stages' warnings.
     """
+    if success:
+        cleanup_stage: CleanupStage = CleanupStage(status="not_required")
+    else:
+        cleanup_stage = _cleanup_stage_for_failure(
+            package, deployment, runtime_attachment, schedule,
+            environment_id=environment_id or deployment.environment_id,
+            runtime_id=runtime_id or runtime_attachment.runtime_id,
+            process_id=target.process_component_id,
+            cleanup_on_failure=cleanup_on_failure,
+            boomi_client=boomi_client,
+            profile=profile,
+        )
     downstream = {
         "runtime_attachment": runtime_attachment,
         "schedule": schedule,
         "execution": execution,
         "logs": logs,
-        "cleanup": CleanupStage(status="not_required"),
+        "cleanup": cleanup_stage,
     }
     response = _assemble_response(
         success=success,
@@ -1943,6 +2470,11 @@ def _real_run_with_test_response(
     test_warnings = list(execution.warnings) + list(logs.warnings)
     if test_warnings:
         response["warnings"] = test_warnings
+    if not success and errors:
+        _attach_failure_metadata(
+            response, errors[0], package, deployment, runtime_attachment, schedule,
+            execution=execution,
+        )
     return response
 
 
@@ -1959,6 +2491,7 @@ def orchestrate_deploy_action(
     run_test: bool = False,
     dry_run: bool = True,
     package_version: Optional[str] = None,
+    cleanup_on_failure: bool = False,
     test_timeout_seconds: int = 300,
     test_dynamic_properties: Optional[Dict[str, Any]] = None,
     test_process_properties: Optional[Dict[str, Any]] = None,
@@ -1976,6 +2509,14 @@ def orchestrate_deploy_action(
     order; any stage failure returns structured error codes and blocks every later stage. An
     invalid ``schedule_override`` is rejected up front (before any SDK call) in both modes. All
     inputs are nullable so missing required values yield structured failures instead of raising.
+
+    Failure hardening (issue #65): every failed real-run response also carries top-level
+    ``error_code``, ``failed_stage``, ``prior_stage_summary`` (what already succeeded, with ids),
+    and ``next_step`` (one actionable hint), plus a ``cleanup`` plan that names — in reverse
+    creation order — exactly the schedule/attachments/deployment/package THIS attempt created.
+    The cleanup plan defaults to dry-run (no mutation); pass ``cleanup_on_failure=True`` to execute
+    it. Because every stage reuses (never duplicates) existing resources, a retry after a partial
+    failure resumes safely from the failed stage.
     """
     # 0. Normalize the request through the typed contract so malformed input TYPES
     #    (e.g. a list build_id, which is unhashable, or a non-dict schedule_override)
@@ -1992,6 +2533,7 @@ def orchestrate_deploy_action(
             run_test=run_test,
             dry_run=dry_run,
             package_version=package_version,
+            cleanup_on_failure=cleanup_on_failure,
             test_timeout_seconds=test_timeout_seconds,
             test_dynamic_properties=test_dynamic_properties,
             test_process_properties=test_process_properties,
@@ -2014,6 +2556,7 @@ def orchestrate_deploy_action(
     run_test = request.run_test
     dry_run = request.dry_run
     package_version = request.package_version
+    cleanup_on_failure = request.cleanup_on_failure
 
     # 1. Required-field validation (collect all missing inputs).
     required_errors: List[OrchestrateDeployError] = []
@@ -2076,8 +2619,11 @@ def orchestrate_deploy_action(
             package=package,
             deployment=deployment,
             runtime_id=runtime_id,
+            environment_id=environment_id,
             schedule_override=schedule_override,
             run_test=run_test,
+            cleanup_on_failure=cleanup_on_failure,
+            boomi_client=boomi_client,
             error=_error(
                 BOOMI_CLIENT_REQUIRED,
                 "A Boomi client is required to run package/deploy (dry_run=False).",
@@ -2107,8 +2653,11 @@ def orchestrate_deploy_action(
             package=package,
             deployment=deployment,
             runtime_id=runtime_id,
+            environment_id=environment_id,
             schedule_override=schedule_override,
             run_test=run_test,
+            cleanup_on_failure=cleanup_on_failure,
+            boomi_client=boomi_client,
             error=package_error,
         )
 
@@ -2133,8 +2682,11 @@ def orchestrate_deploy_action(
             package=package_stage,
             deployment=deployment,
             runtime_id=runtime_id,
+            environment_id=environment_id,
             schedule_override=schedule_override,
             run_test=run_test,
+            cleanup_on_failure=cleanup_on_failure,
+            boomi_client=boomi_client,
             error=deployment_error,
         )
 
@@ -2166,6 +2718,10 @@ def orchestrate_deploy_action(
             schedule=blocked_schedule,
             run_test=run_test,
             error=runtime_error,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            cleanup_on_failure=cleanup_on_failure,
+            boomi_client=boomi_client,
         )
 
     # 3f. Schedule activation stage (issue #62): only after deploy + runtime binding succeed,
@@ -2190,6 +2746,10 @@ def orchestrate_deploy_action(
             schedule=schedule_stage,
             run_test=run_test,
             error=schedule_error,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            cleanup_on_failure=cleanup_on_failure,
+            boomi_client=boomi_client,
         )
 
     # 3g. Success: package, deploy, runtime binding, and schedule all resolved. Without run_test
@@ -2231,4 +2791,8 @@ def orchestrate_deploy_action(
         logs=logs_stage,
         errors=[test_error] if test_error is not None else [],
         error_message=test_error.message if test_error is not None else None,
+        environment_id=environment_id,
+        runtime_id=runtime_id,
+        cleanup_on_failure=cleanup_on_failure,
+        boomi_client=boomi_client,
     )
