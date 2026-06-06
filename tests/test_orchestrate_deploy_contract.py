@@ -2272,9 +2272,10 @@ def test_repeated_call_with_existing_resources_does_not_duplicate(registry, monk
 
 
 def test_cleanup_plan_dry_run_names_exact_operations_without_mutation(registry, monkeypatch):
-    # A run that CREATED package + deployment + all 3 legs + changed the schedule, then the schedule
-    # ENABLE fails. The cleanup plan must name every undo op in reverse creation order, dry-run,
-    # without calling a single destructive action.
+    # A run that CREATED package + deployment + all 3 legs, then the schedule ENABLE fails. The
+    # cleanup plan names every CREATED resource in reverse creation order — package, deployment, and
+    # the three attachment legs — dry-run, without calling a single destructive action. The
+    # schedule is deliberately NOT in the plan (modified in place, re-applied idempotently on retry).
     bid = registry("b65-cleanplan", _single_process_entry(process_id="CID-1"))
     dep, env, rt, sch = _patch_all(
         monkeypatch,
@@ -2300,9 +2301,15 @@ def test_cleanup_plan_dry_run_names_exact_operations_without_mutation(registry, 
     assert cleanup["mutation_allowed"] is False
     assert cleanup["results"] == []
     assert [op["action"] for op in cleanup["operations"]] == [
-        "delete", "detach_process_atom", "detach_process_environment",
+        "detach_process_atom", "detach_process_environment",
         "detach", "undeploy", "delete_package",
     ]
+    # The in-place-modified schedule is never a destructive cleanup target.
+    assert not any(op["resource_type"] == "schedule" for op in cleanup["operations"])
+    # The runtime<->env detach op carries ONLY the attachment id (no environment_id), so the
+    # runtime router uses its direct-by-attachment-id path instead of the runtime-id lookup path.
+    detach_op = next(op for op in cleanup["operations"] if op["action"] == "detach")
+    assert detach_op["config"] == {"resource_id": "ea-new"}
     assert all(op["destructive"] is True for op in cleanup["operations"])
     # NOT ONE destructive action was actually called (dry-run plan only).
     assert not (set(dep.actions_called()) & _DESTRUCTIVE_CLEANUP_ACTIONS)
@@ -2312,7 +2319,8 @@ def test_cleanup_plan_dry_run_names_exact_operations_without_mutation(registry, 
 
 def test_cleanup_on_failure_true_executes_destructive_operations(registry, monkeypatch):
     # Same created-everything + schedule-enable failure, but with cleanup_on_failure=True: every
-    # planned destructive op is executed through the sibling routers and its result recorded.
+    # planned destructive op (the CREATED resources, not the schedule) is executed through the
+    # sibling routers and its result recorded.
     bid = registry("b65-cleanexec", _single_process_entry(process_id="CID-1"))
     deployment = _create_everything_deployment(bid)
     deployment.update({
@@ -2332,7 +2340,6 @@ def test_cleanup_on_failure_true_executes_destructive_operations(registry, monke
         schedules={
             "update": {"_success": True, "schedule": _sched("sch-1")},
             "enable": {"_success": False, "error": "enable boom"},
-            "delete": {"_success": True, "schedule": _sched("sch-1")},
         },
     )
     result = orchestrate_deploy_action(
@@ -2346,13 +2353,13 @@ def test_cleanup_on_failure_true_executes_destructive_operations(registry, monke
     assert cleanup["dry_run"] is False
     assert cleanup["mutation_allowed"] is True
     assert [r["action"] for r in cleanup["results"]] == [
-        "delete", "detach_process_atom", "detach_process_environment",
+        "detach_process_atom", "detach_process_environment",
         "detach", "undeploy", "delete_package",
     ]
     assert all(r["_success"] for r in cleanup["results"])
-    # The destructive ops really were dispatched to the routers.
-    assert "delete" in sch.actions_called()
+    # The destructive ops really were dispatched to the routers; the schedule was NEVER deleted.
     assert "detach" in rt.actions_called()
+    assert "delete" not in sch.actions_called()
     assert {"detach_process_atom", "detach_process_environment", "undeploy", "delete_package"} <= set(
         dep.actions_called()
     )

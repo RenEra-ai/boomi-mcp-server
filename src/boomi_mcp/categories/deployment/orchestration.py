@@ -1892,36 +1892,22 @@ def _cleanup_operations_for_failure(
     package: Optional[PackageStage],
     deployment: Optional[DeploymentStage],
     runtime_attachment: Optional[RuntimeAttachmentStage],
-    schedule: Optional[ScheduleStage],
     *,
     environment_id: Optional[str],
-    runtime_id: Optional[str],
-    process_id: Optional[str],
 ) -> List[CleanupOperation]:
     """Destructive operations, in reverse creation order, that undo what THIS attempt created.
 
-    Only resources this orchestration attempt actually created/changed are listed — reused or
-    not-required resources are omitted, because a retry reuses them (idempotency) and undoing them
-    would break an already-correct prior state. The result *names* exactly what a caller would
-    undeploy / delete / detach; it performs no mutation by itself.
+    Only resources this orchestration attempt actually CREATED are listed — reused/not-required
+    resources are omitted (a retry reuses them idempotently, so undoing them would break an
+    already-correct prior state). The schedule is deliberately EXCLUDED: a process schedule is
+    modified in place (``update``), not created; this run captures no prior cron/status to restore;
+    and a retry re-applies ``schedule_override`` idempotently — so destructively deleting it would
+    risk wiping a pre-existing schedule rather than undoing this attempt. The result *names* exactly
+    what a caller would undeploy / delete / detach; it performs no mutation by itself.
     """
     ops: List[CleanupOperation] = []
 
-    # 1. schedule — delete the schedule this run created/updated.
-    if schedule is not None and schedule.changed:
-        ops.append(CleanupOperation(
-            tool="manage_schedules",
-            action="delete",
-            resource_type="schedule",
-            resource_id=schedule.schedule_id,
-            config={"process_id": process_id, "atom_id": runtime_id},
-            reason=(
-                "This run created/updated the process schedule; delete it to restore the prior "
-                "schedule state before retrying."
-            ),
-        ))
-
-    # 2. process<->runtime attachment.
+    # 1. process<->runtime attachment.
     if (
         runtime_attachment is not None
         and runtime_attachment.process_runtime_attachment_status == "attached"
@@ -1938,7 +1924,7 @@ def _cleanup_operations_for_failure(
             ),
         ))
 
-    # 3. process<->environment attachment.
+    # 2. process<->environment attachment.
     if (
         runtime_attachment is not None
         and runtime_attachment.process_env_attachment_status == "attached"
@@ -1955,7 +1941,10 @@ def _cleanup_operations_for_failure(
             ),
         ))
 
-    # 4. runtime<->environment attachment.
+    # 3. runtime<->environment attachment. Detach by the attachment id ONLY (the direct path):
+    #    manage_runtimes_action('detach') treats resource_id as a *runtime* id whenever
+    #    environment_id is also present, so passing environment_id here would make it look up an
+    #    atom by the attachment id and fail to detach.
     if (
         runtime_attachment is not None
         and runtime_attachment.runtime_env_attachment_status == "attached"
@@ -1965,17 +1954,14 @@ def _cleanup_operations_for_failure(
             action="detach",
             resource_type="runtime_env_attachment",
             resource_id=runtime_attachment.runtime_env_attachment_id,
-            config={
-                "resource_id": runtime_attachment.runtime_env_attachment_id,
-                "environment_id": environment_id,
-            },
+            config={"resource_id": runtime_attachment.runtime_env_attachment_id},
             reason=(
                 "This run attached the runtime to the environment; detach it to undo the new "
                 "runtime<->environment binding."
             ),
         ))
 
-    # 5. deployment — undeploy the package this run deployed.
+    # 4. deployment — undeploy the package this run deployed.
     if deployment is not None and deployment.status == "deployed":
         ops.append(CleanupOperation(
             tool="manage_deployment",
@@ -1990,7 +1976,7 @@ def _cleanup_operations_for_failure(
             reason="This run deployed the package; undeploy it to undo the new deployment.",
         ))
 
-    # 6. package — delete the package this run created.
+    # 5. package — delete the package this run created.
     if package is not None and package.status == "created":
         ops.append(CleanupOperation(
             tool="manage_deployment",
@@ -2016,11 +2002,8 @@ def _cleanup_stage_for_failure(
     package: Optional[PackageStage],
     deployment: Optional[DeploymentStage],
     runtime_attachment: Optional[RuntimeAttachmentStage],
-    schedule: Optional[ScheduleStage],
     *,
     environment_id: Optional[str],
-    runtime_id: Optional[str],
-    process_id: Optional[str],
     cleanup_on_failure: bool,
     boomi_client: Any = None,
     profile: Optional[str] = None,
@@ -2034,8 +2017,7 @@ def _cleanup_stage_for_failure(
     recorded and a failed operation is surfaced (``CLEANUP_OPERATION_FAILED``) without raising.
     """
     operations = _cleanup_operations_for_failure(
-        package, deployment, runtime_attachment, schedule,
-        environment_id=environment_id, runtime_id=runtime_id, process_id=process_id,
+        package, deployment, runtime_attachment, environment_id=environment_id,
     )
     if not operations:
         return CleanupStage(
@@ -2321,10 +2303,8 @@ def _blocked_real_run_response(
     """
     downstream = _blocked_downstream_stages(runtime_id, schedule_override, run_test)
     downstream["cleanup"] = _cleanup_stage_for_failure(
-        package, deployment, None, None,
+        package, deployment, None,
         environment_id=environment_id,
-        runtime_id=runtime_id,
-        process_id=target.process_component_id,
         cleanup_on_failure=cleanup_on_failure,
         boomi_client=boomi_client,
         profile=profile,
@@ -2360,7 +2340,6 @@ def _runtime_or_schedule_failed_response(
     run_test: bool,
     error: OrchestrateDeployError,
     environment_id: Optional[str] = None,
-    runtime_id: Optional[str] = None,
     cleanup_on_failure: bool = False,
     boomi_client: Any = None,
 ) -> Dict[str, Any]:
@@ -2377,10 +2356,8 @@ def _runtime_or_schedule_failed_response(
         **_execution_log_cleanup_stages(run_test, blocked=True),
     }
     downstream["cleanup"] = _cleanup_stage_for_failure(
-        package, deployment, runtime_attachment, schedule,
+        package, deployment, runtime_attachment,
         environment_id=environment_id or deployment.environment_id,
-        runtime_id=runtime_id or runtime_attachment.runtime_id,
-        process_id=target.process_component_id,
         cleanup_on_failure=cleanup_on_failure,
         boomi_client=boomi_client,
         profile=profile,
@@ -2419,7 +2396,6 @@ def _real_run_with_test_response(
     errors: Optional[List[OrchestrateDeployError]] = None,
     error_message: Optional[str] = None,
     environment_id: Optional[str] = None,
-    runtime_id: Optional[str] = None,
     cleanup_on_failure: bool = False,
     boomi_client: Any = None,
 ) -> Dict[str, Any]:
@@ -2435,10 +2411,8 @@ def _real_run_with_test_response(
         cleanup_stage: CleanupStage = CleanupStage(status="not_required")
     else:
         cleanup_stage = _cleanup_stage_for_failure(
-            package, deployment, runtime_attachment, schedule,
+            package, deployment, runtime_attachment,
             environment_id=environment_id or deployment.environment_id,
-            runtime_id=runtime_id or runtime_attachment.runtime_id,
-            process_id=target.process_component_id,
             cleanup_on_failure=cleanup_on_failure,
             boomi_client=boomi_client,
             profile=profile,
@@ -2719,7 +2693,6 @@ def orchestrate_deploy_action(
             run_test=run_test,
             error=runtime_error,
             environment_id=environment_id,
-            runtime_id=runtime_id,
             cleanup_on_failure=cleanup_on_failure,
             boomi_client=boomi_client,
         )
@@ -2747,7 +2720,6 @@ def orchestrate_deploy_action(
             run_test=run_test,
             error=schedule_error,
             environment_id=environment_id,
-            runtime_id=runtime_id,
             cleanup_on_failure=cleanup_on_failure,
             boomi_client=boomi_client,
         )
@@ -2792,7 +2764,6 @@ def orchestrate_deploy_action(
         errors=[test_error] if test_error is not None else [],
         error_message=test_error.message if test_error is not None else None,
         environment_id=environment_id,
-        runtime_id=runtime_id,
         cleanup_on_failure=cleanup_on_failure,
         boomi_client=boomi_client,
     )
