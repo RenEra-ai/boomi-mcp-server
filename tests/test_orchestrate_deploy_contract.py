@@ -153,10 +153,12 @@ def _pkg(package_id, version, created_date="2026-01-01T00:00:00Z"):
     }
 
 
-def _dep(deployment_id, active, current_version=None):
+def _dep(deployment_id, active, current_version=None, version=None):
     dep = {"deployment_id": deployment_id, "active": active}
     if current_version is not None:
         dep["current_version"] = current_version
+    if version is not None:
+        dep["version"] = version
     return dep
 
 
@@ -662,6 +664,46 @@ def test_real_run_missing_process_id_from_resolver_never_calls_sdk(registry):
     assert result["_success"] is False
     assert _codes(result) == ["BUILD_PROCESS_ID_MISSING"]
     assert client.mock_calls == []
+
+
+def test_real_run_deploy_current_version_falls_back_to_version(registry, monkeypatch):
+    # The real DeployedPackage SDK model exposes the revision under "version" as an INT, not
+    # "current_version" — so the summary must fall back to "version" and coerce it to str
+    # (an int would otherwise raise a ValidationError on the Optional[str] stage field).
+    bid = registry("b-versionfallback", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": {"_success": True, "deployments": []},
+        "deploy": {"_success": True, "deployment": _dep("dep-new", True, version=7)},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["deployment"]["status"] == "deployed"
+    assert result["deployment"]["current_version"] == "7"
+    assert result["summary"]["deployment_current_version"] == "7"
+
+
+def test_real_run_reuse_active_coerces_int_version(registry, monkeypatch):
+    # The reuse-active branch must apply the same int->str coercion as the fresh-deploy branch.
+    bid = registry("b-reuse-intver", _single_process_entry(process_id="CID-1"))
+    fake = _FakeDeploymentAction({
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": {"_success": True, "deployments": [_dep("dep-active", True, version=9)]},
+        "deploy": {"_success": True, "deployment": _dep("should-not-be-used", True)},
+    })
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["deployment"]["status"] == "reused"
+    assert "deploy" not in fake.actions_called()
+    assert result["summary"]["deployment_current_version"] == "9"
 
 
 def test_real_run_without_client_returns_boomi_client_required(registry):

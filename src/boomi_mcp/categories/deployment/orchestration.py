@@ -612,6 +612,13 @@ def _find_or_create_deployment(
             details={"package_id": package_id, "environment_id": environment_id},
         )
 
+    # The Boomi SDK ``DeployedPackage`` exposes the deployment revision under ``version``
+    # (an int), not ``current_version`` — and ``packages._deployment_to_dict`` passes it
+    # through uncoerced. Fall back to ``version`` so real deploy/reuse runs report the
+    # revision instead of null, and coerce to str so the int revision satisfies the
+    # ``Optional[str]`` stage field instead of raising a ValidationError.
+    raw_current_version = selected.get("current_version") or selected.get("version")
+    current_version = str(raw_current_version) if raw_current_version is not None else None
     return (
         DeploymentStage(
             status=status,
@@ -619,7 +626,7 @@ def _find_or_create_deployment(
             environment_id=environment_id,
             package_id=package_id,
             active=_deployment_is_active(selected),
-            current_version=selected.get("current_version"),
+            current_version=current_version,
             warnings=warnings,
         ),
         None,
