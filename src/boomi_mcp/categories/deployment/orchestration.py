@@ -4,15 +4,18 @@ This module defines ``orchestrate_deploy_action``: an *internal* action that res
 prior ``build_integration(action='apply')`` build (recorded in the in-memory
 ``_BUILD_REGISTRY``) down to exactly one process component.
 
-Issue #60 introduced the plan-only contract. Issue #61 adds the package + deploy stages:
+Issue #60 introduced the plan-only contract. Issue #61 added the package + deploy stages.
+Issue #62 adds the runtime-attachment + schedule-activation stages:
 - ``dry_run=True`` (the DEFAULT) preserves issue-#60 behavior exactly — **no Boomi SDK
   calls**; every stage is reported as it *would* run.
-- ``dry_run=False`` performs idempotent work through ``manage_deployment_action``: it
+- ``dry_run=False`` performs idempotent work through the sibling action routers: it
   creates (or reuses) a versioned package for the resolved process component and deploys
-  (or reuses an active deployment of) that package to the target environment, reporting
-  package/deployment ids and active/current state. Failed package/deploy stages return
-  structured error codes and **do not proceed** to the runtime/schedule/execution/log
-  stages (those remain placeholders for #future M3.3/M3.4).
+  (or reuses an active deployment of) that package to the target environment, then verifies
+  the environment/runtime and ensures the three bindings (runtime↔environment,
+  process↔environment, process↔runtime) that make the process runnable, then applies the
+  optional ``schedule_override`` (create/update + enable/disable, or clear/disable). Each
+  stage runs strictly in order; a failure returns structured error codes and blocks every
+  later stage. Execution/log/cleanup remain placeholders for #future M3.4.
 
 It is intentionally not wired into ``server.py`` as a public MCP tool; public wiring is
 deferred to issue #64.
@@ -34,6 +37,9 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .. import integration_builder  # registry accessed at call time — see module docstring
 from .packages import manage_deployment_action  # sibling action reused for package/deploy
+from ..environments import manage_environments_action  # verify environment exists
+from ..runtimes import manage_runtimes_action  # runtime verify + runtime<->env attachment
+from ..schedules import manage_schedules_action  # schedule update/delete/enable/disable
 
 StageStatus = Literal[
     "planned",
@@ -42,6 +48,10 @@ StageStatus = Literal[
     "created",
     "deployed",
     "reused",
+    "attached",
+    "updated",
+    "enabled",
+    "disabled",
     "failed",
     "blocked",
 ]
@@ -66,6 +76,25 @@ DEPLOY_LIST_FAILED = "DEPLOY_LIST_FAILED"
 DEPLOY_AMBIGUOUS_EXISTING = "DEPLOY_AMBIGUOUS_EXISTING"
 DEPLOY_CREATE_FAILED = "DEPLOY_CREATE_FAILED"
 DEPLOY_ID_MISSING = "DEPLOY_ID_MISSING"
+
+# Runtime-attachment + schedule stage error codes (issue #62).
+ENVIRONMENT_VERIFY_FAILED = "ENVIRONMENT_VERIFY_FAILED"
+RUNTIME_VERIFY_FAILED = "RUNTIME_VERIFY_FAILED"
+RUNTIME_ENV_ATTACHMENT_LIST_FAILED = "RUNTIME_ENV_ATTACHMENT_LIST_FAILED"
+RUNTIME_ENV_ATTACHMENT_CREATE_FAILED = "RUNTIME_ENV_ATTACHMENT_CREATE_FAILED"
+RUNTIME_ENV_ATTACHMENT_ID_MISSING = "RUNTIME_ENV_ATTACHMENT_ID_MISSING"
+PROCESS_ENV_ATTACHMENT_LIST_FAILED = "PROCESS_ENV_ATTACHMENT_LIST_FAILED"
+PROCESS_ENV_ATTACHMENT_CREATE_FAILED = "PROCESS_ENV_ATTACHMENT_CREATE_FAILED"
+PROCESS_ENV_ATTACHMENT_ID_MISSING = "PROCESS_ENV_ATTACHMENT_ID_MISSING"
+PROCESS_RUNTIME_ATTACHMENT_LIST_FAILED = "PROCESS_RUNTIME_ATTACHMENT_LIST_FAILED"
+PROCESS_RUNTIME_ATTACHMENT_CREATE_FAILED = "PROCESS_RUNTIME_ATTACHMENT_CREATE_FAILED"
+PROCESS_RUNTIME_ATTACHMENT_ID_MISSING = "PROCESS_RUNTIME_ATTACHMENT_ID_MISSING"
+SCHEDULE_OVERRIDE_INVALID = "SCHEDULE_OVERRIDE_INVALID"
+SCHEDULE_UPDATE_FAILED = "SCHEDULE_UPDATE_FAILED"
+SCHEDULE_DELETE_FAILED = "SCHEDULE_DELETE_FAILED"
+SCHEDULE_ENABLE_FAILED = "SCHEDULE_ENABLE_FAILED"
+SCHEDULE_DISABLE_FAILED = "SCHEDULE_DISABLE_FAILED"
+SCHEDULE_ID_MISSING = "SCHEDULE_ID_MISSING"
 
 
 # ---------------------------------------------------------------------------
@@ -149,14 +178,41 @@ class DeploymentStage(BaseModel):
 
 class RuntimeAttachmentStage(BaseModel):
     status: StageStatus
+    # ``attachment_id`` is preserved from issue #60/#61 as an alias of the runtime<->env
+    # attachment id, so existing callers/tests that read it keep working.
     attachment_id: Optional[str] = None
     runtime_id: Optional[str] = None
+    environment_id: Optional[str] = None
+    process_id: Optional[str] = None
+    # Three independent bindings make a process runnable on a runtime in an environment:
+    #   runtime<->environment  (EnvironmentAtomAttachment)
+    #   process<->environment  (ProcessEnvironmentAttachment)
+    #   process<->runtime      (ProcessAtomAttachment)
+    runtime_env_attachment_id: Optional[str] = None
+    runtime_env_attachment_status: Optional[str] = None
+    process_env_attachment_id: Optional[str] = None
+    process_env_attachment_status: Optional[str] = None
+    process_runtime_attachment_id: Optional[str] = None
+    process_runtime_attachment_status: Optional[str] = None
+    reused: bool = False
+    changed: bool = False
+    warnings: List[str] = Field(default_factory=list)
 
 
 class ScheduleStage(BaseModel):
     status: StageStatus
     schedule_id: Optional[str] = None
+    schedule_status_id: Optional[str] = None
     schedule_override: Optional[Dict[str, Any]] = None
+    process_id: Optional[str] = None
+    runtime_id: Optional[str] = None
+    environment_id: Optional[str] = None
+    cron: Optional[str] = None
+    max_retry: Optional[int] = None
+    enabled: Optional[bool] = None
+    reused: bool = False
+    changed: bool = False
+    warnings: List[str] = Field(default_factory=list)
 
 
 class ExecutionStage(BaseModel):
@@ -434,6 +490,51 @@ def _call_deployment_action(
     )
 
 
+def _call_environment_action(
+    boomi_client: Any,
+    profile: Optional[str],
+    action: str,
+    config_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Invoke a ``manage_environments_action`` handler (router swallows exceptions into dicts)."""
+    return manage_environments_action(
+        sdk=boomi_client,
+        profile=profile,
+        action=action,
+        config_data=config_data,
+    )
+
+
+def _call_runtime_action(
+    boomi_client: Any,
+    profile: Optional[str],
+    action: str,
+    config_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Invoke a ``manage_runtimes_action`` handler (router swallows exceptions into dicts)."""
+    return manage_runtimes_action(
+        sdk=boomi_client,
+        profile=profile,
+        action=action,
+        config_data=config_data,
+    )
+
+
+def _call_schedule_action(
+    boomi_client: Any,
+    profile: Optional[str],
+    action: str,
+    config_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Invoke a ``manage_schedules_action`` handler (router swallows exceptions into dicts)."""
+    return manage_schedules_action(
+        sdk=boomi_client,
+        profile=profile,
+        action=action,
+        config_data=config_data,
+    )
+
+
 def _deployment_is_active(dep: Any) -> bool:
     """Truthy active flag, mirroring ``packages._lookup_deployment_id`` rules.
 
@@ -634,10 +735,424 @@ def _find_or_create_deployment(
 
 
 # ---------------------------------------------------------------------------
+# Runtime-attachment stage helpers (issue #62)
+# ---------------------------------------------------------------------------
+def _resolve_attachment_leg(
+    *,
+    list_call,
+    match,
+    attach_call,
+    list_error_code: str,
+    create_error_code: str,
+    id_error_code: str,
+    field: Optional[str],
+    details: Dict[str, Any],
+) -> Tuple[Optional[str], Optional[str], Optional[OrchestrateDeployError]]:
+    """Reuse a matching attachment or create one, for a single binding leg.
+
+    Returns ``(attachment_id, leg_status, error)`` where ``leg_status`` is ``"reused"`` or
+    ``"attached"``. ``list_call``/``attach_call`` are zero-arg callables returning the router's
+    response dict; ``match`` is a predicate over a listed attachment dict.
+    """
+    listed = list_call()
+    if not listed.get("_success"):
+        return None, None, _error(
+            list_error_code,
+            listed.get("error") or "Failed to list existing attachments.",
+            field=field,
+            details=details,
+        )
+
+    attachments = listed.get("attachments") or []
+    existing = next(
+        (a for a in attachments if isinstance(a, dict) and match(a)),
+        None,
+    )
+    if existing is not None:
+        attachment_id = existing.get("id")
+        leg_status = "reused"
+    else:
+        created = attach_call()
+        if not created.get("_success"):
+            return None, None, _error(
+                create_error_code,
+                created.get("error") or "Failed to create attachment.",
+                field=field,
+                details=details,
+            )
+        attachment = created.get("attachment") or {}
+        attachment_id = attachment.get("id") if isinstance(attachment, dict) else None
+        leg_status = "attached"
+
+    if not attachment_id:
+        return None, None, _error(
+            id_error_code,
+            "Attachment resolution returned no attachment id.",
+            field=field,
+            details=details,
+        )
+    return attachment_id, leg_status, None
+
+
+def _ensure_runtime_attachment(
+    boomi_client: Any,
+    profile: Optional[str],
+    *,
+    process_id: str,
+    environment_id: str,
+    runtime_id: str,
+) -> Tuple[RuntimeAttachmentStage, Optional[OrchestrateDeployError]]:
+    """Verify env/runtime, then ensure all three bindings exist (reuse-or-attach, idempotent).
+
+    Returns ``(stage, None)`` on success or ``(failed_stage, error)`` on the first failing leg.
+    The three legs:
+      1. runtime<->environment via ``manage_runtimes_action`` (EnvironmentAtomAttachment).
+      2. process<->environment via ``manage_deployment_action`` (ProcessEnvironmentAttachment).
+      3. process<->runtime    via ``manage_deployment_action`` (ProcessAtomAttachment).
+    """
+    base_details = {
+        "process_id": process_id,
+        "environment_id": environment_id,
+        "runtime_id": runtime_id,
+    }
+
+    def _failed_stage() -> RuntimeAttachmentStage:
+        return RuntimeAttachmentStage(
+            status="failed",
+            runtime_id=runtime_id,
+            environment_id=environment_id,
+            process_id=process_id,
+        )
+
+    # 1. Verify the environment and runtime exist before attaching anything.
+    env_result = _call_environment_action(
+        boomi_client, profile, "get", {"resource_id": environment_id}
+    )
+    if not env_result.get("_success"):
+        return _failed_stage(), _error(
+            ENVIRONMENT_VERIFY_FAILED,
+            env_result.get("error") or "Failed to verify environment.",
+            field="environment_id",
+            details=base_details,
+        )
+
+    runtime_result = _call_runtime_action(
+        boomi_client, profile, "get", {"resource_id": runtime_id}
+    )
+    if not runtime_result.get("_success"):
+        return _failed_stage(), _error(
+            RUNTIME_VERIFY_FAILED,
+            runtime_result.get("error") or "Failed to verify runtime.",
+            field="runtime_id",
+            details=base_details,
+        )
+
+    # 2. runtime<->environment attachment (EnvironmentAtomAttachment).
+    runtime_env_id, runtime_env_status, error = _resolve_attachment_leg(
+        list_call=lambda: _call_runtime_action(
+            boomi_client, profile, "list_attachments", {"environment_id": environment_id}
+        ),
+        match=lambda a: a.get("atom_id") == runtime_id,
+        attach_call=lambda: _call_runtime_action(
+            boomi_client, profile, "attach",
+            {"resource_id": runtime_id, "environment_id": environment_id},
+        ),
+        list_error_code=RUNTIME_ENV_ATTACHMENT_LIST_FAILED,
+        create_error_code=RUNTIME_ENV_ATTACHMENT_CREATE_FAILED,
+        id_error_code=RUNTIME_ENV_ATTACHMENT_ID_MISSING,
+        field="runtime_id",
+        details=base_details,
+    )
+    if error is not None:
+        return _failed_stage(), error
+
+    # 3. process<->environment attachment (ProcessEnvironmentAttachment).
+    process_env_id, process_env_status, error = _resolve_attachment_leg(
+        list_call=lambda: _call_deployment_action(
+            boomi_client, profile, "list_process_environment_attachments",
+            {"process_id": process_id},
+        ),
+        match=lambda a: a.get("environment_id") == environment_id,
+        attach_call=lambda: _call_deployment_action(
+            boomi_client, profile, "attach_process_environment",
+            {"process_id": process_id, "environment_id": environment_id},
+        ),
+        list_error_code=PROCESS_ENV_ATTACHMENT_LIST_FAILED,
+        create_error_code=PROCESS_ENV_ATTACHMENT_CREATE_FAILED,
+        id_error_code=PROCESS_ENV_ATTACHMENT_ID_MISSING,
+        field="environment_id",
+        details=base_details,
+    )
+    if error is not None:
+        return _failed_stage(), error
+
+    # 4. process<->runtime attachment (ProcessAtomAttachment).
+    process_runtime_id, process_runtime_status, error = _resolve_attachment_leg(
+        list_call=lambda: _call_deployment_action(
+            boomi_client, profile, "list_process_atom_attachments",
+            {"process_id": process_id},
+        ),
+        match=lambda a: a.get("atom_id") == runtime_id,
+        attach_call=lambda: _call_deployment_action(
+            boomi_client, profile, "attach_process_atom",
+            {"process_id": process_id, "atom_id": runtime_id},
+        ),
+        list_error_code=PROCESS_RUNTIME_ATTACHMENT_LIST_FAILED,
+        create_error_code=PROCESS_RUNTIME_ATTACHMENT_CREATE_FAILED,
+        id_error_code=PROCESS_RUNTIME_ATTACHMENT_ID_MISSING,
+        field="runtime_id",
+        details=base_details,
+    )
+    if error is not None:
+        return _failed_stage(), error
+
+    leg_statuses = (runtime_env_status, process_env_status, process_runtime_status)
+    changed = any(s == "attached" for s in leg_statuses)
+    reused = all(s == "reused" for s in leg_statuses)
+    stage = RuntimeAttachmentStage(
+        status="attached" if changed else "reused",
+        attachment_id=runtime_env_id,
+        runtime_id=runtime_id,
+        environment_id=environment_id,
+        process_id=process_id,
+        runtime_env_attachment_id=runtime_env_id,
+        runtime_env_attachment_status=runtime_env_status,
+        process_env_attachment_id=process_env_id,
+        process_env_attachment_status=process_env_status,
+        process_runtime_attachment_id=process_runtime_id,
+        process_runtime_attachment_status=process_runtime_status,
+        reused=reused,
+        changed=changed,
+    )
+    return stage, None
+
+
+# ---------------------------------------------------------------------------
+# Schedule stage helpers (issue #62)
+# ---------------------------------------------------------------------------
+_SCHEDULE_ALLOWED_KEYS = {"mode", "cron", "enabled", "max_retry"}
+_SCHEDULE_SCHEDULED_MODES = {"scheduled"}
+_SCHEDULE_DISABLED_MODES = {"manual", "disabled"}
+
+
+def _normalize_schedule_override(
+    schedule_override: Optional[Dict[str, Any]],
+) -> Tuple[Optional[Dict[str, Any]], Optional[OrchestrateDeployError]]:
+    """Validate + normalize the schedule override into a canonical dict.
+
+    Returns ``(None, None)`` when no schedule mutation is requested, ``(normalized, None)`` on
+    success, or ``(None, error)`` with ``SCHEDULE_OVERRIDE_INVALID`` on any content problem.
+
+    Canonical forms returned:
+      - scheduled: ``{"mode": "scheduled", "cron": <5-part>, "enabled": <bool>, "max_retry": <0..5>}``
+      - disabled:  ``{"mode": "disabled", "enabled": False}``
+    """
+    if schedule_override is None:
+        return None, None
+
+    def _invalid(message: str) -> Tuple[None, OrchestrateDeployError]:
+        return None, _error(
+            SCHEDULE_OVERRIDE_INVALID, message, field="schedule_override",
+            details={"schedule_override": schedule_override},
+        )
+
+    if not isinstance(schedule_override, dict):
+        return _invalid("schedule_override must be an object.")
+
+    unknown = set(schedule_override) - _SCHEDULE_ALLOWED_KEYS
+    if unknown:
+        return _invalid(
+            f"Unsupported schedule_override keys: {', '.join(sorted(unknown))}. "
+            f"Allowed: {', '.join(sorted(_SCHEDULE_ALLOWED_KEYS))}."
+        )
+
+    mode = schedule_override.get("mode")
+    cron = schedule_override.get("cron")
+    enabled = schedule_override.get("enabled")
+    max_retry = schedule_override.get("max_retry")
+
+    if "enabled" in schedule_override and not isinstance(enabled, bool):
+        return _invalid("schedule_override.enabled must be a boolean.")
+
+    # Resolve the effective mode.
+    if mode is not None:
+        if not isinstance(mode, str) or mode.strip().lower() not in (
+            _SCHEDULE_SCHEDULED_MODES | _SCHEDULE_DISABLED_MODES
+        ):
+            return _invalid(
+                "schedule_override.mode must be one of 'scheduled', 'manual', 'disabled'."
+            )
+        mode = mode.strip().lower()
+    elif cron is not None:
+        mode = "scheduled"
+    elif enabled is False:
+        mode = "disabled"
+    else:
+        return _invalid(
+            "schedule_override needs a 'cron' (to schedule) or 'enabled: false'/"
+            "'mode' (to disable)."
+        )
+
+    if mode in _SCHEDULE_DISABLED_MODES:
+        if cron is not None:
+            return _invalid("cron is not allowed when disabling a schedule.")
+        if enabled is True:
+            return _invalid("enabled: true is incompatible with a disabled schedule.")
+        return {"mode": "disabled", "enabled": False}, None
+
+    # mode == "scheduled"
+    if not isinstance(cron, str) or not cron.strip():
+        return _invalid("cron is required for a scheduled override.")
+    if len(cron.split()) != 5:
+        return _invalid(
+            "cron must have 5 parts (minute hour day_of_month month day_of_week)."
+        )
+    if max_retry is None:
+        max_retry = 5
+    elif not isinstance(max_retry, int) or isinstance(max_retry, bool) or not 0 <= max_retry <= 5:
+        return _invalid("schedule_override.max_retry must be an integer between 0 and 5.")
+    enabled_flag = True if enabled is None else enabled
+    return (
+        {
+            "mode": "scheduled",
+            "cron": cron.strip(),
+            "enabled": enabled_flag,
+            "max_retry": max_retry,
+        },
+        None,
+    )
+
+
+def _apply_schedule_override(
+    boomi_client: Any,
+    profile: Optional[str],
+    *,
+    process_id: str,
+    environment_id: str,
+    runtime_id: str,
+    normalized: Optional[Dict[str, Any]],
+    schedule_override: Optional[Dict[str, Any]],
+) -> Tuple[ScheduleStage, Optional[OrchestrateDeployError]]:
+    """Apply the (already-normalized) schedule override after runtime binding succeeds.
+
+    Returns ``(stage, None)`` on success or ``(failed_stage, error)`` on the first failing call.
+    Makes no SDK calls when ``normalized`` is ``None`` (no schedule requested).
+    """
+    ids = {"process_id": process_id, "atom_id": runtime_id}
+    base_fields = {
+        "schedule_override": schedule_override,
+        "process_id": process_id,
+        "runtime_id": runtime_id,
+        "environment_id": environment_id,
+    }
+
+    if normalized is None:
+        return (
+            ScheduleStage(status="not_required", reused=False, changed=False, **base_fields),
+            None,
+        )
+
+    def _failed_stage(**extra: Any) -> ScheduleStage:
+        return ScheduleStage(status="failed", changed=True, **base_fields, **extra)
+
+    if normalized["mode"] == "disabled":
+        deleted = _call_schedule_action(boomi_client, profile, "delete", dict(ids))
+        if not deleted.get("_success"):
+            return _failed_stage(), _error(
+                SCHEDULE_DELETE_FAILED,
+                deleted.get("error") or "Failed to clear schedule.",
+                field="schedule_override", details=ids,
+            )
+        schedule_id = (deleted.get("schedule") or {}).get("id")
+        if not schedule_id:
+            return _failed_stage(), _error(
+                SCHEDULE_ID_MISSING, "Schedule clear returned no schedule id.",
+                field="schedule_override", details=ids,
+            )
+        disabled = _call_schedule_action(boomi_client, profile, "disable", dict(ids))
+        if not disabled.get("_success"):
+            return _failed_stage(schedule_id=schedule_id), _error(
+                SCHEDULE_DISABLE_FAILED,
+                disabled.get("error") or "Failed to disable schedule.",
+                field="schedule_override", details=ids,
+            )
+        status_obj = disabled.get("status") or {}
+        return (
+            ScheduleStage(
+                status="disabled",
+                schedule_id=schedule_id,
+                schedule_status_id=status_obj.get("id"),
+                enabled=False,
+                changed=True,
+                **base_fields,
+            ),
+            None,
+        )
+
+    # mode == "scheduled"
+    cron = normalized["cron"]
+    max_retry = normalized["max_retry"]
+    enabled = normalized["enabled"]
+    updated = _call_schedule_action(
+        boomi_client, profile, "update",
+        {**ids, "cron": cron, "max_retry": max_retry},
+    )
+    if not updated.get("_success"):
+        return _failed_stage(cron=cron, max_retry=max_retry, enabled=enabled), _error(
+            SCHEDULE_UPDATE_FAILED,
+            updated.get("error") or "Failed to update schedule.",
+            field="schedule_override", details=ids,
+        )
+    schedule_id = (updated.get("schedule") or {}).get("id")
+    if not schedule_id:
+        return _failed_stage(cron=cron, max_retry=max_retry, enabled=enabled), _error(
+            SCHEDULE_ID_MISSING, "Schedule update returned no schedule id.",
+            field="schedule_override", details=ids,
+        )
+
+    if enabled:
+        status_result = _call_schedule_action(boomi_client, profile, "enable", dict(ids))
+        status_code = SCHEDULE_ENABLE_FAILED
+        final_status: StageStatus = "enabled"
+    else:
+        status_result = _call_schedule_action(boomi_client, profile, "disable", dict(ids))
+        status_code = SCHEDULE_DISABLE_FAILED
+        final_status = "disabled"
+
+    if not status_result.get("_success"):
+        return _failed_stage(
+            schedule_id=schedule_id, cron=cron, max_retry=max_retry, enabled=enabled
+        ), _error(
+            status_code,
+            status_result.get("error") or "Failed to set schedule status.",
+            field="schedule_override", details=ids,
+        )
+    status_obj = status_result.get("status") or {}
+    return (
+        ScheduleStage(
+            status=final_status,
+            schedule_id=schedule_id,
+            schedule_status_id=status_obj.get("id"),
+            cron=cron,
+            max_retry=max_retry,
+            enabled=bool(status_obj.get("enabled")) if "enabled" in status_obj else enabled,
+            changed=True,
+            **base_fields,
+        ),
+        None,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Response assembly
 # ---------------------------------------------------------------------------
-def _stage_summary(package: PackageStage, deployment: DeploymentStage) -> Dict[str, Any]:
-    """Flat summary of the package/deploy outcome surfaced at the top of the response."""
+def _stage_summary(
+    package: PackageStage,
+    deployment: DeploymentStage,
+    runtime_attachment: RuntimeAttachmentStage,
+    schedule: ScheduleStage,
+) -> Dict[str, Any]:
+    """Flat summary of the package/deploy/runtime/schedule outcome at the top of the response."""
     return {
         "package_id": package.package_id,
         "package_version": package.package_version,
@@ -645,10 +1160,45 @@ def _stage_summary(package: PackageStage, deployment: DeploymentStage) -> Dict[s
         "environment_id": deployment.environment_id,
         "deployment_active": deployment.active,
         "deployment_current_version": deployment.current_version,
+        "runtime_id": runtime_attachment.runtime_id,
+        "runtime_attachment_id": runtime_attachment.attachment_id,
+        "runtime_attachment_status": runtime_attachment.status,
+        "schedule_id": schedule.schedule_id,
+        "schedule_status": schedule.status,
+        "schedule_enabled": schedule.enabled,
+        "resource_reuse": {
+            "runtime_attachment": runtime_attachment.reused,
+            "schedule": schedule.reused,
+        },
+        "resource_changes": {
+            "runtime_attachment": runtime_attachment.changed,
+            "schedule": schedule.changed,
+        },
         "stage_warnings": {
             "package": list(package.warnings),
             "deployment": list(deployment.warnings),
+            "runtime_attachment": list(runtime_attachment.warnings),
+            "schedule": list(schedule.warnings),
         },
+    }
+
+
+def _execution_log_cleanup_stages(run_test: bool, *, blocked: bool) -> Dict[str, Any]:
+    """Execution/log/cleanup stages — still M3.4 placeholders (planned/skipped) or ``blocked``."""
+    if blocked:
+        return {
+            "execution": ExecutionStage(status="blocked", run_test=bool(run_test)),
+            "logs": LogsStage(status="blocked"),
+            "cleanup": CleanupStage(status="blocked"),
+        }
+    run_test_flag = bool(run_test)
+    return {
+        "execution": ExecutionStage(
+            status="planned" if run_test_flag else "skipped",
+            run_test=run_test_flag,
+        ),
+        "logs": LogsStage(status="planned" if run_test_flag else "skipped"),
+        "cleanup": CleanupStage(status="not_required"),
     }
 
 
@@ -657,8 +1207,7 @@ def _placeholder_downstream_stages(
     schedule_override: Optional[Dict[str, Any]],
     run_test: bool,
 ) -> Dict[str, Any]:
-    """Runtime/schedule/execution/log/cleanup stages as plan placeholders (M3.3/M3.4)."""
-    run_test_flag = bool(run_test)
+    """Runtime/schedule/execution/log/cleanup stages as plan placeholders (dry-run / M3.4)."""
     schedule_planned = schedule_override is not None
     return {
         "runtime_attachment": RuntimeAttachmentStage(status="planned", runtime_id=runtime_id),
@@ -666,12 +1215,7 @@ def _placeholder_downstream_stages(
             status="planned" if schedule_planned else "not_required",
             schedule_override=schedule_override,
         ),
-        "execution": ExecutionStage(
-            status="planned" if run_test_flag else "skipped",
-            run_test=run_test_flag,
-        ),
-        "logs": LogsStage(status="planned" if run_test_flag else "skipped"),
-        "cleanup": CleanupStage(status="not_required"),
+        **_execution_log_cleanup_stages(run_test, blocked=False),
     }
 
 
@@ -684,9 +1228,7 @@ def _blocked_downstream_stages(
     return {
         "runtime_attachment": RuntimeAttachmentStage(status="blocked", runtime_id=runtime_id),
         "schedule": ScheduleStage(status="blocked", schedule_override=schedule_override),
-        "execution": ExecutionStage(status="blocked", run_test=bool(run_test)),
-        "logs": LogsStage(status="blocked"),
-        "cleanup": CleanupStage(status="blocked"),
+        **_execution_log_cleanup_stages(run_test, blocked=True),
     }
 
 
@@ -762,7 +1304,9 @@ def _plan_response(
         package=package,
         deployment=deployment,
         downstream=downstream,
-        summary=_stage_summary(package, deployment),
+        summary=_stage_summary(
+            package, deployment, downstream["runtime_attachment"], downstream["schedule"]
+        ),
         errors=[],
     )
 
@@ -774,12 +1318,16 @@ def _real_run_response(
     target: ResolvedBuildTarget,
     package: PackageStage,
     deployment: DeploymentStage,
-    runtime_id: Optional[str],
-    schedule_override: Optional[Dict[str, Any]],
+    runtime_attachment: RuntimeAttachmentStage,
+    schedule: ScheduleStage,
     run_test: bool,
 ) -> Dict[str, Any]:
-    """Successful real-run response after the package + deploy stages completed."""
-    downstream = _placeholder_downstream_stages(runtime_id, schedule_override, run_test)
+    """Successful real-run response after package, deploy, runtime binding, and schedule."""
+    downstream = {
+        "runtime_attachment": runtime_attachment,
+        "schedule": schedule,
+        **_execution_log_cleanup_stages(run_test, blocked=False),
+    }
     return _assemble_response(
         success=True,
         profile=profile,
@@ -790,7 +1338,7 @@ def _real_run_response(
         package=package,
         deployment=deployment,
         downstream=downstream,
-        summary=_stage_summary(package, deployment),
+        summary=_stage_summary(package, deployment, runtime_attachment, schedule),
         errors=[],
     )
 
@@ -819,7 +1367,48 @@ def _blocked_real_run_response(
         package=package,
         deployment=deployment,
         downstream=downstream,
-        summary=_stage_summary(package, deployment),
+        summary=_stage_summary(
+            package, deployment, downstream["runtime_attachment"], downstream["schedule"]
+        ),
+        errors=[error],
+        error_message=error.message,
+    )
+
+
+def _runtime_or_schedule_failed_response(
+    *,
+    profile: Optional[str],
+    build_id: Optional[str],
+    target: ResolvedBuildTarget,
+    package: PackageStage,
+    deployment: DeploymentStage,
+    runtime_attachment: RuntimeAttachmentStage,
+    schedule: ScheduleStage,
+    run_test: bool,
+    error: OrchestrateDeployError,
+) -> Dict[str, Any]:
+    """Failed real-run after deploy: a runtime/schedule stage failed; execution onward blocked.
+
+    The runtime and schedule stages are passed through verbatim so the response shows exactly
+    how far binding got (a failed runtime stage with schedule blocked, or a completed runtime
+    stage with a failed schedule stage).
+    """
+    downstream = {
+        "runtime_attachment": runtime_attachment,
+        "schedule": schedule,
+        **_execution_log_cleanup_stages(run_test, blocked=True),
+    }
+    return _assemble_response(
+        success=False,
+        profile=profile,
+        build_id=build_id,
+        dry_run=False,
+        plan_only=False,
+        target=target,
+        package=package,
+        deployment=deployment,
+        downstream=downstream,
+        summary=_stage_summary(package, deployment, runtime_attachment, schedule),
         errors=[error],
         error_message=error.message,
     )
@@ -839,13 +1428,14 @@ def orchestrate_deploy_action(
     dry_run: bool = True,
     package_version: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Resolve a build, then plan (dry-run) or package + deploy it (issue #60/#61).
+    """Resolve a build, then plan (dry-run) or package/deploy/bind/schedule it (#60/#61/#62).
 
     With ``dry_run=True`` (the default) no ``boomi_client`` call is made — every stage is
-    reported as it *would* run. With ``dry_run=False`` the package and deploy stages run for
-    real (idempotently) through ``manage_deployment_action``; a package/deploy failure returns
-    structured error codes and blocks the runtime/schedule/execution/log stages. All inputs are
-    nullable so missing required values yield structured failures instead of raising.
+    reported as it *would* run. With ``dry_run=False`` the package, deploy, runtime-binding,
+    and schedule stages run for real (idempotently) through the sibling action routers, in that
+    order; any stage failure returns structured error codes and blocks every later stage. An
+    invalid ``schedule_override`` is rejected up front (before any SDK call) in both modes. All
+    inputs are nullable so missing required values yield structured failures instead of raising.
     """
     # 0. Normalize the request through the typed contract so malformed input TYPES
     #    (e.g. a list build_id, which is unhashable, or a non-dict schedule_override)
@@ -901,6 +1491,13 @@ def orchestrate_deploy_action(
     target, resolve_error = _resolve_build_deployment_target(build_id)
     if resolve_error is not None:
         return _error_response(resolve_error.message, [resolve_error])
+
+    # 2b. Validate schedule_override CONTENT (format) up front — a fail-fast structured error
+    #     in BOTH dry-run and real-run, before any SDK call. The normalized form is reused by
+    #     the real-run schedule stage; an invalid override never reaches package/deploy.
+    normalized_schedule, schedule_override_error = _normalize_schedule_override(schedule_override)
+    if schedule_override_error is not None:
+        return _error_response(schedule_override_error.message, [schedule_override_error])
 
     # 3a. Dry-run: assemble the plan-only response without any SDK call.
     if dry_run:
@@ -994,14 +1591,69 @@ def orchestrate_deploy_action(
             error=deployment_error,
         )
 
-    # 3e. Success: both stages resolved. Later stages remain plan placeholders (M3.3/M3.4).
+    # 3e. Runtime binding stage (issue #62): verify env/runtime and ensure the three bindings
+    #     that make the deployed process runnable. Runs only after a successful deploy. A
+    #     failure blocks the schedule/execution/log/cleanup stages.
+    runtime_attachment, runtime_error = _ensure_runtime_attachment(
+        boomi_client,
+        profile,
+        process_id=target.process_component_id,
+        environment_id=environment_id,
+        runtime_id=runtime_id,
+    )
+    if runtime_error is not None:
+        blocked_schedule = ScheduleStage(
+            status="blocked",
+            schedule_override=schedule_override,
+            process_id=target.process_component_id,
+            runtime_id=runtime_id,
+            environment_id=environment_id,
+        )
+        return _runtime_or_schedule_failed_response(
+            profile=profile,
+            build_id=build_id,
+            target=target,
+            package=package_stage,
+            deployment=deployment_stage,
+            runtime_attachment=runtime_attachment,
+            schedule=blocked_schedule,
+            run_test=run_test,
+            error=runtime_error,
+        )
+
+    # 3f. Schedule activation stage (issue #62): only after deploy + runtime binding succeed,
+    #     and never in dry-run (handled at 3a). A failure blocks execution/log/cleanup.
+    schedule_stage, schedule_error = _apply_schedule_override(
+        boomi_client,
+        profile,
+        process_id=target.process_component_id,
+        environment_id=environment_id,
+        runtime_id=runtime_id,
+        normalized=normalized_schedule,
+        schedule_override=schedule_override,
+    )
+    if schedule_error is not None:
+        return _runtime_or_schedule_failed_response(
+            profile=profile,
+            build_id=build_id,
+            target=target,
+            package=package_stage,
+            deployment=deployment_stage,
+            runtime_attachment=runtime_attachment,
+            schedule=schedule_stage,
+            run_test=run_test,
+            error=schedule_error,
+        )
+
+    # 3g. Success: package, deploy, runtime binding, and schedule all resolved. Execution/log/
+    #     cleanup remain plan placeholders (#future M3.4).
     return _real_run_response(
         profile=profile,
         build_id=build_id,
         target=target,
         package=package_stage,
         deployment=deployment_stage,
-        runtime_id=runtime_id,
-        schedule_override=schedule_override,
+        runtime_attachment=runtime_attachment,
+        schedule=schedule_stage,
         run_test=run_test,
     )

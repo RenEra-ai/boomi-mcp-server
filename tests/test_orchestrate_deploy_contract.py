@@ -121,26 +121,129 @@ def _codes(result):
 # ---------------------------------------------------------------------------
 # Real-run (issue #61) fakes & helpers
 # ---------------------------------------------------------------------------
-class _FakeDeploymentAction:
+class _FakeAction:
     """Records ``(action, config_data)`` calls and returns canned dict responses per action.
 
-    Patched in for ``orchestration.manage_deployment_action`` so the real-run tests exercise
-    orchestration's dict-inspection contract (it inspects ``_success``/payload, never catches
-    exceptions) without a live SDK. Mirrors the real router's return shapes.
+    Patched in for any of the ``orchestration.manage_*_action`` routers so the real-run tests
+    exercise orchestration's dict-inspection contract (it inspects ``_success``/payload, never
+    catches exceptions) without a live SDK. Mirrors the real routers' return shapes. An optional
+    shared ``order_log`` records ``(label, action)`` across fakes to assert cross-router ordering.
     """
 
-    def __init__(self, responses):
+    def __init__(self, responses, *, label=None, order_log=None):
         self.responses = responses
+        self.label = label
+        self.order_log = order_log
         self.calls = []
 
     def __call__(self, sdk=None, profile=None, action=None, config_data=None, **kwargs):
         self.calls.append({"action": action, "config_data": config_data})
+        if self.order_log is not None:
+            self.order_log.append((self.label, action))
         if action not in self.responses:
-            raise AssertionError(f"unexpected deployment action call: {action}")
+            raise AssertionError(f"unexpected {self.label or 'deployment'} action call: {action}")
         return self.responses[action]
 
     def actions_called(self):
         return [c["action"] for c in self.calls]
+
+
+# Backwards-compatible alias used by the issue #61 deploy tests.
+_FakeDeploymentAction = _FakeAction
+
+
+def _att(att_id, *, atom_id=None, environment_id=None, process_id=None):
+    """An attachment dict as the runtime/deployment routers' ``_attachment_to_dict`` returns it."""
+    out = {"id": att_id}
+    if atom_id is not None:
+        out["atom_id"] = atom_id
+    if environment_id is not None:
+        out["environment_id"] = environment_id
+    if process_id is not None:
+        out["process_id"] = process_id
+    return out
+
+
+def _sched(schedule_id="sch-1"):
+    """A process-schedule dict shaped like schedules ``_process_schedule_to_dict``."""
+    return {"id": schedule_id}
+
+
+def _status(status_id="sst-1", enabled=True):
+    """A schedule-status dict shaped like schedules ``_schedule_status_to_dict``."""
+    return {"id": status_id, "enabled": enabled}
+
+
+def _ok_env(environment_id="env-1"):
+    return {"get": {"_success": True, "environment": {"id": environment_id}}}
+
+
+def _ok_runtime(runtime_id="rt-1", environment_id="env-1", *, attached=True):
+    attachments = (
+        [_att("ea-1", atom_id=runtime_id, environment_id=environment_id)] if attached else []
+    )
+    return {
+        "get": {"_success": True, "runtime": {"id": runtime_id}},
+        "list_attachments": {"_success": True, "attachments": attachments},
+        "attach": {
+            "_success": True,
+            "attachment": _att("ea-new", atom_id=runtime_id, environment_id=environment_id),
+        },
+    }
+
+
+def _process_attachments(
+    runtime_id="rt-1", environment_id="env-1", process_id="CID-1", *,
+    env_attached=True, atom_attached=True,
+):
+    """The four process-attachment responses ``manage_deployment_action`` serves for binding."""
+    pe = [_att("pe-1", process_id=process_id, environment_id=environment_id)] if env_attached else []
+    pa = [_att("pa-1", process_id=process_id, atom_id=runtime_id)] if atom_attached else []
+    return {
+        "list_process_environment_attachments": {"_success": True, "attachments": pe},
+        "attach_process_environment": {
+            "_success": True,
+            "attachment": _att("pe-new", process_id=process_id, environment_id=environment_id),
+        },
+        "list_process_atom_attachments": {"_success": True, "attachments": pa},
+        "attach_process_atom": {
+            "_success": True,
+            "attachment": _att("pa-new", process_id=process_id, atom_id=runtime_id),
+        },
+    }
+
+
+def _patch_all(monkeypatch, *, deployment, environments, runtimes, schedules, order_log=None):
+    """Patch all four ``manage_*_action`` routers and return their fakes (deployment first)."""
+    dep = _FakeAction(deployment, label="deployment", order_log=order_log)
+    env = _FakeAction(environments, label="environments", order_log=order_log)
+    rt = _FakeAction(runtimes, label="runtimes", order_log=order_log)
+    sch = _FakeAction(schedules, label="schedules", order_log=order_log)
+    monkeypatch.setattr(orchestration, "manage_deployment_action", dep)
+    monkeypatch.setattr(orchestration, "manage_environments_action", env)
+    monkeypatch.setattr(orchestration, "manage_runtimes_action", rt)
+    monkeypatch.setattr(orchestration, "manage_schedules_action", sch)
+    return dep, env, rt, sch
+
+
+def _bind_success(monkeypatch, pkg_deploy_responses, *,
+                  runtime_id="rt-1", environment_id="env-1", process_id="CID-1"):
+    """Patch all routers for a fully-successful real run: pre-existing bindings, no schedule.
+
+    Returns the deployment fake so callers keep asserting on package/deploy actions.
+    """
+    deployment = {
+        **pkg_deploy_responses,
+        **_process_attachments(runtime_id, environment_id, process_id),
+    }
+    dep, _env, _rt, _sch = _patch_all(
+        monkeypatch,
+        deployment=deployment,
+        environments=_ok_env(environment_id),
+        runtimes=_ok_runtime(runtime_id, environment_id, attached=True),
+        schedules={},
+    )
+    return dep
 
 
 def _pkg(package_id, version, created_date="2026-01-01T00:00:00Z"):
@@ -160,6 +263,17 @@ def _dep(deployment_id, active, current_version=None, version=None):
     if version is not None:
         dep["version"] = version
     return dep
+
+
+def _deploy_ok(bid):
+    """Package/deploy responses for a successful real run (reuse existing package + active deploy)."""
+    return {
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": {
+            "_success": True,
+            "deployments": [_dep("dep-1", True, current_version="1")],
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +557,18 @@ def test_full_success_contract(registry):
     assert summary["environment_id"] == "env-9"
     assert summary["deployment_active"] is None
     assert summary["deployment_current_version"] is None
-    assert summary["stage_warnings"] == {"package": [], "deployment": []}
+    # Runtime/schedule summary keys (dry-run: planned/not_required, ids null, no reuse/change).
+    assert summary["runtime_id"] == "rt-9"
+    assert summary["runtime_attachment_id"] is None
+    assert summary["runtime_attachment_status"] == "planned"
+    assert summary["schedule_id"] is None
+    assert summary["schedule_status"] == "not_required"
+    assert summary["schedule_enabled"] is None
+    assert summary["resource_reuse"] == {"runtime_attachment": False, "schedule": False}
+    assert summary["resource_changes"] == {"runtime_attachment": False, "schedule": False}
+    assert summary["stage_warnings"] == {
+        "package": [], "deployment": [], "runtime_attachment": [], "schedule": [],
+    }
 
 
 def test_success_with_schedule_and_run_test(registry):
@@ -512,13 +637,12 @@ def test_dry_run_package_deploy_stages_are_planned_and_no_sdk_calls(registry):
 
 def test_real_run_creates_package_when_no_existing_version(registry, monkeypatch):
     bid = registry("b-create", _single_process_entry(process_id="CID-1"))
-    fake = _FakeDeploymentAction({
+    fake = _bind_success(monkeypatch, {
         "list_packages": {"_success": True, "packages": []},
         "create_package": {"_success": True, "package": _pkg("pkg-new", bid)},
         "list_deployments": {"_success": True, "deployments": []},
         "deploy": {"_success": True, "deployment": _dep("dep-new", True, current_version="1")},
     })
-    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
     result = orchestrate_deploy_action(
         boomi_client=MagicMock(), build_id=bid,
         environment_id="env-1", runtime_id="rt-1", dry_run=False,
@@ -532,7 +656,7 @@ def test_real_run_creates_package_when_no_existing_version(registry, monkeypatch
 def test_real_run_reuses_existing_package_for_same_component_and_version(registry, monkeypatch):
     bid = registry("b-reusepkg", _single_process_entry(process_id="CID-1"))
     # Two packages match the effective version (=build_id); a third is a different version.
-    fake = _FakeDeploymentAction({
+    fake = _bind_success(monkeypatch, {
         "list_packages": {"_success": True, "packages": [
             _pkg("pkg-old", bid, created_date="2026-01-01T00:00:00Z"),
             _pkg("pkg-new", bid, created_date="2026-02-01T00:00:00Z"),
@@ -541,7 +665,6 @@ def test_real_run_reuses_existing_package_for_same_component_and_version(registr
         "list_deployments": {"_success": True, "deployments": []},
         "deploy": {"_success": True, "deployment": _dep("dep-1", True)},
     })
-    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
     result = orchestrate_deploy_action(
         boomi_client=MagicMock(), build_id=bid,
         environment_id="env-1", runtime_id="rt-1", dry_run=False,
@@ -556,12 +679,11 @@ def test_real_run_reuses_existing_package_for_same_component_and_version(registr
 
 def test_real_run_deploys_package_when_no_active_deployment(registry, monkeypatch):
     bid = registry("b-deploy", _single_process_entry(process_id="CID-1"))
-    fake = _FakeDeploymentAction({
+    fake = _bind_success(monkeypatch, {
         "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
         "list_deployments": {"_success": True, "deployments": [_dep("dep-old", False)]},
         "deploy": {"_success": True, "deployment": _dep("dep-new", True, current_version="2")},
-    })
-    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
+    }, environment_id="env-9")
     result = orchestrate_deploy_action(
         boomi_client=MagicMock(), build_id=bid,
         environment_id="env-9", runtime_id="rt-1", dry_run=False,
@@ -577,7 +699,7 @@ def test_real_run_deploys_package_when_no_active_deployment(registry, monkeypatc
 
 def test_real_run_reuses_existing_active_deployment(registry, monkeypatch):
     bid = registry("b-reusedep", _single_process_entry(process_id="CID-1"))
-    fake = _FakeDeploymentAction({
+    fake = _bind_success(monkeypatch, {
         "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
         "list_deployments": {"_success": True, "deployments": [
             _dep("dep-active", True, current_version="3"),
@@ -585,7 +707,6 @@ def test_real_run_reuses_existing_active_deployment(registry, monkeypatch):
         ]},
         "deploy": {"_success": True, "deployment": _dep("should-not-be-used", True)},
     })
-    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
     result = orchestrate_deploy_action(
         boomi_client=MagicMock(), build_id=bid,
         environment_id="env-1", runtime_id="rt-1", dry_run=False,
@@ -671,12 +792,11 @@ def test_real_run_deploy_current_version_falls_back_to_version(registry, monkeyp
     # "current_version" — so the summary must fall back to "version" and coerce it to str
     # (an int would otherwise raise a ValidationError on the Optional[str] stage field).
     bid = registry("b-versionfallback", _single_process_entry(process_id="CID-1"))
-    fake = _FakeDeploymentAction({
+    fake = _bind_success(monkeypatch, {
         "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
         "list_deployments": {"_success": True, "deployments": []},
         "deploy": {"_success": True, "deployment": _dep("dep-new", True, version=7)},
     })
-    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
     result = orchestrate_deploy_action(
         boomi_client=MagicMock(), build_id=bid,
         environment_id="env-1", runtime_id="rt-1", dry_run=False,
@@ -690,12 +810,11 @@ def test_real_run_deploy_current_version_falls_back_to_version(registry, monkeyp
 def test_real_run_reuse_active_coerces_int_version(registry, monkeypatch):
     # The reuse-active branch must apply the same int->str coercion as the fresh-deploy branch.
     bid = registry("b-reuse-intver", _single_process_entry(process_id="CID-1"))
-    fake = _FakeDeploymentAction({
+    fake = _bind_success(monkeypatch, {
         "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
         "list_deployments": {"_success": True, "deployments": [_dep("dep-active", True, version=9)]},
         "deploy": {"_success": True, "deployment": _dep("should-not-be-used", True)},
     })
-    monkeypatch.setattr(orchestration, "manage_deployment_action", fake)
     result = orchestrate_deploy_action(
         boomi_client=MagicMock(), build_id=bid,
         environment_id="env-1", runtime_id="rt-1", dry_run=False,
@@ -721,6 +840,368 @@ def test_real_run_without_client_returns_boomi_client_required(registry):
 
 
 # ---------------------------------------------------------------------------
+# Real run (issue #62): runtime-attachment + schedule-activation stages
+# ---------------------------------------------------------------------------
+def _last_bind_index(order):
+    return max(
+        i for i, (_label, a) in enumerate(order)
+        if a in ("get", "list_attachments",
+                 "list_process_environment_attachments", "list_process_atom_attachments")
+    )
+
+
+def test_real_run_reuses_existing_runtime_bindings_before_schedule(registry, monkeypatch):
+    bid = registry("b-rt-reuse", _single_process_entry(process_id="CID-1"))
+    order = []
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments("rt-1", "env-1", "CID-1")},
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=True),
+        schedules={
+            "update": {"_success": True, "schedule": _sched("sch-1")},
+            "enable": {"_success": True, "status": _status("sst-1", True)},
+        },
+        order_log=order,
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert result["_success"] is True
+    rta = result["runtime_attachment"]
+    assert rta["status"] == "reused"
+    assert rta["reused"] is True
+    assert rta["changed"] is False
+    assert rta["attachment_id"] == "ea-1"  # alias of the runtime<->env attachment id
+    # Nothing was created on any router.
+    assert "attach" not in rt.actions_called()
+    assert "attach_process_environment" not in dep.actions_called()
+    assert "attach_process_atom" not in dep.actions_called()
+    # Schedule runs strictly after every runtime/process binding call.
+    first_sched = min(i for i, (label, _a) in enumerate(order) if label == "schedules")
+    assert first_sched > _last_bind_index(order)
+    assert result["schedule"]["status"] == "enabled"
+    assert result["summary"]["resource_reuse"]["runtime_attachment"] is True
+
+
+def test_real_run_creates_missing_runtime_and_process_bindings(registry, monkeypatch):
+    bid = registry("b-rt-create", _single_process_entry(process_id="CID-1"))
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={
+            **_deploy_ok(bid),
+            **_process_attachments("rt-1", "env-1", "CID-1", env_attached=False, atom_attached=False),
+        },
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=False),
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    rta = result["runtime_attachment"]
+    assert rta["status"] == "attached"
+    assert rta["changed"] is True
+    assert rta["reused"] is False
+    assert rt.actions_called().count("attach") == 1
+    assert dep.actions_called().count("attach_process_environment") == 1
+    assert dep.actions_called().count("attach_process_atom") == 1
+    assert rta["runtime_env_attachment_status"] == "attached"
+    assert rta["process_env_attachment_status"] == "attached"
+    assert rta["process_runtime_attachment_status"] == "attached"
+    assert rta["runtime_env_attachment_id"] == "ea-new"
+    assert rta["process_env_attachment_id"] == "pe-new"
+    assert rta["process_runtime_attachment_id"] == "pa-new"
+    # No override -> schedule not_required, zero schedule calls.
+    assert result["schedule"]["status"] == "not_required"
+    assert sch.actions_called() == []
+    assert result["summary"]["resource_changes"]["runtime_attachment"] is True
+
+
+def test_runtime_attachment_api_failure_is_structured_and_blocks_schedule(registry, monkeypatch):
+    bid = registry("b-rt-fail", _single_process_entry(process_id="CID-1"))
+    runtimes = _ok_runtime("rt-1", "env-1", attached=False)
+    runtimes["attach"] = {"_success": False, "error": "Action 'attach' failed: denied (500)"}
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(),
+        runtimes=runtimes,
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "RUNTIME_ENV_ATTACHMENT_CREATE_FAILED" in _codes(result)
+    assert result["runtime_attachment"]["status"] == "failed"
+    assert result["schedule"]["status"] == "blocked"
+    assert result["execution"]["status"] == "blocked"
+    assert result["logs"]["status"] == "blocked"
+    assert result["cleanup"]["status"] == "blocked"
+    # Schedule never touched; process bindings never reached (runtime<->env is the first leg).
+    assert sch.actions_called() == []
+    assert "attach_process_environment" not in dep.actions_called()
+
+
+def test_missing_runtime_or_environment_blocks_runtime_stage(registry, monkeypatch):
+    bid = registry("b-rt-missing", _single_process_entry(process_id="CID-1"))
+    # Environment verify fails.
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments={"get": {"_success": False, "error": "Environment not found"}},
+        runtimes=_ok_runtime(),
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "ENVIRONMENT_VERIFY_FAILED" in _codes(result)
+    assert result["runtime_attachment"]["status"] == "failed"
+    assert result["schedule"]["status"] == "blocked"
+    assert "attach" not in rt.actions_called()
+    assert sch.actions_called() == []
+
+    # Runtime verify fails (env ok).
+    dep2, env2, rt2, sch2 = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(),
+        runtimes={"get": {"_success": False, "error": "Runtime not found"}},
+        schedules={},
+    )
+    result2 = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result2["_success"] is False
+    assert "RUNTIME_VERIFY_FAILED" in _codes(result2)
+    assert result2["runtime_attachment"]["status"] == "failed"
+    assert sch2.actions_called() == []
+
+
+def test_schedule_override_none_or_manual_has_expected_schedule_calls(registry, monkeypatch):
+    bid = registry("b-sched-manual", _single_process_entry(process_id="CID-1"))
+    # None override -> no schedule mutation.
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(), schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["schedule"]["status"] == "not_required"
+    assert sch.actions_called() == []
+
+    # manual mode -> delete (clear) then disable.
+    dep2, env2, rt2, sch2 = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={
+            "delete": {"_success": True, "schedule": _sched("sch-1")},
+            "disable": {"_success": True, "status": _status("sst-1", False)},
+        },
+    )
+    result2 = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"mode": "manual"}, dry_run=False,
+    )
+    assert result2["_success"] is True
+    assert result2["schedule"]["status"] == "disabled"
+    assert result2["schedule"]["enabled"] is False
+    assert sch2.actions_called() == ["delete", "disable"]
+    assert result2["summary"]["schedule_status"] == "disabled"
+
+
+def test_schedule_override_updates_schedule_after_runtime_binding(registry, monkeypatch):
+    bid = registry("b-sched-update", _single_process_entry(process_id="CID-1"))
+    order = []
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={
+            "update": {"_success": True, "schedule": _sched("sch-9")},
+            "enable": {"_success": True, "status": _status("sst-9", True)},
+        },
+        order_log=order,
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert result["_success"] is True
+    sched_stage = result["schedule"]
+    assert sched_stage["status"] == "enabled"
+    assert sched_stage["schedule_id"] == "sch-9"
+    assert sched_stage["schedule_status_id"] == "sst-9"
+    assert sched_stage["cron"] == "0 9 * * *"
+    assert sched_stage["enabled"] is True
+    assert sch.actions_called() == ["update", "enable"]
+    assert result["summary"]["schedule_id"] == "sch-9"
+    # The update call carries the process/atom/cron/max_retry the schedule router expects.
+    update_call = next(c for c in sch.calls if c["action"] == "update")
+    assert update_call["config_data"]["process_id"] == "CID-1"
+    assert update_call["config_data"]["atom_id"] == "rt-1"
+    assert update_call["config_data"]["cron"] == "0 9 * * *"
+    assert update_call["config_data"]["max_retry"] == 5
+    # Schedule runs after runtime/process binding.
+    first_sched = min(i for i, (label, _a) in enumerate(order) if label == "schedules")
+    assert first_sched > _last_bind_index(order)
+
+
+def test_schedule_override_enable_disable_status_flows(registry, monkeypatch):
+    bid = registry("b-sched-status", _single_process_entry(process_id="CID-1"))
+    # scheduled + enabled:false -> update then disable.
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={
+            "update": {"_success": True, "schedule": _sched("sch-1")},
+            "disable": {"_success": True, "status": _status("sst-1", False)},
+        },
+    )
+    disabled = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"mode": "scheduled", "cron": "0 9 * * *", "enabled": False},
+        dry_run=False,
+    )
+    assert disabled["_success"] is True
+    assert disabled["schedule"]["status"] == "disabled"
+    assert disabled["schedule"]["enabled"] is False
+    assert sch.actions_called() == ["update", "disable"]
+
+    # scheduled + enabled:true -> update then enable.
+    dep2, env2, rt2, sch2 = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={
+            "update": {"_success": True, "schedule": _sched("sch-1")},
+            "enable": {"_success": True, "status": _status("sst-1", True)},
+        },
+    )
+    enabled = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"mode": "scheduled", "cron": "0 9 * * *", "enabled": True},
+        dry_run=False,
+    )
+    assert enabled["_success"] is True
+    assert enabled["schedule"]["status"] == "enabled"
+    assert enabled["schedule"]["enabled"] is True
+    assert sch2.actions_called() == ["update", "enable"]
+
+
+def test_invalid_schedule_override_returns_structured_error_without_schedule_call(registry, monkeypatch):
+    bid = registry("b-sched-invalid", _single_process_entry(process_id="CID-1"))
+    # Every router raises on ANY call, proving validation fails before any SDK work.
+    dep, env, rt, sch = _patch_all(
+        monkeypatch, deployment={}, environments={}, runtimes={}, schedules={},
+    )
+    for bad in ({"mode": "weird"}, {"cron": "0 9 * *"}, {"cron": "0 9 * * *", "max_retry": 9}):
+        result = orchestrate_deploy_action(
+            boomi_client=MagicMock(), build_id=bid,
+            environment_id="env-1", runtime_id="rt-1",
+            schedule_override=bad, dry_run=False,
+        )
+        assert result["_success"] is False
+        assert _codes(result) == ["SCHEDULE_OVERRIDE_INVALID"]
+    assert dep.actions_called() == []
+    assert env.actions_called() == []
+    assert rt.actions_called() == []
+    assert sch.actions_called() == []
+
+
+def test_schedule_api_failure_is_structured_and_blocks_execution(registry, monkeypatch):
+    bid = registry("b-sched-apifail", _single_process_entry(process_id="CID-1"))
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={"update": {"_success": False, "error": "Action 'update' failed: denied"}},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "SCHEDULE_UPDATE_FAILED" in _codes(result)
+    assert result["schedule"]["status"] == "failed"
+    # Runtime binding completed before the schedule failed -> preserved.
+    assert result["runtime_attachment"]["status"] == "reused"
+    assert result["execution"]["status"] == "blocked"
+    assert result["logs"]["status"] == "blocked"
+    assert result["cleanup"]["status"] == "blocked"
+    assert sch.actions_called() == ["update"]  # failed before enable
+
+
+def test_dry_run_with_schedule_override_never_calls_runtime_or_schedule_helpers(registry, monkeypatch):
+    bid = registry("b-dry-sched", _single_process_entry(process_id="CID-1"))
+    # Every router (and the client) explodes if touched.
+    dep, env, rt, sch = _patch_all(
+        monkeypatch, deployment={}, environments={}, runtimes={}, schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=_ExplodingClient(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=True,
+    )
+    assert result["_success"] is True
+    assert result["dry_run"] is True
+    assert result["schedule"]["status"] == "planned"
+    assert dep.actions_called() == []
+    assert env.actions_called() == []
+    assert rt.actions_called() == []
+    assert sch.actions_called() == []
+
+
+def test_deploy_failure_blocks_runtime_and_schedule_without_schedule_calls(registry, monkeypatch):
+    bid = registry("b-deploy-blocks-rt", _single_process_entry(process_id="CID-1"))
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment={
+            "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+            "list_deployments": {"_success": True, "deployments": []},
+            "deploy": {"_success": False, "error": "Action 'deploy' failed: denied"},
+        },
+        environments={}, runtimes={}, schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "DEPLOY_CREATE_FAILED" in _codes(result)
+    assert result["runtime_attachment"]["status"] == "blocked"
+    assert result["schedule"]["status"] == "blocked"
+    # Runtime/schedule routers never touched when deploy fails.
+    assert env.actions_called() == []
+    assert rt.actions_called() == []
+    assert sch.actions_called() == []
+
+
+# ---------------------------------------------------------------------------
 # Typed-contract sanity
 # ---------------------------------------------------------------------------
 def test_error_code_constants_match_module():
@@ -728,3 +1209,6 @@ def test_error_code_constants_match_module():
     assert orchestration.BUILD_MULTIPLE_PROCESS_COMPONENTS == "BUILD_MULTIPLE_PROCESS_COMPONENTS"
     assert orchestration.DEPLOY_AMBIGUOUS_EXISTING == "DEPLOY_AMBIGUOUS_EXISTING"
     assert orchestration.PACKAGE_CREATE_FAILED == "PACKAGE_CREATE_FAILED"
+    assert orchestration.RUNTIME_ENV_ATTACHMENT_CREATE_FAILED == "RUNTIME_ENV_ATTACHMENT_CREATE_FAILED"
+    assert orchestration.SCHEDULE_OVERRIDE_INVALID == "SCHEDULE_OVERRIDE_INVALID"
+    assert orchestration.SCHEDULE_UPDATE_FAILED == "SCHEDULE_UPDATE_FAILED"
