@@ -4936,19 +4936,27 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.retry_count",
             "reliability.dlq",
             "reliability.dlq.mode",
+            # Issue #51 M3.R1a: DLQ catch-path bindings now consumed by the
+            # verified Try/Catch wrapper (retry_count == 0 only). Bind via the
+            # *_id field — a literal component id or a $ref:KEY token in
+            # depends_on; the bare *_ref_key variant is not resolvable here.
+            "reliability.dlq.document_cache_id",
+            "reliability.dlq.process_id",
         ],
         # Issue #28 added primitives that PRODUCE these fields as process
         # fragments (schedule_envelope, run_metadata, dlq_writer,
-        # error_classifier). Issue #29 now REPRESENTS them as metadata under
-        # build_from_archetype's validation_rules.operational_intent — but
-        # ProcessFlowBuilder still does NOT consume them into process XML, so
-        # they remain deferred here (not optional). Promoting them to
-        # optional_fields would repeat the Codex r3 P2 "silently ignored"
-        # lie. `produced_by` names the issue-#28 primitive; `represented_by`
-        # names where #29 surfaces the field as metadata; `tracked_by` names
-        # the issue/milestone that will wire it into the executable process
-        # (M3 schedule activation; #51 verified Try/Catch retry/DLQ +
-        # dynamic operation-property wiring).
+        # error_classifier). Issue #29 REPRESENTS them as metadata under
+        # build_from_archetype's validation_rules.operational_intent.
+        # Issue #51 M3.R1a now CONSUMES the dlq_writer fragment: for
+        # retry_count == 0, reliability.dlq.mode in {document_cache_ref,
+        # error_subprocess_ref} emits a verified Try/Catch + DLQ catch-path
+        # (see optional_fields), so reliability.on_failure is no longer
+        # deferred. The remaining fields below are still NOT consumed into
+        # process XML, so they stay deferred (not optional) — promoting them
+        # would repeat the Codex r3 P2 "silently ignored" lie.
+        # `produced_by` names the issue-#28 primitive; `represented_by` names
+        # where #29 surfaces the field as metadata; `tracked_by` names the
+        # issue/milestone that will wire it into the executable process.
         "deferred_fields": [
             {
                 "field": "execution.trigger",
@@ -4963,10 +4971,10 @@ _PROCESS_FLOW_PROTOCOLS = {
                 "tracked_by": "#51 (run-metadata / dynamic process-property wiring)",
             },
             {
-                "field": "reliability.on_failure",
-                "produced_by": "dlq_writer / error_classifier primitives (#28)",
+                "field": "reliability.error_classifier",
+                "produced_by": "error_classifier primitive (#28)",
                 "represented_by": "build_from_archetype operational_intent metadata (#29)",
-                "tracked_by": "#51",
+                "tracked_by": "#51 follow-up (catch-path classifier wiring)",
             },
         ],
         "supported_transform_modes": ["passthrough", "message", "map_ref"],
@@ -4990,18 +4998,26 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target"},
             {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type"},
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
-            {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.dlq.mode"},
-            {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode"},
+            {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count"},
+            {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
         ],
         "notes": [
-            "retry_count > 0 and dlq.mode != 'disabled' return PROCESS_RETRY_UNVERIFIED "
-            "for now; the verified Try/Catch wrapper lands in issue #51 after live "
-            "Try/Catch XML is captured.",
-            "Issue #28 primitives (schedule_envelope, run_metadata, dlq_writer, "
-            "error_classifier) PRODUCE execution/reliability fragments, but "
-            "ProcessFlowBuilder does not yet consume them — see deferred_fields.",
+            "Issue #51 M3.R1a: retry_count == 0 with dlq.mode in "
+            "{document_cache_ref, error_subprocess_ref} now emits a verified "
+            "Try/Catch wrapper + DLQ catch-path (shape captured from live Boomi "
+            "Try/Catch XML). Bind the catch leg via reliability.dlq.document_cache_id "
+            "(or .process_id) — a literal component id or a $ref:KEY token in "
+            "depends_on; the bare *_ref_key variant is rejected with "
+            "PROCESS_DLQ_BINDING_INVALID on this build path.",
+            "retry_count > 0 still returns PROCESS_RETRY_UNVERIFIED (issue #51 R1b: "
+            "the retryCount->interval mapping for 1..5 is not yet verified against "
+            "a live export, so it stays gated).",
+            "Issue #28 primitives schedule_envelope, run_metadata, and "
+            "error_classifier PRODUCE execution/reliability fragments that "
+            "ProcessFlowBuilder does not yet consume — see deferred_fields. The "
+            "dlq_writer fragment IS now consumed (above).",
             "Map components are referenced by id or $ref token only; map creation "
             "is tracked by issue #26.",
             "Schedule activation, deployment, and execution remain M3 scope.",

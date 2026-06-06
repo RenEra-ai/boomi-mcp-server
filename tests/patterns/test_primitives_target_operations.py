@@ -895,12 +895,28 @@ class TestComposition:
         assert err is not None
         assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
 
-    def test_enabled_dlq_still_gated(self):
+    def test_enabled_dlq_with_binding_now_supported(self):
+        # Issue #51 M3.R1a: a dlq_writer fragment with retry_count == 0 and a
+        # bound document cache is now consumed into a verified Try/Catch + DLQ
+        # catch-path, so it validates cleanly (was PROCESS_RETRY_UNVERIFIED).
         dlq_frag = _fragment(
             DlqWriterPrimitive,
             {"mode": "document_cache_ref", "document_cache_id": "dc-1"},
         )
         reliability = {"retry_count": 0, **dlq_frag["process_config"]["reliability"]}
+        err = ProcessFlowBuilder.validate_config(
+            self._process_config(reliability), depends_on=[]
+        )
+        assert err is None
+
+    def test_enabled_dlq_with_retry_still_gated(self):
+        # retry_count > 0 + DLQ stays gated until issue #51 R1b verifies the
+        # retryCount->interval mapping against a live export.
+        dlq_frag = _fragment(
+            DlqWriterPrimitive,
+            {"mode": "document_cache_ref", "document_cache_id": "dc-1"},
+        )
+        reliability = {"retry_count": 1, **dlq_frag["process_config"]["reliability"]}
         err = ProcessFlowBuilder.validate_config(
             self._process_config(reliability), depends_on=[]
         )

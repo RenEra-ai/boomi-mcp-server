@@ -440,11 +440,16 @@ class TestValidateConfig:
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
 
-    def test_rejects_dlq_document_cache_mode(self):
+    def test_dlq_document_cache_mode_without_binding_is_invalid(self):
+        # Issue #51 M3.R1a: document_cache_ref with retry_count == 0 is now
+        # un-gated (no longer PROCESS_RETRY_UNVERIFIED), but a missing cache
+        # binding is rejected as PROCESS_DLQ_BINDING_INVALID — the catch leg
+        # needs a real target. (Full Try/Catch coverage lives in
+        # test_process_flow_builder_trycatch_dlq.py.)
         cfg = _base_config(reliability={"retry_count": 0, "dlq": {"mode": "document_cache_ref"}})
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
-        assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
-        assert err.field == "reliability.dlq.mode"
+        assert err.error_code == "PROCESS_DLQ_BINDING_INVALID"
+        assert err.field == "reliability.dlq.document_cache_id"
 
     def test_accepts_dlq_disabled_mode(self):
         cfg = _base_config(reliability={"retry_count": 0, "dlq": {"mode": "disabled"}})

@@ -88,26 +88,31 @@ def test_template_lists_optional_fields(template):
         "reliability",
         "reliability.retry_count",
         "reliability.dlq.mode",
+        # Issue #51 M3.R1a: DLQ catch-path bindings now consumed by the builder.
+        "reliability.dlq.document_cache_id",
+        "reliability.dlq.process_id",
     ):
         assert field in optional, f"optional field {field!r} missing from template"
 
 
 def test_template_deferred_fields_lists_unimplemented_surface(template):
-    """Codex review r3 P2: execution.* and reliability.on_failure were
-    advertised as accepted optional fields but silently ignored by the
-    builder. They must stay documented as deferred so callers can't mistake
-    them for working surface area.
+    """Codex review r3 P2: execution.* fields are produced by #28 primitives
+    but silently ignored by the builder, so they must stay documented as
+    deferred (not optional) so callers can't mistake them for working surface.
 
-    Issue #28 added primitives that PRODUCE these fields as process fragments,
-    and issue #29 REPRESENTS them as build_from_archetype operational_intent
-    metadata — but ProcessFlowBuilder still does not consume them into process
-    XML, so they remain deferred. `tracked_by` now points at the milestone/issue
-    that will wire each field into the executable process (M3 schedule
-    activation; #51 verified Try/Catch + dynamic operation-property wiring)."""
+    Issue #51 M3.R1a: reliability.on_failure is NO LONGER deferred — the
+    dlq_writer fragment is now consumed into a verified Try/Catch + DLQ
+    catch-path for retry_count == 0 (see test_template_lists_optional_fields).
+    The error_classifier fragment is still not consumed, so it remains
+    deferred in its place. `tracked_by` points at the milestone/issue that
+    will wire each remaining field into the executable process."""
     deferred = {entry["field"]: entry["tracked_by"] for entry in template["deferred_fields"]}
     assert deferred.get("execution.trigger") == "M3 (deploy + schedule activation)"
     assert deferred.get("execution.run_metadata") == "#51 (run-metadata / dynamic process-property wiring)"
-    assert deferred.get("reliability.on_failure") == "#51"
+    # on_failure (the DLQ intent) is now consumed → must NOT be deferred.
+    assert "reliability.on_failure" not in deferred
+    # The classifier half of the old on_failure umbrella is still unconsumed.
+    assert "reliability.error_classifier" in deferred
 
     # Each deferred field names the issue-#28 primitive that produces it and the
     # #29 surface that now represents it, so callers understand the field exists
@@ -115,10 +120,10 @@ def test_template_deferred_fields_lists_unimplemented_surface(template):
     produced_by = {entry["field"]: entry.get("produced_by", "") for entry in template["deferred_fields"]}
     assert "schedule_envelope" in produced_by["execution.trigger"]
     assert "run_metadata" in produced_by["execution.run_metadata"]
-    assert "dlq_writer" in produced_by["reliability.on_failure"]
+    assert "error_classifier" in produced_by["reliability.error_classifier"]
 
     represented_by = {entry["field"]: entry.get("represented_by", "") for entry in template["deferred_fields"]}
-    for field in ("execution.trigger", "execution.run_metadata", "reliability.on_failure"):
+    for field in ("execution.trigger", "execution.run_metadata", "reliability.error_classifier"):
         assert "#29" in represented_by[field], field
         assert "operational_intent" in represented_by[field], field
 

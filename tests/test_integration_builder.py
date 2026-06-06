@@ -2814,7 +2814,10 @@ class TestBuildPlanProcessFlow:
         assert process_step["validation_error"]["error_code"] == "PROCESS_RETRY_UNVERIFIED"
 
     @patch(_PATCH_TARGET)
-    def test_dlq_non_disabled_errors_with_unverified(self, mock_pag):
+    def test_dlq_document_cache_missing_binding_errors_at_plan(self, mock_pag):
+        # Issue #51 M3.R1a: document_cache_ref with retry_count == 0 is now
+        # un-gated, but a missing cache binding is rejected as
+        # PROCESS_DLQ_BINDING_INVALID (was PROCESS_RETRY_UNVERIFIED).
         mock_pag.return_value = []
         components = [
             _stub_dep_comp("db_connection"),
@@ -2828,7 +2831,31 @@ class TestBuildPlanProcessFlow:
         plan = _build_plan(MagicMock(), _build_config(components))
         process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
         assert process_step["planned_action"] == "error_process_validation"
-        assert process_step["validation_error"]["error_code"] == "PROCESS_RETRY_UNVERIFIED"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_DLQ_BINDING_INVALID"
+
+    @patch(_PATCH_TARGET)
+    def test_dlq_document_cache_with_binding_plans_create(self, mock_pag):
+        # Issue #51 M3.R1a: retry_count == 0 + a bound document_cache_ref DLQ
+        # now plans cleanly (the verified Try/Catch wrapper is emitted at apply).
+        mock_pag.return_value = []
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _process_flow_comp(
+                reliability={
+                    "retry_count": 0,
+                    "dlq": {
+                        "mode": "document_cache_ref",
+                        "document_cache_id": "99999999-9999-9999-9999-999999999999",
+                    },
+                },
+            ),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "create"
 
     @patch(_PATCH_TARGET)
     def test_plaintext_secret_blocks_process_validation(self, mock_pag):

@@ -8,10 +8,15 @@ Start -> [optional transform] -> Target -> Stop flow whose shape XML
 uses `shapetype="connectoraction"` (matches live Renera examples like
 `DB Test`, `Rest Test GET`, `Rest Test PATCH`).
 
-Try/Catch retry and DLQ wrappers are intentionally deferred until live
-Try/Catch XML is captured (see PROCESS_RETRY_UNVERIFIED). Map and
-subprocess components are referenced by id/$ref only — their build is
-out of scope.
+Issue #51 M3.R1a adds a verified Try/Catch + DLQ catch-path: for
+`retry_count == 0` with `dlq.mode` in {`document_cache_ref`,
+`error_subprocess_ref`}, the flow is wrapped in a `catcherrors` shape
+(transcribed from live Boomi exports, not invented from docs) whose
+catch leg routes to a `doccacheload` (DLQ cache) or `processcall` (error
+subprocess). `retry_count > 0` stays gated by PROCESS_RETRY_UNVERIFIED
+until the retryCount->interval mapping is verified (issue #51 R1b). Map
+and subprocess/cache components are referenced by id/$ref only — their
+build is out of scope.
 """
 
 from __future__ import annotations
@@ -42,6 +47,11 @@ _DB_ACTION_TYPES = frozenset({"Get"})
 _SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "message", "map_ref"})
 _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subprocess_ref"})
 
+# Issue #51 M3.R1a: DLQ modes that, with retry_count == 0, emit a verified
+# Try/Catch wrapper + DLQ catch-path (every supported mode except "disabled").
+# retry_count > 0 stays gated by PROCESS_RETRY_UNVERIFIED until R1b lands.
+_TRY_CATCH_DLQ_MODES = frozenset({"document_cache_ref", "error_subprocess_ref"})
+
 # Per Boomi: Try/Catch retryCount ranges 0..5. Once retry is unlocked the
 # validator will check that; today any value > 0 fails with
 # PROCESS_RETRY_UNVERIFIED.
@@ -56,6 +66,11 @@ _START_SHAPE_Y = 94.0
 _SHAPE_X_STEP = 160.0
 _DRAGPOINT_X_OFFSET = 144.0
 _DRAGPOINT_Y = 104.0
+# Catch-path row sits below the Try row. Geometry is decorative; the verified
+# live Try/Catch (work component dff0bf83-d525-4781-b572-c93d285bb788) places
+# the catch leg on a separate lower y. Issue #51 M3.R1a.
+_CATCH_SHAPE_Y = 456.0
+_CATCH_DRAGPOINT_Y = 464.0
 
 
 def _shape_x(index: int) -> float:
@@ -312,6 +327,30 @@ class ProcessFlowBuilder:
 
         return None
 
+    @classmethod
+    def _should_emit_try_catch(cls, reliability: Any) -> bool:
+        """True when the config should emit a verified Try/Catch + DLQ wrapper.
+
+        Issue #51 M3.R1a: only retry_count == 0 with a supported DLQ mode
+        (document_cache_ref / error_subprocess_ref) is un-gated. Any
+        retry_count > 0 stays gated (PROCESS_RETRY_UNVERIFIED) and never
+        reaches this path because validate_config rejects it first. This
+        guard mirrors that boundary so a direct build() call is also total.
+        """
+        if not isinstance(reliability, dict):
+            return False
+        retry_count = reliability.get("retry_count", 0)
+        if (
+            not isinstance(retry_count, int)
+            or isinstance(retry_count, bool)
+            or retry_count != 0
+        ):
+            return False
+        dlq = reliability.get("dlq")
+        if not isinstance(dlq, dict):
+            return False
+        return str(dlq.get("mode") or "").strip().lower() in _TRY_CATCH_DLQ_MODES
+
     # ------------------------------------------------------------------
     # Apply-time XML emission
     # ------------------------------------------------------------------
@@ -413,34 +452,17 @@ class ProcessFlowBuilder:
         ))
         flow.append(("stop", {"continue_": True}))
 
-        total = len(flow)
-        # Walk twice: emit each shape with its outgoing dragpoint that
-        # points at the next shape. Stop has no outgoing edge.
-        shape_xml_parts: List[str] = []
-        for i, (kind, params) in enumerate(flow):
-            shape_index = i + 1  # shape1..N
-            shape_name = f"shape{shape_index}"
-            next_name = f"shape{shape_index + 1}" if shape_index < total else None
-
-            if kind == "start_noaction":
-                shape_xml_parts.append(_emit_start_noaction(shape_name, next_name, shape_index))
-            elif kind == "connectoraction_source":
-                shape_xml_parts.append(_emit_connectoraction(shape_name, params, next_name, shape_index))
-            elif kind == "connectoraction_target":
-                shape_xml_parts.append(_emit_connectoraction(shape_name, params, next_name, shape_index))
-            elif kind == "message":
-                shape_xml_parts.append(_emit_message(shape_name, params, next_name, shape_index))
-            elif kind == "map":
-                shape_xml_parts.append(_emit_map(shape_name, params, next_name, shape_index))
-            elif kind == "stop":
-                shape_xml_parts.append(_emit_stop(shape_name, params))
-            else:  # pragma: no cover — defensive
-                raise BuilderValidationError(
-                    f"Unknown shape kind {kind!r} produced by builder.",
-                    error_code="PROCESS_XML_VALIDATION_FAILED",
-                    field="shapes",
-                    hint="Internal builder bug — please report.",
-                )
+        # Issue #51 M3.R1a: when retry_count == 0 and a supported DLQ mode is
+        # set, wrap the linear flow in the verified Try/Catch (catcherrors)
+        # shape with a DLQ catch path. Otherwise emit the unchanged linear
+        # flow so existing non-DLQ process XML is byte-for-byte identical.
+        reliability_cfg = config.get("reliability")
+        if cls._should_emit_try_catch(reliability_cfg):
+            shape_xml_parts: List[str] = _emit_try_catch_shapes(
+                flow, reliability_cfg.get("dlq") or {}
+            )
+        else:
+            shape_xml_parts = _emit_linear_shapes(flow)
 
         process_inner = (
             '<process xmlns="" '
@@ -662,14 +684,15 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
         )
     if retry_count > 0:
         return BuilderValidationError(
-            "reliability.retry_count > 0 requires Try/Catch which is not "
-            "yet implemented (PROCESS_RETRY_UNVERIFIED).",
+            "reliability.retry_count > 0 is not yet verified "
+            "(PROCESS_RETRY_UNVERIFIED).",
             error_code="PROCESS_RETRY_UNVERIFIED",
             field="reliability.retry_count",
             hint=(
-                "Set retry_count=0 for the M2.5 vertical slice. "
-                "Try/Catch wrapper lands in a follow-up issue after "
-                "live Try/Catch XML is captured."
+                "Set retry_count=0. The verified Try/Catch + DLQ wrapper is "
+                "emitted for retry_count=0 (issue #51 M3.R1a); un-gating "
+                "1..5 awaits a live export confirming the Boomi "
+                "retryCount->interval mapping (issue #51 R1b)."
             ),
         )
     dlq = reliability.get("dlq")
@@ -695,19 +718,74 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
                 field="reliability.dlq.mode",
                 hint=f"Supported dlq modes: {sorted(_SUPPORTED_DLQ_MODES)}.",
             )
-        if dlq_mode != "disabled":
-            # Recognized mode but Try/Catch wrapper isn't wired yet.
+        if dlq_mode in _TRY_CATCH_DLQ_MODES:
+            # Issue #51 M3.R1a: retry_count is guaranteed 0 here (retry_count
+            # > 0 returned PROCESS_RETRY_UNVERIFIED above), so the verified
+            # Try/Catch wrapper + DLQ catch-path is now emitted. Require a
+            # resolvable catch-leg binding (literal id or $ref:KEY token).
+            binding_err = _validate_dlq_binding(dlq, dlq_mode)
+            if binding_err is not None:
+                return binding_err
+        # dlq_mode == "disabled" → no Try/Catch; nothing else to validate.
+    return None
+
+
+def _validate_dlq_binding(
+    dlq: Dict[str, Any], mode: str
+) -> Optional[BuilderValidationError]:
+    """Validate the DLQ catch-leg binding for a supported Try/Catch mode.
+
+    The process builder resolves component references via literal ids or
+    ``$ref:KEY`` tokens (substituted by integration_builder before build()).
+    The dlq_writer primitive's bare ``*_ref_key`` mechanism is NOT resolvable
+    on this build path, so the binding must use the ``*_id`` field — a literal
+    Boomi component id, or a ``$ref:KEY`` token whose KEY is in depends_on
+    (the existing $ref-reachability walk in validate_config covers it). Issue
+    #51 M3.R1a.
+    """
+    if mode == "document_cache_ref":
+        id_field, ref_field, target = (
+            "document_cache_id", "document_cache_ref_key", "Document Cache",
+        )
+    else:  # error_subprocess_ref
+        id_field, ref_field, target = (
+            "process_id", "process_ref_key", "error subprocess",
+        )
+
+    id_value = dlq.get(id_field)
+    has_id = isinstance(id_value, str) and id_value.strip() != ""
+    ref_value = dlq.get(ref_field)
+    has_ref = isinstance(ref_value, str) and ref_value.strip() != ""
+
+    bind_hint = (
+        f"Set {id_field} to a literal Boomi component id, or a '$ref:KEY' "
+        f"token whose KEY is in the process component's depends_on."
+    )
+    if has_id and has_ref:
+        return BuilderValidationError(
+            f"reliability.dlq for mode {mode!r} must set exactly one of "
+            f"{id_field!r} or {ref_field!r}, not both.",
+            error_code="PROCESS_DLQ_BINDING_INVALID",
+            field=f"reliability.dlq.{id_field}",
+            hint=f"Provide only {id_field!r}. {bind_hint}",
+        )
+    if not has_id:
+        if has_ref:
             return BuilderValidationError(
-                f"reliability.dlq.mode={dlq_mode!r} requires Try/Catch "
-                "which is not yet implemented (PROCESS_RETRY_UNVERIFIED).",
-                error_code="PROCESS_RETRY_UNVERIFIED",
-                field="reliability.dlq.mode",
-                hint=(
-                    "Set dlq.mode='disabled' for the M2.5 vertical slice. "
-                    "DLQ paths land in a follow-up issue alongside "
-                    "Try/Catch."
-                ),
+                f"reliability.dlq.{ref_field} is not resolvable by the "
+                f"process builder; bind the {target} via {id_field!r} "
+                f"instead.",
+                error_code="PROCESS_DLQ_BINDING_INVALID",
+                field=f"reliability.dlq.{ref_field}",
+                hint=bind_hint,
             )
+        return BuilderValidationError(
+            f"reliability.dlq.mode={mode!r} requires {id_field!r} to bind "
+            f"the {target} catch path.",
+            error_code="PROCESS_DLQ_BINDING_INVALID",
+            field=f"reliability.dlq.{id_field}",
+            hint=bind_hint,
+        )
     return None
 
 
@@ -837,6 +915,168 @@ def _emit_dragpoints(
             f'x="{_dragpoint_x(shape_index)}" y="{_DRAGPOINT_Y}"/>'
         )
     return "".join(parts)
+
+
+# ----------------------------------------------------------------------
+# Issue #51 M3.R1a — Try/Catch + DLQ catch-path emission
+#
+# Shapes below are transcribed verbatim from verified live `work`-profile
+# exports (no XML invented from docs):
+#   * catcherrors  — component dff0bf83-d525-4781-b572-c93d285bb788 (shape4)
+#   * doccacheload — same component (shape80), terminal catch leg
+#   * processcall  — component 7b19baeb-ed62-4fac-9962-44fc0ed87f07 (shape34,
+#                    on a catcherrors error branch), terminal catch leg
+# ----------------------------------------------------------------------
+
+# Shape "kinds" produced by build()'s flow list (mirrors the dispatch order).
+def _emit_flow_shape(
+    kind: str,
+    params: Dict[str, Any],
+    shape_name: str,
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit one linear-flow shape with an outgoing edge to next_name."""
+    if kind == "start_noaction":
+        return _emit_start_noaction(shape_name, next_name, shape_index)
+    if kind in ("connectoraction_source", "connectoraction_target"):
+        return _emit_connectoraction(shape_name, params, next_name, shape_index)
+    if kind == "message":
+        return _emit_message(shape_name, params, next_name, shape_index)
+    if kind == "map":
+        return _emit_map(shape_name, params, next_name, shape_index)
+    if kind == "stop":
+        return _emit_stop(shape_name, params)
+    raise BuilderValidationError(  # pragma: no cover — defensive
+        f"Unknown shape kind {kind!r} produced by builder.",
+        error_code="PROCESS_XML_VALIDATION_FAILED",
+        field="shapes",
+        hint="Internal builder bug — please report.",
+    )
+
+
+def _emit_linear_shapes(flow: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
+    """Emit the unwrapped Start -> ... -> Stop chain (pre-#51 behavior)."""
+    total = len(flow)
+    parts: List[str] = []
+    for i, (kind, params) in enumerate(flow):
+        shape_index = i + 1  # shape1..N
+        shape_name = f"shape{shape_index}"
+        next_name = f"shape{shape_index + 1}" if shape_index < total else None
+        parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
+    return parts
+
+
+def _emit_try_catch_shapes(
+    flow: List[Tuple[str, Dict[str, Any]]], dlq: Dict[str, Any]
+) -> List[str]:
+    """Wrap the linear flow in a verified catcherrors Try/Catch + DLQ catch leg.
+
+    Layout (shape names are positional, like the linear path):
+        shape1  start        -> shape2 (catcherrors)
+        shape2  catcherrors  Try(default) -> shape3 ; Catch(error) -> catch leg
+        shape3..K  source -> [transform] -> target -> stop  (the normal chain)
+        shape{K+1} catch leg: doccacheload | processcall  (terminal)
+
+    The catch leg is terminal (empty dragpoints) to match the verified live
+    shapes; retry_count is guaranteed 0 by validate_config / the build guard.
+    """
+    normal = flow[1:]  # source, [transform], target, stop
+    n = len(normal)
+    catcherrors_index = 2
+    catcherrors_name = "shape2"
+    first_try_index = 3
+    first_try_name = "shape3"
+    stop_index = catcherrors_index + n  # last normal (stop) shape index
+    catch_index = stop_index + 1
+    catch_name = f"shape{catch_index}"
+
+    parts: List[str] = []
+    # Start keeps its noaction config; only its outgoing edge moves to catcherrors.
+    parts.append(_emit_start_noaction("shape1", catcherrors_name, 1))
+    parts.append(
+        _emit_catcherrors(catcherrors_name, first_try_name, catch_name, catcherrors_index)
+    )
+    # Normal Try chain, shifted to indices 3..stop_index.
+    for j, (kind, params) in enumerate(normal):
+        shape_index = first_try_index + j
+        shape_name = f"shape{shape_index}"
+        is_last = j == n - 1
+        next_name = None if is_last else f"shape{shape_index + 1}"
+        parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
+    # Catch leg (binding validated by _validate_dlq_binding; id is literal or a
+    # $ref:KEY already resolved by integration_builder before build()).
+    mode = str(dlq.get("mode") or "").strip().lower()
+    if mode == "document_cache_ref":
+        cache_id = str(dlq.get("document_cache_id") or "").strip()
+        parts.append(_emit_doccacheload(catch_name, cache_id, catch_index))
+    elif mode == "error_subprocess_ref":
+        process_id = str(dlq.get("process_id") or "").strip()
+        parts.append(_emit_processcall(catch_name, process_id, catch_index))
+    return parts
+
+
+def _emit_catcherrors(
+    shape_name: str, try_to: str, catch_to: str, shape_index: int
+) -> str:
+    """Emit the verified catcherrors Try/Catch shape (catchAll, retryCount=0).
+
+    Dragpoints carry the verified identifier/text pair: Try=`default`,
+    Catch=`error` (live component dff0bf83-... shape4).
+    """
+    dragpoints = (
+        f'<dragpoint identifier="default" name="{shape_name}.dragpoint1" '
+        f'text="Try" toShape="{_escape_xml(try_to)}" '
+        f'x="{_dragpoint_x(shape_index)}" y="{_DRAGPOINT_Y}"/>'
+        f'<dragpoint identifier="error" name="{shape_name}.dragpoint2" '
+        f'text="Catch" toShape="{_escape_xml(catch_to)}" '
+        f'x="{_dragpoint_x(shape_index)}" y="{_CATCH_DRAGPOINT_Y}"/>'
+    )
+    return (
+        f'<shape image="catcherrors_icon" name="{shape_name}" '
+        f'shapetype="catcherrors" '
+        f'userlabel="Try/Catch all errors (no retry) - route caught documents to DLQ" '
+        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        '<configuration><catcherrors catchAll="true" retryCount="0"/></configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
+def _emit_doccacheload(shape_name: str, doc_cache_id: str, shape_index: int) -> str:
+    """Emit the verified document-cache DLQ catch leg (terminal).
+
+    Live shape: doccacheload with a docCache id, empty dragpoints (live
+    component dff0bf83-... shape80).
+    """
+    return (
+        f'<shape image="doccacheload_icon" name="{shape_name}" '
+        f'shapetype="doccacheload" userlabel="Route caught errors to DLQ cache" '
+        f'x="{_shape_x(shape_index)}" y="{_CATCH_SHAPE_Y}">'
+        f'<configuration><doccacheload docCache="{_escape_xml(doc_cache_id)}"/></configuration>'
+        '<dragpoints/>'
+        '</shape>'
+    )
+
+
+def _emit_processcall(shape_name: str, process_id: str, shape_index: int) -> str:
+    """Emit the verified error-subprocess DLQ catch leg (terminal).
+
+    Live shape: processcall abort="true" wait="true" with empty parameters /
+    returnpaths, empty dragpoints (live component 7b19baeb-... shape34).
+    """
+    return (
+        f'<shape image="processcall_icon" name="{shape_name}" '
+        f'shapetype="processcall" userlabel="Route caught errors to error subprocess" '
+        f'x="{_shape_x(shape_index)}" y="{_CATCH_SHAPE_Y}">'
+        '<configuration>'
+        f'<processcall abort="true" processId="{_escape_xml(process_id)}" wait="true">'
+        '<parameters/><returnpaths/>'
+        '</processcall>'
+        '</configuration>'
+        '<dragpoints/>'
+        '</shape>'
+    )
 
 
 # ----------------------------------------------------------------------
