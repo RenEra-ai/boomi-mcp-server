@@ -1016,6 +1016,8 @@ def _normalize_schedule_override(
     if mode in _SCHEDULE_DISABLED_MODES:
         if cron is not None:
             return _invalid("cron is not allowed when disabling a schedule.")
+        if max_retry is not None:
+            return _invalid("max_retry is not allowed when disabling a schedule.")
         if enabled is True:
             return _invalid("enabled: true is incompatible with a disabled schedule.")
         return {"mode": "disabled", "enabled": False}, None
@@ -1101,11 +1103,17 @@ def _apply_schedule_override(
                 field="schedule_override", details=ids,
             )
         status_obj = disabled.get("status") or {}
+        schedule_status_id = status_obj.get("id")
+        if not schedule_status_id:
+            return _failed_stage(changed=True, schedule_id=schedule_id), _error(
+                SCHEDULE_ID_MISSING, "Schedule disable returned no status id.",
+                field="schedule_override", details=ids,
+            )
         return (
             ScheduleStage(
                 status="disabled",
                 schedule_id=schedule_id,
-                schedule_status_id=status_obj.get("id"),
+                schedule_status_id=schedule_status_id,
                 enabled=False,
                 changed=True,
                 **base_fields,
@@ -1152,11 +1160,19 @@ def _apply_schedule_override(
             field="schedule_override", details=ids,
         )
     status_obj = status_result.get("status") or {}
+    schedule_status_id = status_obj.get("id")
+    if not schedule_status_id:
+        return _failed_stage(
+            changed=True, schedule_id=schedule_id, cron=cron, max_retry=max_retry, enabled=enabled
+        ), _error(
+            SCHEDULE_ID_MISSING, "Schedule status update returned no status id.",
+            field="schedule_override", details=ids,
+        )
     return (
         ScheduleStage(
             status=final_status,
             schedule_id=schedule_id,
-            schedule_status_id=status_obj.get("id"),
+            schedule_status_id=schedule_status_id,
             cron=cron,
             max_retry=max_retry,
             enabled=bool(status_obj.get("enabled")) if "enabled" in status_obj else enabled,

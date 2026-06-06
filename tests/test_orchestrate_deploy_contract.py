@@ -1117,7 +1117,13 @@ def test_invalid_schedule_override_returns_structured_error_without_schedule_cal
     dep, env, rt, sch = _patch_all(
         monkeypatch, deployment={}, environments={}, runtimes={}, schedules={},
     )
-    for bad in ({"mode": "weird"}, {"cron": "0 9 * *"}, {"cron": "0 9 * * *", "max_retry": 9}):
+    for bad in (
+        {"mode": "weird"},
+        {"cron": "0 9 * *"},
+        {"cron": "0 9 * * *", "max_retry": 9},
+        {"mode": "manual", "max_retry": 3},   # max_retry is not applicable to disable/manual
+        {"mode": "disabled", "max_retry": "bad"},
+    ):
         result = orchestrate_deploy_action(
             boomi_client=MagicMock(), build_id=bid,
             environment_id="env-1", runtime_id="rt-1",
@@ -1308,6 +1314,49 @@ def test_schedule_changed_flag_reflects_failed_mutation(registry, monkeypatch):
     assert "SCHEDULE_DISABLE_FAILED" in _codes(r2)
     assert r2["schedule"]["changed"] is True
     assert r2["summary"]["resource_changes"]["schedule"] is True
+
+
+def test_schedule_missing_status_id_returns_structured_error(registry, monkeypatch):
+    bid = registry("b-sched-noid", _single_process_entry(process_id="CID-1"))
+    # scheduled: update ok, but enable returns success with no status id -> SCHEDULE_ID_MISSING.
+    _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={
+            "update": {"_success": True, "schedule": _sched("sch-1")},
+            "enable": {"_success": True, "status": {}},  # no id returned
+        },
+    )
+    scheduled = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"cron": "0 9 * * *"}, dry_run=False,
+    )
+    assert scheduled["_success"] is False
+    assert "SCHEDULE_ID_MISSING" in _codes(scheduled)
+    assert scheduled["schedule"]["status"] == "failed"
+    assert scheduled["schedule"]["changed"] is True  # update already mutated the schedule
+
+    # manual: delete ok, but disable returns success with no status id -> SCHEDULE_ID_MISSING.
+    _patch_all(
+        monkeypatch,
+        deployment={**_deploy_ok(bid), **_process_attachments()},
+        environments=_ok_env(), runtimes=_ok_runtime(),
+        schedules={
+            "delete": {"_success": True, "schedule": _sched("sch-1")},
+            "disable": {"_success": True, "status": {}},  # no id returned
+        },
+    )
+    manual = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        schedule_override={"mode": "manual"}, dry_run=False,
+    )
+    assert manual["_success"] is False
+    assert "SCHEDULE_ID_MISSING" in _codes(manual)
+    assert manual["schedule"]["status"] == "failed"
+    assert manual["schedule"]["changed"] is True  # delete already mutated the schedule
 
 
 # ---------------------------------------------------------------------------
