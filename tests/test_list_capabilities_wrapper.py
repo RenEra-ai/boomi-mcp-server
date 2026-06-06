@@ -70,6 +70,25 @@ def test_list_capabilities_wrapper_filters_to_live_registry():
         assert name in catalog_names, f"{name!r} missing from filtered catalog"
 
 
+def test_list_capabilities_wrapper_includes_orchestrate_deploy():
+    """Issue #64: once orchestrate_deploy is registered, the live-filtered catalog
+    must surface it (it is in the static catalog AND the FastMCP registry)."""
+    result = _run_async(server.mcp.call_tool("list_capabilities", {}))
+    payload = _payload(result)
+
+    registered_names = {t.name for t in _run_async(server.mcp.list_tools())}
+    assert "orchestrate_deploy" in registered_names, "orchestrate_deploy must be registered"
+    assert "orchestrate_deploy" in payload["tools"], (
+        "orchestrate_deploy missing from live-filtered catalog"
+    )
+    # The authoring workflow's step 8 routes apply -> orchestrate_deploy and must survive.
+    wf = payload["workflows"].get("build_integration_from_description")
+    assert wf is not None, "authoring workflow dropped — orchestrate_deploy step filtered it out"
+    assert any("orchestrate_deploy" in s for s in wf["steps"]), (
+        "authoring workflow must reference orchestrate_deploy"
+    )
+
+
 def test_list_capabilities_wrapper_surfaces_integration_authoring_workflow():
     """End-to-end: Issue #20's archetype-first workflow reaches MCP clients post-fix."""
     result = _run_async(server.mcp.call_tool("list_capabilities", {}))

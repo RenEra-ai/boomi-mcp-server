@@ -290,6 +290,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import deployment tools: {e}")
     manage_deployment_action = None
 
+# --- Deployment Orchestration Tool (issue #64) ---
+try:
+    from boomi_mcp.categories.deployment import orchestrate_deploy_action
+    print(f"[INFO] Deployment orchestration tool loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import deployment orchestration tool: {e}")
+    orchestrate_deploy_action = None
+
 # --- Execution Tools ---
 try:
     from boomi_mcp.categories.execution import execute_process_action
@@ -2829,6 +2837,262 @@ if manage_deployment_action:
 
 
 # ============================================================
+# orchestrate_deploy — One-call package -> deploy -> bind runtime -> optional schedule/test
+# ============================================================
+# Config keys the wrapper folds into the orchestration engine call. Top-level MCP
+# args (build_id/environment_id/runtime_id/dry_run/run_test) override config values.
+_ORCH_CONFIG_KEYS = (
+    "build_id",
+    "environment_id",
+    "runtime_id",
+    "schedule_override",
+    "run_test",
+    "dry_run",
+    "package_version",
+    "test_timeout_seconds",
+    "test_dynamic_properties",
+    "test_process_properties",
+    "test_log_level",
+    "test_fetch_logs",
+    "test_fetch_artifacts",
+    "test_log_fetch_content",
+)
+
+
+def _orchestrate_next_steps(result: dict, run_test: bool) -> list:
+    """Agent-facing next-step hints. Order is always package/deploy -> runtime -> schedule/test."""
+    if not result.get("_success"):
+        codes = {e.get("code") for e in (result.get("errors") or []) if isinstance(e, dict)}
+        steps = []
+        required = codes & {"BUILD_ID_REQUIRED", "ENVIRONMENT_ID_REQUIRED", "RUNTIME_ID_REQUIRED"}
+        if required:
+            missing = ", ".join(sorted(c.split("_REQUIRED")[0].lower() for c in required))
+            steps.append(f"Provide the missing required input(s): {missing}.")
+        if "BUILD_ID_UNKNOWN" in codes:
+            steps.append("Run build_integration(action='apply') first to obtain a valid build_id.")
+        steps.append("Fix the reported error(s) in 'errors', then re-run orchestrate_deploy.")
+        steps.append(
+            "Run with dry_run=true to preview the package -> deploy -> runtime-binding -> "
+            "(optional) schedule/test plan without mutating Boomi."
+        )
+        return steps
+    if result.get("plan_only"):
+        return [
+            "This was a dry-run plan; no Boomi resources were created.",
+            "Re-run with dry_run=false to package -> deploy -> bind the runtime, then optionally "
+            "apply the schedule and run a test.",
+        ]
+    if not run_test:
+        return [
+            "Deployment complete: package created/reused, deployed, and runtime bound "
+            "(schedule applied if requested).",
+            "Optionally re-run with run_test=true to execute the process and fetch log/artifact "
+            "diagnostics.",
+        ]
+    return [
+        "Deployment + test run complete.",
+        "Review summary.test for the execution status and log/artifact excerpts; use "
+        "monitor_platform(action='execution_records') for full run detail.",
+    ]
+
+
+def _normalize_orchestrate_response(result, environment_id, runtime_id, run_test):
+    """Add stable top-level aliases (process_id/environment_id/runtime_id) and next_steps.
+
+    Only engine responses (dicts carrying ``_success``) are normalized; wrapper-level config
+    short-circuits build their own envelope and never reach here. Aliases use a fallback chain
+    so a minimal validation-error response (no target/summary) still yields a stable shape.
+    """
+    if not isinstance(result, dict) or "_success" not in result:
+        return result
+    target = result.get("target") or {}
+    summary = result.get("summary") or {}
+    deployment = result.get("deployment") or {}
+    runtime_attachment = result.get("runtime_attachment") or {}
+    schedule = result.get("schedule") or {}
+    result.setdefault(
+        "process_id",
+        target.get("process_component_id")
+        or runtime_attachment.get("process_id")
+        or schedule.get("process_id"),
+    )
+    result.setdefault(
+        "environment_id",
+        summary.get("environment_id") or deployment.get("environment_id") or environment_id,
+    )
+    result.setdefault(
+        "runtime_id",
+        summary.get("runtime_id") or runtime_attachment.get("runtime_id") or runtime_id,
+    )
+    result.setdefault("warnings", [])
+    result.setdefault("errors", [])
+    result.setdefault("next_steps", _orchestrate_next_steps(result, run_test))
+    return result
+
+
+# --- Deployment Orchestration MCP Tool (issue #64) ---
+if orchestrate_deploy_action:
+    @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+    @_kb_hint
+    def orchestrate_deploy(
+        profile: str,
+        build_id: str = None,
+        environment_id: str = None,
+        runtime_id: str = None,
+        dry_run: bool = None,
+        run_test: bool = None,
+        config: str = None,
+    ):
+        """One call to package -> deploy -> bind runtime -> (optional) schedule/test a build.
+
+        Resolves a prior build_integration(action='apply') build (via build_id) to its single
+        process component, then plans (dry-run) or executes the full deploy in order:
+        package/deploy, then runtime binding, then the optional schedule override and test run.
+        Schedules NEVER run before deployment.
+
+        Args:
+            profile: Boomi profile name (only consulted on a real run, dry_run=false).
+            build_id: Build id returned by build_integration(action='apply').
+            environment_id: Target environment id.
+            runtime_id: Target runtime (atom) id.
+            dry_run: Preview-only (no Boomi mutation). DEFAULTS TO true when unset.
+            run_test: After a real deploy, execute the process and fetch log/artifact diagnostics.
+            config: JSON object string for the remaining engine inputs. Allowed keys:
+                build_id, environment_id, runtime_id, schedule_override, run_test, dry_run,
+                package_version, test_timeout_seconds, test_dynamic_properties,
+                test_process_properties, test_log_level, test_fetch_logs, test_fetch_artifacts,
+                test_log_fetch_content. Top-level args override the matching config values.
+
+        Credential behavior:
+            dry_run=true (the default) makes NO Boomi SDK call and reads no credentials. A real
+            run (dry_run=false) is validated first WITHOUT credentials; only once the engine
+            confirms a Boomi client is the sole remaining requirement are the profile credentials
+            read and the SDK constructed.
+
+        Examples:
+            Preview:  orchestrate_deploy(profile="prod", build_id="<uuid>", environment_id="env-1",
+                      runtime_id="atom-1", dry_run=true)
+            Execute:  orchestrate_deploy(profile="prod", build_id="<uuid>", environment_id="env-1",
+                      runtime_id="atom-1", dry_run=false)
+
+        Returns:
+            High-level summary envelope: _success, build_id, process_id, environment_id,
+            runtime_id, package, deployment, runtime_attachment, schedule, execution, logs,
+            summary, errors, warnings, and next_steps. Agents can branch on this single response
+            without calling each low-level tool.
+        """
+        # 1. Parse config JSON — wrapper-level errors short-circuit before any auth/SDK/action.
+        config_data = {}
+        if config:
+            try:
+                config_data = json.loads(config)
+            except (json.JSONDecodeError, TypeError) as e:
+                return {
+                    "_success": False,
+                    "error": f"Invalid config (must be a JSON string): {e}",
+                    "errors": [
+                        {"code": "INVALID_CONFIG_JSON", "message": str(e), "field": "config"}
+                    ],
+                    "warnings": [],
+                    "next_steps": [
+                        "Provide 'config' as a JSON object string, e.g. "
+                        "config='{\"package_version\": \"1.0\"}'.",
+                        "Run orchestrate_deploy with dry_run=true to preview without mutating Boomi.",
+                    ],
+                }
+            if not isinstance(config_data, dict):
+                return {
+                    "_success": False,
+                    "error": "config must be a JSON object, not " + type(config_data).__name__,
+                    "errors": [
+                        {
+                            "code": "INVALID_CONFIG_TYPE",
+                            "message": "config must be a JSON object.",
+                            "field": "config",
+                        }
+                    ],
+                    "warnings": [],
+                    "next_steps": [
+                        "Pass 'config' as a JSON object (mapping), not "
+                        + type(config_data).__name__
+                        + ".",
+                        "Run orchestrate_deploy with dry_run=true to preview without mutating Boomi.",
+                    ],
+                }
+
+        # 2. Merge config (allowed keys only) with top-level arg overrides.
+        merged = {k: config_data[k] for k in _ORCH_CONFIG_KEYS if k in config_data}
+        for name, val in (
+            ("build_id", build_id),
+            ("environment_id", environment_id),
+            ("runtime_id", runtime_id),
+            ("dry_run", dry_run),
+            ("run_test", run_test),
+        ):
+            if val is not None:
+                merged[name] = val
+
+        effective_dry_run = merged.get("dry_run", True)
+        effective_run_test = bool(merged.get("run_test", False))
+
+        # 3. Dry-run: no SDK, no credentials — plan only.
+        if effective_dry_run:
+            call_kwargs = dict(merged)
+            call_kwargs["dry_run"] = True
+            result = orchestrate_deploy_action(
+                boomi_client=None, profile=profile, creds=None, **call_kwargs
+            )
+            return _normalize_orchestrate_response(
+                result, environment_id, runtime_id, effective_run_test
+            )
+
+        # 4. Real run: validate WITHOUT credentials first (no-secret preflight).
+        call_kwargs = dict(merged)
+        call_kwargs["dry_run"] = False
+        result = orchestrate_deploy_action(
+            boomi_client=None, profile=profile, creds=None, **call_kwargs
+        )
+        codes = {e.get("code") for e in (result.get("errors") or []) if isinstance(e, dict)}
+        if not result.get("_success") and "BOOMI_CLIENT_REQUIRED" not in codes:
+            # Build resolution / required-field / schedule-override failure — never read secrets.
+            return _normalize_orchestrate_response(
+                result, environment_id, runtime_id, effective_run_test
+            )
+
+        # 5. Only the Boomi client is missing — read credentials and run for real.
+        try:
+            subject = get_current_user()
+            print(f"[INFO] orchestrate_deploy called by user: {subject}, profile: {profile}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            result = orchestrate_deploy_action(
+                boomi_client=sdk, profile=profile, creds=creds, **call_kwargs
+            )
+            return _normalize_orchestrate_response(
+                result, environment_id, runtime_id, effective_run_test
+            )
+
+        except Exception as e:
+            print(f"[ERROR] orchestrate_deploy failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
+
+    print("[INFO] Deployment orchestration tool registered successfully")
+
+
+# ============================================================
 # execute_process — Execute a Boomi process on a runtime
 # ============================================================
 if execute_process_action:
@@ -4254,6 +4518,9 @@ if __name__ == "__main__":
             print("  manage_deployment - Packages and deployment lifecycle")
             print("    Actions: list_packages, get_package, create_package, delete_package,")
             print("             deploy, undeploy, list_deployments, get_deployment")
+        if orchestrate_deploy_action:
+            print("  orchestrate_deploy - One-call package -> deploy -> bind runtime -> optional schedule/test")
+            print("    dry_run=true previews; dry_run=false executes. Order: package/deploy, then runtime, then schedule/test")
         if execute_process_action:
             print("\n  Process Execution:")
             print("  execute_process - Execute a process on a runtime")

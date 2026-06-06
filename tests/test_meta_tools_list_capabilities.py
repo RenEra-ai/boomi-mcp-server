@@ -168,6 +168,7 @@ def test_authoring_workflow_preserved_when_all_referenced_tools_present():
         "build_from_archetype",
         "build_integration",
         "review_transformation",
+        "orchestrate_deploy",
     }
     catalog = list_capabilities_action(available_tools=only)
     assert "build_integration_from_description" in catalog["workflows"]
@@ -206,6 +207,7 @@ def test_workflow_fallback_dropped_when_schema_template_absent():
         "build_from_archetype",
         "build_integration",
         "review_transformation",
+        "orchestrate_deploy",
     }
     catalog = list_capabilities_action(available_tools=only)
     wf = catalog["workflows"].get("build_integration_from_description")
@@ -225,6 +227,7 @@ def test_workflow_fallback_preserved_when_all_referenced_tools_present():
         "build_integration",
         "review_transformation",
         "get_schema_template",
+        "orchestrate_deploy",
     }
     catalog = list_capabilities_action(available_tools=only)
     wf = catalog["workflows"]["build_integration_from_description"]
@@ -251,3 +254,35 @@ def test_infer_profile_fields_filtered_out_when_not_registered():
     only = {"build_integration"}
     tools = list_capabilities_action(available_tools=only)["tools"]
     assert "infer_profile_fields" not in tools
+
+
+# ---------------------------------------------------------------------------
+# Issue #64 — orchestrate_deploy discoverability
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrate_deploy_in_capabilities():
+    tools = list_capabilities_action()["tools"]
+    assert "orchestrate_deploy" in tools, "orchestrate_deploy missing from list_capabilities tools"
+    entry = tools["orchestrate_deploy"]
+    assert entry["category"] == "Deployment & B2B"
+    assert entry["read_only"] is False
+    assert entry["implemented"] is True
+    # The public response keys the wrapper guarantees must be documented.
+    for key in ("_success", "build_id", "process_id", "environment_id", "runtime_id", "next_steps"):
+        assert key in entry["response_keys"], f"{key} missing from documented response_keys"
+
+
+def test_orchestrate_deploy_filtered_out_when_not_registered():
+    only = {"build_integration"}
+    tools = list_capabilities_action(available_tools=only)["tools"]
+    assert "orchestrate_deploy" not in tools
+
+
+def test_build_integration_points_to_orchestrate_deploy():
+    """build_integration capability text must route apply's build_id to orchestrate_deploy."""
+    entry = list_capabilities_action()["tools"]["build_integration"]
+    text = entry["description"] + " " + " ".join(entry.get("examples", []))
+    assert "orchestrate_deploy" in text, (
+        "build_integration must point agents from apply to orchestrate_deploy"
+    )

@@ -5612,7 +5612,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             ],
         },
 
-        # === Category 3: Deployment & B2B (3 tools) ===
+        # === Category 3: Deployment & B2B (4 tools) ===
         "manage_deployment": {
             "category": "Deployment & B2B",
             "description": "Manage deployment packages, deploy to environments, and manage component/process attachments",
@@ -5642,6 +5642,43 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "create_deployment.py",
                 "query_deployed_packages.py",
                 "promote_package_to_environment.py",
+            ],
+        },
+        "orchestrate_deploy": {
+            "category": "Deployment & B2B",
+            "description": (
+                "One-call deployment orchestration: resolve a build_integration(action='apply') "
+                "build to its process component, then package -> deploy -> bind the runtime, then "
+                "apply the optional schedule override and optional test run. Stages run strictly in "
+                "that order (schedules never run before deployment). Returns a single high-level "
+                "summary agents can branch on instead of calling each low-level tool. dry_run=true "
+                "(the default) previews the plan with no Boomi mutation; dry_run=false executes."
+            ),
+            "read_only": False,
+            "implemented": True,
+            "parameters": {
+                "profile": "str (required) — only consulted on a real run (dry_run=false)",
+                "build_id": "str (required) — build id returned by build_integration(action='apply')",
+                "environment_id": "str (required) — target environment id",
+                "runtime_id": "str (required) — target runtime (atom) id",
+                "dry_run": "bool (optional) — preview only, no Boomi mutation. DEFAULTS TO true",
+                "run_test": "bool (optional) — after a real deploy, execute the process and fetch log/artifact diagnostics",
+                "config": (
+                    "str (optional) — JSON object for the remaining engine inputs. Allowed keys: "
+                    "build_id, environment_id, runtime_id, schedule_override, run_test, dry_run, "
+                    "package_version, test_timeout_seconds, test_dynamic_properties, "
+                    "test_process_properties, test_log_level, test_fetch_logs, test_fetch_artifacts, "
+                    "test_log_fetch_content. Top-level args override matching config values."
+                ),
+            },
+            "response_keys": [
+                "_success", "build_id", "process_id", "environment_id", "runtime_id",
+                "package", "deployment", "runtime_attachment", "schedule", "execution", "logs",
+                "summary", "errors", "warnings", "next_steps",
+            ],
+            "examples": [
+                'orchestrate_deploy(profile="prod", build_id="<uuid-from-apply>", environment_id="env-1", runtime_id="atom-1", dry_run=true)',
+                'orchestrate_deploy(profile="prod", build_id="<uuid-from-apply>", environment_id="env-1", runtime_id="atom-1", dry_run=false)',
             ],
         },
         "manage_trading_partner": {
@@ -5783,7 +5820,12 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         },
         "build_integration": {
             "category": "Execution",
-            "description": "High-level orchestrator for building integrations from component-oriented JSON specs",
+            "description": (
+                "High-level orchestrator for building integrations from component-oriented JSON specs. "
+                "action='apply' returns a build_id; hand that build_id to orchestrate_deploy to "
+                "package -> deploy -> bind the runtime (then optional schedule/test) in one call. "
+                "Use orchestrate_deploy(dry_run=true) to preview that deploy plan, dry_run=false to execute."
+            ),
             "actions": ["plan", "apply", "verify"],
             "read_only": False,
             "parameters": {
@@ -5795,6 +5837,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'build_integration(profile="prod", action="plan", config=\'{"name":"Order Sync","mode":"lift_shift","components":[{"key":"p1","type":"process","action":"create","name":"Order Process","config":{"name":"Order Process","shapes":[{"type":"start","name":"start"},{"type":"stop","name":"end"}]}}]}\')',
                 'build_integration(profile="prod", action="apply", config=\'{"dry_run":false,"conflict_policy":"reuse","integration_spec":{"name":"Order Sync","mode":"lift_shift","components":[...]}}\')',
                 'build_integration(profile="prod", action="verify", config=\'{"build_id":"<uuid>"}\')',
+                '# After apply returns build_id: orchestrate_deploy(profile="prod", build_id="<uuid-from-apply>", environment_id="env-1", runtime_id="atom-1", dry_run=true)',
             ],
         },
         "manage_schedules": {
@@ -6241,6 +6284,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "5. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 3>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
                 "6. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 3>, ...}') → execute ordered component creation/update",
                 "7. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
+                "8. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test).",
             ],
             "fallback": {
                 "when": "No archetype fits — e.g., an integration shape not yet covered by the registry.",
@@ -6249,6 +6293,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                     "F2. build_integration(action='plan', config='...') → validate the hand-authored spec",
                     "F3. build_integration(action='apply', config='{\"dry_run\": false, ...}') → execute",
                     "F4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify",
+                    "F5. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview the deploy plan; re-run with dry_run=false to package → deploy → bind runtime → optional schedule/test.",
                 ],
             },
         },
