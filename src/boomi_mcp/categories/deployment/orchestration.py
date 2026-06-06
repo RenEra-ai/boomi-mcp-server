@@ -943,6 +943,24 @@ def _resolve_attachment_leg(
     return attachment_id, leg_status, None
 
 
+# Boomi rejects a direct process<->atom (ProcessAtomAttachment) binding on environment-enabled
+# accounts, surfacing a message that names "environments" / "ComponentEnvironmentAttachment"
+# (e.g. "This account uses environments. Please use ComponentEnvironmentAttachment"). On such
+# accounts the process<->environment binding plus the runtime<->environment binding already make
+# the process runnable on the runtime via the environment, so the direct process<->runtime leg is
+# not required and must NOT be treated as a failure. Detect the signal narrowly so any other
+# list/attach failure still fails closed.
+_ENVIRONMENT_ACCOUNT_SIGNALS = ("uses environments", "componentenvironmentattachment")
+
+
+def _is_environment_account_signal(message: Optional[str]) -> bool:
+    """True when a leg error indicates the account uses environments (no direct atom attach)."""
+    if not message:
+        return False
+    lowered = message.lower()
+    return any(signal in lowered for signal in _ENVIRONMENT_ACCOUNT_SIGNALS)
+
+
 def _ensure_runtime_attachment(
     boomi_client: Any,
     profile: Optional[str],
@@ -951,13 +969,16 @@ def _ensure_runtime_attachment(
     environment_id: str,
     runtime_id: str,
 ) -> Tuple[RuntimeAttachmentStage, Optional[OrchestrateDeployError]]:
-    """Verify env/runtime, then ensure all three bindings exist (reuse-or-attach, idempotent).
+    """Verify env/runtime, then ensure the required bindings exist (reuse-or-attach, idempotent).
 
     Returns ``(stage, None)`` on success or ``(failed_stage, error)`` on the first failing leg.
     The three legs:
       1. runtime<->environment via ``manage_runtimes_action`` (EnvironmentAtomAttachment).
       2. process<->environment via ``manage_deployment_action`` (ProcessEnvironmentAttachment).
       3. process<->runtime    via ``manage_deployment_action`` (ProcessAtomAttachment).
+    On environment-enabled accounts Boomi rejects leg 3 (the direct process<->atom binding) because
+    legs 1+2 already make the process runnable on the runtime via the environment; that rejection is
+    recorded as a ``not_required`` leg and does not fail the stage (see _is_environment_account_signal).
     """
     base_details = {
         "process_id": process_id,
@@ -1052,7 +1073,11 @@ def _ensure_runtime_attachment(
     if error is not None:
         return _failed_stage(), error
 
-    # 4. process<->runtime attachment (ProcessAtomAttachment).
+    # 4. process<->runtime attachment (ProcessAtomAttachment). Environment-enabled accounts reject
+    # this direct leg ("This account uses environments. Please use ComponentEnvironmentAttachment");
+    # there legs 2+3 above (runtime<->env + process<->env) already make the process runnable on the
+    # runtime via the environment, so the direct leg is NOT required — record it as ``not_required``
+    # and continue. Any other list/attach failure remains fatal.
     process_runtime_id, process_runtime_status, error = _resolve_attachment_leg(
         list_call=lambda: _call_deployment_action(
             boomi_client, profile, "list_process_atom_attachments",
@@ -1070,11 +1095,21 @@ def _ensure_runtime_attachment(
         details=base_details,
     )
     if error is not None:
-        return _failed_stage(), error
+        if _is_environment_account_signal(error.message):
+            process_runtime_id = None
+            process_runtime_status = "not_required"
+        else:
+            return _failed_stage(), error
 
-    leg_statuses = (runtime_env_status, process_env_status, process_runtime_status)
-    changed = any(s == "attached" for s in leg_statuses)
-    reused = all(s == "reused" for s in leg_statuses)
+    # Only legs actually attempted (reused/attached) drive the stage's reused/changed flags; a
+    # ``not_required`` leg (e.g. the direct process<->atom binding skipped on an environment-enabled
+    # account) must not skew them or make a no-op re-run look not-reused.
+    attempted_statuses = [
+        s for s in (runtime_env_status, process_env_status, process_runtime_status)
+        if s in ("reused", "attached")
+    ]
+    changed = any(s == "attached" for s in attempted_statuses)
+    reused = bool(attempted_statuses) and all(s == "reused" for s in attempted_statuses)
     stage = RuntimeAttachmentStage(
         status="attached" if changed else "reused",
         attachment_id=runtime_env_id,

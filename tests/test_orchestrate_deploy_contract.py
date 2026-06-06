@@ -945,6 +945,52 @@ def test_real_run_creates_missing_runtime_and_process_bindings(registry, monkeyp
     assert result["summary"]["resource_changes"]["runtime_attachment"] is True
 
 
+def test_real_run_skips_process_atom_leg_on_environment_account(registry, monkeypatch):
+    """Issue #66 live-QA finding: environment-enabled accounts reject the direct process<->atom
+    (ProcessAtomAttachment) leg with "This account uses environments. Please use
+    ComponentEnvironmentAttachment". Legs 1+2 (runtime<->env + process<->env) already make the
+    process runnable via the environment, so the direct leg is recorded ``not_required`` and the
+    stage succeeds instead of hard-failing at runtime_attachment."""
+    bid = registry("b-rt-envacct", _single_process_entry(process_id="CID-1"))
+    deployment = {
+        **_deploy_ok(bid),
+        **_process_attachments("rt-1", "env-1", "CID-1"),  # env+atom legs would otherwise reuse...
+    }
+    # ...but Boomi rejects the direct process<->atom list on an environment-enabled account.
+    deployment["list_process_atom_attachments"] = {
+        "_success": False,
+        "error": (
+            "Action 'list_process_atom_attachments' failed: This account uses environments. "
+            "Please use ComponentEnvironmentAttachment"
+        ),
+    }
+    dep, env, rt, sch = _patch_all(
+        monkeypatch,
+        deployment=deployment,
+        environments=_ok_env("env-1"),
+        runtimes=_ok_runtime("rt-1", "env-1", attached=True),
+        schedules={},
+    )
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    rta = result["runtime_attachment"]
+    assert rta["status"] == "reused"
+    assert rta["process_runtime_attachment_status"] == "not_required"
+    assert rta["process_runtime_attachment_id"] is None
+    assert rta["runtime_env_attachment_status"] == "reused"
+    assert rta["process_env_attachment_status"] == "reused"
+    assert rta["reused"] is True
+    assert rta["changed"] is False
+    # The direct atom-attach create must NEVER be attempted on an environment-enabled account.
+    assert "attach_process_atom" not in dep.actions_called()
+    # Stage did not fail -> downstream stages proceed (no override -> schedule not_required).
+    assert result["schedule"]["status"] == "not_required"
+    assert result.get("failed_stage") is None
+
+
 def test_runtime_attachment_api_failure_is_structured_and_blocks_schedule(registry, monkeypatch):
     bid = registry("b-rt-fail", _single_process_entry(process_id="CID-1"))
     runtimes = _ok_runtime("rt-1", "env-1", attached=False)
