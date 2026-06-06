@@ -1509,11 +1509,16 @@ def _exec_timeout(*, request_id="req-1", message="Timed out after 300s waiting",
 
 
 def _exec_no_request_id():
-    """The early ``execute_process_action`` failure: no request_id, no execution_result."""
+    """The "accepted but no request_id came back" failure: no request_id, no execution_result."""
     return {
         "_success": False,
         "error": "Execution request accepted but no request_id returned.",
     }
+
+
+def _exec_setup_failed(error="dynamic_properties must be a dict of {key: value}"):
+    """A pre-request execute failure (bad properties / API setup error): no request_id, no poll."""
+    return {"_success": False, "error": error}
 
 
 def _logs_ok(files=None, *, status_code=202, download_url="https://logs.example/dl",
@@ -1657,16 +1662,20 @@ def test_run_test_success_executes_after_schedule_and_fetches_diagnostics(regist
     assert ex["terminal_status"] == "COMPLETE"
     assert ex["request_id"] == "req-1"
     assert ex["execution_id"] == "ex-1"
+    assert ex["elapsed_seconds"] == 3.0  # poll metadata surfaced (acceptance: elapsed/poll count)
+    assert ex["poll_count"] == 2
     assert ex["document_counts"] == {"inbound": 2, "outbound": 3, "inbound_error": 0}
     logs = result["logs"]
     assert logs["status"] == "retrieved"
     assert logs["log_excerpts"]  # non-empty
+    assert logs["download_url"] == "https://logs.example/dl"  # log download pointer surfaced
     assert logs["artifact_download_url"] == "https://artifacts.example/dl"
-    # Execute called once, with the resolved process/runtime and forced wait.
+    # Execute called once, with the resolved process/runtime/environment and forced wait.
     assert len(execute.calls) == 1
     call = execute.calls[0]
     assert call["process_id"] == "CID-1"
     assert call["atom_id"] == "rt-1"
+    assert call["environment_id"] == "env-1"
     assert call["config_data"]["wait"] is True
     assert call["config_data"]["timeout"] == 300
     # Both diagnostics fetched once with the resolved execution_id.
@@ -1834,6 +1843,28 @@ def test_run_test_log_fetch_unavailable_is_diagnostic_not_execution_failure(regi
     assert not any(c.startswith("TEST_") for c in _codes(result))
     assert result["summary"]["test"]["logs_status"] == "unavailable"
     assert result["summary"]["test"]["log_error"]
+
+
+def test_run_test_execute_setup_failure_is_execution_failed_not_request_id_missing(registry, monkeypatch):
+    # A pre-request execute failure (e.g. invalid dynamic/process properties, or an API setup
+    # error) returns _success=False with an error and NO request_id — but it is NOT the
+    # "accepted but no request_id" case, so it must map to TEST_EXECUTION_FAILED, not
+    # TEST_REQUEST_ID_MISSING. Logs are blocked (no execution to diagnose).
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-setupfail")
+    execute = _FakeExecuteAction(_exec_setup_failed("process_properties['CID-1'] must be a dict"))
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "TEST_EXECUTION_FAILED" in _codes(result)
+    assert "TEST_REQUEST_ID_MISSING" not in _codes(result)
+    assert result["execution"]["status"] == "failed"
+    assert result["execution"]["error"] == "process_properties['CID-1'] must be a dict"
+    assert result["logs"]["status"] == "blocked"
+    assert monitor.calls == []
 
 
 def test_run_test_log_content_download_failure_is_unavailable_not_false_retrieved(registry, monkeypatch):

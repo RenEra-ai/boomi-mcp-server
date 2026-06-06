@@ -1334,14 +1334,16 @@ def _execution_stage_from_result(
         atom_id=exec_result.get("atom_id") or atom_id,
     )
 
-    # No poll result means the request was never accepted (execute_process_action returned its
-    # early failure before the wait branch). A blank request id is the canonical "no request_id".
+    # No poll result means the wait branch never ran — execute_process_action returned an early
+    # failure. Distinguish the canonical "request accepted but no request_id came back" sentinel
+    # (TEST_REQUEST_ID_MISSING — Boomi gave us no handle to track the run) from any other
+    # pre-request execute failure such as invalid dynamic/process properties (a ValueError from
+    # the property builders) or an API/setup error, which are general execution failures.
     if poll is None:
-        if not request_id:
-            message = exec_result.get("error") or "Execution request returned no request_id."
+        message = exec_result.get("error") or "Execution produced no terminal result."
+        if not request_id and "no request_id" in message.lower():
             stage = ExecutionStage(status="failed", error=message, **base_kwargs)
             return stage, _error(TEST_REQUEST_ID_MISSING, message, field="run_test")
-        message = exec_result.get("error") or "Execution produced no terminal result."
         stage = ExecutionStage(status="failed", error=message, **base_kwargs)
         return stage, _error(TEST_EXECUTION_FAILED, message, field="run_test")
 
