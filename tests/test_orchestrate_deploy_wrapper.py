@@ -252,6 +252,22 @@ def test_real_run_builds_sdk(_mock_auth_and_sdk):
     assert result["process_id"] == "CID-1"
 
 
+def test_real_run_sdk_includes_optional_base_url(_mock_auth_and_sdk):
+    """When the stored credentials carry base_url, the SDK must be built with it."""
+    preflight = {"_success": False, "errors": [{"code": "BOOMI_CLIENT_REQUIRED"}]}
+    success = {"_success": True, "plan_only": False, "target": {"process_component_id": "CID-1"},
+               "summary": {"environment_id": "env-1", "runtime_id": "rt-1"}, "errors": [], "warnings": []}
+    creds_with_url = {**FAKE_CREDS, "base_url": "https://api.example.test/v1"}
+    _mock_auth_and_sdk["secret"].return_value = creds_with_url
+    with patch.object(server, "orchestrate_deploy_action", side_effect=[preflight, success]):
+        server.orchestrate_deploy(
+            profile="dev", build_id="b1", environment_id="env-1", runtime_id="rt-1",
+            dry_run=False,
+        )
+    sdk_kwargs = server.Boomi.call_args.kwargs
+    assert sdk_kwargs["base_url"] == "https://api.example.test/v1"
+
+
 def test_real_run_invalid_input_short_circuits_before_secret(_mock_auth_and_sdk):
     # A non-BOOMI_CLIENT_REQUIRED failure on the preflight must NOT read secrets.
     preflight_fail = {
@@ -411,3 +427,70 @@ def test_stage_composition_with_real_action(monkeypatch, _mock_auth_and_sdk):
     # The credential path was taken (real run) and built the SDK once.
     _mock_auth_and_sdk["secret"].assert_called_once()
     _mock_auth_and_sdk["boomi"].assert_called_once()
+
+
+def test_stage_composition_deploys_then_binds_then_schedules(monkeypatch, _mock_auth_and_sdk):
+    """Full composition with an ACTUAL deploy call + schedule_override: assert the engine,
+    driven through the wrapper, runs package/deploy BEFORE runtime binding BEFORE the schedule."""
+    bid = "wrap-compose-2"
+    integration_builder._BUILD_REGISTRY[bid] = _single_process_entry("CID-1")
+    order = []
+    try:
+        deployment_responses = {
+            # Existing package is reused, but there is NO active deployment -> engine deploys.
+            "list_packages": {"_success": True, "packages": [
+                {"package_id": "pkg-1", "component_id": "CID-1", "component_type": "process",
+                 "package_version": bid, "created_date": "2026-01-01T00:00:00Z"}]},
+            "list_deployments": {"_success": True, "deployments": []},
+            "deploy": {"_success": True, "deployment": {
+                "deployment_id": "dep-new", "active": True, "version": 1}},
+            "list_process_environment_attachments": {"_success": True,
+                "attachments": [_att("pe-1", process_id="CID-1", environment_id="env-1")]},
+            "list_process_atom_attachments": {"_success": True,
+                "attachments": [_att("pa-1", process_id="CID-1", atom_id="rt-1")]},
+        }
+        runtimes_responses = {
+            "get": {"_success": True, "runtime": {"id": "rt-1"}},
+            "list_attachments": {"_success": True,
+                "attachments": [_att("ea-1", atom_id="rt-1", environment_id="env-1")]},
+        }
+        env_responses = {"get": {"_success": True, "environment": {"id": "env-1"}}}
+        schedules_responses = {
+            "update": {"_success": True, "schedule": {"id": "sch-1"}},
+            "enable": {"_success": True, "status": {"id": "sst-1", "enabled": True}},
+        }
+
+        monkeypatch.setattr(orchestration, "manage_deployment_action",
+                            _FakeAction(deployment_responses, label="deployment", order_log=order))
+        monkeypatch.setattr(orchestration, "manage_environments_action",
+                            _FakeAction(env_responses, label="environments", order_log=order))
+        monkeypatch.setattr(orchestration, "manage_runtimes_action",
+                            _FakeAction(runtimes_responses, label="runtimes", order_log=order))
+        monkeypatch.setattr(orchestration, "manage_schedules_action",
+                            _FakeAction(schedules_responses, label="schedules", order_log=order))
+
+        result = server.orchestrate_deploy(
+            profile="dev", build_id=bid, environment_id="env-1", runtime_id="rt-1",
+            config='{"schedule_override": {"cron": "0 9 * * *"}}',
+            dry_run=False,
+        )
+    finally:
+        integration_builder._BUILD_REGISTRY.pop(bid, None)
+
+    assert result["_success"] is True, result
+    # An actual deploy was performed (not just a reuse).
+    assert ("deployment", "deploy") in order, "engine must have called the deploy action"
+    assert result["deployment"]["status"] == "deployed"
+    assert result["schedule"]["status"] in ("enabled", "updated"), result["schedule"]
+
+    def _first(label, action):
+        return next(i for i, (lbl, a) in enumerate(order) if lbl == label and a == action)
+
+    i_deploy = _first("deployment", "deploy")
+    i_runtime = _first("runtimes", "get")
+    i_schedule = min(i for i, (lbl, _a) in enumerate(order) if lbl == "schedules")
+    last_bind = max(
+        i for i, (lbl, _a) in enumerate(order) if lbl in ("deployment", "runtimes", "environments")
+    )
+    assert i_deploy < i_runtime, "deploy must precede runtime binding"
+    assert i_schedule > last_bind, "schedule must run strictly after every package/deploy/bind call"

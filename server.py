@@ -2859,8 +2859,13 @@ _ORCH_CONFIG_KEYS = (
 )
 
 
-def _orchestrate_next_steps(result: dict, run_test: bool) -> list:
-    """Agent-facing next-step hints. Order is always package/deploy -> runtime -> schedule/test."""
+def _orchestrate_next_steps(result: dict) -> list:
+    """Agent-facing next-step hints. Order is always package/deploy -> runtime -> schedule/test.
+
+    Whether a test actually ran is derived from the ENGINE's response (``summary['test']`` is
+    present only when a real run-test stage executed), not from the raw ``run_test`` input — so
+    a coercible-but-non-bool input value can't desync the hint from what the engine really did.
+    """
     if not result.get("_success"):
         codes = {e.get("code") for e in (result.get("errors") or []) if isinstance(e, dict)}
         steps = []
@@ -2882,7 +2887,8 @@ def _orchestrate_next_steps(result: dict, run_test: bool) -> list:
             "Re-run with dry_run=false to package -> deploy -> bind the runtime, then optionally "
             "apply the schedule and run a test.",
         ]
-    if not run_test:
+    ran_test = bool((result.get("summary") or {}).get("test"))
+    if not ran_test:
         return [
             "Deployment complete: package created/reused, deployed, and runtime bound "
             "(schedule applied if requested).",
@@ -2896,7 +2902,7 @@ def _orchestrate_next_steps(result: dict, run_test: bool) -> list:
     ]
 
 
-def _normalize_orchestrate_response(result, environment_id, runtime_id, run_test):
+def _normalize_orchestrate_response(result, environment_id, runtime_id):
     """Add stable top-level aliases (process_id/environment_id/runtime_id) and next_steps.
 
     Only engine responses (dicts carrying ``_success``) are normalized; wrapper-level config
@@ -2926,7 +2932,7 @@ def _normalize_orchestrate_response(result, environment_id, runtime_id, run_test
     )
     result.setdefault("warnings", [])
     result.setdefault("errors", [])
-    result.setdefault("next_steps", _orchestrate_next_steps(result, run_test))
+    result.setdefault("next_steps", _orchestrate_next_steps(result))
     return result
 
 
@@ -3059,7 +3065,6 @@ if orchestrate_deploy_action:
                 ],
             }
         effective_dry_run = dry_run_value
-        effective_run_test = bool(merged.get("run_test", False))
 
         # 3. Dry-run: no SDK, no credentials — plan only.
         if effective_dry_run:
@@ -3068,9 +3073,7 @@ if orchestrate_deploy_action:
             result = orchestrate_deploy_action(
                 boomi_client=None, profile=profile, creds=None, **call_kwargs
             )
-            return _normalize_orchestrate_response(
-                result, environment_id, runtime_id, effective_run_test
-            )
+            return _normalize_orchestrate_response(result, environment_id, runtime_id)
 
         # 4. Real run: validate WITHOUT credentials first (no-secret preflight).
         call_kwargs = dict(merged)
@@ -3079,11 +3082,12 @@ if orchestrate_deploy_action:
             boomi_client=None, profile=profile, creds=None, **call_kwargs
         )
         codes = {e.get("code") for e in (result.get("errors") or []) if isinstance(e, dict)}
-        if not result.get("_success") and "BOOMI_CLIENT_REQUIRED" not in codes:
-            # Build resolution / required-field / schedule-override failure — never read secrets.
-            return _normalize_orchestrate_response(
-                result, environment_id, runtime_id, effective_run_test
-            )
+        # Proceed to credentials ONLY when the engine's sole remaining blocker is the missing
+        # client. Any other failure (required-field, build resolution, schedule-override, or even
+        # BOOMI_CLIENT_REQUIRED co-reported with another code) returns the structured error
+        # without ever reading secrets — fail closed for a destructive tool.
+        if codes != {"BOOMI_CLIENT_REQUIRED"}:
+            return _normalize_orchestrate_response(result, environment_id, runtime_id)
 
         # 5. Only the Boomi client is missing — read credentials and run for real.
         try:
@@ -3105,9 +3109,7 @@ if orchestrate_deploy_action:
             result = orchestrate_deploy_action(
                 boomi_client=sdk, profile=profile, creds=creds, **call_kwargs
             )
-            return _normalize_orchestrate_response(
-                result, environment_id, runtime_id, effective_run_test
-            )
+            return _normalize_orchestrate_response(result, environment_id, runtime_id)
 
         except Exception as e:
             print(f"[ERROR] orchestrate_deploy failed: {e}")

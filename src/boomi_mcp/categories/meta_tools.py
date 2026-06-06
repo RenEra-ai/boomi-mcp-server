@@ -689,6 +689,10 @@ _INTEGRATION_APPLY = {
     "notes": [
         "dry_run defaults to true; set dry_run=false to mutate Boomi resources.",
         "apply returns build_id; use it with verify.",
+        "After apply returns build_id, call orchestrate_deploy(profile=..., build_id=..., "
+        "environment_id=..., runtime_id=..., dry_run=true) to preview package -> deploy -> "
+        "runtime binding -> optional schedule/test; use dry_run=false to execute. Stages run in "
+        "that order — deployment always precedes any schedule/test.",
     ],
 }
 
