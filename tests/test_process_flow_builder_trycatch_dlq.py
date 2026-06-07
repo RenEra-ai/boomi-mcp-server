@@ -36,6 +36,7 @@ from src.boomi_mcp.categories.components.builders import (
     BuilderValidationError,
     ProcessFlowBuilder,
 )
+from src.boomi_mcp.categories.integration_builder import _resolve_dependency_tokens
 
 NS = {"bns": "http://api.platform.boomi.com/"}
 
@@ -215,6 +216,58 @@ def test_trycatch_xml_round_trips():
         name="N",
     )
     ET.fromstring(xml)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# $ref DLQ binding: resolution -> emitted id (full pipeline invariant)
+# ---------------------------------------------------------------------------
+
+def test_ref_token_binding_resolves_into_emitted_doccache():
+    # Exercises the whole $ref -> resolve -> emit path that validate_config-only
+    # tests miss: a $ref:KEY binding must be substituted by
+    # _resolve_dependency_tokens (as integration_builder does before build())
+    # and the RESOLVED id — not the literal "$ref:my_cache" — must reach docCache.
+    resolved_cache = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    cfg = _config({"mode": "document_cache_ref", "document_cache_id": "$ref:my_cache"})
+    resolved_cfg = _resolve_dependency_tokens(cfg, {"my_cache": resolved_cache})
+    _, shapes = _parse_shapes(ProcessFlowBuilder.build(resolved_cfg, name="N"))
+    catch_leg = shapes[5]
+    assert catch_leg.attrib["shapetype"] == "doccacheload"
+    doccache = catch_leg.find("configuration/doccacheload").attrib["docCache"]
+    assert doccache == resolved_cache
+    assert "$ref" not in doccache
+
+
+def test_ref_token_binding_resolves_into_emitted_processcall():
+    resolved_proc = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    cfg = _config({"mode": "error_subprocess_ref", "process_id": "$ref:my_proc"})
+    resolved_cfg = _resolve_dependency_tokens(cfg, {"my_proc": resolved_proc})
+    _, shapes = _parse_shapes(ProcessFlowBuilder.build(resolved_cfg, name="N"))
+    call = shapes[5].find("configuration/processcall")
+    assert call.attrib["processId"] == resolved_proc
+    assert "$ref" not in call.attrib["processId"]
+
+
+# ---------------------------------------------------------------------------
+# build() stays total on the validate_config-bypass path (issue #51 fix)
+# ---------------------------------------------------------------------------
+
+def test_build_raises_on_missing_document_cache_binding():
+    # Direct build() (bypassing validate_config) with a DLQ mode but no binding
+    # must RAISE, not emit <doccacheload docCache=""/>.
+    cfg = _config({"mode": "document_cache_ref"})  # no document_cache_id
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DLQ_BINDING_INVALID"
+    assert exc.value.field == "reliability.dlq.document_cache_id"
+
+
+def test_build_raises_on_missing_error_subprocess_binding():
+    cfg = _config({"mode": "error_subprocess_ref"})  # no process_id
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DLQ_BINDING_INVALID"
+    assert exc.value.field == "reliability.dlq.process_id"
 
 
 # ---------------------------------------------------------------------------

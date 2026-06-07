@@ -1077,13 +1077,34 @@ def _check_process_flow_ref_types(
     """
     source = raw_config.get("source") if isinstance(raw_config.get("source"), dict) else {}
     target = raw_config.get("target") if isinstance(raw_config.get("target"), dict) else {}
+    reliability = (
+        raw_config.get("reliability")
+        if isinstance(raw_config.get("reliability"), dict)
+        else {}
+    )
+    dlq = reliability.get("dlq") if isinstance(reliability.get("dlq"), dict) else {}
+    dlq_mode = str(dlq.get("mode") or "").strip().lower()
 
-    slot_rules = (
+    slot_rules = [
         ("source.connection_id", source.get("connection_id"), "database connector-settings"),
         ("source.operation_id", source.get("operation_id"), "database connector-action Get"),
         ("target.connection_id", target.get("connection_id"), "REST Client connector-settings"),
         ("target.operation_id", target.get("operation_id"), "REST Client connector-action"),
-    )
+    ]
+    # Issue #51 M3.R1a: the DLQ catch-leg bindings are $ref-resolvable too, so
+    # type-check them with the same discipline as source/target. Gate each rule
+    # on the active dlq.mode — a stray cross-mode binding (e.g. a process_id set
+    # under document_cache_ref) is never consumed by the emitter, so
+    # type-checking it would surprise-reject an otherwise-valid config.
+    if dlq_mode == "document_cache_ref":
+        slot_rules.append(
+            ("reliability.dlq.document_cache_id", dlq.get("document_cache_id"), "Document Cache")
+        )
+    elif dlq_mode == "error_subprocess_ref":
+        slot_rules.append(
+            ("reliability.dlq.process_id", dlq.get("process_id"), "error subprocess")
+        )
+    slot_rules = tuple(slot_rules)
 
     target_op_ref_component: Optional[IntegrationComponentSpec] = None
 
@@ -1109,6 +1130,15 @@ def _check_process_flow_ref_types(
             ok = role == expected_role
             if ok:
                 target_op_ref_component = target_comp
+        elif expected_role == "Document Cache":
+            # Issue #51: the DLQ document-cache catch leg must point at a
+            # Document Cache component (type "documentcache"), never a swapped
+            # connector/profile ref.
+            ok = _effective_component_type(target_comp) == "documentcache"
+        elif expected_role == "error subprocess":
+            # Issue #51: the DLQ error-subprocess catch leg must point at a
+            # process component.
+            ok = _effective_component_type(target_comp) == "process"
         else:
             ok = True
 

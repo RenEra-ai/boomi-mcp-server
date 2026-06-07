@@ -458,8 +458,10 @@ class ProcessFlowBuilder:
         # flow so existing non-DLQ process XML is byte-for-byte identical.
         reliability_cfg = config.get("reliability")
         if cls._should_emit_try_catch(reliability_cfg):
+            # _should_emit_try_catch already proved reliability_cfg["dlq"] is a
+            # non-empty dict, so subscript directly (no dead `or {}` fallback).
             shape_xml_parts: List[str] = _emit_try_catch_shapes(
-                flow, reliability_cfg.get("dlq") or {}
+                flow, reliability_cfg["dlq"]
             )
         else:
             shape_xml_parts = _emit_linear_shapes(flow)
@@ -984,9 +986,9 @@ def _emit_try_catch_shapes(
     normal = flow[1:]  # source, [transform], target, stop
     n = len(normal)
     catcherrors_index = 2
-    catcherrors_name = "shape2"
+    catcherrors_name = f"shape{catcherrors_index}"
     first_try_index = 3
-    first_try_name = "shape3"
+    first_try_name = f"shape{first_try_index}"
     stop_index = catcherrors_index + n  # last normal (stop) shape index
     catch_index = stop_index + 1
     catch_name = f"shape{catch_index}"
@@ -1004,15 +1006,42 @@ def _emit_try_catch_shapes(
         is_last = j == n - 1
         next_name = None if is_last else f"shape{shape_index + 1}"
         parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
-    # Catch leg (binding validated by _validate_dlq_binding; id is literal or a
-    # $ref:KEY already resolved by integration_builder before build()).
+    # Catch leg (binding normally validated by _validate_dlq_binding; id is a
+    # literal or a $ref:KEY already resolved by integration_builder before
+    # build()). Stay total on the validate_config-bypass path: raise on a
+    # missing binding (would emit docCache=""/processId="") or an unexpected
+    # mode (would leave the Catch dragpoint pointing at a never-emitted shape),
+    # mirroring build()'s empty-name guard instead of producing broken XML.
     mode = str(dlq.get("mode") or "").strip().lower()
     if mode == "document_cache_ref":
         cache_id = str(dlq.get("document_cache_id") or "").strip()
+        if not cache_id:
+            raise BuilderValidationError(
+                "reliability.dlq.mode='document_cache_ref' requires a non-empty "
+                "document_cache_id to emit the DLQ catch leg.",
+                error_code="PROCESS_DLQ_BINDING_INVALID",
+                field="reliability.dlq.document_cache_id",
+                hint="Set document_cache_id to a literal id or a resolved $ref:KEY.",
+            )
         parts.append(_emit_doccacheload(catch_name, cache_id, catch_index))
     elif mode == "error_subprocess_ref":
         process_id = str(dlq.get("process_id") or "").strip()
+        if not process_id:
+            raise BuilderValidationError(
+                "reliability.dlq.mode='error_subprocess_ref' requires a non-empty "
+                "process_id to emit the DLQ catch leg.",
+                error_code="PROCESS_DLQ_BINDING_INVALID",
+                field="reliability.dlq.process_id",
+                hint="Set process_id to a literal id or a resolved $ref:KEY.",
+            )
         parts.append(_emit_processcall(catch_name, process_id, catch_index))
+    else:  # pragma: no cover — _should_emit_try_catch only admits the two modes
+        raise BuilderValidationError(
+            f"Unsupported DLQ mode {mode!r} reached the Try/Catch emitter.",
+            error_code="PROCESS_XML_VALIDATION_FAILED",
+            field="reliability.dlq.mode",
+            hint="Internal builder bug — please report.",
+        )
     return parts
 
 
@@ -1035,7 +1064,7 @@ def _emit_catcherrors(
     return (
         f'<shape image="catcherrors_icon" name="{shape_name}" '
         f'shapetype="catcherrors" '
-        f'userlabel="Try/Catch all errors (no retry) - route caught documents to DLQ" '
+        f'userlabel="Try/Catch all errors (no retry) - route caught documents to the failure handler" '
         f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
         '<configuration><catcherrors catchAll="true" retryCount="0"/></configuration>'
         f'<dragpoints>{dragpoints}</dragpoints>'

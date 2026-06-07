@@ -2656,6 +2656,9 @@ _STUB_DEP_ROLES = {
     "db_query_operation": "database connector-action Get",
     "target_rest_connection": "REST Client connector-settings",
     "target_rest_operation": "REST Client connector-action",
+    # Issue #51: DLQ catch-leg ref targets.
+    "dlq_document_cache": "Document Cache",
+    "dlq_error_subprocess": "error subprocess",
 }
 
 
@@ -2711,6 +2714,24 @@ def _stub_dep_comp(key, *, role=None, method="POST"):
                 "connection_ref_key": "target_rest_connection",
             },
             depends_on=["target_rest_connection"],
+        )
+    if role == "Document Cache":
+        # Issue #51: a Document Cache catch-leg target. reference_only-style
+        # (action="update" + component_id) so it is never built; documentcache
+        # has no create path. _effective_component_type returns "documentcache".
+        return IntegrationComponentSpec(
+            key=key, type="documentcache", action="update",
+            component_id=stub_id, name=name,
+            config={"name": name},
+        )
+    if role == "error subprocess":
+        # Issue #51: a process/subprocess catch-leg target. NO process_kind in
+        # config, so it skips the structured process-flow validation block
+        # (that block gates on process_kind). _effective_component_type -> "process".
+        return IntegrationComponentSpec(
+            key=key, type="process", action="update",
+            component_id=stub_id, name=name,
+            config={"name": name},
         )
     if role == "profile.db":
         return IntegrationComponentSpec(
@@ -3740,6 +3761,106 @@ class TestBuildPlanProcessFlowRefTypes:
             _process_flow_comp(),
         ]))
         process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step.get("validation_error") is None
+        assert process_step["planned_action"] == "create"
+
+    # Issue #51: the newly un-gated DLQ catch-leg $ref slots get the same
+    # plan-time type discipline as source/target.
+    @patch(_PATCH_TARGET)
+    def test_dlq_document_cache_ref_wrong_type_errors(self, mock_pag):
+        # document_cache_id $ref pointing at a REST connector-settings (not a
+        # Document Cache) is caught at plan time.
+        mock_pag.return_value = []
+        bad = _process_flow_comp(reliability={
+            "retry_count": 0,
+            "dlq": {"mode": "document_cache_ref",
+                    "document_cache_id": "$ref:target_rest_connection"},
+        })
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        ve = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
+                  if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "reliability.dlq.document_cache_id"
+        assert ve["details"]["expected_role"] == "Document Cache"
+        assert ve["details"]["actual_role"] == "REST Client connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_dlq_error_subprocess_ref_wrong_type_errors(self, mock_pag):
+        # process_id $ref pointing at a database connector-settings (not a
+        # process) is caught at plan time.
+        mock_pag.return_value = []
+        bad = _process_flow_comp(reliability={
+            "retry_count": 0,
+            "dlq": {"mode": "error_subprocess_ref",
+                    "process_id": "$ref:db_connection"},
+        })
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        ve = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
+                  if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "reliability.dlq.process_id"
+        assert ve["details"]["expected_role"] == "error subprocess"
+        assert ve["details"]["actual_role"] == "database connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_dlq_document_cache_ref_correct_type_plans_clean(self, mock_pag):
+        # document_cache_id $ref pointing at a real Document Cache component
+        # passes the type check and plans cleanly.
+        mock_pag.return_value = []
+        good = _process_flow_comp(
+            depends_on=("db_connection", "db_query_operation",
+                        "target_rest_connection", "target_rest_operation",
+                        "dlq_document_cache"),
+            reliability={"retry_count": 0,
+                         "dlq": {"mode": "document_cache_ref",
+                                 "document_cache_id": "$ref:dlq_document_cache"}},
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _stub_dep_comp("dlq_document_cache"),
+            good,
+        ]
+        process_step = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
+                            if s["key"] == "main_process")
+        assert process_step.get("validation_error") is None
+        assert process_step["planned_action"] == "create"
+
+    @patch(_PATCH_TARGET)
+    def test_dlq_error_subprocess_ref_correct_type_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        good = _process_flow_comp(
+            depends_on=("db_connection", "db_query_operation",
+                        "target_rest_connection", "target_rest_operation",
+                        "dlq_error_subprocess"),
+            reliability={"retry_count": 0,
+                         "dlq": {"mode": "error_subprocess_ref",
+                                 "process_id": "$ref:dlq_error_subprocess"}},
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _stub_dep_comp("dlq_error_subprocess"),
+            good,
+        ]
+        process_step = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
+                            if s["key"] == "main_process")
         assert process_step.get("validation_error") is None
         assert process_step["planned_action"] == "create"
 
