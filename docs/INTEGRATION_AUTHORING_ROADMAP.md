@@ -161,7 +161,7 @@ Implementation focus:
 - Use existing deployment, runtime attachment, schedule, execution, and monitoring modules.
 - Return a single summary with package IDs, deployment IDs, runtime attachment result, schedule result, execution ID, terminal status, and log excerpts.
 - Add cleanup helper behavior for failed builds only if it can be dry-run by default.
-- Complete verified Try/Catch/DLQ process emission (#51) so runtime failure proof no longer stops at `PROCESS_RETRY_UNVERIFIED`.
+- Complete verified Try/Catch/DLQ process emission (#51): shipped as R1a for `retry_count == 0` so emission no longer stops at `PROCESS_RETRY_UNVERIFIED` for that slice; `retry_count > 0` (R1b) remains gated under `PROCESS_RETRY_UNVERIFIED`.
 - Follow the issue split:
   - #60 — `orchestrate_deploy` contract and build-result resolver
   - #61 — idempotent package creation and deployment stage
@@ -239,7 +239,7 @@ Constraints:
 
 - `database_to_api_sync` stays backward-compatible; `sync_pipeline` is internal process-builder vocabulary, not a public archetype name.
 - Audit/provenance is opt-in metadata in v1, not a mandatory always-on shell.
-- Try/Catch, DLQ, Branch, Process Call, and retry behavior stay gated until their Boomi XML and live behavior are verified through the reliability follow-up #51 (or a follow-up live-XML issue).
+- Try/Catch + DLQ emission for `retry_count == 0` is verified and shipped via #51 (R1a); Branch, standalone Process Call, and `retry_count > 0` behavior stay gated until their Boomi XML and live behavior are verified through #51 R1b (or a follow-up live-XML issue).
 - Keep task-specific OData filters, SOAP operation inputs, REST payloads, and field mappings as open parameters. No canned SQL, payloads, maps, SOAP envelopes, OData filters, or raw Boomi XML templates.
 - Expand primitives before presets: `rest_fetch` before `api_to_api_sync`; `db_write` (#32) before `api_to_database_sync`.
 - OData and SOAP source/target adapters are follow-on primitives over the same pipeline contract, added after the REST presets are validated — not as separate pairwise archetypes.
@@ -249,12 +249,12 @@ Exit criteria:
 - A `sync_pipeline` builder emits the same linear shape currently used for `database_to_api_sync`, and existing `database_to_api_sync` tests stay green.
 - `api_to_api_sync` and `api_to_database_sync` are implemented as thin presets that map to `sync_pipeline` stages, inspectable through existing MCP planning/review flows.
 - No raw XML or canned payload templates are exposed; no product-specific archetype forks (Elite 3e, Aderant, Microsoft Graph, Dynamics, or similar) are introduced.
-- Try/Catch, DLQ, and retry behavior remain gated unless verified live through #51.
+- Try/Catch + DLQ for `retry_count == 0` is verified/shipped via #51 (R1a); `retry_count > 0` remains gated unless verified live through #51 (R1b).
 
 Validation:
 
 - Validator unit tests reject duplicate stage keys, unknown refs, cycles, invalid side-effect ordering, and unsupported failure modes.
-- Builder tests cover linear `sync_pipeline` emission and `database_to_api_sync` adapter equivalence; retry/DLQ/Branch/Process Call paths fail closed until verified.
+- Builder tests cover linear `sync_pipeline` emission and `database_to_api_sync` adapter equivalence; the R1a Try/Catch + DLQ catch-path (`retry_count == 0`) is covered by golden tests, while `retry_count > 0`/Branch/standalone Process Call paths fail closed until verified.
 - Live Boomi QA for at least one REST-to-REST and one REST-to-DB flow once the presets exist; deploy/test QA uses `orchestrate_deploy` when M3 is complete.
 
 ## M6: Event and Listener Variants

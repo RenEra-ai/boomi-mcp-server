@@ -51,7 +51,7 @@ The main gap is authoring:
 - Most connector types do not have JSON builders.
 - Profiles, maps, connector actions, database operations, SOAP/OData operations, and many process shapes are not first-class builders.
 - There is no pattern catalog or workflow that tells the LLM how to turn a business request into a safe Boomi design.
-- Deployment after `build_integration apply` still requires multiple manual tool calls.
+- Deployment after `build_integration apply` previously required multiple manual tool calls; `orchestrate_deploy` (L6) now collapses it into one call.
 
 ## 4. Architecture Layers
 
@@ -133,11 +133,11 @@ The LLM-facing contract must stay JSON. The internal XML templates remain implem
 
 ### L6: Deploy, Test, and Observe
 
-Planned tool:
+Shipped tool (M3, #60-#66):
 
 - `orchestrate_deploy(build_id: str, environment_id: str, runtime_id: str, schedule_override?: dict, run_test?: bool)`
 
-This tool should package, deploy, attach runtime, apply schedule when needed, execute a test run when requested, poll until terminal state, fetch logs, and return a concise deployment/test summary.
+This tool packages, deploys, attaches runtime, applies schedule when needed, executes a test run when requested, polls until terminal state, fetches logs, and returns a concise deployment/test summary.
 
 ### Semantic sync pipeline foundation (M5 direction)
 
@@ -147,7 +147,7 @@ From M5 onward, integration authoring is framed as **presets over reusable seman
 - `sync_pipeline` is the **internal** process-builder kind that compiles a verified linear stage graph. It is not a public archetype name unless deliberately exposed later.
 - `database_to_api_sync` stays the public preset/archetype name and a backward-compatible compatibility adapter over `sync_pipeline`. `IntegrationSpecV1` is not replaced.
 - Each stage declares its execution semantics — cardinality, context effect, side effect, and failure behavior — so the validator checks correctness before any process XML or component planning runs.
-- **Audit/provenance is opt-in metadata in v1**, not a mandatory always-on shell. Try/Catch + DLQ emission shipped as R1a (#51, closed) for `reliability.retry_count == 0` with `dlq.mode` in `{document_cache_ref, error_subprocess_ref}`, emitting verified Boomi Try/Catch/DLQ shapes compiled from live-exported reference XML, with a plan-time DLQ `$ref` type check (`PROCESS_REF_TYPE_MISMATCH`); `retry_count > 0` stays gated by `PROCESS_RETRY_UNVERIFIED` and end-to-end runtime failure-row proof remains blocked at M3/#9 closeout. Branch and Process Call behavior stay gated until their Boomi XML and live behavior are verified (see `docs/INTEGRATION_AUTHORING_ROADMAP.md` M5).
+- **Audit/provenance is opt-in metadata in v1**, not a mandatory always-on shell. Try/Catch + DLQ emission shipped as R1a (#51, closed) for `reliability.retry_count == 0` with `dlq.mode` in `{document_cache_ref, error_subprocess_ref}`, emitting verified Boomi Try/Catch/DLQ shapes compiled from live-exported reference XML, with a plan-time DLQ `$ref` type check (`PROCESS_REF_TYPE_MISMATCH`); `retry_count > 0` stays gated by `PROCESS_RETRY_UNVERIFIED` and end-to-end runtime failure-row proof remains blocked at M3/#9 closeout. The DLQ `error_subprocess_ref` catch-path emits a verified `processcall` shape as part of R1a; general standalone Process Call and Branch behavior stay gated until their Boomi XML and live behavior are verified (see `docs/INTEGRATION_AUTHORING_ROADMAP.md` M5).
 
 API/database variants (`api_to_api_sync`, `api_to_database_sync`) are added as thin presets over this foundation once the REST fetch source and database write primitives exist, rather than as independent pairwise archetypes.
 
@@ -342,7 +342,7 @@ Initial primitive set:
 7. LLM calls build_integration(action="plan", config=spec).
 8. LLM reviews plan and calls build_integration(action="apply", dry_run=false).
 9. LLM calls build_integration(action="verify", build_id=...).
-10. LLM calls orchestrate_deploy(...) when implemented.
+10. LLM calls orchestrate_deploy(...) to package, deploy, optionally test, and summarize.
 ```
 
 ### Migration from another integration tool
