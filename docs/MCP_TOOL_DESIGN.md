@@ -135,9 +135,9 @@ The LLM-facing contract must stay JSON. The internal XML templates remain implem
 
 Shipped tool (M3, #60-#66):
 
-- `orchestrate_deploy(build_id: str, environment_id: str, runtime_id: str, schedule_override?: dict, run_test?: bool)`
+- `orchestrate_deploy(profile: str, build_id: str, environment_id: str, runtime_id: str, dry_run: bool = true, run_test?: bool, config?: str)`
 
-This tool packages, deploys, attaches runtime, applies schedule when needed, executes a test run when requested, polls until terminal state, fetches logs, and returns a concise deployment/test summary.
+This tool packages, deploys, attaches runtime, applies schedule when needed, executes a test run when requested, polls until terminal state, fetches logs, and returns a concise deployment/test summary. `profile` is required; `dry_run` defaults to `true` (preview-only, no Boomi mutation) — pass `dry_run=false` to execute the real deploy. `schedule_override` and the other engine inputs are supplied via the `config` JSON object.
 
 ### Semantic sync pipeline foundation (M5 direction)
 
