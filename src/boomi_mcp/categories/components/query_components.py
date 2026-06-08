@@ -8,6 +8,7 @@ Provides component discovery and retrieval capabilities:
 - bulk_get: Retrieve up to 5 components in one call
 """
 
+import time
 from typing import Dict, Any, List, Optional
 
 from boomi import Boomi
@@ -28,6 +29,7 @@ from ._shared import (
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
     component_get_deadline_item,
+    _component_get_deadline_seconds,
 )
 
 DEFAULT_LIMIT = 100
@@ -303,9 +305,24 @@ def bulk_get_components(
 
         components = []
         errors = []
+        # Aggregate wall-clock budget: a bulk of stalled components must not sum
+        # past the platform request timeout (e.g. 5 × the per-item deadline).
+        # Each GET gets at most the remaining budget; once it's spent, the rest
+        # are reported as deadline errors without starting another (possibly
+        # stalling) request.
+        budget = float(_component_get_deadline_seconds())
         for cid in component_ids:
+            if budget < 1:
+                errors.append({
+                    'component_id': cid,
+                    'error': 'Skipped: bulk component-read deadline budget exhausted',
+                    'error_code': 'COMPONENT_GET_DEADLINE_EXCEEDED',
+                    'retryable': True,
+                })
+                continue
+            started = time.monotonic()
             try:
-                comp = component_get_xml(boomi_client, cid)
+                comp = component_get_xml(boomi_client, cid, deadline_seconds=int(budget))
                 # Remove full XML from bulk response to keep it lighter
                 comp_summary = {k: v for k, v in comp.items() if k != 'xml'}
                 components.append(comp_summary)
@@ -315,6 +332,8 @@ def bulk_get_components(
                 errors.append({'component_id': cid, 'error': _extract_api_error_msg(e)})
             except Exception as e:
                 errors.append({'component_id': cid, 'error': str(e)})
+            finally:
+                budget -= time.monotonic() - started
 
         all_failed = errors and not components
         result = {

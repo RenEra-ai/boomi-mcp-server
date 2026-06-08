@@ -9,6 +9,7 @@ Provides component dependency analysis, version comparison, and merge:
 """
 
 from typing import Dict, Any, List, Optional
+import time
 import xml.etree.ElementTree as ET
 import difflib
 
@@ -31,6 +32,7 @@ from ._shared import (
     _extract_api_error_msg,
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
+    _component_get_deadline_seconds,
 )
 
 
@@ -76,19 +78,27 @@ def _paginate_references(boomi_client: Boomi, query_config) -> List[Dict[str, An
 
 
 def _enrich_references(boomi_client: Boomi, references: List[Dict], id_key: str) -> List[Dict]:
-    """Enrich references with component metadata by fetching each component."""
+    """Enrich references with component metadata by fetching each component.
+
+    Best-effort, bounded by an aggregate wall-clock budget: a long reference
+    list whose reads stall must not sum past the platform request timeout. Once
+    the budget is spent, remaining refs are left un-enriched and flagged rather
+    than fetched.
+    """
     enriched = []
+    budget = float(_component_get_deadline_seconds())
     for ref in references:
         comp_id = ref.get(id_key, '')
-        if comp_id:
+        if comp_id and budget >= 1:
+            started = time.monotonic()
             try:
-                meta = component_get_xml(boomi_client, comp_id)
+                meta = component_get_xml(boomi_client, comp_id, deadline_seconds=int(budget))
                 ref['name'] = meta.get('name', '')
                 ref['component_type'] = meta.get('type', '')
                 ref['folder_name'] = meta.get('folder_name', '')
             except ComponentGetDeadlineExceeded:
                 # Bounded timeout enriching this one ref — flag it (don't vanish
-                # it) and keep enriching the rest.
+                # it) and keep enriching the rest until the budget is spent.
                 ref['name'] = ''
                 ref['component_type'] = ''
                 ref['folder_name'] = ''
@@ -97,6 +107,15 @@ def _enrich_references(boomi_client: Boomi, references: List[Dict], id_key: str)
                 ref['name'] = ''
                 ref['component_type'] = ''
                 ref['folder_name'] = ''
+            finally:
+                budget -= time.monotonic() - started
+        elif comp_id:
+            # Aggregate budget exhausted — leave un-enriched, flagged, without
+            # starting another (possibly stalling) read.
+            ref['name'] = ''
+            ref['component_type'] = ''
+            ref['folder_name'] = ''
+            ref['_enrichment_error'] = 'COMPONENT_GET_DEADLINE_BUDGET_EXHAUSTED'
         enriched.append(ref)
     return enriched
 

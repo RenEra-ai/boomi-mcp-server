@@ -5,7 +5,7 @@ Provides XML-based component retrieval and parsing used across
 query_components, manage_component, and analyze_component modules.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import concurrent.futures
 import os
 import time
@@ -107,8 +107,12 @@ def _run_with_deadline(fn, component_id: str, deadline_seconds: int):
     try:
         return future.result(timeout=deadline_seconds)
     except concurrent.futures.TimeoutError:
-        # Do NOT future.cancel(): a running task can't be cancelled and we must
-        # not block. Let the worker drain on its own.
+        # Cancel the future before raising. If it is still QUEUED (the pool
+        # saturated — e.g. many abandoned reads draining during a backend
+        # outage), cancel() removes it so the stale Boomi request never runs,
+        # preventing backlog growth. If it is already RUNNING, cancel() is a
+        # non-blocking no-op and the abandoned worker drains on its own.
+        future.cancel()
         raise ComponentGetDeadlineExceeded(
             component_id=component_id,
             deadline_seconds=deadline_seconds,
@@ -181,12 +185,21 @@ def set_description_element(root, text: str) -> None:
     desc_elem.text = text
 
 
-def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
+def component_get_xml(
+    boomi_client: Boomi,
+    component_id: str,
+    deadline_seconds: Optional[int] = None,
+) -> Dict[str, Any]:
     """GET component as raw XML + parsed metadata dict.
 
     The SDK's get_component_raw() auto-sets Accept: application/json, but Boomi's
     Component GET endpoint only supports application/xml (returns 406 otherwise).
     We use the Serializer directly with an explicit Accept header.
+
+    ``deadline_seconds`` overrides the per-call wall-clock deadline. Multi-get
+    callers (bulk/enrichment loops) pass the remaining slice of a shared
+    aggregate budget so the loop can't sum past the platform request timeout;
+    ``None`` reads ``BOOMI_COMPONENT_GET_DEADLINE_SECONDS``.
     """
     svc = boomi_client.component
     serialized_request = (
@@ -198,7 +211,8 @@ def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
         .serialize()
         .set_method("GET")
     )
-    deadline_seconds = _component_get_deadline_seconds()
+    if deadline_seconds is None:
+        deadline_seconds = _component_get_deadline_seconds()
     try:
         response, status, content = _run_with_deadline(
             lambda: svc.send_request(serialized_request),

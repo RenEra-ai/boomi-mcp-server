@@ -14,10 +14,14 @@ from unittest.mock import Mock
 
 import pytest
 
+import concurrent.futures as _cf
+
 # Imported via the canonical `boomi_mcp` package (the suite runs with
 # `PYTHONPATH=src`, matching the modules' own relative imports).
+from boomi_mcp.categories.components import _shared
 from boomi_mcp.categories.components import query_components
 from boomi_mcp.categories.components import manage_component
+from boomi_mcp.categories.components import analyze_component
 from boomi_mcp.categories.components._shared import (
     ComponentGetDeadlineExceeded,
     component_get_xml,
@@ -92,6 +96,30 @@ def test_run_with_deadline_times_out():
         assert elapsed < 5  # returns promptly, does not wait for the worker
     finally:
         released.set()  # free the abandoned worker
+
+
+def test_run_with_deadline_cancels_queued_task(monkeypatch):
+    # A still-QUEUED task that times out must be cancelled so it never runs.
+    # Force queueing with a 1-worker pool occupied by a blocker.
+    small = _cf.ThreadPoolExecutor(max_workers=1)
+    monkeypatch.setattr(_shared, "_COMPONENT_GET_EXECUTOR", small)
+    occupy_release = threading.Event()
+    ran = threading.Event()
+    busy = small.submit(occupy_release.wait)
+    try:
+        def queued_task():
+            ran.set()
+            return "done"
+
+        with pytest.raises(ComponentGetDeadlineExceeded):
+            _run_with_deadline(queued_task, "cid-q", 1)  # times out while queued
+        occupy_release.set()
+        busy.result(timeout=5)  # let the worker free up
+        time.sleep(0.3)  # the cancelled task must NOT run now
+        assert not ran.is_set()
+    finally:
+        occupy_release.set()
+        small.shutdown(wait=False)
 
 
 # --- envelope builders -----------------------------------------------------
@@ -220,7 +248,7 @@ def test_update_component_maps_deadline_to_envelope(monkeypatch):
 
 
 def test_bulk_get_records_per_item_deadline_and_keeps_siblings(monkeypatch):
-    def side_effect(_client, cid):
+    def side_effect(_client, cid, deadline_seconds=None):
         if cid == "bad":
             raise ComponentGetDeadlineExceeded("bad", 90, 1.1)
         return {"component_id": cid, "name": cid, "xml": "<x/>"}
@@ -236,3 +264,55 @@ def test_bulk_get_records_per_item_deadline_and_keeps_siblings(monkeypatch):
     assert err["component_id"] == "bad"
     assert err["error_code"] == "COMPONENT_GET_DEADLINE_EXCEEDED"
     assert err["retryable"] is True
+
+
+# --- deadline override + aggregate budgets ---------------------------------
+
+def test_component_get_xml_respects_deadline_override(monkeypatch):
+    monkeypatch.delenv("BOOMI_COMPONENT_GET_DEADLINE_SECONDS", raising=False)  # env=90
+    released = threading.Event()
+    svc = _FakeComponentService(block_event=released, response=(_SAMPLE_XML, 200, "x"))
+    try:
+        start = time.monotonic()
+        with pytest.raises(ComponentGetDeadlineExceeded) as exc_info:
+            component_get_xml(_FakeClient(svc), "cid", deadline_seconds=1)
+        assert time.monotonic() - start < 5  # honored the override (1s), not env 90
+        assert exc_info.value.deadline_seconds == 1
+    finally:
+        released.set()
+
+
+def test_bulk_get_aggregate_budget_skips_after_exhaustion(monkeypatch):
+    monkeypatch.setenv("BOOMI_COMPONENT_GET_DEADLINE_SECONDS", "1")
+    calls = []
+
+    def fake(_client, cid, deadline_seconds=None):
+        calls.append(cid)
+        time.sleep(deadline_seconds)  # consume the whole granted slice
+        raise ComponentGetDeadlineExceeded(cid, deadline_seconds, float(deadline_seconds))
+
+    monkeypatch.setattr(query_components, "component_get_xml", fake)
+    result = query_components.bulk_get_components(Mock(), "work", ["a", "b", "c", "d"])
+    # 1s aggregate budget: only the first GET runs; the rest are skipped.
+    assert calls == ["a"]
+    assert result["_success"] is False  # all failed (1 timed out, 3 skipped)
+    assert len(result["errors"]) == 4
+    assert all(e.get("error_code") == "COMPONENT_GET_DEADLINE_EXCEEDED" for e in result["errors"])
+
+
+def test_enrich_references_aggregate_budget_stops_after_exhaustion(monkeypatch):
+    monkeypatch.setenv("BOOMI_COMPONENT_GET_DEADLINE_SECONDS", "1")
+    calls = []
+
+    def fake(_client, cid, deadline_seconds=None):
+        calls.append(cid)
+        time.sleep(deadline_seconds)
+        raise ComponentGetDeadlineExceeded(cid, deadline_seconds, float(deadline_seconds))
+
+    monkeypatch.setattr(analyze_component, "component_get_xml", fake)
+    refs = [{"component_id": "a"}, {"component_id": "b"}, {"component_id": "c"}]
+    out = analyze_component._enrich_references(Mock(), refs, "component_id")
+    assert calls == ["a"]  # budget spent on the first ref
+    assert out[0]["_enrichment_error"] == "COMPONENT_GET_DEADLINE_EXCEEDED"
+    assert out[1]["_enrichment_error"] == "COMPONENT_GET_DEADLINE_BUDGET_EXHAUSTED"
+    assert out[2]["_enrichment_error"] == "COMPONENT_GET_DEADLINE_BUDGET_EXHAUSTED"
