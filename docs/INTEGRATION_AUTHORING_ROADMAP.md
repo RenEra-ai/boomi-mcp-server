@@ -157,7 +157,7 @@ Goal: remove the post-apply manual chain for agents.
 
 Implementation focus:
 
-- Add `orchestrate_deploy(build_id, environment_id, runtime_id, schedule_override?, run_test?)`.
+- Add `orchestrate_deploy(profile, build_id, environment_id, runtime_id, dry_run=true, run_test?, config?)` (shipped; `dry_run` defaults to preview-only and `schedule_override` is supplied via `config`).
 - Use existing deployment, runtime attachment, schedule, execution, and monitoring modules.
 - Return a single summary with package IDs, deployment IDs, runtime attachment result, schedule result, execution ID, terminal status, and log excerpts.
 - Add cleanup helper behavior for failed builds only if it can be dry-run by default.
