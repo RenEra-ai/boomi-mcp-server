@@ -19,7 +19,7 @@ Dates assume one main implementer, code review time, and live Boomi QA buffers. 
 | M0 Docs Alignment | 2026-05-15 | 2026-05-15 | Done 2026-05-15 |
 | M1 Archetype Framework Skeleton | 2026-05-15 | 2026-05-16 | Done 2026-05-16 (sub-issues #15-#20 closed; 361 tests passing) |
 | M2 `database_to_api_sync` Vertical Slice | 2026-05-18 | 2026-05-30 | Done 2026-05-30 (#21-#31, #40-#46, #49, and #30 closed; parent #8 closed) |
-| M3 Deploy and Test Orchestration | 2026-06-08 | 2026-06-12 | Next; split into #60-#66 plus reliability follow-up #51 |
+| M3 Deploy and Test Orchestration | 2026-06-08 | 2026-06-12 | Done 2026-06-08 (#60-#66 closed; #51 R1a shipped; parent #9 closed by documented evidence) |
 | M4 Agent Ergonomics | 2026-06-15 | 2026-06-19 | Depends on M1/M2 tool surface and M3 workflow handoff |
 | M5 API Variants | 2026-06-22 | 2026-07-03 | Depends on M2/M4; semantic sync_pipeline foundation first, then API/DB presets (M5.0–M5.9 under #11; includes #32, #50) |
 | M6 Event and Listener Variants | 2026-07-06 | 2026-07-10 | Depends on M3/M5 |
@@ -151,7 +151,7 @@ Validation:
 
 ## M3: Deploy and Test Orchestration
 
-Status: Next — due 2026-06-12. Parent #9 is split into #60-#66. Reliability follow-up #51 is also assigned to M3 because runtime failure proof requires verified Try/Catch/DLQ behavior, but #51 is not a child of #9.
+Status: Done 2026-06-08. `orchestrate_deploy` is built and public (#60-#66 closed); exit criteria 1-3 are satisfied by #66 live QA, and criterion 4 is resolved via the permitted blocked-with-recorded-evidence path. #51 shipped R1a Try/Catch + DLQ emitter support (`retry_count == 0`); R1b (`retry_count > 0`) remains gated under `PROCESS_RETRY_UNVERIFIED`. Parent #9 is split into #60-#66. Reliability follow-up #51 is also assigned to M3 because runtime failure proof requires verified Try/Catch/DLQ behavior, but #51 is not a child of #9.
 
 Goal: remove the post-apply manual chain for agents.
 
@@ -178,6 +178,8 @@ Exit criteria:
 - The tool is idempotent enough to retry safely when package/deployment already exists.
 - Failed deployment or failed test execution returns structured error codes and diagnostic context.
 - Retry/DLQ process behavior needed for failure-row proof is either verified live through #51 or explicitly blocked with recorded Boomi evidence.
+
+Closeout (2026-06-08): criteria 1-3 satisfied (#66); criterion 4 = blocked-with-recorded-evidence accepted — see `docs/M3_ORCHESTRATE_DEPLOY_LIVE_QA.md` "Epic #9 Closeout Evidence".
 
 Validation:
 

@@ -317,8 +317,14 @@ defect.
 - **M5/M6 (logs/observability):** the run-test log stage returns a `download_url`
   and bounded excerpts; full log download/parse hardening belongs to later
   milestones.
-- **#51 (reliability):** Try/Catch/DLQ proof remains out of scope — do not attempt
-  it from this runbook.
+- **#51 (reliability):** CLOSED — shipped R1a Try/Catch + DLQ emitter support for
+  `retry_count == 0` with `dlq.mode` in `{document_cache_ref, error_subprocess_ref}`
+  (commits `313ce04` + `b5c275b`). #51 was verified at the emitter level (the
+  catcherrors/DLQ shapes were transcribed from live-exported reference XML), not by
+  an end-to-end runtime failure-row execution. End-to-end runtime failure-row proof
+  and `retry_count > 0` (R1b) remain blocked/gated under `PROCESS_RETRY_UNVERIFIED`,
+  so epic #9 criterion 4 is recorded `BLOCKED_WITH_EVIDENCE` — see the "Epic #9
+  Closeout Evidence" ledger below. Do not attempt new live mutation from this runbook.
 - **Schedule path:** this run used a manual trigger (`schedule` → `not_required`).
   A scheduled-trigger + `schedule_override` live pass is a worthwhile follow-up.
 
@@ -328,3 +334,31 @@ defect.
 - The `work` profile is read-only reference and must not be mutated.
 - Keep this runbook free of raw XML, secrets, SQL credentials, mappings, full
   payloads, or full downloaded logs — IDs / statuses / short excerpts only.
+
+## Epic #9 Closeout Evidence
+
+- **Status:** `CLOSED_BY_DOCUMENTED_EVIDENCE` (2026-06-08).
+- **Criterion 1 — one-call build→deploy→test:** satisfied by the #66 green run —
+  package `3acd5ef7…`, deployment `577afecb…`, execution `execution-8e811200…`,
+  terminal `COMPLETE`, logs `retrieved` with `download_url` (see the Step 4 evidence
+  block above).
+- **Criterion 2 — idempotent, retry-safe:** satisfied by #65 hardening plus #66 reuse
+  behavior (package / deployment / runtime↔environment / process↔environment reused on
+  re-run; process↔atom recorded `not_required` on the environment-enabled account).
+- **Criterion 3 — structured error codes + diagnostics:** satisfied by the #65
+  structured-error envelope (`error_code` / `failed_stage` / `prior_stage_summary` /
+  `next_step`) and the #66 Step 5 `BUILD_ID_UNKNOWN` case (no resources created) with
+  the Step 4 logs.
+- **Criterion 4 — retry/DLQ failure-row proof:** `BLOCKED_WITH_EVIDENCE`.
+  - Verified (R1a, #51): Try/Catch + DLQ emitter support for `retry_count == 0` with
+    `dlq.mode` in `{document_cache_ref, error_subprocess_ref}`; shapes transcribed
+    verbatim from verified live `work`-profile exports — catcherrors / doccacheload
+    `dff0bf83…`, processcall `7b19baeb…`. Emitter live QA `62/0` (feature) + `10/0`
+    (fix); DLQ `$ref` plan-time type check returns `PROCESS_REF_TYPE_MISMATCH`.
+    Commits `313ce04` + `b5c275b`.
+  - Still blocked/deferred: end-to-end runtime failure-row execution (no live DLQ
+    document-landing run was performed) and R1b (`retry_count > 0`, gated by
+    `PROCESS_RETRY_UNVERIFIED`).
+- **Closeout statement:** epic #9 closes without new feature code because exit
+  criterion 4 explicitly permits a documented blocked path with recorded Boomi
+  evidence; no new live mutation was attempted for this closeout.
