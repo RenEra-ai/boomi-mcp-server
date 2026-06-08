@@ -339,6 +339,8 @@ def delete_component(
             "warning": "Dependent components are NOT automatically deleted. Check references first.",
         }
 
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except ApiError as e:
         return {
             "_success": False,

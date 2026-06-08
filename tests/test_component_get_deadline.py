@@ -14,13 +14,11 @@ from unittest.mock import Mock
 
 import pytest
 
-import concurrent.futures as _cf
-
 # Imported via the canonical `boomi_mcp` package (the suite runs with
 # `PYTHONPATH=src`, matching the modules' own relative imports).
-from boomi_mcp.categories.components import _shared
 from boomi_mcp.categories.components import query_components
 from boomi_mcp.categories.components import manage_component
+from boomi_mcp.categories.components import connectors
 from boomi_mcp.categories.components import analyze_component
 from boomi_mcp.categories.components._shared import (
     ComponentGetDeadlineExceeded,
@@ -98,28 +96,18 @@ def test_run_with_deadline_times_out():
         released.set()  # free the abandoned worker
 
 
-def test_run_with_deadline_cancels_queued_task(monkeypatch):
-    # A still-QUEUED task that times out must be cancelled so it never runs.
-    # Force queueing with a 1-worker pool occupied by a blocker.
-    small = _cf.ThreadPoolExecutor(max_workers=1)
-    monkeypatch.setattr(_shared, "_COMPONENT_GET_EXECUTOR", small)
-    occupy_release = threading.Event()
-    ran = threading.Event()
-    busy = small.submit(occupy_release.wait)
-    try:
-        def queued_task():
-            ran.set()
-            return "done"
+def test_run_with_deadline_worker_is_daemon():
+    # The worker MUST be a daemon thread so a stuck send_request can never block
+    # interpreter shutdown / Cloud Run deploy replacement (ThreadPoolExecutor
+    # workers are NOT daemon threads, which is why the pool was dropped).
+    captured = {}
 
-        with pytest.raises(ComponentGetDeadlineExceeded):
-            _run_with_deadline(queued_task, "cid-q", 1)  # times out while queued
-        occupy_release.set()
-        busy.result(timeout=5)  # let the worker free up
-        time.sleep(0.3)  # the cancelled task must NOT run now
-        assert not ran.is_set()
-    finally:
-        occupy_release.set()
-        small.shutdown(wait=False)
+    def fn():
+        captured["daemon"] = threading.current_thread().daemon
+        return "ok"
+
+    assert _run_with_deadline(fn, "cid", 5) == "ok"
+    assert captured["daemon"] is True
 
 
 # --- envelope builders -----------------------------------------------------
@@ -230,6 +218,32 @@ def test_get_component_maps_deadline_to_envelope(monkeypatch):
     assert result["_success"] is False
     assert result["error_code"] == "COMPONENT_GET_DEADLINE_EXCEEDED"
     assert result["component_id"] == "cid-9"
+    assert result["retryable"] is True
+
+
+def test_delete_component_maps_deadline_to_envelope(monkeypatch):
+    # soft_delete_component() reads XML internally; a deadline there must surface
+    # the structured envelope, not the generic delete error.
+    def boom(_client, _cid):
+        raise ComponentGetDeadlineExceeded("cid-del", 90, 1.0)
+
+    monkeypatch.setattr(manage_component, "soft_delete_component", boom)
+    result = manage_component.delete_component(Mock(), "work", "cid-del")
+    assert result["_success"] is False
+    assert result["error_code"] == "COMPONENT_GET_DEADLINE_EXCEEDED"
+    assert result["component_id"] == "cid-del"
+    assert result["retryable"] is True
+
+
+def test_delete_connector_maps_deadline_to_envelope(monkeypatch):
+    def boom(_client, _cid):
+        raise ComponentGetDeadlineExceeded("cid-conn", 90, 1.0)
+
+    monkeypatch.setattr(connectors, "soft_delete_component", boom)
+    result = connectors.delete_connector(Mock(), "work", "cid-conn")
+    assert result["_success"] is False
+    assert result["error_code"] == "COMPONENT_GET_DEADLINE_EXCEEDED"
+    assert result["component_id"] == "cid-conn"
     assert result["retryable"] is True
 
 

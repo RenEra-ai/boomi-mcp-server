@@ -607,6 +607,8 @@ def delete_connector(
             "warning": "Dependent components (operations, processes) are NOT automatically deleted.",
         }
 
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except ApiError as e:
         return {
             "_success": False,

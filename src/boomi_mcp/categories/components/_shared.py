@@ -6,8 +6,8 @@ query_components, manage_component, and analyze_component modules.
 """
 
 from typing import Dict, Any, List, Optional
-import concurrent.futures
 import os
+import threading
 import time
 import xml.etree.ElementTree as ET
 
@@ -40,15 +40,6 @@ _DEADLINE_ENV = "BOOMI_COMPONENT_GET_DEADLINE_SECONDS"
 _DEADLINE_DEFAULT = 90
 _DEADLINE_MIN = 1
 _DEADLINE_MAX = 240
-
-# Sized ABOVE anyio's default to_thread limiter (~40) so normal concurrent
-# reads each get a worker immediately and the pool is never the bottleneck.
-# Workers are daemon threads (ThreadPoolExecutor default on 3.9+), so an
-# abandoned send_request after a timeout never blocks interpreter shutdown.
-_COMPONENT_GET_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=64,
-    thread_name_prefix="component-get",
-)
 
 
 class ComponentGetDeadlineExceeded(Exception):
@@ -93,31 +84,45 @@ def _component_get_deadline_seconds() -> int:
 
 
 def _run_with_deadline(fn, component_id: str, deadline_seconds: int):
-    """Run ``fn()`` in the pool with a wall-clock deadline.
+    """Run ``fn()`` on a daemon worker thread with a wall-clock deadline.
 
     Returns ``fn()``'s result; re-raises ``fn()``'s ORIGINAL exception (so the
     existing ``except ApiError`` / ``except Exception`` handlers behave exactly
-    as before); or raises :class:`ComponentGetDeadlineExceeded` on timeout. On
-    timeout the worker is NOT cancelled or joined — it keeps draining the
-    abandoned request to its own bounded self-termination, then frees the
-    worker.
+    as before); or raises :class:`ComponentGetDeadlineExceeded` on timeout.
+
+    The worker is a ``daemon`` thread spawned per call (no shared pool/queue).
+    On timeout it is abandoned (never joined or killed) and keeps draining the
+    request to its own bounded self-termination (the SDK's per-read timeout +
+    retries). Being a daemon, it can never block interpreter shutdown / Cloud
+    Run deploy replacement — unlike ``ThreadPoolExecutor`` workers, which are
+    NOT daemon threads (verified on 3.12) and are joined at interpreter exit.
+    Spawning per call (no queue) also means a timed-out GET can't leave a stale
+    request queued to run later. During a sustained backend outage abandoned
+    daemon threads can accumulate, but each self-terminates within the SDK
+    timeout and is reaped at process exit.
     """
+    box: Dict[str, Any] = {}
+    done = threading.Event()
+
+    def _worker():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — marshalled to the caller
+            box["exc"] = exc
+        finally:
+            done.set()
+
     started = time.monotonic()
-    future = _COMPONENT_GET_EXECUTOR.submit(fn)
-    try:
-        return future.result(timeout=deadline_seconds)
-    except concurrent.futures.TimeoutError:
-        # Cancel the future before raising. If it is still QUEUED (the pool
-        # saturated — e.g. many abandoned reads draining during a backend
-        # outage), cancel() removes it so the stale Boomi request never runs,
-        # preventing backlog growth. If it is already RUNNING, cancel() is a
-        # non-blocking no-op and the abandoned worker drains on its own.
-        future.cancel()
+    threading.Thread(target=_worker, name="component-get", daemon=True).start()
+    if not done.wait(timeout=deadline_seconds):
         raise ComponentGetDeadlineExceeded(
             component_id=component_id,
             deadline_seconds=deadline_seconds,
             elapsed_seconds=time.monotonic() - started,
         )
+    if "exc" in box:
+        raise box["exc"]
+    return box["value"]
 
 
 def component_get_deadline_envelope(exc: "ComponentGetDeadlineExceeded") -> Dict[str, Any]:
