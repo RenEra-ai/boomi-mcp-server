@@ -406,21 +406,28 @@ BOOMI_MCP_STATELESS_HTTP   # PINNED true in cloudbuild.yaml. Builds the MCP app
                            # session-manager binding, JWT-issuer binding, and
                            # session reaper (none apply without per-instance
                            # sessions). Set false to revert to stateful.
-BOOMI_MCP_JSON_RESPONSE    # default false (unset). Honored ONLY in stateless
-                           # mode; passes json_response=true (single-JSON POST
-                           # framing instead of SSE-on-POST). Validated working,
-                           # but Combo A (false / SSE-on-POST) is the chosen default.
+BOOMI_MCP_JSON_RESPONSE    # PINNED true in cloudbuild.yaml (since 2026-06-07).
+                           # Honored ONLY in stateless mode; passes
+                           # json_response=true so each POST tool result is a
+                           # single buffered JSON response instead of SSE-on-POST.
+                           # Required: SSE-on-POST large results stalled in the
+                           # Cloud Run managed-domain-mapping proxy and hung the
+                           # client indefinitely. Set false only to debug.
 ```
 
-> ✅ **Live matrix passed (2026-06-01, `boomi.renera.ai`).** Both combinations
-> were validated against the real Claude Code client —
-> `stateless=true / json_response=false` (**chosen**) and
-> `stateless=true / json_response=true` (validated fallback). Connect, initialize,
-> tools/list, `query_components` get, and lazy docs warmup all succeeded with
-> **zero `404 Session not found`** and no 300s held-open POSTs; the client works
-> purely over POST (no server→client GET channel needed, so the stateless
-> `GET /mcp → 405` is harmless). Rollback is `BOOMI_MCP_STATELESS_HTTP=false` +
-> redeploy. True-value convention: `true`, `1`, `yes`, `on` (case-insensitive).
+> ✅ **Chosen: `stateless=true / json_response=true`** (pinned 2026-06-07). The
+> earlier default `json_response=false` (SSE-on-POST) was found to stall large
+> tool results (e.g. a `query_components` action=get returning ~30 KB process
+> XML) in the Cloud Run managed-domain-mapping proxy — the response was never
+> delivered and the client hung with no error. Buffered JSON responses are
+> delivered reliably. As a backstop, component-XML reads are bounded by a
+> wall-clock deadline (`BOOMI_COMPONENT_GET_DEADLINE_SECONDS`, default 90s,
+> clamped 1–240) that returns a structured `COMPONENT_GET_DEADLINE_EXCEEDED`
+> error instead of hanging if the backend fetch itself stalls. The fix preserves
+> scale-to-zero (no min-instances). Startup logs state which POST framing is
+> active and whether the stream-guard env vars are inert in stateless mode.
+> Rollback is `BOOMI_MCP_JSON_RESPONSE=false` + redeploy. True-value convention:
+> `true`, `1`, `yes`, `on` (case-insensitive).
 
 ---
 

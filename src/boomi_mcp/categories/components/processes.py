@@ -34,7 +34,12 @@ from boomi.models import (
 )
 
 # Import shared helper
-from ._shared import component_get_xml as _component_get_xml, _extract_api_error_msg
+from ._shared import (
+    component_get_xml as _component_get_xml,
+    _extract_api_error_msg,
+    ComponentGetDeadlineExceeded,
+    component_get_deadline_envelope,
+)
 
 
 def _component_delete(boomi_client: Boomi, component_id: str) -> None:
@@ -165,6 +170,8 @@ def get_process(
             "profile": profile
         }
 
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except Exception as e:
         return {
             "_success": False,

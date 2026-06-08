@@ -90,6 +90,27 @@ def _flag(name, default):
     return os.getenv(name, default).strip().lower() in ("true", "1", "yes", "on")
 
 
+# Stream-guard env vars are honored only in STATEFUL mode (McpStreamGuardConfig
+# .from_env() is constructed only on the stateful path). In stateless mode they
+# are silently inert; we surface that to operators at startup. Listed here for a
+# cheap presence check that does NOT construct the guard config (which would
+# mint an identity salt and emit its own logs).
+_STREAM_GUARD_ENV_VARS = (
+    "BOOMI_MCP_STREAM_GUARD_ENABLED",
+    "BOOMI_MCP_GET_MODE",
+    "BOOMI_MCP_GET_MAX_AGE_SECONDS",
+    "BOOMI_MCP_GET_WORK_IDLE_SECONDS",
+    "BOOMI_MCP_MAX_GET_STREAMS_PER_IDENTITY",
+)
+
+
+def _stream_guard_env_present():
+    """Names of stream-guard env vars that are set (non-empty) in the
+    environment. Used only for a stateless-mode diagnostic; does NOT construct
+    ``McpStreamGuardConfig``."""
+    return [n for n in _STREAM_GUARD_ENV_VARS if os.getenv(n, "").strip()]
+
+
 def _compose_strict_probe_lifespan(app):
     """Wrap the app's lifespan so ``server.run_strict_startup_probes()`` runs on
     the serving loop at startup, before the app's normal lifespan.
@@ -166,12 +187,40 @@ def build_mcp_app(
         print("[INFO] Eager KB warmup hook enabled (first authenticated /mcp request)")
 
     if stateless_http:
-        print(
-            f"[INFO] MCP stateless HTTP transport ENABLED "
-            f"(stateless_http=True, json_response={json_response}); stream guard, "
-            f"session-manager binding, JWT-issuer binding, and session reaper are "
-            f"disabled in stateless mode"
-        )
+        # Transport-mode banner: which POST response framing is active. The
+        # stream guard, session-manager binding, JWT-issuer binding, and session
+        # reaper are all disabled in stateless mode (they only make sense for
+        # stateful sessions) — see the inert-guard note below for the
+        # operator-facing consequence.
+        if json_response:
+            print(
+                "[INFO] MCP stateless HTTP transport ENABLED "
+                "(stateless_http=True, json_response=True): POST /mcp tool "
+                "results are returned as buffered JSON — safe for large payloads."
+            )
+        else:
+            print(
+                "[WARNING] MCP stateless HTTP transport ENABLED with "
+                "json_response=False: POST /mcp tool results are SSE-framed and "
+                "may hang on large payloads behind the Cloud Run managed domain "
+                "mapping. Set BOOMI_MCP_JSON_RESPONSE=true for buffered JSON "
+                "responses."
+            )
+        _inert_guard_vars = _stream_guard_env_present()
+        if _inert_guard_vars:
+            print(
+                "[WARNING] Stream-guard env vars are IGNORED in stateless mode "
+                "(GET /mcp is not routed and the guard does not bound POST "
+                f"delivery): {', '.join(_inert_guard_vars)}. Stream guard, "
+                "session-manager binding, JWT-issuer binding, and session reaper "
+                "are all disabled when stateless_http=True."
+            )
+        else:
+            print(
+                "[INFO] Stateless mode: stream guard, session-manager binding, "
+                "JWT-issuer binding, and session reaper are disabled "
+                "(no stream-guard env vars set)."
+            )
         app = mcp.http_app(
             stateless_http=True,
             json_response=json_response,

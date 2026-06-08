@@ -22,7 +22,13 @@ from boomi.models import (
 )
 from boomi.net.transport.api_error import ApiError
 
-from ._shared import component_get_xml, paginate_metadata
+from ._shared import (
+    component_get_xml,
+    paginate_metadata,
+    ComponentGetDeadlineExceeded,
+    component_get_deadline_envelope,
+    component_get_deadline_item,
+)
 
 DEFAULT_LIMIT = 100
 
@@ -149,6 +155,8 @@ def get_component(
             "component": comp_data,
             "profile": profile,
         }
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except ApiError as e:
         return {
             "_success": False,
@@ -301,6 +309,8 @@ def bulk_get_components(
                 # Remove full XML from bulk response to keep it lighter
                 comp_summary = {k: v for k, v in comp.items() if k != 'xml'}
                 components.append(comp_summary)
+            except ComponentGetDeadlineExceeded as e:
+                errors.append(component_get_deadline_item(e))
             except ApiError as e:
                 errors.append({'component_id': cid, 'error': _extract_api_error_msg(e)})
             except Exception as e:

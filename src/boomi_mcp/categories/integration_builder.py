@@ -39,7 +39,12 @@ from boomi.models import (
 )
 
 from ..models.integration_models import IntegrationComponentSpec, IntegrationSpecV1
-from .components._shared import component_get_xml, paginate_metadata
+from .components._shared import (
+    component_get_xml,
+    paginate_metadata,
+    ComponentGetDeadlineExceeded,
+    component_get_deadline_envelope,
+)
 from .components.builders._preservation_policy import (
     OwnedPath,
     PreservationPolicy,
@@ -1413,6 +1418,8 @@ def _apply_structured_update(
         }
     try:
         current = component_get_xml(boomi_client, target_id)
+    except ComponentGetDeadlineExceeded as exc:
+        return component_get_deadline_envelope(exc)
     except Exception as exc:
         return {
             "_success": False,
@@ -3232,6 +3239,15 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
                 component_get_xml(boomi_client, component_id)
             verification["components"][comp.key] = {"verified": True, "component_id": component_id}
             verified_count += 1
+        except ComponentGetDeadlineExceeded as exc:
+            verification["components"][comp.key] = {
+                "verified": False,
+                "component_id": component_id,
+                "error": str(exc),
+                "error_code": "COMPONENT_GET_DEADLINE_EXCEEDED",
+                "retryable": True,
+            }
+            failed_count += 1
         except Exception as exc:
             verification["components"][comp.key] = {
                 "verified": False,

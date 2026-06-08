@@ -204,3 +204,54 @@ def test_flag_default_used_when_unset(monkeypatch):
     monkeypatch.delenv("BOOMI_MCP_STATELESS_HTTP", raising=False)
     assert server_http._flag("BOOMI_MCP_STATELESS_HTTP", "false") is False
     assert server_http._flag("BOOMI_MCP_STATELESS_HTTP", "true") is True
+
+
+# --- stateless startup diagnostics -----------------------------------------
+
+def _clear_guard_env(monkeypatch):
+    """Drop ambient stream-guard env so the inert-vs-no-vars branch is
+    deterministic regardless of the test runner's environment."""
+    for name in server_http._STREAM_GUARD_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_stateless_json_false_prints_sse_hang_warning(monkeypatch, capsys, recorded_bindings):
+    _clear_guard_env(monkeypatch)
+    build_mcp_app(_FakeMcp(), stateless_http=True, json_response=False)
+    out = capsys.readouterr().out
+    assert "[WARNING]" in out
+    assert "json_response=False" in out
+    assert "SSE-framed" in out
+    assert "BOOMI_MCP_JSON_RESPONSE=true" in out
+
+
+def test_stateless_json_true_prints_positive_info(monkeypatch, capsys, recorded_bindings):
+    _clear_guard_env(monkeypatch)
+    build_mcp_app(_FakeMcp(), stateless_http=True, json_response=True)
+    out = capsys.readouterr().out
+    assert "[INFO]" in out
+    assert "json_response=True" in out
+    assert "buffered JSON" in out
+    # the SSE-hang warning must NOT appear on the safe path
+    assert "may hang" not in out
+
+
+def test_stateless_warns_when_stream_guard_env_present(monkeypatch, capsys, recorded_bindings):
+    _clear_guard_env(monkeypatch)
+    monkeypatch.setenv("BOOMI_MCP_STREAM_GUARD_ENABLED", "true")
+    monkeypatch.setenv("BOOMI_MCP_GET_MODE", "bounded")
+    build_mcp_app(_FakeMcp(), stateless_http=True, json_response=True)
+    out = capsys.readouterr().out
+    assert "IGNORED in stateless mode" in out
+    assert "BOOMI_MCP_STREAM_GUARD_ENABLED" in out
+    assert "BOOMI_MCP_GET_MODE" in out
+
+
+def test_stateless_inert_note_printed_when_no_guard_env(monkeypatch, capsys, recorded_bindings):
+    _clear_guard_env(monkeypatch)
+    build_mcp_app(_FakeMcp(), stateless_http=True, json_response=True)
+    out = capsys.readouterr().out
+    # inert note always present in stateless mode; this is the no-vars variant
+    assert "disabled" in out
+    assert "no stream-guard env vars set" in out
+    assert "IGNORED in stateless mode" not in out

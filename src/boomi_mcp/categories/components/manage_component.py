@@ -17,6 +17,7 @@ from boomi.net.transport.api_error import ApiError
 from ._shared import (
     component_get_xml, set_description_element, soft_delete_component,
     _create_component_raw, _extract_api_error_msg,
+    ComponentGetDeadlineExceeded, component_get_deadline_envelope,
 )
 from .builders import (
     BuilderValidationError,
@@ -236,6 +237,8 @@ def update_component(
             "profile": profile,
         }
 
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except ApiError as e:
         return {
             "_success": False,
@@ -303,6 +306,8 @@ def clone_component(
             "profile": profile,
         }
 
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except ApiError as e:
         return {
             "_success": False,

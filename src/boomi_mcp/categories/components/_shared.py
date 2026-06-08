@@ -6,6 +6,9 @@ query_components, manage_component, and analyze_component modules.
 """
 
 from typing import Dict, Any, List
+import concurrent.futures
+import os
+import time
 import xml.etree.ElementTree as ET
 
 from boomi import Boomi
@@ -19,6 +22,132 @@ from boomi.models import (
 from boomi.net.transport.api_error import ApiError
 from boomi.net.transport.serializer import Serializer
 from boomi.net.environment.environment import Environment
+
+
+# ============================================================================
+# Component XML GET wall-clock deadline
+# ============================================================================
+#
+# component_get_xml() is synchronous and FastMCP runs sync @mcp.tool functions
+# inside an anyio worker thread, so there is no usable asyncio loop here — the
+# deadline must be thread-based (not asyncio.wait_for). The SDK's send_request
+# uses a per-socket-read timeout (60s) plus retries, so a stalled backend fetch
+# is bounded (~minutes) but can exceed Cloud Run's 300s request timeout and any
+# client's patience. This wraps the blocking call in a wall-clock deadline that
+# raises a structured error instead of hanging.
+
+_DEADLINE_ENV = "BOOMI_COMPONENT_GET_DEADLINE_SECONDS"
+_DEADLINE_DEFAULT = 90
+_DEADLINE_MIN = 1
+_DEADLINE_MAX = 240
+
+# Sized ABOVE anyio's default to_thread limiter (~40) so normal concurrent
+# reads each get a worker immediately and the pool is never the bottleneck.
+# Workers are daemon threads (ThreadPoolExecutor default on 3.9+), so an
+# abandoned send_request after a timeout never blocks interpreter shutdown.
+_COMPONENT_GET_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=64,
+    thread_name_prefix="component-get",
+)
+
+
+class ComponentGetDeadlineExceeded(Exception):
+    """A synchronous component XML GET exceeded its wall-clock deadline.
+
+    Carries the structured fields needed to build the error envelope so call
+    sites can surface a retryable failure instead of hanging. Subclasses
+    ``Exception``, so a bare ``except Exception`` still catches it (bounded, not
+    a hang) — sites that want the rich envelope must catch this BEFORE the
+    generic handler.
+    """
+
+    def __init__(self, component_id: str, deadline_seconds: int, elapsed_seconds: float):
+        self.component_id = component_id
+        self.deadline_seconds = deadline_seconds
+        self.elapsed_seconds = round(elapsed_seconds, 3)
+        super().__init__(
+            f"Component GET for {component_id!r} exceeded {deadline_seconds}s "
+            f"deadline (elapsed {self.elapsed_seconds}s)"
+        )
+
+
+def _component_get_deadline_seconds() -> int:
+    """Read + clamp the component GET deadline from the environment.
+
+    Default 90s, clamped inclusive to [1, 240]; empty/invalid -> default.
+    Mirrors the kb/service ``_env_int`` style and the ``min(max(...))`` clamp
+    idiom used elsewhere in the repo.
+    """
+    raw = os.getenv(_DEADLINE_ENV)
+    if raw is None or raw.strip() == "":
+        return _DEADLINE_DEFAULT
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        print(
+            f"[WARNING] {_DEADLINE_ENV}={raw!r} is not an integer; "
+            f"using default {_DEADLINE_DEFAULT}"
+        )
+        return _DEADLINE_DEFAULT
+    return min(max(value, _DEADLINE_MIN), _DEADLINE_MAX)
+
+
+def _run_with_deadline(fn, component_id: str, deadline_seconds: int):
+    """Run ``fn()`` in the pool with a wall-clock deadline.
+
+    Returns ``fn()``'s result; re-raises ``fn()``'s ORIGINAL exception (so the
+    existing ``except ApiError`` / ``except Exception`` handlers behave exactly
+    as before); or raises :class:`ComponentGetDeadlineExceeded` on timeout. On
+    timeout the worker is NOT cancelled or joined — it keeps draining the
+    abandoned request to its own bounded self-termination, then frees the
+    worker.
+    """
+    started = time.monotonic()
+    future = _COMPONENT_GET_EXECUTOR.submit(fn)
+    try:
+        return future.result(timeout=deadline_seconds)
+    except concurrent.futures.TimeoutError:
+        # Do NOT future.cancel(): a running task can't be cancelled and we must
+        # not block. Let the worker drain on its own.
+        raise ComponentGetDeadlineExceeded(
+            component_id=component_id,
+            deadline_seconds=deadline_seconds,
+            elapsed_seconds=time.monotonic() - started,
+        )
+
+
+def component_get_deadline_envelope(exc: "ComponentGetDeadlineExceeded") -> Dict[str, Any]:
+    """Structured failure envelope for a component-GET wall-clock timeout.
+
+    Single-result call sites return this directly.
+    """
+    return {
+        "_success": False,
+        "error_code": "COMPONENT_GET_DEADLINE_EXCEEDED",
+        "exception_type": "ComponentGetDeadlineExceeded",
+        "component_id": exc.component_id,
+        "deadline_seconds": exc.deadline_seconds,
+        "elapsed_seconds": exc.elapsed_seconds,
+        "retryable": True,
+        "hint": (
+            "Retry the read or narrow the request. If it repeats for this "
+            "component, use metadata search/list first and inspect Cloud Run "
+            "logs."
+        ),
+    }
+
+
+def component_get_deadline_item(exc: "ComponentGetDeadlineExceeded") -> Dict[str, Any]:
+    """Per-item deadline error for bulk/loop accumulators (no ``_success``)."""
+    return {
+        "component_id": exc.component_id,
+        "error": str(exc),
+        "error_code": "COMPONENT_GET_DEADLINE_EXCEEDED",
+        "exception_type": "ComponentGetDeadlineExceeded",
+        "deadline_seconds": exc.deadline_seconds,
+        "elapsed_seconds": exc.elapsed_seconds,
+        "retryable": True,
+    }
 
 
 def _extract_description(root) -> str:
@@ -69,8 +198,17 @@ def component_get_xml(boomi_client: Boomi, component_id: str) -> Dict[str, Any]:
         .serialize()
         .set_method("GET")
     )
+    deadline_seconds = _component_get_deadline_seconds()
     try:
-        response, status, content = svc.send_request(serialized_request)
+        response, status, content = _run_with_deadline(
+            lambda: svc.send_request(serialized_request),
+            component_id,
+            deadline_seconds,
+        )
+    except ComponentGetDeadlineExceeded:
+        # Bounded wall-clock abort — propagate the rich exception unchanged so
+        # call sites can build the COMPONENT_GET_DEADLINE_EXCEEDED envelope.
+        raise
     except Exception as exc:
         raise Exception(f"GET failed: {_extract_api_error_msg(exc)}") from exc
     if status >= 400:

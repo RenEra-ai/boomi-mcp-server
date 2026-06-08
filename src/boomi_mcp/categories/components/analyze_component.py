@@ -26,7 +26,12 @@ from boomi.models import (
 )
 
 from boomi.net.transport.api_error import ApiError
-from ._shared import component_get_xml, _extract_api_error_msg
+from ._shared import (
+    component_get_xml,
+    _extract_api_error_msg,
+    ComponentGetDeadlineExceeded,
+    component_get_deadline_envelope,
+)
 
 
 # ============================================================================
@@ -81,6 +86,13 @@ def _enrich_references(boomi_client: Boomi, references: List[Dict], id_key: str)
                 ref['name'] = meta.get('name', '')
                 ref['component_type'] = meta.get('type', '')
                 ref['folder_name'] = meta.get('folder_name', '')
+            except ComponentGetDeadlineExceeded:
+                # Bounded timeout enriching this one ref — flag it (don't vanish
+                # it) and keep enriching the rest.
+                ref['name'] = ''
+                ref['component_type'] = ''
+                ref['folder_name'] = ''
+                ref['_enrichment_error'] = 'COMPONENT_GET_DEADLINE_EXCEEDED'
             except Exception:
                 ref['name'] = ''
                 ref['component_type'] = ''
@@ -233,6 +245,8 @@ def find_dependencies(
             "note": "Shows immediate dependencies only (one level, not recursive)",
         }
 
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except ApiError as e:
         return {
             "_success": False,
@@ -411,6 +425,8 @@ def merge_versions(
 
         return result
 
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except ApiError as e:
         return {
             "_success": False,

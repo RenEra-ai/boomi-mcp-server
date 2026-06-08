@@ -28,6 +28,10 @@ from boomi.models import (
     ComponentMetadataSimpleExpressionOperator,
     ComponentMetadataSimpleExpressionProperty,
 )
+from .components._shared import (
+    ComponentGetDeadlineExceeded,
+    component_get_deadline_envelope,
+)
 
 
 # ============================================================================
@@ -591,6 +595,8 @@ def manage_folders_action(
 
     try:
         return handler(sdk, profile, **merged)
+    except ComponentGetDeadlineExceeded as e:
+        return component_get_deadline_envelope(e)
     except ApiError as e:
         return {
             "_success": False,
