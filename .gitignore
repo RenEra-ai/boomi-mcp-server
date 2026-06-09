@@ -98,21 +98,8 @@ TRADING_PARTNER_VERIFICATION.md
 *_ANALYSIS.md
 OAUTH_DISCONNECT_ANALYSIS.md
 
-# Local docs history remains ignored, but active design docs are tracked.
-docs/*
-!docs/
-!docs/MCP_TOOL_DESIGN.md
-!docs/INTEGRATION_AUTHORING_ROADMAP.md
-!docs/oauth-migration-runbook.md
-!docs/M2_DATABASE_TO_API_SYNC_LIVE_QA.md
-!docs/M3_ORCHESTRATE_DEPLOY_LIVE_QA.md
-!docs/superpowers/
-!docs/superpowers/specs/
-!docs/superpowers/specs/2026-04-13-boomi-docs-kb-design.md
-!docs/archive/
-docs/archive/*
-!docs/archive/MCP_TOOL_DESIGN_V2_2026-03-10.md
-!docs/archive/xml_builders_README_legacy_2026-05-15.md
+# Documentation stays local, not in the remote repo.
+docs/
 
 # Test files (local only, except anywhere under tests/)
 test_*.py
