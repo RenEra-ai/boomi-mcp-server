@@ -393,6 +393,12 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
 }
 @media (max-width: 640px) {
     .stats { grid-template-columns: repeat(2, 1fr); gap: 18px 0; }
+    .stats > div,
+    .stats > div:not(:first-child),
+    .stats > div:last-child {
+        padding: 4px 12px 0;
+        text-align: center;
+    }
     .stats > div:nth-child(2) { border-right: 0; }
 }
 
