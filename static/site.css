@@ -466,7 +466,7 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
     font-size: 11px;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--magenta-soft);
+    color: var(--magenta);
 }
 .companion-band h2 {
     margin: 0;
@@ -478,16 +478,17 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
     letter-spacing: -0.02em;
     color: var(--ink);
 }
-.companion-band p {
+.companion-band__copy {
     margin: 0;
     color: var(--ink-soft);
     font-size: clamp(15.5px, 1.35vw, 18px);
     line-height: 1.65;
 }
 .companion-band__note {
-    margin-top: 16px !important;
-    color: var(--ink-mute) !important;
-    font-size: 14px !important;
+    margin: 16px 0 0;
+    color: var(--ink-mute);
+    font-size: 14px;
+    line-height: 1.65;
 }
 @media (max-width: 760px) {
     .companion-band { grid-template-columns: 1fr; }
