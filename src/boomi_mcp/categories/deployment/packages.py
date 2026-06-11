@@ -11,15 +11,15 @@ Provides 21 deployment management actions:
 - undeploy: Remove deployment from environment
 - list_deployments: List deployments with optional filters
 - get_deployment: Get single deployment details
-- list_component_atom_attachments: List component-atom attachments
-- attach_component_atom: Attach component to a runtime
-- detach_component_atom: Detach component from a runtime
+- list_component_atom_attachments: List component-atom attachments (DEPRECATED — env-enabled accounts: use *_environment actions)
+- attach_component_atom: Attach component to a runtime (DEPRECATED — env-enabled accounts: use *_environment actions)
+- detach_component_atom: Detach component from a runtime (DEPRECATED — env-enabled accounts: use *_environment actions)
 - list_component_environment_attachments: List component-environment attachments
 - attach_component_environment: Attach component to an environment
 - detach_component_environment: Detach component from an environment
-- list_process_atom_attachments: List process-atom attachments
-- attach_process_atom: Attach process to a runtime
-- detach_process_atom: Detach process from a runtime
+- list_process_atom_attachments: List process-atom attachments (DEPRECATED — env-enabled accounts: use *_environment actions)
+- attach_process_atom: Attach process to a runtime (DEPRECATED — env-enabled accounts: use *_environment actions)
+- detach_process_atom: Detach process from a runtime (DEPRECATED — env-enabled accounts: use *_environment actions)
 - list_process_environment_attachments: List process-environment attachments
 - attach_process_environment: Attach process to an environment
 - detach_process_environment: Detach process from an environment
@@ -67,6 +67,14 @@ from boomi.models import (
     ProcessEnvironmentAttachmentSimpleExpression,
     ProcessEnvironmentAttachmentSimpleExpressionOperator,
     ProcessEnvironmentAttachmentSimpleExpressionProperty,
+)
+
+from .deployment_utils import (
+    ENVIRONMENT_ACCOUNT_ATOM_ATTACHMENT_UNSUPPORTED,
+    DEPRECATED_ATOM_ATTACHMENT_ACTION,
+    atom_attachment_deprecation_metadata,
+    environment_account_remediation,
+    is_environment_account_signal,
 )
 
 
@@ -180,6 +188,14 @@ def _extract_api_error_msg(e: ApiError) -> str:
             if msg:
                 return msg
     return getattr(e, 'message', '') or str(e)
+
+
+def _with_atom_deprecation(action: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge deprecation metadata into an atom-attachment action response (no-op otherwise)."""
+    meta = atom_attachment_deprecation_metadata(action)
+    if meta:
+        payload.update(meta)
+    return payload
 
 
 # ============================================================================
@@ -625,40 +641,65 @@ def _action_list_component_atom_attachments(sdk: Boomi, profile: str, **kwargs) 
             items = result.result if isinstance(result.result, list) else [result.result]
             attachments.extend([_attachment_to_dict(a) for a in items])
 
-    return {"_success": True, "attachments": attachments, "total_count": len(attachments)}
+    response = {"_success": True, "attachments": attachments, "total_count": len(attachments)}
+    if not attachments:
+        response["warning"] = (
+            "Deprecated atom endpoint: environment-enabled accounts return empty results "
+            "here even when bindings exist."
+        )
+        response["hint"] = (
+            "Use list_component_environment_attachments and "
+            "manage_runtimes(action='list_attachments') to see the real bindings."
+        )
+    return _with_atom_deprecation("list_component_atom_attachments", response)
 
 
 def _action_attach_component_atom(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """Attach a component to a runtime (atom)."""
+    """Attach a component to a runtime (atom). DEPRECATED — rejected on env-enabled accounts."""
     component_id = kwargs.get("component_id")
     atom_id = kwargs.get("atom_id")
 
     if not component_id:
-        return {"_success": False, "error": "component_id is required for 'attach_component_atom'"}
+        return _with_atom_deprecation("attach_component_atom", {
+            "_success": False,
+            "error": "component_id is required for 'attach_component_atom'",
+            "error_code": DEPRECATED_ATOM_ATTACHMENT_ACTION,
+        })
     if not atom_id:
-        return {"_success": False, "error": "atom_id is required for 'attach_component_atom'"}
+        return _with_atom_deprecation("attach_component_atom", {
+            "_success": False,
+            "error": "atom_id is required for 'attach_component_atom'",
+            "error_code": DEPRECATED_ATOM_ATTACHMENT_ACTION,
+        })
 
     attachment = ComponentAtomAttachment(component_id=component_id, atom_id=atom_id)
     result = sdk.component_atom_attachment.create_component_atom_attachment(
         request_body=attachment
     )
 
-    return {"_success": True, "attachment": _attachment_to_dict(result)}
+    return _with_atom_deprecation(
+        "attach_component_atom",
+        {"_success": True, "attachment": _attachment_to_dict(result)},
+    )
 
 
 def _action_detach_component_atom(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """Detach a component from a runtime by attachment resource_id."""
+    """Detach a component from a runtime by attachment resource_id. DEPRECATED."""
     resource_id = kwargs.get("resource_id")
     if not resource_id:
-        return {"_success": False, "error": "resource_id is required for 'detach_component_atom'"}
+        return _with_atom_deprecation("detach_component_atom", {
+            "_success": False,
+            "error": "resource_id is required for 'detach_component_atom'",
+            "error_code": DEPRECATED_ATOM_ATTACHMENT_ACTION,
+        })
 
     sdk.component_atom_attachment.delete_component_atom_attachment(id_=resource_id)
 
-    return {
+    return _with_atom_deprecation("detach_component_atom", {
         "_success": True,
         "deleted_id": resource_id,
         "message": "Component-atom attachment deleted.",
-    }
+    })
 
 
 # ============================================================================
@@ -795,40 +836,65 @@ def _action_list_process_atom_attachments(sdk: Boomi, profile: str, **kwargs) ->
             items = result.result if isinstance(result.result, list) else [result.result]
             attachments.extend([_attachment_to_dict(a) for a in items])
 
-    return {"_success": True, "attachments": attachments, "total_count": len(attachments)}
+    response = {"_success": True, "attachments": attachments, "total_count": len(attachments)}
+    if not attachments:
+        response["warning"] = (
+            "Deprecated atom endpoint: environment-enabled accounts return empty results "
+            "here even when bindings exist."
+        )
+        response["hint"] = (
+            "Use list_process_environment_attachments and "
+            "manage_runtimes(action='list_attachments') to see the real bindings."
+        )
+    return _with_atom_deprecation("list_process_atom_attachments", response)
 
 
 def _action_attach_process_atom(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """Attach a process to a runtime (atom)."""
+    """Attach a process to a runtime (atom). DEPRECATED — rejected on env-enabled accounts."""
     process_id = kwargs.get("process_id")
     atom_id = kwargs.get("atom_id")
 
     if not process_id:
-        return {"_success": False, "error": "process_id is required for 'attach_process_atom'"}
+        return _with_atom_deprecation("attach_process_atom", {
+            "_success": False,
+            "error": "process_id is required for 'attach_process_atom'",
+            "error_code": DEPRECATED_ATOM_ATTACHMENT_ACTION,
+        })
     if not atom_id:
-        return {"_success": False, "error": "atom_id is required for 'attach_process_atom'"}
+        return _with_atom_deprecation("attach_process_atom", {
+            "_success": False,
+            "error": "atom_id is required for 'attach_process_atom'",
+            "error_code": DEPRECATED_ATOM_ATTACHMENT_ACTION,
+        })
 
     attachment = ProcessAtomAttachment(process_id=process_id, atom_id=atom_id)
     result = sdk.process_atom_attachment.create_process_atom_attachment(
         request_body=attachment
     )
 
-    return {"_success": True, "attachment": _attachment_to_dict(result)}
+    return _with_atom_deprecation(
+        "attach_process_atom",
+        {"_success": True, "attachment": _attachment_to_dict(result)},
+    )
 
 
 def _action_detach_process_atom(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """Detach a process from a runtime by attachment resource_id."""
+    """Detach a process from a runtime by attachment resource_id. DEPRECATED."""
     resource_id = kwargs.get("resource_id")
     if not resource_id:
-        return {"_success": False, "error": "resource_id is required for 'detach_process_atom'"}
+        return _with_atom_deprecation("detach_process_atom", {
+            "_success": False,
+            "error": "resource_id is required for 'detach_process_atom'",
+            "error_code": DEPRECATED_ATOM_ATTACHMENT_ACTION,
+        })
 
     sdk.process_atom_attachment.delete_process_atom_attachment(id_=resource_id)
 
-    return {
+    return _with_atom_deprecation("detach_process_atom", {
         "_success": True,
         "deleted_id": resource_id,
         "message": "Process-atom attachment deleted.",
-    }
+    })
 
 
 # ============================================================================
@@ -968,14 +1034,27 @@ def manage_deployment_action(
     try:
         return handler(sdk, profile, **merged)
     except ApiError as e:
-        return {
+        msg = _extract_api_error_msg(e)
+        response = {
             "_success": False,
-            "error": f"Action '{action}' failed: {_extract_api_error_msg(e)}",
+            "error": f"Action '{action}' failed: {msg}",
             "exception_type": "ApiError",
         }
+        # Environment-enabled accounts reject the deprecated atom actions wholesale — the
+        # attach creates AND the list queries themselves. Fail closed with remediation:
+        # unlike orchestrate_deploy (whose env+runtime legs already bound the process), a
+        # standalone atom call has no compensating bindings. The "Action '...' failed:
+        # <original message>" format is load-bearing — orchestrate_deploy's leg-3 handling
+        # re-detects the env signal from this text.
+        remediation = environment_account_remediation(action)
+        if remediation and is_environment_account_signal(msg):
+            response["error_code"] = ENVIRONMENT_ACCOUNT_ATOM_ATTACHMENT_UNSUPPORTED
+            response["retryable"] = False
+            response["remediation"] = remediation
+        return _with_atom_deprecation(action, response)
     except Exception as e:
-        return {
+        return _with_atom_deprecation(action, {
             "_success": False,
             "error": f"Action '{action}' failed: {str(e)}",
             "exception_type": type(e).__name__,
-        }
+        })

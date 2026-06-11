@@ -2725,9 +2725,9 @@ if manage_deployment_action:
             profile: Boomi profile name (required)
             action: One of: list_packages, get_package, create_package, delete_package,
                     deploy, undeploy, list_deployments, get_deployment,
-                    list_component_atom_attachments, attach_component_atom, detach_component_atom,
+                    list_component_atom_attachments (DEPRECATED), attach_component_atom (DEPRECATED), detach_component_atom (DEPRECATED),
                     list_component_environment_attachments, attach_component_environment, detach_component_environment,
-                    list_process_atom_attachments, attach_process_atom, detach_process_atom,
+                    list_process_atom_attachments (DEPRECATED), attach_process_atom (DEPRECATED), detach_process_atom (DEPRECATED),
                     list_process_environment_attachments, attach_process_environment, detach_process_environment, get_package_manifest
             package_id: Package ID (get/delete/deploy/get_package_manifest)
             environment_id: Target environment (deploy) or filter (list_deployments)
@@ -2738,6 +2738,11 @@ if manage_deployment_action:
           1. Create a package: action="create_package", config='{"component_id":"...", "component_type":"process", "package_version":"1.0"}'
           2. Deploy to env: action="deploy", package_id="<from step 1>", environment_id="..."
           3. Promote to prod: action="deploy", package_id="<same>", environment_id="<prod-env-id>"
+
+        DEPRECATED atom-attachment actions (environment-enabled accounts reject attach_* and
+        return empty list_*): list/attach/detach_component_atom, list/attach/detach_process_atom.
+        Use attach/list/detach_component_environment, attach/list/detach_process_environment,
+        and manage_runtimes(action='attach'|'list_attachments') instead.
 
         Actions and config examples:
 

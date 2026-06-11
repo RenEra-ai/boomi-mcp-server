@@ -5635,7 +5635,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         # === Category 3: Deployment & B2B (4 tools) ===
         "manage_deployment": {
             "category": "Deployment & B2B",
-            "description": "Manage deployment packages, deploy to environments, and manage component/process attachments",
+            "description": "Manage deployment packages, deploy to environments, and manage component/process attachments. Environment attachments are the supported path; the *_atom attachment actions are deprecated.",
             "actions": [
                 "list_packages", "get_package", "create_package", "delete_package",
                 "deploy", "undeploy", "list_deployments", "get_deployment",
@@ -5644,6 +5644,38 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "list_process_atom_attachments", "attach_process_atom", "detach_process_atom",
                 "list_process_environment_attachments", "attach_process_environment", "detach_process_environment", "get_package_manifest",
             ],
+            "deprecated_actions": {
+                "list_component_atom_attachments": {
+                    "error_code": "DEPRECATED_ATOM_ATTACHMENT_ACTION",
+                    "replacement_actions": ["list_component_environment_attachments", "manage_runtimes(action='list_attachments')"],
+                    "note": "Direct atom attachments are deprecated; rejected/empty on environment-enabled accounts.",
+                },
+                "attach_component_atom": {
+                    "error_code": "DEPRECATED_ATOM_ATTACHMENT_ACTION",
+                    "replacement_actions": ["attach_component_environment", "manage_runtimes(action='attach')"],
+                    "note": "Direct atom attachments are deprecated; rejected/empty on environment-enabled accounts.",
+                },
+                "detach_component_atom": {
+                    "error_code": "DEPRECATED_ATOM_ATTACHMENT_ACTION",
+                    "replacement_actions": ["detach_component_environment", "manage_runtimes(action='detach')"],
+                    "note": "Direct atom attachments are deprecated; rejected/empty on environment-enabled accounts.",
+                },
+                "list_process_atom_attachments": {
+                    "error_code": "DEPRECATED_ATOM_ATTACHMENT_ACTION",
+                    "replacement_actions": ["list_process_environment_attachments", "manage_runtimes(action='list_attachments')"],
+                    "note": "Direct atom attachments are deprecated; rejected/empty on environment-enabled accounts.",
+                },
+                "attach_process_atom": {
+                    "error_code": "DEPRECATED_ATOM_ATTACHMENT_ACTION",
+                    "replacement_actions": ["attach_process_environment", "manage_runtimes(action='attach')"],
+                    "note": "Direct atom attachments are deprecated; rejected/empty on environment-enabled accounts.",
+                },
+                "detach_process_atom": {
+                    "error_code": "DEPRECATED_ATOM_ATTACHMENT_ACTION",
+                    "replacement_actions": ["detach_process_environment", "manage_runtimes(action='detach')"],
+                    "note": "Direct atom attachments are deprecated; rejected/empty on environment-enabled accounts.",
+                },
+            },
             "read_only": False,
             "implemented": True,
             "parameters": {

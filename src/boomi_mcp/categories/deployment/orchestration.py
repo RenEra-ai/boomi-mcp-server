@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field, StrictBool, ValidationError
 
 from .. import integration_builder  # registry accessed at call time — see module docstring
 from .packages import manage_deployment_action  # sibling action reused for package/deploy
+from .deployment_utils import is_environment_account_signal  # shared env-account signal detection
 from ..environments import manage_environments_action  # verify environment exists
 from ..runtimes import manage_runtimes_action  # runtime verify + runtime<->env attachment
 from ..schedules import manage_schedules_action  # schedule update/delete/enable/disable
@@ -943,24 +944,6 @@ def _resolve_attachment_leg(
     return attachment_id, leg_status, None
 
 
-# Boomi rejects a direct process<->atom (ProcessAtomAttachment) binding on environment-enabled
-# accounts, surfacing a message that names "environments" / "ComponentEnvironmentAttachment"
-# (e.g. "This account uses environments. Please use ComponentEnvironmentAttachment"). On such
-# accounts the process<->environment binding plus the runtime<->environment binding already make
-# the process runnable on the runtime via the environment, so the direct process<->runtime leg is
-# not required and must NOT be treated as a failure. Detect the signal narrowly so any other
-# list/attach failure still fails closed.
-_ENVIRONMENT_ACCOUNT_SIGNALS = ("uses environments", "componentenvironmentattachment")
-
-
-def _is_environment_account_signal(message: Optional[str]) -> bool:
-    """True when a leg error indicates the account uses environments (no direct atom attach)."""
-    if not message:
-        return False
-    lowered = message.lower()
-    return any(signal in lowered for signal in _ENVIRONMENT_ACCOUNT_SIGNALS)
-
-
 def _ensure_runtime_attachment(
     boomi_client: Any,
     profile: Optional[str],
@@ -978,7 +961,8 @@ def _ensure_runtime_attachment(
       3. process<->runtime    via ``manage_deployment_action`` (ProcessAtomAttachment).
     On environment-enabled accounts Boomi rejects leg 3 (the direct process<->atom binding) because
     legs 1+2 already make the process runnable on the runtime via the environment; that rejection is
-    recorded as a ``not_required`` leg and does not fail the stage (see _is_environment_account_signal).
+    recorded as a ``not_required`` leg and does not fail the stage (see
+    deployment_utils.is_environment_account_signal).
     """
     base_details = {
         "process_id": process_id,
@@ -1095,7 +1079,7 @@ def _ensure_runtime_attachment(
         details=base_details,
     )
     if error is not None:
-        if _is_environment_account_signal(error.message):
+        if is_environment_account_signal(error.message):
             process_runtime_id = None
             process_runtime_status = "not_required"
         else:
