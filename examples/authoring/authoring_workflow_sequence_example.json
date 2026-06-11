@@ -1,0 +1,32 @@
+{
+  "example_not_template": true,
+  "is_template": false,
+  "template_status": "example_only_not_reusable_template",
+  "purpose": "Show the recommended profile-first, archetype-first authoring workflow as data. The live, always-current version is returned by get_schema_template(schema_name='workflow:build_integration_from_description') and list_capabilities()['workflows'].",
+  "do_not_reuse": "This file illustrates the step sequence only. Fetch the live sequence from the server instead of copying this file — the server copy is canonical and may have moved on.",
+  "workflow_name": "build_integration_from_description",
+  "workflow": {
+    "description": "Author an integration: prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
+    "steps": [
+      "1. list_boomi_profiles() → pick the credential profile; pass profile=... to every account-scoped call",
+      "2. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
+      "3. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
+      "4. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
+      "5. build_integration(action='plan', ...) → preview the deterministic plan",
+      "6. review_transformation(action='validate_unmapped', ...) → confirm no unmapped/invalid mappings BEFORE apply",
+      "7. build_integration(action='apply', ...) → execute ordered component creation/update",
+      "8. build_integration(action='verify', ...) → verify created components and dependencies",
+      "9. orchestrate_deploy(..., dry_run=true) → preview package/deploy/runtime-bind; re-run with dry_run=false to execute"
+    ],
+    "fallback": {
+      "when": "No archetype fits — an integration shape not yet covered by the registry.",
+      "steps": [
+        "F1. get_schema_template(schema_name='IntegrationSpecV1') → get the spec JSON schema",
+        "F2. build_integration(action='plan', ...) → validate the hand-authored spec",
+        "F3. build_integration(action='apply', ...) → execute",
+        "F4. build_integration(action='verify', ...) → verify",
+        "F5. orchestrate_deploy(..., dry_run=true) → preview, then re-run with dry_run=false"
+      ]
+    }
+  }
+}

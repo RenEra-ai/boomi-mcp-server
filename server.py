@@ -100,6 +100,38 @@ KB_INSTRUCTIONS = (
     "rather than inventing Boomi facts."
 )
 
+# Always-on operating doctrine for agent clients (issue #10). Kept compact —
+# the full doctrine lives in list_capabilities()['operating_doctrine'] and the
+# per-tool docstrings; this block only routes a cold client correctly.
+AGENT_AUTHORING_INSTRUCTIONS = (
+    "Boomi MCP operating guide:\n"
+    "1. Profile first: call list_boomi_profiles(), then pass profile=... to "
+    "every account-scoped call.\n"
+    "2. Archetype-first authoring: for component/integration creation, use "
+    "list_integration_archetypes → get_integration_archetype → "
+    "build_from_archetype → build_integration(plan/apply) → orchestrate_deploy. "
+    "Hand-author IntegrationSpecV1 only when no archetype fits.\n"
+    "3. Discovery: list_capabilities() returns the tool catalog, workflow "
+    "sequences, and the full operating_doctrine; "
+    "get_schema_template(schema_name=...) returns exact authoring schemas "
+    "(IntegrationSpecV1, archetype:<name>, workflow_sequences).\n"
+    "4. Prefer typed tools over invoke_boomi_api; mutating raw POST/PUT "
+    "requires confirm_write=true — this is enforced, not advisory.\n"
+    "5. Deploy/test success is not behavioral correctness: read execution log "
+    "excerpts after test runs.\n"
+    "6. Bounded retries: never retry an unchanged failing call; change one "
+    "variable at a time and stop after 3-4 rounds, then hand off what was "
+    "tried/learned/blocking.\n"
+    "7. [companion_unverified] STOP after ~2 consecutive auth/credential "
+    "errors — repeated invalid-auth calls risk platform lockout."
+)
+
+SERVER_INSTRUCTIONS = (
+    AGENT_AUTHORING_INSTRUCTIONS + "\n\n" + KB_INSTRUCTIONS
+    if BOOMI_DOCS_ENABLED
+    else AGENT_AUTHORING_INSTRUCTIONS
+)
+
 
 def _kb_hint(func):
     """Append the KB cross-reference to a tool's docstring — but only when the
@@ -719,7 +751,7 @@ if not LOCAL_MODE:
     mcp = FastMCP(
         name="Boomi MCP Server",
         auth=auth,
-        instructions=KB_INSTRUCTIONS if BOOMI_DOCS_ENABLED else None,
+        instructions=SERVER_INSTRUCTIONS,
     )
 
     # SessionMiddleware is configured in server_http.py via mcp.http_app()
@@ -745,7 +777,7 @@ else:
     # Local dev mode - no auth
     mcp = FastMCP(
         name="Boomi MCP Server (Local Dev)",
-        instructions=KB_INSTRUCTIONS if BOOMI_DOCS_ENABLED else None,
+        instructions=SERVER_INSTRUCTIONS,
     )
 
 
@@ -2213,16 +2245,21 @@ if manage_folders_action:
 if get_schema_template_action:
     @mcp.tool(annotations={"readOnlyHint": True})
     def get_schema_template(
-        resource_type: str,
+        resource_type: str = None,
         operation: str = None,
         standard: str = None,
         component_type: str = None,
         protocol: str = None,
+        schema_name: str = None,
     ):
         """Get JSON template and enum values for constructing tool requests.
 
         Returns example payloads, required/optional fields, and valid enum values.
         No API calls — pure reference data. Use before create/update operations.
+
+        Two selectors: resource_type (legacy templates) or schema_name (authoring
+        schemas). schema_name takes precedence when both are given; omitting both
+        returns error_code=SCHEMA_SELECTOR_REQUIRED.
 
         Args:
             resource_type: One of: trading_partner, process, integration, component, environment, package, execution_request, organization, folder, monitoring
@@ -2230,6 +2267,7 @@ if get_schema_template_action:
             standard: For trading_partner create: x12, edifact, hl7, rosettanet, tradacoms, odette, custom
             component_type: For component: process, connector-settings, transform.map, etc.
             protocol: For trading_partner protocols: http, as2, ftp, sftp, disk, mllp, oftp
+            schema_name: Authoring schema selector — 'IntegrationSpecV1' (full JSON schema), 'archetype:<name>' (parameter schema + metadata), 'workflow_sequences' (all recommended workflows), 'workflow:<name>' (one workflow)
 
         Examples:
             get_schema_template("trading_partner") → overview of all actions/standards
@@ -2240,6 +2278,9 @@ if get_schema_template_action:
             get_schema_template("component") → overview of component tools
             get_schema_template("monitoring", "execution_records") → execution query template
             get_schema_template("organization", "create") → organization create template
+            get_schema_template(schema_name="IntegrationSpecV1") → IntegrationSpecV1 JSON schema
+            get_schema_template(schema_name="archetype:database_to_api_sync") → archetype parameter schema
+            get_schema_template(schema_name="workflow_sequences") → recommended workflow sequences
         """
         return get_schema_template_action(
             resource_type=resource_type,
@@ -2247,6 +2288,7 @@ if get_schema_template_action:
             standard=standard,
             component_type=component_type,
             protocol=protocol,
+            schema_name=schema_name,
         )
 
     print("[INFO] Schema template tool registered successfully")

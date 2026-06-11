@@ -73,16 +73,19 @@ def test_docs_workflow_and_hint_point_at_search_tool():
 # ---------------------------------------------------------------------------
 
 
-def test_workflow_starts_with_list_integration_archetypes():
+def test_workflow_starts_profile_first_then_archetypes():
     wf = list_capabilities_action()["workflows"]["build_integration_from_description"]
     assert wf["steps"], "workflow must have at least one step"
-    assert "list_integration_archetypes" in wf["steps"][0], (
-        f"first step must reference list_integration_archetypes, got: {wf['steps'][0]!r}"
+    assert "list_boomi_profiles" in wf["steps"][0], (
+        f"first step must reference list_boomi_profiles, got: {wf['steps'][0]!r}"
+    )
+    assert "list_integration_archetypes" in wf["steps"][1], (
+        f"second step must reference list_integration_archetypes, got: {wf['steps'][1]!r}"
     )
 
 
 def test_workflow_chain_runs_through_archetype_to_build_integration_plan():
-    """Archetype discovery → get → build_from → build_integration(action='plan')."""
+    """Profile → archetype discovery → get → build_from → build_integration(action='plan')."""
     wf = list_capabilities_action()["workflows"]["build_integration_from_description"]
     steps = wf["steps"]
 
@@ -94,9 +97,9 @@ def test_workflow_chain_runs_through_archetype_to_build_integration_plan():
         if m:
             referenced.append(m.group(1))
 
-    # The first three numbered steps must be the archetype chain in order.
-    assert referenced[:3] == list(AUTHORING_TOOLS), (
-        f"workflow must start with the archetype chain, got: {referenced[:3]!r}"
+    # The first four numbered steps: profile first, then the archetype chain.
+    assert referenced[:4] == ["list_boomi_profiles", *AUTHORING_TOOLS], (
+        f"workflow must start profile-first then the archetype chain, got: {referenced[:4]!r}"
     )
     # At least one downstream step must hand off to build_integration(action='plan').
     assert any(
@@ -163,6 +166,7 @@ def test_authoring_workflow_preserved_when_all_referenced_tools_present():
     """When the runtime exposes the authoring chain + build_integration, the
     archetype-first workflow survives the filter."""
     only = {
+        "list_boomi_profiles",
         "list_integration_archetypes",
         "get_integration_archetype",
         "build_from_archetype",
@@ -173,7 +177,8 @@ def test_authoring_workflow_preserved_when_all_referenced_tools_present():
     catalog = list_capabilities_action(available_tools=only)
     assert "build_integration_from_description" in catalog["workflows"]
     wf = catalog["workflows"]["build_integration_from_description"]
-    assert "list_integration_archetypes" in wf["steps"][0]
+    assert "list_boomi_profiles" in wf["steps"][0]
+    assert "list_integration_archetypes" in wf["steps"][1]
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +207,7 @@ def test_workflow_fallback_dropped_when_schema_template_absent():
     main workflow must survive but the fallback (which calls get_schema_template)
     must be stripped — agents can still follow the archetype-first chain."""
     only = {
+        "list_boomi_profiles",
         "list_integration_archetypes",
         "get_integration_archetype",
         "build_from_archetype",
@@ -221,6 +227,7 @@ def test_workflow_fallback_preserved_when_all_referenced_tools_present():
     """When every fallback tool is also registered, the fallback block must
     travel with the workflow."""
     only = {
+        "list_boomi_profiles",
         "list_integration_archetypes",
         "get_integration_archetype",
         "build_from_archetype",
@@ -286,3 +293,58 @@ def test_build_integration_points_to_orchestrate_deploy():
     assert "orchestrate_deploy" in text, (
         "build_integration must point agents from apply to orchestrate_deploy"
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #10 — operating doctrine
+# ---------------------------------------------------------------------------
+
+
+DOCTRINE_KEYS = (
+    "profile_first",
+    "archetype_first",
+    "typed_tools_before_raw",
+    "raw_write_gate_enforced",
+    "reuse_secured_connections",
+    "review_logs_after_test",
+    "bounded_escalation",
+    "repeated_auth_stop",
+    "gui_only_boundaries",
+    "no_throwaway_scripts",
+)
+
+
+def test_operating_doctrine_present_with_all_entries():
+    doctrine = list_capabilities_action()["operating_doctrine"]
+    for key in DOCTRINE_KEYS:
+        assert key in doctrine, f"operating_doctrine missing {key}"
+        assert isinstance(doctrine[key], str) and doctrine[key].strip()
+
+
+def test_doctrine_raw_write_gate_described_as_enforced():
+    doctrine = list_capabilities_action()["operating_doctrine"]
+    text = doctrine["raw_write_gate_enforced"]
+    assert "confirm_write" in text
+    assert "ENFORCED" in text
+    assert "RAW_WRITE_CONFIRMATION_REQUIRED" in text
+
+
+def test_doctrine_repeated_auth_stop_labeled_companion_unverified():
+    doctrine = list_capabilities_action()["operating_doctrine"]
+    assert doctrine["repeated_auth_stop"].startswith("[companion_unverified]")
+
+
+def test_doctrine_present_in_filtered_catalog():
+    """Doctrine is text-only guidance — it must survive available_tools filtering."""
+    catalog = list_capabilities_action(available_tools={"build_integration"})
+    assert "operating_doctrine" in catalog
+    for key in DOCTRINE_KEYS:
+        assert key in catalog["operating_doctrine"]
+
+
+def test_new_doctrine_hints_present():
+    hints = list_capabilities_action()["hints"]
+    for key in ("raw_write_gate", "review_logs", "bounded_retries",
+                "reuse_connections", "avoid_scripts"):
+        assert key in hints, f"hints missing {key}"
+    assert "confirm_write=true" in hints["raw_write_gate"]

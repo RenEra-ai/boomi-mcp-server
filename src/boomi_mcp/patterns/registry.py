@@ -19,6 +19,13 @@ from .base import (
     PrimitivePattern,
 )
 from .errors import PatternError
+from ..errors import (
+    DUPLICATE_PATTERN_NAME,
+    INVALID_PATTERN_KIND,
+    PATTERN_CONTRACT_INVALID,
+    PATTERN_DISCOVERY_FAILED,
+    PATTERN_NOT_FOUND,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +87,7 @@ class PatternRegistry:
                 submodule = importlib.import_module(mod_name)
             except Exception as exc:  # noqa: BLE001 — wrap any import failure
                 raise PatternRegistryError(
-                    error_code="PATTERN_DISCOVERY_FAILED",
+                    error_code=PATTERN_DISCOVERY_FAILED,
                     error=f"Failed to import pattern module {mod_name!r}: {exc}",
                     suggestion="Fix the import error or exclude the broken module.",
                     context={"module": mod_name},
@@ -104,7 +111,7 @@ class PatternRegistry:
         if name in self._by_name:
             existing = self._by_name[name]
             raise PatternRegistryError(
-                error_code="DUPLICATE_PATTERN_NAME",
+                error_code=DUPLICATE_PATTERN_NAME,
                 error=f"Pattern name {name!r} is already registered.",
                 suggestion="Rename one of the patterns; names must be globally unique.",
                 context={
@@ -123,7 +130,7 @@ class PatternRegistry:
     ) -> PatternClass:
         if not isinstance(name, str):
             raise PatternRegistryError(
-                error_code="PATTERN_NOT_FOUND",
+                error_code=PATTERN_NOT_FOUND,
                 error="Pattern name must be a string.",
                 context={"name": repr(name)},
             )
@@ -132,7 +139,7 @@ class PatternRegistry:
         cls = self._by_name.get(lookup)
         if cls is None or (wanted_kind is not None and cls.metadata.kind != wanted_kind):
             raise PatternRegistryError(
-                error_code="PATTERN_NOT_FOUND",
+                error_code=PATTERN_NOT_FOUND,
                 error=f"No pattern registered with name {lookup!r}.",
                 suggestion="Call list_patterns() to see available pattern names.",
                 context={
@@ -178,13 +185,13 @@ class PatternRegistry:
                 module = importlib.import_module(package)
             except Exception as exc:  # noqa: BLE001
                 raise PatternRegistryError(
-                    error_code="PATTERN_DISCOVERY_FAILED",
+                    error_code=PATTERN_DISCOVERY_FAILED,
                     error=f"Failed to import pattern package {package!r}: {exc}",
                     context={"package": package},
                 ) from exc
         if not hasattr(module, "__path__"):
             raise PatternRegistryError(
-                error_code="PATTERN_DISCOVERY_FAILED",
+                error_code=PATTERN_DISCOVERY_FAILED,
                 error=f"{module.__name__!r} is not a package (no __path__).",
                 context={"package": module.__name__},
             )
@@ -201,7 +208,7 @@ class PatternRegistry:
         except ValueError as exc:
             valid = ", ".join(k.value for k in PatternKind)
             raise PatternRegistryError(
-                error_code="INVALID_PATTERN_KIND",
+                error_code=INVALID_PATTERN_KIND,
                 error=f"Unknown pattern kind {kind!r}.",
                 suggestion=f"Use one of: {valid}.",
                 context={"kind": kind, "valid": [k.value for k in PatternKind]},
@@ -216,13 +223,13 @@ class PatternRegistry:
     def _validate_pattern_class(pattern_cls: Any) -> None:
         if not (inspect.isclass(pattern_cls) and issubclass(pattern_cls, PatternBase)):
             raise PatternRegistryError(
-                error_code="PATTERN_CONTRACT_INVALID",
+                error_code=PATTERN_CONTRACT_INVALID,
                 error=f"{pattern_cls!r} is not a PatternBase subclass.",
                 context={"class": repr(pattern_cls)},
             )
         if pattern_cls in _BASE_CLASSES or inspect.isabstract(pattern_cls):
             raise PatternRegistryError(
-                error_code="PATTERN_CONTRACT_INVALID",
+                error_code=PATTERN_CONTRACT_INVALID,
                 error=f"{pattern_cls.__qualname__} is abstract or a base class; cannot register.",
                 context={
                     "class": f"{pattern_cls.__module__}.{pattern_cls.__qualname__}"
@@ -231,27 +238,27 @@ class PatternRegistry:
         md = getattr(pattern_cls, "metadata", None)
         if not isinstance(md, PatternMetadata):
             raise PatternRegistryError(
-                error_code="PATTERN_CONTRACT_INVALID",
+                error_code=PATTERN_CONTRACT_INVALID,
                 error=f"{pattern_cls.__qualname__}.metadata must be a PatternMetadata instance.",
                 context={"class": pattern_cls.__qualname__},
             )
         if not md.name or not md.name.strip():
             raise PatternRegistryError(
-                error_code="PATTERN_CONTRACT_INVALID",
+                error_code=PATTERN_CONTRACT_INVALID,
                 error=f"{pattern_cls.__qualname__}.metadata.name must be non-empty.",
                 context={"class": pattern_cls.__qualname__},
             )
         params_model = getattr(pattern_cls, "parameters_model", None)
         if not (inspect.isclass(params_model) and issubclass(params_model, BaseModel)):
             raise PatternRegistryError(
-                error_code="PATTERN_CONTRACT_INVALID",
+                error_code=PATTERN_CONTRACT_INVALID,
                 error=f"{pattern_cls.__qualname__}.parameters_model must subclass pydantic.BaseModel.",
                 context={"class": pattern_cls.__qualname__},
             )
         # Kind must match the concrete subclass family.
         if issubclass(pattern_cls, ArchetypePattern) and md.kind != PatternKind.ARCHETYPE:
             raise PatternRegistryError(
-                error_code="PATTERN_CONTRACT_INVALID",
+                error_code=PATTERN_CONTRACT_INVALID,
                 error=(
                     f"{pattern_cls.__qualname__} extends ArchetypePattern "
                     f"but metadata.kind={md.kind.value!r}."
@@ -263,7 +270,7 @@ class PatternRegistry:
             )
         if issubclass(pattern_cls, PrimitivePattern) and md.kind != PatternKind.PRIMITIVE:
             raise PatternRegistryError(
-                error_code="PATTERN_CONTRACT_INVALID",
+                error_code=PATTERN_CONTRACT_INVALID,
                 error=(
                     f"{pattern_cls.__qualname__} extends PrimitivePattern "
                     f"but metadata.kind={md.kind.value!r}."

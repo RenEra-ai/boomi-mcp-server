@@ -11,6 +11,16 @@ from boomi import Boomi
 from boomi.net.transport.serializer import Serializer
 from boomi.net.environment.environment import Environment
 
+from ..errors import (
+    PATTERN_NOT_FOUND,
+    RAW_WRITE_CONFIRMATION_REQUIRED,
+    SCHEMA_LOOKUP_FAILED,
+    SCHEMA_NAME_UNSUPPORTED,
+    SCHEMA_SELECTOR_REQUIRED,
+    WORKFLOW_SEQUENCE_NOT_FOUND,
+)
+from ..models.integration_models import IntegrationSpecV1
+
 
 # ============================================================================
 # Contact Fields (shared across trading partners and organizations)
@@ -4468,8 +4478,6 @@ def _truncate_json_response(parsed, max_size):
     return serialized[:max_size], meta
 
 
-RAW_WRITE_CONFIRMATION_REQUIRED = "RAW_WRITE_CONFIRMATION_REQUIRED"
-
 # Boomi query pagination: "<Object>/query" starts a query, "<Object>/queryMore"
 # continues it with a queryToken. Both are POSTs that only read platform state.
 _READ_LIKE_POST_SEGMENTS = ("query", "querymore")
@@ -4806,6 +4814,217 @@ _VALID_RESOURCE_TYPES = [
 ]
 
 
+def _authoring_workflow_sequences() -> Dict[str, Any]:
+    """Canonical workflow sequences surfaced by both list_capabilities and
+    get_schema_template(schema_name='workflow_sequences'). Returns a fresh dict
+    per call so per-call filtering never mutates shared state.
+    """
+    return {
+        "discover_components": {
+            "description": "Find and understand components in your account",
+            "steps": [
+                "1. list_boomi_profiles() → find your profile",
+                "2. query_components(action='list', config='{\"type\": \"process\"}') → list processes",
+                "3. query_components(action='get', component_id='...') → get details",
+                "4. analyze_component(action='where_used', component_id='...') → find dependencies",
+            ],
+        },
+        "create_and_deploy_process": {
+            "description": "Build a process from scratch and deploy it",
+            "steps": [
+                "1. get_schema_template(resource_type='process', operation='create') → get JSON template",
+                "2. manage_process(action='create', config='...') → create process",
+                "3. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
+                "4. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
+                "5. execute_process(profile='...', process_id='<proc_id>', environment_id='<env_id>') → run it",
+                "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
+            ],
+        },
+        "build_integration_from_description": {
+            "description": "Author an integration: prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
+            "steps": [
+                "1. list_boomi_profiles() → pick the credential profile; pass profile=... to every account-scoped call",
+                "2. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
+                "3. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
+                "4. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
+                "5. build_integration(action='plan', config='{\"integration_spec\": <spec from step 4>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
+                "6. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 4>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
+                "7. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 4>, ...}') → execute ordered component creation/update",
+                "8. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
+                "9. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test).",
+            ],
+            "fallback": {
+                "when": "No archetype fits — e.g., an integration shape not yet covered by the registry.",
+                "steps": [
+                    "F1. get_schema_template(resource_type='integration', operation='plan') → get raw IntegrationSpecV1 template",
+                    "F2. build_integration(action='plan', config='...') → validate the hand-authored spec",
+                    "F3. build_integration(action='apply', config='{\"dry_run\": false, ...}') → execute",
+                    "F4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify",
+                    "F5. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview the deploy plan; re-run with dry_run=false to package → deploy → bind runtime → optional schedule/test.",
+                ],
+            },
+        },
+        "set_up_b2b_trading_partner": {
+            "description": "Create a trading partner for EDI/B2B integration",
+            "steps": [
+                "1. manage_trading_partner(action='list_options') → see available standards/protocols",
+                "2. get_schema_template(resource_type='trading_partner', standard='x12') → get template",
+                "3. manage_trading_partner(action='create', config='{...}') → create partner",
+                "4. manage_trading_partner(action='analyze_usage', resource_id='...') → verify setup",
+            ],
+        },
+        "troubleshoot_failed_execution": {
+            "description": "Debug why a process execution failed",
+            "steps": [
+                "1. monitor_platform(action='execution_records', config='{\"status\": \"ERROR\", \"limit\": 10}') → find failures",
+                "2. monitor_platform(action='execution_logs', config='{\"execution_id\": \"...\"}') → get error logs",
+                "3. monitor_platform(action='execution_artifacts', config='{\"execution_id\": \"...\"}') → get output docs",
+                "4. analyze_component(action='dependencies', component_id='...') → check dependencies",
+            ],
+        },
+        "research_boomi_docs": {
+            "description": "Look up current Boomi product behavior in the bundled documentation KB",
+            "steps": [
+                "1. search_boomi_docs(query='...', top_k=5) → find relevant documentation chunks",
+                "2. read_boomi_doc_page(page_key='<hit page_key>') → read surrounding page context when needed",
+            ],
+        },
+        "manage_admin_operations": {
+            "description": "Account administration — roles, branches, and uncovered APIs",
+            "steps": [
+                "1. manage_account(action='list_roles') → list roles",
+                "2. manage_account(action='manage_role', config='{\"operation\": \"create\", \"name\": \"...\", \"privileges\": [...]}') → create/update/delete roles",
+                "3. manage_account(action='list_branches') → list branches",
+                "4. manage_account(action='manage_branch', config='{\"operation\": \"create\", \"name\": \"...\"}') → create/delete branches",
+                "5. invoke_boomi_api(...) → for remaining uncovered APIs (integration packs, etc.)",
+            ],
+        },
+    }
+
+
+def _valid_schema_names() -> list:
+    """All accepted get_schema_template(schema_name=...) values.
+
+    Best effort on archetype discovery: a registry failure must never break the
+    error envelope that calls this for its valid_schema_names listing.
+    """
+    names = ["IntegrationSpecV1", "workflow_sequences"]
+    names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
+    try:
+        # Call-time import — registry discovery imports patterns.archetypes.*,
+        # which imports categories.components.builders; keep meta_tools free of
+        # that import-order constraint.
+        from ..patterns import PatternKind, PatternRegistry, PatternRegistryError
+        registry = PatternRegistry.from_package("boomi_mcp.patterns")
+        archetypes = registry.list_patterns(kind=PatternKind.ARCHETYPE)
+    except Exception:  # noqa: BLE001 — discovery is advisory here
+        return names
+    names += [f"archetype:{cls.metadata.name}" for cls in archetypes]
+    return names
+
+
+def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
+    """Dispatch get_schema_template(schema_name=...) requests (issue #10).
+
+    Read-only reference data — never calls Boomi, never emits raw XML.
+    """
+    if schema_name == "IntegrationSpecV1":
+        return {
+            "_success": True,
+            "schema_name": "IntegrationSpecV1",
+            "json_schema": IntegrationSpecV1.model_json_schema(),
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "tool": "build_integration (action='plan' | 'apply')",
+            "hint": (
+                "Prefer archetype-first authoring: list_integration_archetypes() → "
+                "get_integration_archetype(...) → build_from_archetype(...) emits a "
+                "valid IntegrationSpecV1 for you. Hand-author this spec only when "
+                "no archetype fits."
+            ),
+        }
+
+    if schema_name == "workflow_sequences":
+        return {
+            "_success": True,
+            "schema_name": "workflow_sequences",
+            "workflow_sequences": _authoring_workflow_sequences(),
+            "record_schema": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "steps": {"type": "array", "items": {"type": "string"}},
+                    "fallback": {
+                        "type": "object",
+                        "properties": {
+                            "when": {"type": "string"},
+                            "steps": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                },
+                "required": ["description", "steps"],
+            },
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+        }
+
+    if schema_name.startswith("workflow:"):
+        wf_name = schema_name[len("workflow:"):]
+        sequences = _authoring_workflow_sequences()
+        sequence = sequences.get(wf_name)
+        if sequence is None:
+            return {
+                "_success": False,
+                "error": f"Unknown workflow sequence: {wf_name}",
+                "error_code": WORKFLOW_SEQUENCE_NOT_FOUND,
+                "valid_workflows": sorted(sequences),
+            }
+        return {
+            "_success": True,
+            "schema_name": schema_name,
+            "workflow": sequence,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+        }
+
+    if schema_name.startswith("archetype:"):
+        archetype_name = schema_name[len("archetype:"):]
+        # Call-time import — see _valid_schema_names for the rationale.
+        from ..patterns import PatternKind, PatternRegistry, PatternRegistryError
+        try:
+            registry = PatternRegistry.from_package("boomi_mcp.patterns")
+            cls = registry.get(archetype_name, kind=PatternKind.ARCHETYPE)
+        except PatternRegistryError as exc:
+            if exc.error_code == PATTERN_NOT_FOUND:
+                return {
+                    "_success": False,
+                    "error": f"Unknown archetype: {archetype_name}",
+                    "error_code": SCHEMA_NAME_UNSUPPORTED,
+                    "valid_schema_names": _valid_schema_names(),
+                }
+            return {
+                "_success": False,
+                "error": exc.error,
+                "error_code": SCHEMA_LOOKUP_FAILED,
+                "registry_error_code": exc.error_code,
+                "context": exc.context,
+            }
+        return {
+            "_success": True,
+            "schema_name": schema_name,
+            **cls.describe(),
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+        }
+
+    return {
+        "_success": False,
+        "error": f"Unknown schema_name: {schema_name}",
+        "error_code": SCHEMA_NAME_UNSUPPORTED,
+        "valid_schema_names": _valid_schema_names(),
+    }
+
+
 # Issue #47 — discovery protocol entry for the read-only infer_profile_fields
 # tool. Documents the four modes, inputs/outputs, safety flags, error codes, and
 # placeholder-only examples (no canned SQL/JSON/XML payloads).
@@ -4939,13 +5158,36 @@ _PROFILE_INFERENCE_TEMPLATE = {
 
 
 def get_schema_template_action(
-    resource_type: str,
+    resource_type: Optional[str] = None,
     operation: Optional[str] = None,
     standard: Optional[str] = None,
     component_type: Optional[str] = None,
     protocol: Optional[str] = None,
+    schema_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Look up and return the appropriate template."""
+    """Look up and return the appropriate template.
+
+    Two selectors: ``resource_type`` picks a legacy template; ``schema_name``
+    picks an authoring schema (issue #10 — IntegrationSpecV1, archetype:<name>,
+    workflow_sequences, workflow:<name>). ``schema_name`` takes precedence when
+    both are supplied; omitting both returns SCHEMA_SELECTOR_REQUIRED.
+    """
+
+    if schema_name:
+        return _get_authoring_schema_by_name(schema_name)
+
+    if not resource_type:
+        return {
+            "_success": False,
+            "error": "Provide resource_type or schema_name.",
+            "error_code": SCHEMA_SELECTOR_REQUIRED,
+            "valid_types": _VALID_RESOURCE_TYPES,
+            "valid_schema_names": _valid_schema_names(),
+            "hint": (
+                "resource_type selects a template (e.g. 'process'); schema_name "
+                "selects an authoring schema (e.g. 'IntegrationSpecV1')."
+            ),
+        }
 
     registry = {
         "trading_partner": _get_trading_partner_template,
@@ -4966,15 +5208,22 @@ def get_schema_template_action(
         return {
             "_success": False,
             "error": f"Unknown resource_type: {resource_type}",
+            "error_code": SCHEMA_LOOKUP_FAILED,
             "valid_types": _VALID_RESOURCE_TYPES,
         }
 
-    return handler(
+    result = handler(
         operation=operation,
         standard=standard,
         component_type=component_type,
         protocol=protocol,
     )
+    # Make every template-lookup failure branchable by error_code without
+    # touching the individual handlers; setdefault keeps pre-existing specific
+    # codes (e.g. UNSUPPORTED_DB_OPERATION_MODE) intact.
+    if isinstance(result, dict) and result.get("_success") is False:
+        result.setdefault("error_code", SCHEMA_LOOKUP_FAILED)
+    return result
 
 
 def _get_profile_inference_template(operation=None, standard=None, component_type=None, protocol=None, **_):
@@ -6286,22 +6535,29 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "get_schema_template": {
             "category": "Meta Tools",
             "description": "Get example payloads, field descriptions, and enum values for all tools",
-            "actions": ["(single action — specify resource_type and operation)"],
+            "actions": ["(single action — specify resource_type+operation, or schema_name)"],
             "read_only": True,
             "parameters": {
-                "resource_type": "str (required) — trading_partner | process | integration | component | environment | etc.",
+                "resource_type": "str (optional — or use schema_name) — trading_partner | process | integration | component | environment | etc.",
                 "operation": "str (optional) — create | update | list | etc.",
                 "standard": "str (optional) — for trading_partner: x12, edifact, hl7, etc.",
                 "component_type": "str (optional) — for component: process, connector-settings, transform.map, etc.",
                 "protocol": "str (optional) — for trading_partner: http, as2, ftp, sftp, etc.",
+                "schema_name": "str (optional) — authoring schema selector: 'IntegrationSpecV1' | "
+                               "'archetype:<name>' | 'workflow_sequences' | 'workflow:<name>'. "
+                               "Takes precedence over resource_type.",
             },
             "examples": [
                 'get_schema_template(resource_type="trading_partner", operation="create", standard="x12")',
                 'get_schema_template(resource_type="process", operation="create")',
                 'get_schema_template(resource_type="integration", operation="plan")',
                 'get_schema_template(resource_type="trading_partner", protocol="http")',
+                'get_schema_template(schema_name="IntegrationSpecV1")',
+                'get_schema_template(schema_name="archetype:database_to_api_sync")',
+                'get_schema_template(schema_name="workflow_sequences")',
             ],
-            "note": "No profile needed — returns static reference data. No API calls.",
+            "note": "No profile needed — returns static reference data. No API calls. "
+                    "Omitting both resource_type and schema_name returns SCHEMA_SELECTOR_REQUIRED.",
         },
         "invoke_boomi_api": {
             "category": "Meta Tools",
@@ -6471,87 +6727,8 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         else:
             not_implemented.append(name)
 
-    # --- Workflow suggestions ---
-    workflows = {
-        "discover_components": {
-            "description": "Find and understand components in your account",
-            "steps": [
-                "1. list_boomi_profiles() → find your profile",
-                "2. query_components(action='list', config='{\"type\": \"process\"}') → list processes",
-                "3. query_components(action='get', component_id='...') → get details",
-                "4. analyze_component(action='where_used', component_id='...') → find dependencies",
-            ],
-        },
-        "create_and_deploy_process": {
-            "description": "Build a process from scratch and deploy it",
-            "steps": [
-                "1. get_schema_template(resource_type='process', operation='create') → get JSON template",
-                "2. manage_process(action='create', config='...') → create process",
-                "3. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
-                "4. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
-                "5. execute_process(profile='...', process_id='<proc_id>', environment_id='<env_id>') → run it",
-                "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
-            ],
-        },
-        "build_integration_from_description": {
-            "description": "Author an integration: prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
-            "steps": [
-                "1. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
-                "2. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
-                "3. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
-                "4. build_integration(action='plan', config='{\"integration_spec\": <spec from step 3>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
-                "5. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 3>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
-                "6. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 3>, ...}') → execute ordered component creation/update",
-                "7. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
-                "8. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test).",
-            ],
-            "fallback": {
-                "when": "No archetype fits — e.g., an integration shape not yet covered by the registry.",
-                "steps": [
-                    "F1. get_schema_template(resource_type='integration', operation='plan') → get raw IntegrationSpecV1 template",
-                    "F2. build_integration(action='plan', config='...') → validate the hand-authored spec",
-                    "F3. build_integration(action='apply', config='{\"dry_run\": false, ...}') → execute",
-                    "F4. build_integration(action='verify', config='{\"build_id\": \"...\"}') → verify",
-                    "F5. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview the deploy plan; re-run with dry_run=false to package → deploy → bind runtime → optional schedule/test.",
-                ],
-            },
-        },
-        "set_up_b2b_trading_partner": {
-            "description": "Create a trading partner for EDI/B2B integration",
-            "steps": [
-                "1. manage_trading_partner(action='list_options') → see available standards/protocols",
-                "2. get_schema_template(resource_type='trading_partner', standard='x12') → get template",
-                "3. manage_trading_partner(action='create', config='{...}') → create partner",
-                "4. manage_trading_partner(action='analyze_usage', resource_id='...') → verify setup",
-            ],
-        },
-        "troubleshoot_failed_execution": {
-            "description": "Debug why a process execution failed",
-            "steps": [
-                "1. monitor_platform(action='execution_records', config='{\"status\": \"ERROR\", \"limit\": 10}') → find failures",
-                "2. monitor_platform(action='execution_logs', config='{\"execution_id\": \"...\"}') → get error logs",
-                "3. monitor_platform(action='execution_artifacts', config='{\"execution_id\": \"...\"}') → get output docs",
-                "4. analyze_component(action='dependencies', component_id='...') → check dependencies",
-            ],
-        },
-        "research_boomi_docs": {
-            "description": "Look up current Boomi product behavior in the bundled documentation KB",
-            "steps": [
-                "1. search_boomi_docs(query='...', top_k=5) → find relevant documentation chunks",
-                "2. read_boomi_doc_page(page_key='<hit page_key>') → read surrounding page context when needed",
-            ],
-        },
-        "manage_admin_operations": {
-            "description": "Account administration — roles, branches, and uncovered APIs",
-            "steps": [
-                "1. manage_account(action='list_roles') → list roles",
-                "2. manage_account(action='manage_role', config='{\"operation\": \"create\", \"name\": \"...\", \"privileges\": [...]}') → create/update/delete roles",
-                "3. manage_account(action='list_branches') → list branches",
-                "4. manage_account(action='manage_branch', config='{\"operation\": \"create\", \"name\": \"...\"}') → create/delete branches",
-                "5. invoke_boomi_api(...) → for remaining uncovered APIs (integration packs, etc.)",
-            ],
-        },
-    }
+    # --- Workflow suggestions (canonical source: _authoring_workflow_sequences) ---
+    workflows = _authoring_workflow_sequences()
 
     # --- Filter workflows to only reference tools in the catalog ---
     if available_tools is not None:
@@ -6609,6 +6786,12 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "need_template": "Use get_schema_template() before create/update operations",
         "uncovered_api": "Use invoke_boomi_api() for APIs without dedicated tools (integration packs, secrets rotation, etc.)",
         "profile_required": "Most tools require a 'profile' parameter — get it from list_boomi_profiles()",
+        "raw_write_gate": "invoke_boomi_api mutating POST/PUT requires confirm_write=true (enforced); "
+                          "blocked calls return error_code=RAW_WRITE_CONFIRMATION_REQUIRED naming typed alternatives",
+        "review_logs": "After a test execution, read the execution log excerpts — deploy/test success is not behavioral verification",
+        "bounded_retries": "Never retry an unchanged failing call; change one variable at a time and stop after 3-4 rounds",
+        "reuse_connections": "Prefer existing secured connection components before authoring new ones",
+        "avoid_scripts": "Prefer native steps and typed map rungs over scripts; a ~50+ line script is an escalation signal",
     }
     # Only point at the docs KB when the live runtime actually registers it.
     if available_tools is None or "search_boomi_docs" in available_tools:
@@ -6630,6 +6813,68 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "build_integration authoring."
         )
 
+    # --- Operating doctrine (issue #10 — companion-adoption guidance) ---
+    # Text-only guidance for agents; mechanical counterparts live in the M9
+    # epic (#78 gotcha KB, #81 test-verification, #82 anti-script lint) and the
+    # #13/M7.3 connection-reuse surface.
+    operating_doctrine = {
+        "profile_first": (
+            "Call list_boomi_profiles() first and pass profile=... to every "
+            "account-scoped call."
+        ),
+        "archetype_first": (
+            "For component/integration creation, route through archetypes: "
+            "list_integration_archetypes → get_integration_archetype → "
+            "build_from_archetype → build_integration(plan/apply). Hand-author "
+            "IntegrationSpecV1 only when no archetype fits."
+        ),
+        "typed_tools_before_raw": (
+            "Prefer typed tools over invoke_boomi_api. Reaching for the raw API "
+            "escape hatch is an anomaly worth flagging to the user — stop and "
+            "reconsider the typed path first."
+        ),
+        "raw_write_gate_enforced": (
+            "Mutating raw POST/PUT via invoke_boomi_api REQUIRES "
+            "confirm_write=true — this is ENFORCED, not advisory: unconfirmed "
+            "writes are blocked with error_code=RAW_WRITE_CONFIRMATION_REQUIRED "
+            "and a typed_alternatives list."
+        ),
+        "reuse_secured_connections": (
+            "Prefer existing secured connection components over authoring new "
+            "ones — reuse keeps credentials out of the conversation."
+        ),
+        "review_logs_after_test": (
+            "Deploy/test success is not behavioral correctness: after a test "
+            "execution, read the execution log excerpts (e.g. Groovy compiles "
+            "only at first Atom execution)."
+        ),
+        "bounded_escalation": (
+            "Escalation ladder: (1) check the docs KB first — the most common "
+            "failure mode is concluding docs don't exist without actually "
+            "checking; (2) apply analogous patterns; (3) bounded experimentation "
+            "— one variable at a time, never retry unchanged, stop after 3-4 "
+            "rounds; (4) structured user handoff: what was tried, what was "
+            "learned, what specifically blocks."
+        ),
+        "repeated_auth_stop": (
+            "[companion_unverified] STOP after ~2 consecutive auth/credential "
+            "errors — repeated calls with invalid auth risk platform lockout. "
+            "No documented lockout policy was found in the official docs KB; "
+            "retained as defensive doctrine."
+        ),
+        "gui_only_boundaries": (
+            "Be honest about GUI-only platform surfaces (branded-connector "
+            "OAuth authorization, API Gateway policies, Flow UI, MFT portal "
+            "config): say exactly which part needs the Boomi GUI and which part "
+            "the MCP can build."
+        ),
+        "no_throwaway_scripts": (
+            "Prefer typed transform rungs (direct map → map function → map "
+            "script) and native process steps over scripts; a script past ~50 "
+            "lines is an escalation signal, not a convenience."
+        ),
+    }
+
     return {
         "_success": True,
         "server_name": "Boomi MCP Server",
@@ -6643,4 +6888,5 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "workflows": workflows,
         "coverage": coverage,
         "hints": hints,
+        "operating_doctrine": operating_doctrine,
     }

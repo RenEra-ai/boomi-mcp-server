@@ -1,0 +1,78 @@
+{
+  "example_not_template": true,
+  "is_template": false,
+  "template_status": "example_only_not_reusable_template",
+  "purpose": "Show the SHAPE of a build_from_archetype call that REUSES existing secured connection components (binding.mode='reuse') instead of authoring new ones — the preferred doctrine: reuse keeps credentials out of the conversation.",
+  "do_not_reuse": "Every value below is a <<placeholder>> sentinel. Discover real component ids with query_components(action='list') and author all other values from the user's actual requirements.",
+  "tool_call": {
+    "tool": "build_from_archetype",
+    "arguments": {
+      "name": "database_to_api_sync",
+      "parameters": {
+        "naming": {
+          "integration_name": "<<integration name>>",
+          "component_prefix": "<<PREFIX>>"
+        },
+        "source": {
+          "binding": {
+            "mode": "reuse",
+            "component_id": "<<existing DB connection component id>>"
+          },
+          "read_operation": {
+            "sql": "<<user-authored DB read statement>>",
+            "result_schema": {
+              "fields": [
+                {"name": "<<source field a>>", "data_type": "character", "required": true},
+                {"name": "<<source field b>>", "data_type": "datetime"}
+              ]
+            }
+          }
+        },
+        "target": {
+          "binding": {
+            "mode": "reuse",
+            "component_id": "<<existing REST connection component id>>"
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "<<api path>>"
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "name": "Root",
+              "kind": "object",
+              "children": [
+                {"name": "<<target field a>>", "kind": "simple", "data_type": "character", "required": true},
+                {"name": "<<target field b>>", "kind": "simple", "data_type": "datetime"}
+              ]
+            }
+          }
+        },
+        "transform": {
+          "operations": [
+            {
+              "operation_type": "direct",
+              "source_field": "<<source field a>>",
+              "target_path": "Root/<<target field a>>"
+            },
+            {
+              "operation_type": "direct",
+              "source_field": "<<source field b>>",
+              "target_path": "Root/<<target field b>>"
+            }
+          ]
+        },
+        "execution": {
+          "trigger": {"mode": "manual"}
+        },
+        "reliability": {
+          "retry": {"max_attempts": 1},
+          "dlq": {"enabled": false},
+          "error_classifier": {}
+        }
+      }
+    }
+  },
+  "next_steps": "Reused connections are referenced, never modified. Pass the returned integration_spec to build_integration(action='plan'), then review_transformation(action='validate_unmapped') BEFORE apply."
+}

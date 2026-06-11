@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
+from ..errors import PARAM_VALIDATION_FAILED
+
 
 class PatternFieldError(BaseModel):
     """Single field-level validation error sanitized for MCP responses."""
@@ -47,7 +49,7 @@ def pattern_validation_error(
             )
         )
     return PatternError(
-        error_code="PARAM_VALIDATION_FAILED",
+        error_code=PARAM_VALIDATION_FAILED,
         error="Parameter validation failed",
         suggestion=suggestion,
         retryable=False,

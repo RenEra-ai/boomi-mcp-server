@@ -1,0 +1,81 @@
+{
+  "example_not_template": true,
+  "is_template": false,
+  "template_status": "example_only_not_reusable_template",
+  "purpose": "Show the SHAPE of a minimal build_from_archetype(name='database_to_api_sync', parameters=...) call: create-mode DB source with one declared result field, create-mode REST target with no auth, one direct transform, manual trigger, DLQ disabled.",
+  "do_not_reuse": "Every value below is a <<placeholder>> sentinel. Author your own read statement, fields, URLs, and names from the user's actual requirements — never copy these values into a real build.",
+  "tool_call": {
+    "tool": "build_from_archetype",
+    "arguments": {
+      "name": "database_to_api_sync",
+      "parameters": {
+        "naming": {
+          "integration_name": "<<integration name>>",
+          "component_prefix": "<<PREFIX>>"
+        },
+        "source": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "driver": "<<jdbc driver, e.g. microsoft_jdbc>>",
+              "auth_mode": "username_password",
+              "host": "<<db host>>",
+              "database": "<<database name>>",
+              "username": "<<service account>>",
+              "credential_ref": "<<secrets reference - never an inline credential>>"
+            }
+          },
+          "read_operation": {
+            "sql": "<<user-authored DB read statement>>",
+            "result_schema": {
+              "fields": [
+                {"name": "<<source field>>", "data_type": "character"}
+              ]
+            }
+          }
+        },
+        "target": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "base_url": "<<https://api.example.invalid>>",
+              "auth_mode": "none"
+            }
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "<<api path>>"
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "name": "Root",
+              "kind": "object",
+              "children": [
+                {"name": "<<target field>>", "kind": "simple", "data_type": "character"}
+              ]
+            }
+          }
+        },
+        "transform": {
+          "operations": [
+            {
+              "operation_type": "direct",
+              "source_field": "<<source field>>",
+              "target_path": "Root/<<target field>>"
+            }
+          ]
+        },
+        "execution": {
+          "trigger": {"mode": "manual"}
+        },
+        "reliability": {
+          "retry": {"max_attempts": 1},
+          "dlq": {"enabled": false},
+          "error_classifier": {}
+        }
+      }
+    }
+  },
+  "next_steps": "Pass the returned integration_spec to build_integration(action='plan'), then review_transformation(action='validate_unmapped') BEFORE build_integration(action='apply')."
+}

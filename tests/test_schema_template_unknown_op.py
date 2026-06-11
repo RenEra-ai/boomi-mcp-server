@@ -10,6 +10,7 @@ This prevents a future refactor from silently reverting to the old
 import pytest
 
 from boomi_mcp.categories.meta_tools import get_schema_template_action
+from boomi_mcp.errors import SCHEMA_LOOKUP_FAILED
 
 # (resource_type, expected valid_operations)
 RESOURCE_CASES = [
@@ -35,6 +36,7 @@ def test_unknown_operation_returns_structured_error(resource_type, expected_ops)
     assert result["_success"] is False
     assert result["error"] == f"Unknown {resource_type} operation: __bogus__"
     assert result["valid_operations"] == expected_ops
+    assert result["error_code"] == SCHEMA_LOOKUP_FAILED
 
 
 def test_monitoring_unknown_operation():
@@ -43,6 +45,7 @@ def test_monitoring_unknown_operation():
 
     assert result["_success"] is False
     assert result["error"] == "Unknown monitoring operation: __bogus__"
+    assert result["error_code"] == SCHEMA_LOOKUP_FAILED
     assert isinstance(result["valid_operations"], list)
     assert len(result["valid_operations"]) > 0
     # Spot-check a few known monitoring operations
@@ -57,3 +60,4 @@ def test_unknown_resource_type():
     assert result["_success"] is False
     assert result["error"] == "Unknown resource_type: __nonexistent__"
     assert "valid_types" in result
+    assert result["error_code"] == SCHEMA_LOOKUP_FAILED

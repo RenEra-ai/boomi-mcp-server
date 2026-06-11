@@ -95,7 +95,8 @@ def test_list_capabilities_wrapper_surfaces_integration_authoring_workflow():
     payload = _payload(result)
     wf = payload["workflows"].get("build_integration_from_description")
     assert wf is not None, "archetype-first workflow filtered out — wrapper regression"
-    assert "list_integration_archetypes" in wf["steps"][0]
+    assert "list_boomi_profiles" in wf["steps"][0]
+    assert "list_integration_archetypes" in wf["steps"][1]
 
 
 def test_list_capabilities_wrapper_does_not_call_boomi_or_credentials():

@@ -7,8 +7,10 @@ and ``src.boomi_mcp.*`` namespaces.
 
 from typing import Any, Dict, Optional
 
-ENVIRONMENT_ACCOUNT_ATOM_ATTACHMENT_UNSUPPORTED = "ENVIRONMENT_ACCOUNT_ATOM_ATTACHMENT_UNSUPPORTED"
-DEPRECATED_ATOM_ATTACHMENT_ACTION = "DEPRECATED_ATOM_ATTACHMENT_ACTION"
+from ...errors import (  # noqa: F401 — re-exported; existing imports/tests stay valid
+    DEPRECATED_ATOM_ATTACHMENT_ACTION,
+    ENVIRONMENT_ACCOUNT_ATOM_ATTACHMENT_UNSUPPORTED,
+)
 
 # Boomi rejects a direct process<->atom (ProcessAtomAttachment) binding on environment-enabled
 # accounts, surfacing a message that names "environments" / "ComponentEnvironmentAttachment"

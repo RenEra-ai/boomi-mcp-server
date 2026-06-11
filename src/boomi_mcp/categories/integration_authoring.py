@@ -21,6 +21,12 @@ from .components.builders.profile_inference import (
     infer_profile_from_sample_xml,
     infer_profile_from_xsd,
 )
+from ..errors import (
+    ARCHETYPE_BUILD_FAILED,
+    ARCHETYPE_BUILD_VALIDATION_FAILED,
+    INVALID_INPUT,
+    PARAM_VALIDATION_FAILED,
+)
 from ..patterns import (
     PatternError,
     PatternKind,
@@ -38,7 +44,7 @@ def list_integration_archetypes_action(
         normalized_tags = _normalize_tags(tags)
     except (TypeError, ValueError) as exc:
         return PatternError(
-            error_code="INVALID_INPUT",
+            error_code=INVALID_INPUT,
             error=f"Invalid tags argument: {exc}",
             suggestion="Provide tags as a list of strings, a comma-separated string, or a JSON array string.",
             retryable=False,
@@ -46,7 +52,7 @@ def list_integration_archetypes_action(
 
     if query is not None and not isinstance(query, str):
         return PatternError(
-            error_code="INVALID_INPUT",
+            error_code=INVALID_INPUT,
             error=f"query must be a string or None; got {type(query).__name__}",
             suggestion="Provide query as a substring to match (or omit to list all archetypes).",
             retryable=False,
@@ -95,7 +101,7 @@ def build_from_archetype_action(
         params_dict = _normalize_parameters(parameters)
     except (ValueError, TypeError) as exc:
         return PatternError(
-            error_code="PARAM_VALIDATION_FAILED",
+            error_code=PARAM_VALIDATION_FAILED,
             error=str(exc),
             suggestion="Provide parameters as a JSON object (dict) or JSON-encoded string.",
             retryable=False,
@@ -129,7 +135,7 @@ def build_from_archetype_action(
         if exc.details:
             context["details"] = exc.details
         return PatternError(
-            error_code=exc.error_code or "ARCHETYPE_BUILD_VALIDATION_FAILED",
+            error_code=exc.error_code or ARCHETYPE_BUILD_VALIDATION_FAILED,
             error=str(exc),
             suggestion=exc.hint
             or f"Adjust the {name} archetype parameters to satisfy the builder.",
@@ -138,7 +144,7 @@ def build_from_archetype_action(
         ).to_dict()
     except Exception as exc:  # noqa: BLE001 — last-line defense; do not leak parameters
         return PatternError(
-            error_code="ARCHETYPE_BUILD_FAILED",
+            error_code=ARCHETYPE_BUILD_FAILED,
             error=f"emit_spec() failed for archetype {name!r}: {exc}",
             suggestion=f"Inspect the {name} archetype implementation.",
             retryable=False,
@@ -226,7 +232,10 @@ def _inference_error_envelope(
     env: dict[str, Any] = {
         "_success": False,
         **_INFERENCE_FLAGS,
+        # ``code`` is the legacy key; ``error_code`` is the taxonomy-standard
+        # branchable key (#10). Both carry the same value.
         "code": code,
+        "error_code": code,
         "error": message,
     }
     if field is not None:
