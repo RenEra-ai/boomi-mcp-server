@@ -4514,9 +4514,17 @@ def _classify_raw_api_request(method: str, endpoint: str) -> Dict[str, Any]:
 
 # First endpoint path segment (lowercased) -> safer typed tools for that family.
 _TYPED_ALTERNATIVES_BY_SEGMENT = {
-    "component": ["query_components", "manage_component", "analyze_component", "build_integration"],
-    "componentmetadata": ["query_components", "manage_component", "analyze_component", "build_integration"],
-    "componentreference": ["query_components", "manage_component", "analyze_component", "build_integration"],
+    "component": [
+        "query_components", "manage_component", "analyze_component",
+        "build_integration", "manage_process", "manage_connector",
+    ],
+    "componentmetadata": [
+        "query_components", "manage_component", "analyze_component",
+        "build_integration", "manage_process", "manage_connector",
+    ],
+    # ComponentReference is reference lookup only — steer to the read tools
+    # (analyze_component wraps this API for where_used/dependencies).
+    "componentreference": ["query_components", "analyze_component"],
     "process": ["manage_process", "build_integration"],
     "packagedcomponent": ["manage_deployment", "orchestrate_deploy"],
     "deployedpackage": ["manage_deployment", "orchestrate_deploy"],
