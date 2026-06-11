@@ -96,3 +96,12 @@ def test_read_page_tool_annotations_are_read_only():
     tool = run_async(server.mcp.get_tool("read_boomi_doc_page"))
     assert tool.annotations.readOnlyHint is True
     assert tool.annotations.openWorldHint is False
+
+
+# --- invoke_boomi_api KB hint (Issue #79) -------------------------------------
+
+def test_invoke_boomi_api_description_carries_kb_hint():
+    # KB is enabled in this module, so @_kb_hint must have appended the generic
+    # docs cross-reference to the registered description.
+    tool = run_async(server.mcp.get_tool("invoke_boomi_api"))
+    assert "use search_boomi_docs before making factual claims" in (tool.description or "")

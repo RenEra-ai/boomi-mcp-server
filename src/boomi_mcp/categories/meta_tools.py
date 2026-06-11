@@ -4468,6 +4468,144 @@ def _truncate_json_response(parsed, max_size):
     return serialized[:max_size], meta
 
 
+RAW_WRITE_CONFIRMATION_REQUIRED = "RAW_WRITE_CONFIRMATION_REQUIRED"
+
+# Boomi query pagination: "<Object>/query" starts a query, "<Object>/queryMore"
+# continues it with a queryToken. Both are POSTs that only read platform state.
+_READ_LIKE_POST_SEGMENTS = ("query", "querymore")
+
+
+def _classify_raw_api_request(method: str, endpoint: str) -> Dict[str, Any]:
+    """Classify a raw API call as read vs write for the confirm_write gate.
+
+    DELETE is classified write but exempt from confirm_write — it stays governed
+    by the pre-existing confirm_delete gate. PATCH never reaches this helper
+    (rejected by the method whitelist).
+    """
+    method = method.upper()
+    path = endpoint.split("?", 1)[0].split("#", 1)[0]
+    segments = [seg.lower() for seg in path.strip("/").split("/") if seg]
+    last_segment = segments[-1] if segments else ""
+
+    if method == "GET":
+        return {
+            "class": "read",
+            "requires_confirm_write": False,
+            "reason": "GET requests are read-only.",
+        }
+    if method == "POST" and last_segment in _READ_LIKE_POST_SEGMENTS:
+        return {
+            "class": "read",
+            "requires_confirm_write": False,
+            "reason": "POST to a */query or */queryMore endpoint only reads platform state.",
+        }
+    if method == "DELETE":
+        return {
+            "class": "write",
+            "requires_confirm_write": False,
+            "reason": "DELETE is governed by confirm_delete, not confirm_write.",
+        }
+    return {
+        "class": "write",
+        "requires_confirm_write": True,
+        "reason": f"{method} to '{endpoint}' mutates platform state.",
+    }
+
+
+# First endpoint path segment (lowercased) -> safer typed tools for that family.
+_TYPED_ALTERNATIVES_BY_SEGMENT = {
+    "component": ["query_components", "manage_component", "analyze_component", "build_integration"],
+    "componentmetadata": ["query_components", "manage_component", "analyze_component", "build_integration"],
+    "componentreference": ["query_components", "manage_component", "analyze_component", "build_integration"],
+    "process": ["manage_process", "build_integration"],
+    "packagedcomponent": ["manage_deployment", "orchestrate_deploy"],
+    "deployedpackage": ["manage_deployment", "orchestrate_deploy"],
+    "componentenvironmentattachment": ["manage_deployment", "orchestrate_deploy"],
+    "processenvironmentattachment": ["manage_deployment", "orchestrate_deploy"],
+    "componentatomattachment": ["manage_deployment", "orchestrate_deploy"],
+    "processatomattachment": ["manage_deployment", "orchestrate_deploy"],
+    "environment": ["manage_environments"],
+    "environmentextensions": ["manage_environments"],
+    "environmentmapextension": ["manage_environments"],
+    "environmentrole": ["manage_environments"],
+    "atom": ["manage_runtimes", "manage_deployment"],
+    "cloud": ["manage_runtimes", "manage_deployment"],
+    "installertoken": ["manage_runtimes", "manage_deployment"],
+    "role": ["manage_account"],
+    "branch": ["manage_account"],
+    "userrole": ["manage_account"],
+    "userfederation": ["manage_account"],
+    "ssoconfig": ["manage_account"],
+    "folder": ["manage_folders"],
+    "sharedwebserver": ["manage_shared_resources"],
+    "sharedserverinformation": ["manage_shared_resources"],
+    "sharedcommunicationchannelcomponent": ["manage_shared_resources"],
+    "processschedules": ["manage_schedules"],
+    "processschedulestatus": ["manage_schedules"],
+    "executionrequest": ["execute_process", "monitor_platform", "troubleshoot_execution"],
+    "executionrecord": ["execute_process", "monitor_platform", "troubleshoot_execution"],
+    "listqueues": ["execute_process", "monitor_platform", "troubleshoot_execution"],
+    "clearqueue": ["execute_process", "monitor_platform", "troubleshoot_execution"],
+    "movequeue": ["execute_process", "monitor_platform", "troubleshoot_execution"],
+    "tradingpartnercomponent": ["manage_trading_partner"],
+    "tradingpartnerprocessinggroup": ["manage_trading_partner"],
+    "integrationpack": ["manage_integration_packs"],
+    "integrationpackinstance": ["manage_integration_packs"],
+    "publisherintegrationpack": ["manage_integration_packs"],
+    "releaseintegrationpack": ["manage_integration_packs"],
+    "accountgroup": ["manage_account_groups"],
+    "accountgroupaccount": ["manage_account_groups"],
+    "listenerstatus": ["manage_listeners"],
+}
+
+_DEFAULT_TYPED_ALTERNATIVES = ["list_capabilities", "get_schema_template", "search_boomi_docs"]
+
+
+def _typed_alternatives_for_endpoint(endpoint: str) -> list:
+    """Safer typed tools for the endpoint's object family (first path segment)."""
+    path = endpoint.split("?", 1)[0].split("#", 1)[0]
+    segments = [seg for seg in path.strip("/").split("/") if seg]
+    first_segment = segments[0].lower() if segments else ""
+    return list(
+        _TYPED_ALTERNATIVES_BY_SEGMENT.get(first_segment, _DEFAULT_TYPED_ALTERNATIVES)
+    )
+
+
+def _raw_write_confirmation_guard(
+    endpoint: str, method: str, classification: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Fail-closed guard response for an unconfirmed raw write (no Boomi call made)."""
+    alternatives = _typed_alternatives_for_endpoint(endpoint)
+    path = endpoint.split("?", 1)[0].split("#", 1)[0]
+    segments = [seg for seg in path.strip("/").split("/") if seg]
+    family = segments[0] if segments else "the target object"
+    return {
+        "_success": False,
+        "error": "Raw Boomi API write requires confirm_write=true before invoking the platform.",
+        "error_code": RAW_WRITE_CONFIRMATION_REQUIRED,
+        "retryable": False,
+        "remediation": (
+            f"Prefer the typed tools for this endpoint family first: {', '.join(alternatives)}. "
+            f"They validate parameters and preserve component XML via read-merge-write. "
+            f"Re-call with confirm_write=true only after confirming no typed tool covers this write."
+        ),
+        "method": method,
+        "endpoint": endpoint,
+        "classification": classification,
+        "confirm_write_required": True,
+        "typed_alternatives": alternatives,
+        "suggested_searches": {
+            "docs": [
+                f"search_boomi_docs(query='{family} API {method} reference')",
+                f"search_boomi_docs(query='{family} required fields')",
+            ],
+            "gotchas": [
+                f"search_boomi_docs(query='{family} common errors gotchas')",
+            ],
+        },
+    }
+
+
 def invoke_api(
     boomi_client: Boomi,
     profile: str,
@@ -4477,10 +4615,13 @@ def invoke_api(
     content_type: str = "json",
     accept: str = "json",
     confirm_delete: bool = False,
+    confirm_write: bool = False,
 ) -> Dict[str, Any]:
     """Execute arbitrary Boomi API call using SDK's Serializer.
 
     Uses the same proven Serializer + send_request() pattern from _shared.py.
+    Mutating POST/PUT calls require confirm_write=True; DELETE keeps its
+    separate confirm_delete gate.
     """
     import json as json_mod
 
@@ -4502,6 +4643,12 @@ def invoke_api(
             "endpoint": endpoint,
             "warning": "This operation may be irreversible",
         }
+
+    # --- Safety: write confirmation (mutating POST/PUT) ---
+    # Must return before any platform access (boomi_client.account below).
+    classification = _classify_raw_api_request(method, endpoint)
+    if classification["requires_confirm_write"] and not confirm_write:
+        return _raw_write_confirmation_guard(endpoint, method, classification)
 
     # --- Build URL ---
     # All SDK services share the same base URL (includes accountId) + auth
@@ -6161,10 +6308,12 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "content_type": "str (optional, default=json) — json | xml",
                 "accept": "str (optional, default=json) — json | xml",
                 "confirm_delete": "bool (optional, default=false) — must be true to allow DELETE operations",
+                "confirm_write": "bool (optional, default=false) — must be true for mutating POST/PUT; "
+                                 "GET and */query, */queryMore POSTs are read-like and need no confirmation",
             },
             "examples": [
                 'invoke_boomi_api(profile="prod", endpoint="Role/query", method="POST", payload=\'{"QueryFilter":...}\')',
-                'invoke_boomi_api(profile="prod", endpoint="Branch", method="POST", payload=\'{"name":"feature-v2"}\')',
+                'invoke_boomi_api(profile="prod", endpoint="Branch", method="POST", payload=\'{"name":"feature-v2"}\', confirm_write=True)',
                 'invoke_boomi_api(profile="prod", endpoint="Component/abc-123", method="GET", accept="xml")',
             ],
             "covers_uncovered_apis": [
@@ -6173,7 +6322,9 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "Document Reprocessing",
             ],
             "note": "Use dedicated tools when available for better parameter validation. "
-                    "DELETE operations are blocked by safety feature.",
+                    "Mutating POST/PUT requires confirm_write=true; DELETE still requires "
+                    "confirm_delete=true. Raw Component XML writes are a full replacement "
+                    "(typed tools preserve unknown XML via read-merge-write) — prefer typed tools.",
         },
         "list_capabilities": {
             "category": "Meta Tools",

@@ -2254,7 +2254,8 @@ if get_schema_template_action:
 
 # --- Generic API Invoker MCP Tool ---
 if invoke_api:
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+    @_kb_hint
     def invoke_boomi_api(
         profile: str,
         endpoint: str,
@@ -2263,10 +2264,29 @@ if invoke_api:
         content_type: str = "json",
         accept: str = "json",
         confirm_delete: bool = False,
+        confirm_write: bool = False,
     ):
         """Direct Boomi API access for operations not covered by other tools.
 
-        Generic escape hatch for any Boomi REST API endpoint.
+        Generic escape hatch for any Boomi REST API endpoint. Prefer the typed
+        tools first — they validate parameters and steer around platform gotchas;
+        if you find yourself crafting a custom raw call, check list_capabilities
+        for a typed tool that already covers it.
+
+        WARNING — raw Component XML writes are a FULL REPLACEMENT: a POST/PUT to
+        Component/{id} overwrites the stored XML wholesale. Typed builders and
+        structured update paths (manage_component, build_integration) preserve
+        unknown/future XML elements via read-merge-write; raw replacement does
+        not and can silently drop configuration.
+
+        Write safety gates:
+        - GET and POST to */query or */queryMore endpoints are read-like — no
+          confirmation needed, unchanged behavior.
+        - All other POST/PUT calls mutate platform state and require
+          confirm_write=true. Without it the call returns a structured guard
+          (error_code=RAW_WRITE_CONFIRMATION_REQUIRED) naming safer typed
+          alternatives — no platform call is made.
+        - DELETE keeps its separate confirm_delete gate (unchanged).
 
         Args:
             profile: Boomi profile name (required for authentication)
@@ -2277,6 +2297,8 @@ if invoke_api:
             content_type: Request body format - "json" (default) or "xml"
             accept: Response format - "json" (default) or "xml"
             confirm_delete: Set to true to confirm DELETE operations (safety gate)
+            confirm_write: Set to true to confirm mutating POST/PUT operations
+                           (safety gate; not needed for GET or */query POSTs)
 
         Common endpoints:
             # Roles — see /mnt/examples/04_environment_setup/manage_roles.py
@@ -2315,9 +2337,13 @@ if invoke_api:
             - "DeployedPackage" POST → deploy package
 
         Examples:
-            # List all roles
+            # List all roles (query POST — read-like, no confirmation)
             invoke_boomi_api(profile="prod", endpoint="Role/query",
                 method="POST", payload='{"QueryFilter":{"expression":{"operator":"EQUALS","property":"name","argument":["Administrator"]}}}')
+
+            # Create a role (mutating POST — requires confirm_write)
+            invoke_boomi_api(profile="prod", endpoint="Role",
+                method="POST", payload='{"name":"Auditor"}', confirm_write=True)
 
             # Get a specific folder
             invoke_boomi_api(profile="prod", endpoint="Folder/12345", method="GET")
@@ -2350,6 +2376,7 @@ if invoke_api:
                 content_type=content_type,
                 accept=accept,
                 confirm_delete=confirm_delete,
+                confirm_write=confirm_write,
             )
 
         except Exception as e:
