@@ -4913,9 +4913,12 @@ def _valid_schema_names() -> list:
     try:
         # Call-time import — registry discovery imports patterns.archetypes.*,
         # which imports categories.components.builders; keep meta_tools free of
-        # that import-order constraint.
-        from ..patterns import PatternKind, PatternRegistry, PatternRegistryError
-        registry = PatternRegistry.from_package("boomi_mcp.patterns")
+        # that import-order constraint. Pass the package MODULE (resolved
+        # relatively), not a hard-coded name, so discovery works from both the
+        # boomi_mcp.* and src.boomi_mcp.* namespaces.
+        from .. import patterns as patterns_pkg
+        from ..patterns import PatternKind, PatternRegistry
+        registry = PatternRegistry.from_package(patterns_pkg)
         archetypes = registry.list_patterns(kind=PatternKind.ARCHETYPE)
     except Exception:  # noqa: BLE001 — discovery is advisory here
         return names
@@ -4989,10 +4992,12 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
 
     if schema_name.startswith("archetype:"):
         archetype_name = schema_name[len("archetype:"):]
-        # Call-time import — see _valid_schema_names for the rationale.
+        # Call-time import — see _valid_schema_names for the rationale (incl.
+        # the module-not-name argument to from_package).
+        from .. import patterns as patterns_pkg
         from ..patterns import PatternKind, PatternRegistry, PatternRegistryError
         try:
-            registry = PatternRegistry.from_package("boomi_mcp.patterns")
+            registry = PatternRegistry.from_package(patterns_pkg)
             cls = registry.get(archetype_name, kind=PatternKind.ARCHETYPE)
         except PatternRegistryError as exc:
             if exc.error_code == PATTERN_NOT_FOUND:

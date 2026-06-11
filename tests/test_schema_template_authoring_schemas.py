@@ -131,3 +131,35 @@ def test_valid_schema_names_covers_all_families():
     assert "workflow_sequences" in names
     assert any(n.startswith("workflow:") for n in names)
     assert any(n.startswith("archetype:") for n in names)
+
+
+def test_archetype_discovery_resolves_callers_namespace():
+    """Registry discovery must derive the patterns package from the calling
+    module's own namespace, not a hard-coded 'boomi_mcp.patterns' string, so
+    src.boomi_mcp imports walk src.boomi_mcp.patterns. (A pre-existing absolute
+    import in categories.components.builders still blocks full archetype loading
+    in a src-only environment — so accept either success or a graceful envelope
+    that provably attempted the caller's namespace.)
+    """
+    import json
+    import subprocess
+    import sys
+
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    script = (
+        "import sys, json\n"
+        f"sys.path.insert(0, {repo_root!r})\n"
+        "from src.boomi_mcp.categories.meta_tools import get_schema_template_action\n"
+        "r = get_schema_template_action(schema_name='archetype:database_to_api_sync')\n"
+        "print(json.dumps({'success': r.get('_success'),\n"
+        "                  'module': (r.get('context') or {}).get('module', '')}))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, cwd="/", timeout=120,
+    )
+    assert proc.returncode == 0, f"dispatch crashed: {proc.stderr[-2000:]}"
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert result["success"] is True or result["module"].startswith(
+        "src.boomi_mcp.patterns"
+    ), f"discovery did not resolve the caller's namespace: {result!r}"
