@@ -3,8 +3,8 @@
 The production MCP server must run stateless HTTP transport with buffered JSON
 responses (BOOMI_MCP_JSON_RESPONSE=true); without it, large tool results are
 SSE-framed and hang clients behind Cloud Run's managed domain mapping. It must
-ALSO keep scale-to-zero (no --min-instances / minScale / always-allocated CPU)
-for cost. This test locks both invariants into the deploy config.
+also keep scale-to-zero (no --min-instances / minScale) while leaving CPU
+available between requests so deferred docs KB warmup can complete.
 
 Parsed as plain text (not YAML): PyYAML is not a project dependency, and the
 --update-env-vars value is a single flat comma-separated string.
@@ -42,9 +42,16 @@ def test_cloudbuild_json_response_inside_update_env_vars():
 
 
 def test_cloudbuild_keeps_scale_to_zero():
-    """No min-instances / minScale / always-allocated CPU — keep scale-to-zero."""
+    """No min-instances / minScale — keep scale-to-zero."""
     text = _cloudbuild_text()
     assert "--min-instances" not in text
     assert "minScale" not in text
-    assert "--no-cpu-throttling" not in text
     assert "--cpu-always-allocated" not in text
+
+
+def test_cloudbuild_keeps_cpu_available_for_docs_warmup():
+    """Deferred KB warmup runs in a background thread after first MCP request."""
+    text = _cloudbuild_text()
+    segment = _update_env_vars_segment(text)
+    assert "--no-cpu-throttling" in text
+    assert "BOOMI_DOCS_WARMUP_EAGER=true" in segment
