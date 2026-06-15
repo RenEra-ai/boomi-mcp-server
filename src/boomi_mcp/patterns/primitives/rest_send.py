@@ -10,10 +10,11 @@ Materializes the REST target send-component group consumed by a
      profiles.
 
 It also emits a process *fragment* (``emit_fragment``) describing the REST
-target binding for issue #29 archetype assembly. ``retry_policy`` is carried
-as planning metadata only — it never un-gates ``ProcessFlowBuilder``'s
-``PROCESS_RETRY_UNVERIFIED`` check (verified Try/Catch emission is a separate
-follow-up).
+target binding for issue #29 archetype assembly. This primitive's
+``retry_policy`` is carried as planning metadata only — it does not drive the
+process ``reliability.retry_count``. Process-level Try/Catch retry is wired
+separately via the archetype's ``RetryPolicy`` (#88 M4.5.3); this fragment's
+retry_policy is representation-only.
 
 The primitive emits JSON ``IntegrationComponentSpec`` objects only — every
 byte of XML and all structured validation is delegated to the existing
@@ -176,9 +177,9 @@ class RestRetryPolicy(BaseModel):
     """Planning-only retry metadata for issue #29 assembly.
 
     Representation only: it is carried in the fragment metadata and does NOT
-    flow into a ``reliability.retry_count`` that ``ProcessFlowBuilder`` would
-    consume — retry/DLQ process emission stays gated by
-    ``PROCESS_RETRY_UNVERIFIED`` until verified Try/Catch support lands.
+    flow into the process ``reliability.retry_count``. Process-level Try/Catch
+    retry is wired separately through the archetype's ``RetryPolicy`` →
+    ``reliability.retry_count`` (#88 M4.5.3); this field stays representational.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -236,7 +237,7 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         ],
         not_for=[
             "Database or file targets",
-            "Implicit retry/DLQ process wiring (gated until verified)",
+            "Process-level retry/DLQ wiring (owned by the archetype RetryPolicy + ProcessFlowBuilder, not this primitive's metadata)",
             "Authoring request payloads, paths, or credentials",
         ],
     )

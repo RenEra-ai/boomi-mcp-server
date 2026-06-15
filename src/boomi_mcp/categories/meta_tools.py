@@ -5398,8 +5398,8 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.retry_count",
             "reliability.dlq",
             "reliability.dlq.mode",
-            # Issue #51 M3.R1a: DLQ catch-path bindings now consumed by the
-            # verified Try/Catch wrapper (retry_count == 0 only). Bind via the
+            # Issue #51 M3.R1a / #88 M4.5.3: DLQ catch-path bindings consumed by
+            # the verified Try/Catch wrapper (retry_count 0..5). Bind via the
             # *_id field — a literal component id or a $ref:KEY token in
             # depends_on; the bare *_ref_key variant is not resolvable here.
             "reliability.dlq.document_cache_id",
@@ -5466,16 +5466,19 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
         ],
         "notes": [
-            "Issue #51 M3.R1a: retry_count == 0 with dlq.mode in "
-            "{document_cache_ref, error_subprocess_ref} now emits a verified "
+            "Issue #51 M3.R1a / #88 M4.5.3: retry_count 0..5 with dlq.mode in "
+            "{document_cache_ref, error_subprocess_ref} emits a verified "
             "Try/Catch wrapper + DLQ catch-path (shape captured from live Boomi "
             "Try/Catch XML). Bind the catch leg via reliability.dlq.document_cache_id "
             "(or .process_id) — a literal component id or a $ref:KEY token in "
             "depends_on; the bare *_ref_key variant is rejected with "
             "PROCESS_DLQ_BINDING_INVALID on this build path.",
-            "retry_count > 0 still returns PROCESS_RETRY_UNVERIFIED (issue #51 R1b: "
-            "the retryCount->interval mapping for 1..5 is not yet verified against "
-            "a live export, so it stays gated).",
+            "retry_count 1..5 is un-gated (issue #88): Boomi Try/Catch applies "
+            "platform-controlled timing (count 1 retries immediately; 2..5 use "
+            "built-in escalating waits) — there is no caller-selected backoff "
+            "field. retry_count > 0 requires a wired DLQ catch path; retry_count "
+            "outside 0..5 (or > 0 without a DLQ mode) returns "
+            "PROCESS_RETRY_UNVERIFIED.",
             "Issue #28 primitives schedule_envelope, run_metadata, and "
             "error_classifier PRODUCE execution/reliability fragments that "
             "ProcessFlowBuilder does not yet consume — see deferred_fields. The "

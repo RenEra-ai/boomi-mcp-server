@@ -474,8 +474,8 @@ def test_process_models_error_handling_predicate():
             key="p", type="process", action="create", name="P", config=config
         )
 
-    # Structured route (process_kind set) trusts only the supported zero-retry
-    # DLQ modes — the only config that actually emits a Try/Catch.
+    # Structured route (process_kind set) trusts the supported DLQ modes with a
+    # valid 0..5 retry count — the configs that actually emit a Try/Catch.
     assert _process_models_error_handling(
         comp({"process_kind": "database_to_api_sync",
               "reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}}})
@@ -484,16 +484,22 @@ def test_process_models_error_handling_predicate():
         comp({"process_kind": "database_to_api_sync",
               "reliability": {"retry_count": 0, "dlq": {"mode": "error_subprocess_ref"}}})
     )
-    # retry_count > 0 is gated (never emits a Try/Catch) — NOT error handling,
-    # even paired with an otherwise-supported DLQ mode (mirrors
-    # _should_emit_try_catch's retry_count==0 gate). Codex review round 2.
+    # Issue #88: retry_count 1..5 with a supported DLQ mode is now un-gated and
+    # emits a Try/Catch → counts as modeled error handling.
+    assert _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
+              "reliability": {"retry_count": 2, "dlq": {"mode": "document_cache_ref"}}})
+    )
+    # retry_count > 0 without a wired DLQ catch path is gated (no Try/Catch
+    # emitted) → NOT error handling.
     assert not _process_models_error_handling(
         comp({"process_kind": "database_to_api_sync",
               "reliability": {"retry_count": 2, "dlq": {"mode": "disabled"}}})
     )
+    # retry_count out of range (6) → gated → NOT error handling.
     assert not _process_models_error_handling(
         comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": 2, "dlq": {"mode": "document_cache_ref"}}})
+              "reliability": {"retry_count": 6, "dlq": {"mode": "document_cache_ref"}}})
     )
     # Structured but DLQ disabled → no error handling.
     assert not _process_models_error_handling(
@@ -536,21 +542,22 @@ def test_build_plan_warns_for_legacy_process_with_stray_reliability(_mock_pag):
 def test_corroboration_backlog_present_and_verified():
     catalog = get_design_doctrine_catalog()
     backlog = catalog["corroboration_backlog"]
-    assert len(backlog) == 4
+    assert len(backlog) == 5
     backlog_entries = {item["entry"] for item in backlog}
     assert backlog_entries <= set(DESIGN_DOCTRINE_ENTRIES)
-    # Every claim was checked via search_boomi_docs (2026-06-15). Status reflects
-    # the outcome: docs_corroborated claims cite a help.boomi.com page key; the
-    # rest stay course_unverified because the KB does not cover the claim. Every
-    # item records a verification result.
+    # Every claim was checked via search_boomi_docs. Status reflects the
+    # outcome: docs_corroborated claims cite a help.boomi.com page key; the rest
+    # stay course_unverified because the KB does not cover the claim. Every item
+    # records a verification result.
     for item in backlog:
         assert item["status"] in ("course_unverified", "docs_corroborated")
         assert item.get("verification"), f"{item['entry']} missing verification note"
         if item["status"] == "docs_corroborated":
             assert item.get("docs_page_key", "").startswith("https://help.boomi.com")
     statuses = {item["entry"]: item["status"] for item in backlog}
-    # Fully corroborated by the official KB (deferred-batch return to parent):
-    assert statuses["combine_split_flow_control"] == "docs_corroborated"
+    # Fully corroborated by the official KB:
+    assert statuses["combine_split_flow_control"] == "docs_corroborated"  # deferred-batch return
+    assert statuses["connector_retry_design"] == "docs_corroborated"  # Try/Catch retry range + timing (#88)
     # Only partially documented (runtime-scoped yes; "shared across all users" no)
     # or not covered at all → claim retained as course_unverified, never overstated:
     assert statuses["test_mode_workaround_for_listener_connectors"] == "course_unverified"

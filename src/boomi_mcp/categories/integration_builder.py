@@ -2023,11 +2023,11 @@ def _process_models_error_handling(comp: Any) -> bool:
     no-error-handling plan warning never fires on a process that does handle
     errors:
       * structured route (process_kind/process_type set): a config that
-        ProcessFlowBuilder._should_emit_try_catch accepts — i.e. retry_count==0
-        with a supported DLQ mode, the only configuration that actually emits a
-        Try/Catch + DLQ wrapper. Delegating to that classmethod keeps this
-        predicate in exact lockstep with the builder (no duplicated/ drifting
-        retry+DLQ logic);
+        ProcessFlowBuilder._should_emit_try_catch accepts — i.e. retry_count
+        0..5 with a supported DLQ mode, the configurations that actually emit a
+        Try/Catch + DLQ wrapper (#51 M3.R1a for retry 0; #88 M4.5.3 for 1..5).
+        Delegating to that classmethod keeps this predicate in exact lockstep
+        with the builder (no duplicated / drifting retry+DLQ logic);
       * legacy route: a Try/Catch evident in raw process XML, or a catch-typed
         entry in a ``config.shapes`` list.
 
@@ -2037,10 +2037,10 @@ def _process_models_error_handling(comp: Any) -> bool:
     suppress the warning for a legacy process carrying a stray reliability
     block — gate it on process_kind. Codex review P2.
 
-    ``retry_count > 0`` is NOT error-handling evidence: it is gated
-    (PROCESS_RETRY_UNVERIFIED) and rejected by validate_config, so it never
-    emits a Try/Catch — _should_emit_try_catch enforces retry_count==0. Codex
-    review (architect, findings 2 + round 2).
+    A retry_count outside 0..5, the wrong type, or retry_count > 0 without a
+    supported DLQ mode is NOT error-handling evidence: _should_emit_try_catch
+    rejects it (no Try/Catch emitted), so the warning still fires. Codex review
+    (architect, findings 2 + round 2; #88 un-gate).
     """
     config = comp.config if isinstance(comp.config, dict) else {}
 

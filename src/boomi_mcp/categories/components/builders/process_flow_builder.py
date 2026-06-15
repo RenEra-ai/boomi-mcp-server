@@ -47,14 +47,16 @@ _DB_ACTION_TYPES = frozenset({"Get"})
 _SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "message", "map_ref"})
 _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subprocess_ref"})
 
-# Issue #51 M3.R1a: DLQ modes that, with retry_count == 0, emit a verified
-# Try/Catch wrapper + DLQ catch-path (every supported mode except "disabled").
-# retry_count > 0 stays gated by PROCESS_RETRY_UNVERIFIED until R1b lands.
+# Issue #51 M3.R1a / #88 M4.5.3: DLQ modes that emit a verified Try/Catch
+# wrapper + DLQ catch-path (every supported mode except "disabled"). The catch
+# leg is structural, so positive retry_count is only emittable WITH one of
+# these modes wired.
 _TRY_CATCH_DLQ_MODES = frozenset({"document_cache_ref", "error_subprocess_ref"})
 
-# Per Boomi: Try/Catch retryCount ranges 0..5. Once retry is unlocked the
-# validator will check that; today any value > 0 fails with
-# PROCESS_RETRY_UNVERIFIED.
+# Per the Boomi Try/Catch shape docs, Retry Count ranges 0..5 (count 1 retries
+# immediately; 2..5 use the platform's built-in escalating wait schedule). The
+# platform offers no caller-selected backoff. Issue #88 un-gated 1..5 (with a
+# wired catch path); values outside 0..5 fail with PROCESS_RETRY_UNVERIFIED.
 _MAX_RETRY_COUNT = 5
 
 # Visual layout. Geometry is decorative only — process correctness is
@@ -331,11 +333,12 @@ class ProcessFlowBuilder:
     def _should_emit_try_catch(cls, reliability: Any) -> bool:
         """True when the config should emit a verified Try/Catch + DLQ wrapper.
 
-        Issue #51 M3.R1a: only retry_count == 0 with a supported DLQ mode
-        (document_cache_ref / error_subprocess_ref) is un-gated. Any
-        retry_count > 0 stays gated (PROCESS_RETRY_UNVERIFIED) and never
-        reaches this path because validate_config rejects it first. This
-        guard mirrors that boundary so a direct build() call is also total.
+        Issue #51 M3.R1a + #88 M4.5.3: retry_count 0..5 with a supported DLQ
+        mode (document_cache_ref / error_subprocess_ref) is un-gated. Values
+        outside 0..5, the wrong type, or retry_count > 0 without a supported
+        DLQ mode stay gated (PROCESS_RETRY_UNVERIFIED) and never reach this path
+        because validate_config rejects them first. This guard mirrors that
+        boundary so a direct build() call is also total.
         """
         if not isinstance(reliability, dict):
             return False
@@ -343,7 +346,7 @@ class ProcessFlowBuilder:
         if (
             not isinstance(retry_count, int)
             or isinstance(retry_count, bool)
-            or retry_count != 0
+            or not (0 <= retry_count <= _MAX_RETRY_COUNT)
         ):
             return False
         dlq = reliability.get("dlq")
@@ -452,16 +455,20 @@ class ProcessFlowBuilder:
         ))
         flow.append(("stop", {"continue_": True}))
 
-        # Issue #51 M3.R1a: when retry_count == 0 and a supported DLQ mode is
-        # set, wrap the linear flow in the verified Try/Catch (catcherrors)
-        # shape with a DLQ catch path. Otherwise emit the unchanged linear
-        # flow so existing non-DLQ process XML is byte-for-byte identical.
+        # Issue #51 M3.R1a + #88 M4.5.3: when retry_count is 0..5 and a supported
+        # DLQ mode is set, wrap the linear flow in the verified Try/Catch
+        # (catcherrors) shape with a DLQ catch path, emitting the validated
+        # retry count. Otherwise emit the unchanged linear flow so existing
+        # non-DLQ process XML is byte-for-byte identical.
         reliability_cfg = config.get("reliability")
         if cls._should_emit_try_catch(reliability_cfg):
             # _should_emit_try_catch already proved reliability_cfg["dlq"] is a
-            # non-empty dict, so subscript directly (no dead `or {}` fallback).
+            # non-empty dict and retry_count is a valid int 0..5, so subscript
+            # directly (no dead `or {}` fallback).
             shape_xml_parts: List[str] = _emit_try_catch_shapes(
-                flow, reliability_cfg["dlq"]
+                flow,
+                reliability_cfg["dlq"],
+                retry_count=int(reliability_cfg.get("retry_count", 0)),
             )
         else:
             shape_xml_parts = _emit_linear_shapes(flow)
@@ -674,7 +681,7 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
             "reliability.retry_count must be an integer 0..5.",
             error_code="PROCESS_RETRY_UNVERIFIED",
             field="reliability.retry_count",
-            hint="Use a plain integer; Try/Catch retry is not yet wired.",
+            hint="Use a plain integer in 0..5.",
         )
     if retry_count < 0 or retry_count > _MAX_RETRY_COUNT:
         return BuilderValidationError(
@@ -684,20 +691,15 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
             field="reliability.retry_count",
             hint=f"Boomi Try/Catch retry range is 0..{_MAX_RETRY_COUNT}.",
         )
-    if retry_count > 0:
-        return BuilderValidationError(
-            "reliability.retry_count > 0 is not yet verified "
-            "(PROCESS_RETRY_UNVERIFIED).",
-            error_code="PROCESS_RETRY_UNVERIFIED",
-            field="reliability.retry_count",
-            hint=(
-                "Set retry_count=0. The verified Try/Catch + DLQ wrapper is "
-                "emitted for retry_count=0 (issue #51 M3.R1a); un-gating "
-                "1..5 awaits a live export confirming the Boomi "
-                "retryCount->interval mapping (issue #51 R1b)."
-            ),
-        )
+    # Issue #88 (M4.5.3): retry_count 0..5 is un-gated. The Try/Catch Retry
+    # Count range (0..5) and its built-in platform wait schedule (count 1
+    # retries immediately; 2..5 use escalating built-in waits) are
+    # docs-corroborated; the platform offers no caller-selected backoff.
+    # Positive retry is only emittable inside a Try/Catch whose catch leg
+    # routes to a DLQ (the catcherrors shape always carries a catch leg), so
+    # retry_count > 0 requires a supported Try/Catch DLQ mode (checked below).
     dlq = reliability.get("dlq")
+    dlq_mode = "disabled"
     if dlq is not None:
         if not isinstance(dlq, dict):
             # Shape error → caller mistake → PROCESS_DLQ_BINDING_INVALID
@@ -721,14 +723,25 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
                 hint=f"Supported dlq modes: {sorted(_SUPPORTED_DLQ_MODES)}.",
             )
         if dlq_mode in _TRY_CATCH_DLQ_MODES:
-            # Issue #51 M3.R1a: retry_count is guaranteed 0 here (retry_count
-            # > 0 returned PROCESS_RETRY_UNVERIFIED above), so the verified
-            # Try/Catch wrapper + DLQ catch-path is now emitted. Require a
+            # The verified Try/Catch wrapper + DLQ catch-path is emitted (issue
+            # #51 M3.R1a for retry_count=0; issue #88 for 1..5). Require a
             # resolvable catch-leg binding (literal id or $ref:KEY token).
             binding_err = _validate_dlq_binding(dlq, dlq_mode)
             if binding_err is not None:
                 return binding_err
         # dlq_mode == "disabled" → no Try/Catch; nothing else to validate.
+    if retry_count > 0 and dlq_mode not in _TRY_CATCH_DLQ_MODES:
+        return BuilderValidationError(
+            "reliability.retry_count > 0 requires a wired Try/Catch catch path.",
+            error_code="PROCESS_RETRY_UNVERIFIED",
+            field="reliability.retry_count",
+            hint=(
+                "Positive retry is emitted only inside a Try/Catch whose catch "
+                "leg routes to a DLQ. Set reliability.dlq.mode to "
+                "document_cache_ref or error_subprocess_ref, or use "
+                "retry_count=0."
+            ),
+        )
     return None
 
 
@@ -970,7 +983,9 @@ def _emit_linear_shapes(flow: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
 
 
 def _emit_try_catch_shapes(
-    flow: List[Tuple[str, Dict[str, Any]]], dlq: Dict[str, Any]
+    flow: List[Tuple[str, Dict[str, Any]]],
+    dlq: Dict[str, Any],
+    retry_count: int = 0,
 ) -> List[str]:
     """Wrap the linear flow in a verified catcherrors Try/Catch + DLQ catch leg.
 
@@ -981,7 +996,10 @@ def _emit_try_catch_shapes(
         shape{K+1} catch leg: doccacheload | processcall  (terminal)
 
     The catch leg is terminal (empty dragpoints) to match the verified live
-    shapes; retry_count is guaranteed 0 by validate_config / the build guard.
+    shapes. ``retry_count`` is a validated 0..5 value (validate_config / the
+    build guard); for counts > 0 the platform applies its built-in wait
+    schedule before each retry, then routes the failed documents down the catch
+    leg on exhaust (issue #88).
     """
     normal = flow[1:]  # source, [transform], target, stop
     n = len(normal)
@@ -997,7 +1015,9 @@ def _emit_try_catch_shapes(
     # Start keeps its noaction config; only its outgoing edge moves to catcherrors.
     parts.append(_emit_start_noaction("shape1", catcherrors_name, 1))
     parts.append(
-        _emit_catcherrors(catcherrors_name, first_try_name, catch_name, catcherrors_index)
+        _emit_catcherrors(
+            catcherrors_name, first_try_name, catch_name, catcherrors_index, retry_count
+        )
     )
     # Normal Try chain, shifted to indices 3..stop_index.
     for j, (kind, params) in enumerate(normal):
@@ -1046,13 +1066,16 @@ def _emit_try_catch_shapes(
 
 
 def _emit_catcherrors(
-    shape_name: str, try_to: str, catch_to: str, shape_index: int
+    shape_name: str, try_to: str, catch_to: str, shape_index: int, retry_count: int = 0
 ) -> str:
-    """Emit the verified catcherrors Try/Catch shape (catchAll, retryCount=0).
+    """Emit the verified catcherrors Try/Catch shape (catchAll, bounded retry).
 
     Dragpoints carry the verified identifier/text pair: Try=`default`,
-    Catch=`error` (live component dff0bf83-... shape4).
+    Catch=`error` (live component dff0bf83-... shape4). ``retry_count`` is a
+    validated 0..5 value; for retry_count=0 the emitted XML and userlabel are
+    byte-identical to the M3.R1a output (issue #88).
     """
+    retry_label = "no retry" if retry_count == 0 else f"retry {retry_count}"
     dragpoints = (
         f'<dragpoint identifier="default" name="{shape_name}.dragpoint1" '
         f'text="Try" toShape="{_escape_xml(try_to)}" '
@@ -1064,9 +1087,9 @@ def _emit_catcherrors(
     return (
         f'<shape image="catcherrors_icon" name="{shape_name}" '
         f'shapetype="catcherrors" '
-        f'userlabel="Try/Catch all errors (no retry) - route caught documents to the failure handler" '
+        f'userlabel="Try/Catch all errors ({retry_label}) - route caught documents to the failure handler" '
         f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
-        '<configuration><catcherrors catchAll="true" retryCount="0"/></configuration>'
+        f'<configuration><catcherrors catchAll="true" retryCount="{retry_count}"/></configuration>'
         f'<dragpoints>{dragpoints}</dragpoints>'
         '</shape>'
     )

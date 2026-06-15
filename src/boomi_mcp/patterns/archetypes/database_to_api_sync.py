@@ -7,12 +7,13 @@ assembly: it now composes the shipped #27 (db_extract, field_map) and #28
 IntegrationSpecV1 (DB source, JSON transform, REST target, structured process)
 suitable for build_integration(action='plan'). Every byte of XML is produced by
 the existing component builders through those primitives; this file emits JSON
-component specs only and never calls a live Boomi account. DLQ now wires the
+component specs only and never calls a live Boomi account. DLQ wires the
 verified Try/Catch + DLQ catch path for modes document_cache_ref /
-error_subprocess_ref (process retry_count=0; #51 M3.R1a). Caller retry
-(max_attempts>1), schedule activation, watermark update, and dynamic
-operation-property wiring remain represented as metadata only and are deferred
-(#51 R1b / M3).
+error_subprocess_ref (#51 M3.R1a), and caller retry (max_attempts 1..6 →
+Try/Catch retry_count 0..5, platform-timed) is wired through to the emitted
+process when a catch path is configured (#88 M4.5.3). Schedule activation,
+watermark update, and dynamic operation-property wiring remain represented as
+metadata only and are deferred (M3).
 
 M2.1a (issue #44) replaces the legacy ``transform.mappings`` /
 ``transform.payload_template`` / ``transform.script_slots`` surface with:
@@ -1498,27 +1499,26 @@ class RetryPolicy(BaseModel):
     max_attempts: int = Field(
         default=1,
         ge=1,
+        le=6,
         description=(
-            "Maximum number of attempts per record (1 means no retry). The "
-            "contract surfaces this value verbatim; downstream builders wire "
-            "the retry shape."
+            "Total attempts per record, 1..6 (1 means no retry). Maps to the "
+            "Boomi Try/Catch Retry Count as retry_count = max_attempts - 1 "
+            "(so 6 attempts = 5 retries, the platform maximum). Wired to the "
+            "emitted process only when a Try/Catch catch path (DLQ) is "
+            "configured."
         ),
     )
-    backoff: Literal["none", "fixed", "exponential"] = Field(
-        default="none",
+    backoff: Literal["platform"] = Field(
+        default="platform",
         description=(
-            "Backoff strategy between retry attempts. 'none' retries "
-            "immediately; 'fixed' waits a constant interval; 'exponential' "
-            "doubles the interval each attempt."
-        ),
-    )
-    initial_interval_seconds: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description=(
-            "Initial backoff interval in seconds for 'fixed' / 'exponential' "
-            "backoffs. The contract does not enforce a default; downstream "
-            "builders pick one when this value is omitted."
+            "Retry timing is platform-controlled and not caller-selectable: "
+            "the Boomi Try/Catch shape retries the first attempt immediately "
+            "and applies its built-in escalating wait schedule for subsequent "
+            "retries (counts 2..5). Arbitrary fixed/exponential backoff with a "
+            "caller-chosen interval is NOT supported by the platform; for a "
+            "custom backoff window, design a scheduled re-run or queue-based "
+            "retry instead (guidance_only — see design_doctrine "
+            "connector_retry_design)."
         ),
     )
 
@@ -1707,6 +1707,31 @@ class ReliabilityConfig(BaseModel):
             "Drives the retry and DLQ policies above."
         ),
     )
+
+    @model_validator(mode="after")
+    def _enforce_retry_requires_wired_dlq(self) -> "ReliabilityConfig":
+        # Issue #88 (M4.5.3): positive retry is only emittable inside a
+        # Try/Catch whose catch leg routes to a DLQ — the platform Try/Catch
+        # shape always carries a catch leg. So max_attempts > 1 (retry_count
+        # > 0) requires a wired DLQ mode (document_cache_ref /
+        # error_subprocess_ref); guidance_only / disabled DLQ cannot carry
+        # retry. This mirrors the builder's PROCESS_RETRY_UNVERIFIED rule at the
+        # contract layer with a clean parameter-validation error.
+        if self.retry.max_attempts > 1:
+            target = self.dlq.target if self.dlq.enabled else None
+            wired = target is not None and target.mode in (
+                "document_cache_ref",
+                "error_subprocess_ref",
+            )
+            if not wired:
+                raise ValueError(
+                    "reliability.retry.max_attempts > 1 requires a wired DLQ "
+                    "catch path: set reliability.dlq.enabled=true with "
+                    "target.mode='document_cache_ref' or 'error_subprocess_ref'. "
+                    "Positive retry is emitted only inside a Try/Catch whose "
+                    "catch leg routes to a DLQ."
+                )
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -2311,13 +2336,13 @@ def _derive_process_reliability(
     ``reliability`` block plus an optional ``$ref`` dependency key for the DLQ
     catch-leg binding.
 
-    The emitted process always carries ``retry_count == 0`` — caller retry
-    (max_attempts > 1) is recorded as intent only and remains gated for #51 R1b
-    (retryCount→interval mapping). For ``retry_count == 0`` the builder emits
-    the verified Try/Catch + DLQ catch path when a wired DLQ mode and its
-    binding id are present (issue #51 M3.R1a). ``guidance_only`` and ``disabled``
-    emit no Try/Catch.
+    The emitted process ``retry_count`` is ``max_attempts - 1`` (0..5), wired
+    when a Try/Catch catch path (a wired DLQ mode) is present (issue #88
+    M4.5.3, building on #51 M3.R1a). The ReliabilityConfig validator guarantees
+    ``max_attempts == 1`` (retry_count 0) on the disabled / guidance_only
+    branches, so those still emit no retry and no Try/Catch.
     """
+    retry_count = reliability.retry.max_attempts - 1
     dlq = reliability.dlq
     if not dlq.enabled or dlq.target is None:
         return {"retry_count": 0, "dlq": {"mode": "disabled"}}, None
@@ -2325,7 +2350,7 @@ def _derive_process_reliability(
     target = dlq.target
     if target.mode == "document_cache_ref":
         block = {
-            "retry_count": 0,
+            "retry_count": retry_count,
             "dlq": {
                 "mode": "document_cache_ref",
                 "document_cache_id": target.document_cache_id,
@@ -2334,12 +2359,13 @@ def _derive_process_reliability(
         return block, _ref_dep_key(target.document_cache_id)
     if target.mode == "error_subprocess_ref":
         block = {
-            "retry_count": 0,
+            "retry_count": retry_count,
             "dlq": {"mode": "error_subprocess_ref", "process_id": target.process_id},
         }
         return block, _ref_dep_key(target.process_id)
 
-    # guidance_only — recorded as intent in operational_intent; no builder wiring.
+    # guidance_only — recorded as intent in operational_intent; no builder
+    # wiring. The validator guarantees max_attempts == 1 here (retry_count 0).
     return {"retry_count": 0, "dlq": {"mode": "disabled"}}, None
 
 
@@ -2517,8 +2543,10 @@ def _build_operational_intent(
     """Compose the operational primitives' fragments into intent metadata.
 
     Verified DLQ modes (document_cache_ref / error_subprocess_ref) ARE wired
-    into the emitted process reliability (#51 M3.R1a); this records the matching
-    intent. Retry (max_attempts>1) and guidance_only DLQ remain metadata-only.
+    into the emitted process reliability (#51 M3.R1a), and caller retry
+    (max_attempts → retry_count, #88 M4.5.3) is wired when a catch path is
+    configured; this records the matching intent. guidance_only DLQ remains
+    metadata-only.
     """
     execution = parameters.execution
     reliability = parameters.reliability
@@ -2603,16 +2631,14 @@ def _build_operational_intent(
     if classifier:
         reliability_intent["error_classifier"] = classifier
 
-    # Requested retry is recorded as intent only; the process stays retry_count=0.
-    # retry > 1 mapping (retryCount→interval) is gated for #51 R1b.
+    # Issue #88 (M4.5.3): retry is now wired to the emitted process when a
+    # Try/Catch catch path (a wired DLQ) is present — process_retry_count =
+    # max_attempts - 1. Timing is platform-controlled (backoff="platform").
     retry_intent: Dict[str, Any] = {
         "requested_max_attempts": reliability.retry.max_attempts,
         "backoff": reliability.retry.backoff,
-        "process_retry_count": 0,
-        "deferred_to": "#51 R1b",
+        "process_retry_count": _derive_process_reliability(reliability)[0]["retry_count"],
     }
-    if reliability.retry.initial_interval_seconds is not None:
-        retry_intent["initial_interval_seconds"] = reliability.retry.initial_interval_seconds
     reliability_intent["retry"] = retry_intent
 
     # Record the DLQ block actually emitted into the process (truthful — the
@@ -2692,10 +2718,11 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             "Every byte of XML is produced by the existing component builders; "
             "the archetype emits JSON component specs only and never calls "
             "Boomi. Emits a verified Try/Catch + DLQ catch path when DLQ is "
-            "enabled with mode document_cache_ref or error_subprocess_ref "
-            "(process retry_count stays 0; #51 M3.R1a). Schedule activation, "
-            "watermark update, dynamic operation-property wiring, and "
-            "retry>1+DLQ remain deferred (#51 R1b / M3)."
+            "enabled with mode document_cache_ref or error_subprocess_ref, and "
+            "wires caller retry (max_attempts 1..6 → platform-timed Try/Catch "
+            "retry_count 0..5) through to the emitted process (#51 M3.R1a / #88 "
+            "M4.5.3). Schedule activation, watermark update, and dynamic "
+            "operation-property wiring remain deferred (M3)."
         ),
         tags=[
             "database",
@@ -2724,13 +2751,13 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "Caller-declared DB result schema and caller-supplied JSON profile tree are the M2 source of truth.",
         "Emits executable component specs (DB source, JSON transform, REST target, process) for build_integration(action='plan').",
         "All XML is produced by the existing component builders; the archetype emits JSON component specs only.",
-        "Emits a verified Try/Catch + DLQ catch path when dlq.enabled with mode document_cache_ref or error_subprocess_ref (process retry_count stays 0; #51 M3.R1a).",
+        "Emits a verified Try/Catch + DLQ catch path when dlq.enabled with mode document_cache_ref or error_subprocess_ref; caller retry (max_attempts 1..6) is wired as platform-timed Try/Catch retry_count 0..5 (#51 M3.R1a / #88 M4.5.3).",
         "Credentials cross the contract only as opaque credential_ref values and are never echoed in errors.",
     ]
     limitations = [
         "Emits JSON component specs only; performs no Boomi mutation and exposes no raw XML.",
-        "DLQ wiring is emitted for mode document_cache_ref / error_subprocess_ref (process retry_count=0); legacy folder/topic/queue targets require mode='guidance_only' and are recorded as metadata only (no wiring).",
-        "Combining caller retry (max_attempts>1) with emitted DLQ is gated for M4.5.3 (#51 R1b); the emitted process keeps retry_count=0 and records retry as intent.",
+        "DLQ wiring is emitted for mode document_cache_ref / error_subprocess_ref; legacy folder/topic/queue targets require mode='guidance_only' and are recorded as metadata only (no wiring).",
+        "Retry timing is platform-controlled (Try/Catch built-in waits); caller-selected fixed/exponential backoff is NOT supported (backoff='platform' only). retry max_attempts>1 requires a wired DLQ catch path.",
         "Schedule intent is represented as metadata only; deployment and schedule activation are M3.",
         "Watermark is represented as metadata only; watermark-update and dynamic operation-property wiring are deferred (#51).",
         "REST create-mode emits only auth='none'; secured auth (basic / bearer / oauth2) requires binding.mode='reuse'.",
@@ -2950,8 +2977,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "reliability": {
                     "retry": {
                         "max_attempts": 5,
-                        "backoff": "exponential",
-                        "initial_interval_seconds": 2,
+                        "backoff": "platform",
                     },
                     "dlq": {
                         "enabled": True,
@@ -3233,9 +3259,10 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "Emit executable component specs (DB source, JSON transform, "
                 "REST target, structured process) for build_integration("
                 "action='plan'); a verified Try/Catch + DLQ catch path is "
-                "emitted for DLQ modes document_cache_ref / error_subprocess_ref "
-                "(retry_count=0; #51 M3.R1a). Deployment, schedule activation, "
-                "and retry>1+DLQ remain M3 / #51 R1b.",
+                "emitted for DLQ modes document_cache_ref / error_subprocess_ref, "
+                "with caller retry (max_attempts 1..6 → platform-timed "
+                "retry_count 0..5) wired through (#51 M3.R1a / #88 M4.5.3). "
+                "Deployment and schedule activation remain M3.",
             ],
             endpoints=[db_endpoint, rest_endpoint],
             flows=flows,
@@ -3268,8 +3295,8 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 },
                 "limitations": {
                     "schedule_activation": "M3 (deploy to a runtime first)",
-                    "process_dlq": "emitted for document_cache_ref / error_subprocess_ref (retry_count=0; #51 M3.R1a)",
-                    "process_retry_gt1": "#51 R1b (retry max_attempts>1 mapping; emitted retry_count stays 0)",
+                    "process_dlq": "emitted for document_cache_ref / error_subprocess_ref (#51 M3.R1a)",
+                    "process_retry": "max_attempts 1..6 wired as platform-timed Try/Catch retry_count 0..5 (#88 M4.5.3); requires a wired DLQ catch path; no caller-selected backoff",
                     "watermark_update": "#51 (dynamic operation-property wiring)",
                     "db_create_auth": (
                         "username_password only; windows_integrated requires reuse"

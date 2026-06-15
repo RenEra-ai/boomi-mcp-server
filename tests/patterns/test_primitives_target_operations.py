@@ -909,9 +909,9 @@ class TestComposition:
         )
         assert err is None
 
-    def test_enabled_dlq_with_retry_still_gated(self):
-        # retry_count > 0 + DLQ stays gated until issue #51 R1b verifies the
-        # retryCount->interval mapping against a live export.
+    def test_enabled_dlq_with_retry_now_accepted(self):
+        # Issue #88: retry_count 1..5 with a wired DLQ catch path is un-gated
+        # (Boomi Try/Catch Retry Count range 0..5, platform-timed).
         dlq_frag = _fragment(
             DlqWriterPrimitive,
             {"mode": "document_cache_ref", "document_cache_id": "dc-1"},
@@ -920,5 +920,4 @@ class TestComposition:
         err = ProcessFlowBuilder.validate_config(
             self._process_config(reliability), depends_on=[]
         )
-        assert err is not None
-        assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
+        assert err is None

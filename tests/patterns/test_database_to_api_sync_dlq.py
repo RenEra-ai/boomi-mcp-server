@@ -161,14 +161,15 @@ def test_disabled_unchanged():
     assert _main_process(spec)["config"]["reliability"] == {"retry_count": 0, "dlq": {"mode": "disabled"}}
 
 
-def test_retry_gt1_with_dlq_keeps_retry_count_zero_but_wires_dlq():
-    # Caller retry>1 is intent-only (gated #51 R1b); DLQ still wires.
+def test_retry_gt1_with_wired_dlq_emits_retry_count():
+    # Issue #88: caller retry max_attempts=5 with a wired DLQ emits
+    # process retry_count = max_attempts - 1 = 4 (platform-timed).
     spec = _emit(
         {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}},
-        retry={"max_attempts": 5, "backoff": "exponential", "initial_interval_seconds": 2},
+        retry={"max_attempts": 5, "backoff": "platform"},
     )
     rel = _main_process(spec)["config"]["reliability"]
-    assert rel["retry_count"] == 0
+    assert rel["retry_count"] == 4
     assert rel["dlq"] == {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}
 
 
@@ -255,9 +256,17 @@ def test_operational_intent_guidance_only_status_and_no_freeform_echo():
     assert "<<secret reason addr>>" not in blob
 
 
-def test_operational_intent_retry_deferral_retargeted():
-    spec = _emit(retry={"max_attempts": 5})
-    assert _operational_intent(spec)["reliability"]["retry"]["deferred_to"] == "#51 R1b"
+def test_operational_intent_retry_no_longer_deferred():
+    # Issue #88: with a wired DLQ, retry is emitted (not deferred). The intent
+    # records the emitted process_retry_count and carries no deferred_to.
+    spec = _emit(
+        {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}},
+        retry={"max_attempts": 5},
+    )
+    retry = _operational_intent(spec)["reliability"]["retry"]
+    assert "deferred_to" not in retry
+    assert retry["requested_max_attempts"] == 5
+    assert retry["process_retry_count"] == 4
 
 
 # ---------------------------------------------------------------------------

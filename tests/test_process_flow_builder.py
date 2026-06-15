@@ -425,10 +425,24 @@ class TestValidateConfig:
         assert err.error_code == "PROCESS_SHAPE_UNSUPPORTED"
         assert err.field == "transform.map_ref"
 
-    def test_rejects_retry_count_positive(self):
+    def test_rejects_retry_count_positive_without_dlq(self):
+        # Issue #88: positive retry needs a wired Try/Catch catch path (DLQ).
         cfg = _base_config(reliability={"retry_count": 1})
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
+        assert err.field == "reliability.retry_count"
+
+    def test_accepts_retry_count_positive_with_dlq(self):
+        # Issue #88: retry_count 1..5 with a wired DLQ catch path is un-gated.
+        for rc in (1, 5):
+            cfg = _base_config(reliability={
+                "retry_count": rc,
+                "dlq": {
+                    "mode": "document_cache_ref",
+                    "document_cache_id": "11111111-1111-1111-1111-111111111111",
+                },
+            })
+            assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None, rc
 
     def test_rejects_retry_count_out_of_range(self):
         cfg = _base_config(reliability={"retry_count": 99})

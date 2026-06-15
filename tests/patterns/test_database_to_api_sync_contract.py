@@ -231,10 +231,11 @@ def _valid_full() -> Dict[str, Any]:
             "run_metadata": {"owner": "crm-team"},
         },
         "reliability": {
+            # guidance_only DLQ wires no catch path → retry stays 1 (#88
+            # validator: retry>1 requires a wired DLQ). backoff is platform-only.
             "retry": {
-                "max_attempts": 5,
-                "backoff": "exponential",
-                "initial_interval_seconds": 2,
+                "max_attempts": 1,
+                "backoff": "platform",
             },
             "dlq": {
                 "enabled": True,

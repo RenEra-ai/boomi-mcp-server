@@ -195,8 +195,9 @@ class PrimitivePattern(PatternBase):
           * ``depends_on``    — component keys the ``process_config`` references.
           * ``metadata``      — primitive-specific planning metadata.
 
-        It is representation only: emitting a ``reliability`` fragment never
-        un-gates ``ProcessFlowBuilder``'s ``PROCESS_RETRY_UNVERIFIED`` check.
+        It is representation only: a primitive ``reliability`` fragment does not
+        drive process retry/DLQ — that is wired by the archetype's
+        RetryPolicy/DlqPolicy + ``ProcessFlowBuilder`` (#51 M3.R1a / #88 M4.5.3).
         """
         return {}
 

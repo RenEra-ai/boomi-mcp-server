@@ -38,13 +38,15 @@ from ..patterns import (
 
 def _reliability_downgrade_hints(spec: Any) -> list[str]:
     """Surface design_doctrine pointers when a caller's reliability intent
-    (retry / DLQ) was recorded but the emitted process keeps it disabled.
+    (retry / DLQ) was recorded but NOT emitted into the process.
 
-    Reads ``validation_rules.operational_intent.reliability`` — where
-    database_to_api_sync records requested-but-deferred retry/DLQ while the
-    process itself stays retry-disabled / DLQ-disabled (gated capabilities).
-    Archetypes that emit no such intent simply yield no hints. Read-only —
-    never mutates the spec; archetype-agnostic via defensive navigation.
+    Reads ``validation_rules.operational_intent.reliability``. Retry and DLQ are
+    emittable when a wired Try/Catch catch path is configured (#51 M3.R1a / #88
+    M4.5.3); this points at the doctrine when the recorded intent did not reach
+    the emitted process (e.g. retry requested with no emitted retry_count, or a
+    guidance_only DLQ). Archetypes that emit no such intent yield no hints.
+    Read-only — never mutates the spec; archetype-agnostic via defensive
+    navigation.
     """
     validation_rules = getattr(spec, "validation_rules", None)
     if not isinstance(validation_rules, dict):
@@ -70,9 +72,10 @@ def _reliability_downgrade_hints(spec: Any) -> list[str]:
         ):
             hints.append(
                 "Requested retry (max_attempts > 1) is recorded as intent but "
-                "the emitted process keeps retry disabled (a gated capability). "
-                "See get_schema_template(schema_name="
-                "'design_pattern:connector_retry_design')."
+                "the emitted process has no retry — retry requires a wired "
+                "Try/Catch catch path (a document_cache_ref / "
+                "error_subprocess_ref DLQ). See get_schema_template("
+                "schema_name='design_pattern:connector_retry_design')."
             )
 
     dlq_requested = reliability.get("dlq_requested")

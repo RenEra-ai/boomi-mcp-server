@@ -193,19 +193,23 @@ _ENTRIES: List[Dict[str, Any]] = [
             "send-and-hope."
         ),
         "when_to_use": (
-            "Around connector calls subject to transient faults. Tune by "
-            "connector class: network/HTTP transients tolerate two to three "
-            "retries; database writes risk duplicate transactions so allow "
-            "at most one retry and prefer idempotent statements."
+            "Around connector calls subject to transient faults. The Try/Catch "
+            "Retry Count is bounded 0 to 5: a count of one retries immediately, "
+            "and two to five apply the platform's built-in escalating wait "
+            "schedule. Tune by connector class (design guidance): network/HTTP "
+            "transients tolerate two to three retries; database writes risk "
+            "duplicate transactions so allow at most one retry and prefer "
+            "idempotent statements; transform/map failures take zero retries."
         ),
         "when_not_to_use": (
             "Transform/map errors (zero retries — fix the map instead) and "
-            "non-idempotent writes that cannot be made safe. Retries fire "
-            "immediately with no backoff, so do not retry where a backoff "
-            "window is required."
+            "non-idempotent writes that cannot be made safe. The platform owns "
+            "the retry timing, so a caller-selected fixed or exponential backoff "
+            "interval is not available; if a custom backoff window is required, "
+            "design a scheduled re-run or queue-based retry instead."
         ),
         "verification_status": "docs_corroborated",
-        "capability_status": "gated",
+        "capability_status": "emittable_today",
         "category": "reliability",
         "mutual_exclusion": [],
         "cross_refs": [
@@ -214,7 +218,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "idempotency_and_duplicates",
             "reliable_and_sequential_messaging",
         ],
-        "provenance": "companion_unverified",
+        "provenance": "docs_corroborated",
     },
     {
         "name": "try_catch_placement",
@@ -1365,6 +1369,18 @@ _ENTRIES: List[Dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 CORROBORATION_BACKLOG: List[Dict[str, str]] = [
+    {
+        "claim": "Try/Catch Retry Count ranges 0..5; a count of one retries "
+        "immediately and two to five apply the platform's built-in escalating "
+        "wait schedule (no caller-selected backoff interval).",
+        "entry": "connector_retry_design",
+        "status": "docs_corroborated",
+        "docs_page_key": "https://help.boomi.com/docs/Atomsphere/Integration/"
+        "Process%20building/r-atm-Try_Catch_shape_7b3dd8df-426e-4ed7-824a-40cc0b5dc68d",
+        "verification": "search_boomi_docs (2026-06-15): the Try/Catch shape page "
+        "documents the 0..5 retry range and the built-in wait schedule; un-gated "
+        "in process_flow_builder (#88 M4.5.3).",
+    },
     {
         "claim": "A change-data-capture diff over a partial/test dataset reads "
         "the missing rows as mass deletions.",

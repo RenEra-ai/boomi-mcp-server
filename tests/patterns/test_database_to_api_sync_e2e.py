@@ -171,7 +171,8 @@ def _full_reuse() -> Dict[str, Any]:
             "run_metadata": {"owner": "crm-team"},
         },
         "reliability": {
-            "retry": {"max_attempts": 5, "backoff": "exponential", "initial_interval_seconds": 2},
+            # guidance_only DLQ wires no catch path → retry stays 1 (#88).
+            "retry": {"max_attempts": 1, "backoff": "platform"},
             "dlq": {"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<dlq queue address>>"}},
             "error_classifier": {"custom_rules": ["rate_limit_exhausted"]},
         },
@@ -314,8 +315,8 @@ class TestFullLocalChain:
         # watermark (incremental) intent
         assert oi["watermark"]["enabled"] is True
         assert oi["watermark"]["field"] == "source_b"
-        # retry request + DLQ request, both recorded but gated
-        assert oi["reliability"]["retry"]["requested_max_attempts"] == 5
+        # guidance_only DLQ → retry stays 1; emitted process_retry_count 0 (#88)
+        assert oi["reliability"]["retry"]["requested_max_attempts"] == 1
         assert oi["reliability"]["retry"]["process_retry_count"] == 0
         assert oi["reliability"]["dlq"] == {"mode": "disabled"}
         assert oi["reliability"]["dlq_requested"]["requested"] is True

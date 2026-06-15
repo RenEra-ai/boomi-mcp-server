@@ -107,6 +107,37 @@ def test_document_cache_matches_golden_fixture():
     assert ET.canonicalize(emitted) == ET.canonicalize(expected)
 
 
+_FIXTURE_RETRY2 = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "try_catch_dlq_retry_count_2.xml"
+)
+
+
+def test_document_cache_retry_count_2_matches_golden_fixture():
+    """Issue #88: a retry_count=2 build emits the verified Try/Catch with the
+    bounded retry attribute. Builder-emitted golden (no vendor XML)."""
+    cfg = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
+    cfg["reliability"]["retry_count"] = 2
+    emitted = ProcessFlowBuilder.build(
+        cfg, name="TryCatch DLQ Retry2 Golden", folder_name="Golden/Fixtures"
+    )
+    assert ET.canonicalize(emitted) == ET.canonicalize(_FIXTURE_RETRY2.read_text())
+
+
+def test_retry_count_2_emits_bounded_retry_attribute():
+    cfg = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
+    cfg["reliability"]["retry_count"] = 2
+    _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    catcherrors = shapes[1]
+    cfg_node = catcherrors.find("configuration/catcherrors")
+    assert cfg_node.attrib["retryCount"] == "2"
+    assert cfg_node.attrib["catchAll"] == "true"
+    # Catch leg still present + terminal (unchanged by the retry count).
+    assert shapes[-1].attrib["shapetype"] == "doccacheload"
+
+
 # ---------------------------------------------------------------------------
 # catcherrors wrapper structure (verified live shape)
 # ---------------------------------------------------------------------------
@@ -292,9 +323,22 @@ class TestValidateGating:
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
 
-    def test_retry_count_positive_with_dlq_still_gated(self):
+    def test_retry_count_positive_with_dlq_now_accepted(self):
+        # Issue #88: retry_count 1..5 with a wired DLQ catch path is un-gated.
         cfg = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
         cfg["reliability"]["retry_count"] = 1
+        assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+        cfg["reliability"]["retry_count"] = 5
+        assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+        # Out-of-range retry stays gated.
+        cfg["reliability"]["retry_count"] = 6
+        err6 = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+        assert err6.error_code == "PROCESS_RETRY_UNVERIFIED"
+
+    def test_retry_count_positive_without_dlq_still_gated(self):
+        # Positive retry has no Try/Catch catch leg without a wired DLQ mode.
+        cfg = _config({"mode": "disabled"})
+        cfg["reliability"]["retry_count"] = 2
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
         assert err.field == "reliability.retry_count"
@@ -331,8 +375,16 @@ class TestValidateGating:
     def test_should_emit_try_catch_guard(self):
         good = {"retry_count": 0, "dlq": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}}
         assert ProcessFlowBuilder._should_emit_try_catch(good) is True
+        # Issue #88: retry_count 1..5 with a supported DLQ mode now emits.
         assert ProcessFlowBuilder._should_emit_try_catch(
             {"retry_count": 1, "dlq": {"mode": "document_cache_ref"}}
+        ) is True
+        assert ProcessFlowBuilder._should_emit_try_catch(
+            {"retry_count": 5, "dlq": {"mode": "error_subprocess_ref"}}
+        ) is True
+        # Out of range / disabled / None → no Try/Catch.
+        assert ProcessFlowBuilder._should_emit_try_catch(
+            {"retry_count": 6, "dlq": {"mode": "document_cache_ref"}}
         ) is False
         assert ProcessFlowBuilder._should_emit_try_catch(
             {"retry_count": 0, "dlq": {"mode": "disabled"}}

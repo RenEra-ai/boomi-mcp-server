@@ -158,7 +158,10 @@ def _full_reuse() -> Dict[str, Any]:
             "run_metadata": {"owner": "crm-team"},
         },
         "reliability": {
-            "retry": {"max_attempts": 5, "backoff": "exponential", "initial_interval_seconds": 2},
+            # guidance_only DLQ does not wire a catch path, so retry must stay 1
+            # (issue #88 validator: retry>1 requires a wired DLQ). Wired-DLQ
+            # retry is covered by test_wired_dlq_retry_reaches_process_builder.
+            "retry": {"max_attempts": 1, "backoff": "platform"},
             "dlq": {"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<dlq queue address>>"}},
             "error_classifier": {"custom_rules": ["rate_limit_exhausted"]},
         },
@@ -302,11 +305,12 @@ class TestOperationalIntent:
         }
         assert oi["execution"]["run_metadata"] == {"owner": "crm-team"}
         assert oi["expected_status_codes"] == [200, 202]
-        # Requested retry is recorded as intent only; the process stays gated.
+        # guidance_only DLQ carries no catch path, so max_attempts stays 1 and
+        # the emitted process_retry_count is 0 (issue #88).
         retry = oi["reliability"]["retry"]
-        assert retry["requested_max_attempts"] == 5
+        assert retry["requested_max_attempts"] == 1
         assert retry["process_retry_count"] == 0
-        assert retry["deferred_to"] == "#51 R1b"
+        assert "deferred_to" not in retry
         assert oi["reliability"]["dlq"] == {"mode": "disabled"}
         assert oi["reliability"]["dlq_requested"]["requested"] is True
         assert oi["reliability"]["dlq_requested"]["status"] == "guidance_only"
@@ -471,15 +475,25 @@ class TestPlanner:
         assert planned["validation_rules"]["component_count"] == len(planned["components"]) == 10
 
     @patch(_PAGINATE_TARGET)
-    def test_requested_retry_dlq_do_not_reach_process_builder(self, mock_pag):
-        """Even when the caller requests retry>1 + DLQ enabled, the emitted
-        process keeps retry_count=0 / dlq disabled, so the plan succeeds and
-        PROCESS_RETRY_UNVERIFIED never trips."""
+    def test_wired_dlq_retry_reaches_process_builder(self, mock_pag):
+        """Issue #88: with a wired DLQ (document_cache_ref), caller retry
+        max_attempts=3 is emitted as process retry_count=2 (max_attempts-1) and
+        the plan succeeds — PROCESS_RETRY_UNVERIFIED never trips."""
+        import copy
         mock_pag.return_value = []
-        spec = _spec(_full_reuse())  # requests max_attempts=5 + dlq enabled
+        payload = copy.deepcopy(_full_reuse())
+        payload["reliability"]["retry"] = {"max_attempts": 3, "backoff": "platform"}
+        payload["reliability"]["dlq"] = {
+            "enabled": True,
+            "target": {
+                "mode": "document_cache_ref",
+                "document_cache_id": "<<existing dlq cache id>>",
+            },
+        }
+        spec = _spec(payload)
         proc = _by_key(spec)["main_process"]
-        assert proc["config"]["reliability"]["retry_count"] == 0
-        assert proc["config"]["reliability"]["dlq"]["mode"] == "disabled"
+        assert proc["config"]["reliability"]["retry_count"] == 2
+        assert proc["config"]["reliability"]["dlq"]["mode"] == "document_cache_ref"
         plan = _build_plan(MagicMock(), {"integration_spec": spec})
         assert plan["_success"] is True, plan
 

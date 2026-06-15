@@ -14,7 +14,9 @@ components:
 
 Each implements ``emit_components`` as a no-op (``[]``) and overrides
 ``emit_fragment``. Emitting a ``reliability`` fragment is representation only —
-it never un-gates ``ProcessFlowBuilder``'s ``PROCESS_RETRY_UNVERIFIED`` check.
+these fragments do not drive process retry. Process-level Try/Catch retry/DLQ
+is wired by the archetype's RetryPolicy/DlqPolicy + ProcessFlowBuilder (#51
+M3.R1a / #88 M4.5.3), not by these primitive fragments.
 
 Validation philosophy mirrors issue #27 ``db_extract``: parameter models carry
 structural / cross-field shape constraints (raising pydantic ``ValidationError``
