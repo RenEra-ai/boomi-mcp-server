@@ -109,11 +109,19 @@ _SQL_CRUD_RE = re.compile(
 
 
 def _flatten_strings(node):
-    """Yield every string anywhere in a nested dict/list structure."""
+    """Yield every string anywhere in a nested dict/list structure.
+
+    Skips ``docs_page_key`` values: those are help.boomi.com documentation
+    citation URLs (the #86 acceptance criterion mandates citing a docs page key
+    for corroborated claims) and legitimately contain a UUID slug, so they are
+    not doctrine prose and must not trip the anti-template UUID guard.
+    """
     if isinstance(node, str):
         yield node
     elif isinstance(node, dict):
-        for value in node.values():
+        for key, value in node.items():
+            if key == "docs_page_key":
+                continue
             yield from _flatten_strings(value)
     elif isinstance(node, list):
         for value in node:
@@ -525,14 +533,25 @@ def test_build_plan_warns_for_legacy_process_with_stray_reliability(_mock_pag):
 # ---------------------------------------------------------------------------
 
 
-def test_corroboration_backlog_present_and_labeled():
+def test_corroboration_backlog_present_and_verified():
     catalog = get_design_doctrine_catalog()
     backlog = catalog["corroboration_backlog"]
     assert len(backlog) == 4
     backlog_entries = {item["entry"] for item in backlog}
     assert backlog_entries <= set(DESIGN_DOCTRINE_ENTRIES)
-    # Each backlog CLAIM is course-derived and stays unverified until
-    # corroborated (decoupled from the host entry's overall provenance — the
-    # claim, not the whole entry, is what carries the label).
+    # Every claim was checked via search_boomi_docs (2026-06-15). Status reflects
+    # the outcome: docs_corroborated claims cite a help.boomi.com page key; the
+    # rest stay course_unverified because the KB does not cover the claim. Every
+    # item records a verification result.
     for item in backlog:
-        assert item["status"] == "course_unverified"
+        assert item["status"] in ("course_unverified", "docs_corroborated")
+        assert item.get("verification"), f"{item['entry']} missing verification note"
+        if item["status"] == "docs_corroborated":
+            assert item.get("docs_page_key", "").startswith("https://help.boomi.com")
+    statuses = {item["entry"]: item["status"] for item in backlog}
+    # Corroborated by the official KB:
+    assert statuses["combine_split_flow_control"] == "docs_corroborated"
+    assert statuses["test_mode_workaround_for_listener_connectors"] == "docs_corroborated"
+    # KB does not cover these design-level claims → label retained:
+    assert statuses["change_data_capture_strategy"] == "course_unverified"
+    assert statuses["document_tracking_as_monitoring"] == "course_unverified"

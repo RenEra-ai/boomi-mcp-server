@@ -1370,28 +1370,42 @@ CORROBORATION_BACKLOG: List[Dict[str, str]] = [
         "the missing rows as mass deletions.",
         "entry": "change_data_capture_strategy",
         "status": "course_unverified",
-        "verify_via": "search_boomi_docs / live QA",
+        "verification": "search_boomi_docs (2026-06-15) returned low_confidence — "
+        "the official KB does not cover this design-level CDC diff behavior; "
+        "course_unverified retained.",
     },
     {
         "claim": "Return Documents returns only after the full subprocess "
         "completes (a deferred batch).",
         "entry": "combine_split_flow_control",
-        "status": "course_unverified",
-        "verify_via": "search_boomi_docs / live QA",
+        "status": "docs_corroborated",
+        "docs_page_key": "https://help.boomi.com/docs/Atomsphere/Integration/"
+        "Process%20building/r-atm-Return_Documents_shape_61192114-0f9d-49d8-bcd0-1c8d6a843db2",
+        "verification": "search_boomi_docs (2026-06-15): the Return Documents step "
+        "page states documents that reach the step are 'batched and returned to "
+        "the parent process' — deferred-batch return corroborated.",
     },
     {
         "claim": "A tracked field on a repeating element captures the first "
         "occurrence only.",
         "entry": "document_tracking_as_monitoring",
         "status": "course_unverified",
-        "verify_via": "search_boomi_docs / live QA",
+        "verification": "search_boomi_docs (2026-06-15) returned low_confidence — "
+        "the official KB covers tracked-field setup but not the repeating-element "
+        "first-occurrence behavior; course_unverified retained.",
     },
     {
         "claim": "Test-Mode extension values are runtime-scoped and shared "
         "across all users.",
         "entry": "test_mode_workaround_for_listener_connectors",
-        "status": "course_unverified",
-        "verify_via": "search_boomi_docs / live QA",
+        "status": "docs_corroborated",
+        "docs_page_key": "https://help.boomi.com/docs/Atomsphere/Integration/"
+        "Process%20building/c-atm-Setting_Extension_Values_for_Use_in_Test_Mode_"
+        "a3aa3a4a-03b7-488c-b70c-f145af642897",
+        "verification": "search_boomi_docs (2026-06-15): 'Test mode extension "
+        "values are remembered per Runtime' corroborates the runtime-scoped claim; "
+        "'shared across all users' is implied by per-Runtime persistence but not "
+        "stated verbatim.",
     },
 ]
 
