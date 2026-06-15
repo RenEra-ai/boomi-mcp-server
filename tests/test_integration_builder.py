@@ -5970,6 +5970,46 @@ class TestWrapperSubprocessPlan:
         assert step["planned_action"] == "error_process_validation"
         assert step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
 
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_creates_child_first_and_resolves_id_into_parent(self, mock_pag, mock_exec):
+        # Apply-layer proof (parallel to test_apply_resolves_ref_token_to_created_profile_id):
+        # with the parent listed FIRST, _apply_plan executes the child first, puts
+        # its created id in the registry, and the parent's resolved config carries
+        # that id in the processcall subprocess_ref (not the literal $ref token).
+        mock_pag.return_value = []
+        # side_effect is consumed in execution order — child (main_logic) first,
+        # then the wrapper parent.
+        mock_exec.side_effect = [
+            {"_success": True, "component_id": "child-id-001", "type": "process"},
+            {"_success": True, "component_id": "parent-id-002", "type": "process"},
+        ]
+        components = [
+            _wrapper_parent_comp([{"subprocess_ref": "$ref:main_logic"}]),  # listed first
+            _legacy_child_comp(),
+        ]
+        config = _build_config(components)
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True, result
+        assert mock_exec.call_count == 2
+        # Identify each call by its config; the wrapper parent carries process_kind.
+        configs = [c.kwargs["config"] for c in mock_exec.call_args_list]
+        parent_idx = next(
+            i for i, cfg in enumerate(configs)
+            if cfg.get("process_kind") == "wrapper_subprocess"
+        )
+        child_idx = next(
+            i for i, cfg in enumerate(configs)
+            if cfg.get("process_kind") != "wrapper_subprocess"
+        )
+        # Child created BEFORE the parent.
+        assert child_idx < parent_idx
+        # The parent's resolved config carries the child's CREATED id (no $ref leak).
+        parent_call = configs[parent_idx]["process_calls"][0]["subprocess_ref"]
+        assert parent_call == "child-id-001"
+        assert "$ref" not in parent_call
+
     def test_ref_resolves_into_emitted_parent_xml(self):
         # The whole $ref -> resolve -> emit path: a $ref:KEY subprocess_ref must
         # be substituted by _resolve_dependency_tokens (as integration_builder
