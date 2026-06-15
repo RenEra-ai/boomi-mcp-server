@@ -3231,8 +3231,10 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "manual or scheduled trigger.",
                 "Emit executable component specs (DB source, JSON transform, "
                 "REST target, structured process) for build_integration("
-                "action='plan'); deployment, schedule activation, and verified "
-                "retry/DLQ process emission remain M3 / #51.",
+                "action='plan'); a verified Try/Catch + DLQ catch path is "
+                "emitted for DLQ modes document_cache_ref / error_subprocess_ref "
+                "(retry_count=0; #51 M3.R1a). Deployment, schedule activation, "
+                "and retry>1+DLQ remain M3 / #51 R1b.",
             ],
             endpoints=[db_endpoint, rest_endpoint],
             flows=flows,
