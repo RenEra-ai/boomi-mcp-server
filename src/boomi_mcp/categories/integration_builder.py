@@ -59,6 +59,7 @@ from .components.builders import (
     RestClientConnectionBuilder,
     RestClientOperationBuilder,
     ProcessFlowBuilder,
+    WrapperSubprocessBuilder,
     PROFILE_BUILDERS,
     PROCESS_FLOW_BUILDERS,
     get_connector_action_builder,
@@ -356,6 +357,47 @@ def _synthesize_script_function_wrappers(spec: IntegrationSpecV1) -> None:
                 comp.depends_on.append(wrapper_key)
 
     spec.components.extend(new_wrappers)
+
+
+def _synthesize_wrapper_subprocess_edges(spec: IntegrationSpecV1) -> None:
+    """Add implicit parent->child depends_on edges for wrapper_subprocess (#90).
+
+    A wrapper parent's processcall ``subprocess_ref: "$ref:KEY"`` is a real
+    dependency on the in-spec child KEY. Appending KEY to the parent's
+    ``depends_on`` (when absent) makes the existing topo-sort apply children
+    BEFORE the parent even when the spec lists the parent first.
+
+    Only edges to OTHER in-spec components are synthesized. A self-reference or
+    a ref to a non-existent KEY is deliberately NOT added — adding it would make
+    the topo-sort raise a generic cycle / unknown-dependency error before the
+    per-component preflight can surface the precise PROCESS_REF_SELF_REFERENCE /
+    PROCESS_REF_NOT_FOUND. A literal ``process_id`` targets an out-of-spec
+    component and creates no edge.
+    """
+    components_by_key = {comp.key: comp for comp in spec.components}
+    for comp in spec.components:
+        cfg = comp.config or {}
+        if (
+            str(cfg.get("process_kind") or cfg.get("process_type") or "").strip().lower()
+            != WrapperSubprocessBuilder.PROCESS_KIND
+        ):
+            continue
+        calls = cfg.get("process_calls")
+        if not isinstance(calls, list):
+            continue
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            sref = call.get("subprocess_ref")
+            if isinstance(sref, str) and sref.startswith("$ref:"):
+                key = sref[len("$ref:"):]
+                if (
+                    key
+                    and key != comp.key
+                    and key in components_by_key
+                    and key not in comp.depends_on
+                ):
+                    comp.depends_on.append(key)
 
 
 def _build_auto_wrapper_spec(
@@ -1208,6 +1250,75 @@ def _check_process_flow_ref_types(
                 },
             )
 
+    return None
+
+
+def _check_wrapper_subprocess_ref_types(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+    components_by_key: Dict[str, IntegrationComponentSpec],
+) -> Optional[BuilderValidationError]:
+    """Cross-component ref checks for a wrapper_subprocess parent (issue #90).
+
+    Runs after ``WrapperSubprocessBuilder.validate_config`` (which already
+    enforced per-entry MISSING/AMBIGUOUS and depends_on reachability). For each
+    processcall whose ``subprocess_ref`` is an in-spec ``$ref:KEY``:
+      * PROCESS_REF_SELF_REFERENCE — KEY is the wrapper's own key.
+      * PROCESS_REF_NOT_FOUND — KEY is not a component in this spec (declared in
+        depends_on but absent — validate_config catches undeclared refs first).
+      * PROCESS_REF_TYPE_MISMATCH — the in-spec target is not a process.
+    A literal ``process_id`` (not a ``$ref``) targets an out-of-spec component
+    and is skipped, like the source/target helper.
+    """
+    calls = raw_config.get("process_calls")
+    if not isinstance(calls, list):
+        return None
+    for i, call in enumerate(calls):
+        if not isinstance(call, dict):
+            continue
+        raw_value = call.get("subprocess_ref")
+        if not (isinstance(raw_value, str) and raw_value.startswith("$ref:")):
+            continue
+        ref_key = raw_value[5:]
+        if not ref_key:
+            continue
+        field_path = f"process_calls[{i}].subprocess_ref"
+        if ref_key == comp.key:
+            return BuilderValidationError(
+                f"{field_path} {raw_value!r} references the wrapper itself; a "
+                "parent cannot call itself.",
+                error_code="PROCESS_REF_SELF_REFERENCE",
+                field=field_path,
+                hint="Point subprocess_ref at a child process component, not the parent.",
+                details={"ref_key": ref_key},
+            )
+        target_comp = components_by_key.get(ref_key)
+        if target_comp is None:
+            return BuilderValidationError(
+                f"{field_path} {raw_value!r} does not resolve to an in-spec component.",
+                error_code="PROCESS_REF_NOT_FOUND",
+                field=field_path,
+                hint=(
+                    "subprocess_ref must target a process component declared in "
+                    "the same IntegrationSpecV1; use process_id for an existing "
+                    "Boomi component."
+                ),
+                details={"ref_key": ref_key},
+            )
+        if _effective_component_type(target_comp) != "process":
+            actual_role = _format_actual_role(target_comp)
+            return BuilderValidationError(
+                f"{field_path} {raw_value!r} must reference a process component "
+                f"(got {actual_role}).",
+                error_code="PROCESS_REF_TYPE_MISMATCH",
+                field=field_path,
+                hint="A wrapper Process Call can only invoke a process/subprocess component.",
+                details={
+                    "ref_key": ref_key,
+                    "expected_role": "process",
+                    "actual_role": actual_role,
+                },
+            )
     return None
 
 
@@ -2076,6 +2187,10 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # references. Live Boomi requires the indirection — see
     # _synthesize_script_function_wrappers docstring.
     _synthesize_script_function_wrappers(spec)
+    # Issue #90: a wrapper_subprocess parent's processcall $ref:KEY children are
+    # implicit dependencies — synthesize the edges so the topo-sort applies
+    # children before the parent regardless of input order.
+    _synthesize_wrapper_subprocess_edges(spec)
     # Wrapper synthesis can add components (a transform.function per script-route
     # map), so keep an archetype-authored validation_rules.component_count in
     # sync with the planned component list. Otherwise the dumped plan spec is
@@ -2662,6 +2777,14 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 # builders will add their own ref-type helpers when they land.
                 if process_flow_err is None and builder_cls is ProcessFlowBuilder:
                     process_flow_err = _check_process_flow_ref_types(
+                        comp, raw_config, components_by_key
+                    )
+                # Issue #90: the wrapper_subprocess parent has its own ref-type
+                # helper (processcall subprocess_ref → in-spec process child).
+                # WrapperSubprocessBuilder is a ProcessFlowBuilder subclass, so
+                # the identity check above is False for it — branch explicitly.
+                elif process_flow_err is None and builder_cls is WrapperSubprocessBuilder:
+                    process_flow_err = _check_wrapper_subprocess_ref_types(
                         comp, raw_config, components_by_key
                     )
 

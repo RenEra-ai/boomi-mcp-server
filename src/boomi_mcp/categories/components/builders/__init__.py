@@ -25,6 +25,7 @@ from .profile_builder import (
 )
 from .process_flow_builder import (
     ProcessFlowBuilder,
+    WrapperSubprocessBuilder,
     PROCESS_FLOW_BUILDERS,
     get_process_flow_builder,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "RestClientConnectionBuilder",
     "RestClientOperationBuilder",
     "ProcessFlowBuilder",
+    "WrapperSubprocessBuilder",
     "CONNECTOR_BUILDERS",
     "CONNECTOR_ACTION_BUILDERS",
     "PROFILE_BUILDERS",

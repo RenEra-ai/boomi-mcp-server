@@ -27,6 +27,15 @@ from a live `work`-profile export (notify shape, not invented from docs);
 omitting `catch_notify` keeps the existing catch leg byte-for-byte
 identical. Email/SMS notification channels and Notify outside catch paths
 are out of scope.
+
+Issue #90 M4.5.5 adds a verified standalone Process Call in the main flow
+and the `WrapperSubprocessBuilder` (`process_kind="wrapper_subprocess"`): a
+thin parent `start -> process call(s) -> stop` that invokes in-spec child
+processes by `$ref:` or existing components by id. The standalone processcall
+shape is transcribed from the live `work` wrapper exemplar (it continues past
+a child failure: abort="false", wait="true"); the DLQ catch-leg processcall
+(abort="true") is unchanged. integration_builder applies children first and
+substitutes `$ref`->id; changing a child requires redeploying the parent.
 """
 
 from __future__ import annotations
@@ -306,51 +315,8 @@ class ProcessFlowBuilder:
             return reliability_err
 
         # Dependency reachability: every $ref:KEY token in the config tree
-        # must appear in depends_on. Matches integration_builder's
-        # _resolve_dependency_tokens contract — apply-time substitution
-        # walks the same tree, so undeclared refs would silently survive
-        # as literal "$ref:KEY" strings in emitted XML.
-        declared = set(depends_on or [])
-        for path, value in _walk_scalars(config):
-            if not isinstance(value, str):
-                continue
-            stripped = value.strip()
-            if not stripped.startswith("$ref:"):
-                continue
-            # Codex review r7 P2.2: a padded value like " $ref:foo " is
-            # not recognized as a ref by _resolve_dependency_tokens
-            # (which requires startswith at byte 0), but build()'s
-            # whitespace stripping then emits the unresolved token
-            # directly into the connectoraction XML. Reject the
-            # malformed shape here so apply never sees it.
-            if value != stripped:
-                return BuilderValidationError(
-                    f"$ref token at {'.'.join(path)!r} has surrounding "
-                    f"whitespace ({value!r}); refs must be exact "
-                    f"'$ref:KEY' strings.",
-                    error_code="MISSING_PROCESS_DEPENDENCY",
-                    field=".".join(path),
-                    hint=(
-                        "Remove leading/trailing whitespace from the "
-                        "$ref:KEY value. Apply-time substitution only "
-                        "matches refs that start at byte 0."
-                    ),
-                )
-            ref_key = value[5:]
-            if ref_key not in declared:
-                return BuilderValidationError(
-                    f"$ref:{ref_key} at {'.'.join(path)!r} is not "
-                    f"declared in the process component's depends_on.",
-                    error_code="MISSING_PROCESS_DEPENDENCY",
-                    field="depends_on",
-                    hint=(
-                        f"Add {ref_key!r} to the process component's "
-                        "depends_on list so $ref resolution can find it "
-                        "at apply time."
-                    ),
-                )
-
-        return None
+        # must appear in depends_on (shared helper — see _validate_ref_reachability).
+        return _validate_ref_reachability(config, set(depends_on or []))
 
     @classmethod
     def _should_emit_try_catch(cls, reliability: Any) -> bool:
@@ -513,61 +479,87 @@ class ProcessFlowBuilder:
                 )
             shape_xml_parts = _emit_linear_shapes(flow)
 
-        process_inner = (
-            '<process xmlns="" '
-            'allowSimultaneous="false" '
-            'enableUserLog="false" '
-            'processLogOnErrorOnly="false" '
-            'purgeDataImmediately="false" '
-            'stopProcessingIfZeroDocuments="true" '
-            'updateRunDates="true" '
-            'workload="general">'
-            '<shapes>'
-            f"{''.join(shape_xml_parts)}"
-            '</shapes>'
-            '</process>'
+        return _assemble_process_component_xml(
+            shape_xml_parts,
+            name=name,
+            description=description,
+            folder_name=folder_name,
         )
 
-        # folderName is the writable folder attribute on Component
-        # create/update; folderFullPath is response-only metadata that
-        # Boomi ignores on writes. All other builders in the repo
-        # (DatabaseConnectorBuilder, RestClient*, profile builders) emit
-        # folderName for placement — match them. Codex review r8 F2.
-        folder_attr = (
-            f' folderName="{_escape_xml(str(folder_name))}"' if folder_name else ""
-        )
-        component_xml = (
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<bns:Component '
-            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
-            'xmlns:bns="http://api.platform.boomi.com/" '
-            f'type="process" name="{_escape_xml(name)}"'
-            f"{folder_attr}>"
-            '<bns:encryptedValues/>'
-            f'<bns:description>{_escape_xml(description)}</bns:description>'
-            '<bns:object>'
-            f"{process_inner}"
-            '</bns:object>'
-            '<bns:processOverrides/>'
-            '</bns:Component>'
-        )
 
-        # Internal invariant: the XML we just produced must round-trip
-        # through ElementTree without raising. Catches stray
-        # unescaped chars or malformed manual concatenation early —
-        # surfaces as PROCESS_XML_VALIDATION_FAILED rather than as a
-        # confusing Boomi API error at apply time.
-        try:
-            ET.fromstring(component_xml)
-        except ET.ParseError as exc:  # pragma: no cover — defensive
-            raise BuilderValidationError(
-                f"Generated process Component XML did not round-trip: {exc}",
-                error_code="PROCESS_XML_VALIDATION_FAILED",
-                field="config",
-                hint="Internal builder bug — please report.",
-            ) from exc
+def _assemble_process_component_xml(
+    shape_xml_parts: List[str],
+    *,
+    name: str,
+    description: str = "",
+    folder_name: Optional[str] = None,
+) -> str:
+    """Wrap emitted shapes in the ``<process>`` / ``<bns:Component>`` envelope.
 
-        return component_xml
+    Shared by ProcessFlowBuilder and WrapperSubprocessBuilder (issue #90). Coerces
+    and requires a non-empty name, emits ``folderName`` when set, and round-trips
+    the result through ElementTree (PROCESS_XML_VALIDATION_FAILED on malformation).
+
+    folderName is the writable folder attribute on Component create/update;
+    folderFullPath is response-only metadata Boomi ignores on writes. Other
+    builders emit folderName for placement — match them (Codex review r8 F2).
+    """
+    name = str(name) if name is not None else ""
+    if not name or not name.strip():
+        raise BuilderValidationError(
+            "Process component name is required.",
+            error_code="PROCESS_XML_VALIDATION_FAILED",
+            field="name",
+            hint="Pass a non-empty name via the IntegrationComponentSpec.name field.",
+        )
+    process_inner = (
+        '<process xmlns="" '
+        'allowSimultaneous="false" '
+        'enableUserLog="false" '
+        'processLogOnErrorOnly="false" '
+        'purgeDataImmediately="false" '
+        'stopProcessingIfZeroDocuments="true" '
+        'updateRunDates="true" '
+        'workload="general">'
+        '<shapes>'
+        f"{''.join(shape_xml_parts)}"
+        '</shapes>'
+        '</process>'
+    )
+    folder_attr = (
+        f' folderName="{_escape_xml(str(folder_name))}"' if folder_name else ""
+    )
+    component_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<bns:Component '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+        'xmlns:bns="http://api.platform.boomi.com/" '
+        f'type="process" name="{_escape_xml(name)}"'
+        f"{folder_attr}>"
+        '<bns:encryptedValues/>'
+        f'<bns:description>{_escape_xml(description)}</bns:description>'
+        '<bns:object>'
+        f"{process_inner}"
+        '</bns:object>'
+        '<bns:processOverrides/>'
+        '</bns:Component>'
+    )
+
+    # Internal invariant: the XML we just produced must round-trip through
+    # ElementTree without raising. Catches stray unescaped chars or malformed
+    # manual concatenation early — surfaces as PROCESS_XML_VALIDATION_FAILED
+    # rather than a confusing Boomi API error at apply time.
+    try:
+        ET.fromstring(component_xml)
+    except ET.ParseError as exc:  # pragma: no cover — defensive
+        raise BuilderValidationError(
+            f"Generated process Component XML did not round-trip: {exc}",
+            error_code="PROCESS_XML_VALIDATION_FAILED",
+            field="config",
+            hint="Internal builder bug — please report.",
+        ) from exc
+
+    return component_xml
 
 
 # ----------------------------------------------------------------------
@@ -1091,6 +1083,22 @@ def _emit_flow_shape(
         return _emit_message(shape_name, params, next_name, shape_index)
     if kind == "map":
         return _emit_map(shape_name, params, next_name, shape_index)
+    if kind == "processcall":
+        # Standalone main-flow Process Call (issue #90 wrapper_subprocess):
+        # main-flow geometry, abort defaults False (parent continues past a
+        # child failure — the live-observed wrapper value), forward dragpoint
+        # to the next shape.
+        return _emit_processcall(
+            shape_name,
+            str(params.get("process_id") or "").strip(),
+            shape_index,
+            next_name,
+            wait=bool(params.get("wait", True)),
+            abort=bool(params.get("abort", False)),
+            y=_SHAPE_Y,
+            dragpoint_y=_DRAGPOINT_Y,
+            userlabel=str(params.get("userlabel") or ""),
+        )
     if kind == "stop":
         return _emit_stop(shape_name, params)
     raise BuilderValidationError(  # pragma: no cover — defensive
@@ -1335,26 +1343,47 @@ def _emit_doccacheload(
 
 
 def _emit_processcall(
-    shape_name: str, process_id: str, shape_index: int, next_name: Optional[str] = None
+    shape_name: str,
+    process_id: str,
+    shape_index: int,
+    next_name: Optional[str] = None,
+    *,
+    wait: bool = True,
+    abort: bool = True,
+    y: float = _CATCH_SHAPE_Y,
+    dragpoint_y: float = _CATCH_DRAGPOINT_Y,
+    userlabel: str = "Route caught errors to error subprocess",
 ) -> str:
-    """Emit the verified error-subprocess DLQ catch leg.
+    """Emit a verified ``processcall`` shape (two live-grounded call sites).
 
-    Live shape: processcall abort="true" wait="true" with empty parameters /
-    returnpaths (live component 7b19baeb-... shape34). Terminal (empty
-    dragpoints) by default; when ``next_name`` is set (issue #89 notify path)
-    it routes to the catch-row Stop.
+    * **DLQ catch leg** (``error_subprocess_ref``) — the issue #51 default:
+      ``abort="true" wait="true"``, catch-row geometry, terminal empty
+      dragpoints by default (live component 7b19baeb-... shape34). When
+      ``next_name`` is set (issue #89 notify path) it routes to the catch Stop.
+    * **Standalone main/try-flow Process Call** (issue #90 ``wrapper_subprocess``)
+      — ``abort="false"`` so the parent continues past a child failure, main-flow
+      geometry, and a forward dragpoint to the next shape. Boomi runs the child
+      as a separate process and waits for it (``wait="true"``). Transcribed from
+      the live ``work`` wrapper parent 6a432a0b-... (a processcall calling the
+      main-logic subprocess 57a5822c-...): abort="false", wait="true",
+      empty parameters/returnpaths.
+
+    Defaults reproduce the catch-leg shape byte-for-byte; the standalone caller
+    overrides ``abort``/``y``/``dragpoint_y``/``userlabel``.
     """
+    wait_s = "true" if wait else "false"
+    abort_s = "true" if abort else "false"
     dragpoints_xml = (
-        f'<dragpoints>{_emit_dragpoints([next_name], shape_index, y=_CATCH_DRAGPOINT_Y)}</dragpoints>'
+        f'<dragpoints>{_emit_dragpoints([next_name], shape_index, y=dragpoint_y)}</dragpoints>'
         if next_name
         else '<dragpoints/>'
     )
     return (
         f'<shape image="processcall_icon" name="{shape_name}" '
-        f'shapetype="processcall" userlabel="Route caught errors to error subprocess" '
-        f'x="{_shape_x(shape_index)}" y="{_CATCH_SHAPE_Y}">'
+        f'shapetype="processcall" userlabel="{_escape_xml(userlabel)}" '
+        f'x="{_shape_x(shape_index)}" y="{y}">'
         '<configuration>'
-        f'<processcall abort="true" processId="{_escape_xml(process_id)}" wait="true">'
+        f'<processcall abort="{abort_s}" processId="{_escape_xml(process_id)}" wait="{wait_s}">'
         '<parameters/><returnpaths/>'
         '</processcall>'
         '</configuration>'
@@ -1398,12 +1427,227 @@ def _walk_scalars(value: Any, _path: Tuple[str, ...] = ()) -> Iterable[Tuple[Tup
         yield _path, value
 
 
+def _validate_ref_reachability(
+    config: Any, declared: set
+) -> Optional[BuilderValidationError]:
+    """Every ``$ref:KEY`` token in the config tree must appear in ``declared``.
+
+    Matches integration_builder's ``_resolve_dependency_tokens`` contract —
+    apply-time substitution walks the same tree, so an undeclared or
+    whitespace-padded ref would survive as a literal ``"$ref:KEY"`` string in
+    the emitted XML. Shared by ProcessFlowBuilder and WrapperSubprocessBuilder.
+    """
+    for path, value in _walk_scalars(config):
+        if not isinstance(value, str):
+            continue
+        stripped = value.strip()
+        if not stripped.startswith("$ref:"):
+            continue
+        # Codex review r7 P2.2: a padded value like " $ref:foo " is not
+        # recognized as a ref by _resolve_dependency_tokens (which requires
+        # startswith at byte 0), but build()'s whitespace stripping then emits
+        # the unresolved token directly. Reject the malformed shape here.
+        if value != stripped:
+            return BuilderValidationError(
+                f"$ref token at {'.'.join(path)!r} has surrounding "
+                f"whitespace ({value!r}); refs must be exact '$ref:KEY' strings.",
+                error_code="MISSING_PROCESS_DEPENDENCY",
+                field=".".join(path),
+                hint=(
+                    "Remove leading/trailing whitespace from the $ref:KEY value. "
+                    "Apply-time substitution only matches refs that start at byte 0."
+                ),
+            )
+        ref_key = value[5:]
+        if ref_key not in declared:
+            return BuilderValidationError(
+                f"$ref:{ref_key} at {'.'.join(path)!r} is not declared in the "
+                f"process component's depends_on.",
+                error_code="MISSING_PROCESS_DEPENDENCY",
+                field="depends_on",
+                hint=(
+                    f"Add {ref_key!r} to the process component's depends_on list "
+                    "so $ref resolution can find it at apply time."
+                ),
+            )
+    return None
+
+
+def _validate_processcall_entry(
+    call: Any, index: int
+) -> Optional[BuilderValidationError]:
+    """Per-entry well-formedness for a wrapper_subprocess process call (#90).
+
+    Each entry targets a child via EXACTLY ONE of ``subprocess_ref`` (a
+    ``$ref:KEY`` token resolved in-spec) or ``process_id`` (a literal/existing
+    component id). Cross-component resolution checks (self-reference, in-spec
+    presence, target type) run at the integration_builder plan layer.
+    """
+    field = f"process_calls[{index}]"
+    if not isinstance(call, dict):
+        return BuilderValidationError(
+            f"{field} must be a JSON object with subprocess_ref or process_id.",
+            error_code="PROCESS_REF_MISSING",
+            field=field,
+            hint="Each process call targets a child via subprocess_ref ('$ref:KEY') or process_id.",
+        )
+    sref = call.get("subprocess_ref")
+    pid = call.get("process_id")
+    has_sref = isinstance(sref, str) and sref.strip() != ""
+    has_pid = isinstance(pid, str) and pid.strip() != ""
+    if has_sref and has_pid:
+        return BuilderValidationError(
+            f"{field} sets both subprocess_ref and process_id; provide exactly one.",
+            error_code="PROCESS_REF_AMBIGUOUS",
+            field=field,
+            hint="Use subprocess_ref ('$ref:KEY') for an in-spec child, or process_id for an existing component.",
+        )
+    if not has_sref and not has_pid:
+        return BuilderValidationError(
+            f"{field} requires subprocess_ref ('$ref:KEY') or process_id.",
+            error_code="PROCESS_REF_MISSING",
+            field=field,
+            hint="Add subprocess_ref ('$ref:KEY') for an in-spec child, or process_id for an existing component.",
+        )
+    # Exact '$ref:KEY' token required (byte 0, no surrounding whitespace) — a
+    # padded " $ref:KEY " is not resolved by _resolve_dependency_tokens and would
+    # survive as a literal in the emitted XML; a literal id belongs in process_id.
+    if has_sref and not sref.startswith("$ref:"):
+        return BuilderValidationError(
+            f"{field}.subprocess_ref must be an exact '$ref:KEY' token (got {sref!r}); "
+            "use process_id for a literal component id.",
+            error_code="PROCESS_REF_MISSING",
+            field=f"{field}.subprocess_ref",
+            hint="subprocess_ref references an in-spec child by key (no surrounding whitespace); existing components use process_id.",
+        )
+    return None
+
+
+class WrapperSubprocessBuilder(ProcessFlowBuilder):
+    """Thin wrapper-parent ("facade") process: start -> process call(s) -> stop.
+
+    Issue #90 (M4.5.5). Emits a parent process whose only steps are standalone
+    Process Call shapes invoking in-spec child processes (by ``subprocess_ref``
+    = ``$ref:KEY``) or existing components (by ``process_id``). The standalone
+    processcall shape is transcribed from the live ``work`` wrapper exemplar
+    (component 6a432a0b-..., a processcall calling the main-logic subprocess
+    57a5822c-...): ``abort="false"`` (the parent continues past a child failure),
+    ``wait="true"``, empty parameters/returnpaths.
+
+    Config shape::
+
+        {"process_kind": "wrapper_subprocess",
+         "process_calls": [
+             {"subprocess_ref": "$ref:main_logic", "wait": true, "abort_on_error": false, "label": "..."},
+             {"process_id": "<existing component id>"}
+         ]}
+
+    Inherits the plaintext-secret scan/redact from ProcessFlowBuilder; overrides
+    validate_config (wrapper shape) and build (parent emission). Child-first apply
+    ordering and ``$ref``->id substitution are handled by integration_builder's
+    existing topo-sort + _resolve_dependency_tokens (an implicit parent->child
+    dependency edge is synthesized at plan time); the cross-component ref checks
+    (self-reference / in-spec presence / target type) run there too. Changing a
+    child requires repackaging and redeploying the parent — the parent is the
+    release boundary.
+    """
+
+    PROCESS_KIND = "wrapper_subprocess"
+
+    @classmethod
+    def validate_config(
+        cls,
+        config: Dict[str, Any],
+        *,
+        depends_on: Optional[Iterable[str]] = None,
+    ) -> Optional[BuilderValidationError]:
+        process_kind = str(
+            config.get("process_kind") or config.get("process_type") or ""
+        ).strip()
+        if process_kind != cls.PROCESS_KIND:
+            return BuilderValidationError(
+                f"process_kind {process_kind!r} is not supported.",
+                error_code="PROCESS_KIND_UNSUPPORTED",
+                field="process_kind",
+                hint=f"Use process_kind={cls.PROCESS_KIND!r} for the wrapper-parent (facade) structure.",
+            )
+        calls = config.get("process_calls")
+        if not isinstance(calls, list) or not calls:
+            return BuilderValidationError(
+                "wrapper_subprocess requires a non-empty 'process_calls' list.",
+                error_code="PROCESS_REF_MISSING",
+                field="process_calls",
+                hint="Each entry calls a child via subprocess_ref ('$ref:KEY') or process_id.",
+            )
+        for i, call in enumerate(calls):
+            entry_err = _validate_processcall_entry(call, i)
+            if entry_err is not None:
+                return entry_err
+        # Reuse the plaintext-secret scan shared with the database_to_api_sync
+        # builder. No depends_on-membership requirement here: a processcall
+        # $ref:KEY child is wired by an implicit edge synthesized at plan time
+        # (integration_builder._synthesize_wrapper_subprocess_edges), and the
+        # cross-spec resolution checks (self-reference / not-found / type
+        # mismatch) run there. The exact-$ref-token shape is enforced per entry
+        # above. depends_on is accepted for interface parity but not required.
+        return cls.scan_forbidden_secret_fields(config)
+
+    @classmethod
+    def build(
+        cls,
+        config: Dict[str, Any],
+        *,
+        name: str,
+        folder_name: Optional[str] = None,
+    ) -> str:
+        """Emit the thin parent: start -> processcall(s) -> stop.
+
+        Assumes validate_config passed and that ``$ref`` tokens in process_calls
+        have been substituted with real child component ids by the integration
+        builder (so subprocess_ref now carries a resolved id).
+        """
+        description = str(config.get("description") or "")
+        calls = config.get("process_calls") or []
+        flow: List[Tuple[str, Dict[str, Any]]] = [("start_noaction", {})]
+        for call in calls:
+            # process_id (literal) or subprocess_ref (a $ref:KEY already resolved
+            # to an id by integration_builder before build()).
+            pid = str(call.get("process_id") or call.get("subprocess_ref") or "").strip()
+            if not pid:
+                # Stay total on the validate_config-bypass path: never emit
+                # <processcall processId=""> — raise instead.
+                raise BuilderValidationError(
+                    "wrapper_subprocess process call is missing a resolved "
+                    "target process id.",
+                    error_code="PROCESS_REF_MISSING",
+                    field="process_calls",
+                    hint="Set subprocess_ref ('$ref:KEY') or process_id on each process call.",
+                )
+            flow.append((
+                "processcall",
+                {
+                    "process_id": pid,
+                    "wait": bool(call.get("wait", True)),
+                    "abort": bool(call.get("abort_on_error", False)),
+                    "userlabel": str(call.get("label") or ""),
+                },
+            ))
+        flow.append(("stop", {"continue_": True}))
+        return _assemble_process_component_xml(
+            _emit_linear_shapes(flow),
+            name=name,
+            description=description,
+            folder_name=folder_name,
+        )
+
+
 # ----------------------------------------------------------------------
 # Registry (parallel to PROFILE_BUILDERS / CONNECTOR_BUILDERS)
 # ----------------------------------------------------------------------
 
 PROCESS_FLOW_BUILDERS: Dict[str, type] = {
     ProcessFlowBuilder.PROCESS_KIND: ProcessFlowBuilder,
+    WrapperSubprocessBuilder.PROCESS_KIND: WrapperSubprocessBuilder,
 }
 
 
@@ -1418,9 +1662,15 @@ ProcessFlowBuilder.PRESERVATION_POLICY = PreservationPolicy(
     owned_paths=(OwnedPath(path="bns:object/process"),),
 )
 
+# The wrapper-parent builder owns the same `<process>` subtree (issue #90).
+WrapperSubprocessBuilder.PRESERVATION_POLICY = PreservationPolicy(
+    component_type="process",
+    owned_paths=(OwnedPath(path="bns:object/process"),),
+)
+
 
 def get_process_flow_builder(process_kind: Optional[str]):
-    """Return the ProcessFlowBuilder subclass for process_kind, or None."""
+    """Return the process-flow builder for process_kind, or None."""
     if not process_kind:
         return None
     return PROCESS_FLOW_BUILDERS.get(str(process_kind).strip().lower())
@@ -1428,6 +1678,7 @@ def get_process_flow_builder(process_kind: Optional[str]):
 
 __all__ = [
     "ProcessFlowBuilder",
+    "WrapperSubprocessBuilder",
     "PROCESS_FLOW_BUILDERS",
     "get_process_flow_builder",
 ]

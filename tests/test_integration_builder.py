@@ -5837,3 +5837,148 @@ def test_synthesize_wrappers_non_string_map_type_does_not_raise():
         _synthesize_script_function_wrappers(spec)
         # Non-script (coerced) map_type → no wrapper synthesized.
         assert len(spec.components) == before
+
+
+# ---------------------------------------------------------------------------
+# Issue #90 — wrapper_subprocess parent + standalone Process Call
+# ---------------------------------------------------------------------------
+
+def _wrapper_parent_comp(process_calls, key="wrapper_parent", depends_on=()):
+    # depends_on defaults to empty: the implicit parent->child edge is synthesized
+    # at plan time from each processcall $ref, so callers need not pre-declare it.
+    return IntegrationComponentSpec(
+        key=key,
+        type="process",
+        action="create",
+        name="Wrapper Parent",
+        config={"process_kind": "wrapper_subprocess", "process_calls": list(process_calls)},
+        depends_on=list(depends_on),
+    )
+
+
+def _legacy_child_comp(key="main_logic", name="Main Logic"):
+    # A minimal legacy process child (process_json_to_xml route) — a real
+    # "process" component the wrapper can create and call.
+    return IntegrationComponentSpec(
+        key=key,
+        type="process",
+        action="create",
+        name=name,
+        config={"name": name, "shapes": [
+            {"type": "start", "name": "start"},
+            {"type": "stop", "name": "stop"},
+        ]},
+    )
+
+
+class TestWrapperSubprocessPlan:
+    """Plan-time behavior for the wrapper_subprocess parent (issue #90)."""
+
+    @patch(_PATCH_TARGET)
+    def test_parent_listed_first_builds_child_first(self, mock_pag):
+        mock_pag.return_value = []
+        # Parent BEFORE child in the spec — the synthesized implicit edge must
+        # still order the child first.
+        components = [
+            _wrapper_parent_comp([{"subprocess_ref": "$ref:main_logic"}]),
+            _legacy_child_comp(),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        assert plan["_success"] is True
+        order = plan["execution_order"]
+        assert order.index("main_logic") < order.index("wrapper_parent")
+        pstep = next(s for s in plan["steps"] if s["key"] == "wrapper_parent")
+        assert pstep["planned_action"] == "create"
+
+    @patch(_PATCH_TARGET)
+    def test_literal_process_id_creates_no_implicit_edge(self, mock_pag):
+        mock_pag.return_value = []
+        # A literal process_id targets an out-of-spec component — no synthetic
+        # dependency edge, and the parent needs no in-spec child.
+        parent = _wrapper_parent_comp(
+            [{"process_id": "99999999-9999-9999-9999-999999999999"}],
+            depends_on=(),
+        )
+        plan = _build_plan(MagicMock(), _build_config([parent]))
+        assert plan["_success"] is True
+        pstep = next(s for s in plan["steps"] if s["key"] == "wrapper_parent")
+        assert pstep["planned_action"] == "create"
+        # No synthetic dependency was added (depends_on stays empty).
+        comp = next(c for c in plan["integration_spec"]["components"] if c["key"] == "wrapper_parent")
+        assert comp["depends_on"] == []
+
+    def _wrapper_err(self, mock_pag, process_calls, extra=None):
+        mock_pag.return_value = []
+        components = [_wrapper_parent_comp(process_calls)]
+        components.append(extra if extra is not None else _legacy_child_comp())
+        plan = _build_plan(MagicMock(), _build_config(components))
+        assert "steps" in plan, plan
+        step = next(s for s in plan["steps"] if s["key"] == "wrapper_parent")
+        return step
+
+    @patch(_PATCH_TARGET)
+    def test_missing_target_errors(self, mock_pag):
+        step = self._wrapper_err(mock_pag, [{"wait": True}])
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "PROCESS_REF_MISSING"
+
+    @patch(_PATCH_TARGET)
+    def test_ambiguous_target_errors(self, mock_pag):
+        step = self._wrapper_err(
+            mock_pag,
+            [{"subprocess_ref": "$ref:main_logic", "process_id": "x"}],
+        )
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "PROCESS_REF_AMBIGUOUS"
+
+    @patch(_PATCH_TARGET)
+    def test_self_reference_errors(self, mock_pag):
+        # Self-ref synthesizes no edge (so topo does not cycle); the precise
+        # PROCESS_REF_SELF_REFERENCE surfaces at the preflight.
+        step = self._wrapper_err(mock_pag, [{"subprocess_ref": "$ref:wrapper_parent"}])
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "PROCESS_REF_SELF_REFERENCE"
+
+    @patch(_PATCH_TARGET)
+    def test_not_found_errors(self, mock_pag):
+        # Ref to a non-existent in-spec key synthesizes no edge (so topo does not
+        # choke on an unknown dependency); PROCESS_REF_NOT_FOUND surfaces at the
+        # preflight.
+        step = self._wrapper_err(mock_pag, [{"subprocess_ref": "$ref:ghost"}])
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "PROCESS_REF_NOT_FOUND"
+
+    @patch(_PATCH_TARGET)
+    def test_type_mismatch_errors(self, mock_pag):
+        # subprocess_ref pointing at a non-process (in-spec) component.
+        conn = IntegrationComponentSpec(
+            key="some_conn", type="connector-settings", action="create",
+            name="Conn", config={"connector_type": "database"},
+        )
+        step = self._wrapper_err(
+            mock_pag,
+            [{"subprocess_ref": "$ref:some_conn"}],
+            extra=conn,
+        )
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+
+    def test_ref_resolves_into_emitted_parent_xml(self):
+        # The whole $ref -> resolve -> emit path: a $ref:KEY subprocess_ref must
+        # be substituted by _resolve_dependency_tokens (as integration_builder
+        # does before build()) and the RESOLVED id must reach the processcall.
+        import xml.etree.ElementTree as ET
+
+        from src.boomi_mcp.categories.integration_builder import _resolve_dependency_tokens
+        from src.boomi_mcp.categories.components.builders import WrapperSubprocessBuilder
+
+        resolved_child = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        cfg = {"process_kind": "wrapper_subprocess",
+               "process_calls": [{"subprocess_ref": "$ref:main_logic"}]}
+        resolved_cfg = _resolve_dependency_tokens(cfg, {"main_logic": resolved_child})
+        xml = WrapperSubprocessBuilder.build(resolved_cfg, name="N")
+        root = ET.fromstring(xml)
+        pc = root.find("bns:object/process", {"bns": "http://api.platform.boomi.com/"}) \
+            .find("shapes").findall("shape")[1].find("configuration/processcall")
+        assert pc.attrib["processId"] == resolved_child
+        assert "$ref" not in pc.attrib["processId"]

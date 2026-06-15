@@ -248,6 +248,14 @@ def test_notification_logging_is_live_verified_and_emittable():
     assert entry["provenance"] == "live_verified"
 
 
+def test_wrapper_subprocess_separation_is_emittable():
+    # Issue #90 M4.5.5: the wrapper-parent (facade) + subprocess pattern is now
+    # emittable (WrapperSubprocessBuilder emits a thin parent calling children
+    # via standalone Process Call).
+    entry = DESIGN_DOCTRINE_ENTRIES["wrapper_subprocess_separation"]
+    assert entry["capability_status"] == "emittable_today"
+
+
 def test_fifo_parallel_mutual_exclusion_is_symmetric():
     fifo = DESIGN_DOCTRINE_ENTRIES["reliable_and_sequential_messaging"]
     parallel = DESIGN_DOCTRINE_ENTRIES["combine_split_flow_control"]

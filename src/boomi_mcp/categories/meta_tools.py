@@ -5552,6 +5552,95 @@ _PROCESS_FLOW_PROTOCOLS = {
             },
         },
     },
+    "wrapper_subprocess": {
+        "resource_type": "process",
+        "operation": "create",
+        "protocol": "wrapper_subprocess",
+        "process_kind": "wrapper_subprocess",
+        "summary": (
+            "A thin wrapper-parent ('facade') process: start -> Process Call(s) "
+            "-> stop (issue #90 M4.5.5). The parent orchestrates child processes "
+            "(the logic units) authored in the SAME IntegrationSpecV1 and "
+            "referenced by key (subprocess_ref='$ref:KEY'), or existing Boomi "
+            "components referenced by id (process_id). No connector source/target "
+            "of its own."
+        ),
+        "required_fields": [
+            "process_kind",
+            "process_calls",
+        ],
+        "optional_fields": [
+            "folder_name",
+            "description",
+            "process_calls[].subprocess_ref",
+            "process_calls[].process_id",
+            "process_calls[].wait",
+            "process_calls[].abort_on_error",
+            "process_calls[].label",
+        ],
+        "field_notes": {
+            "process_calls": "Non-empty list; each entry is one standalone Process Call to a child process.",
+            "process_calls[].subprocess_ref": "$ref:KEY of an in-spec process component (the child). EXACTLY ONE of subprocess_ref / process_id per entry.",
+            "process_calls[].process_id": "Component id of an EXISTING Boomi process (no in-spec child required).",
+            "process_calls[].wait": "Wait for the child to finish before continuing (default true).",
+            "process_calls[].abort_on_error": "Abort the parent if the child fails (default false — the parent continues, matching the live wrapper exemplar).",
+        },
+        "structured_errors": [
+            {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
+            {"error_code": "PROCESS_REF_MISSING", "field": "process_calls|process_calls[N]"},
+            {"error_code": "PROCESS_REF_AMBIGUOUS", "field": "process_calls[N]"},
+            {"error_code": "PROCESS_REF_SELF_REFERENCE", "field": "process_calls[N].subprocess_ref"},
+            {"error_code": "PROCESS_REF_NOT_FOUND", "field": "process_calls[N].subprocess_ref"},
+            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "process_calls[N].subprocess_ref"},
+            {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
+            {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
+        ],
+        "notes": [
+            "Author the parent and its children as separate process components in "
+            "ONE IntegrationSpecV1. The parent's process_calls reference children "
+            "by $ref:KEY; the integration builder applies children FIRST (an "
+            "implicit parent->child dependency edge is synthesized, so depends_on "
+            "need not list them) and substitutes $ref->created id before building "
+            "the parent.",
+            "Standalone Process Call is transcribed from a live wrapper exemplar: "
+            "it runs the child as a separate process and waits for it (wait=true), "
+            "and by default does NOT abort the parent on a child failure "
+            "(abort_on_error=false).",
+            "Parent-redeploy implication: the parent is the release boundary — when "
+            "a child subprocess changes, repackage and redeploy the parent so the "
+            "deployed wrapper references the intended child implementation.",
+            "Invalid references fail at plan time before any Boomi mutation: a "
+            "missing/ambiguous target, a self-reference, a key not present in the "
+            "spec, or a non-process target each return a structured PROCESS_REF_* "
+            "error.",
+            "Branch shape and cross-part document-handoff contracts are out of "
+            "scope (Branch stays gated; #14 owns composed fanout).",
+        ],
+        "example_component_spec": {
+            "key": "wrapper_parent",
+            "type": "process",
+            "action": "create",
+            "name": "<<Wrapper Parent Process Name>>",
+            "depends_on": ["main_logic"],
+            "config": {
+                "process_kind": "wrapper_subprocess",
+                "folder_name": "<<Boomi folder path>>",
+                "process_calls": [
+                    {
+                        "subprocess_ref": "$ref:main_logic",
+                        "wait": True,
+                        "abort_on_error": False,
+                        "label": "<<invoke main-logic subprocess>>",
+                    },
+                ],
+            },
+        },
+        "example_child_note": (
+            "Author the child (e.g. a database_to_api_sync process) as its own "
+            "process component keyed 'main_logic' in the same spec; the parent "
+            "references it via subprocess_ref='$ref:main_logic'."
+        ),
+    },
 }
 
 

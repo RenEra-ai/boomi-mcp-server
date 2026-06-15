@@ -257,6 +257,44 @@ def test_example_demonstrates_wired_dlq_and_catch_notify(template):
     assert "<<" in notify["message_template"]
 
 
+def test_wrapper_subprocess_protocol_documented():
+    # Issue #90: the wrapper_subprocess structure is documented in get_schema_template.
+    result = get_schema_template_action(
+        resource_type="process",
+        operation="create",
+        protocol="wrapper_subprocess",
+    )
+    assert result["_success"] is True
+    assert result["process_kind"] == "wrapper_subprocess"
+    assert "process_calls" in result["required_fields"]
+    for field in (
+        "process_calls[].subprocess_ref",
+        "process_calls[].process_id",
+        "process_calls[].wait",
+        "process_calls[].abort_on_error",
+    ):
+        assert field in result["optional_fields"], field
+    codes = {e["error_code"] for e in result["structured_errors"]}
+    for code in (
+        "PROCESS_REF_MISSING",
+        "PROCESS_REF_AMBIGUOUS",
+        "PROCESS_REF_SELF_REFERENCE",
+        "PROCESS_REF_NOT_FOUND",
+        "PROCESS_REF_TYPE_MISMATCH",
+    ):
+        assert code in codes, code
+    # Parent-redeploy implication is documented; example uses $ref + placeholders only.
+    notes_blob = " ".join(result["notes"]).lower()
+    assert "redeploy" in notes_blob
+    example = result["example_component_spec"]
+    assert example["config"]["process_kind"] == "wrapper_subprocess"
+    call0 = example["config"]["process_calls"][0]
+    assert call0["subprocess_ref"] == "$ref:main_logic"
+    assert "main_logic" in example["depends_on"]
+    serialized = json.dumps(result)
+    assert not _UUID_RE.search(serialized)
+
+
 def test_unknown_protocol_returns_error():
     result = get_schema_template_action(
         resource_type="process",

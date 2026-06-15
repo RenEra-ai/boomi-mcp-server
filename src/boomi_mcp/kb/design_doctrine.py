@@ -144,8 +144,11 @@ _ENTRIES: List[Dict[str, Any]] = [
             "orchestration only, calling thick subprocesses (via Process "
             "Call) that own the logic; shared framework and error-handling "
             "subprocesses are front-loaded and reused across integrations. "
-            "Process Route gives each subprocess an independent deploy unit "
-            "with a back-compatible interface contract."
+            "The parent and its children can be authored together in one "
+            "integration spec — the parent references each child by key and "
+            "the children are built first. Process Route gives each "
+            "subprocess an independent deploy unit with a back-compatible "
+            "interface contract."
         ),
         "when_to_use": (
             "Any integration with more than one logical operation, or where "
@@ -161,7 +164,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "redeploying the parent."
         ),
         "verification_status": "companion_unverified",
-        "capability_status": "gated",
+        "capability_status": "emittable_today",
         "category": "decomposition",
         "mutual_exclusion": [
             "Synchronous parent-to-subprocess handoff couples their "
