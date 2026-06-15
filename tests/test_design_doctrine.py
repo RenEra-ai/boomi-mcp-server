@@ -549,9 +549,10 @@ def test_corroboration_backlog_present_and_verified():
         if item["status"] == "docs_corroborated":
             assert item.get("docs_page_key", "").startswith("https://help.boomi.com")
     statuses = {item["entry"]: item["status"] for item in backlog}
-    # Corroborated by the official KB:
+    # Fully corroborated by the official KB (deferred-batch return to parent):
     assert statuses["combine_split_flow_control"] == "docs_corroborated"
-    assert statuses["test_mode_workaround_for_listener_connectors"] == "docs_corroborated"
-    # KB does not cover these design-level claims → label retained:
+    # Only partially documented (runtime-scoped yes; "shared across all users" no)
+    # or not covered at all → claim retained as course_unverified, never overstated:
+    assert statuses["test_mode_workaround_for_listener_connectors"] == "course_unverified"
     assert statuses["change_data_capture_strategy"] == "course_unverified"
     assert statuses["document_tracking_as_monitoring"] == "course_unverified"

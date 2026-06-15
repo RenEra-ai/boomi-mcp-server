@@ -1398,14 +1398,15 @@ CORROBORATION_BACKLOG: List[Dict[str, str]] = [
         "claim": "Test-Mode extension values are runtime-scoped and shared "
         "across all users.",
         "entry": "test_mode_workaround_for_listener_connectors",
-        "status": "docs_corroborated",
+        "status": "course_unverified",
         "docs_page_key": "https://help.boomi.com/docs/Atomsphere/Integration/"
         "Process%20building/c-atm-Setting_Extension_Values_for_Use_in_Test_Mode_"
         "a3aa3a4a-03b7-488c-b70c-f145af642897",
-        "verification": "search_boomi_docs (2026-06-15): 'Test mode extension "
-        "values are remembered per Runtime' corroborates the runtime-scoped claim; "
-        "'shared across all users' is implied by per-Runtime persistence but not "
-        "stated verbatim.",
+        "verification": "search_boomi_docs (2026-06-15): the cited page corroborates "
+        "the runtime-scoped half ('Test mode extension values are remembered per "
+        "Runtime'), but the 'shared across all users' half is NOT stated in the KB. "
+        "Because only part of the claim is documented, the full claim is retained as "
+        "course_unverified pending verification of the user-sharing behavior.",
     },
 ]
 
