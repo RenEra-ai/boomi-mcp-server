@@ -2025,8 +2025,9 @@ def _process_models_error_handling(comp: Any) -> bool:
     no-error-handling plan warning never fires on a process that does handle
     errors:
       * structured route (process_kind/process_type set): a supported
-        non-disabled DLQ mode, or a retry count greater than zero, under
-        ``config.reliability``;
+        zero-retry DLQ mode under ``config.reliability`` — mirroring
+        ProcessFlowBuilder._should_emit_try_catch, the only configuration that
+        actually emits a Try/Catch + DLQ wrapper;
       * legacy route: a Try/Catch evident in raw process XML, or a catch-typed
         entry in a ``config.shapes`` list.
 
@@ -2035,6 +2036,11 @@ def _process_models_error_handling(comp: Any) -> bool:
     unknown reliability block entirely, so trusting it there would wrongly
     suppress the warning for a legacy process carrying a stray reliability
     block — gate it on process_kind. Codex review P2.
+
+    ``retry_count > 0`` is NOT error-handling evidence: it is gated
+    (PROCESS_RETRY_UNVERIFIED) and rejected by validate_config, so it never
+    emits a Try/Catch. Only the supported zero-retry DLQ modes count. Codex
+    review (architect, finding 2).
     """
     config = comp.config if isinstance(comp.config, dict) else {}
 
@@ -2049,13 +2055,6 @@ def _process_models_error_handling(comp: Any) -> bool:
                 mode = str(dlq.get("mode") or "").strip().lower()
                 if mode in _ERROR_HANDLING_DLQ_MODES:
                     return True
-            retry_count = reliability.get("retry_count")
-            if (
-                isinstance(retry_count, int)
-                and not isinstance(retry_count, bool)
-                and retry_count > 0
-            ):
-                return True
 
     raw_xml = config.get("xml")
     if isinstance(raw_xml, str):

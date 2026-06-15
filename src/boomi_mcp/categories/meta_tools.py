@@ -4850,16 +4850,15 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
             "description": "Author an integration: FIRST consult design_doctrine and select patterns by capability_status, THEN prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
             "steps": [
                 "1. list_boomi_profiles() → pick the credential profile; pass profile=... to every account-scoped call",
-                # Design-consultation step (issue #86). Deliberately phrased to
-                # begin with a verb, not "tool(", so the available_tools regex
-                # filter (_refs_in_steps) does NOT treat get_schema_template as a
-                # hard dependency of the whole workflow — that keeps the archetype
-                # chain available even when get_schema_template is filtered out,
-                # and preserves the fallback-strip semantics. get_schema_template
-                # is a foundational always-registered tool, so the routing text is
-                # valid in practice. Routing lives in this response payload, never
-                # in a tool description (MCP-conformance, issue #86).
-                "2. Consult design_doctrine BEFORE choosing an archetype: get_schema_template(schema_name='design_doctrine') → review the pattern catalog, then fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Select patterns by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / note the gap), or guidance_only (GUI/handoff).",
+                # Design-consultation step (issue #86). A parsable
+                # get_schema_template(...) step so the available_tools filter
+                # (_refs_in_steps) tracks it: the design-first authoring workflow
+                # genuinely depends on get_schema_template to serve
+                # design_doctrine, so the workflow is correctly dropped when that
+                # tool is absent rather than advertising an unusable consult.
+                # Routing lives in this response payload, never in a tool
+                # description (MCP-conformance, issue #86).
+                "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing an archetype; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Select patterns by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / note the gap), or guidance_only (GUI/handoff).",
                 "3. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
                 "4. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
                 "5. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",

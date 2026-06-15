@@ -102,9 +102,10 @@ def test_workflow_chain_runs_through_archetype_to_build_integration_plan():
         if m:
             referenced.append(m.group(1))
 
-    # The first four numbered steps: profile first, then the archetype chain.
-    assert referenced[:4] == ["list_boomi_profiles", *AUTHORING_TOOLS], (
-        f"workflow must start profile-first then the archetype chain, got: {referenced[:4]!r}"
+    # Profile first, then the design_doctrine consult (issue #86), then the
+    # archetype chain.
+    assert referenced[:5] == ["list_boomi_profiles", "get_schema_template", *AUTHORING_TOOLS], (
+        f"workflow must start profile → design_doctrine consult → archetype chain, got: {referenced[:5]!r}"
     )
     # At least one downstream step must hand off to build_integration(action='plan').
     assert any(
@@ -172,6 +173,9 @@ def test_authoring_workflow_preserved_when_all_referenced_tools_present():
     archetype-first workflow survives the filter."""
     only = {
         "list_boomi_profiles",
+        # Issue #86: the design_doctrine consult is a parsable get_schema_template
+        # step, so it is now a tracked dependency of the workflow's main chain.
+        "get_schema_template",
         "list_integration_archetypes",
         "get_integration_archetype",
         "build_from_archetype",
@@ -184,8 +188,6 @@ def test_authoring_workflow_preserved_when_all_referenced_tools_present():
     wf = catalog["workflows"]["build_integration_from_description"]
     assert "list_boomi_profiles" in wf["steps"][0]
     # Issue #86: design_doctrine consult sits between profile and archetypes.
-    # It is intentionally not a hard filter dependency, so the workflow still
-    # survives this filter (which omits get_schema_template) with the step intact.
     assert "design_doctrine" in wf["steps"][1]
     assert "list_integration_archetypes" in wf["steps"][2]
 
@@ -211,10 +213,12 @@ def test_prefer_archetypes_hint_suppressed_when_authoring_tools_not_registered()
     )
 
 
-def test_workflow_fallback_dropped_when_schema_template_absent():
-    """When archetype tools are registered but get_schema_template is not, the
-    main workflow must survive but the fallback (which calls get_schema_template)
-    must be stripped — agents can still follow the archetype-first chain."""
+def test_workflow_dropped_when_schema_template_absent():
+    """Issue #86: the design_doctrine consult is a parsable get_schema_template
+    step in the main chain, so the whole archetype-first workflow is correctly
+    dropped when get_schema_template isn't registered — the design-first flow
+    genuinely cannot be followed without it. (Previously only the fallback,
+    which also calls get_schema_template, was stripped.)"""
     only = {
         "list_boomi_profiles",
         "list_integration_archetypes",
@@ -225,10 +229,9 @@ def test_workflow_fallback_dropped_when_schema_template_absent():
         "orchestrate_deploy",
     }
     catalog = list_capabilities_action(available_tools=only)
-    wf = catalog["workflows"].get("build_integration_from_description")
-    assert wf is not None, "main workflow must survive when archetype chain is intact"
-    assert "fallback" not in wf, (
-        "fallback must be stripped when get_schema_template isn't registered"
+    assert "build_integration_from_description" not in catalog["workflows"], (
+        "workflow must drop when its get_schema_template design-consult step "
+        "references a tool absent from the catalog"
     )
 
 

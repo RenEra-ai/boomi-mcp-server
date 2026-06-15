@@ -466,23 +466,25 @@ def test_process_models_error_handling_predicate():
             key="p", type="process", action="create", name="P", config=config
         )
 
-    # Structured route (process_kind set) trusts reliability evidence.
+    # Structured route (process_kind set) trusts only the supported zero-retry
+    # DLQ modes — the only config that actually emits a Try/Catch.
     assert _process_models_error_handling(
         comp({"process_kind": "database_to_api_sync",
               "reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}}})
     )
     assert _process_models_error_handling(
         comp({"process_kind": "database_to_api_sync",
+              "reliability": {"retry_count": 0, "dlq": {"mode": "error_subprocess_ref"}}})
+    )
+    # retry_count > 0 is gated (never emits a Try/Catch) — NOT error handling.
+    assert not _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
               "reliability": {"retry_count": 2, "dlq": {"mode": "disabled"}}})
     )
-    # Structured but disabled / retry bool → no error handling.
+    # Structured but DLQ disabled → no error handling.
     assert not _process_models_error_handling(
         comp({"process_kind": "database_to_api_sync",
               "reliability": {"retry_count": 0, "dlq": {"mode": "disabled"}}})
-    )
-    assert not _process_models_error_handling(
-        comp({"process_kind": "database_to_api_sync",
-              "reliability": {"retry_count": True, "dlq": {"mode": "disabled"}}})
     )
     # Legacy route ignores the reliability block entirely.
     assert not _process_models_error_handling(
