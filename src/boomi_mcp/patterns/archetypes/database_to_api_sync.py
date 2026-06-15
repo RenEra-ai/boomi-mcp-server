@@ -7,9 +7,12 @@ assembly: it now composes the shipped #27 (db_extract, field_map) and #28
 IntegrationSpecV1 (DB source, JSON transform, REST target, structured process)
 suitable for build_integration(action='plan'). Every byte of XML is produced by
 the existing component builders through those primitives; this file emits JSON
-component specs only and never calls a live Boomi account. Process retry/DLQ,
-schedule activation, watermark update, and dynamic operation-property wiring
-remain represented as metadata only and are deferred (#51 / M3).
+component specs only and never calls a live Boomi account. DLQ now wires the
+verified Try/Catch + DLQ catch path for modes document_cache_ref /
+error_subprocess_ref (process retry_count=0; #51 M3.R1a). Caller retry
+(max_attempts>1), schedule activation, watermark update, and dynamic
+operation-property wiring remain represented as metadata only and are deferred
+(#51 R1b / M3).
 
 M2.1a (issue #44) replaces the legacy ``transform.mappings`` /
 ``transform.payload_template`` / ``transform.script_slots`` surface with:
@@ -30,7 +33,7 @@ parsing / DB browse / row sampling remain out of scope.
 from __future__ import annotations
 
 import re
-from typing import Annotated, Any, Dict, List, Literal, Optional, Set, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
 from pydantic import (
     BaseModel,
@@ -72,8 +75,6 @@ from ..primitives._helpers import (
 from ..primitives.db_extract import DbExtractParameters, DbExtractPrimitive
 from ..primitives.field_map import FieldMapParameters, FieldMapPrimitive
 from ..primitives.operational import (
-    DlqWriterParameters,
-    DlqWriterPrimitive,
     ErrorClassifierParameters,
     ErrorClassifierPrimitive,
     RunMetadataParameters,
@@ -1523,28 +1524,111 @@ class RetryPolicy(BaseModel):
 
 
 class DlqTarget(BaseModel):
+    """Dead-letter destination, aligned to the builder's verified DLQ modes.
+
+    The process builder (issue #51 M3.R1a) emits a verified Try/Catch + DLQ
+    catch path for exactly two modes — ``document_cache_ref`` (catch leg routes
+    to a Document Cache, bound via ``document_cache_id``) and
+    ``error_subprocess_ref`` (catch leg calls an error subprocess, bound via
+    ``process_id``). The binding is a literal Boomi component id or a
+    ``$ref:KEY`` token whose KEY is an in-spec component. Legacy
+    folder/topic/queue routing is NOT an emittable builder mode; it is retained
+    ONLY as an explicitly-labeled ``guidance_only`` alias that records intent
+    as metadata (no wiring) — never silently accepted as a real DLQ.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["folder", "topic", "queue"] = Field(
+    mode: Literal["document_cache_ref", "error_subprocess_ref", "guidance_only"] = Field(
         ...,
         description=(
-            "Kind of dead-letter destination: a Boomi folder, a messaging "
-            "topic, or a queue. The contract does not validate the target's "
-            "existence; downstream builders wire the destination."
+            "Verified DLQ mode. 'document_cache_ref' / 'error_subprocess_ref' "
+            "emit a real Try/Catch + DLQ catch path (require document_cache_id "
+            "/ process_id). 'guidance_only' records legacy folder/topic/queue "
+            "intent as metadata only and emits no wiring."
         ),
     )
-    address: str = Field(
-        ...,
+    document_cache_id: Optional[str] = Field(
+        default=None,
         description=(
-            "Address of the dead-letter destination (e.g. folder path, topic "
-            "name, queue URL). Surfaced verbatim to downstream builders."
+            "DLQ Document Cache binding for mode='document_cache_ref': a literal "
+            "Boomi component id, or a '$ref:KEY' token referencing an in-spec "
+            "Document Cache component. Required for that mode; rejected otherwise."
         ),
+    )
+    process_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Error-subprocess binding for mode='error_subprocess_ref': a literal "
+            "Boomi component id, or a '$ref:KEY' token referencing an in-spec "
+            "process/subprocess component. Required for that mode; rejected "
+            "otherwise."
+        ),
+    )
+    kind: Optional[Literal["folder", "topic", "queue"]] = Field(
+        default=None,
+        description=(
+            "Legacy routing kind — accepted ONLY with mode='guidance_only' "
+            "(recorded as metadata, never wired)."
+        ),
+    )
+    address: Optional[str] = Field(
+        default=None,
+        description=(
+            "Legacy destination address — accepted ONLY with "
+            "mode='guidance_only'. Never echoed back (may carry sensitive "
+            "content); only its presence is recorded."
+        ),
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="Optional free-form note for a guidance_only target.",
     )
 
-    @field_validator("address")
+    @field_validator("document_cache_id", "process_id", "address")
     @classmethod
-    def _strip_address(cls, value: str) -> str:
+    def _strip_required_present(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
         return _stripped_nonblank(value)
+
+    @model_validator(mode="after")
+    def _enforce_mode_fields(self) -> "DlqTarget":
+        if self.mode == "document_cache_ref":
+            if not self.document_cache_id:
+                raise ValueError(
+                    "dlq.target.mode='document_cache_ref' requires "
+                    "document_cache_id (a Boomi component id or '$ref:KEY')."
+                )
+            if self.process_id or self.kind or self.address:
+                raise ValueError(
+                    "dlq.target.mode='document_cache_ref' accepts only "
+                    "document_cache_id (no process_id/kind/address)."
+                )
+        elif self.mode == "error_subprocess_ref":
+            if not self.process_id:
+                raise ValueError(
+                    "dlq.target.mode='error_subprocess_ref' requires process_id "
+                    "(a Boomi component id or '$ref:KEY')."
+                )
+            if self.document_cache_id or self.kind or self.address:
+                raise ValueError(
+                    "dlq.target.mode='error_subprocess_ref' accepts only "
+                    "process_id (no document_cache_id/kind/address)."
+                )
+        else:  # guidance_only
+            if not self.kind or not self.address:
+                raise ValueError(
+                    "dlq.target.mode='guidance_only' requires kind and address "
+                    "(legacy folder/topic/queue intent recorded as metadata only "
+                    "— no builder wiring)."
+                )
+            if self.document_cache_id or self.process_id:
+                raise ValueError(
+                    "dlq.target.mode='guidance_only' must not set "
+                    "document_cache_id/process_id."
+                )
+        return self
 
 
 class DlqPolicy(BaseModel):
@@ -2210,11 +2294,61 @@ def _build_rest_send_params(
     )
 
 
+def _ref_dep_key(binding: Optional[str]) -> Optional[str]:
+    """If a DLQ binding is a ``$ref:KEY`` token, return KEY (to add to the
+    process ``depends_on`` so the builder's $ref-reachability walk passes);
+    otherwise None (a literal component id needs no dependency edge)."""
+    if isinstance(binding, str) and binding.startswith("$ref:"):
+        key = binding[len("$ref:"):].strip()
+        return key or None
+    return None
+
+
+def _derive_process_reliability(
+    reliability: "ReliabilityConfig",
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Map the caller's reliability config to the emitted process
+    ``reliability`` block plus an optional ``$ref`` dependency key for the DLQ
+    catch-leg binding.
+
+    The emitted process always carries ``retry_count == 0`` — caller retry
+    (max_attempts > 1) is recorded as intent only and remains gated for #51 R1b
+    (retryCount→interval mapping). For ``retry_count == 0`` the builder emits
+    the verified Try/Catch + DLQ catch path when a wired DLQ mode and its
+    binding id are present (issue #51 M3.R1a). ``guidance_only`` and ``disabled``
+    emit no Try/Catch.
+    """
+    dlq = reliability.dlq
+    if not dlq.enabled or dlq.target is None:
+        return {"retry_count": 0, "dlq": {"mode": "disabled"}}, None
+
+    target = dlq.target
+    if target.mode == "document_cache_ref":
+        block = {
+            "retry_count": 0,
+            "dlq": {
+                "mode": "document_cache_ref",
+                "document_cache_id": target.document_cache_id,
+            },
+        }
+        return block, _ref_dep_key(target.document_cache_id)
+    if target.mode == "error_subprocess_ref":
+        block = {
+            "retry_count": 0,
+            "dlq": {"mode": "error_subprocess_ref", "process_id": target.process_id},
+        }
+        return block, _ref_dep_key(target.process_id)
+
+    # guidance_only — recorded as intent in operational_intent; no builder wiring.
+    return {"retry_count": 0, "dlq": {"mode": "disabled"}}, None
+
+
 def _build_main_process(
     parameters: "DatabaseToApiSyncParameters", overrides: Dict[str, str]
 ) -> IntegrationComponentSpec:
     naming = parameters.naming
     send = parameters.target.send_request
+    reliability_block, dlq_dep_key = _derive_process_reliability(parameters.reliability)
 
     db_conn_key = primitive_component_key(_SOURCE_PREFIX, ROLE_DB_CONNECTION)
     db_op_key = primitive_component_key(_SOURCE_PREFIX, ROLE_DB_GET_OPERATION)
@@ -2242,11 +2376,12 @@ def _build_main_process(
             "operation_id": f"$ref:{rest_op_key}",
             "action_type": send.method,
         },
-        # Retry/DLQ stay disabled in the emitted process XML until verified
-        # Try/Catch emission lands (#51); requested retry/DLQ intent lives only
-        # in validation_rules.operational_intent. This keeps ProcessFlowBuilder's
-        # PROCESS_RETRY_UNVERIFIED gate satisfied.
-        "reliability": {"retry_count": 0, "dlq": {"mode": "disabled"}},
+        # Reliability derived from the caller's DLQ policy. For retry_count == 0
+        # (always, here — caller retry is intent-only, gated for #51 R1b) a
+        # verified DLQ mode (document_cache_ref / error_subprocess_ref) emits the
+        # live Try/Catch + DLQ catch path via ProcessFlowBuilder (#51 M3.R1a);
+        # disabled / guidance_only emit no Try/Catch.
+        "reliability": reliability_block,
     }
     if naming.folder_path:
         config["folder_name"] = naming.folder_path
@@ -2254,13 +2389,18 @@ def _build_main_process(
     # depends_on must contain exactly the keys referenced by $ref tokens in the
     # process config (ProcessFlowBuilder enforces this). The read profile and
     # target profile are depended transitively by the operation/map components.
+    # A $ref DLQ binding adds one more edge so the catch-leg target is reachable.
+    depends_on = [db_conn_key, db_op_key, map_key, rest_conn_key, rest_op_key]
+    if dlq_dep_key is not None and dlq_dep_key not in depends_on:
+        depends_on.append(dlq_dep_key)
+
     return IntegrationComponentSpec(
         key=_MAIN_PROCESS_KEY,
         type="process",
         action="create",
         name=process_name,
         config=config,
-        depends_on=[db_conn_key, db_op_key, map_key, rest_conn_key, rest_op_key],
+        depends_on=depends_on,
     )
 
 
@@ -2374,10 +2514,11 @@ def _deferred_intent(parameters: "DatabaseToApiSyncParameters") -> Dict[str, Any
 def _build_operational_intent(
     parameters: "DatabaseToApiSyncParameters", context: PrimitiveBuildContext
 ) -> Dict[str, Any]:
-    """Compose the operational primitives' fragments into metadata-only intent.
+    """Compose the operational primitives' fragments into intent metadata.
 
-    None of this changes the emitted process component's gated reliability —
-    retry/DLQ stay disabled in process XML until #51.
+    Verified DLQ modes (document_cache_ref / error_subprocess_ref) ARE wired
+    into the emitted process reliability (#51 M3.R1a); this records the matching
+    intent. Retry (max_attempts>1) and guidance_only DLQ remain metadata-only.
     """
     execution = parameters.execution
     reliability = parameters.reliability
@@ -2463,31 +2604,52 @@ def _build_operational_intent(
         reliability_intent["error_classifier"] = classifier
 
     # Requested retry is recorded as intent only; the process stays retry_count=0.
+    # retry > 1 mapping (retryCount→interval) is gated for #51 R1b.
     retry_intent: Dict[str, Any] = {
         "requested_max_attempts": reliability.retry.max_attempts,
         "backoff": reliability.retry.backoff,
         "process_retry_count": 0,
-        "deferred_to": "#51",
+        "deferred_to": "#51 R1b",
     }
     if reliability.retry.initial_interval_seconds is not None:
         retry_intent["initial_interval_seconds"] = reliability.retry.initial_interval_seconds
     reliability_intent["retry"] = retry_intent
 
-    # DLQ wiring stays disabled (DlqWriterPrimitive invoked disabled).
-    dlq_fragment = DlqWriterPrimitive.emit_fragment(
-        context,
-        _coerce_primitive_params(
-            DlqWriterParameters, {"mode": "disabled"}, field="reliability.dlq"
-        ),
-    )
-    reliability_intent["dlq"] = dlq_fragment["process_config"]["reliability"]["dlq"]
-    if reliability.dlq.enabled:
-        dlq_requested: Dict[str, Any] = {"requested": True, "deferred_to": "#51"}
-        if reliability.dlq.target is not None:
-            # Only the routing kind (folder/topic/queue) — never the address,
-            # which can carry caller-specific or sensitive content.
-            dlq_requested["target_kind"] = reliability.dlq.target.kind
-        reliability_intent["dlq_requested"] = dlq_requested
+    # Record the DLQ block actually emitted into the process (truthful — the
+    # archetype now wires verified DLQ modes directly into process.reliability;
+    # disabled / guidance_only emit {"mode": "disabled"}). #51 M3.R1a.
+    emitted_block, _ = _derive_process_reliability(reliability)
+    reliability_intent["dlq"] = emitted_block["dlq"]
+    if reliability.dlq.enabled and reliability.dlq.target is not None:
+        target = reliability.dlq.target
+        if target.mode in ("document_cache_ref", "error_subprocess_ref"):
+            binding = (
+                target.document_cache_id
+                if target.mode == "document_cache_ref"
+                else target.process_id
+            )
+            # The binding is a Boomi component id / $ref token — structural, not
+            # a secret — so it is safe to record (it also appears in the spec).
+            reliability_intent["dlq_requested"] = {
+                "requested": True,
+                "status": "emitted",
+                "builder_mode": target.mode,
+                "binding": binding,
+            }
+        else:  # guidance_only
+            # Never echo the legacy address (may carry sensitive content) — only
+            # its presence + the routing kind.
+            reliability_intent["dlq_requested"] = {
+                "requested": True,
+                "status": "guidance_only",
+                "kind": target.kind,
+                "address_present": target.address is not None,
+                "reason": target.reason,
+                "note": (
+                    "folder/topic/queue is not a verified builder DLQ mode; "
+                    "recorded as guidance only (no wiring)."
+                ),
+            }
     intent["reliability"] = reliability_intent
 
     # --- expected status codes ---
@@ -2517,7 +2679,7 @@ def _build_operational_intent(
 class DatabaseToApiSyncArchetype(ArchetypePattern):
     metadata = PatternMetadata(
         name="database_to_api_sync",
-        version="0.3.0",
+        version="0.4.0",
         kind=PatternKind.ARCHETYPE,
         description=(
             "Archetype for replicating SQL Server records to a REST API on a "
@@ -2528,9 +2690,11 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             "structured process — suitable for build_integration(action='plan'). "
             "Every byte of XML is produced by the existing component builders; "
             "the archetype emits JSON component specs only and never calls "
-            "Boomi. Retry/DLQ process emission, schedule activation, watermark "
-            "update, and dynamic operation-property wiring remain deferred "
-            "(#51 / M3)."
+            "Boomi. Emits a verified Try/Catch + DLQ catch path when DLQ is "
+            "enabled with mode document_cache_ref or error_subprocess_ref "
+            "(process retry_count stays 0; #51 M3.R1a). Schedule activation, "
+            "watermark update, dynamic operation-property wiring, and "
+            "retry>1+DLQ remain deferred (#51 R1b / M3)."
         ),
         tags=[
             "database",
@@ -2559,11 +2723,13 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "Caller-declared DB result schema and caller-supplied JSON profile tree are the M2 source of truth.",
         "Emits executable component specs (DB source, JSON transform, REST target, process) for build_integration(action='plan').",
         "All XML is produced by the existing component builders; the archetype emits JSON component specs only.",
+        "Emits a verified Try/Catch + DLQ catch path when dlq.enabled with mode document_cache_ref or error_subprocess_ref (process retry_count stays 0; #51 M3.R1a).",
         "Credentials cross the contract only as opaque credential_ref values and are never echoed in errors.",
     ]
     limitations = [
         "Emits JSON component specs only; performs no Boomi mutation and exposes no raw XML.",
-        "Process retry/DLQ stay disabled in the emitted process XML; verified Try/Catch + DLQ emission is deferred (#51).",
+        "DLQ wiring is emitted for mode document_cache_ref / error_subprocess_ref (process retry_count=0); legacy folder/topic/queue targets require mode='guidance_only' and are recorded as metadata only (no wiring).",
+        "Combining caller retry (max_attempts>1) with emitted DLQ is gated for M4.5.3 (#51 R1b); the emitted process keeps retry_count=0 and records retry as intent.",
         "Schedule intent is represented as metadata only; deployment and schedule activation are M3.",
         "Watermark is represented as metadata only; watermark-update and dynamic operation-property wiring are deferred (#51).",
         "REST create-mode emits only auth='none'; secured auth (basic / bearer / oauth2) requires binding.mode='reuse'.",
@@ -2789,8 +2955,8 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "dlq": {
                         "enabled": True,
                         "target": {
-                            "kind": "queue",
-                            "address": "<<dlq queue address>>",
+                            "mode": "document_cache_ref",
+                            "document_cache_id": "<<dlq document cache component id>>",
                         },
                     },
                     "error_classifier": {
@@ -3078,11 +3244,11 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "component_count": len(components),
                 "raw_xml_exposed": False,
                 "boomi_mutation": False,
-                "metadata_version": "0.3.0",
-                # Metadata-only representation of trigger / schedule / watermark /
-                # retry intent / DLQ intent / error classifier / run metadata /
-                # expected status codes / deferred follow-up notes. None of this
-                # un-gates the process component's reliability.
+                "metadata_version": "0.4.0",
+                # Representation of trigger / schedule / watermark / retry intent /
+                # DLQ intent / error classifier / run metadata / expected status
+                # codes / deferred follow-up notes. Verified DLQ modes are wired
+                # into the process reliability (#51 M3.R1a); retry>1 stays gated.
                 "operational_intent": operational_intent,
                 "transform_review": {
                     "supported_actions": [
@@ -3099,7 +3265,8 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 },
                 "limitations": {
                     "schedule_activation": "M3 (deploy to a runtime first)",
-                    "process_retry_dlq": "#51 (verified Try/Catch + DLQ emission)",
+                    "process_dlq": "emitted for document_cache_ref / error_subprocess_ref (retry_count=0; #51 M3.R1a)",
+                    "process_retry_gt1": "#51 R1b (retry max_attempts>1 mapping; emitted retry_count stays 0)",
                     "watermark_update": "#51 (dynamic operation-property wiring)",
                     "db_create_auth": (
                         "username_password only; windows_integrated requires reuse"

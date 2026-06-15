@@ -172,7 +172,7 @@ def _full_reuse() -> Dict[str, Any]:
         },
         "reliability": {
             "retry": {"max_attempts": 5, "backoff": "exponential", "initial_interval_seconds": 2},
-            "dlq": {"enabled": True, "target": {"kind": "queue", "address": "<<dlq queue address>>"}},
+            "dlq": {"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<dlq queue address>>"}},
             "error_classifier": {"custom_rules": ["rate_limit_exhausted"]},
         },
     }

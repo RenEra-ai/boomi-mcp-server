@@ -76,11 +76,25 @@ def _reliability_downgrade_hints(spec: Any) -> list[str]:
             )
 
     dlq_requested = reliability.get("dlq_requested")
-    if isinstance(dlq_requested, dict) and dlq_requested.get("requested"):
+    # Only hint when the DLQ is genuinely NOT emitted. Since #87 the archetype
+    # wires verified DLQ modes (document_cache_ref / error_subprocess_ref) into
+    # the process reliability and records the emitted block under
+    # reliability.dlq — so a hint claiming "DLQ kept disabled" would be false
+    # for a wired DLQ. Gate on the actual emitted mode being disabled/absent
+    # (covers guidance_only and any archetype that records intent but emits no
+    # wiring).
+    emitted_dlq = reliability.get("dlq")
+    emitted_mode = emitted_dlq.get("mode") if isinstance(emitted_dlq, dict) else None
+    if (
+        isinstance(dlq_requested, dict)
+        and dlq_requested.get("requested")
+        and emitted_mode in (None, "disabled")
+    ):
         hints.append(
             "Requested dead-letter routing is recorded as intent but the "
-            "emitted process keeps DLQ disabled (a gated capability). See "
-            "get_schema_template(schema_name='design_pattern:error_routing_and_dlq')."
+            "emitted process keeps DLQ disabled. See get_schema_template("
+            "schema_name='design_pattern:error_routing_and_dlq') and choose a "
+            "verified DLQ mode (document_cache_ref / error_subprocess_ref)."
         )
 
     return hints

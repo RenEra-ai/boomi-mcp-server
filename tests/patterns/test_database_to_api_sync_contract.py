@@ -238,7 +238,7 @@ def _valid_full() -> Dict[str, Any]:
             },
             "dlq": {
                 "enabled": True,
-                "target": {"kind": "queue", "address": "<<dlq queue address>>"},
+                "target": {"mode": "guidance_only", "kind": "queue", "address": "<<dlq queue address>>"},
             },
             "error_classifier": {
                 "custom_rules": ["rate_limit_exhausted"],
@@ -359,7 +359,7 @@ def test_valid_build_emits_executable_component_spec():
     assert rules["boomi_mutation"] is False
     # Issue #29 removed the zero-component marker.
     assert "requires_m2_9_for_executable_components" not in rules
-    assert rules["metadata_version"] == "0.3.0"
+    assert rules["metadata_version"] == "0.4.0"
     assert "caller-declared" in rules["profile_schema_strategy"]
     assert "caller-supplied" in rules["profile_schema_strategy"]
     assert spec["name"] == "demo-db-to-api-sync"

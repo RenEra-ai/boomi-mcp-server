@@ -159,7 +159,7 @@ def _full_reuse() -> Dict[str, Any]:
         },
         "reliability": {
             "retry": {"max_attempts": 5, "backoff": "exponential", "initial_interval_seconds": 2},
-            "dlq": {"enabled": True, "target": {"kind": "queue", "address": "<<dlq queue address>>"}},
+            "dlq": {"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<dlq queue address>>"}},
             "error_classifier": {"custom_rules": ["rate_limit_exhausted"]},
         },
     }
@@ -306,10 +306,12 @@ class TestOperationalIntent:
         retry = oi["reliability"]["retry"]
         assert retry["requested_max_attempts"] == 5
         assert retry["process_retry_count"] == 0
-        assert retry["deferred_to"] == "#51"
+        assert retry["deferred_to"] == "#51 R1b"
         assert oi["reliability"]["dlq"] == {"mode": "disabled"}
         assert oi["reliability"]["dlq_requested"]["requested"] is True
-        assert oi["reliability"]["dlq_requested"]["target_kind"] == "queue"
+        assert oi["reliability"]["dlq_requested"]["status"] == "guidance_only"
+        assert oi["reliability"]["dlq_requested"]["kind"] == "queue"
+        assert oi["reliability"]["dlq_requested"]["address_present"] is True
 
     def test_manual_trigger_intent(self):
         oi = _spec(_minimal())["validation_rules"]["operational_intent"]
