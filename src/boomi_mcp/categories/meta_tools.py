@@ -20,6 +20,12 @@ from ..errors import (
     WORKFLOW_SEQUENCE_NOT_FOUND,
 )
 from ..models.integration_models import IntegrationSpecV1
+from ..kb.design_doctrine import (
+    get_design_doctrine_catalog,
+    get_design_pattern,
+    list_design_doctrine_index,
+    valid_design_pattern_names,
+)
 
 
 # ============================================================================
@@ -4841,17 +4847,27 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
             ],
         },
         "build_integration_from_description": {
-            "description": "Author an integration: prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
+            "description": "Author an integration: FIRST consult design_doctrine and select patterns by capability_status, THEN prefer V3 archetypes; fall back to direct IntegrationSpecV1 only when no archetype fits.",
             "steps": [
                 "1. list_boomi_profiles() → pick the credential profile; pass profile=... to every account-scoped call",
-                "2. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
-                "3. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
-                "4. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
-                "5. build_integration(action='plan', config='{\"integration_spec\": <spec from step 4>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
-                "6. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 4>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
-                "7. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 4>, ...}') → execute ordered component creation/update",
-                "8. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
-                "9. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test).",
+                # Design-consultation step (issue #86). Deliberately phrased to
+                # begin with a verb, not "tool(", so the available_tools regex
+                # filter (_refs_in_steps) does NOT treat get_schema_template as a
+                # hard dependency of the whole workflow — that keeps the archetype
+                # chain available even when get_schema_template is filtered out,
+                # and preserves the fallback-strip semantics. get_schema_template
+                # is a foundational always-registered tool, so the routing text is
+                # valid in practice. Routing lives in this response payload, never
+                # in a tool description (MCP-conformance, issue #86).
+                "2. Consult design_doctrine BEFORE choosing an archetype: get_schema_template(schema_name='design_doctrine') → review the pattern catalog, then fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Select patterns by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / note the gap), or guidance_only (GUI/handoff).",
+                "3. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
+                "4. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
+                "5. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
+                "6. build_integration(action='plan', config='{\"integration_spec\": <spec from step 5>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
+                "7. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 5>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
+                "8. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 5>, ...}') → execute ordered component creation/update",
+                "9. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
+                "10. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test).",
             ],
             "fallback": {
                 "when": "No archetype fits — e.g., an integration shape not yet covered by the registry.",
@@ -4908,8 +4924,11 @@ def _valid_schema_names() -> list:
     Best effort on archetype discovery: a registry failure must never break the
     error envelope that calls this for its valid_schema_names listing.
     """
-    names = ["IntegrationSpecV1", "workflow_sequences"]
+    names = ["IntegrationSpecV1", "workflow_sequences", "design_doctrine"]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
+    # design_doctrine is a stdlib-only static module — import-safe, so no
+    # try/except guard (unlike the archetype registry discovery below).
+    names += [f"design_pattern:{name}" for name in valid_design_pattern_names()]
     try:
         # Call-time import — registry discovery imports patterns.archetypes.*,
         # which imports categories.components.builders; keep meta_tools free of
@@ -4988,6 +5007,41 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
             "workflow": sequence,
             "raw_xml_exposed": False,
             "boomi_mutation": False,
+        }
+
+    if schema_name == "design_doctrine":
+        # Read-only integration-architecture knowledge surface (issue #86).
+        # Conceptual decisions only — no XML/attribute mechanics (see the
+        # boomi_mcp.kb.design_doctrine module + its token-lint test).
+        catalog = get_design_doctrine_catalog()
+        return {
+            "_success": True,
+            "schema_name": "design_doctrine",
+            "surface": "design_doctrine",
+            "pattern_surface": "get_schema_template(schema_name='design_pattern:<name>')",
+            **catalog,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "read_only": True,
+        }
+
+    if schema_name.startswith("design_pattern:"):
+        pattern_name = schema_name[len("design_pattern:"):]
+        entry = get_design_pattern(pattern_name)
+        if entry is None:
+            return {
+                "_success": False,
+                "error": f"Unknown design pattern: {pattern_name}",
+                "error_code": SCHEMA_NAME_UNSUPPORTED,
+                "valid_design_patterns": valid_design_pattern_names(),
+            }
+        return {
+            "_success": True,
+            "schema_name": schema_name,
+            "design_pattern": entry,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "read_only": True,
         }
 
     if schema_name.startswith("archetype:"):
@@ -6880,6 +6934,24 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         ),
     }
 
+    # --- Design doctrine (issue #86 — integration-architecture knowledge) ---
+    # A compact index only: name / category / capability_status per entry. The
+    # full prose lives behind get_schema_template(schema_name='design_doctrine')
+    # so list_capabilities stays a budgeted catalog, not a prose dump. Text-only,
+    # so it survives available_tools filtering (like operating_doctrine).
+    design_doctrine = {
+        "entry_count": get_design_doctrine_catalog()["entry_count"],
+        "surface": "get_schema_template(schema_name='design_doctrine')",
+        "pattern_surface": "get_schema_template(schema_name='design_pattern:<name>')",
+        "note": (
+            "Integration-architecture decisions (decomposition, reliability, "
+            "sync, routing, testing). Consult BEFORE selecting an archetype; "
+            "select patterns by capability_status (emittable_today | gated | "
+            "guidance_only)."
+        ),
+        "index": list_design_doctrine_index(),
+    }
+
     return {
         "_success": True,
         "server_name": "Boomi MCP Server",
@@ -6894,4 +6966,5 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "coverage": coverage,
         "hints": hints,
         "operating_doctrine": operating_doctrine,
+        "design_doctrine": design_doctrine,
     }

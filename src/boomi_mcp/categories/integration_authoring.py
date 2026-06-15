@@ -36,6 +36,56 @@ from ..patterns import (
 )
 
 
+def _reliability_downgrade_hints(spec: Any) -> list[str]:
+    """Surface design_doctrine pointers when a caller's reliability intent
+    (retry / DLQ) was recorded but the emitted process keeps it disabled.
+
+    Reads ``validation_rules.operational_intent.reliability`` — where
+    database_to_api_sync records requested-but-deferred retry/DLQ while the
+    process itself stays retry-disabled / DLQ-disabled (gated capabilities).
+    Archetypes that emit no such intent simply yield no hints. Read-only —
+    never mutates the spec; archetype-agnostic via defensive navigation.
+    """
+    validation_rules = getattr(spec, "validation_rules", None)
+    if not isinstance(validation_rules, dict):
+        return []
+    operational_intent = validation_rules.get("operational_intent")
+    if not isinstance(operational_intent, dict):
+        return []
+    reliability = operational_intent.get("reliability")
+    if not isinstance(reliability, dict):
+        return []
+
+    hints: list[str] = []
+
+    retry = reliability.get("retry")
+    if isinstance(retry, dict):
+        requested = retry.get("requested_max_attempts")
+        process_retry_count = retry.get("process_retry_count", 0)
+        if (
+            isinstance(requested, int)
+            and not isinstance(requested, bool)
+            and requested > 1
+            and process_retry_count in (0, None)
+        ):
+            hints.append(
+                "Requested retry (max_attempts > 1) is recorded as intent but "
+                "the emitted process keeps retry disabled (a gated capability). "
+                "See get_schema_template(schema_name="
+                "'design_pattern:connector_retry_design')."
+            )
+
+    dlq_requested = reliability.get("dlq_requested")
+    if isinstance(dlq_requested, dict) and dlq_requested.get("requested"):
+        hints.append(
+            "Requested dead-letter routing is recorded as intent but the "
+            "emitted process keeps DLQ disabled (a gated capability). See "
+            "get_schema_template(schema_name='design_pattern:error_routing_and_dlq')."
+        )
+
+    return hints
+
+
 def list_integration_archetypes_action(
     query: str | None = None,
     tags: list[str] | str | None = None,
@@ -151,7 +201,7 @@ def build_from_archetype_action(
             context={"archetype": name, "exception_type": type(exc).__name__},
         ).to_dict()
 
-    return {
+    response: dict[str, Any] = {
         "_success": True,
         "archetype": cls.metadata.name,
         "archetype_version": cls.metadata.version,
@@ -163,6 +213,17 @@ def build_from_archetype_action(
             "to preview steps before applying."
         ),
     }
+
+    # Issue #86 — contextual design-doctrine wiring. When the caller requested
+    # retry/DLQ reliability but the emitted process keeps it disabled (a gated
+    # capability), point at the relevant design_doctrine entries so the agent
+    # understands the gap and can design around it. Read-only, additive; the
+    # emitted integration_spec is never mutated.
+    hints = _reliability_downgrade_hints(spec)
+    if hints:
+        response["design_doctrine_hints"] = hints
+
+    return response
 
 
 # ---- private input normalizers ------------------------------------------

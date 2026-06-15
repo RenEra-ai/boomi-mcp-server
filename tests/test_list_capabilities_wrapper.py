@@ -96,7 +96,9 @@ def test_list_capabilities_wrapper_surfaces_integration_authoring_workflow():
     wf = payload["workflows"].get("build_integration_from_description")
     assert wf is not None, "archetype-first workflow filtered out — wrapper regression"
     assert "list_boomi_profiles" in wf["steps"][0]
-    assert "list_integration_archetypes" in wf["steps"][1]
+    # Issue #86: design_doctrine consult is interposed before archetype discovery.
+    assert "design_doctrine" in wf["steps"][1]
+    assert "list_integration_archetypes" in wf["steps"][2]
 
 
 def test_list_capabilities_wrapper_does_not_call_boomi_or_credentials():

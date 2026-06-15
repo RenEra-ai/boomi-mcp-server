@@ -79,8 +79,13 @@ def test_workflow_starts_profile_first_then_archetypes():
     assert "list_boomi_profiles" in wf["steps"][0], (
         f"first step must reference list_boomi_profiles, got: {wf['steps'][0]!r}"
     )
-    assert "list_integration_archetypes" in wf["steps"][1], (
-        f"second step must reference list_integration_archetypes, got: {wf['steps'][1]!r}"
+    # Issue #86: a design_doctrine consult is now interposed between profile
+    # selection and archetype discovery.
+    assert "design_doctrine" in wf["steps"][1], (
+        f"second step must consult design_doctrine, got: {wf['steps'][1]!r}"
+    )
+    assert "list_integration_archetypes" in wf["steps"][2], (
+        f"third step must reference list_integration_archetypes, got: {wf['steps'][2]!r}"
     )
 
 
@@ -178,7 +183,11 @@ def test_authoring_workflow_preserved_when_all_referenced_tools_present():
     assert "build_integration_from_description" in catalog["workflows"]
     wf = catalog["workflows"]["build_integration_from_description"]
     assert "list_boomi_profiles" in wf["steps"][0]
-    assert "list_integration_archetypes" in wf["steps"][1]
+    # Issue #86: design_doctrine consult sits between profile and archetypes.
+    # It is intentionally not a hard filter dependency, so the workflow still
+    # survives this filter (which omits get_schema_template) with the step intact.
+    assert "design_doctrine" in wf["steps"][1]
+    assert "list_integration_archetypes" in wf["steps"][2]
 
 
 # ---------------------------------------------------------------------------

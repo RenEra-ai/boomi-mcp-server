@@ -129,8 +129,10 @@ def test_valid_schema_names_covers_all_families():
     names = _valid_schema_names()
     assert "IntegrationSpecV1" in names
     assert "workflow_sequences" in names
+    assert "design_doctrine" in names
     assert any(n.startswith("workflow:") for n in names)
     assert any(n.startswith("archetype:") for n in names)
+    assert any(n.startswith("design_pattern:") for n in names)
 
 
 def test_archetype_discovery_resolves_callers_namespace():

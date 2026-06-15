@@ -2011,6 +2011,58 @@ def _first_nonblank_str(*values: Any) -> Optional[str]:
     return None
 
 
+_ERROR_HANDLING_DLQ_MODES = frozenset({"document_cache_ref", "error_subprocess_ref"})
+
+#: planned_action values that author process XML (and thus could carry — or
+#: lack — modeled error handling). reuse/reference/error_* actions never do.
+_PROCESS_AUTHORING_ACTIONS = frozenset({"create", "create_clone", "update"})
+
+
+def _process_models_error_handling(comp: Any) -> bool:
+    """True when a process component models error handling.
+
+    Conservative by design — returns True on ANY positive signal so the
+    no-error-handling plan warning never fires on a process that does handle
+    errors:
+      * structured route: a supported non-disabled DLQ mode, or a retry count
+        greater than zero, under ``config.reliability``;
+      * legacy route: a Try/Catch evident in raw process XML, or a catch-typed
+        entry in a ``config.shapes`` list.
+    """
+    config = comp.config if isinstance(comp.config, dict) else {}
+
+    reliability = config.get("reliability")
+    if isinstance(reliability, dict):
+        dlq = reliability.get("dlq")
+        if isinstance(dlq, dict):
+            mode = str(dlq.get("mode") or "").strip().lower()
+            if mode in _ERROR_HANDLING_DLQ_MODES:
+                return True
+        retry_count = reliability.get("retry_count")
+        if (
+            isinstance(retry_count, int)
+            and not isinstance(retry_count, bool)
+            and retry_count > 0
+        ):
+            return True
+
+    raw_xml = config.get("xml")
+    if isinstance(raw_xml, str):
+        lowered = raw_xml.lower()
+        if "catcherrors" in lowered or "trycatch" in lowered:
+            return True
+
+    shapes = config.get("shapes")
+    if isinstance(shapes, list):
+        for shape in shapes:
+            if isinstance(shape, dict) and "catch" in str(
+                shape.get("type") or shape.get("shapetype") or ""
+            ).strip().lower():
+                return True
+
+    return False
+
+
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     spec = _normalize_to_spec(config)
     # Issue #41 r3: inject transform.function wrappers between any
@@ -2992,6 +3044,26 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         warnings.append("No components were provided; plan contains zero executable steps.")
     if config.get("source_description") and not config.get("integration_spec"):
         warnings.append("Spec was derived from source_description. Review normalized output before apply.")
+
+    # Issue #86 — contextual design-doctrine wiring. Warn (do not block) when an
+    # authored process models no error handling, and point at the relevant
+    # design_doctrine entries. Routing lives in this response payload, never in a
+    # tool description (MCP-conformance).
+    processes_missing_error_handling = [
+        step["key"]
+        for step in steps
+        if step.get("type") == "process"
+        and step.get("planned_action") in _PROCESS_AUTHORING_ACTIONS
+        and not _process_models_error_handling(components_by_key[step["key"]])
+    ]
+    if processes_missing_error_handling:
+        warnings.append(
+            "Process component(s) "
+            f"{processes_missing_error_handling} model no error handling. "
+            "Consult get_schema_template(schema_name="
+            "'design_pattern:try_catch_placement') and "
+            "get_schema_template(schema_name='design_pattern:error_routing_and_dlq')."
+        )
 
     return {
         "_success": True,
