@@ -2011,8 +2011,6 @@ def _first_nonblank_str(*values: Any) -> Optional[str]:
     return None
 
 
-_ERROR_HANDLING_DLQ_MODES = frozenset({"document_cache_ref", "error_subprocess_ref"})
-
 #: planned_action values that author process XML (and thus could carry — or
 #: lack — modeled error handling). reuse/reference/error_* actions never do.
 _PROCESS_AUTHORING_ACTIONS = frozenset({"create", "create_clone", "update"})
@@ -2024,10 +2022,12 @@ def _process_models_error_handling(comp: Any) -> bool:
     Conservative by design — returns True on ANY positive signal so the
     no-error-handling plan warning never fires on a process that does handle
     errors:
-      * structured route (process_kind/process_type set): a supported
-        zero-retry DLQ mode under ``config.reliability`` — mirroring
-        ProcessFlowBuilder._should_emit_try_catch, the only configuration that
-        actually emits a Try/Catch + DLQ wrapper;
+      * structured route (process_kind/process_type set): a config that
+        ProcessFlowBuilder._should_emit_try_catch accepts — i.e. retry_count==0
+        with a supported DLQ mode, the only configuration that actually emits a
+        Try/Catch + DLQ wrapper. Delegating to that classmethod keeps this
+        predicate in exact lockstep with the builder (no duplicated/ drifting
+        retry+DLQ logic);
       * legacy route: a Try/Catch evident in raw process XML, or a catch-typed
         entry in a ``config.shapes`` list.
 
@@ -2039,22 +2039,18 @@ def _process_models_error_handling(comp: Any) -> bool:
 
     ``retry_count > 0`` is NOT error-handling evidence: it is gated
     (PROCESS_RETRY_UNVERIFIED) and rejected by validate_config, so it never
-    emits a Try/Catch. Only the supported zero-retry DLQ modes count. Codex
-    review (architect, finding 2).
+    emits a Try/Catch — _should_emit_try_catch enforces retry_count==0. Codex
+    review (architect, findings 2 + round 2).
     """
     config = comp.config if isinstance(comp.config, dict) else {}
 
     process_kind = str(
         config.get("process_kind") or config.get("process_type") or ""
     ).strip()
-    if process_kind:
-        reliability = config.get("reliability")
-        if isinstance(reliability, dict):
-            dlq = reliability.get("dlq")
-            if isinstance(dlq, dict):
-                mode = str(dlq.get("mode") or "").strip().lower()
-                if mode in _ERROR_HANDLING_DLQ_MODES:
-                    return True
+    if process_kind and ProcessFlowBuilder._should_emit_try_catch(
+        config.get("reliability")
+    ):
+        return True
 
     raw_xml = config.get("xml")
     if isinstance(raw_xml, str):

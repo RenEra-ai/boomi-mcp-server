@@ -476,10 +476,16 @@ def test_process_models_error_handling_predicate():
         comp({"process_kind": "database_to_api_sync",
               "reliability": {"retry_count": 0, "dlq": {"mode": "error_subprocess_ref"}}})
     )
-    # retry_count > 0 is gated (never emits a Try/Catch) — NOT error handling.
+    # retry_count > 0 is gated (never emits a Try/Catch) — NOT error handling,
+    # even paired with an otherwise-supported DLQ mode (mirrors
+    # _should_emit_try_catch's retry_count==0 gate). Codex review round 2.
     assert not _process_models_error_handling(
         comp({"process_kind": "database_to_api_sync",
               "reliability": {"retry_count": 2, "dlq": {"mode": "disabled"}}})
+    )
+    assert not _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
+              "reliability": {"retry_count": 2, "dlq": {"mode": "document_cache_ref"}}})
     )
     # Structured but DLQ disabled → no error handling.
     assert not _process_models_error_handling(
