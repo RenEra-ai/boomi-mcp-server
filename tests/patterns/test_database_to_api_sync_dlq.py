@@ -214,6 +214,40 @@ def test_unsupported_mode_rejected():
 
 
 # ---------------------------------------------------------------------------
+# RetryPolicy contract reconciliation (#88): bounds, mapping, no over-promise
+# ---------------------------------------------------------------------------
+
+_WIRED_DLQ = {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}}
+
+
+def test_max_attempts_6_maps_to_retry_count_5():
+    # Boomi platform maximum: 6 attempts = 5 retries.
+    spec = _emit(_WIRED_DLQ, retry={"max_attempts": 6, "backoff": "platform"})
+    assert _main_process(spec)["config"]["reliability"]["retry_count"] == 5
+
+
+def _expect_retry_validation_error(retry: dict, dlq: dict | None = None):
+    result = build_from_archetype_action(
+        "database_to_api_sync", _params(dlq, retry)
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED", result
+
+
+def test_max_attempts_7_rejected():
+    _expect_retry_validation_error({"max_attempts": 7}, _WIRED_DLQ)
+
+
+def test_legacy_backoff_exponential_rejected():
+    _expect_retry_validation_error({"max_attempts": 1, "backoff": "exponential"})
+
+
+def test_removed_initial_interval_seconds_rejected():
+    # extra="forbid" rejects the dropped field rather than silently ignoring it.
+    _expect_retry_validation_error({"max_attempts": 1, "initial_interval_seconds": 2})
+
+
+# ---------------------------------------------------------------------------
 # Operational intent
 # ---------------------------------------------------------------------------
 

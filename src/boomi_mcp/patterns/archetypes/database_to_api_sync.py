@@ -2402,11 +2402,11 @@ def _build_main_process(
             "operation_id": f"$ref:{rest_op_key}",
             "action_type": send.method,
         },
-        # Reliability derived from the caller's DLQ policy. For retry_count == 0
-        # (always, here — caller retry is intent-only, gated for #51 R1b) a
-        # verified DLQ mode (document_cache_ref / error_subprocess_ref) emits the
-        # live Try/Catch + DLQ catch path via ProcessFlowBuilder (#51 M3.R1a);
-        # disabled / guidance_only emit no Try/Catch.
+        # Reliability derived from the caller's policy: a verified DLQ mode
+        # (document_cache_ref / error_subprocess_ref) emits the live Try/Catch +
+        # DLQ catch path via ProcessFlowBuilder, with retry_count = max_attempts
+        # - 1 (0..5, platform-timed) wired through (#51 M3.R1a / #88 M4.5.3).
+        # disabled / guidance_only emit no Try/Catch (retry stays 0).
         "reliability": reliability_block,
     }
     if naming.folder_path:
@@ -3277,8 +3277,9 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "metadata_version": "0.4.0",
                 # Representation of trigger / schedule / watermark / retry intent /
                 # DLQ intent / error classifier / run metadata / expected status
-                # codes / deferred follow-up notes. Verified DLQ modes are wired
-                # into the process reliability (#51 M3.R1a); retry>1 stays gated.
+                # codes / deferred follow-up notes. Verified DLQ modes + caller
+                # retry (max_attempts → retry_count) are wired into the process
+                # reliability (#51 M3.R1a / #88 M4.5.3).
                 "operational_intent": operational_intent,
                 "transform_review": {
                     "supported_actions": [

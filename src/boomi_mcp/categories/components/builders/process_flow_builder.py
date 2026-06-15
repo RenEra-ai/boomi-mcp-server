@@ -9,14 +9,15 @@ uses `shapetype="connectoraction"` (matches live Renera examples like
 `DB Test`, `Rest Test GET`, `Rest Test PATCH`).
 
 Issue #51 M3.R1a adds a verified Try/Catch + DLQ catch-path: for
-`retry_count == 0` with `dlq.mode` in {`document_cache_ref`,
+`retry_count` 0..5 with `dlq.mode` in {`document_cache_ref`,
 `error_subprocess_ref`}, the flow is wrapped in a `catcherrors` shape
 (transcribed from live Boomi exports, not invented from docs) whose
 catch leg routes to a `doccacheload` (DLQ cache) or `processcall` (error
-subprocess). `retry_count > 0` stays gated by PROCESS_RETRY_UNVERIFIED
-until the retryCount->interval mapping is verified (issue #51 R1b). Map
-and subprocess/cache components are referenced by id/$ref only — their
-build is out of scope.
+subprocess). Issue #88 M4.5.3 un-gated retry 1..5 (docs-corroborated:
+Boomi Try/Catch Retry Count is 0..5, platform-timed) — positive retry
+requires a wired DLQ catch path; values outside 0..5 (or retry>0 without
+a DLQ) still return PROCESS_RETRY_UNVERIFIED. Map and subprocess/cache
+components are referenced by id/$ref only — their build is out of scope.
 """
 
 from __future__ import annotations

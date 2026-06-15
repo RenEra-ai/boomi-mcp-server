@@ -126,13 +126,15 @@ def test_document_cache_retry_count_2_matches_golden_fixture():
     assert ET.canonicalize(emitted) == ET.canonicalize(_FIXTURE_RETRY2.read_text())
 
 
-def test_retry_count_2_emits_bounded_retry_attribute():
+@pytest.mark.parametrize("retry_count", [1, 2, 5])
+def test_retry_count_emits_bounded_retry_attribute(retry_count):
+    # Issue #88: the full un-gated range 1..5 emits the matching Retry Count.
     cfg = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
-    cfg["reliability"]["retry_count"] = 2
+    cfg["reliability"]["retry_count"] = retry_count
     _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
     catcherrors = shapes[1]
     cfg_node = catcherrors.find("configuration/catcherrors")
-    assert cfg_node.attrib["retryCount"] == "2"
+    assert cfg_node.attrib["retryCount"] == str(retry_count)
     assert cfg_node.attrib["catchAll"] == "true"
     # Catch leg still present + terminal (unchanged by the retry count).
     assert shapes[-1].attrib["shapetype"] == "doccacheload"

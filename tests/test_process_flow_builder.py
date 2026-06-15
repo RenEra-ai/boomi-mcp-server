@@ -445,14 +445,17 @@ class TestValidateConfig:
             assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None, rc
 
     def test_rejects_retry_count_out_of_range(self):
-        cfg = _base_config(reliability={"retry_count": 99})
-        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
-        assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
+        for rc in (99, -1, 6):
+            cfg = _base_config(reliability={"retry_count": rc})
+            err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+            assert err.error_code == "PROCESS_RETRY_UNVERIFIED", rc
 
     def test_rejects_retry_count_wrong_type(self):
-        cfg = _base_config(reliability={"retry_count": "1"})
-        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
-        assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
+        # str and bool both rejected (bool is an int subclass — guarded).
+        for rc in ("1", True):
+            cfg = _base_config(reliability={"retry_count": rc})
+            err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+            assert err.error_code == "PROCESS_RETRY_UNVERIFIED", rc
 
     def test_dlq_document_cache_mode_without_binding_is_invalid(self):
         # Issue #51 M3.R1a: document_cache_ref with retry_count == 0 is now
