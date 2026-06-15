@@ -5546,7 +5546,7 @@ _PROCESS_FLOW_PROTOCOLS = {
                     },
                     "catch_notify": {
                         "level": "ERROR",
-                        "message_template": "<<integration>> failed; caught error: meta.base.catcherrorsmessage",
+                        "message_template": "<<caller-authored notify message referencing meta.base.catcherrorsmessage>>",
                     },
                 },
             },

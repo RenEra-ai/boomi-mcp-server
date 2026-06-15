@@ -3099,7 +3099,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     },
                     "catch_notify": {
                         "level": "ERROR",
-                        "message_template": "<<integration>> failed; caught error: meta.base.catcherrorsmessage",
+                        "message_template": "<<caller-authored notify message referencing meta.base.catcherrorsmessage>>",
                     },
                     "error_classifier": {
                         "custom_rules": ["rate_limit_exhausted"],

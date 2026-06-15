@@ -253,6 +253,8 @@ def test_example_demonstrates_wired_dlq_and_catch_notify(template):
     notify = reliability["catch_notify"]
     assert notify["level"] in ("INFO", "WARNING", "ERROR")
     assert "meta.base.catcherrorsmessage" in notify["message_template"]
+    # Placeholder-only message body (no canned content) — anti-template hygiene.
+    assert "<<" in notify["message_template"]
 
 
 def test_unknown_protocol_returns_error():

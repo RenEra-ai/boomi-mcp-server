@@ -495,6 +495,22 @@ class ProcessFlowBuilder:
                 catch_notify=reliability_cfg.get("catch_notify"),
             )
         else:
+            # build() stays total on the validate_config-bypass path: a present
+            # catch_notify cannot be honored without a Try/Catch catch leg, so
+            # raise rather than silently dropping it (issue #89; mirrors the DLQ
+            # binding guard inside _emit_try_catch_shapes). validate_config
+            # already rejects this combination on the normal path.
+            if isinstance(reliability_cfg, dict) and reliability_cfg.get("catch_notify") is not None:
+                raise BuilderValidationError(
+                    "reliability.catch_notify requires a wired Try/Catch catch path.",
+                    error_code="PROCESS_NOTIFY_CONFIG_INVALID",
+                    field="reliability.catch_notify",
+                    hint=(
+                        "Notify is emitted only on a catch leg. Set "
+                        "reliability.dlq.mode to document_cache_ref or "
+                        "error_subprocess_ref."
+                    ),
+                )
             shape_xml_parts = _emit_linear_shapes(flow)
 
         process_inner = (

@@ -634,3 +634,13 @@ class TestNotifyValidation:
         with pytest.raises(BuilderValidationError) as exc:
             ProcessFlowBuilder.build(cfg, name="N")
         assert exc.value.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+
+    def test_build_bypass_raises_when_notify_present_without_wired_dlq(self):
+        # Direct build() with catch_notify but a disabled DLQ would skip the
+        # Try/Catch path (no catch leg) — build() must RAISE rather than silently
+        # drop the notify (the linear-fallback branch stays total). Codex §6.
+        cfg = _config({"mode": "disabled"}, catch_notify=_CATCH_NOTIFY)
+        with pytest.raises(BuilderValidationError) as exc:
+            ProcessFlowBuilder.build(cfg, name="N")
+        assert exc.value.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+        assert exc.value.field == "reliability.catch_notify"
