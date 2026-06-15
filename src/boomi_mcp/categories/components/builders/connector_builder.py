@@ -424,7 +424,7 @@ class DatabaseConnectorBuilder:
 
     # Issue #31: the registry now models two shapes — host_port_db (SQL Server,
     # jTDS, Oracle, MySQL, SAP HANA) and custom_url (caller-supplied Custom JDBC
-    # driver). live_reference_component_id points at the reneraai-5RO3DD
+    # driver). live_reference_component_id points at the legacy-ref-acct (decommissioned)
     # `#Common` example used to verify each driver's XML byte-for-byte.
     DRIVERS: Dict[str, Dict[str, Any]] = {
         "sqlserver": {
@@ -1171,7 +1171,7 @@ class DatabaseConnectorBuilder:
             # host/port/dbname/additional are forbidden in the JSON contract
             # but the XML still emits them as empty strings to match the
             # live #Common Custom export byte-for-byte (component
-            # 39fb519d-e970-4aaf-a1f7-4eba39158e9d on reneraai-5RO3DD).
+            # 39fb519d-e970-4aaf-a1f7-4eba39158e9d on legacy-ref-acct (decommissioned)).
             host = ""
             dbname = ""
             port = ""

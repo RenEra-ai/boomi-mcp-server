@@ -6,7 +6,7 @@ tree matching the issue #43 ``profile_from_xml_schema`` contract.
 Reference XML shapes verified against live Boomi exports (fetched
 2026-05-25):
 
-* reneraai-5RO3DD ``74f66e9e-fd30-470c-970e-397ee29fed73`` (Shipping Order
+* legacy-ref-acct (decommissioned) ``74f66e9e-fd30-470c-970e-397ee29fed73`` (Shipping Order
   XML) — nested repeating + non-repeating elements, character / datetime /
   number leaves.
 * work ``9570b55c-993c-4715-9bc5-3d8d8353ff1e`` (CDS PATCH Request

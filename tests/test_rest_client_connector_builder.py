@@ -1,7 +1,7 @@
 """Tests for RestClientConnectionBuilder (issue #24, M2.4).
 
 Shape locked against the verified Renera live export:
-  profile=reneraai-5RO3DD, component_id=d6ee8b5b-6d83-44c0-9e77-216a60adb452
+  profile=legacy-ref-acct (decommissioned), component_id=d6ee8b5b-6d83-44c0-9e77-216a60adb452
 
 Builder emits Boomi REST Client connection components
 (subType="officialboomi-X3979C-rest-prod"). Issue #24 ships only the

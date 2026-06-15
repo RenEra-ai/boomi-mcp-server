@@ -4,7 +4,7 @@ database.stored_procedure_read.
 M2.3 follow-up to Issue #23. Anti-template policy: examples MUST use
 angle-bracket placeholders only. No canned procedure names, no canned
 column names, no values copied from the live reference profile
-(reneraai-5RO3DD component 439fd4ae).
+(legacy-ref-acct (decommissioned) component 439fd4ae).
 """
 
 import json

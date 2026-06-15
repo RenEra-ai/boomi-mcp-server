@@ -1,8 +1,8 @@
 """Tests for RestClientOperationBuilder (issue #24, M2.4).
 
 Shapes locked against two verified Renera live exports:
-- GET:   profile=reneraai-5RO3DD, component_id=e268ea19-bbbe-4e1f-b406-b5129358575a
-- PATCH: profile=reneraai-5RO3DD, component_id=64c4eafd-f2e7-49e2-b128-c9b1c50f81b9
+- GET:   profile=legacy-ref-acct (decommissioned), component_id=e268ea19-bbbe-4e1f-b406-b5129358575a
+- PATCH: profile=legacy-ref-acct (decommissioned), component_id=64c4eafd-f2e7-49e2-b128-c9b1c50f81b9
 
 Builder emits Boomi REST Client operation components
 (subType="officialboomi-X3979C-rest-prod"). Issue #24 ships only GET and

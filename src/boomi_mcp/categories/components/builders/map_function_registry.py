@@ -30,10 +30,10 @@ contract uniformly even though the emission path differs.
 
 Reference XML shape evidence (fetched 2026-05-26):
 
-* reneraai-5RO3DD ``92a8b6a9-9fe4-48c1-87bd-7369acdf6523`` (Map Document to
+* legacy-ref-acct (decommissioned) ``92a8b6a9-9fe4-48c1-87bd-7369acdf6523`` (Map Document to
   Slack Payload) — ``DocumentPropertyGet`` + ``<Defaults><Default toKey
   value/></Defaults>`` envelope.
-* reneraai-5RO3DD ``b8a90410-b9c5-401e-80f6-b0544f3a2104`` (Google CSV to
+* legacy-ref-acct (decommissioned) ``b8a90410-b9c5-401e-80f6-b0544f3a2104`` (Google CSV to
   XML Summary Report) — ``Sum2`` (Numeric) + ``DocumentPropertyGet``
   combination with profile→function-input and function-output→profile
   mappings.

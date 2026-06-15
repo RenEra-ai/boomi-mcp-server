@@ -17,7 +17,7 @@ Two statement-type variants are supported:
      profile_type="database.stored_procedure_read", caller supplies the
      procedure name in `procedure_name`. Parameters may carry IN/OUT/INOUT
      direction via `mode`.
-     Reference XML: reneraai-5RO3DD profile, component 439fd4ae-7990-4a5b-9453-fbb9d7fe458e
+     Reference XML: legacy-ref-acct (decommissioned) profile, component 439fd4ae-7990-4a5b-9453-fbb9d7fe458e
      "Test SP Profile" (fetched 2026-05-18). Maps to statementType="spread"
      ("Stored Procedure READ").
 
@@ -662,7 +662,7 @@ class DatabaseStoredProcedureReadProfileBuilder(_DatabaseReadProfileBuilderBase)
         description:     optional
 
     Reference XML: live profile 439fd4ae-7990-4a5b-9453-fbb9d7fe458e in the
-    reneraai-5RO3DD test profile (procedure
+    legacy-ref-acct (decommissioned) test profile (procedure
     Expert.dbo.usp_GetMatterWIPSummary;1, 14 result columns, 5 IN params).
     The reference is used only for shape verification; no procedure-name,
     column-name, or parameter-name values are baked into the builder.

@@ -13,12 +13,12 @@
 Reference XML shape evidence (fetched 2026-05-25 for direct, 2026-05-26 for
 function additions, 2026-05-26 for #41 script additions):
 
-* reneraai-5RO3DD ``77bb73d5-43ae-4581-8ab9-af615f3778e5`` (Order DB to
+* legacy-ref-acct (decommissioned) ``77bb73d5-43ae-4581-8ab9-af615f3778e5`` (Order DB to
   Shipping XML).
 * work ``5aa8d537-2f16-4597-8dc9-c4ffbdd9ba94`` (CDS PATCH XML→JSON).
-* reneraai-5RO3DD ``92a8b6a9-9fe4-48c1-87bd-7369acdf6523`` (Slack payload
+* legacy-ref-acct (decommissioned) ``92a8b6a9-9fe4-48c1-87bd-7369acdf6523`` (Slack payload
   map) — ``DocumentPropertyGet`` + ``<Defaults>``.
-* reneraai-5RO3DD ``b8a90410-b9c5-401e-80f6-b0544f3a2104`` (CSV→XML
+* legacy-ref-acct (decommissioned) ``b8a90410-b9c5-401e-80f6-b0544f3a2104`` (CSV→XML
   summary report) — ``Sum2`` + ``DocumentPropertyGet`` showing the
   profile→function-input / function-output→profile mapping wiring.
 * work ``f5481730-b9b1-4b67-96eb-3a510feaa734`` — ``String2Lower``.

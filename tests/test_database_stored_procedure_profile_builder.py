@@ -1,7 +1,7 @@
 """Unit tests for DatabaseStoredProcedureReadProfileBuilder.
 
 M2.3 follow-up to Issue #23. Verifies the emitted XML matches the structure
-of a real exported Boomi Stored Procedure Read profile (reneraai-5RO3DD
+of a real exported Boomi Stored Procedure Read profile (legacy-ref-acct (decommissioned)
 component 439fd4ae-7990-4a5b-9453-fbb9d7fe458e "Test SP Profile", fetched
 2026-05-18) and that SP-specific validation (procedure_name required,
 parameter mode in/out/in_out/return) behaves correctly.

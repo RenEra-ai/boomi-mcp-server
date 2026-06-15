@@ -8,7 +8,7 @@ builder routing for ``profile.json`` / ``json.generated``.
 Reference XML shapes verified against live Boomi exports (fetched
 2026-05-25):
 
-* reneraai-5RO3DD ``954783c1-443f-4efd-9f92-ad380d078216`` (Slack Chat
+* legacy-ref-acct (decommissioned) ``954783c1-443f-4efd-9f92-ad380d078216`` (Slack Chat
   Message CREATE Request) — flat root-object shape.
 * work ``dbe1f2b9-e238-4da0-8211-65570781cf28`` (CDS PATCH Request
   JSON) — nested root → object → array(repeating) → object → entries shape.
