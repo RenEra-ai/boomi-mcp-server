@@ -2637,14 +2637,15 @@ def _build_operational_intent(
                 "binding": binding,
             }
         else:  # guidance_only
-            # Never echo the legacy address (may carry sensitive content) — only
-            # its presence + the routing kind.
+            # Never echo caller-supplied free-form values (address OR reason —
+            # both can carry sensitive content) — only their presence + the
+            # enum routing kind.
             reliability_intent["dlq_requested"] = {
                 "requested": True,
                 "status": "guidance_only",
                 "kind": target.kind,
                 "address_present": target.address is not None,
-                "reason": target.reason,
+                "reason_present": target.reason is not None,
                 "note": (
                     "folder/topic/queue is not a verified builder DLQ mode; "
                     "recorded as guidance only (no wiring)."

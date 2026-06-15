@@ -231,14 +231,28 @@ def test_operational_intent_emitted_status_for_wired_modes():
     }
 
 
-def test_operational_intent_guidance_only_status_and_no_address_echo():
-    spec = _emit({"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<secret addr>>"}})
+def test_operational_intent_guidance_only_status_and_no_freeform_echo():
+    spec = _emit(
+        {
+            "enabled": True,
+            "target": {
+                "mode": "guidance_only",
+                "kind": "queue",
+                "address": "<<secret addr>>",
+                "reason": "<<secret reason addr>>",
+            },
+        }
+    )
     dq = _operational_intent(spec)["reliability"]["dlq_requested"]
     assert dq["status"] == "guidance_only"
     assert dq["kind"] == "queue"
     assert dq["address_present"] is True
-    # The literal address must never be echoed back anywhere in the spec.
-    assert "<<secret addr>>" not in json.dumps(spec)
+    assert dq["reason_present"] is True
+    # Neither free-form caller value (address OR reason) may be echoed anywhere
+    # in the spec — both are leak vectors.
+    blob = json.dumps(spec)
+    assert "<<secret addr>>" not in blob
+    assert "<<secret reason addr>>" not in blob
 
 
 def test_operational_intent_retry_deferral_retargeted():
