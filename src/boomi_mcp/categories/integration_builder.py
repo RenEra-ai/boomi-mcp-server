@@ -2024,27 +2024,38 @@ def _process_models_error_handling(comp: Any) -> bool:
     Conservative by design — returns True on ANY positive signal so the
     no-error-handling plan warning never fires on a process that does handle
     errors:
-      * structured route: a supported non-disabled DLQ mode, or a retry count
-        greater than zero, under ``config.reliability``;
+      * structured route (process_kind/process_type set): a supported
+        non-disabled DLQ mode, or a retry count greater than zero, under
+        ``config.reliability``;
       * legacy route: a Try/Catch evident in raw process XML, or a catch-typed
         entry in a ``config.shapes`` list.
+
+    The ``config.reliability`` block is only honored on the structured
+    process-flow route. The legacy JSON-to-XML path (no process_kind) drops an
+    unknown reliability block entirely, so trusting it there would wrongly
+    suppress the warning for a legacy process carrying a stray reliability
+    block — gate it on process_kind. Codex review P2.
     """
     config = comp.config if isinstance(comp.config, dict) else {}
 
-    reliability = config.get("reliability")
-    if isinstance(reliability, dict):
-        dlq = reliability.get("dlq")
-        if isinstance(dlq, dict):
-            mode = str(dlq.get("mode") or "").strip().lower()
-            if mode in _ERROR_HANDLING_DLQ_MODES:
+    process_kind = str(
+        config.get("process_kind") or config.get("process_type") or ""
+    ).strip()
+    if process_kind:
+        reliability = config.get("reliability")
+        if isinstance(reliability, dict):
+            dlq = reliability.get("dlq")
+            if isinstance(dlq, dict):
+                mode = str(dlq.get("mode") or "").strip().lower()
+                if mode in _ERROR_HANDLING_DLQ_MODES:
+                    return True
+            retry_count = reliability.get("retry_count")
+            if (
+                isinstance(retry_count, int)
+                and not isinstance(retry_count, bool)
+                and retry_count > 0
+            ):
                 return True
-        retry_count = reliability.get("retry_count")
-        if (
-            isinstance(retry_count, int)
-            and not isinstance(retry_count, bool)
-            and retry_count > 0
-        ):
-            return True
 
     raw_xml = config.get("xml")
     if isinstance(raw_xml, str):

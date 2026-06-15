@@ -33,7 +33,10 @@ from boomi_mcp.kb.design_doctrine import (
     get_design_doctrine_catalog,
 )
 from boomi_mcp.models.integration_models import IntegrationComponentSpec
-from boomi_mcp.categories.integration_builder import _build_plan
+from boomi_mcp.categories.integration_builder import (
+    _build_plan,
+    _process_models_error_handling,
+)
 
 
 # Authoritative entry-name partition (issue #86 body + spec §6).
@@ -357,8 +360,146 @@ def test_build_plan_warns_when_process_lacks_error_handling(_mock_pag):
     assert "error_routing_and_dlq" in joined
 
 
+_STUB_ID = "00000000-0000-0000-0000-stubbed00001"
+
+
+def _stub(key, ctype, config, **extra):
+    # action='update' + component_id keeps the stub on the update path so
+    # plan-time builder validation (create/create_clone only) is skipped.
+    return IntegrationComponentSpec(
+        key=key, type=ctype, action="update", component_id=_STUB_ID,
+        name=key.replace("_", " ").title(), config=config, **extra
+    ).model_dump()
+
+
+def _structured_dlq_plan_config():
+    """A minimal VALID structured process-flow spec with a real DLQ
+    (document_cache_ref), so the process step is authored (planned_action
+    'create') and the design-doctrine warning genuinely exercises the
+    reliability gate — not the validation-error short-circuit. Codex review P3.
+    """
+    main = IntegrationComponentSpec(
+        key="main_process", type="process", action="create", name="Main Process",
+        depends_on=[
+            "db_connection", "db_query_operation",
+            "target_rest_connection", "target_rest_operation", "dlq_document_cache",
+        ],
+        config={
+            "process_kind": "database_to_api_sync",
+            "source": {
+                "connector_type": "database",
+                "connection_id": "$ref:db_connection",
+                "operation_id": "$ref:db_query_operation",
+                "action_type": "Get",
+            },
+            "transform": {"mode": "passthrough"},
+            "target": {
+                "connector_type": "rest",
+                "connection_id": "$ref:target_rest_connection",
+                "operation_id": "$ref:target_rest_operation",
+                "action_type": "POST",
+            },
+            "reliability": {
+                "retry_count": 0,
+                "dlq": {"mode": "document_cache_ref",
+                        "document_cache_id": "$ref:dlq_document_cache"},
+            },
+        },
+    ).model_dump()
+    components = [
+        _stub("db_connection", "connector-settings",
+              {"connector_type": "database", "name": "Db Connection"}),
+        _stub("db_query_operation", "connector-action",
+              {"connector_type": "database", "operation_mode": "get",
+               "name": "Db Query Operation"}),
+        _stub("target_rest_connection", "connector-settings",
+              {"connector_type": "rest", "name": "Target Rest Connection"}),
+        _stub("target_rest_operation", "connector-action",
+              {"connector_type": "rest", "operation_mode": "execute",
+               "method": "POST", "path": "/v1/stub",
+               "component_name": "Target Rest Operation",
+               "connection_ref_key": "target_rest_connection"},
+              depends_on=["target_rest_connection"]),
+        _stub("dlq_document_cache", "documentcache", {"name": "Dlq Document Cache"}),
+        main,
+    ]
+    return {
+        "conflict_policy": "reuse",
+        "integration_spec": {"version": "1.0", "name": "demo", "components": components},
+    }
+
+
 @patch(_PAGINATE, return_value=[])
-def test_build_plan_no_error_handling_warning_when_dlq_configured(_mock_pag):
+def test_build_plan_no_warning_for_structured_process_with_dlq(_mock_pag):
+    # Structured route (process_kind set) honors config.reliability.dlq — and
+    # the step must actually be authored, not validation-errored, for this to
+    # exercise the gate.
+    plan = _build_plan(MagicMock(), _structured_dlq_plan_config())
+    assert plan["_success"] is True
+    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+    assert main_step.get("validation_error") is None
+    assert main_step["planned_action"] == "create"
+    joined = "\n".join(plan["warnings"] or [])
+    assert "try_catch_placement" not in joined
+    assert "error_routing_and_dlq" not in joined
+
+
+@patch(_PAGINATE, return_value=[])
+def test_build_plan_no_warning_for_legacy_process_with_catch_shape(_mock_pag):
+    # Legacy route — a Try/Catch catch shape is the trusted error-handling
+    # evidence (raw XML / shapes), not the reliability block.
+    comp = _process_comp(
+        {"name": "DemoProcess", "shapes": [{"shapetype": "catcherrors"}]}
+    )
+    plan = _build_plan(MagicMock(), _plan_config(comp))
+    joined = "\n".join(plan["warnings"] or [])
+    assert "try_catch_placement" not in joined
+
+
+def test_process_models_error_handling_predicate():
+    """Directly exercise the gate predicate (independent of the _build_plan
+    planned_action filter) so the structured-vs-legacy distinction is proven.
+    Codex review P2."""
+
+    def comp(config):
+        return IntegrationComponentSpec(
+            key="p", type="process", action="create", name="P", config=config
+        )
+
+    # Structured route (process_kind set) trusts reliability evidence.
+    assert _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
+              "reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}}})
+    )
+    assert _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
+              "reliability": {"retry_count": 2, "dlq": {"mode": "disabled"}}})
+    )
+    # Structured but disabled / retry bool → no error handling.
+    assert not _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
+              "reliability": {"retry_count": 0, "dlq": {"mode": "disabled"}}})
+    )
+    assert not _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
+              "reliability": {"retry_count": True, "dlq": {"mode": "disabled"}}})
+    )
+    # Legacy route ignores the reliability block entirely.
+    assert not _process_models_error_handling(
+        comp({"reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}}})
+    )
+    # Legacy route trusts raw-XML / shape catch evidence.
+    assert _process_models_error_handling(comp({"shapes": [{"shapetype": "catcherrors"}]}))
+    assert _process_models_error_handling(comp({"xml": "<bns:shape shapetype=\"trycatch\"/>"}))
+    # Non-dict config does not crash.
+    assert not _process_models_error_handling(comp({}))
+
+
+@patch(_PAGINATE, return_value=[])
+def test_build_plan_warns_for_legacy_process_with_stray_reliability(_mock_pag):
+    # Codex review P2 regression: a legacy process (no process_kind) carrying a
+    # reliability block the legacy path IGNORES must still warn — the stray
+    # reliability block does not count as modeled error handling.
     comp = _process_comp(
         {
             "name": "DemoProcess",
@@ -366,10 +507,9 @@ def test_build_plan_no_error_handling_warning_when_dlq_configured(_mock_pag):
         }
     )
     plan = _build_plan(MagicMock(), _plan_config(comp))
-    warnings = plan["warnings"] or []
-    joined = "\n".join(warnings)
-    assert "try_catch_placement" not in joined
-    assert "error_routing_and_dlq" not in joined
+    joined = "\n".join(plan["warnings"] or [])
+    assert "try_catch_placement" in joined
+    assert "error_routing_and_dlq" in joined
 
 
 # ---------------------------------------------------------------------------
