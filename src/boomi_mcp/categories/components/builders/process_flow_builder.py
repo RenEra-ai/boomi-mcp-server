@@ -18,6 +18,15 @@ Boomi Try/Catch Retry Count is 0..5, platform-timed) — positive retry
 requires a wired DLQ catch path; values outside 0..5 (or retry>0 without
 a DLQ) still return PROCESS_RETRY_UNVERIFIED. Map and subprocess/cache
 components are referenced by id/$ref only — their build is out of scope.
+
+Issue #89 M4.5.4 adds an optional verified Notify step on the catch leg:
+when `reliability.catch_notify` is set (a `level` + a `message_template`
+that references the caught-error property), the catch leg becomes
+`catch -> notify -> dlq route -> stop`. The Notify shape XML is transcribed
+from a live `work`-profile export (notify shape, not invented from docs);
+omitting `catch_notify` keeps the existing catch leg byte-for-byte
+identical. Email/SMS notification channels and Notify outside catch paths
+are out of scope.
 """
 
 from __future__ import annotations
@@ -59,6 +68,19 @@ _TRY_CATCH_DLQ_MODES = frozenset({"document_cache_ref", "error_subprocess_ref"})
 # platform offers no caller-selected backoff. Issue #88 un-gated 1..5 (with a
 # wired catch path); values outside 0..5 fail with PROCESS_RETRY_UNVERIFIED.
 _MAX_RETRY_COUNT = 5
+
+# Issue #89 M4.5.4 — optional Notify step on the Try/Catch catch leg.
+# Boomi Notify message levels are INFO / WARNING / ERROR (the Notify-step
+# docs list "Information, Warning, or Error"; the live notify shape emits the
+# token "INFO"). The catch-path Notify is log-only (no platform email event),
+# so email/SMS channels are out of scope and any extra config key is rejected.
+_SUPPORTED_NOTIFY_LEVELS = frozenset({"INFO", "WARNING", "ERROR"})
+_CATCH_NOTIFY_ALLOWED_KEYS = frozenset({"level", "message_template"})
+# The runtime property holding the caught Try/Catch error message. Boomi binds
+# it via a numbered placeholder + a notify track parameter (verified live), not
+# by embedding the path in the message text, so the builder substitutes this
+# token for the {1} placeholder and emits the matching track-parameter binding.
+_NOTIFY_CAUGHT_ERROR_TOKEN = "meta.base.catcherrorsmessage"
 
 # Visual layout. Geometry is decorative only — process correctness is
 # driven by toShape wiring. Numbers approximate the live Renera examples
@@ -470,6 +492,7 @@ class ProcessFlowBuilder:
                 flow,
                 reliability_cfg["dlq"],
                 retry_count=int(reliability_cfg.get("retry_count", 0)),
+                catch_notify=reliability_cfg.get("catch_notify"),
             )
         else:
             shape_xml_parts = _emit_linear_shapes(flow)
@@ -743,6 +766,89 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
                 "retry_count=0."
             ),
         )
+    # Issue #89 (M4.5.4): optional Notify on the catch leg. Validated after
+    # dlq_mode is finalized (Notify only exists on a wired catch path) and
+    # after the retry gate (retry/DLQ shape errors surface first).
+    notify_err = _validate_catch_notify(reliability.get("catch_notify"), dlq_mode)
+    if notify_err is not None:
+        return notify_err
+    return None
+
+
+def _validate_catch_notify(
+    catch_notify: Any, dlq_mode: str
+) -> Optional[BuilderValidationError]:
+    """Validate the optional ``reliability.catch_notify`` config (issue #89).
+
+    Returns ``None`` when absent (Notify is opt-in) or valid; otherwise a
+    ``PROCESS_NOTIFY_CONFIG_INVALID`` error. Notify is emitted only at the head
+    of a wired Try/Catch catch leg, so it requires ``dlq_mode`` in
+    ``_TRY_CATCH_DLQ_MODES``. The message must reference the caught-error
+    property so the emitted Notify logs the real error. Email/SMS/channel keys
+    are out of scope and rejected (extra keys).
+    """
+    if catch_notify is None:
+        return None
+    if not isinstance(catch_notify, dict):
+        return BuilderValidationError(
+            "reliability.catch_notify must be a JSON object.",
+            error_code="PROCESS_NOTIFY_CONFIG_INVALID",
+            field="reliability.catch_notify",
+            hint="See get_schema_template for the catch_notify surface.",
+        )
+    extra = set(catch_notify) - _CATCH_NOTIFY_ALLOWED_KEYS
+    if extra:
+        return BuilderValidationError(
+            f"reliability.catch_notify has unsupported keys: {sorted(extra)}.",
+            error_code="PROCESS_NOTIFY_CONFIG_INVALID",
+            field="reliability.catch_notify",
+            hint=(
+                "Only 'level' and 'message_template' are supported. Email/SMS "
+                "notification channels are out of scope (#14/M4.5.5)."
+            ),
+        )
+    template = catch_notify.get("message_template")
+    if not isinstance(template, str) or not template.strip():
+        return BuilderValidationError(
+            "reliability.catch_notify.message_template is required and must be "
+            "a non-empty string.",
+            error_code="PROCESS_NOTIFY_CONFIG_INVALID",
+            field="reliability.catch_notify.message_template",
+            hint=(
+                "Provide the notify message text and reference the caught error "
+                f"via the {_NOTIFY_CAUGHT_ERROR_TOKEN} property token."
+            ),
+        )
+    if _NOTIFY_CAUGHT_ERROR_TOKEN not in template:
+        return BuilderValidationError(
+            "reliability.catch_notify.message_template must reference the "
+            "caught-error property.",
+            error_code="PROCESS_NOTIFY_CONFIG_INVALID",
+            field="reliability.catch_notify.message_template",
+            hint=(
+                f"Include the {_NOTIFY_CAUGHT_ERROR_TOKEN} token so the emitted "
+                "Notify logs the caught error."
+            ),
+        )
+    level = catch_notify.get("level")
+    if not isinstance(level, str) or level.strip().upper() not in _SUPPORTED_NOTIFY_LEVELS:
+        return BuilderValidationError(
+            f"reliability.catch_notify.level must be one of "
+            f"{sorted(_SUPPORTED_NOTIFY_LEVELS)}.",
+            error_code="PROCESS_NOTIFY_CONFIG_INVALID",
+            field="reliability.catch_notify.level",
+            hint="Boomi Notify message levels are INFO, WARNING, ERROR.",
+        )
+    if dlq_mode not in _TRY_CATCH_DLQ_MODES:
+        return BuilderValidationError(
+            "reliability.catch_notify requires a wired Try/Catch catch path.",
+            error_code="PROCESS_NOTIFY_CONFIG_INVALID",
+            field="reliability.catch_notify",
+            hint=(
+                "Notify is emitted only on a catch leg. Set reliability.dlq.mode "
+                "to document_cache_ref or error_subprocess_ref."
+            ),
+        )
     return None
 
 
@@ -896,14 +1002,16 @@ def _emit_map(
     )
 
 
-def _emit_stop(shape_name: str, params: Dict[str, Any]) -> str:
+def _emit_stop(shape_name: str, params: Dict[str, Any], y: float = _SHAPE_Y) -> str:
     cont = "true" if params.get("continue_", True) else "false"
     # Stop x position == last index but we don't know it here; the caller
     # passes shape_index implicitly through shape_name's numeric suffix.
+    # ``y`` defaults to the Try-row y; the issue #89 catch-leg Stop (after a
+    # Notify + DLQ route) passes ``_CATCH_SHAPE_Y`` to sit on the catch row.
     shape_index = int(re.sub(r"\D", "", shape_name) or "1")
     return (
         f'<shape image="stop_icon" name="{shape_name}" shapetype="stop" '
-        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        f'x="{_shape_x(shape_index)}" y="{y}">'
         f'<configuration><stop continue="{cont}"/></configuration>'
         '<dragpoints/>'
         '</shape>'
@@ -911,13 +1019,15 @@ def _emit_stop(shape_name: str, params: Dict[str, Any]) -> str:
 
 
 def _emit_dragpoints(
-    next_names: List[Optional[str]], shape_index: int
+    next_names: List[Optional[str]], shape_index: int, y: float = _DRAGPOINT_Y
 ) -> str:
     """Emit <dragpoint .../> children for a shape.
 
     Each non-None entry in next_names produces one dragpoint with name
     "<shape>.dragpoint<N>" and toShape set. None entries are skipped
-    (used by Stop, which has no outgoing edge).
+    (used by Stop, which has no outgoing edge). ``y`` defaults to the Try-row
+    dragpoint y; catch-row shapes (issue #89 Notify / chained DLQ route) pass
+    ``_CATCH_DRAGPOINT_Y`` so their outgoing edges sit on the catch row.
     """
     parts: List[str] = []
     point_index = 0
@@ -928,13 +1038,13 @@ def _emit_dragpoints(
         parts.append(
             f'<dragpoint name="shape{shape_index}.dragpoint{point_index}" '
             f'toShape="{_escape_xml(to_shape)}" '
-            f'x="{_dragpoint_x(shape_index)}" y="{_DRAGPOINT_Y}"/>'
+            f'x="{_dragpoint_x(shape_index)}" y="{y}"/>'
         )
     return "".join(parts)
 
 
 # ----------------------------------------------------------------------
-# Issue #51 M3.R1a — Try/Catch + DLQ catch-path emission
+# Issue #51 M3.R1a / #89 M4.5.4 — Try/Catch + DLQ + Notify catch-path emission
 #
 # Shapes below are transcribed verbatim from verified live `work`-profile
 # exports (no XML invented from docs):
@@ -942,6 +1052,10 @@ def _emit_dragpoints(
 #   * doccacheload — same component (shape80), terminal catch leg
 #   * processcall  — component 7b19baeb-ed62-4fac-9962-44fc0ed87f07 (shape34,
 #                    on a catcherrors error branch), terminal catch leg
+#   * notify       — component 1139079f-fff5-434c-aedc-d2758cc20525 (shape5),
+#                    a notify on an error-handling path: notifyMessage with
+#                    {N} placeholders, notifyMessageLevel, and a notifyParameters
+#                    track binding of meta.base.catcherrorsmessage (issue #89)
 # ----------------------------------------------------------------------
 
 # Shape "kinds" produced by build()'s flow list (mirrors the dispatch order).
@@ -987,6 +1101,7 @@ def _emit_try_catch_shapes(
     flow: List[Tuple[str, Dict[str, Any]]],
     dlq: Dict[str, Any],
     retry_count: int = 0,
+    catch_notify: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """Wrap the linear flow in a verified catcherrors Try/Catch + DLQ catch leg.
 
@@ -994,13 +1109,17 @@ def _emit_try_catch_shapes(
         shape1  start        -> shape2 (catcherrors)
         shape2  catcherrors  Try(default) -> shape3 ; Catch(error) -> catch leg
         shape3..K  source -> [transform] -> target -> stop  (the normal chain)
-        shape{K+1} catch leg: doccacheload | processcall  (terminal)
+        shape{K+1}.. catch leg
 
-    The catch leg is terminal (empty dragpoints) to match the verified live
-    shapes. ``retry_count`` is a validated 0..5 value (validate_config / the
-    build guard); for counts > 0 the platform applies its built-in wait
-    schedule before each retry, then routes the failed documents down the catch
-    leg on exhaust (issue #88).
+    Without ``catch_notify`` the catch leg is a single terminal
+    doccacheload|processcall (byte-for-byte the issue #51/#88 output). With
+    ``catch_notify`` (issue #89) the catch leg becomes
+    ``notify -> dlq route -> catch stop``: the catcherrors Catch dragpoint
+    targets the Notify, the Notify routes to the DLQ shape, and the DLQ shape
+    routes to a catch-row Stop. ``retry_count`` is a validated 0..5 value; for
+    counts > 0 the platform applies its built-in wait schedule before each
+    retry, then routes the failed documents down the catch leg on exhaust
+    (issue #88).
     """
     normal = flow[1:]  # source, [transform], target, stop
     n = len(normal)
@@ -1008,16 +1127,35 @@ def _emit_try_catch_shapes(
     catcherrors_name = f"shape{catcherrors_index}"
     first_try_index = 3
     first_try_name = f"shape{first_try_index}"
-    stop_index = catcherrors_index + n  # last normal (stop) shape index
-    catch_index = stop_index + 1
-    catch_name = f"shape{catch_index}"
+    stop_index = catcherrors_index + n  # last normal (Try-path stop) shape index
+
+    # A present-but-empty/invalid catch_notify still counts as "notify intended"
+    # so the validate_config-bypass path rejects it consistently (matches
+    # _validate_catch_notify, which treats only None as "absent").
+    notify_present = catch_notify is not None
+    if notify_present:
+        # Catch leg: notify (stop_index+1) -> dlq route (stop_index+2)
+        #            -> catch stop (stop_index+3).
+        notify_index = stop_index + 1
+        notify_name = f"shape{notify_index}"
+        dlq_index = stop_index + 2
+        catch_stop_index = stop_index + 3
+        catch_stop_name = f"shape{catch_stop_index}"
+        catch_target_name = notify_name
+        dlq_next_name: Optional[str] = catch_stop_name
+    else:
+        # Catch leg: a single terminal dlq route (unchanged pre-#89 shape).
+        dlq_index = stop_index + 1
+        catch_target_name = f"shape{dlq_index}"
+        dlq_next_name = None
+    dlq_name = f"shape{dlq_index}"
 
     parts: List[str] = []
     # Start keeps its noaction config; only its outgoing edge moves to catcherrors.
     parts.append(_emit_start_noaction("shape1", catcherrors_name, 1))
     parts.append(
         _emit_catcherrors(
-            catcherrors_name, first_try_name, catch_name, catcherrors_index, retry_count
+            catcherrors_name, first_try_name, catch_target_name, catcherrors_index, retry_count
         )
     )
     # Normal Try chain, shifted to indices 3..stop_index.
@@ -1027,13 +1165,17 @@ def _emit_try_catch_shapes(
         is_last = j == n - 1
         next_name = None if is_last else f"shape{shape_index + 1}"
         parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
-    # Catch leg (binding normally validated by _validate_dlq_binding; id is a
-    # literal or a $ref:KEY already resolved by integration_builder before
-    # build()). Stay total on the validate_config-bypass path: raise on a
-    # missing binding (would emit docCache=""/processId="") or an unexpected
-    # mode (would leave the Catch dragpoint pointing at a never-emitted shape),
-    # mirroring build()'s empty-name guard instead of producing broken XML.
+    # Catch leg. Bindings are normally validated by _validate_dlq_binding /
+    # _validate_catch_notify; ids are literals or $ref:KEY already resolved by
+    # integration_builder before build(). Stay total on the validate_config-
+    # bypass path: raise on a missing/invalid binding instead of emitting broken
+    # XML (mirrors build()'s empty-name guard).
     mode = str(dlq.get("mode") or "").strip().lower()
+    if notify_present:
+        notify_err = _validate_catch_notify(catch_notify, mode)
+        if notify_err is not None:
+            raise notify_err
+        parts.append(_emit_notify(notify_name, catch_notify, dlq_name, notify_index))
     if mode == "document_cache_ref":
         cache_id = str(dlq.get("document_cache_id") or "").strip()
         if not cache_id:
@@ -1044,7 +1186,7 @@ def _emit_try_catch_shapes(
                 field="reliability.dlq.document_cache_id",
                 hint="Set document_cache_id to a literal id or a resolved $ref:KEY.",
             )
-        parts.append(_emit_doccacheload(catch_name, cache_id, catch_index))
+        parts.append(_emit_doccacheload(dlq_name, cache_id, dlq_index, next_name=dlq_next_name))
     elif mode == "error_subprocess_ref":
         process_id = str(dlq.get("process_id") or "").strip()
         if not process_id:
@@ -1055,7 +1197,7 @@ def _emit_try_catch_shapes(
                 field="reliability.dlq.process_id",
                 hint="Set process_id to a literal id or a resolved $ref:KEY.",
             )
-        parts.append(_emit_processcall(catch_name, process_id, catch_index))
+        parts.append(_emit_processcall(dlq_name, process_id, dlq_index, next_name=dlq_next_name))
     else:  # pragma: no cover — _should_emit_try_catch only admits the two modes
         raise BuilderValidationError(
             f"Unsupported DLQ mode {mode!r} reached the Try/Catch emitter.",
@@ -1063,6 +1205,8 @@ def _emit_try_catch_shapes(
             field="reliability.dlq.mode",
             hint="Internal builder bug — please report.",
         )
+    if notify_present:
+        parts.append(_emit_stop(catch_stop_name, {"continue_": True}, y=_CATCH_SHAPE_Y))
     return parts
 
 
@@ -1096,28 +1240,92 @@ def _emit_catcherrors(
     )
 
 
-def _emit_doccacheload(shape_name: str, doc_cache_id: str, shape_index: int) -> str:
-    """Emit the verified document-cache DLQ catch leg (terminal).
+def _emit_notify(
+    shape_name: str,
+    catch_notify: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit the verified Notify catch-leg step (issue #89).
 
-    Live shape: doccacheload with a docCache id, empty dragpoints (live
-    component dff0bf83-... shape80).
+    Live shape: ``notify`` with ``disableEvent="true"`` (log-only — no platform
+    email event, so email/SMS channels stay out of scope), ``enableUserLog`` /
+    ``perExecution`` false, a ``<notifyMessage>`` using ``{N}`` placeholders, a
+    ``<notifyMessageLevel>``, and a ``<notifyParameters>`` track binding (live
+    ``work`` component 1139079f-... shape5, a notify on a catch path).
+
+    Boomi binds runtime properties via numbered placeholders + a notify track
+    parameter, not by embedding the property path in the message text. The
+    validated ``message_template`` references the caught-error property by its
+    token; here that token is substituted for the ``{1}`` placeholder and bound
+    as the single track parameter, so the emitted Notify logs the real caught
+    error at runtime.
     """
+    level = str(catch_notify.get("level") or "").strip().upper()
+    template = str(catch_notify.get("message_template") or "")
+    message = template.replace(_NOTIFY_CAUGHT_ERROR_TOKEN, "{1}")
+    dragpoints = _emit_dragpoints([next_name], shape_index, y=_CATCH_DRAGPOINT_Y)
+    return (
+        f'<shape image="notify_icon" name="{shape_name}" shapetype="notify" '
+        f'userlabel="Notify caught error to the process log" '
+        f'x="{_shape_x(shape_index)}" y="{_CATCH_SHAPE_Y}">'
+        '<configuration>'
+        '<notify disableEvent="true" enableUserLog="false" perExecution="false" '
+        'title="Catch path notification">'
+        f'<notifyMessage>{_escape_xml(message)}</notifyMessage>'
+        f'<notifyMessageLevel>{_escape_xml(level)}</notifyMessageLevel>'
+        '<notifyParameters>'
+        '<parametervalue key="0" valueType="track">'
+        f'<trackparameter defaultValue="" propertyId="{_escape_xml(_NOTIFY_CAUGHT_ERROR_TOKEN)}" '
+        'propertyName="Base - Try/Catch Message"/>'
+        '</parametervalue>'
+        '</notifyParameters>'
+        '</notify>'
+        '</configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
+def _emit_doccacheload(
+    shape_name: str, doc_cache_id: str, shape_index: int, next_name: Optional[str] = None
+) -> str:
+    """Emit the verified document-cache DLQ catch leg.
+
+    Live shape: doccacheload with a docCache id (live component dff0bf83-...
+    shape80). Terminal (empty dragpoints) by default; when ``next_name`` is set
+    (issue #89 notify path) it routes to the catch-row Stop.
+    """
+    dragpoints_xml = (
+        f'<dragpoints>{_emit_dragpoints([next_name], shape_index, y=_CATCH_DRAGPOINT_Y)}</dragpoints>'
+        if next_name
+        else '<dragpoints/>'
+    )
     return (
         f'<shape image="doccacheload_icon" name="{shape_name}" '
         f'shapetype="doccacheload" userlabel="Route caught errors to DLQ cache" '
         f'x="{_shape_x(shape_index)}" y="{_CATCH_SHAPE_Y}">'
         f'<configuration><doccacheload docCache="{_escape_xml(doc_cache_id)}"/></configuration>'
-        '<dragpoints/>'
+        f'{dragpoints_xml}'
         '</shape>'
     )
 
 
-def _emit_processcall(shape_name: str, process_id: str, shape_index: int) -> str:
-    """Emit the verified error-subprocess DLQ catch leg (terminal).
+def _emit_processcall(
+    shape_name: str, process_id: str, shape_index: int, next_name: Optional[str] = None
+) -> str:
+    """Emit the verified error-subprocess DLQ catch leg.
 
     Live shape: processcall abort="true" wait="true" with empty parameters /
-    returnpaths, empty dragpoints (live component 7b19baeb-... shape34).
+    returnpaths (live component 7b19baeb-... shape34). Terminal (empty
+    dragpoints) by default; when ``next_name`` is set (issue #89 notify path)
+    it routes to the catch-row Stop.
     """
+    dragpoints_xml = (
+        f'<dragpoints>{_emit_dragpoints([next_name], shape_index, y=_CATCH_DRAGPOINT_Y)}</dragpoints>'
+        if next_name
+        else '<dragpoints/>'
+    )
     return (
         f'<shape image="processcall_icon" name="{shape_name}" '
         f'shapetype="processcall" userlabel="Route caught errors to error subprocess" '
@@ -1127,7 +1335,7 @@ def _emit_processcall(shape_name: str, process_id: str, shape_index: int) -> str
         '<parameters/><returnpaths/>'
         '</processcall>'
         '</configuration>'
-        '<dragpoints/>'
+        f'{dragpoints_xml}'
         '</shape>'
     )
 

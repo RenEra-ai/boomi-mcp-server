@@ -55,7 +55,21 @@ _CACHE_ID = "55555555-5555-5555-5555-555555555555"
 _PROC_ID = "66666666-6666-6666-6666-666666666666"
 
 
-def _config(dlq, transform=None):
+_NOTIFY_FIXTURE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "try_catch_notify_dlq_document_cache.xml"
+)
+
+# Issue #89: placeholder Notify config (references the caught-error property by
+# its token; the builder substitutes it for the {1} placeholder + track param).
+_NOTIFY_TOKEN = "meta.base.catcherrorsmessage"
+_NOTIFY_TEMPLATE = f"Integration catch path failed. Caught error: {_NOTIFY_TOKEN}"
+_CATCH_NOTIFY = {"level": "ERROR", "message_template": _NOTIFY_TEMPLATE}
+
+
+def _config(dlq, transform=None, catch_notify=None):
     cfg = {
         "process_kind": "database_to_api_sync",
         "source": {
@@ -75,6 +89,8 @@ def _config(dlq, transform=None):
         },
         "reliability": {"retry_count": 0, "dlq": dlq},
     }
+    if catch_notify is not None:
+        cfg["reliability"]["catch_notify"] = catch_notify
     return cfg
 
 
@@ -409,3 +425,194 @@ def test_no_reliability_build_has_no_catcherrors():
     del cfg["reliability"]
     _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
     assert _by_type(shapes) == ["start", "connectoraction", "connectoraction", "stop"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #89 — Notify step on the catch leg
+# ---------------------------------------------------------------------------
+
+def test_notify_document_cache_matches_golden_fixture():
+    """The canonical document_cache_ref + catch_notify build must match the
+    committed golden (C14N-compared, like the no-notify golden)."""
+    cfg = _config(
+        {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        catch_notify=_CATCH_NOTIFY,
+    )
+    emitted = ProcessFlowBuilder.build(
+        cfg, name="TryCatch Notify DLQ Golden", folder_name="Golden/Fixtures"
+    )
+    assert ET.canonicalize(emitted) == ET.canonicalize(_NOTIFY_FIXTURE.read_text())
+
+
+def test_notify_document_cache_shape_sequence():
+    cfg = _config(
+        {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        catch_notify=_CATCH_NOTIFY,
+    )
+    _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    # Catch leg becomes notify -> dlq route -> catch stop, appended after the
+    # Try-path stop.
+    assert _by_type(shapes) == [
+        "start", "catcherrors", "connectoraction", "connectoraction",
+        "stop", "notify", "doccacheload", "stop",
+    ]
+
+
+def test_notify_error_subprocess_shape_sequence():
+    cfg = _config(
+        {"mode": "error_subprocess_ref", "process_id": _PROC_ID},
+        catch_notify=_CATCH_NOTIFY,
+    )
+    _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    assert _by_type(shapes) == [
+        "start", "catcherrors", "connectoraction", "connectoraction",
+        "stop", "notify", "processcall", "stop",
+    ]
+
+
+def test_notify_catch_leg_wiring_resolves():
+    for dlq in (
+        {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        {"mode": "error_subprocess_ref", "process_id": _PROC_ID},
+    ):
+        _, shapes = _parse_shapes(
+            ProcessFlowBuilder.build(_config(dlq, catch_notify=_CATCH_NOTIFY), name="N")
+        )
+        by_name = {s.attrib["name"]: s for s in shapes}
+        catcherrors = shapes[1]
+        notify = shapes[5]
+        dlq_route = shapes[6]
+        catch_stop = shapes[7]
+        # catcherrors Catch dragpoint targets the Notify (not the DLQ route).
+        catch_dp = {dp.attrib["identifier"]: dp for dp in catcherrors.find("dragpoints")}
+        assert catch_dp["error"].attrib["toShape"] == notify.attrib["name"]
+        # Notify -> DLQ route -> catch Stop.
+        assert notify.attrib["shapetype"] == "notify"
+        notify_dps = list(notify.find("dragpoints"))
+        assert len(notify_dps) == 1
+        assert notify_dps[0].attrib["toShape"] == dlq_route.attrib["name"]
+        dlq_dps = list(dlq_route.find("dragpoints"))
+        assert len(dlq_dps) == 1
+        assert dlq_dps[0].attrib["toShape"] == catch_stop.attrib["name"]
+        # Catch Stop is terminal and on the catch row.
+        assert catch_stop.attrib["shapetype"] == "stop"
+        assert catch_stop.attrib["y"] == "456.0"
+        assert list(catch_stop.find("dragpoints")) == []
+        # Every dragpoint target resolves.
+        for shape in shapes:
+            for dp in shape.find("dragpoints"):
+                assert dp.attrib["toShape"] in by_name
+
+
+def test_notify_config_is_verified_shape():
+    cfg = _config(
+        {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        catch_notify={"level": "warning", "message_template": _NOTIFY_TEMPLATE},
+    )
+    _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    notify = shapes[5].find("configuration/notify")
+    # Log-only Notify (no platform email event → email/SMS stays out of scope).
+    assert notify.attrib["disableEvent"] == "true"
+    assert notify.attrib["enableUserLog"] == "false"
+    assert notify.attrib["perExecution"] == "false"
+    # level is normalized to the canonical uppercase token.
+    assert notify.find("notifyMessageLevel").text == "WARNING"
+    # The caught-error property token is substituted for the {1} placeholder...
+    msg = notify.find("notifyMessage").text
+    assert "{1}" in msg
+    assert _NOTIFY_TOKEN not in msg
+    # ...and bound as the single notify track parameter.
+    tp = notify.find("notifyParameters/parametervalue/trackparameter")
+    assert tp.attrib["propertyId"] == _NOTIFY_TOKEN
+
+
+def test_notify_xml_round_trips():
+    xml = ProcessFlowBuilder.build(
+        _config(
+            {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+            catch_notify=_CATCH_NOTIFY,
+        ),
+        name="N",
+    )
+    ET.fromstring(xml)  # must not raise
+
+
+def test_notify_with_retry_still_emits_bounded_retry():
+    cfg = _config(
+        {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        catch_notify=_CATCH_NOTIFY,
+    )
+    cfg["reliability"]["retry_count"] = 3
+    _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    assert shapes[1].find("configuration/catcherrors").attrib["retryCount"] == "3"
+    assert _by_type(shapes)[5:] == ["notify", "doccacheload", "stop"]
+
+
+class TestNotifyValidation:
+    def _ok_dlq(self):
+        return {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}
+
+    def test_accepts_valid_catch_notify(self):
+        cfg = _config(self._ok_dlq(), catch_notify=_CATCH_NOTIFY)
+        assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+
+    def test_rejects_non_dict_catch_notify(self):
+        cfg = _config(self._ok_dlq(), catch_notify="nope")
+        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+        assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+        assert err.field == "reliability.catch_notify"
+
+    def test_rejects_extra_channel_keys(self):
+        for extra in ({"email_to": "x"}, {"channel": "slack"}, {"sms": "+1"}):
+            cn = dict(_CATCH_NOTIFY, **extra)
+            err = ProcessFlowBuilder.validate_config(
+                _config(self._ok_dlq(), catch_notify=cn), depends_on=[]
+            )
+            assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+            assert err.field == "reliability.catch_notify"
+
+    def test_rejects_missing_template(self):
+        err = ProcessFlowBuilder.validate_config(
+            _config(self._ok_dlq(), catch_notify={"level": "ERROR"}), depends_on=[]
+        )
+        assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+        assert err.field == "reliability.catch_notify.message_template"
+
+    def test_rejects_blank_template(self):
+        err = ProcessFlowBuilder.validate_config(
+            _config(self._ok_dlq(), catch_notify={"level": "ERROR", "message_template": "  "}),
+            depends_on=[],
+        )
+        assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+        assert err.field == "reliability.catch_notify.message_template"
+
+    def test_rejects_template_without_caught_error_token(self):
+        err = ProcessFlowBuilder.validate_config(
+            _config(self._ok_dlq(), catch_notify={"level": "ERROR", "message_template": "static text"}),
+            depends_on=[],
+        )
+        assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+        assert err.field == "reliability.catch_notify.message_template"
+
+    def test_rejects_unsupported_level(self):
+        for bad in ("SEVERE", "debug", "", 5):
+            err = ProcessFlowBuilder.validate_config(
+                _config(self._ok_dlq(), catch_notify={"level": bad, "message_template": _NOTIFY_TEMPLATE}),
+                depends_on=[],
+            )
+            assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+            assert err.field == "reliability.catch_notify.level"
+
+    def test_rejects_notify_without_wired_dlq(self):
+        cfg = _config({"mode": "disabled"}, catch_notify=_CATCH_NOTIFY)
+        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+        assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+        assert err.field == "reliability.catch_notify"
+
+    def test_build_bypass_raises_on_invalid_notify(self):
+        # Direct build() (bypassing validate_config) with a wired DLQ but a
+        # malformed catch_notify must RAISE, not emit broken XML.
+        cfg = _config(self._ok_dlq(), catch_notify={"level": "ERROR", "message_template": "no token"})
+        with pytest.raises(BuilderValidationError) as exc:
+            ProcessFlowBuilder.build(cfg, name="N")
+        assert exc.value.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"

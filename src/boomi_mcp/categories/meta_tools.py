@@ -5404,6 +5404,11 @@ _PROCESS_FLOW_PROTOCOLS = {
             # depends_on; the bare *_ref_key variant is not resolvable here.
             "reliability.dlq.document_cache_id",
             "reliability.dlq.process_id",
+            # Issue #89 M4.5.4: optional Notify on the wired catch leg
+            # (catch -> notify -> dlq route -> stop). Requires a wired DLQ.
+            "reliability.catch_notify",
+            "reliability.catch_notify.message_template",
+            "reliability.catch_notify.level",
         ],
         # Issue #28 added primitives that PRODUCE these fields as process
         # fragments (schedule_envelope, run_metadata, dlq_writer,
@@ -5441,6 +5446,7 @@ _PROCESS_FLOW_PROTOCOLS = {
         ],
         "supported_transform_modes": ["passthrough", "message", "map_ref"],
         "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
+        "supported_notify_levels": ["INFO", "WARNING", "ERROR"],
         "supported_connector_action_bindings": {
             "database_source": {
                 "connector_type": "database",
@@ -5462,6 +5468,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
             {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count"},
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
+            {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
         ],
@@ -5479,6 +5486,16 @@ _PROCESS_FLOW_PROTOCOLS = {
             "field. retry_count > 0 requires a wired DLQ catch path; retry_count "
             "outside 0..5 (or > 0 without a DLQ mode) returns "
             "PROCESS_RETRY_UNVERIFIED.",
+            "Issue #89 M4.5.4: reliability.catch_notify (optional) emits a "
+            "verified Notify step at the HEAD of the catch leg — the leg becomes "
+            "notify -> dlq route -> catch stop. It requires a wired DLQ "
+            "(document_cache_ref / error_subprocess_ref). message_template must "
+            "reference the platform caught-error property "
+            "(meta.base.catcherrorsmessage) so the Notify logs the real error; "
+            "level is one of supported_notify_levels (INFO/WARNING/ERROR). The "
+            "Notify is log-only — email/SMS notification channels and Notify "
+            "outside catch paths are out of scope; unsupported config returns "
+            "PROCESS_NOTIFY_CONFIG_INVALID.",
             "Issue #28 primitives schedule_envelope, run_metadata, and "
             "error_classifier PRODUCE execution/reliability fragments that "
             "ProcessFlowBuilder does not yet consume — see deferred_fields. The "
@@ -5497,6 +5514,7 @@ _PROCESS_FLOW_PROTOCOLS = {
                 "db_query_operation",
                 "target_rest_connection",
                 "target_rest_operation",
+                "dlq_document_cache",
             ],
             "config": {
                 "process_kind": "database_to_api_sync",
@@ -5517,9 +5535,19 @@ _PROCESS_FLOW_PROTOCOLS = {
                     "action_type": "PATCH",
                     "label": "<<REST send label>>",
                 },
+                # Wired DLQ + optional Notify (#51 / #89): the catch leg logs the
+                # caught error then routes failed documents to the DLQ cache. The
+                # message_template references the platform caught-error property.
                 "reliability": {
                     "retry_count": 0,
-                    "dlq": {"mode": "disabled"},
+                    "dlq": {
+                        "mode": "document_cache_ref",
+                        "document_cache_id": "$ref:dlq_document_cache",
+                    },
+                    "catch_notify": {
+                        "level": "ERROR",
+                        "message_template": "<<integration>> failed; caught error: meta.base.catcherrorsmessage",
+                    },
                 },
             },
         },
@@ -6286,7 +6314,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         },
         "build_from_archetype": {
             "category": "Integration Authoring",
-            "description": "Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi. Pass the returned spec to build_integration(action='plan') to preview steps. The database_to_api_sync archetype emits executable component specs (DB source, JSON transform, REST target, structured process); deployment/scheduling and verified retry/DLQ remain M3 / #51.",
+            "description": "Build an IntegrationSpecV1 from an archetype WITHOUT calling Boomi. Pass the returned spec to build_integration(action='plan') to preview steps. The database_to_api_sync archetype emits executable component specs (DB source, JSON transform, REST target, structured process), including a verified Try/Catch + DLQ catch path with platform-timed retry and an optional log-only Notify step (#51/#88/#89); deployment and scheduling remain M3.",
             "actions": ["(single action — emits an IntegrationSpecV1 only)"],
             "read_only": True,
             "no_boomi_mutation": True,

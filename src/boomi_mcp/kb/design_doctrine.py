@@ -290,23 +290,29 @@ _ENTRIES: List[Dict[str, Any]] = [
             "bolted on per process."
         ),
         "boomi_shape_mapping": (
-            "A Notify step on every catch path, fed a standard payload, "
-            "implemented as a reusable asynchronous notification subprocess "
-            "invoked off the catch leg; plus run-level summary and audit "
-            "outputs. Split run-level logging from per-subprocess logging."
+            "A Notify step at the head of the catch path logs the "
+            "platform-provided caught-error message to the process log at a "
+            "chosen level, before the caught documents route to the failure "
+            "handler. The builder emits this today on a wired catch leg "
+            "(notify, then dead-letter route). Heavier email/alert delivery "
+            "stays a reusable asynchronous notification subprocess invoked off "
+            "the catch leg; run-level summary and audit outputs are separate. "
+            "Split run-level logging from per-subprocess logging."
         ),
         "when_to_use": (
-            "Every production integration: standardize one notification "
+            "Every production integration: log the caught error on the catch "
+            "path so failures are visible, and standardize one notification "
             "service and a run summary so alerting and audit are uniform."
         ),
         "when_not_to_use": (
             "On a hot low-latency path, heavy synchronous notification adds "
-            "latency — make it asynchronous or move it off the critical "
-            "path. The observability plane (tracked business identifiers) is "
-            "a distinct concern — see document_tracking_as_monitoring."
+            "latency — keep the inline catch-path log lightweight and make "
+            "email/alert delivery asynchronous or off the critical path. The "
+            "observability plane (tracked business identifiers) is a distinct "
+            "concern — see document_tracking_as_monitoring."
         ),
-        "verification_status": "companion_unverified",
-        "capability_status": "gated",
+        "verification_status": "live_verified",
+        "capability_status": "emittable_today",
         "category": "reliability",
         "mutual_exclusion": [],
         "cross_refs": [
@@ -314,7 +320,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "document_tracking_as_monitoring",
             "cross_cutting_framework_services",
         ],
-        "provenance": "companion_unverified",
+        "provenance": "live_verified",
     },
     {
         "name": "idempotency_and_duplicates",

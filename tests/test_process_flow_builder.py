@@ -450,6 +450,47 @@ class TestValidateConfig:
             err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
             assert err.error_code == "PROCESS_RETRY_UNVERIFIED", rc
 
+    def test_rejects_catch_notify_without_wired_dlq(self):
+        # Issue #89: Notify lives on a wired catch leg — without a DLQ there is
+        # no catch path to host it.
+        cfg = _base_config(reliability={
+            "retry_count": 0,
+            "catch_notify": {
+                "level": "ERROR",
+                "message_template": "failed: meta.base.catcherrorsmessage",
+            },
+        })
+        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+        assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+        assert err.field == "reliability.catch_notify"
+
+    def test_accepts_catch_notify_with_wired_dlq(self):
+        cfg = _base_config(reliability={
+            "retry_count": 0,
+            "dlq": {
+                "mode": "document_cache_ref",
+                "document_cache_id": "11111111-1111-1111-1111-111111111111",
+            },
+            "catch_notify": {
+                "level": "ERROR",
+                "message_template": "failed: meta.base.catcherrorsmessage",
+            },
+        })
+        assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+
+    def test_rejects_catch_notify_missing_caught_error_token(self):
+        cfg = _base_config(reliability={
+            "retry_count": 0,
+            "dlq": {
+                "mode": "document_cache_ref",
+                "document_cache_id": "11111111-1111-1111-1111-111111111111",
+            },
+            "catch_notify": {"level": "ERROR", "message_template": "no token here"},
+        })
+        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+        assert err.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+        assert err.field == "reliability.catch_notify.message_template"
+
     def test_rejects_retry_count_wrong_type(self):
         # str and bool both rejected (bool is an int subclass — guarded).
         for rc in ("1", True):

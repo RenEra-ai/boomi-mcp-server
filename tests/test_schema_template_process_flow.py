@@ -222,6 +222,39 @@ def test_template_obeys_anti_template_rule(template):
     )
 
 
+def test_template_lists_catch_notify_optional_fields(template):
+    # Issue #89: catch_notify surface is documented as optional.
+    optional = template["optional_fields"]
+    for field in (
+        "reliability.catch_notify",
+        "reliability.catch_notify.message_template",
+        "reliability.catch_notify.level",
+    ):
+        assert field in optional, f"optional field {field!r} missing from template"
+
+
+def test_template_lists_supported_notify_levels(template):
+    assert template["supported_notify_levels"] == ["INFO", "WARNING", "ERROR"]
+
+
+def test_template_documents_notify_config_error(template):
+    codes = {e["error_code"] for e in template["structured_errors"]}
+    assert "PROCESS_NOTIFY_CONFIG_INVALID" in codes
+
+
+def test_example_demonstrates_wired_dlq_and_catch_notify(template):
+    example = template["example_component_spec"]
+    reliability = example["config"]["reliability"]
+    # Wired DLQ bound by $ref, with the DLQ ref declared in depends_on.
+    assert reliability["dlq"]["mode"] == "document_cache_ref"
+    assert reliability["dlq"]["document_cache_id"] == "$ref:dlq_document_cache"
+    assert "dlq_document_cache" in example["depends_on"]
+    # catch_notify present, references the caught-error property, valid level.
+    notify = reliability["catch_notify"]
+    assert notify["level"] in ("INFO", "WARNING", "ERROR")
+    assert "meta.base.catcherrorsmessage" in notify["message_template"]
+
+
 def test_unknown_protocol_returns_error():
     result = get_schema_template_action(
         resource_type="process",

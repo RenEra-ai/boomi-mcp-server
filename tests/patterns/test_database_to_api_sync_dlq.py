@@ -51,9 +51,33 @@ _GOLDEN = (
     / "try_catch_dlq_document_cache_archetype.xml"
 )
 
+_NOTIFY_GOLDEN = (
+    Path(__file__).resolve().parent.parent
+    / "fixtures"
+    / "golden_xml"
+    / "try_catch_notify_dlq_document_cache_archetype.xml"
+)
 
-def _params(dlq: dict | None = None, retry: dict | None = None) -> dict:
-    """Smallest executable create/create payload; DLQ/retry overridable."""
+# Issue #89: placeholder catch_notify (references the caught-error property).
+_CATCH_NOTIFY = {
+    "level": "ERROR",
+    "message_template": "Sync failed; caught error: meta.base.catcherrorsmessage",
+}
+
+
+def _params(
+    dlq: dict | None = None,
+    retry: dict | None = None,
+    catch_notify: dict | None = None,
+) -> dict:
+    """Smallest executable create/create payload; DLQ/retry/notify overridable."""
+    reliability: dict = {
+        "retry": retry or {"max_attempts": 1},
+        "dlq": dlq if dlq is not None else {"enabled": False},
+        "error_classifier": {},
+    }
+    if catch_notify is not None:
+        reliability["catch_notify"] = catch_notify
     return {
         "naming": {"integration_name": "demo-sync", "component_prefix": "DEMO"},
         "source": {
@@ -91,22 +115,24 @@ def _params(dlq: dict | None = None, retry: dict | None = None) -> dict:
             ]
         },
         "execution": {"trigger": {"mode": "manual"}},
-        "reliability": {
-            "retry": retry or {"max_attempts": 1},
-            "dlq": dlq if dlq is not None else {"enabled": False},
-            "error_classifier": {},
-        },
+        "reliability": reliability,
     }
 
 
-def _result(dlq: dict | None = None, retry: dict | None = None) -> dict:
-    result = build_from_archetype_action("database_to_api_sync", _params(dlq, retry))
+def _result(
+    dlq: dict | None = None, retry: dict | None = None, catch_notify: dict | None = None
+) -> dict:
+    result = build_from_archetype_action(
+        "database_to_api_sync", _params(dlq, retry, catch_notify)
+    )
     assert result["_success"] is True, result
     return result
 
 
-def _emit(dlq: dict | None = None, retry: dict | None = None) -> dict:
-    return _result(dlq, retry)["integration_spec"]
+def _emit(
+    dlq: dict | None = None, retry: dict | None = None, catch_notify: dict | None = None
+) -> dict:
+    return _result(dlq, retry, catch_notify)["integration_spec"]
 
 
 def _main_process(spec: dict) -> dict:
@@ -377,7 +403,7 @@ def test_wrong_type_dlq_ref_flagged_by_plan_check(_mock_pag):
 # ---------------------------------------------------------------------------
 
 
-def _build_archetype_process_xml(spec: dict) -> str:
+def _build_archetype_process_xml(spec: dict, name: str = "Archetype DLQ Golden") -> str:
     cfg = _main_process(spec)["config"]
 
     def _rk(token: str) -> str:
@@ -391,7 +417,7 @@ def _build_archetype_process_xml(spec: dict) -> str:
         _rk(cfg["target"]["operation_id"]): _REST_OP_ID,
     }
     resolved = _resolve_dependency_tokens(cfg, registry)
-    return ProcessFlowBuilder.build(resolved, name="Archetype DLQ Golden", folder_name="Golden/Fixtures")
+    return ProcessFlowBuilder.build(resolved, name=name, folder_name="Golden/Fixtures")
 
 
 def test_archetype_document_cache_ref_matches_golden():
@@ -410,3 +436,95 @@ def test_archetype_dlq_shape_sequence_is_trycatch_with_map_and_dlq():
     catch_leg = shapes[6]
     assert catch_leg.attrib["shapetype"] == "doccacheload"
     assert catch_leg.find("configuration/doccacheload").attrib["docCache"] == _CACHE_ID
+
+
+# ---------------------------------------------------------------------------
+# Issue #89 — catch_notify reaches process.reliability and the emitted XML
+# ---------------------------------------------------------------------------
+
+_WIRED_DC = {"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}}
+_WIRED_SUB = {"enabled": True, "target": {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID}}
+
+
+def test_catch_notify_reaches_process_reliability_document_cache():
+    spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
+    assert _main_process(spec)["config"]["reliability"] == {
+        "retry_count": 0,
+        "dlq": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        "catch_notify": {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"]},
+    }
+
+
+def test_catch_notify_reaches_process_reliability_error_subprocess():
+    spec = _emit(_WIRED_SUB, catch_notify=_CATCH_NOTIFY)
+    rel = _main_process(spec)["config"]["reliability"]
+    assert rel["dlq"] == {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID}
+    assert rel["catch_notify"] == {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"]}
+
+
+def test_catch_notify_level_normalized_to_uppercase():
+    spec = _emit(_WIRED_DC, catch_notify={"level": "warning", "message_template": _CATCH_NOTIFY["message_template"]})
+    assert _main_process(spec)["config"]["reliability"]["catch_notify"]["level"] == "WARNING"
+
+
+def _expect_notify_validation_error(catch_notify: dict, dlq: dict | None = _WIRED_DC):
+    result = build_from_archetype_action(
+        "database_to_api_sync", _params(dlq, None, catch_notify)
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED", result
+
+
+def test_catch_notify_without_wired_dlq_rejected():
+    _expect_notify_validation_error(_CATCH_NOTIFY, dlq={"enabled": False})
+
+
+def test_catch_notify_with_guidance_only_rejected():
+    _expect_notify_validation_error(
+        _CATCH_NOTIFY,
+        dlq={"enabled": True, "target": {"mode": "guidance_only", "kind": "queue", "address": "<<addr>>"}},
+    )
+
+
+def test_catch_notify_missing_caught_error_token_rejected():
+    _expect_notify_validation_error({"level": "ERROR", "message_template": "static text, no token"})
+
+
+def test_catch_notify_unsupported_level_rejected():
+    _expect_notify_validation_error({"level": "SEVERE", "message_template": _CATCH_NOTIFY["message_template"]})
+
+
+def test_catch_notify_extra_channel_key_rejected():
+    _expect_notify_validation_error(
+        {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"], "email_to": "ops@example.com"}
+    )
+
+
+def test_catch_notify_operational_intent_records_no_echo():
+    spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
+    notify_intent = _operational_intent(spec)["reliability"]["catch_notify"]
+    assert notify_intent == {
+        "requested": True,
+        "status": "emitted",
+        "level": "ERROR",
+        "message_template_present": True,
+        "references_caught_error_property": True,
+    }
+    # The message body is never echoed into the intent metadata.
+    assert _CATCH_NOTIFY["message_template"] not in str(notify_intent)
+
+
+def test_archetype_notify_matches_golden():
+    spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
+    emitted = _build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden")
+    assert ET.canonicalize(emitted) == ET.canonicalize(_NOTIFY_GOLDEN.read_text())
+
+
+def test_archetype_notify_shape_sequence():
+    spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
+    root = ET.fromstring(_build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden"))
+    shapes = root.find("bns:object/process", NS).find("shapes").findall("shape")
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "catcherrors", "connectoraction", "map", "connectoraction",
+        "stop", "notify", "doccacheload", "stop",
+    ]

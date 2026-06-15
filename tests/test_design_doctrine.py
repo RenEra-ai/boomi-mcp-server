@@ -239,6 +239,15 @@ def test_document_tracking_is_single_and_cross_referenced():
     assert "idempotency_and_duplicates" in entry["cross_refs"]
 
 
+def test_notification_logging_is_live_verified_and_emittable():
+    # Issue #89 M4.5.4: the Notify-on-catch-path entry is now live-verified and
+    # emittable (the builder emits a verified Notify step on the wired catch leg).
+    entry = DESIGN_DOCTRINE_ENTRIES["notification_logging"]
+    assert entry["verification_status"] == "live_verified"
+    assert entry["capability_status"] == "emittable_today"
+    assert entry["provenance"] == "live_verified"
+
+
 def test_fifo_parallel_mutual_exclusion_is_symmetric():
     fifo = DESIGN_DOCTRINE_ENTRIES["reliable_and_sequential_messaging"]
     parallel = DESIGN_DOCTRINE_ENTRIES["combine_split_flow_control"]

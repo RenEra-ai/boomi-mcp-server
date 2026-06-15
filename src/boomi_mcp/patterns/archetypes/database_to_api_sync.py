@@ -48,6 +48,10 @@ from pydantic import (
 from ...categories.components.builders.connector_builder import (
     BuilderValidationError,
 )
+from ...categories.components.builders.process_flow_builder import (
+    _NOTIFY_CAUGHT_ERROR_TOKEN,
+    _SUPPORTED_NOTIFY_LEVELS,
+)
 from ...categories.components.builders.profile_generation import (
     build_profile_generation_artifacts,
 )
@@ -1685,6 +1689,59 @@ class ErrorClassifier(BaseModel):
     )
 
 
+class CatchNotifyConfig(BaseModel):
+    """Optional Notify step on the Try/Catch catch leg (issue #89 M4.5.4).
+
+    Emitted at the head of a wired DLQ catch path
+    (``catch -> notify -> dlq route -> stop``). Log-only: the emitted Notify has
+    no platform email event, so email/SMS channels are out of scope. The message
+    must reference the platform caught-error property so the Notify logs the real
+    error; the builder binds that property as a notify track parameter.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_template: str = Field(
+        ...,
+        description=(
+            "Notify message text. Must reference the platform caught-error "
+            "property token (meta.base.catcherrorsmessage); the builder binds it "
+            "as a notify track parameter so the emitted Notify logs the real "
+            "caught error. Parameterized text only — no canned content."
+        ),
+    )
+    level: str = Field(
+        ...,
+        description=(
+            "Notify message level: one of INFO, WARNING, ERROR (case-insensitive; "
+            "normalized to uppercase)."
+        ),
+    )
+
+    @field_validator("message_template")
+    @classmethod
+    def _require_caught_error_token(cls, value: str) -> str:
+        text = _stripped_nonblank(value)
+        if _NOTIFY_CAUGHT_ERROR_TOKEN not in text:
+            raise ValueError(
+                "reliability.catch_notify.message_template must reference the "
+                f"caught-error property token ({_NOTIFY_CAUGHT_ERROR_TOKEN}) so "
+                "the Notify logs the caught error."
+            )
+        return text
+
+    @field_validator("level")
+    @classmethod
+    def _normalize_level(cls, value: str) -> str:
+        canonical = value.strip().upper()
+        if canonical not in _SUPPORTED_NOTIFY_LEVELS:
+            raise ValueError(
+                "reliability.catch_notify.level must be one of "
+                f"{sorted(_SUPPORTED_NOTIFY_LEVELS)}."
+            )
+        return canonical
+
+
 class ReliabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1705,6 +1762,15 @@ class ReliabilityConfig(BaseModel):
         description=(
             "Rules that classify response errors as retriable or terminal. "
             "Drives the retry and DLQ policies above."
+        ),
+    )
+    catch_notify: Optional[CatchNotifyConfig] = Field(
+        default=None,
+        description=(
+            "Optional Notify step emitted at the head of the Try/Catch catch leg "
+            "(issue #89). Requires a wired DLQ (target.mode='document_cache_ref' "
+            "or 'error_subprocess_ref'); logs the caught error to the process "
+            "log. Email/SMS notification channels are out of scope."
         ),
     )
 
@@ -1730,6 +1796,22 @@ class ReliabilityConfig(BaseModel):
                     "target.mode='document_cache_ref' or 'error_subprocess_ref'. "
                     "Positive retry is emitted only inside a Try/Catch whose "
                     "catch leg routes to a DLQ."
+                )
+        # Issue #89 (M4.5.4): the Notify step lives at the head of the catch
+        # leg, so catch_notify likewise requires a wired DLQ catch path
+        # (guidance_only / disabled DLQ has no catch leg to host it).
+        if self.catch_notify is not None:
+            target = self.dlq.target if self.dlq.enabled else None
+            wired = target is not None and target.mode in (
+                "document_cache_ref",
+                "error_subprocess_ref",
+            )
+            if not wired:
+                raise ValueError(
+                    "reliability.catch_notify requires a wired DLQ catch path: "
+                    "set reliability.dlq.enabled=true with "
+                    "target.mode='document_cache_ref' or 'error_subprocess_ref'. "
+                    "Notify is emitted only at the head of a Try/Catch catch leg."
                 )
         return self
 
@@ -2347,21 +2429,35 @@ def _derive_process_reliability(
     if not dlq.enabled or dlq.target is None:
         return {"retry_count": 0, "dlq": {"mode": "disabled"}}, None
 
+    # Issue #89: the optional Notify rides the wired catch leg only. The
+    # ReliabilityConfig validator guarantees catch_notify is absent on the
+    # disabled / guidance_only branches, so it is only attached here.
+    notify = reliability.catch_notify
+    notify_block = (
+        {"level": notify.level, "message_template": notify.message_template}
+        if notify is not None
+        else None
+    )
+
     target = dlq.target
     if target.mode == "document_cache_ref":
-        block = {
+        block: Dict[str, Any] = {
             "retry_count": retry_count,
             "dlq": {
                 "mode": "document_cache_ref",
                 "document_cache_id": target.document_cache_id,
             },
         }
+        if notify_block is not None:
+            block["catch_notify"] = notify_block
         return block, _ref_dep_key(target.document_cache_id)
     if target.mode == "error_subprocess_ref":
         block = {
             "retry_count": retry_count,
             "dlq": {"mode": "error_subprocess_ref", "process_id": target.process_id},
         }
+        if notify_block is not None:
+            block["catch_notify"] = notify_block
         return block, _ref_dep_key(target.process_id)
 
     # guidance_only — recorded as intent in operational_intent; no builder
@@ -2677,6 +2773,17 @@ def _build_operational_intent(
                     "recorded as guidance only (no wiring)."
                 ),
             }
+    # Issue #89 (M4.5.4): record Notify intent without echoing the message body
+    # (defense-in-depth — the template is caller free-form). references_caught_
+    # error_property is always true (the CatchNotifyConfig validator enforces it).
+    if reliability.catch_notify is not None:
+        reliability_intent["catch_notify"] = {
+            "requested": True,
+            "status": "emitted",
+            "level": reliability.catch_notify.level,
+            "message_template_present": True,
+            "references_caught_error_property": True,
+        }
     intent["reliability"] = reliability_intent
 
     # --- expected status codes ---
@@ -2706,7 +2813,7 @@ def _build_operational_intent(
 class DatabaseToApiSyncArchetype(ArchetypePattern):
     metadata = PatternMetadata(
         name="database_to_api_sync",
-        version="0.4.0",
+        version="0.4.1",
         kind=PatternKind.ARCHETYPE,
         description=(
             "Archetype for replicating SQL Server records to a REST API on a "
@@ -2721,7 +2828,9 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             "enabled with mode document_cache_ref or error_subprocess_ref, and "
             "wires caller retry (max_attempts 1..6 → platform-timed Try/Catch "
             "retry_count 0..5) through to the emitted process (#51 M3.R1a / #88 "
-            "M4.5.3). Schedule activation, watermark update, and dynamic "
+            "M4.5.3). Optionally emits a log-only Notify step on the catch path "
+            "(reliability.catch_notify) recording the caught error (#89 M4.5.4). "
+            "Schedule activation, watermark update, and dynamic "
             "operation-property wiring remain deferred (M3)."
         ),
         tags=[
@@ -2752,12 +2861,14 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "Emits executable component specs (DB source, JSON transform, REST target, process) for build_integration(action='plan').",
         "All XML is produced by the existing component builders; the archetype emits JSON component specs only.",
         "Emits a verified Try/Catch + DLQ catch path when dlq.enabled with mode document_cache_ref or error_subprocess_ref; caller retry (max_attempts 1..6) is wired as platform-timed Try/Catch retry_count 0..5 (#51 M3.R1a / #88 M4.5.3).",
+        "Optionally emits a verified Notify step at the head of the wired catch path (reliability.catch_notify) that logs the caught error to the process log; level INFO/WARNING/ERROR (#89 M4.5.4).",
         "Credentials cross the contract only as opaque credential_ref values and are never echoed in errors.",
     ]
     limitations = [
         "Emits JSON component specs only; performs no Boomi mutation and exposes no raw XML.",
         "DLQ wiring is emitted for mode document_cache_ref / error_subprocess_ref; legacy folder/topic/queue targets require mode='guidance_only' and are recorded as metadata only (no wiring).",
         "Retry timing is platform-controlled (Try/Catch built-in waits); caller-selected fixed/exponential backoff is NOT supported (backoff='platform' only). retry max_attempts>1 requires a wired DLQ catch path.",
+        "Notify (reliability.catch_notify) is log-only and emitted only on a wired catch path; email/SMS notification channels and Notify outside catch paths are out of scope (#14/M4.5.5).",
         "Schedule intent is represented as metadata only; deployment and schedule activation are M3.",
         "Watermark is represented as metadata only; watermark-update and dynamic operation-property wiring are deferred (#51).",
         "REST create-mode emits only auth='none'; secured auth (basic / bearer / oauth2) requires binding.mode='reuse'.",
@@ -2985,6 +3096,10 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                             "mode": "document_cache_ref",
                             "document_cache_id": "<<dlq document cache component id>>",
                         },
+                    },
+                    "catch_notify": {
+                        "level": "ERROR",
+                        "message_template": "<<integration>> failed; caught error: meta.base.catcherrorsmessage",
                     },
                     "error_classifier": {
                         "custom_rules": ["rate_limit_exhausted"],
@@ -3274,7 +3389,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "component_count": len(components),
                 "raw_xml_exposed": False,
                 "boomi_mutation": False,
-                "metadata_version": "0.4.0",
+                "metadata_version": "0.4.1",
                 # Representation of trigger / schedule / watermark / retry intent /
                 # DLQ intent / error classifier / run metadata / expected status
                 # codes / deferred follow-up notes. Verified DLQ modes + caller
@@ -3298,6 +3413,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "schedule_activation": "M3 (deploy to a runtime first)",
                     "process_dlq": "emitted for document_cache_ref / error_subprocess_ref (#51 M3.R1a)",
                     "process_retry": "max_attempts 1..6 wired as platform-timed Try/Catch retry_count 0..5 (#88 M4.5.3); requires a wired DLQ catch path; no caller-selected backoff",
+                    "process_notify": "optional log-only Notify on the catch path (reliability.catch_notify, #89 M4.5.4); requires a wired DLQ; email/SMS channels out of scope",
                     "watermark_update": "#51 (dynamic operation-property wiring)",
                     "db_create_auth": (
                         "username_password only; windows_integrated requires reuse"
