@@ -1263,7 +1263,14 @@ def _emit_notify(
     """
     level = str(catch_notify.get("level") or "").strip().upper()
     template = str(catch_notify.get("message_template") or "")
-    message = template.replace(_NOTIFY_CAUGHT_ERROR_TOKEN, "{1}")
+    # Boomi Notify message text uses Java-MessageFormat quoting: a single quote
+    # is an escape char, so an unmatched apostrophe (e.g. "couldn't") would quote
+    # the rest of the message and stop the {1} placeholder from expanding — the
+    # caught error would silently not appear. The caller's template is plain
+    # literal text, so double every apostrophe (the MessageFormat literal-quote
+    # escape) BEFORE inserting the {1} placeholder, which keeps the apostrophe
+    # rendering literally and the placeholder substituting.
+    message = template.replace("'", "''").replace(_NOTIFY_CAUGHT_ERROR_TOKEN, "{1}")
     dragpoints = _emit_dragpoints([next_name], shape_index, y=_CATCH_DRAGPOINT_Y)
     return (
         f'<shape image="notify_icon" name="{shape_name}" shapetype="notify" '

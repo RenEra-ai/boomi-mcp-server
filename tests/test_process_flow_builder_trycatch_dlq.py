@@ -526,6 +526,24 @@ def test_notify_config_is_verified_shape():
     assert tp.attrib["propertyId"] == _NOTIFY_TOKEN
 
 
+def test_notify_message_doubles_apostrophes_for_messageformat():
+    # Boomi Notify text uses MessageFormat quoting: an unmatched apostrophe would
+    # quote the {1} placeholder and stop the caught-error from expanding. The
+    # builder doubles apostrophes so they render literally and {1} still binds.
+    cfg = _config(
+        {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        catch_notify={
+            "level": "ERROR",
+            "message_template": f"couldn't sync: {_NOTIFY_TOKEN}",
+        },
+    )
+    _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    msg = shapes[5].find("configuration/notify/notifyMessage").text
+    # XML decodes &apos;&apos; back to '' — the MessageFormat literal-quote escape.
+    assert msg == "couldn''t sync: {1}"
+    assert "{1}" in msg
+
+
 def test_notify_xml_round_trips():
     xml = ProcessFlowBuilder.build(
         _config(
