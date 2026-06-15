@@ -5949,6 +5949,13 @@ class TestWrapperSubprocessPlan:
         assert step["validation_error"]["error_code"] == "PROCESS_REF_NOT_FOUND"
 
     @patch(_PATCH_TARGET)
+    def test_ref_in_process_id_errors(self, mock_pag):
+        # A $ref token in process_id (wrong field) is rejected at plan time.
+        step = self._wrapper_err(mock_pag, [{"process_id": "$ref:main_logic"}])
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "PROCESS_CALL_CONFIG_INVALID"
+
+    @patch(_PATCH_TARGET)
     def test_type_mismatch_errors(self, mock_pag):
         # subprocess_ref pointing at a non-process (in-spec) component.
         conn = IntegrationComponentSpec(

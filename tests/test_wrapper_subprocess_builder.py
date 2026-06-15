@@ -223,6 +223,35 @@ class TestValidate:
         err = WrapperSubprocessBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "PLAINTEXT_SECRET_REJECTED"
 
+    def test_rejects_empty_ref_token(self):
+        # "$ref:" passes a naive startswith check but would emit processId="$ref:".
+        cfg = {"process_kind": "wrapper_subprocess",
+               "process_calls": [{"subprocess_ref": "$ref:"}]}
+        err = WrapperSubprocessBuilder.validate_config(cfg, depends_on=[])
+        assert err.error_code == "PROCESS_REF_MISSING"
+        assert err.field == "process_calls[0].subprocess_ref"
+
+    def test_rejects_ref_token_in_process_id(self):
+        # A $ref in process_id bypasses the implicit edge + ref-type checks
+        # (which only inspect subprocess_ref) — reject it.
+        cfg = {"process_kind": "wrapper_subprocess",
+               "process_calls": [{"process_id": "$ref:child"}]}
+        err = WrapperSubprocessBuilder.validate_config(cfg, depends_on=["child"])
+        assert err.error_code == "PROCESS_CALL_CONFIG_INVALID"
+        assert err.field == "process_calls[0].process_id"
+
+    def test_rejects_non_bool_flags(self):
+        for flag in ("wait", "abort_on_error"):
+            cfg = {"process_kind": "wrapper_subprocess",
+                   "process_calls": [{"process_id": _CHILD_ID, flag: "false"}]}
+            err = WrapperSubprocessBuilder.validate_config(cfg, depends_on=[])
+            assert err.error_code == "PROCESS_CALL_CONFIG_INVALID", flag
+            assert err.field == f"process_calls[0].{flag}"
+        # A real boolean is accepted.
+        ok = {"process_kind": "wrapper_subprocess",
+              "process_calls": [{"process_id": _CHILD_ID, "wait": False, "abort_on_error": True}]}
+        assert WrapperSubprocessBuilder.validate_config(ok, depends_on=[]) is None
+
 
 def test_build_bypass_raises_on_missing_target():
     # Direct build() with neither subprocess_ref nor process_id must RAISE,

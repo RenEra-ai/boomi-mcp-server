@@ -1509,17 +1509,52 @@ def _validate_processcall_entry(
             field=field,
             hint="Add subprocess_ref ('$ref:KEY') for an in-spec child, or process_id for an existing component.",
         )
-    # Exact '$ref:KEY' token required (byte 0, no surrounding whitespace) — a
-    # padded " $ref:KEY " is not resolved by _resolve_dependency_tokens and would
-    # survive as a literal in the emitted XML; a literal id belongs in process_id.
-    if has_sref and not sref.startswith("$ref:"):
+    # Exact '$ref:KEY' token required (byte 0, no surrounding whitespace, non-empty
+    # key) — a padded " $ref:KEY " is not resolved by _resolve_dependency_tokens
+    # and would survive as a literal in the emitted XML; a literal id belongs in
+    # process_id. An empty "$ref:" passes the startswith check but would emit
+    # processId="$ref:" (build()'s non-empty guard sees a truthy "$ref:"), so the
+    # empty-key case is rejected here. (Codex #90 review.)
+    if has_sref:
+        if not sref.startswith("$ref:"):
+            return BuilderValidationError(
+                f"{field}.subprocess_ref must be an exact '$ref:KEY' token (got {sref!r}); "
+                "use process_id for a literal component id.",
+                error_code="PROCESS_REF_MISSING",
+                field=f"{field}.subprocess_ref",
+                hint="subprocess_ref references an in-spec child by key (no surrounding whitespace); existing components use process_id.",
+            )
+        if not sref[len("$ref:"):]:
+            return BuilderValidationError(
+                f"{field}.subprocess_ref is an empty '$ref:' token; name an in-spec child component key.",
+                error_code="PROCESS_REF_MISSING",
+                field=f"{field}.subprocess_ref",
+                hint="Use '$ref:<child_key>' naming a process component in the same spec.",
+            )
+    # process_id is for an EXISTING/literal component id — a $ref:KEY token here
+    # would bypass the implicit child-first edge + cross-spec ref-type checks
+    # (which only inspect subprocess_ref) yet still be substituted by
+    # _resolve_dependency_tokens, risking an unresolved $ref or wrong ordering.
+    # Direct the caller to subprocess_ref for in-spec children. (Codex #90 review.)
+    if has_pid and pid.strip().startswith("$ref:"):
         return BuilderValidationError(
-            f"{field}.subprocess_ref must be an exact '$ref:KEY' token (got {sref!r}); "
-            "use process_id for a literal component id.",
-            error_code="PROCESS_REF_MISSING",
-            field=f"{field}.subprocess_ref",
-            hint="subprocess_ref references an in-spec child by key (no surrounding whitespace); existing components use process_id.",
+            f"{field}.process_id must be a literal component id, not a '$ref:' token; "
+            "use subprocess_ref to reference an in-spec child.",
+            error_code="PROCESS_CALL_CONFIG_INVALID",
+            field=f"{field}.process_id",
+            hint="subprocess_ref='$ref:KEY' references an in-spec child; process_id is for existing component ids.",
         )
+    # wait / abort_on_error must be real JSON booleans when present — a string like
+    # "false" would coerce to True via bool() at emit time and silently reverse the
+    # requested behavior. (Codex #90 review.)
+    for flag in ("wait", "abort_on_error"):
+        if flag in call and not isinstance(call[flag], bool):
+            return BuilderValidationError(
+                f"{field}.{flag} must be a boolean (true/false); got {call[flag]!r}.",
+                error_code="PROCESS_CALL_CONFIG_INVALID",
+                field=f"{field}.{flag}",
+                hint=f"Pass a JSON boolean for {flag}, not a string or number.",
+            )
     return None
 
 

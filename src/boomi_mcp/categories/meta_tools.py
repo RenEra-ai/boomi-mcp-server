@@ -5592,6 +5592,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_REF_SELF_REFERENCE", "field": "process_calls[N].subprocess_ref"},
             {"error_code": "PROCESS_REF_NOT_FOUND", "field": "process_calls[N].subprocess_ref"},
             {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "process_calls[N].subprocess_ref"},
+            {"error_code": "PROCESS_CALL_CONFIG_INVALID", "field": "process_calls[N].process_id|process_calls[N].wait|process_calls[N].abort_on_error"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
         ],
