@@ -18,11 +18,13 @@ class IntegrationComponentSpec(BaseModel):
     config: Dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Type-specific configuration payload. For type='process', set "
-            "config.process_kind to opt into a structured process-flow "
-            "builder (e.g. 'database_to_api_sync' — issue #25). Process "
-            "components without process_kind fall through to the legacy "
-            "linear JSON-to-XML path in create_process."
+            "Type-specific configuration payload. For type='process', "
+            "config.process_kind is REQUIRED and selects a structured "
+            "process-flow builder (e.g. 'database_to_api_sync' or "
+            "'wrapper_subprocess' — issue #25). A process component without "
+            "process_kind is rejected at plan time with PROCESS_KIND_REQUIRED "
+            "(legacy freeform JSON-to-XML process authoring has been removed); "
+            "use manage_component for an explicit raw process XML escape hatch."
         ),
     )
     depends_on: List[str] = Field(default_factory=list, description="Component keys this component depends on")

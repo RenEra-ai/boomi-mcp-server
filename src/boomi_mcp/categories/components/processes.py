@@ -2,27 +2,23 @@
 """
 Process Component MCP Tools for Boomi API Integration.
 
-This module provides process component management capabilities including
-CRUD operations and orchestrated multi-component workflows.
+This module provides read-only process component inspection: listing process
+components in an account and getting a single process by ID.
+
+Process authoring (create/update) is no longer offered here. The legacy
+freeform JSON-to-process-XML compiler has been removed; typed process
+authoring lives in build_integration (config.process_kind) and the
+archetype tooling. manage_process therefore supports list/get only.
 
 Features:
-- Simple process creation (single component, no dependencies)
-- Complex workflows (multi-component with dependency management)
-- Fuzzy ID resolution (component names → IDs)
-- JSON configuration support
-- Topological sorting for dependencies
+- List process components (with optional folder filter)
+- Get a single process component by ID
 """
 
-from typing import Dict, Any, List, Optional
-import xml.etree.ElementTree as ET
+from typing import Dict, Any, Optional
 
 from boomi import Boomi
 from boomi.net.transport.api_error import ApiError
-
-# Import our modules
-from ...xml_builders.builders.orchestrator import ComponentOrchestrator
-from ...xml_builders.json_parser import parse_json_to_specs
-from ...models.process_models import ComponentSpec, ProcessConfig
 
 # Import typed models for query operations
 from boomi.models import (
@@ -40,19 +36,6 @@ from ._shared import (
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
 )
-
-
-def _component_delete(boomi_client: Boomi, component_id: str) -> None:
-    """Delete component — NOT supported by Boomi's Component REST API.
-
-    The Component API (used for processes) does not support HTTP DELETE,
-    nor does updating with deleted='true' work (the flag is silently ignored).
-    Components can only be deleted through the Boomi Platform UI.
-    """
-    raise NotImplementedError(
-        "Boomi's Component REST API does not support deletion. "
-        "Process components can only be deleted through the Boomi Platform UI (Build page)."
-    )
 
 
 def list_processes(
@@ -181,200 +164,6 @@ def get_process(
         }
 
 
-def create_process(
-    boomi_client: Boomi,
-    profile: str,
-    config: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Create process component(s) from JSON configuration.
-
-    Supports both single process and multi-component workflows with dependencies.
-
-    Args:
-        boomi_client: Authenticated Boomi SDK client
-        profile: Profile name (for context)
-        config: JSON object configuration
-
-    Returns:
-        Dict with success status and created component IDs
-    """
-    try:
-        # Parse JSON to ComponentSpec list
-        specs = parse_json_to_specs(config)
-
-        # Create orchestrator
-        orchestrator = ComponentOrchestrator(boomi_client)
-
-        # Build with dependencies
-        registry = orchestrator.build_with_dependencies(specs)
-
-        # Format results
-        created_components = {}
-        for name, info in registry.items():
-            created_components[name] = {
-                'component_id': info['component_id'],
-                'id': info['id'],
-                'type': info['type']
-            }
-
-        result = {
-            "_success": True,
-            "message": f"Created {len(created_components)} component(s)",
-            "components": created_components,
-            "profile": profile
-        }
-        if len(created_components) == 1:
-            only = next(iter(created_components.values()))
-            result["process_id"] = only["component_id"]
-            result["component_id"] = only["component_id"]
-        if orchestrator.warnings:
-            result["warnings"] = orchestrator.warnings
-        return result
-
-    except ValueError as e:
-        # Validation or parsing errors
-        return {
-            "_success": False,
-            "error": f"Configuration error: {str(e)}",
-            "exception_type": "ValidationError",
-            "hint": "Check JSON structure and required fields. Ensure dependencies are declared correctly."
-        }
-
-    except Exception as e:
-        return {
-            "_success": False,
-            "error": f"Failed to create process: {str(e)}",
-            "exception_type": type(e).__name__
-        }
-
-
-def update_process(
-    boomi_client: Boomi,
-    profile: str,
-    process_id: str,
-    config: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Update existing process component.
-
-    Note: This performs a full rebuild of the process XML from the JSON config.
-    Partial updates are not supported by Boomi's Component API.
-
-    Args:
-        boomi_client: Authenticated Boomi SDK client
-        profile: Profile name (for context)
-        process_id: Process component ID to update
-        config: New JSON configuration
-
-    Returns:
-        Dict with success status
-
-    """
-    try:
-        # Parse JSON
-        specs = parse_json_to_specs(config)
-
-        if len(specs) > 1:
-            return {
-                "_success": False,
-                "error": "Update only supports single process configuration",
-                "hint": "Use create action for multi-component workflows"
-            }
-
-        spec = specs[0]
-
-        # Create orchestrator to build XML
-        orchestrator = ComponentOrchestrator(boomi_client)
-        xml = orchestrator._build_process(spec)
-
-        # Update via API
-        result = boomi_client.component.update_component(
-            component_id=process_id,
-            request_body=xml
-        )
-
-        return {
-            "_success": True,
-            "message": f"Updated process '{spec.name}'",
-            "process_id": process_id,
-            "component_id": getattr(result, 'component_id', process_id),
-            "profile": profile
-        }
-
-    except ValueError as e:
-        return {
-            "_success": False,
-            "error": f"Configuration error: {str(e)}",
-            "exception_type": "ValidationError"
-        }
-
-    except ApiError as e:
-        return {
-            "_success": False,
-            "error": f"Failed to update process '{process_id}': {_extract_api_error_msg(e)}",
-            "exception_type": "ApiError"
-        }
-    except Exception as e:
-        return {
-            "_success": False,
-            "error": f"Failed to update process '{process_id}': {str(e)}",
-            "exception_type": type(e).__name__
-        }
-
-
-def delete_process(
-    boomi_client: Boomi,
-    profile: str,
-    process_id: str
-) -> Dict[str, Any]:
-    """
-    Delete process component.
-
-    Args:
-        boomi_client: Authenticated Boomi SDK client
-        profile: Profile name (for context)
-        process_id: Process component ID to delete
-
-    Returns:
-        Dict with success status
-
-    Example:
-        result = delete_process(sdk, "production", "abc-123-def")
-    """
-    try:
-        # Use direct HTTP DELETE — ComponentService lacks delete_component method
-        _component_delete(boomi_client, process_id)
-
-        return {
-            "_success": True,
-            "message": f"Deleted process '{process_id}'",
-            "process_id": process_id,
-            "profile": profile
-        }
-
-    except NotImplementedError as e:
-        return {
-            "_success": False,
-            "error": str(e),
-            "exception_type": "NotSupported",
-            "hint": "Delete process components from the Boomi Platform Build page instead."
-        }
-
-    except ApiError as e:
-        return {
-            "_success": False,
-            "error": f"Failed to delete process '{process_id}': {_extract_api_error_msg(e)}",
-            "exception_type": "ApiError"
-        }
-    except Exception as e:
-        return {
-            "_success": False,
-            "error": f"Failed to delete process '{process_id}': {str(e)}",
-            "exception_type": type(e).__name__
-        }
-
-
 def manage_process_action(
     boomi_client: Boomi,
     profile: str,
@@ -382,15 +171,16 @@ def manage_process_action(
     **params
 ) -> Dict[str, Any]:
     """
-    Consolidated process management function.
+    Consolidated read-only process inspection function.
 
-    Routes to appropriate function based on action parameter.
-    This enables consolidation of multiple operations into 1 MCP tool.
+    Routes to the appropriate reader based on action parameter.
+    manage_process is read-only: create/update/delete are no longer
+    supported (legacy freeform process JSON authoring has been removed).
 
     Args:
         boomi_client: Authenticated Boomi SDK client
         profile: Profile name for authentication
-        action: Action to perform (list, get, create, update, delete)
+        action: Action to perform (list, get)
         **params: Action-specific parameters
 
     Actions:
@@ -400,27 +190,14 @@ def manage_process_action(
         - get: Get specific process by ID
           Params: process_id (required str)
 
-        - create: Create new process(es) from JSON config
-          Params: config (required dict)
-
-        - update: Update existing process
-          Params: process_id (required str), config (required dict)
-
-        - delete: Delete process
-          Params: process_id (required str)
-
     Returns:
-        Action result dict with success status and data/error
+        Action result dict with success status and data/error.
+        Unsupported actions (create/update/delete) return an
+        ACTION_UNSUPPORTED envelope.
 
     Examples:
         # List processes
         result = manage_process_action(sdk, "prod", "list")
-
-        # Create simple process
-        result = manage_process_action(
-            sdk, "prod", "create",
-            config={"name": "Test", "shapes": [...]}
-        )
 
         # Get process
         result = manage_process_action(
@@ -443,48 +220,32 @@ def manage_process_action(
                 }
             return get_process(boomi_client, profile, process_id)
 
-        elif action == "create":
-            config = params.get("config")
-            if not config:
-                return {
-                    "_success": False,
-                    "error": "config is required for 'create' action",
-                    "hint": "Provide JSON config with process structure."
-                }
-            return create_process(boomi_client, profile, config)
-
-        elif action == "update":
-            process_id = params.get("process_id")
-            config = params.get("config")
-            if not process_id:
-                return {
-                    "_success": False,
-                    "error": "process_id is required for 'update' action",
-                    "hint": "Provide the process component ID to update"
-                }
-            if not config:
-                return {
-                    "_success": False,
-                    "error": "config is required for 'update' action",
-                    "hint": "Provide new JSON configuration for the process"
-                }
-            return update_process(boomi_client, profile, process_id, config)
-
-        elif action == "delete":
-            process_id = params.get("process_id")
-            if not process_id:
-                return {
-                    "_success": False,
-                    "error": "process_id is required for 'delete' action",
-                    "hint": "Provide the process component ID to delete"
-                }
-            return delete_process(boomi_client, profile, process_id)
+        elif action in ("create", "update", "delete"):
+            return {
+                "_success": False,
+                "error_code": "ACTION_UNSUPPORTED",
+                "error": (
+                    f"manage_process(action='{action}') is no longer supported. "
+                    "Legacy freeform process JSON authoring has been removed; "
+                    "manage_process is read-only."
+                ),
+                "valid_actions": ["list", "get"],
+                "hint": (
+                    "For typed process authoring use list_integration_archetypes()/"
+                    "build_from_archetype()/build_integration. For an explicit raw "
+                    "XML component escape hatch use manage_component. Components are "
+                    "deleted via manage_component(action='delete') or the Boomi "
+                    "Platform Build page."
+                ),
+            }
 
         else:
             return {
                 "_success": False,
+                "error_code": "ACTION_UNSUPPORTED",
                 "error": f"Unknown action: {action}",
-                "hint": "Valid actions are: list, get, create, update, delete"
+                "valid_actions": ["list", "get"],
+                "hint": "Valid actions are: list, get"
             }
 
     except ApiError as e:
@@ -504,8 +265,5 @@ def manage_process_action(
 __all__ = [
     'list_processes',
     'get_process',
-    'create_process',
-    'update_process',
-    'delete_process',
     'manage_process_action'
 ]

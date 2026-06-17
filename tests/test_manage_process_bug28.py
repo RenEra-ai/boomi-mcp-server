@@ -206,3 +206,40 @@ def test_wrapper_get_end_to_end(mock_xml, _mock_auth):
     proc = result["process"]
     assert "process_id" in proc
     assert proc["process_id"] == COMP_ID
+
+
+# ---------------------------------------------------------------------------
+# manage_process is read-only: create/update/delete return ACTION_UNSUPPORTED.
+# Legacy freeform process JSON authoring has been removed.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", ["create", "update", "delete"])
+def test_action_unsupported_at_router(action):
+    """The router rejects authoring actions without touching the SDK."""
+    sdk = MagicMock()
+    result = manage_process_action(sdk, profile="dev", action=action)
+
+    assert result["_success"] is False
+    assert result["error_code"] == "ACTION_UNSUPPORTED"
+    assert result["valid_actions"] == ["list", "get"]
+    # No mutation attempted against the Boomi Component API.
+    sdk.component.update_component.assert_not_called()
+    sdk.component.create_component.assert_not_called()
+
+
+def test_unknown_action_reports_action_unsupported():
+    sdk = MagicMock()
+    result = manage_process_action(sdk, profile="dev", action="frobnicate")
+    assert result["_success"] is False
+    assert result["error_code"] == "ACTION_UNSUPPORTED"
+    assert result["valid_actions"] == ["list", "get"]
+
+
+@pytest.mark.parametrize("action", ["create", "update", "delete"])
+def test_wrapper_action_unsupported(action, _mock_auth):
+    """Public manage_process wrapper surfaces the ACTION_UNSUPPORTED envelope."""
+    result = _call_wrapper(profile="dev", action=action)
+    assert result["_success"] is False
+    assert result["error_code"] == "ACTION_UNSUPPORTED"
+    assert result["valid_actions"] == ["list", "get"]

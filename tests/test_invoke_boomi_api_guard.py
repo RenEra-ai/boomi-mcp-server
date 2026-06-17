@@ -86,13 +86,13 @@ class TestClassification:
 
 class TestTypedAlternatives:
     def test_component_family(self):
-        # Pins the full set from the architect plan: Component XML covers process
-        # and connection components, so manage_process/manage_connector are
-        # legitimate typed paths for raw Component writes.
+        # Component XML covers process and connection components. manage_process
+        # is read-only (list/get) and is NOT a write alternative; build_integration
+        # and manage_connector are the typed write paths for raw Component writes.
         alts = _typed_alternatives_for_endpoint("Component/abc-123")
         assert alts == [
             "query_components", "manage_component", "analyze_component",
-            "build_integration", "manage_process", "manage_connector",
+            "build_integration", "manage_connector",
         ]
 
     def test_component_reference_family_is_read_oriented(self):

@@ -314,3 +314,40 @@ def test_protocol_overrides_operation_overview():
     )
     assert result["_success"] is True
     assert result.get("process_kind") == "database_to_api_sync"
+
+
+def test_process_create_without_protocol_returns_removal_guidance():
+    # Legacy freeform process JSON authoring has been removed: process
+    # operation='create' with no protocol returns removal guidance instead of
+    # a shape-graph template.
+    result = get_schema_template_action(
+        resource_type="process",
+        operation="create",
+    )
+    assert result["_success"] is True
+    assert result["removed"] is True
+    assert "single_process_template" not in result
+    assert "shape_reference" not in result
+    # Steers to the typed authoring paths.
+    assert "database_to_api_sync" in result["process_protocols"]
+    assert "wrapper_subprocess" in result["process_protocols"]
+    blob = json.dumps(result).lower()
+    assert "build_from_archetype" in blob or "build_integration" in blob
+
+
+def test_process_overview_is_read_only_listget():
+    # The process overview (no operation, no protocol) advertises list/get only.
+    result = get_schema_template_action(resource_type="process")
+    assert result["_success"] is True
+    assert result["available_actions"] == ["list", "get"]
+    assert result.get("read_only") is True
+    assert "shape_types" not in result
+
+
+def test_workflow_sequences_drops_manage_process_create():
+    # Discovery must no longer steer callers to manage_process(action='create').
+    result = get_schema_template_action(schema_name="workflow_sequences")
+    assert result["_success"] is True
+    blob = json.dumps(result["workflow_sequences"])
+    assert "manage_process(action='create'" not in blob
+    assert "manage_process(action=\"create\"" not in blob

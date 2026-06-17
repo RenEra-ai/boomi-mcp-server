@@ -86,7 +86,6 @@ from .components.builders.transform_function_wrapper_builder import (
 from .components.component_update_preservation import merge_for_update
 from .components.connectors import create_connector, update_connector
 from .components.manage_component import create_component, update_component
-from .components.processes import create_process, update_process
 from .components.trading_partners import create_trading_partner, update_trading_partner
 
 
@@ -781,9 +780,9 @@ _CONNECTOR_METADATA_ONLY_KEYS = _METADATA_ONLY_KEYS
 
 # Issue #45: resolve the preservation policy for a planned step. Returns
 # None when the route does not invoke a structured builder (raw-XML
-# updates, trading_partner JSON updates, legacy process JSON-to-XML
-# updates, or connector metadata-only updates), in which case the plan
-# surfaces ``update_mode="metadata_smart_merge"`` or
+# updates, trading_partner JSON updates, or connector metadata-only
+# updates), in which case the plan surfaces
+# ``update_mode="metadata_smart_merge"`` or
 # ``update_mode="full_xml_replace"`` instead.
 def _resolve_preservation_policy(
     comp: "IntegrationComponentSpec",
@@ -799,7 +798,8 @@ def _resolve_preservation_policy(
             .lower()
         )
         if not process_kind:
-            # Legacy linear JSON-to-XML path has no structured builder.
+            # No process_kind is rejected at plan time (PROCESS_KIND_REQUIRED);
+            # there is no structured builder to resolve a policy from.
             return None
         builder_cls = get_process_flow_builder(process_kind)
         return getattr(builder_cls, "PRESERVATION_POLICY", None) if builder_cls else None
@@ -1636,14 +1636,13 @@ def _execute_component(
             payload.setdefault("component_name", comp.name)
 
     if comp.type == "process":
-        # process_kind=... opts into the structured process-flow builder
+        # process_kind=... selects the structured process-flow builder
         # (issue #25). _build_plan has already validated config + depends_on
-        # for create/create_clone/update, and rejected the
-        # process_kind + raw xml combination via PROCESS_KIND_XML_CONFLICT,
-        # so by the time we land here either:
-        #   - process_kind is set and we build the XML
-        #   - process_kind is unset and we use the legacy JSON path
-        # The two are mutually exclusive at the plan layer.
+        # for create/create_clone/update, rejected the process_kind + raw xml
+        # combination via PROCESS_KIND_XML_CONFLICT, and rejected the
+        # no-process_kind case via PROCESS_KIND_REQUIRED, so by the time we
+        # land here process_kind is set and we build the XML. The no-kind
+        # branch below is a defensive guard only.
         process_kind = str(
             payload.get("process_kind") or payload.get("process_type") or ""
         ).strip().lower()
@@ -1709,19 +1708,27 @@ def _execute_component(
                 getattr(builder_cls, "PRESERVATION_POLICY", None),
             )
 
-        if comp.action == "create":
-            return create_process(boomi_client, profile, payload)
-        if not target_id:
-            return {"_success": False, "error": f"Missing process_id for update of component '{comp.key}'"}
-        # Codex r14 P2: when a legacy process update carries
-        # `config.xml` (raw-XML escape hatch), the plan reports
-        # update_mode="full_xml_replace". Honor that — update_process
-        # would otherwise parse the payload as process-JSON and fail
-        # on the xml field. update_component handles config.xml by
-        # routing straight to update_component_raw.
-        if payload.get("xml"):
-            return update_component(boomi_client, profile, target_id, payload)
-        return update_process(boomi_client, profile, target_id, payload)
+        # No process_kind: legacy freeform process JSON authoring has been
+        # removed. _build_plan rejects this at plan time with
+        # PROCESS_KIND_REQUIRED (planned_action="error_process_validation"),
+        # so apply never legitimately reaches here. _execute_component is
+        # directly callable, so guard defensively with the same contract
+        # instead of routing to the deleted create_process/update_process.
+        return {
+            "_success": False,
+            "error_code": "PROCESS_KIND_REQUIRED",
+            "field": "config.process_kind",
+            "error": (
+                "Process components must set config.process_kind; legacy "
+                "freeform process JSON authoring has been removed."
+            ),
+            "hint": (
+                "Use list_integration_archetypes()/build_from_archetype(), "
+                "or set process_kind to one of "
+                "['database_to_api_sync', 'wrapper_subprocess']. Use "
+                "manage_component with raw XML only as an explicit escape hatch."
+            ),
+        }
 
     if comp.type in ("connector-settings", "connector-action"):
         # Normalize local-alias connector_types to their canonical Boomi form
@@ -2139,14 +2146,15 @@ def _process_models_error_handling(comp: Any) -> bool:
         Try/Catch + DLQ wrapper (#51 M3.R1a for retry 0; #88 M4.5.3 for 1..5).
         Delegating to that classmethod keeps this predicate in exact lockstep
         with the builder (no duplicated / drifting retry+DLQ logic);
-      * legacy route: a Try/Catch evident in raw process XML, or a catch-typed
-        entry in a ``config.shapes`` list.
+      * raw evidence: a Try/Catch evident in raw process XML, or a catch-typed
+        entry in a ``config.shapes`` list (defensive — these surfaces no longer
+        reach a successful plan now that process_kind is required, but the
+        predicate stays conservative and is exercised directly by unit tests).
 
-    The ``config.reliability`` block is only honored on the structured
-    process-flow route. The legacy JSON-to-XML path (no process_kind) drops an
-    unknown reliability block entirely, so trusting it there would wrongly
-    suppress the warning for a legacy process carrying a stray reliability
-    block — gate it on process_kind. Codex review P2.
+    The ``config.reliability`` block is only honored when a structured
+    process_kind is set; an unknown reliability block on a config without
+    process_kind would otherwise wrongly suppress the warning, so gate it on
+    process_kind. Codex review P2.
 
     A retry_count outside 0..5, the wrong type, or retry_count > 0 without a
     supported DLQ mode is NOT error-handling evidence: _should_emit_try_catch
@@ -2294,11 +2302,11 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             elif len(candidates) == 0:
                 planned_action = "error_missing_target"
 
-        # Process components opt into the structured process-flow builder
-        # via config.process_kind (or config.process_type). Without it,
-        # processes fall through to the legacy linear JSON-to-XML path
-        # in create_process. process_flow_xml is the new structured route
-        # added by issue #25 (M2.5).
+        # Process components MUST set config.process_kind (or process_type)
+        # to select a structured process-flow builder (issue #25, M2.5).
+        # Legacy freeform JSON-to-XML authoring has been removed; a process
+        # component without process_kind is rejected at plan time below with
+        # PROCESS_KIND_REQUIRED.
         raw_config = comp.config or {}
         # str() coercion guards against non-string process_kind (e.g. 123)
         # before .strip(). The builder's validate_config does the same; this
@@ -2312,8 +2320,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
 
         route = (
             "process_flow_xml"
-            if comp.type == "process" and process_kind
-            else "process_json_to_xml"
             if comp.type == "process"
             else "connector_builder_or_xml"
             if comp.type in ("connector-settings", "connector-action")
@@ -2644,6 +2650,31 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         #       so a typo cannot silently fall through to the legacy
         #       linear path.
         process_flow_err: Optional[BuilderValidationError] = None
+        # Legacy freeform process JSON authoring has been removed: a process
+        # component that will be AUTHORED (create/create_clone/update emits or
+        # rebuilds process XML) must declare a structured process_kind. Reject
+        # the untyped authoring case before any mutation, routing the caller to
+        # the typed path. Non-authoring actions (reuse / error_* / pure
+        # reference of an existing process) do not emit XML, so they do not
+        # require process_kind — mirrors how every other builder gates its
+        # validation on the authoring actions.
+        if (
+            comp.type == "process"
+            and not process_kind
+            and planned_action in ("create", "create_clone", "update")
+        ):
+            process_flow_err = BuilderValidationError(
+                "Process components must set config.process_kind; legacy "
+                "freeform process JSON authoring has been removed.",
+                error_code="PROCESS_KIND_REQUIRED",
+                field="config.process_kind",
+                hint=(
+                    "Use list_integration_archetypes()/build_from_archetype(), "
+                    "or set process_kind to one of "
+                    "['database_to_api_sync', 'wrapper_subprocess']. Use "
+                    "manage_component with raw XML only as an explicit escape hatch."
+                ),
+            )
         if (
             comp.type == "process"
             and process_kind
@@ -2720,18 +2751,21 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     )
             xml_override = bool(raw_config.get("xml"))
             # Codex review C4: process_kind + raw xml is ambiguous —
-            # _execute_component cannot honor both, and falling through to
-            # the legacy create_process path silently drops the user's XML.
-            # Reject the conflict explicitly so callers must pick one.
+            # _execute_component cannot honor both. Reject the conflict
+            # explicitly so callers must pick one. (A process component
+            # carrying config.xml without process_kind is separately rejected
+            # with PROCESS_KIND_REQUIRED, so raw process XML now lives only on
+            # the manage_component / type="component" escape hatch.)
             if process_flow_err is None and xml_override:
                 process_flow_err = BuilderValidationError(
                     "process_kind and config.xml are mutually exclusive.",
                     error_code="PROCESS_KIND_XML_CONFLICT",
                     field="config.xml",
                     hint=(
-                        "Choose one: process_kind for the structured "
-                        "builder, OR omit process_kind and pass raw XML "
-                        "to the legacy process_json_to_xml path."
+                        "Choose one: set process_kind for the structured "
+                        "process-flow builder, OR drop the process_kind and "
+                        "author raw process XML through manage_component "
+                        '(type="component", config.xml) instead.'
                     ),
                 )
             # Codex review r9: enum-membership check is a contract
@@ -3028,9 +3062,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
 
         # Issue #45 — surface update-preservation metadata so callers can
         # see, at plan time, which apply path the step will take:
-        #   - "full_xml_replace": raw-XML escape hatch (config.xml set) or
-        #     legacy process JSON-to-XML rebuild via update_process. No
-        #     preservation — caller-supplied XML / regenerated XML wins.
+        #   - "full_xml_replace": raw-XML escape hatch (config.xml set). No
+        #     preservation — caller-supplied XML wins.
         #   - "read_merge_write": structured builder + merge engine.
         #     Preserves bns:encryptedValues, bns:processOverrides, and
         #     unknown XML siblings.
@@ -3059,12 +3092,6 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     step["preserved_paths"] = _enumerate_preserved_paths(
                         _preservation_policy
                     )
-                elif comp.type == "process":
-                    # Legacy linear process: update_process re-runs
-                    # ComponentOrchestrator.build_process from the JSON
-                    # config and writes the regenerated XML wholesale.
-                    step["update_mode"] = "full_xml_replace"
-                    step["preserves_unknown_xml"] = False
                 else:
                     # Smart-merge path: update_component /
                     # update_connector / update_trading_partner edit

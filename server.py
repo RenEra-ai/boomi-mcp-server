@@ -1253,17 +1253,21 @@ if manage_process_action:
         profile: str,
         action: str,
         process_id: str = None,
-        config: str = None,
         filters: str = None
     ):
         """
-        Manage Boomi process components with JSON configuration.
+        Read-only inspection of Boomi process components.
+
+        manage_process is read-only (list/get). Process authoring is typed:
+        use build_from_archetype()/build_integration with config.process_kind,
+        or manage_component for a raw process XML escape hatch. create/update/
+        delete return an ACTION_UNSUPPORTED envelope (legacy freeform process
+        JSON authoring has been removed).
 
         Args:
             profile: Boomi profile name (required)
-            action: Action to perform - must be one of: list, get, create, update, delete
-            process_id: Process component ID (required for get, update, delete)
-            config: JSON configuration string (required for create, update)
+            action: Action to perform - must be one of: list, get
+            process_id: Process component ID (required for get)
             filters: JSON string with filters for list action (optional)
 
         Actions:
@@ -1274,41 +1278,12 @@ if manage_process_action:
             - get: Get specific process by ID
                 Example: action="get", process_id="abc-123-def"
 
-            - create: Create new process(es) from JSON config
-                Single process:
-                    config='{"name":"Hello World","folder_name":"Test","shapes":[{"type":"start","name":"start"},{"type":"message","name":"msg","config":{"message_text":"Hello from Boomi!"}},{"type":"stop","name":"end"}]}'
-                Multi-component:
-                    config='{"components":[{"name":"Transform Map","type":"map","dependencies":[]},{"name":"Main Process","type":"process","dependencies":["Transform Map"],"config":{"name":"Main Process","shapes":[{"type":"start","name":"start"},{"type":"map","name":"transform","config":{"map_ref":"Transform Map"}},{"type":"stop","name":"end"}]}}]}'
-
-            - update: Update existing process
-                Example: action="update", process_id="abc-123", config='{"name":"Updated Process","shapes":[...]}'
-
-            - delete: Delete process
-                Example: action="delete", process_id="abc-123-def"
-
-        Shape Types:
-            - start: Process start (required first shape)
-            - stop: Process termination (can be last shape)
-            - return: Return documents (alternative last shape)
-            - message: Debug/logging messages
-            - map: Data transformation (requires map_id or map_ref)
-            - connector: External system integration (requires connector_id, operation)
-            - decision: Conditional branching (requires expression)
-            - note: Documentation annotation
-
         Returns:
             Dict with success status and result data
 
         Examples:
             # List all processes
             result = manage_process(profile="prod", action="list")
-
-            # Create simple process
-            result = manage_process(
-                profile="prod",
-                action="create",
-                config='{"name":"Test","shapes":[...]}'
-            )
 
             # Get process details
             result = manage_process(
@@ -1335,7 +1310,9 @@ if manage_process_action:
                 sdk_params["base_url"] = creds["base_url"]
             sdk = Boomi(**sdk_params)
 
-            # Build parameters based on action
+            # Build parameters based on action. Only the read-only list/get
+            # actions take parameters; create/update/delete fall through with
+            # no params and manage_process_action returns ACTION_UNSUPPORTED.
             params = {}
 
             if action == "list":
@@ -1350,30 +1327,6 @@ if manage_process_action:
             elif action == "get":
                 params["process_id"] = process_id
 
-            elif action == "create":
-                if not config:
-                    return {"_success": False, "error": "config is required for create action"}
-                try:
-                    params["config"] = json.loads(config)
-                except (json.JSONDecodeError, TypeError) as e:
-                    return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
-                if not isinstance(params["config"], dict):
-                    return {"_success": False, "error": "config must be a JSON object, not " + type(params["config"]).__name__}
-
-            elif action == "update":
-                params["process_id"] = process_id
-                if not config:
-                    return {"_success": False, "error": "config is required for update action"}
-                try:
-                    params["config"] = json.loads(config)
-                except (json.JSONDecodeError, TypeError) as e:
-                    return {"_success": False, "error": f"Invalid config (must be a JSON string): {e}"}
-                if not isinstance(params["config"], dict):
-                    return {"_success": False, "error": "config must be a JSON object, not " + type(params["config"]).__name__}
-
-            elif action == "delete":
-                params["process_id"] = process_id
-
             # Call the action function
             return manage_process_action(sdk, profile, action, **params)
 
@@ -1383,7 +1336,7 @@ if manage_process_action:
             traceback.print_exc()
             return {"_success": False, "error": str(e), "exception_type": type(e).__name__}
 
-    print("[INFO] Process tool registered successfully (1 consolidated tool)")
+    print("[INFO] Process tool registered successfully (read-only list/get)")
 
 
 
@@ -4624,7 +4577,7 @@ if __name__ == "__main__":
             print("    Standards: X12, EDIFACT, HL7, RosettaNet, Custom, Tradacoms, Odette")
         if manage_process_action:
             print("\n  Process Management:")
-            print("  manage_process - Unified tool for all process operations")
+            print("  manage_process - Read-only process inspection (list/get)")
         if build_integration_action:
             print("\n  Integration Builder:")
             print("  build_integration - Plan/apply/verify full integration builds")

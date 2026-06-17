@@ -521,68 +521,46 @@ _TP_PROTOCOLS = {
 _PROCESS_OVERVIEW = {
     "resource_type": "process",
     "tool": "manage_process",
-    "available_actions": ["list", "get", "create", "update", "delete"],
-    "config_format": "JSON (config parameter)",
-    "shape_types": ["start", "stop", "return", "message", "map", "connector", "decision", "note"],
-    "hint": "Use operation='create' for a full JSON template",
+    "available_actions": ["list", "get"],
+    "read_only": True,
+    "hint": (
+        "manage_process is read-only (list/get). Author processes with "
+        "build_from_archetype()/build_integration using a typed "
+        "config.process_kind; use get_schema_template(resource_type='process', "
+        "protocol='database_to_api_sync'|'wrapper_subprocess') for protocol "
+        "templates."
+    ),
 }
 
-_PROCESS_CREATE = {
+# Legacy freeform process JSON authoring has been removed. The
+# operation='create' schema now returns removal guidance instead of a
+# shape-graph template, steering callers to typed process_kind authoring.
+_PROCESS_CREATE_REMOVED = {
     "resource_type": "process",
     "operation": "create",
-    "single_process_template": {
-        "name": "My Process Name",
-        "folder_name": "Home",
-        "description": "Optional description",
-        "shapes": [
-            {"type": "start", "name": "start"},
-            {"type": "message", "name": "log_msg", "config": {"message_text": "Process started"}},
-            {"type": "map", "name": "transform", "config": {"map_id": "existing-map-component-id"}},
-            {
-                "type": "connector",
-                "name": "get_data",
-                "config": {"connector_id": "connector-component-id", "operation": "Get", "object_type": "Object"}
-            },
-            {"type": "decision", "name": "check_result", "config": {"expression": "document property equals value"}},
-            {"type": "stop", "name": "end"},
-        ],
+    "removed": True,
+    "message": (
+        "Freeform process JSON (shape-graph) authoring has been removed. "
+        "manage_process is read-only and build_integration no longer accepts "
+        "untyped process components."
+    ),
+    "use_instead": {
+        "archetype_first": (
+            "list_integration_archetypes() → build_from_archetype() → "
+            "build_integration(action='plan'|'apply')"
+        ),
+        "typed_process_kind": (
+            "Set config.process_kind to one of "
+            "['database_to_api_sync', 'wrapper_subprocess'] on a "
+            "build_integration process component. See "
+            "get_schema_template(resource_type='process', protocol=...)."
+        ),
+        "raw_xml_escape_hatch": (
+            "manage_component (type='component', config.xml) for hand-authored "
+            "process XML."
+        ),
     },
-    "multi_component_template": {
-        "components": [
-            {"name": "Transform Map", "type": "map", "dependencies": []},
-            {
-                "name": "Main Process",
-                "type": "process",
-                "dependencies": ["Transform Map"],
-                "config": {
-                    "name": "Main Process",
-                    "shapes": [
-                        {"type": "start", "name": "start"},
-                        {"type": "map", "name": "transform", "config": {"map_ref": "Transform Map"}},
-                        {"type": "stop", "name": "end"},
-                    ],
-                },
-            },
-        ],
-    },
-    "shape_reference": {
-        "start": {"required": True, "position": "first", "config": "none"},
-        "stop": {"position": "last", "config": {"continue_": "true|false"}},
-        "return": {"position": "last", "config": {"label": "text"}},
-        "message": {"config": {"message_text": "REQUIRED"}},
-        "map": {"config": {"map_id": "existing map component ID", "map_ref": "name in multi-component JSON"}},
-        "connector": {"config": {"connector_id": "REQUIRED", "operation": "Get|Send", "object_type": "REQUIRED"}},
-        "decision": {"config": {"expression": "REQUIRED"}},
-        "note": {"config": {"note_text": "documentation text", "created_by": "author"}},
-    },
-    "process_level_attributes": {
-        "allow_simultaneous": "false (default)",
-        "enable_user_log": "false (default)",
-        "process_log_on_error_only": "false (default)",
-        "purge_data_immediately": "false (default)",
-        "update_run_dates": "true (default)",
-        "workload": "general | high | low (default: general)",
-    },
+    "process_protocols": ["database_to_api_sync", "wrapper_subprocess"],
 }
 
 _PROCESS_LIST = {
@@ -748,7 +726,7 @@ _COMPONENT_OVERVIEW = {
 _COMPONENT_CREATE = {
     "resource_type": "component",
     "operation": "create",
-    "note": "Boomi's Component API requires type-specific XML. For processes, use manage_process with config (JSON object) instead.",
+    "note": "Boomi's Component API requires type-specific XML. For processes, prefer build_from_archetype()/build_integration with a typed config.process_kind; use config.xml here only as an explicit raw-XML escape hatch.",
     "xml_template": (
         '<Component xmlns="http://api.platform.boomi.com/"\n'
         '    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
@@ -766,7 +744,7 @@ _COMPONENT_CREATE = {
         "2. Use query_components get action to retrieve its full XML",
         "3. Modify the XML for your new component",
         "4. Pass modified XML as config.xml to manage_component create action",
-        "   OR for processes: use manage_process with config (JSON object)",
+        "   OR for processes: use build_from_archetype()/build_integration with a typed config.process_kind",
     ],
 }
 
@@ -4527,16 +4505,18 @@ def _classify_raw_api_request(method: str, endpoint: str) -> Dict[str, Any]:
 _TYPED_ALTERNATIVES_BY_SEGMENT = {
     "component": [
         "query_components", "manage_component", "analyze_component",
-        "build_integration", "manage_process", "manage_connector",
+        "build_integration", "manage_connector",
     ],
     "componentmetadata": [
         "query_components", "manage_component", "analyze_component",
-        "build_integration", "manage_process", "manage_connector",
+        "build_integration", "manage_connector",
     ],
     # ComponentReference is reference lookup only — steer to the read tools
     # (analyze_component wraps this API for where_used/dependencies).
     "componentreference": ["query_components", "analyze_component"],
-    "process": ["manage_process", "build_integration"],
+    # manage_process is read-only (list/get) and cannot author processes;
+    # build_integration is the typed write path for process components.
+    "process": ["build_integration"],
     "packagedcomponent": ["manage_deployment", "orchestrate_deploy"],
     "deployedpackage": ["manage_deployment", "orchestrate_deploy"],
     "componentenvironmentattachment": ["manage_deployment", "orchestrate_deploy"],
@@ -4833,14 +4813,15 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
             ],
         },
         "create_and_deploy_process": {
-            "description": "Build a process from scratch and deploy it",
+            "description": "Author a typed process and deploy it (freeform process JSON authoring has been removed)",
             "steps": [
-                "1. get_schema_template(resource_type='process', operation='create') → get JSON template",
-                "2. manage_process(action='create', config='...') → create process",
-                "3. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
-                "4. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
-                "5. execute_process(profile='...', process_id='<proc_id>', environment_id='<env_id>') → run it",
-                "6. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
+                "1. list_integration_archetypes() / get_schema_template(resource_type='process', protocol='database_to_api_sync'|'wrapper_subprocess') → pick a typed process_kind and inspect its schema",
+                "2. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (or hand-author a process component with config.process_kind)",
+                "3. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec>}') → create the process component(s)",
+                "4. manage_deployment(action='create_package', config='{\"component_id\":\"...\", \"component_type\":\"process\", \"package_version\":\"1.0\"}') → package it",
+                "5. manage_deployment(action='deploy', package_id='<pkg_id>', environment_id='<env_id>') → deploy it",
+                "6. execute_process(profile='...', process_id='<proc_id>', environment_id='<env_id>') → run it",
+                "7. monitor_platform(action='execution_records', config='{\"execution_id\": \"...\"}') → check status",
             ],
         },
         "build_integration_from_description": {
@@ -5657,7 +5638,7 @@ def _get_process_template(operation=None, protocol=None, **_):
         return {"_success": True, **_PROCESS_OVERVIEW}
 
     if operation == "create":
-        return {"_success": True, **_PROCESS_CREATE}
+        return {"_success": True, **_PROCESS_CREATE_REMOVED}
 
     if operation == "list":
         return {"_success": True, **_PROCESS_LIST}
@@ -6351,22 +6332,18 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         # === Category 4: Execution ===
         "manage_process": {
             "category": "Execution",
-            "description": "Manage process components with JSON-based configuration and scheduling",
-            "actions": ["list", "get", "create", "update", "delete"],
-            "read_only": False,
+            "description": "Read-only process component inspection (list/get). Process authoring is typed: use build_from_archetype()/build_integration with config.process_kind.",
+            "actions": ["list", "get"],
+            "read_only": True,
             "parameters": {
                 "profile": "str (required)",
-                "action": "str (required)",
-                "process_id": "str (optional)",
-                "config": "JSON str (optional) — process definition with shapes",
-                "filters": "JSON str (optional)",
+                "action": "str (required) — list | get",
+                "process_id": "str (optional) — required for get",
+                "filters": "JSON str (optional) — e.g. {\"folder_name\": \"Home\"}",
             },
             "examples": [
                 'manage_process(profile="prod", action="list")',
-                'manage_process(profile="prod", action="create", config=\'{"name":"My Process","shapes":[{"type":"start","name":"start"},{"type":"stop","name":"end"}]}\')',
-            ],
-            "sdk_examples_covered": [
-                "create_process_component.py",
+                'manage_process(profile="prod", action="get", process_id="<component-id>")',
             ],
         },
         # === Category 4a: Integration Authoring (3 tools — V3 archetypes, no Boomi mutation) ===
@@ -6725,7 +6702,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             },
             "examples": [
                 'get_schema_template(resource_type="trading_partner", operation="create", standard="x12")',
-                'get_schema_template(resource_type="process", operation="create")',
+                'get_schema_template(resource_type="process", protocol="database_to_api_sync")',
                 'get_schema_template(resource_type="integration", operation="plan")',
                 'get_schema_template(resource_type="trading_partner", protocol="http")',
                 'get_schema_template(schema_name="IntegrationSpecV1")',

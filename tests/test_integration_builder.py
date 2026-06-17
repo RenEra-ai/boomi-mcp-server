@@ -44,9 +44,18 @@ def _meta(component_id, name, folder_name="Root", comp_type="process"):
 
 def _comp(key="p1", name="MyProcess", action="create", comp_type="process",
           component_id=None):
+    # Process components now require a typed process_kind. Use a minimal valid
+    # wrapper_subprocess (one out-of-spec literal process_id call) so generic
+    # conflict-policy / ambiguity tests author a structurally-valid process.
+    process_config = {
+        "name": name,
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": "99999999-9999-9999-9999-999999999999"}],
+    }
     return IntegrationComponentSpec(
         key=key, type=comp_type, action=action, name=name,
-        component_id=component_id, config={"name": name} if comp_type == "process" else {},
+        component_id=component_id,
+        config=process_config if comp_type == "process" else {},
     )
 
 
@@ -2962,26 +2971,28 @@ class TestBuildPlanProcessFlow:
         assert "[REDACTED]" in serialized
 
     @patch(_PATCH_TARGET)
-    def test_legacy_process_without_kind_uses_legacy_route(self, mock_pag):
+    def test_process_without_kind_errors_process_kind_required(self, mock_pag):
+        # Legacy freeform process JSON authoring has been removed: a process
+        # component without config.process_kind is rejected at plan time.
         mock_pag.return_value = []
-        legacy_process = IntegrationComponentSpec(
-            key="legacy_proc",
+        untyped_process = IntegrationComponentSpec(
+            key="untyped_proc",
             type="process",
             action="create",
-            name="Legacy Process",
+            name="Untyped Process",
             config={
-                "name": "Legacy Process",
+                "name": "Untyped Process",
                 "shapes": [
                     {"type": "start", "name": "start"},
                     {"type": "stop", "name": "stop"},
                 ],
             },
         )
-        plan = _build_plan(MagicMock(), _build_config([legacy_process]))
-        legacy_step = next(s for s in plan["steps"] if s["key"] == "legacy_proc")
-        assert legacy_step["route"] == "process_json_to_xml"
-        # And no spurious process-validation error attaches.
-        assert "validation_error" not in legacy_step
+        plan = _build_plan(MagicMock(), _build_config([untyped_process]))
+        step = next(s for s in plan["steps"] if s["key"] == "untyped_proc")
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "PROCESS_KIND_REQUIRED"
+        assert step["validation_error"]["field"] == "config.process_kind"
 
     @patch(_PATCH_TARGET)
     def test_process_without_name_errors_at_plan_create(self, mock_pag):
@@ -5439,21 +5450,21 @@ class TestCodexR5Followups:
         assert step["preserves_unknown_xml"] is True
 
     @patch(_PATCH_TARGET)
-    def test_legacy_process_update_without_process_kind_reports_full_replace(self, mock_pag):
-        """Process updates without process_kind go through update_process
-        which rebuilds the XML wholesale (no preservation)."""
+    def test_process_update_without_process_kind_errors_process_kind_required(self, mock_pag):
+        """Process updates without process_kind are rejected at plan time;
+        legacy freeform process JSON authoring has been removed."""
         comp = IntegrationComponentSpec(
-            key="legacy_proc",
+            key="untyped_proc",
             type="process",
             action="update",
-            name="Legacy Process",
+            name="Untyped Process",
             component_id="explicit-proc-id",
-            config={"name": "Legacy Process"},  # no process_kind → legacy path
+            config={"name": "Untyped Process"},  # no process_kind → rejected
         )
         plan = _build_plan(MagicMock(), _build_config([comp]))
         step = plan["steps"][0]
-        assert step["update_mode"] == "full_xml_replace"
-        assert step["preserves_unknown_xml"] is False
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "PROCESS_KIND_REQUIRED"
 
 
 class TestCodexR9Followups:
@@ -5601,71 +5612,73 @@ class TestCodexR13Followups:
         )
 
 
-class TestCodexR14Followups:
-    """Codex r14 P2: legacy process update with config.xml must route through
-    update_component_raw, not update_process."""
+class TestProcessKindRequiredEnforcement:
+    """Legacy freeform process authoring removed: untyped process create/update
+    is rejected at apply time too (defensive guard), and raw process XML now
+    lives only on the manage_component (type='component') escape hatch."""
 
-    @patch(_PATCH_TARGET)
-    def test_legacy_process_raw_xml_update_routes_through_update_component(self, mock_pag):
-        """When type='process' update carries config.xml without
-        process_kind, plan reports update_mode='full_xml_replace' AND
-        apply must route through update_component (which calls
-        update_component_raw) — NOT update_process (which parses
-        payload as JSON and fails on xml-only payload)."""
+    def test_execute_component_rejects_untyped_process_create(self):
         from src.boomi_mcp.categories.integration_builder import _execute_component
         boomi_client = MagicMock()
         comp = IntegrationComponentSpec(
-            key="legacy_proc",
+            key="untyped_proc",
+            type="process",
+            action="create",
+            name="Untyped Process",
+            config={"name": "Untyped Process"},  # no process_kind
+        )
+        result = _execute_component(boomi_client, "dev", comp, comp.config)
+        assert result["_success"] is False
+        assert result["error_code"] == "PROCESS_KIND_REQUIRED"
+        assert result["field"] == "config.process_kind"
+
+    def test_execute_component_rejects_untyped_process_update(self):
+        from src.boomi_mcp.categories.integration_builder import _execute_component
+        boomi_client = MagicMock()
+        comp = IntegrationComponentSpec(
+            key="untyped_proc",
             type="process",
             action="update",
-            name="Legacy Process",
+            name="Untyped Process",
+            component_id="explicit-proc-id",
+            # Even with config.xml a type='process' component without
+            # process_kind is rejected — raw process XML must use the
+            # type='component' escape hatch instead.
+            config={
+                "name": "Untyped Process",
+                "xml": "<bns:Component>...pre-built XML...</bns:Component>",
+            },
+        )
+        result = _execute_component(
+            boomi_client, "dev", comp, comp.config, target_id="explicit-proc-id",
+        )
+        assert result["_success"] is False
+        assert result["error_code"] == "PROCESS_KIND_REQUIRED"
+
+    def test_raw_process_xml_escape_hatch_via_generic_component(self):
+        """The raw process XML escape hatch is type='component' + config.xml
+        (config.type='process'), which routes through update_component."""
+        from src.boomi_mcp.categories.integration_builder import _execute_component
+        boomi_client = MagicMock()
+        comp = IntegrationComponentSpec(
+            key="raw_proc",
+            type="component",
+            action="update",
+            name="Raw Process",
             component_id="explicit-proc-id",
             config={
-                "name": "Legacy Process",
+                "type": "process",
                 "xml": "<bns:Component>...pre-built XML...</bns:Component>",
-                # no process_kind → legacy linear path
             },
         )
         with patch(
             "src.boomi_mcp.categories.integration_builder.update_component"
-        ) as mock_update_component, patch(
-            "src.boomi_mcp.categories.integration_builder.update_process"
-        ) as mock_update_process:
+        ) as mock_update_component:
             mock_update_component.return_value = {"_success": True}
             _execute_component(
                 boomi_client, "dev", comp, comp.config, target_id="explicit-proc-id",
             )
-        # update_component must be invoked (which handles config.xml).
         mock_update_component.assert_called_once()
-        # update_process must NOT be invoked for raw-XML path.
-        mock_update_process.assert_not_called()
-
-    @patch(_PATCH_TARGET)
-    def test_legacy_process_json_update_still_routes_through_update_process(self, mock_pag):
-        """Legacy process update WITHOUT config.xml still uses
-        update_process (JSON rebuild) — the r14 fix is gated on
-        payload.get('xml')."""
-        from src.boomi_mcp.categories.integration_builder import _execute_component
-        boomi_client = MagicMock()
-        comp = IntegrationComponentSpec(
-            key="legacy_proc",
-            type="process",
-            action="update",
-            name="Legacy Process",
-            component_id="explicit-proc-id",
-            config={"name": "Legacy Process"},  # no xml, no process_kind
-        )
-        with patch(
-            "src.boomi_mcp.categories.integration_builder.update_component"
-        ) as mock_update_component, patch(
-            "src.boomi_mcp.categories.integration_builder.update_process"
-        ) as mock_update_process:
-            mock_update_process.return_value = {"_success": True}
-            _execute_component(
-                boomi_client, "dev", comp, comp.config, target_id="explicit-proc-id",
-            )
-        mock_update_process.assert_called_once()
-        mock_update_component.assert_not_called()
 
 
 class TestCodexR15Followups:
@@ -5856,18 +5869,23 @@ def _wrapper_parent_comp(process_calls, key="wrapper_parent", depends_on=()):
     )
 
 
-def _legacy_child_comp(key="main_logic", name="Main Logic"):
-    # A minimal legacy process child (process_json_to_xml route) — a real
-    # "process" component the wrapper can create and call.
+def _structured_child_comp(key="main_logic", name="Main Logic"):
+    # A minimal typed process child the wrapper can create and call: a
+    # wrapper_subprocess that invokes a single out-of-spec process by literal
+    # process_id (no in-spec deps, plans clean — see
+    # test_literal_process_id_creates_no_implicit_edge). Its type is still
+    # "process", so the parent's subprocess_ref ref-type check passes.
     return IntegrationComponentSpec(
         key=key,
         type="process",
         action="create",
         name=name,
-        config={"name": name, "shapes": [
-            {"type": "start", "name": "start"},
-            {"type": "stop", "name": "stop"},
-        ]},
+        config={
+            "process_kind": "wrapper_subprocess",
+            "process_calls": [
+                {"process_id": "99999999-9999-9999-9999-999999999999"}
+            ],
+        },
     )
 
 
@@ -5881,7 +5899,7 @@ class TestWrapperSubprocessPlan:
         # still order the child first.
         components = [
             _wrapper_parent_comp([{"subprocess_ref": "$ref:main_logic"}]),
-            _legacy_child_comp(),
+            _structured_child_comp(),
         ]
         plan = _build_plan(MagicMock(), _build_config(components))
         assert plan["_success"] is True
@@ -5910,7 +5928,7 @@ class TestWrapperSubprocessPlan:
     def _wrapper_err(self, mock_pag, process_calls, extra=None):
         mock_pag.return_value = []
         components = [_wrapper_parent_comp(process_calls)]
-        components.append(extra if extra is not None else _legacy_child_comp())
+        components.append(extra if extra is not None else _structured_child_comp())
         plan = _build_plan(MagicMock(), _build_config(components))
         assert "steps" in plan, plan
         step = next(s for s in plan["steps"] if s["key"] == "wrapper_parent")
@@ -5986,22 +6004,24 @@ class TestWrapperSubprocessPlan:
         ]
         components = [
             _wrapper_parent_comp([{"subprocess_ref": "$ref:main_logic"}]),  # listed first
-            _legacy_child_comp(),
+            _structured_child_comp(),
         ]
         config = _build_config(components)
         config["dry_run"] = False
         result = _apply_plan(MagicMock(), "dev", config)
         assert result["_success"] is True, result
         assert mock_exec.call_count == 2
-        # Identify each call by its config; the wrapper parent carries process_kind.
+        # Both components are processes; distinguish them by processcall shape —
+        # the parent's call carries subprocess_ref ($ref:main_logic, resolved at
+        # apply), the child's carries a literal process_id.
         configs = [c.kwargs["config"] for c in mock_exec.call_args_list]
         parent_idx = next(
             i for i, cfg in enumerate(configs)
-            if cfg.get("process_kind") == "wrapper_subprocess"
+            if "subprocess_ref" in cfg["process_calls"][0]
         )
         child_idx = next(
             i for i, cfg in enumerate(configs)
-            if cfg.get("process_kind") != "wrapper_subprocess"
+            if "process_id" in cfg["process_calls"][0]
         )
         # Child created BEFORE the parent.
         assert child_idx < parent_idx

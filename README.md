@@ -99,7 +99,7 @@ valid `profile` parameter pointing at a stored Boomi credential set.
 - `manage_account(...)`, `manage_account_groups(...)` — Boomi account admin.
 
 ### Build, deploy, and operate integrations
-- `manage_process`, `manage_component`, `analyze_component`,
+- `manage_process` (read-only process list/get), `manage_component`, `analyze_component`,
   `query_components`, `build_integration`, `get_schema_template`
 - `manage_environments`, `manage_runtimes`, `manage_deployment`,
   `execute_process`, `troubleshoot_execution`, `manage_schedules`,
@@ -490,7 +490,6 @@ boomi-mcp-server/
 │   ├── categories/            # Tool category groupings
 │   ├── models/                # Pydantic models for SDK payloads
 │   ├── utils/                 # Misc utilities
-│   ├── xml_builders/          # Helpers that emit Boomi component XML
 │   └── kb/                    # Boomi Docs knowledge-base (gated by BOOMI_DOCS_ENABLED)
 │       ├── service.py         # Search + page retrieval over Chroma corpus
 │       ├── manifest.py        # kb://boomi-docs/corpus resource

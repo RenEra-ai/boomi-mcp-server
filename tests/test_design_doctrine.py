@@ -376,9 +376,12 @@ def _plan_config(comp):
 
 @patch(_PAGINATE, return_value=[])
 def test_build_plan_warns_when_process_lacks_error_handling(_mock_pag):
-    comp = _process_comp({"name": "DemoProcess"})
-    plan = _build_plan(MagicMock(), _plan_config(comp))
+    # An authored structured process with NO reliability block lacks modeled
+    # error handling and must warn.
+    plan = _build_plan(MagicMock(), _structured_no_error_handling_plan_config())
     assert plan["_success"] is True
+    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+    assert main_step["planned_action"] == "create"
     warnings = plan["warnings"] or []
     joined = "\n".join(warnings)
     assert "try_catch_placement" in joined
@@ -454,6 +457,61 @@ def _structured_dlq_plan_config():
     }
 
 
+def _structured_no_error_handling_plan_config(reliability=None):
+    """A minimal VALID structured process-flow spec that is AUTHORED
+    (planned_action 'create') but carries no modeled error handling — either
+    no reliability block at all, or a reliability block whose DLQ is disabled.
+    Used to exercise the design-doctrine warning gate now that untyped
+    (no process_kind) processes are rejected before the warning path.
+    """
+    config = {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "database",
+            "connection_id": "$ref:db_connection",
+            "operation_id": "$ref:db_query_operation",
+            "action_type": "Get",
+        },
+        "transform": {"mode": "passthrough"},
+        "target": {
+            "connector_type": "rest",
+            "connection_id": "$ref:target_rest_connection",
+            "operation_id": "$ref:target_rest_operation",
+            "action_type": "POST",
+        },
+    }
+    if reliability is not None:
+        config["reliability"] = reliability
+    main = IntegrationComponentSpec(
+        key="main_process", type="process", action="create", name="Main Process",
+        depends_on=[
+            "db_connection", "db_query_operation",
+            "target_rest_connection", "target_rest_operation",
+        ],
+        config=config,
+    ).model_dump()
+    components = [
+        _stub("db_connection", "connector-settings",
+              {"connector_type": "database", "name": "Db Connection"}),
+        _stub("db_query_operation", "connector-action",
+              {"connector_type": "database", "operation_mode": "get",
+               "name": "Db Query Operation"}),
+        _stub("target_rest_connection", "connector-settings",
+              {"connector_type": "rest", "name": "Target Rest Connection"}),
+        _stub("target_rest_operation", "connector-action",
+              {"connector_type": "rest", "operation_mode": "execute",
+               "method": "POST", "path": "/v1/stub",
+               "component_name": "Target Rest Operation",
+               "connection_ref_key": "target_rest_connection"},
+              depends_on=["target_rest_connection"]),
+        main,
+    ]
+    return {
+        "conflict_policy": "reuse",
+        "integration_spec": {"version": "1.0", "name": "demo", "components": components},
+    }
+
+
 @patch(_PAGINATE, return_value=[])
 def test_build_plan_no_warning_for_structured_process_with_dlq(_mock_pag):
     # Structured route (process_kind set) honors config.reliability.dlq — and
@@ -470,15 +528,15 @@ def test_build_plan_no_warning_for_structured_process_with_dlq(_mock_pag):
 
 
 @patch(_PAGINATE, return_value=[])
-def test_build_plan_no_warning_for_legacy_process_with_catch_shape(_mock_pag):
-    # Legacy route — a Try/Catch catch shape is the trusted error-handling
-    # evidence (raw XML / shapes), not the reliability block.
-    comp = _process_comp(
-        {"name": "DemoProcess", "shapes": [{"shapetype": "catcherrors"}]}
-    )
+def test_build_plan_errors_for_process_without_process_kind(_mock_pag):
+    # Legacy freeform process JSON authoring has been removed: an untyped
+    # process (no process_kind) is rejected at plan time before the
+    # design-doctrine warning path is ever reached.
+    comp = _process_comp({"name": "DemoProcess"})
     plan = _build_plan(MagicMock(), _plan_config(comp))
-    joined = "\n".join(plan["warnings"] or [])
-    assert "try_catch_placement" not in joined
+    step = next(s for s in plan["steps"] if s["key"] == "p1")
+    assert step["planned_action"] == "error_process_validation"
+    assert step["validation_error"]["error_code"] == "PROCESS_KIND_REQUIRED"
 
 
 def test_process_models_error_handling_predicate():
@@ -535,17 +593,18 @@ def test_process_models_error_handling_predicate():
 
 
 @patch(_PAGINATE, return_value=[])
-def test_build_plan_warns_for_legacy_process_with_stray_reliability(_mock_pag):
-    # Codex review P2 regression: a legacy process (no process_kind) carrying a
-    # reliability block the legacy path IGNORES must still warn — the stray
-    # reliability block does not count as modeled error handling.
-    comp = _process_comp(
-        {
-            "name": "DemoProcess",
-            "reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}},
-        }
+def test_build_plan_warns_for_structured_process_with_disabled_dlq(_mock_pag):
+    # A structured process whose reliability block has DLQ disabled emits no
+    # Try/Catch and thus carries no modeled error handling — it must still warn
+    # (a reliability block without a real catch path is not error handling).
+    plan = _build_plan(
+        MagicMock(),
+        _structured_no_error_handling_plan_config(
+            reliability={"retry_count": 0, "dlq": {"mode": "disabled"}}
+        ),
     )
-    plan = _build_plan(MagicMock(), _plan_config(comp))
+    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+    assert main_step["planned_action"] == "create"
     joined = "\n".join(plan["warnings"] or [])
     assert "try_catch_placement" in joined
     assert "error_routing_and_dlq" in joined

@@ -120,9 +120,13 @@ def test_schema_name_takes_precedence_over_resource_type():
     assert result["schema_name"] == "IntegrationSpecV1"
 
 
-def test_legacy_resource_type_path_unchanged():
+def test_process_create_returns_removal_guidance():
+    # The resource_type dispatch still resolves, but process operation='create'
+    # now returns removal guidance instead of the freeform shape template.
     result = get_schema_template_action(resource_type="process", operation="create")
     assert result["_success"] is True
+    assert result["removed"] is True
+    assert "single_process_template" not in result
 
 
 def test_valid_schema_names_covers_all_families():
