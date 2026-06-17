@@ -1253,7 +1253,8 @@ if manage_process_action:
         profile: str,
         action: str,
         process_id: str = None,
-        filters: str = None
+        filters: str = None,
+        config: str = None
     ):
         """
         Read-only inspection of Boomi process components.
@@ -1269,6 +1270,9 @@ if manage_process_action:
             action: Action to perform - must be one of: list, get
             process_id: Process component ID (required for get)
             filters: JSON string with filters for list action (optional)
+            config: DEPRECATED and ignored. Accepted only so legacy
+                create/update/delete calls still receive the structured
+                ACTION_UNSUPPORTED envelope instead of a TypeError.
 
         Actions:
             - list: List all process components
@@ -2226,7 +2230,7 @@ if get_schema_template_action:
             get_schema_template("trading_partner") → overview of all actions/standards
             get_schema_template("trading_partner", "create", standard="x12") → X12 create template
             get_schema_template("trading_partner", protocol="as2") → AS2 protocol fields
-            get_schema_template("process", "create") → JSON process template
+            get_schema_template("process", protocol="database_to_api_sync") → typed process_kind template
             get_schema_template("integration", "plan") → IntegrationSpecV1 planner template
             get_schema_template("component") → overview of component tools
             get_schema_template("monitoring", "execution_records") → execution query template

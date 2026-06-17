@@ -243,3 +243,18 @@ def test_wrapper_action_unsupported(action, _mock_auth):
     assert result["_success"] is False
     assert result["error_code"] == "ACTION_UNSUPPORTED"
     assert result["valid_actions"] == ["list", "get"]
+
+
+@pytest.mark.parametrize("action", ["create", "update", "delete"])
+def test_wrapper_legacy_config_arg_reaches_action_unsupported(action, _mock_auth):
+    """A legacy caller that still passes config/process_id must receive the
+    ACTION_UNSUPPORTED envelope, not a TypeError on the dropped argument."""
+    result = _call_wrapper(
+        profile="dev",
+        action=action,
+        process_id="abc-123",
+        config='{"name": "X", "shapes": []}',
+    )
+    assert result["_success"] is False
+    assert result["error_code"] == "ACTION_UNSUPPORTED"
+    assert result["valid_actions"] == ["list", "get"]
