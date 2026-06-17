@@ -1294,7 +1294,6 @@ if manage_process_action:
             - map: Data transformation (requires map_id or map_ref)
             - connector: External system integration (requires connector_id, operation)
             - decision: Conditional branching (requires expression)
-            - branch: Parallel branches (requires num_branches)
             - note: Documentation annotation
 
         Returns:
