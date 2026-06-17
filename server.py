@@ -1602,7 +1602,8 @@ if manage_component_action:
 
             create - Create a component from XML template:
                 config='{"xml": "<full-component-xml>...</full-component-xml>"}'
-                For processes, use manage_process with config (JSON) instead.
+                For processes, prefer build_from_archetype()/build_integration with a
+                typed config.process_kind; pass raw process XML here only as an escape hatch.
                 For connectors (connector-settings, connector-action), use manage_connector.
                 Tip: Use query_components get on a similar component to obtain an XML template.
 

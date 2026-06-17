@@ -617,29 +617,6 @@ _INTEGRATION_PLAN = {
                         },
                     },
                 },
-                {
-                    "key": "order_process",
-                    "type": "process",
-                    "action": "create",
-                    "name": "Order Sync Process",
-                    "depends_on": ["rest_connection"],
-                    "config": {
-                        "name": "Order Sync Process",
-                        "shapes": [
-                            {"type": "start", "name": "start"},
-                            {
-                                "type": "connector",
-                                "name": "get_orders",
-                                "config": {
-                                    "connector_id": "$ref:rest_connection",
-                                    "operation": "Get",
-                                    "object_type": "orders",
-                                },
-                            },
-                            {"type": "stop", "name": "end"},
-                        ],
-                    },
-                },
             ],
         },
     },
@@ -647,6 +624,11 @@ _INTEGRATION_PLAN = {
         "You can also provide integration_spec directly instead of source_description.",
         "plan is read-only and returns deterministic execution order with endpoint routes.",
         "Dependency tokens in config can reference previous components with $ref:<component_key>.",
+        "Process components require a typed config.process_kind "
+        "(database_to_api_sync / wrapper_subprocess) — freeform shape-graph "
+        "process JSON is no longer supported. Author processes with "
+        "build_from_archetype()/build_integration, and inspect the per-kind "
+        "shape via get_schema_template(resource_type='process', protocol=...).",
     ],
 }
 
@@ -5785,7 +5767,12 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
             return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW}
         result = {"_success": True, **_COMPONENT_CREATE}
         if component_type == "process":
-            result["recommendation"] = "For processes, use manage_process with config (JSON object) instead of raw XML."
+            result["recommendation"] = (
+                "For processes, prefer build_from_archetype()/build_integration "
+                "with a typed config.process_kind "
+                "(database_to_api_sync / wrapper_subprocess); use config.xml here "
+                "only as an explicit raw-XML escape hatch."
+            )
         return result
 
     if operation == "search":
@@ -6451,7 +6438,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "config": "JSON str (optional) — IntegrationSpecV1 payload and execution options",
             },
             "examples": [
-                'build_integration(profile="prod", action="plan", config=\'{"name":"Order Sync","mode":"lift_shift","components":[{"key":"p1","type":"process","action":"create","name":"Order Process","config":{"name":"Order Process","shapes":[{"type":"start","name":"start"},{"type":"stop","name":"end"}]}}]}\')',
+                'build_integration(profile="prod", action="plan", config=\'{"name":"Order Sync","mode":"lift_shift","components":[{"key":"p1","type":"process","action":"create","name":"Order Process","config":{"process_kind":"wrapper_subprocess","process_calls":[{"process_id":"<existing-process-uuid>"}]}}]}\')',
                 'build_integration(profile="prod", action="apply", config=\'{"dry_run":false,"conflict_policy":"reuse","integration_spec":{"name":"Order Sync","mode":"lift_shift","components":[...]}}\')',
                 'build_integration(profile="prod", action="verify", config=\'{"build_id":"<uuid>"}\')',
                 '# After apply returns build_id: orchestrate_deploy(profile="prod", build_id="<uuid-from-apply>", environment_id="env-1", runtime_id="atom-1", dry_run=true)',
