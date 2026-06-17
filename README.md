@@ -484,13 +484,9 @@ boomi-mcp-server/
 ├── server.py                  # Core MCP server (FastMCP, all tool definitions)
 ├── server_http.py             # HTTP wrapper with OAuth middleware
 ├── src/boomi_mcp/
-│   ├── auth.py                # Auth helpers
-│   ├── cloud_auth.py          # OAuth provider implementations
 │   ├── cloud_secrets.py       # Secret Manager backends (GCP/AWS/Azure)
 │   ├── local_secrets.py       # Local filesystem secret backend
-│   ├── credentials.py         # Credential storage models / validation
 │   ├── sanitize.py            # Response sanitization helpers
-│   ├── tools.py               # Shared tool helpers
 │   ├── categories/            # Tool category groupings
 │   ├── models/                # Pydantic models for SDK payloads
 │   ├── utils/                 # Misc utilities
@@ -506,7 +502,6 @@ boomi-mcp-server/
 ├── agents/                    # Subagent configs (boomi-qa-tester, ...)
 ├── examples/                  # Usage examples
 ├── scripts/                   # Operational scripts
-├── k8s/                       # Reference Kubernetes manifests
 ├── local_atom/                # Helpers for the local-atom dev profile
 ├── requirements.txt           # Core dependencies (FastMCP, ...)
 ├── requirements-cloud.txt     # Cloud provider SDKs
