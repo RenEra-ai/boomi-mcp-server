@@ -18,11 +18,8 @@ from ..templates.shapes import (
     MESSAGE_SHAPE_TEMPLATE,
     CONNECTOR_SHAPE_TEMPLATE,
     DECISION_SHAPE_TEMPLATE,
-    DOCUMENT_PROPERTIES_SHAPE_TEMPLATE,
-    BRANCH_SHAPE_TEMPLATE,
     NOTE_SHAPE_TEMPLATE,
     DRAGPOINT_TEMPLATE,
-    DRAGPOINT_BRANCH_TEMPLATE,
 )
 from .coordinate_calculator import CoordinateCalculator
 
@@ -39,7 +36,6 @@ class ProcessBuilder:
     def __init__(self):
         """Initialize process builder with coordinate calculator."""
         self.coord_calc = CoordinateCalculator()
-        self.shape_counter = 1  # Auto-increment shape names
 
     def build_linear_process(
         self,
@@ -273,7 +269,3 @@ class ProcessBuilder:
 
         else:
             raise ValueError(f"Unsupported shape type: {shape_type}")
-
-    def reset_counter(self):
-        """Reset shape counter for testing."""
-        self.shape_counter = 1

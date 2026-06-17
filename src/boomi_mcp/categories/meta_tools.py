@@ -523,7 +523,7 @@ _PROCESS_OVERVIEW = {
     "tool": "manage_process",
     "available_actions": ["list", "get", "create", "update", "delete"],
     "config_format": "JSON (config parameter)",
-    "shape_types": ["start", "stop", "return", "message", "map", "connector", "decision", "branch", "note", "documentproperties"],
+    "shape_types": ["start", "stop", "return", "message", "map", "connector", "decision", "note"],
     "hint": "Use operation='create' for a full JSON template",
 }
 
@@ -544,7 +544,6 @@ _PROCESS_CREATE = {
                 "config": {"connector_id": "connector-component-id", "operation": "Get", "object_type": "Object"}
             },
             {"type": "decision", "name": "check_result", "config": {"expression": "document property equals value"}},
-            {"type": "branch", "name": "parallel_work", "config": {"num_branches": 2}},
             {"type": "stop", "name": "end"},
         ],
     },
@@ -574,9 +573,7 @@ _PROCESS_CREATE = {
         "map": {"config": {"map_id": "existing map component ID", "map_ref": "name in multi-component JSON"}},
         "connector": {"config": {"connector_id": "REQUIRED", "operation": "Get|Send", "object_type": "REQUIRED"}},
         "decision": {"config": {"expression": "REQUIRED"}},
-        "branch": {"config": {"num_branches": "REQUIRED (integer >= 2)"}},
         "note": {"config": {"note_text": "documentation text", "created_by": "author"}},
-        "documentproperties": {"config": {}},
     },
     "process_level_attributes": {
         "allow_simultaneous": "false (default)",

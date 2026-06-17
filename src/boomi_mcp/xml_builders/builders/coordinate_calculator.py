@@ -94,37 +94,3 @@ class CoordinateCalculator:
         drag_y = shape_y + offset_y
 
         return (drag_x, drag_y)
-
-    def calculate_branch_layout(
-        self,
-        branch_x: float,
-        branch_y: float,
-        num_branches: int,
-        vertical_spacing: float = 160.0
-    ) -> List[Tuple[float, float]]:
-        """
-        Calculate coordinates for shapes after a branch.
-
-        Args:
-            branch_x: Branch shape X coordinate
-            branch_y: Branch shape Y coordinate
-            num_branches: Number of branches
-            vertical_spacing: Vertical spacing between branches (default: 160.0)
-
-        Returns:
-            List of (x, y) coordinates for post-branch shapes
-
-        Example:
-            >>> calc = CoordinateCalculator()
-            >>> coords = calc.calculate_branch_layout(240.0, 48.0, num_branches=2)
-            >>> coords
-            [(432.0, 48.0), (432.0, 208.0)]
-        """
-        next_x = branch_x + self.DEFAULT_SPACING
-
-        coordinates = []
-        for i in range(num_branches):
-            y = branch_y + (i * vertical_spacing)
-            coordinates.append((next_x, y))
-
-        return coordinates

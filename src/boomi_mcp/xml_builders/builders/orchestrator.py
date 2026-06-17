@@ -12,7 +12,7 @@ Based on MCP_TOOL_DESIGN.md lines 2700-2925.
 
 import re
 from typing import List, Dict, Any, Optional, Tuple
-from collections import defaultdict, deque
+from collections import deque
 
 from boomi import Boomi
 from boomi.models import (
@@ -342,7 +342,6 @@ class ComponentOrchestrator:
         Converts reference names to component IDs:
         - 'map_ref': 'Transform Map' → 'map_id': 'abc-123-def'
         - 'connector_ref': 'SF Connector' → 'connector_id': 'xyz-789'
-        - 'subprocess_ref': 'Validator' → 'process_id': 'uvw-456'
 
         Args:
             spec: ComponentSpec with ProcessConfig containing shapes
@@ -376,20 +375,6 @@ class ComponentOrchestrator:
                 connector_id = self._resolve_component_id(connector_name, 'connector-action')
                 shape.config['connector_id'] = connector_id
                 del shape.config['connector_ref']
-
-            # Connection reference (Boomi metadata type: connector-settings)
-            if 'connection_ref' in shape.config:
-                connection_name = shape.config['connection_ref']
-                connection_id = self._resolve_component_id(connection_name, 'connector-settings')
-                shape.config['connection_id'] = connection_id
-                del shape.config['connection_ref']
-
-            # Subprocess reference
-            if 'subprocess_ref' in shape.config:
-                subprocess_name = shape.config['subprocess_ref']
-                subprocess_id = self._resolve_component_id(subprocess_name, 'process')
-                shape.config['process_id'] = subprocess_id
-                del shape.config['subprocess_ref']
 
         # Update spec config with resolved references
         spec.config = process_config

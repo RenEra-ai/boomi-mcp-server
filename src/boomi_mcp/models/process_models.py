@@ -50,9 +50,7 @@ class ShapeConfig(BaseModel):
         "connector",
         "message",
         "decision",
-        "branch",
-        "note",
-        "documentproperties"
+        "note"
     ]
     name: str = Field(..., description="Unique shape name within process")
     userlabel: Optional[str] = Field(None, description="Display label in Boomi UI")
