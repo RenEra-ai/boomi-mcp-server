@@ -2734,13 +2734,20 @@ def _stub_dep_comp(key, *, role=None, method="POST"):
             config={"name": name},
         )
     if role == "error subprocess":
-        # Issue #51: a process/subprocess catch-leg target. NO process_kind in
-        # config, so it skips the structured process-flow validation block
-        # (that block gates on process_kind). _effective_component_type -> "process".
+        # Issue #51: a process/subprocess catch-leg target. A real typed
+        # process (a minimal wrapper_subprocess calling an out-of-spec process
+        # by literal id) so it plans clean as its own step under the
+        # process_kind-required contract; _effective_component_type -> "process"
+        # keeps the DLQ error_subprocess_ref type-check satisfied.
         return IntegrationComponentSpec(
             key=key, type="process", action="update",
             component_id=stub_id, name=name,
-            config={"name": name},
+            config={
+                "process_kind": "wrapper_subprocess",
+                "process_calls": [
+                    {"process_id": "99999999-9999-9999-9999-999999999999"}
+                ],
+            },
         )
     if role == "profile.db":
         return IntegrationComponentSpec(
@@ -3924,9 +3931,15 @@ class TestBuildPlanProcessFlowRefTypes:
             _stub_dep_comp("dlq_error_subprocess"),
             good,
         ]
-        process_step = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
-                            if s["key"] == "main_process")
-        assert process_step.get("validation_error") is None
+        plan = _build_plan(MagicMock(), _build_config(components))
+        # No step may carry a validation error — in particular the referenced
+        # in-spec error-subprocess must itself plan clean, not silently fail
+        # the process_kind-required gate.
+        assert all(s.get("validation_error") is None for s in plan["steps"]), [
+            (s["key"], s.get("validation_error")) for s in plan["steps"]
+            if s.get("validation_error") is not None
+        ]
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
         assert process_step["planned_action"] == "create"
 
     @patch(_PATCH_TARGET)

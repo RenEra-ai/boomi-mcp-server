@@ -354,6 +354,16 @@ def test_dlq_downgrade_hint_present_for_guidance_only():
 
 def _append_component(spec: dict, key: str, ctype: str) -> dict:
     spec = copy.deepcopy(spec)
+    config = {"name": key.replace("_", " ").title()}
+    if ctype == "process":
+        # Process components require a typed process_kind under the
+        # process_kind-required contract; a minimal wrapper_subprocess (one
+        # out-of-spec literal process_id call) plans clean as its own step and
+        # keeps _effective_component_type -> "process" for the DLQ ref-type check.
+        config["process_kind"] = "wrapper_subprocess"
+        config["process_calls"] = [
+            {"process_id": "99999999-9999-9999-9999-999999999999"}
+        ]
     spec["components"].append(
         {
             "key": key,
@@ -361,7 +371,7 @@ def _append_component(spec: dict, key: str, ctype: str) -> dict:
             "action": "update",
             "component_id": _HANDLER_ID,
             "name": key.replace("_", " ").title(),
-            "config": {"name": key.replace("_", " ").title()},
+            "config": config,
             "depends_on": [],
         }
     )
@@ -374,6 +384,12 @@ def test_error_subprocess_ref_round_trips_with_in_spec_subprocess(_mock_pag):
     spec = _append_component(spec, "dlq_handler", "process")
     plan = _build_plan(MagicMock(), {"integration_spec": spec})
     assert plan["_success"] is True, plan
+    # The referenced in-spec subprocess must itself plan clean — no step may
+    # carry a validation error (it must satisfy the process_kind-required gate).
+    assert all(s.get("validation_error") is None for s in plan["steps"]), [
+        (s["key"], s.get("validation_error")) for s in plan["steps"]
+        if s.get("validation_error") is not None
+    ]
     step = next(s for s in plan["steps"] if s["key"] == _main_process(spec)["key"])
     assert step.get("validation_error") is None
 

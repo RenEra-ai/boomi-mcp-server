@@ -2658,23 +2658,32 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         # reference of an existing process) do not emit XML, so they do not
         # require process_kind — mirrors how every other builder gates its
         # validation on the authoring actions.
-        if (
-            comp.type == "process"
-            and not process_kind
-            and planned_action in ("create", "create_clone", "update")
-        ):
-            process_flow_err = BuilderValidationError(
-                "Process components must set config.process_kind; legacy "
-                "freeform process JSON authoring has been removed.",
-                error_code="PROCESS_KIND_REQUIRED",
-                field="config.process_kind",
-                hint=(
-                    "Use list_integration_archetypes()/build_from_archetype(), "
-                    "or set process_kind to one of "
-                    "['database_to_api_sync', 'wrapper_subprocess']. Use "
-                    "manage_component with raw XML only as an explicit escape hatch."
-                ),
-            )
+        if comp.type == "process" and not process_kind:
+            # Scan the untyped config for plaintext secrets FIRST, regardless
+            # of planned_action: the plan echoes comp.config via
+            # spec.model_dump(), so a secret must never leak even on the
+            # reuse / reference / rejection paths. A forbidden secret returns
+            # PLAINTEXT_SECRET_REJECTED (redacted at the block tail below);
+            # otherwise an authoring action is rejected for the missing
+            # process_kind. Mirrors the process_kind block's secret discipline.
+            process_flow_err = ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)
+            if process_flow_err is None and planned_action in (
+                "create",
+                "create_clone",
+                "update",
+            ):
+                process_flow_err = BuilderValidationError(
+                    "Process components must set config.process_kind; legacy "
+                    "freeform process JSON authoring has been removed.",
+                    error_code="PROCESS_KIND_REQUIRED",
+                    field="config.process_kind",
+                    hint=(
+                        "Use list_integration_archetypes()/build_from_archetype(), "
+                        "or set process_kind to one of "
+                        "['database_to_api_sync', 'wrapper_subprocess']. Use "
+                        "manage_component with raw XML only as an explicit escape hatch."
+                    ),
+                )
         if (
             comp.type == "process"
             and process_kind
