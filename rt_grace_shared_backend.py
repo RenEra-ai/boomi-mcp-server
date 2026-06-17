@@ -4,8 +4,8 @@ Shared backend for the refresh-token grace cache (Fix D of the cache plan).
 Fix A (refresh_token_grace_patch.py, shipped in PR #33) keeps a per-process
 LRU cache of rotated tokens for ~60s so a client retry-after-blip or
 parallel-tab refresh on the same Python process still receives the same
-new tokens. That works inside one Cloud Run replica. With
-`k8s/deployment.yaml replicas: 2`, the per-process map is invisible to
+new tokens. That works inside one Cloud Run replica. Once Cloud Run scales
+to more than one replica, the per-process map is invisible to
 the other replica: a refresh that lands on replica B after replica A has
 already rotated the RT still gets `Refresh token mapping not found` 401
 because B's local cache is empty AND the FastMCP RT row + JTI mapping
