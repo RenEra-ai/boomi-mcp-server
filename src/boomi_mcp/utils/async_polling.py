@@ -7,7 +7,7 @@ is ready or a timeout is reached.  This module centralises that logic.
 """
 
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 
 def poll_async_result(
