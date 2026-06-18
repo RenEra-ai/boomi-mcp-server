@@ -130,3 +130,23 @@ def test_channel_to_dict_accepts_typed_model():
     d = sr._channel_to_dict(model)
     assert d["id"] == "ch-1"
     assert d["name"] == "Ch1"
+
+
+def test_channel_to_dict_preserves_unmodeled_folder_full_path():
+    """get_*_json hydrates to a model; folderFullPath is NOT a modeled attribute,
+    so it lands in _kwargs. _channel_to_dict must still surface it (the old raw-dict
+    display path did) — regression guard for the hydrated-display data-loss finding.
+    """
+    model = SharedCommunicationChannelComponent._unmap({
+        "componentId": "ch-1",
+        "componentName": "Ch1",
+        "communicationType": "HTTP",
+        "folderName": "Home",
+        "folderFullPath": "Home/Sub",
+        "PartnerArchiving": {},
+        "PartnerCommunication": {},
+    })
+    assert "folderFullPath" in getattr(model, "_kwargs", {})  # precondition: unmodeled
+    d = sr._channel_to_dict(model)
+    assert d["folder_full_path"] == "Home/Sub"
+    assert d["folder_name"] == "Home"

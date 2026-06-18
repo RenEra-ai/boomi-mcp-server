@@ -151,11 +151,21 @@ def _channel_to_dict(channel) -> Dict[str, Any]:
         result["type"] = str(result["type"].value)
     else:
         result["type"] = str(result["type"])
-    for attr in (
-        'folder_id', 'folder_full_path', 'component_id', 'deleted',
-        'description', 'folder_name', 'branch_id', 'branch_name',
+    # Some fields a real channel returns are NOT defined on the generated model
+    # (e.g. ``folderFullPath``) — SDK 3.0.1's get_*_json hydrates the response, so
+    # those land in the model's private ``_kwargs`` rather than a typed attribute.
+    # Fall back to ``_kwargs`` (keyed by wire name) so the typed-model display path
+    # stays as lossless as the old raw-dict path.
+    _kw = getattr(channel, '_kwargs', None) or {}
+    for attr, wire in (
+        ('folder_id', 'folderId'), ('folder_full_path', 'folderFullPath'),
+        ('component_id', 'componentId'), ('deleted', 'deleted'),
+        ('description', 'description'), ('folder_name', 'folderName'),
+        ('branch_id', 'branchId'), ('branch_name', 'branchName'),
     ):
         val = getattr(channel, attr, None)
+        if val is None:
+            val = _kw.get(wire)
         if val is not None:
             if hasattr(val, 'value'):
                 result[attr] = str(val.value)
