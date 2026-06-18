@@ -1792,17 +1792,20 @@ def _action_list_account_cloud_attachment_quotas(sdk: Boomi, profile: str, **kwa
         request_body=request
     )
 
+    # v3 bulk responses nest each quota under response[*].result (the outer
+    # object has no top-level .result), so unwrap that envelope here.
     quotas = []
-    if hasattr(result, 'result') and result.result:
-        items = result.result if isinstance(result.result, list) else [result.result]
-        for item in items:
-            entry = {}
-            for attr in dir(item):
-                if not attr.startswith('_'):
-                    val = getattr(item, attr, None)
-                    if val is not None and not callable(val):
-                        entry[attr] = _enum_str(val) if hasattr(val, 'value') else val
-            quotas.append(entry)
+    for entry in getattr(result, 'response', None) or []:
+        quota_obj = getattr(entry, 'result', None)
+        if quota_obj is None:
+            continue
+        record = {}
+        for attr in dir(quota_obj):
+            if not attr.startswith('_'):
+                val = getattr(quota_obj, attr, None)
+                if val is not None and not callable(val):
+                    record[attr] = _enum_str(val) if hasattr(val, 'value') else val
+        quotas.append(record)
 
     return {"_success": True, "quotas": quotas, "total_count": len(quotas)}
 

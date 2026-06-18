@@ -18,7 +18,16 @@ stranded in ``_kwargs``.
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from boomi.models import AccountCloudAttachmentQuotaBulkRequest, BulkId, JavaUpgrade
+from boomi.models import (
+    AccountCloudAttachmentQuota,
+    AccountCloudAttachmentQuotaBulkRequest,
+    BulkId,
+    JavaUpgrade,
+)
+from boomi.models.account_cloud_attachment_quota_bulk_response import (
+    AccountCloudAttachmentQuotaBulkResponse,
+    AccountCloudAttachmentQuotaBulkResponseResponse,
+)
 import boomi_mcp.categories.runtimes as runtimes
 
 
@@ -80,3 +89,30 @@ def test_quota_bulk_serializes_bulk_ids():
         "type": "GET",
     }
     assert body._kwargs == {}
+
+
+def test_quota_bulk_parses_nested_response_results():
+    """A populated v3 bulk response surfaces each entry's nested .result quota.
+
+    The v3 response is AccountCloudAttachmentQuotaBulkResponse.response[*].result
+    — there is no top-level .result. A handler that reads the outer object's
+    .result would return an empty list for valid quota ids.
+    """
+    sdk = MagicMock()
+    quota = AccountCloudAttachmentQuota(
+        account_id="acct-1", cloud_id="cloud-1", id_="q1", max_atom_attachment="5"
+    )
+    entry = AccountCloudAttachmentQuotaBulkResponseResponse(result=quota, id_="q1", index=0)
+    sdk.account_cloud_attachment_quota.bulk_account_cloud_attachment_quota.return_value = (
+        AccountCloudAttachmentQuotaBulkResponse(response=[entry])
+    )
+
+    out = runtimes._action_list_account_cloud_attachment_quotas(
+        sdk, "work", resource_ids=["q1"]
+    )
+
+    assert out["_success"] is True
+    assert out["total_count"] == 1
+    assert out["quotas"][0]["id_"] == "q1"
+    assert out["quotas"][0]["cloud_id"] == "cloud-1"
+    assert out["quotas"][0]["account_id"] == "acct-1"
