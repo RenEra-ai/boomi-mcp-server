@@ -116,3 +116,45 @@ def test_quota_bulk_parses_nested_response_results():
     assert out["quotas"][0]["id_"] == "q1"
     assert out["quotas"][0]["cloud_id"] == "cloud-1"
     assert out["quotas"][0]["account_id"] == "acct-1"
+
+
+def test_java_upgrade_rejects_present_but_falsy_target_version():
+    """A supplied-but-falsy target_version is still a rejection, not a silent upgrade.
+
+    Rejection keys on the caller having passed the field at all — an empty
+    string must not slip past the guard and start a real (irreversible) upgrade.
+    """
+    sdk = MagicMock()
+
+    out = runtimes._action_configure_java(
+        sdk, "work", resource_id="atom-1", java_action="upgrade", target_version=""
+    )
+
+    assert out["_success"] is False
+    assert "target_version" in out["error"]
+    sdk.java_upgrade.create_java_upgrade.assert_not_called()
+
+
+def test_quota_bulk_surfaces_error_entries():
+    """Result-less bulk entries (e.g. not-found) are reported, not silently dropped."""
+    sdk = MagicMock()
+    good = AccountCloudAttachmentQuotaBulkResponseResponse(
+        result=AccountCloudAttachmentQuota(cloud_id="cloud-1", id_="q1"), id_="q1", index=0
+    )
+    failed = AccountCloudAttachmentQuotaBulkResponseResponse(
+        id_="missing", index=1, status_code=404, error_message="not found"
+    )
+    sdk.account_cloud_attachment_quota.bulk_account_cloud_attachment_quota.return_value = (
+        AccountCloudAttachmentQuotaBulkResponse(response=[good, failed])
+    )
+
+    out = runtimes._action_list_account_cloud_attachment_quotas(
+        sdk, "work", resource_ids=["q1", "missing"]
+    )
+
+    assert out["_success"] is True
+    assert out["total_count"] == 1
+    assert out["quotas"][0]["id_"] == "q1"
+    assert out["errors"] == [
+        {"id_": "missing", "status_code": 404, "error_message": "not found"}
+    ]

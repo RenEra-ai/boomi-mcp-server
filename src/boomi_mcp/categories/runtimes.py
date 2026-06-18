@@ -580,7 +580,6 @@ def _action_configure_java(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     """Upgrade a runtime to the latest supported Java, or roll back."""
     resource_id = kwargs.get("resource_id")
     java_action = kwargs.get("java_action")
-    target_version = kwargs.get("target_version")
 
     if not resource_id:
         return {"_success": False, "error": "resource_id is required for 'configure_java' action"}
@@ -593,7 +592,10 @@ def _action_configure_java(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     java_action = java_action.lower()
 
     if java_action == "upgrade":
-        if target_version:
+        # Reject if the caller supplied target_version at all (even falsy like
+        # "" or 0): v3 cannot target a version, so honoring it is impossible and
+        # silently ignoring it would mislead the caller into an unintended upgrade.
+        if "target_version" in kwargs:
             return {
                 "_success": False,
                 "error": "config.target_version is not supported: the Boomi "
@@ -1793,11 +1795,21 @@ def _action_list_account_cloud_attachment_quotas(sdk: Boomi, profile: str, **kwa
     )
 
     # v3 bulk responses nest each quota under response[*].result (the outer
-    # object has no top-level .result), so unwrap that envelope here.
+    # object has no top-level .result), so unwrap that envelope here. Entries
+    # without a .result carry a per-id status_code/error_message — surface them
+    # rather than silently dropping (which would look like an empty success).
     quotas = []
+    errors = []
     for entry in getattr(result, 'response', None) or []:
         quota_obj = getattr(entry, 'result', None)
         if quota_obj is None:
+            err = {}
+            for key in ('id_', 'status_code', 'error_message'):
+                val = getattr(entry, key, None)
+                if val is not None:
+                    err[key] = val
+            if err:
+                errors.append(err)
             continue
         record = {}
         for attr in dir(quota_obj):
@@ -1807,7 +1819,10 @@ def _action_list_account_cloud_attachment_quotas(sdk: Boomi, profile: str, **kwa
                     record[attr] = _enum_str(val) if hasattr(val, 'value') else val
         quotas.append(record)
 
-    return {"_success": True, "quotas": quotas, "total_count": len(quotas)}
+    out = {"_success": True, "quotas": quotas, "total_count": len(quotas)}
+    if errors:
+        out["errors"] = errors
+    return out
 
 
 def _action_get_account_cloud_attachment_quota(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
