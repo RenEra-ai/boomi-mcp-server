@@ -11,7 +11,7 @@ Provides 45 runtime management actions:
 - detach: Detach runtime from environment
 - list_attachments: List environment-runtime attachments
 - restart: Restart runtime
-- configure_java: Upgrade or rollback Java version
+- configure_java: Upgrade to latest supported Java or rollback
 - create_installer_token: Create installer token for new runtime installation
 - available_clouds: List Boomi-managed public clouds (PCS/DCS/MCS) your account can use for cloud attachments
 - cloud_list: List private runtime clouds your account owns (requires Cloud Management privilege)
@@ -106,13 +106,6 @@ VALID_RUNTIME_TYPES = {"ATOM", "MOLECULE", "CLOUD"}
 VALID_STATUSES = {"ONLINE", "OFFLINE"}
 VALID_INSTALL_TYPES = {"ATOM", "MOLECULE", "CLOUD", "BROKER", "GATEWAY"}
 VALID_CLASSIFICATIONS = {"PROD", "TEST"}
-
-JAVA_VERSIONS = {
-    '8': '1.8.0',
-    '11': '11.0',
-    '17': '17.0',
-    '21': '21.0',
-}
 
 # Known property fields for AccountCloudAttachmentProperties (excludes SDK metadata like session_id, status_code)
 _CLOUD_ATTACHMENT_PROPERTY_FIELDS = {
@@ -584,7 +577,7 @@ def _action_restart(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
 
 
 def _action_configure_java(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """Upgrade or rollback Java version on a runtime."""
+    """Upgrade a runtime to the latest supported Java, or roll back."""
     resource_id = kwargs.get("resource_id")
     java_action = kwargs.get("java_action")
     target_version = kwargs.get("target_version")
@@ -600,34 +593,23 @@ def _action_configure_java(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     java_action = java_action.lower()
 
     if java_action == "upgrade":
-        if not target_version:
+        if target_version:
             return {
                 "_success": False,
-                "error": "config.target_version is required for upgrade "
-                         f"(valid: {', '.join(sorted(JAVA_VERSIONS.keys()))})",
-            }
-        target_version = str(target_version)
-        if target_version not in JAVA_VERSIONS:
-            return {
-                "_success": False,
-                "error": f"Invalid target_version: '{target_version}'. "
-                         f"Valid values: {', '.join(sorted(JAVA_VERSIONS.keys()))}",
+                "error": "config.target_version is not supported: the Boomi "
+                         "upgrade-Java operation upgrades the runtime to the "
+                         "latest supported Java version and cannot target a "
+                         "specific version. Omit target_version to upgrade.",
             }
 
-        sdk_version = JAVA_VERSIONS[target_version]
-        upgrade_request = JavaUpgrade(
-            atom_id=resource_id,
-            target_version=sdk_version,
-        )
-        result = sdk.java_upgrade.create_java_upgrade(request_body=upgrade_request)
+        upgrade_request = JavaUpgrade(atom_id=resource_id)
+        sdk.java_upgrade.create_java_upgrade(request_body=upgrade_request)
 
         return {
             "_success": True,
             "runtime_id": resource_id,
             "java_action": "upgrade",
-            "target_version": target_version,
-            "sdk_version": sdk_version,
-            "message": f"Java upgrade to {target_version} ({sdk_version}) initiated",
+            "message": "Java upgrade to latest supported version initiated",
         }
 
     elif java_action == "rollback":
@@ -1793,7 +1775,7 @@ def _action_get_account_cloud_attachment_summary(sdk: Boomi, profile: str, **kwa
 
 def _action_list_account_cloud_attachment_quotas(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     """Bulk-get account cloud attachment quotas by IDs."""
-    from boomi.models import AccountCloudAttachmentQuotaBulkRequest
+    from boomi.models import AccountCloudAttachmentQuotaBulkRequest, BulkId
 
     resource_ids = kwargs.get("resource_ids")
     if not resource_ids:
@@ -1802,7 +1784,10 @@ def _action_list_account_cloud_attachment_quotas(sdk: Boomi, profile: str, **kwa
     if isinstance(resource_ids, str):
         resource_ids = [resource_ids]
 
-    request = AccountCloudAttachmentQuotaBulkRequest(id_=resource_ids)
+    request = AccountCloudAttachmentQuotaBulkRequest(
+        type_="GET",
+        request=[BulkId(id_=rid) for rid in resource_ids],
+    )
     result = sdk.account_cloud_attachment_quota.bulk_account_cloud_attachment_quota(
         request_body=request
     )

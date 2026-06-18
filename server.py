@@ -2648,9 +2648,9 @@ if manage_runtimes_action:
             restart - Restart runtime:
                 resource_id="abc-123-def"
 
-            configure_java - Upgrade or rollback Java:
+            configure_java - Upgrade to latest supported Java or rollback:
                 resource_id="abc-123-def"
-                config='{"java_action": "upgrade", "target_version": "17"}'
+                config='{"java_action": "upgrade"}'   (upgrades to the latest supported Java; a specific version cannot be targeted)
                 config='{"java_action": "rollback"}'
 
             create_installer_token - Create installer token for local runtime:
@@ -2685,7 +2685,6 @@ if manage_runtimes_action:
         Runtime types: ATOM, MOLECULE, CLOUD
         Install types: ATOM, MOLECULE, CLOUD, BROKER, GATEWAY
         Cloud classifications: PROD, TEST (immutable after creation)
-        Java versions: 8, 11, 17, 21
 
         Returns:
             Action result with success status and data/error
