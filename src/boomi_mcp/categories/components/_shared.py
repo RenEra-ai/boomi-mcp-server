@@ -20,6 +20,9 @@ from boomi.models import (
     ComponentMetadataSimpleExpressionProperty,
 )
 from boomi.net.transport.api_error import ApiError
+# Serializer/Environment are used ONLY for the documented JSON transport of the
+# B2B component-family endpoints (see component_family_json_request). The
+# XML-only generic /Component endpoint uses the SDK's raw-XML methods instead.
 from boomi.net.transport.serializer import Serializer
 from boomi.net.environment.environment import Environment
 
@@ -197,30 +200,21 @@ def component_get_xml(
 ) -> Dict[str, Any]:
     """GET component as raw XML + parsed metadata dict.
 
-    The SDK's get_component_raw() auto-sets Accept: application/json, but Boomi's
-    Component GET endpoint only supports application/xml (returns 406 otherwise).
-    We use the Serializer directly with an explicit Accept header.
+    Routes through the SDK 3.0.0 raw component getter
+    (``boomi_client.component.get_component``), which returns the response bytes
+    byte-for-byte and sets ``Accept: application/xml`` itself. The blocking call
+    is wrapped in the wall-clock deadline (see ``_run_with_deadline``).
 
     ``deadline_seconds`` overrides the per-call wall-clock deadline. Multi-get
     callers (bulk/enrichment loops) pass the remaining slice of a shared
     aggregate budget so the loop can't sum past the platform request timeout;
     ``None`` reads ``BOOMI_COMPONENT_GET_DEADLINE_SECONDS``.
     """
-    svc = boomi_client.component
-    serialized_request = (
-        Serializer(
-            f"{svc.base_url or Environment.DEFAULT.url}/Component/{component_id}",
-            [svc.get_access_token(), svc.get_basic_auth()],
-        )
-        .add_header("Accept", "application/xml")
-        .serialize()
-        .set_method("GET")
-    )
     if deadline_seconds is None:
         deadline_seconds = _component_get_deadline_seconds()
     try:
-        response, status, content = _run_with_deadline(
-            lambda: svc.send_request(serialized_request),
+        raw = _run_with_deadline(
+            lambda: boomi_client.component.get_component(component_id),
             component_id,
             deadline_seconds,
         )
@@ -228,25 +222,19 @@ def component_get_xml(
         # Bounded wall-clock abort — propagate the rich exception unchanged so
         # call sites can build the COMPONENT_GET_DEADLINE_EXCEEDED envelope.
         raise
+    except ApiError as exc:
+        # SDK 3.0.0 raises ApiError on non-2xx (where the old bypass inspected a
+        # status code). Preserve the prior "GET failed (HTTP <status>): <msg>"
+        # envelope text so callers behave exactly as before.
+        status = getattr(exc, "status", None)
+        msg = _extract_api_error_msg(exc)
+        raise Exception(
+            f"GET failed (HTTP {status}): {msg}" if status else f"GET failed: {msg}"
+        ) from exc
     except Exception as exc:
         raise Exception(f"GET failed: {_extract_api_error_msg(exc)}") from exc
-    if status >= 400:
-        # Extract a clean message from the error response body.
-        # send_request() returns response.body which is a parsed dict for
-        # JSON responses, raw str/bytes for XML/text.
-        body_msg = ""
-        if isinstance(response, dict):
-            body_msg = response.get("message", "")
-        elif isinstance(response, (str, bytes)):
-            raw = response if isinstance(response, str) else response.decode("utf-8", errors="replace")
-            try:
-                import json as _json
-                body_msg = _json.loads(raw).get("message", "")
-            except Exception:
-                body_msg = raw.split("\n")[0][:200] if raw else ""
-        raise Exception(f"GET failed (HTTP {status}): {body_msg}" if body_msg else f"GET failed: HTTP {status}")
 
-    raw_xml = response if isinstance(response, str) else response.decode('utf-8')
+    raw_xml = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
     root = ET.fromstring(raw_xml)
 
     return {
@@ -393,30 +381,23 @@ def metadata_to_dict(comp) -> Dict[str, Any]:
 # ============================================================================
 
 def _create_component_raw(boomi_client: Boomi, xml: str) -> Dict[str, Any]:
-    """Create a component via raw POST, returning parsed XML response.
+    """Create a component from raw XML via the SDK; return parsed response metadata.
 
-    The SDK's create_component() fails to parse GenericConnectionConfig responses,
-    so we use the Serializer directly (same approach as component_get_xml).
+    Routes through ``boomi_client.component.create_component`` (SDK 3.0.0), which
+    sends the XML byte-for-byte with ``Accept``/``Content-Type: application/xml``
+    and returns the raw response bytes. We parse the returned XML for the new
+    component's root attributes.
     """
-    svc = boomi_client.component
-    serialized_request = (
-        Serializer(
-            f"{svc.base_url or Environment.DEFAULT.url}/Component",
-            [svc.get_access_token(), svc.get_basic_auth()],
-        )
-        .add_header("Accept", "application/xml")
-        .add_header("Content-Type", "application/xml")
-        .serialize()
-        .set_method("POST")
-    )
-    serialized_request.body = xml.encode('utf-8') if isinstance(xml, str) else xml
-    response, status, content = svc.send_request(serialized_request)
+    try:
+        raw = boomi_client.component.create_component(xml)
+    except ApiError as exc:
+        status = getattr(exc, "status", None)
+        msg = _extract_api_error_msg(exc)
+        raise Exception(
+            f"Create failed: HTTP {status} — {msg}" if status else f"Create failed: {msg}"
+        ) from exc
 
-    if status >= 400:
-        raw = response if isinstance(response, str) else response.decode('utf-8')
-        raise Exception(f"Create failed: HTTP {status} — {raw}")
-
-    raw_xml = response if isinstance(response, str) else response.decode('utf-8')
+    raw_xml = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
     root = ET.fromstring(raw_xml)
 
     return {
@@ -427,6 +408,90 @@ def _create_component_raw(boomi_client: Boomi, xml: str) -> Dict[str, Any]:
         'folder_name': root.attrib.get('folderName', ''),
         'version': root.attrib.get('version', ''),
     }
+
+
+def _update_component_xml(boomi_client: Boomi, component_id: str, xml: str) -> Dict[str, Any]:
+    """Update a component with full raw XML via the SDK; return parsed response metadata.
+
+    Routes through ``boomi_client.component.update_component`` (SDK 3.0.0): the
+    complete component XML is sent byte-for-byte and the raw response bytes are
+    parsed for the updated component's root attributes. Boomi performs full
+    updates only — callers that own just part of the XML should GET the current
+    document, merge their fields with ElementTree, and pass the merged XML here
+    so unknown subtrees are preserved.
+    """
+    try:
+        raw = boomi_client.component.update_component(component_id, xml)
+    except ApiError as exc:
+        status = getattr(exc, "status", None)
+        msg = _extract_api_error_msg(exc)
+        raise Exception(
+            f"Update failed: HTTP {status} — {msg}" if status else f"Update failed: {msg}"
+        ) from exc
+
+    raw_xml = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
+    root = ET.fromstring(raw_xml)
+
+    return {
+        'component_id': root.attrib.get('componentId', component_id),
+        'name': root.attrib.get('name', ''),
+        'type': root.attrib.get('type', ''),
+        'sub_type': root.attrib.get('subType', ''),
+        'folder_name': root.attrib.get('folderName', ''),
+        'version': root.attrib.get('version', ''),
+    }
+
+
+def component_family_json_request(
+    service,
+    path: str,
+    method: str = "POST",
+    body: Any = None,
+    body_content_type: str = "application/json",
+):
+    """Send a JSON request to a B2B component-family endpoint; return ``(body, status)``.
+
+    The Boomi B2B component-family endpoints (OrganizationComponent,
+    TradingPartnerComponent, SharedCommunicationChannelComponent) accept JSON,
+    and the MCP keeps building/reading the SDK *typed models* for them. SDK 3.0.0,
+    however, made the typed ``create``/``get``/``update`` methods raw-**XML** only
+    (they ``require_raw_xml`` and reject models), so we serialize the model to
+    JSON and transport it here. This is a deliberate, documented JSON path for
+    endpoints that support JSON — NOT one of the stale raw-XML bypasses the SDK
+    3.0.0 cleanup removed; only the XML-only generic ``/Component`` endpoint uses
+    the SDK's raw-XML methods (see ``component_get_xml``).
+
+    ``body`` may be a typed model, dict, or str (e.g. a queryMore token); the SDK
+    transport serializes a model via its ``_map()``. Returns the parsed response
+    body (a dict for JSON) and the HTTP status; the caller hydrates a typed model
+    with ``Model._unmap`` and checks ``status`` for non-2xx.
+    """
+    base = service.base_url or Environment.DEFAULT.url
+    url = f"{base.rstrip('/')}/{path.lstrip('/')}"
+    ser = Serializer(url, [service.get_access_token(), service.get_basic_auth()])  # sdk-bypass-ok: component-family JSON transport (SDK 3.0.0 typed methods are XML-only)
+    ser = ser.add_header("Accept", "application/json")
+    serialized = ser.serialize().set_method(method)
+    if body is not None:
+        serialized = serialized.set_body(body, body_content_type)
+    response, status, _ = service.send_request(serialized)  # sdk-bypass-ok: component-family JSON transport
+    return response, status
+
+
+def _json_error_message(resp) -> str:
+    """Best-effort user-facing message from a JSON (or raw) error response body."""
+    if isinstance(resp, dict):
+        return resp.get("message") or resp.get("error") or str(resp)
+    if isinstance(resp, (bytes, bytearray)):
+        resp = resp.decode("utf-8", errors="replace")
+    if isinstance(resp, str):
+        try:
+            import json as _json
+            parsed = _json.loads(resp)
+            if isinstance(parsed, dict):
+                return parsed.get("message") or parsed.get("error") or resp
+        except Exception:
+            return resp.split("\n")[0][:300]
+    return str(resp)
 
 
 def _extract_api_error_msg(e) -> str:

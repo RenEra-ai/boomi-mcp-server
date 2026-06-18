@@ -44,6 +44,8 @@ from .components._shared import (
     paginate_metadata,
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
+    component_family_json_request,
+    _json_error_message,
 )
 from .components.builders._preservation_policy import (
     OwnedPath,
@@ -3471,7 +3473,13 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
 
         try:
             if comp.type == "trading_partner":
-                boomi_client.trading_partner_component.get_trading_partner_component(id_=component_id)
+                # Existence check via JSON (SDK 3.0.0 typed get is XML-only).
+                _resp, _st = component_family_json_request(
+                    boomi_client.trading_partner_component,
+                    f"TradingPartnerComponent/{component_id}", "GET"
+                )
+                if _st and _st >= 400:
+                    raise Exception(_json_error_message(_resp))
             else:
                 component_get_xml(boomi_client, component_id)
             verification["components"][comp.key] = {"verified": True, "component_id": component_id}

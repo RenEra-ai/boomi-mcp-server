@@ -4672,7 +4672,7 @@ def invoke_api(
             body = payload
 
     # --- Build request via Serializer ---
-    ser = Serializer(
+    ser = Serializer(  # sdk-bypass-ok: invoke_boomi_api is the explicit raw escape hatch
         url,
         [svc.get_access_token(), svc.get_basic_auth()],
     )
@@ -4688,7 +4688,7 @@ def invoke_api(
     # The SDK raises ApiError for non-2xx responses, so we catch it
     # and extract the response details.
     try:
-        response, status, _ = svc.send_request(serialized)
+        response, status, _ = svc.send_request(serialized)  # sdk-bypass-ok: invoke_boomi_api raw escape hatch
     except Exception as api_err:
         # Extract status and response body from ApiError
         status = getattr(api_err, "status", 0)

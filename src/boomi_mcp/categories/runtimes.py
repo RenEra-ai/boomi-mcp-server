@@ -55,13 +55,6 @@ from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
 from boomi.net.transport.api_error import ApiError
-from boomi.net.transport.serializer import Serializer
-from boomi.net.environment.environment import Environment
-
-
-def _get_env_url():
-    """Get the default Boomi API base URL."""
-    return Environment.DEFAULT.url
 from boomi.models import (
     Atom,
     AtomQueryConfig,
@@ -1328,14 +1321,43 @@ def _action_delete_release_schedule(sdk: Boomi, profile: str, **kwargs) -> Dict[
 # Observability Settings Actions (async reads)
 # ============================================================================
 
-def _action_get_observability_settings(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
-    """Get observability settings for a runtime (async operation).
+def _normalize_observability_result(result) -> Optional[List[Dict[str, Any]]]:
+    """Normalize an observability async-poll result to a list of settings, or None.
 
-    Uses raw API call for the token poll because the SDK model deserialization
-    can fail when RuntimeObservabilitySettings requires runtime_id.
+    SDK 3.0.0's ``async_token_runtime_observability_settings`` returns a typed
+    ``RuntimeObservabilitySettingsAsyncResponse``, or a raw dict/str (sparse
+    hydration fallback), or ``None`` when the result is not ready yet. Returns the
+    settings rows on success, or ``None`` to keep polling.
     """
     import json as json_mod
 
+    if result is None:
+        return None
+    if isinstance(result, (bytes, bytearray)):
+        result = result.decode("utf-8", errors="replace")
+    if isinstance(result, str):
+        try:
+            result = json_mod.loads(result)
+        except Exception:
+            return None
+    if isinstance(result, dict):
+        rows = result.get("result")
+        if rows:
+            return rows if isinstance(rows, list) else [rows]
+        # A direct settings dict (not an async-token envelope) counts as ready.
+        if result and not str(result.get("@type", "")).endswith("AsyncOperationTokenResult"):
+            return [result]
+        return None
+    # Typed RuntimeObservabilitySettingsAsyncResponse
+    rows = getattr(result, "result", None)
+    if rows:
+        rows = rows if isinstance(rows, list) else [rows]
+        return [r._map() if hasattr(r, "_map") else r for r in rows]
+    return None
+
+
+def _action_get_observability_settings(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
+    """Get observability settings for a runtime (async operation)."""
     resource_id = kwargs.get("resource_id")
     if not resource_id:
         return {"_success": False, "error": "resource_id is required for 'get_observability_settings' action"}
@@ -1352,45 +1374,30 @@ def _action_get_observability_settings(sdk: Boomi, profile: str, **kwargs) -> Di
 
     token = token_result.async_token.token
 
-    # Step 2: Poll with raw API to avoid SDK deserialization errors
+    # Step 2: Poll for the result via the SDK's async token endpoint. SDK 3.0.0
+    # returns None while the result is "still processing" (empty/204) and falls
+    # back to a raw dict/str when the typed model can't hydrate.
     svc = sdk.runtime_observability_settings
-    base = svc.base_url or _get_env_url()
-    poll_url = f"{base.rstrip('/')}/async/RuntimeObservabilitySettings/response/{token}"
 
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            ser = Serializer(poll_url, [svc.get_access_token(), svc.get_basic_auth()])
-            ser = ser.add_header("Accept", "application/json")
-            serialized = ser.serialize().set_method("GET")
-            response, status, _ = svc.send_request(serialized)
-
-            if isinstance(response, (bytes, bytearray)):
-                response = response.decode("utf-8")
-            data = json_mod.loads(response) if isinstance(response, str) else response
-
-            if data and isinstance(data, dict) and data.get("result"):
-                settings_list = data["result"] if isinstance(data["result"], list) else [data["result"]]
-                return {
-                    "_success": True,
-                    "runtime_id": resource_id,
-                    "settings": settings_list,
-                    "total_count": len(settings_list),
-                }
-            elif data and isinstance(data, dict) and not data.get("@type", "").endswith("AsyncOperationTokenResult"):
-                # Direct response, not a token
-                return {
-                    "_success": True,
-                    "runtime_id": resource_id,
-                    "settings": [data],
-                    "total_count": 1,
-                }
+            result = svc.async_token_runtime_observability_settings(token)
         except Exception as e:
             err_str = str(e).lower()
             if "202" in err_str or "still processing" in err_str:
                 time.sleep(2)
                 continue
             return {"_success": False, "error": f"Error polling observability settings: {e}"}
+
+        settings_list = _normalize_observability_result(result)
+        if settings_list is not None:
+            return {
+                "_success": True,
+                "runtime_id": resource_id,
+                "settings": settings_list,
+                "total_count": len(settings_list),
+            }
 
         time.sleep(2)
 

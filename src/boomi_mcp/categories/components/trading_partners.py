@@ -30,6 +30,7 @@ import xml.etree.ElementTree as ET
 
 # Import typed models for query operations
 from boomi.models import (
+    TradingPartnerComponent,
     TradingPartnerComponentQueryConfig,
     TradingPartnerComponentQueryConfigQueryFilter,
     TradingPartnerComponentSimpleExpression,
@@ -42,7 +43,12 @@ from boomi.models import (
     TradingPartnerProcessingGroupSimpleExpressionOperator,
 )
 from boomi.net.transport.api_error import ApiError
-from boomi_mcp.categories.components._shared import _extract_api_error_msg
+from boomi_mcp.categories.components._shared import (
+    _extract_api_error_msg,
+    component_family_json_request,
+    _json_error_message,
+    component_get_xml,
+)
 from boomi_mcp.categories.components.organizations import (
     list_organizations,
     get_organization,
@@ -243,10 +249,20 @@ def create_trading_partner(boomi_client, profile: str, request_data: Dict[str, A
                 "message": f"Invalid trading partner configuration: {str(ve)}"
             }
 
-        # Create trading partner using TradingPartnerComponent API (JSON-based)
-        result = boomi_client.trading_partner_component.create_trading_partner_component(
-            request_body=tp_model
+        # Create trading partner. TradingPartnerComponent accepts JSON; SDK 3.0.0's
+        # typed create is XML-only, so transport the typed model as JSON and hydrate
+        # the response back into a model for the existing field readers.
+        resp, status = component_family_json_request(
+            boomi_client.trading_partner_component, "TradingPartnerComponent", "POST", body=tp_model
         )
+        if status and status >= 400:
+            msg = _json_error_message(resp)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to create trading partner: {msg}"
+            }
+        result = TradingPartnerComponent._unmap(resp) if isinstance(resp, dict) else resp
 
         # Extract component ID using the same pattern as SDK example
         # SDK uses 'id_' attribute, not 'component_id'
@@ -307,10 +323,19 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
         Trading partner details or error
     """
     try:
-        # Use SDK directly - model deserialization is now fixed
-        result = boomi_client.trading_partner_component.get_trading_partner_component(
-            id_=component_id
+        # Get trading partner (JSON; SDK 3.0.0 typed get is XML-only). Hydrate into
+        # a model so the existing field readers below are unchanged.
+        resp, status = component_family_json_request(
+            boomi_client.trading_partner_component, f"TradingPartnerComponent/{component_id}", "GET"
         )
+        if status and status >= 400:
+            msg = _json_error_message(resp)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to get trading partner: {msg}"
+            }
+        result = TradingPartnerComponent._unmap(resp) if isinstance(resp, dict) else resp
 
         # Extract using SDK model attributes
         retrieved_id = None
@@ -1162,9 +1187,12 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                 # If still None, retrieve standard via GET (lightweight per-partner call)
                 if std_val is None and partner_id:
                     try:
-                        full_tp = boomi_client.trading_partner_component.get_trading_partner_component(id_=partner_id)
-                        fetched_std = getattr(full_tp, 'standard', None)
-                        std_val = fetched_std.value if hasattr(fetched_std, 'value') else fetched_std
+                        _resp, _st = component_family_json_request(
+                            boomi_client.trading_partner_component,
+                            f"TradingPartnerComponent/{partner_id}", "GET"
+                        )
+                        if not (_st and _st >= 400) and isinstance(_resp, dict):
+                            std_val = _resp.get("standard") or std_val
                     except Exception:
                         pass  # leave as None if GET fails
                 partners.append({
@@ -1225,9 +1253,10 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
     Update an existing trading partner component using JSON-based TradingPartnerComponent API.
 
     This implementation uses the typed JSON models for a much simpler update process:
-    1. Get existing trading partner using trading_partner_component.get_trading_partner_component()
+    1. Get existing trading partner as JSON (SDK 3.0.0 typed get is XML-only) and
+       hydrate it into a typed model
     2. Update the model fields based on the updates dict
-    3. Call trading_partner_component.update_trading_partner_component() with updated model
+    3. POST the updated model back as JSON
 
     Args:
         boomi_client: Authenticated Boomi SDK client
@@ -1286,23 +1315,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     "Also consider setting ftp_move_force_override='true' if target may already exist."
                 )
 
-        # Step 1: Get the existing trading partner using JSON-based API
-        try:
-            existing_tp = boomi_client.trading_partner_component.get_trading_partner_component(
-                id_=component_id
-            )
-        except ApiError as e:
+        # Step 1: Get the existing trading partner (JSON; SDK 3.0.0 typed get is
+        # XML-only). Hydrate into a model so the merge logic below is unchanged.
+        resp, status = component_family_json_request(
+            boomi_client.trading_partner_component, f"TradingPartnerComponent/{component_id}", "GET"
+        )
+        if status and status >= 400:
+            msg = _json_error_message(resp)
             return {
                 "_success": False,
-                "error": f"Component not found: {_extract_api_error_msg(e)}",
+                "error": f"Component not found: {msg}",
                 "message": f"Trading partner {component_id} not found or could not be retrieved"
             }
-        except Exception as e:
-            return {
-                "_success": False,
-                "error": f"Component not found: {str(e)}",
-                "message": f"Trading partner {component_id} not found or could not be retrieved"
-            }
+        existing_tp = TradingPartnerComponent._unmap(resp) if isinstance(resp, dict) else resp
 
         # Step 2: Update model fields based on updates dict
         # The SDK's PartnerCommunication._map() now produces minimal structure that the API accepts,
@@ -2738,11 +2763,19 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     from boomi_mcp.models.trading_partner_builders import PartnerCommunicationDict
                     existing_tp.partner_communication = PartnerCommunicationDict(preserved)
 
-        # Step 3: Update the trading partner using JSON-based API
-        result = boomi_client.trading_partner_component.update_trading_partner_component(
-            id_=component_id,
-            request_body=existing_tp
+        # Step 3: Update the trading partner (JSON; SDK 3.0.0 typed update is
+        # XML-only). The typed model serializes to JSON via its _map().
+        resp2, status2 = component_family_json_request(
+            boomi_client.trading_partner_component, f"TradingPartnerComponent/{component_id}",
+            "POST", body=existing_tp
         )
+        if status2 and status2 >= 400:
+            msg = _json_error_message(resp2)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to update trading partner: {msg}"
+            }
 
         return {
             "_success": True,
@@ -2805,74 +2838,6 @@ def delete_trading_partner(boomi_client, profile: str, component_id: str) -> Dic
         }
 
 
-def bulk_create_trading_partners(boomi_client, profile: str, partners: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Create multiple trading partners in a single operation.
-
-    Args:
-        boomi_client: Authenticated Boomi SDK client
-        profile: Profile name for authentication
-        partners: List of trading partner configurations
-
-    Returns:
-        Bulk creation results or error
-    """
-    try:
-        # Prepare bulk request
-        bulk_data = {
-            "TradingPartnerComponent": []
-        }
-
-        for partner_data in partners:
-            partner_component = {
-                "componentName": partner_data.get("component_name"),
-                "standard": partner_data.get("standard", "x12").lower(),
-                "classification": partner_data.get("classification", "tradingpartner").lower()
-            }
-
-            # Add optional fields
-            if "folder_name" in partner_data:
-                partner_component["folderName"] = partner_data["folder_name"]
-            if "contact_info" in partner_data:
-                partner_component["ContactInfo"] = partner_data["contact_info"]
-            if "partner_info" in partner_data:
-                partner_component["PartnerInfo"] = partner_data["partner_info"]
-
-            bulk_data["TradingPartnerComponent"].append(partner_component)
-
-        # Execute bulk create
-        result = boomi_client.trading_partner_component.bulk_create_trading_partner_component(bulk_data)
-
-        created_partners = []
-        if hasattr(result, 'TradingPartnerComponent'):
-            for partner in result.TradingPartnerComponent:
-                created_partners.append({
-                    "component_id": getattr(partner, 'component_id', None),
-                    "name": getattr(partner, 'component_name', None),
-                    "standard": getattr(partner, 'standard', None)
-                })
-
-        return {
-            "_success": True,
-            "created_count": len(created_partners),
-            "partners": created_partners,
-            "message": f"Successfully created {len(created_partners)} trading partners"
-        }
-
-    except ApiError as e:
-        return {
-            "_success": False,
-            "error": _extract_api_error_msg(e),
-            "message": f"Failed to bulk create trading partners: {_extract_api_error_msg(e)}"
-        }
-    except Exception as e:
-        return {
-            "_success": False,
-            "error": str(e),
-            "message": f"Failed to bulk create trading partners: {str(e)}"
-        }
-
-
 def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str) -> Dict[str, Any]:
     """
     Analyze where a trading partner is used in processes and configurations.
@@ -2889,11 +2854,18 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
         Usage analysis including processes, connections, and dependencies
     """
     try:
-        # Get the trading partner details using TradingPartnerComponent API
-        # (Component API's get_component returns 406 due to JSON-only Accept header)
-        partner = boomi_client.trading_partner_component.get_trading_partner_component(
-            id_=component_id
+        # Get the trading partner details (JSON; SDK 3.0.0 typed get is XML-only).
+        resp, status = component_family_json_request(
+            boomi_client.trading_partner_component, f"TradingPartnerComponent/{component_id}", "GET"
         )
+        if status and status >= 400:
+            msg = _json_error_message(resp)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to analyze trading partner usage: {msg}"
+            }
+        partner = TradingPartnerComponent._unmap(resp) if isinstance(resp, dict) else resp
         partner_name = getattr(partner, 'name', None) or getattr(partner, 'component_name', 'Unknown')
 
         # Query for component references using the QUERY endpoint (returns 200 with empty results, not 400)
@@ -2933,31 +2905,14 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
                     parent_version = getattr(ref, 'parent_version', None)
 
                     if parent_id:
-                        # Try to get component metadata via Serializer with Accept: application/xml
+                        # Fetch parent component metadata via the SDK-backed
+                        # component XML getter (generic /Component is XML-only).
                         try:
-                            import xml.etree.ElementTree as _ET
-                            from boomi.net.transport.serializer import Serializer as _Ser
-                            from boomi.net.environment.environment import Environment as _Env
-                            _svc = boomi_client.component
-                            _req = (
-                                _Ser(
-                                    f"{_svc.base_url or _Env.DEFAULT.url}/Component/{parent_id}",
-                                    [_svc.get_access_token(), _svc.get_basic_auth()],
-                                )
-                                .add_header("Accept", "application/xml")
-                                .serialize()
-                                .set_method("GET")
-                            )
-                            _resp, _st, _ = _svc.send_request(_req)
-                            _raw = _resp if isinstance(_resp, str) else _resp.decode('utf-8')
-                            _root = _ET.fromstring(_raw)
-                            comp_type = _root.attrib.get('type', 'unknown')
-                            comp_name = _root.attrib.get('name', 'Unknown')
-
+                            meta = component_get_xml(boomi_client, parent_id)
                             referenced_by.append({
                                 "component_id": parent_id,
-                                "name": comp_name,
-                                "type": comp_type,
+                                "name": meta.get("name") or "Unknown",
+                                "type": meta.get("type") or "unknown",
                                 "version": str(parent_version)
                             })
                         except Exception as e:

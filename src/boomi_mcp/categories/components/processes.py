@@ -143,7 +143,8 @@ def get_process(
         print(result["process"]["name"])
     """
     try:
-        # Use raw XML helper — SDK's get_component() returns 406 (JSON-only Accept header)
+        # Process XML lives on the generic /Component endpoint (XML-only); use the
+        # SDK-backed raw-XML helper.
         process_data = _component_get_xml(boomi_client, process_id)
         process_data['process_id'] = process_data.get('component_id', process_id)
 

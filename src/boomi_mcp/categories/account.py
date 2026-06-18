@@ -47,8 +47,6 @@ from boomi.models import (
     AccountUserFederationSimpleExpressionProperty,
 )
 from boomi.net.transport.api_error import ApiError
-from boomi.net.transport.serializer import Serializer
-from boomi.net.environment.environment import Environment
 
 
 # ============================================================================
@@ -127,45 +125,41 @@ def _extract_api_error_msg(e) -> str:
     return getattr(e, "message", "") or str(e)
 
 
-def _query_all_roles_raw(sdk: Boomi) -> List[Dict[str, Any]]:
-    """List all roles using raw API call (empty QueryFilter).
+def _list_all_roles(sdk: Boomi) -> List[Dict[str, Any]]:
+    """List all roles via the SDK typed query with an empty ``RoleQueryConfig()``.
 
-    The Role API rejects IS_NOT_NULL and LIKE operators, so we bypass
-    the SDK query builder and POST an empty QueryFilter directly.
+    SDK 3.0.0's ``RoleQueryConfig()`` serializes to the "list all roles" body
+    (``{"QueryFilter": {}}``), so the previous raw-POST bypass — added because the
+    Role API rejects IS_NOT_NULL/LIKE operators — is no longer needed. Results are
+    normalized whether the SDK returns typed ``Role`` models or, on sparse
+    hydration, raw dicts.
     """
-    import json as json_mod
-    svc = sdk.role
-    base = svc.base_url or Environment.DEFAULT.url
-    url = f"{base.rstrip('/')}/Role/query"
+    roles: List[Dict[str, Any]] = []
 
-    ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])
-    ser = ser.add_header("Accept", "application/json")
-    serialized = ser.serialize().set_method("POST")
-    serialized = serialized.set_body({"QueryFilter": {}}, "application/json")
+    def _ingest(result) -> None:
+        rows = getattr(result, "result", None)
+        if rows is None and isinstance(result, dict):
+            rows = result.get("result")
+        if not rows:
+            return
+        if not isinstance(rows, list):
+            rows = [rows]
+        for r in rows:
+            roles.append(_role_to_dict_raw(r) if isinstance(r, dict) else _role_to_dict(r))
 
-    response, status, _ = svc.send_request(serialized)
-    if isinstance(response, (bytes, bytearray)):
-        response = response.decode("utf-8")
-    data = json_mod.loads(response) if isinstance(response, str) else response
+    def _next_token(result):
+        token = getattr(result, "query_token", None)
+        if token is None and isinstance(result, dict):
+            token = result.get("queryToken")
+        return token
 
-    roles = []
-    if "result" in data:
-        roles.extend([_role_to_dict_raw(r) for r in data["result"]])
-
-    # Handle pagination via queryToken
-    while data.get("queryToken"):
-        token = data["queryToken"]
-        url_more = f"{base.rstrip('/')}/Role/queryMore"
-        ser2 = Serializer(url_more, [svc.get_access_token(), svc.get_basic_auth()])
-        ser2 = ser2.add_header("Accept", "application/json")
-        serialized2 = ser2.serialize().set_method("POST")
-        serialized2 = serialized2.set_body(token, "text/plain")
-        response2, _, _ = svc.send_request(serialized2)
-        if isinstance(response2, (bytes, bytearray)):
-            response2 = response2.decode("utf-8")
-        data = json_mod.loads(response2) if isinstance(response2, str) else response2
-        if "result" in data:
-            roles.extend([_role_to_dict_raw(r) for r in data["result"]])
+    result = sdk.role.query_role(request_body=RoleQueryConfig())
+    _ingest(result)
+    token = _next_token(result)
+    while token:
+        result = sdk.role.query_more_role(request_body=token)
+        _ingest(result)
+        token = _next_token(result)
 
     return roles
 
@@ -327,8 +321,8 @@ def _action_list_roles(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
         )
         roles = _query_all_roles(sdk, expression)
     else:
-        # Empty QueryFilter via raw API (SDK operators not supported)
-        roles = _query_all_roles_raw(sdk)
+        # List all roles via the SDK typed query (empty RoleQueryConfig()).
+        roles = _list_all_roles(sdk)
 
     return {
         "_success": True,

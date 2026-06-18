@@ -22,9 +22,11 @@ from boomi.models import (
     OrganizationComponentSimpleExpressionProperty
 )
 from boomi.net.transport.api_error import ApiError
-from boomi.net.transport.serializer import Serializer
-from boomi.net.environment.environment import Environment
-from boomi_mcp.categories.components._shared import _extract_api_error_msg
+from boomi_mcp.categories.components._shared import (
+    _extract_api_error_msg,
+    component_family_json_request,
+    _json_error_message,
+)
 import json as json_mod
 
 
@@ -103,20 +105,30 @@ def create_organization(boomi_client, profile: str, request_data: Dict[str, Any]
             folder_name=request_data.get("folder_name", "Home")
         )
 
-        # Create organization
-        result = boomi_client.organization_component.create_organization_component(
-            request_body=org_model
+        # Create organization. The OrganizationComponent endpoint accepts JSON;
+        # SDK 3.0.0's typed create is XML-only, so transport the typed model as
+        # JSON and hydrate the response back into a model for field access.
+        resp, status = component_family_json_request(
+            boomi_client.organization_component, "OrganizationComponent", "POST", body=org_model
         )
-
-        # Extract component ID
-        component_id = getattr(result, 'component_id', None) or getattr(result, 'id_', None)
+        if status and status >= 400:
+            msg = _json_error_message(resp)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to create organization: {msg}"
+            }
+        # Read the JSON response as a dict (the strict typed model rejects sparse
+        # OrganizationContactInfo, so we never re-hydrate it).
+        result = resp if isinstance(resp, dict) else {}
+        component_id = result.get("componentId") or result.get("id")
 
         return {
             "_success": True,
             "organization": {
                 "component_id": component_id,
-                "name": getattr(result, 'component_name', request_data.get("component_name")),
-                "folder_name": getattr(result, 'folder_name', request_data.get("folder_name", "Home"))
+                "name": result.get("componentName") or request_data.get("component_name"),
+                "folder_name": result.get("folderName") or request_data.get("folder_name", "Home")
             },
             "message": f"Successfully created organization: {request_data.get('component_name')}"
         }
@@ -148,33 +160,43 @@ def get_organization(boomi_client, profile: str, organization_id: str) -> Dict[s
         Organization details or error
     """
     try:
-        result = boomi_client.organization_component.get_organization_component(
-            id_=organization_id
+        resp, status = component_family_json_request(
+            boomi_client.organization_component, f"OrganizationComponent/{organization_id}", "GET"
         )
+        if status and status >= 400:
+            msg = _json_error_message(resp)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to get organization: {msg}"
+            }
+        # Read the JSON response as a dict (avoids the strict typed model, which
+        # rejects sparse OrganizationContactInfo payloads).
+        result = resp if isinstance(resp, dict) else {}
 
         # Extract contact info with normalized contact_* field names (matches input config format)
         org_data = {
-            "component_id": getattr(result, 'component_id', None) or organization_id,
-            "name": getattr(result, 'component_name', None),
-            "folder_id": getattr(result, 'folder_id', None),
-            "folder_name": getattr(result, 'folder_name', None),
-            "deleted": getattr(result, 'deleted', False),
+            "component_id": result.get("componentId") or organization_id,
+            "name": result.get("componentName"),
+            "folder_id": result.get("folderId"),
+            "folder_name": result.get("folderName"),
+            "deleted": result.get("deleted", False),
         }
 
-        contact = getattr(result, 'organization_contact_info', None)
-        if contact:
+        contact = result.get("OrganizationContactInfo") or {}
+        if isinstance(contact, dict) and contact:
             contact_fields = {
-                "contact_name": getattr(contact, 'contact_name', None),
-                "contact_email": getattr(contact, 'email', None),
-                "contact_phone": getattr(contact, 'phone', None),
-                "contact_fax": getattr(contact, 'fax', None),
-                "contact_url": getattr(contact, 'contact_url', None),
-                "contact_address": getattr(contact, 'address1', None),
-                "contact_address2": getattr(contact, 'address2', None),
-                "contact_city": getattr(contact, 'city', None),
-                "contact_state": getattr(contact, 'state', None),
-                "contact_country": getattr(contact, 'country', None),
-                "contact_postalcode": getattr(contact, 'postalcode', None),
+                "contact_name": contact.get("contactName"),
+                "contact_email": contact.get("email"),
+                "contact_phone": contact.get("phone"),
+                "contact_fax": contact.get("fax"),
+                "contact_url": contact.get("contactUrl"),
+                "contact_address": contact.get("address1"),
+                "contact_address2": contact.get("address2"),
+                "contact_city": contact.get("city"),
+                "contact_state": contact.get("state"),
+                "contact_country": contact.get("country"),
+                "contact_postalcode": contact.get("postalcode"),
             }
             # Flatten into org_data, skip empty values
             for k, v in contact_fields.items():
@@ -229,18 +251,19 @@ def list_organizations(boomi_client, profile: str, filters: Optional[Dict[str, A
             }
         }
 
-        # Use raw Serializer to avoid SDK model hydration failures
-        # on sparse OrganizationContactInfo payloads
-        svc = boomi_client.organization_component
-        base = svc.base_url or Environment.DEFAULT.url
-        url = f"{base.rstrip('/')}/OrganizationComponent/query"
-
-        ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])
-        ser = ser.add_header("Accept", "application/json")
-        serialized = ser.serialize().set_method("POST")
-        serialized = serialized.set_body(query_body, "application/json")
-
-        response, status, _ = svc.send_request(serialized)
+        # OrganizationComponent query accepts JSON; transport it via the shared
+        # component-family JSON helper (SDK 3.0.0's typed query path is fine too,
+        # but keeping JSON preserves this list's sparse-tolerant field handling).
+        response, status = component_family_json_request(
+            boomi_client.organization_component, "OrganizationComponent/query", "POST", body=query_body
+        )
+        if status and status >= 400:
+            msg = _json_error_message(response)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to list organizations: {msg}"
+            }
         if isinstance(response, (bytes, bytearray)):
             response = response.decode("utf-8")
         data = json_mod.loads(response) if isinstance(response, str) else response
@@ -276,12 +299,10 @@ def list_organizations(boomi_client, profile: str, filters: Optional[Dict[str, A
         # Handle pagination
         while data.get("queryToken"):
             token = data["queryToken"]
-            url_more = f"{base.rstrip('/')}/OrganizationComponent/queryMore"
-            ser2 = Serializer(url_more, [svc.get_access_token(), svc.get_basic_auth()])
-            ser2 = ser2.add_header("Accept", "application/json")
-            serialized2 = ser2.serialize().set_method("POST")
-            serialized2 = serialized2.set_body(token, "text/plain")
-            response2, _, _ = svc.send_request(serialized2)
+            response2, _ = component_family_json_request(
+                boomi_client.organization_component, "OrganizationComponent/queryMore",
+                "POST", body=token, body_content_type="text/plain"
+            )
             if isinstance(response2, (bytes, bytearray)):
                 response2 = response2.decode("utf-8")
             data = json_mod.loads(response2) if isinstance(response2, str) else response2
@@ -331,55 +352,73 @@ def update_organization(boomi_client, profile: str, organization_id: str, update
         Updated organization details or error
     """
     try:
-        # Get existing organization
-        existing_org = boomi_client.organization_component.get_organization_component(
-            id_=organization_id
+        # Get existing organization (JSON; hydrate into a typed model to merge).
+        resp, status = component_family_json_request(
+            boomi_client.organization_component, f"OrganizationComponent/{organization_id}", "GET"
         )
+        if status and status >= 400:
+            msg = _json_error_message(resp)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to update organization: {msg}"
+            }
+        # Work on the JSON dict directly (avoids the strict typed model) and POST
+        # it back, preserving any fields the MCP doesn't own.
+        existing_org = resp if isinstance(resp, dict) else {}
 
-        # Update component name if provided
+        # Update component name / folder if provided (wire keys are camelCase)
         if "component_name" in updates:
-            existing_org.component_name = updates["component_name"]
-
+            existing_org["componentName"] = updates["component_name"]
         if "folder_name" in updates:
-            existing_org.folder_name = updates["folder_name"]
+            existing_org["folderName"] = updates["folder_name"]
 
-        # Boomi API REQUIRES OrganizationContactInfo to be present in update payload
-        # Build contact info from existing values merged with any updates
-        existing_contact = getattr(existing_org, 'organization_contact_info', None)
-
-        # Get existing values or defaults
+        # Boomi API REQUIRES OrganizationContactInfo to be present in the update
+        # payload. Merge existing contact values with any contact_* updates,
+        # mapped to their wire keys.
+        existing_contact = existing_org.get("OrganizationContactInfo") or {}
         contact_params = {
-            'contact_name': getattr(existing_contact, 'contact_name', '') if existing_contact else '',
-            'contact_email': getattr(existing_contact, 'email', '') if existing_contact else '',
-            'contact_phone': getattr(existing_contact, 'phone', '') if existing_contact else '',
-            'contact_fax': getattr(existing_contact, 'fax', '') if existing_contact else '',
-            'contact_url': getattr(existing_contact, 'contact_url', '') if existing_contact else '',
-            'contact_address': getattr(existing_contact, 'address1', '') if existing_contact else '',
-            'contact_address2': getattr(existing_contact, 'address2', '') if existing_contact else '',
-            'contact_city': getattr(existing_contact, 'city', '') if existing_contact else '',
-            'contact_state': getattr(existing_contact, 'state', '') if existing_contact else '',
-            'contact_country': getattr(existing_contact, 'country', '') if existing_contact else '',
-            'contact_postalcode': getattr(existing_contact, 'postalcode', '') if existing_contact else ''
+            'contactName': existing_contact.get('contactName', ''),
+            'email': existing_contact.get('email', ''),
+            'phone': existing_contact.get('phone', ''),
+            'fax': existing_contact.get('fax', ''),
+            'contactUrl': existing_contact.get('contactUrl', ''),
+            'address1': existing_contact.get('address1', ''),
+            'address2': existing_contact.get('address2', ''),
+            'city': existing_contact.get('city', ''),
+            'state': existing_contact.get('state', ''),
+            'country': existing_contact.get('country', ''),
+            'postalcode': existing_contact.get('postalcode', ''),
         }
+        _contact_wire_keys = {
+            'contact_name': 'contactName', 'contact_email': 'email', 'contact_phone': 'phone',
+            'contact_fax': 'fax', 'contact_url': 'contactUrl', 'contact_address': 'address1',
+            'contact_address2': 'address2', 'contact_city': 'city', 'contact_state': 'state',
+            'contact_country': 'country', 'contact_postalcode': 'postalcode',
+        }
+        for k, v in updates.items():
+            if k in _contact_wire_keys:
+                contact_params[_contact_wire_keys[k]] = v
+        existing_org["OrganizationContactInfo"] = contact_params
 
-        # Override with any contact updates
-        contact_updates = {k: v for k, v in updates.items() if k.startswith('contact_')}
-        contact_params.update(contact_updates)
-
-        # Always set contact info (required by Boomi API)
-        existing_org.organization_contact_info = build_organization_contact_info(**contact_params)
-
-        # Update organization
-        result = boomi_client.organization_component.update_organization_component(
-            id_=organization_id,
-            request_body=existing_org
+        # Update organization (JSON POST to the dedicated endpoint).
+        resp2, status2 = component_family_json_request(
+            boomi_client.organization_component, f"OrganizationComponent/{organization_id}",
+            "POST", body=existing_org
         )
+        if status2 and status2 >= 400:
+            msg = _json_error_message(resp2)
+            return {
+                "_success": False,
+                "error": msg,
+                "message": f"Failed to update organization: {msg}"
+            }
 
         return {
             "_success": True,
             "organization": {
                 "component_id": organization_id,
-                "name": updates.get("component_name", getattr(existing_org, 'component_name', None)),
+                "name": updates.get("component_name", existing_org.get("componentName")),
                 "updated_fields": list(updates.keys())
             },
             "message": f"Successfully updated organization: {organization_id}"

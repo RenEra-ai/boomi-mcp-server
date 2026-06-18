@@ -146,31 +146,27 @@ _SAMPLE_XML = (
 )
 
 
-class _FakeAuth:
-    def get_headers(self):
-        return {}
-
-
 class _FakeComponentService:
-    """Minimal stand-in for boomi_client.component used by component_get_xml."""
+    """Minimal stand-in for boomi_client.component used by component_get_xml.
+
+    SDK 3.0.0's ``get_component`` returns the raw XML response *bytes* and raises
+    ``ApiError`` on non-2xx; this fake mirrors that contract.
+    """
 
     base_url = "https://api.example.com"
 
-    def __init__(self, *, block_event=None, response=None):
+    def __init__(self, *, block_event=None, response=None, error=None):
         self._block_event = block_event
         self._response = response
-        self.send_calls = 0
+        self._error = error
+        self.get_calls = 0
 
-    def get_access_token(self):
-        return _FakeAuth()
-
-    def get_basic_auth(self):
-        return _FakeAuth()
-
-    def send_request(self, request):
-        self.send_calls += 1
+    def get_component(self, component_id):
+        self.get_calls += 1
         if self._block_event is not None:
             self._block_event.wait()
+        if self._error is not None:
+            raise self._error
         return self._response
 
 
@@ -181,7 +177,7 @@ class _FakeClient:
 
 def test_component_get_xml_success_shape(monkeypatch):
     monkeypatch.delenv("BOOMI_COMPONENT_GET_DEADLINE_SECONDS", raising=False)
-    svc = _FakeComponentService(response=(_SAMPLE_XML, 200, "application/xml"))
+    svc = _FakeComponentService(response=_SAMPLE_XML.encode())
     result = component_get_xml(_FakeClient(svc), "cid-1")
     assert result["component_id"] == "cid-1"
     assert result["name"] == "My Component"
@@ -189,13 +185,27 @@ def test_component_get_xml_success_shape(monkeypatch):
     assert result["version"] == 3
     assert result["description"] == "hello"
     assert result["xml"] == _SAMPLE_XML
-    assert svc.send_calls == 1
+    assert svc.get_calls == 1
+
+
+def test_component_get_xml_maps_api_error_to_envelope_text(monkeypatch):
+    # SDK 3.0.0 raises ApiError on non-2xx; component_get_xml must surface the
+    # "GET failed (HTTP <status>)" message the old status-code path produced.
+    from boomi.net.transport.api_error import ApiError
+
+    monkeypatch.delenv("BOOMI_COMPONENT_GET_DEADLINE_SECONDS", raising=False)
+    svc = _FakeComponentService(error=ApiError("Failed to get component: HTTP 404", 404, None))
+    with pytest.raises(Exception) as exc_info:
+        component_get_xml(_FakeClient(svc), "missing")
+    msg = str(exc_info.value)
+    assert "GET failed" in msg and "404" in msg
+    assert svc.get_calls == 1
 
 
 def test_component_get_xml_times_out_when_backend_stalls(monkeypatch):
     monkeypatch.setenv("BOOMI_COMPONENT_GET_DEADLINE_SECONDS", "1")
     released = threading.Event()
-    svc = _FakeComponentService(block_event=released, response=(_SAMPLE_XML, 200, "x"))
+    svc = _FakeComponentService(block_event=released, response=_SAMPLE_XML.encode())
     try:
         start = time.monotonic()
         with pytest.raises(ComponentGetDeadlineExceeded) as exc_info:
@@ -285,7 +295,7 @@ def test_bulk_get_records_per_item_deadline_and_keeps_siblings(monkeypatch):
 def test_component_get_xml_respects_deadline_override(monkeypatch):
     monkeypatch.delenv("BOOMI_COMPONENT_GET_DEADLINE_SECONDS", raising=False)  # env=90
     released = threading.Event()
-    svc = _FakeComponentService(block_event=released, response=(_SAMPLE_XML, 200, "x"))
+    svc = _FakeComponentService(block_event=released, response=_SAMPLE_XML.encode())
     try:
         start = time.monotonic()
         with pytest.raises(ComponentGetDeadlineExceeded) as exc_info:

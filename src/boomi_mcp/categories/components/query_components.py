@@ -288,9 +288,8 @@ def bulk_get_components(
 ) -> Dict[str, Any]:
     """Retrieve up to 5 components by their IDs.
 
-    Note: Boomi's bulk Component endpoint returns 406 when SDK sends
-    Accept: application/json. We use individual component_get_xml() calls
-    instead, which is still efficient for up to 5 components.
+    Uses individual ``component_get_xml()`` calls (one GET per id through the
+    SDK-backed raw-XML helper), which is efficient for up to 5 components.
     """
     try:
         if not component_ids:
