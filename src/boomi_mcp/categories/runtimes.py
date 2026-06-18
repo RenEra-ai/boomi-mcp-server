@@ -1340,19 +1340,32 @@ def _normalize_observability_result(result) -> Optional[List[Dict[str, Any]]]:
             result = json_mod.loads(result)
         except Exception:
             return None
+    # Typed RuntimeObservabilitySettingsAsyncResponse: prefer its typed result
+    # rows. A *direct* settings payload hydrates with ``result`` unset and the
+    # settings fields captured in ``_kwargs`` (SDK 3.0.0's lenient ``_unmap``,
+    # which ``_map()`` then drops), so fold those into a dict and fall through to
+    # the dict handling rather than treating the response as "not ready" and
+    # polling to timeout.
+    if not isinstance(result, dict):
+        rows = getattr(result, "result", None)
+        if rows:
+            rows = rows if isinstance(rows, list) else [rows]
+            return [r._map() if hasattr(r, "_map") else r for r in rows]
+        extra = getattr(result, "_kwargs", None)
+        result = dict(extra) if isinstance(extra, dict) else {}
+
     if isinstance(result, dict):
         rows = result.get("result")
         if rows:
             return rows if isinstance(rows, list) else [rows]
-        # A direct settings dict (not an async-token envelope) counts as ready.
-        if result and not str(result.get("@type", "")).endswith("AsyncOperationTokenResult"):
+        # A direct settings payload counts as ready — but a still-processing
+        # async-token echo (``@type`` AsyncOperationTokenResult / an ``asyncToken``
+        # field) does not, so keep polling for those.
+        if (result
+                and "asyncToken" not in result
+                and not str(result.get("@type", "")).endswith("AsyncOperationTokenResult")):
             return [result]
         return None
-    # Typed RuntimeObservabilitySettingsAsyncResponse
-    rows = getattr(result, "result", None)
-    if rows:
-        rows = rows if isinstance(rows, list) else [rows]
-        return [r._map() if hasattr(r, "_map") else r for r in rows]
     return None
 
 

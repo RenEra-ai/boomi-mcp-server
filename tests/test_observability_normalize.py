@@ -41,6 +41,26 @@ def test_typed_response_mapped_to_dicts():
     assert out == [{"runtimeId": "a"}]
 
 
+def test_typed_direct_settings_stranded_in_kwargs_is_ready():
+    # SDK 3.0.0 hydrates a direct settings payload into the async-response model
+    # with result unset and the fields in _kwargs; this must be returned, not
+    # treated as "still processing".
+    typed = SimpleNamespace(result=None, _kwargs={"runtimeId": "a", "generalSettings": {}})
+    out = rt._normalize_observability_result(typed)
+    assert out == [{"runtimeId": "a", "generalSettings": {}}]
+
+
+def test_typed_empty_kwargs_keeps_polling():
+    typed = SimpleNamespace(result=None, _kwargs={})
+    assert rt._normalize_observability_result(typed) is None
+
+
+def test_typed_async_token_echo_keeps_polling():
+    # A still-processing token echo lands in _kwargs as asyncToken — not ready.
+    typed = SimpleNamespace(result=None, _kwargs={"asyncToken": {"token": "t"}})
+    assert rt._normalize_observability_result(typed) is None
+
+
 def test_str_json_parsed():
     out = rt._normalize_observability_result('{"result": [{"runtimeId": "a"}]}')
     assert out == [{"runtimeId": "a"}]
