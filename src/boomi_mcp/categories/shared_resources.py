@@ -18,6 +18,12 @@ from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
 from boomi.net.transport.api_error import ApiError
+# Serializer/Environment back ONE documented bypass: the lossless raw-JSON read
+# for the channel update merge (see _get_channel_raw_json). The component-family
+# endpoints (unlike SharedWebServer) got no lossless dict GET in SDK 3.0.1, and
+# the hydrating *_json GET drops nested config on a _map() round-trip.
+from boomi.net.transport.serializer import Serializer
+from boomi.net.environment import Environment
 from boomi.models import (
     SharedCommunicationChannelComponent,
     SharedCommunicationChannelComponentQueryConfig,
@@ -160,29 +166,33 @@ def _channel_to_dict(channel) -> Dict[str, Any]:
     return result
 
 
-def _channel_to_wire_dict(value) -> Dict[str, Any]:
-    """Normalize a SharedCommunicationChannelComponent JSON response to a wire dict.
+def _get_channel_raw_json(sdk: Boomi, resource_id: str) -> Dict[str, Any]:
+    """Lossless raw-JSON GET of a channel, for the update GET -> mutate -> POST.
 
-    ``get_shared_communication_channel_component_json`` (SDK 3.0.1) returns
-    ``Union[model, dict, str]``. The update merge mutates camelCase wire keys in
-    place, so map a hydrated model back through ``_map()``, pass a raw dict through
-    unchanged, and parse a JSON string; anything else becomes ``{}``.
+    SDK 3.0.1's ``get_shared_communication_channel_component_json`` hydrates the
+    response into a ``SharedCommunicationChannelComponent``; round-tripping that
+    model back to JSON via ``_map()`` DROPS every field the generated model does
+    not define — proven to lose nested protocol config such as
+    ``HTTPCommunicationOptions.sharedClientSSLCertificate`` (plus ``folderFullPath``
+    and any runtime-only keys), which land in a model's private ``_kwargs`` and are
+    skipped on serialization. The channel update is a full-document round-trip, so
+    a hydrated GET would silently erase untouched config. Unlike ``SharedWebServer``
+    (which got a lossless ``*_json`` dict method in 3.0.1), the component-family
+    endpoints expose only model-or-dict JSON methods, so we read the raw JSON here
+    to preserve the complete document — the same lossless-dict rationale. The
+    create/get display paths never write back, so they keep the typed SDK methods.
+
+    Raises ``ApiError`` on a non-2xx, matching the SDK transport (handled by the
+    action router).
     """
-    if isinstance(value, dict):
-        return dict(value)
-    if hasattr(value, "_map"):
-        mapped = value._map()
-        return mapped if isinstance(mapped, dict) else {}
-    if isinstance(value, (bytes, bytearray)):
-        value = value.decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        try:
-            import json as _json
-            parsed = _json.loads(value)
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            return {}
-    return {}
+    svc = sdk.shared_communication_channel_component
+    base = svc.base_url or Environment.DEFAULT.url
+    url = f"{base.rstrip('/')}/SharedCommunicationChannelComponent/{resource_id}"
+    ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])  # sdk-bypass-ok: lossless channel JSON read for the update merge (no SDK dict GET; model round-trip drops nested config)
+    ser = ser.add_header("Accept", "application/json")
+    serialized = ser.serialize().set_method("GET")
+    response, status, _ = svc.send_request(serialized)  # sdk-bypass-ok: lossless channel JSON read for the update merge
+    return response if isinstance(response, dict) else {}
 
 
 def _query_all_channels(sdk: Boomi, expression=None) -> List[Dict[str, Any]]:
@@ -443,14 +453,12 @@ def _action_update_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     if not resource_id:
         return {"_success": False, "error": "resource_id (channel_id) is required for 'update_channel' action"}
 
-    # Fetch existing channel (JSON) to preserve its full config; merge on the wire
-    # dict and POST it back (SDK 3.0.1). A non-2xx raises ApiError (handled by the
-    # action router). Normalize a hydrated model back to the wire dict the merge
-    # below mutates in place.
-    resp = sdk.shared_communication_channel_component.get_shared_communication_channel_component_json(
-        resource_id
-    )
-    existing = _channel_to_wire_dict(resp)
+    # Fetch existing channel as the LOSSLESS raw JSON dict, then merge in place and
+    # POST the full document back. The hydrating SDK *_json GET would drop nested
+    # config on a _map() round-trip (see _get_channel_raw_json), erasing untouched
+    # settings; the raw read preserves them. A non-2xx raises ApiError (handled by
+    # the action router).
+    existing = _get_channel_raw_json(sdk, resource_id)
 
     # Normalize channel_type / communication_type the same way as create
     new_type = kwargs.get("channel_type") or kwargs.get("communication_type")

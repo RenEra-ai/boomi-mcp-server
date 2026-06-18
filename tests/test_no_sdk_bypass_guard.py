@@ -43,24 +43,31 @@ def test_no_unjustified_sdk_bypasses():
     )
 
 
-def test_only_invoke_boomi_api_bypass_remains():
-    """Pin the justified-bypass inventory: after adopting the SDK 3.0.1 JSON
-    methods, the component-family and SharedWebServer JSON transports are gone,
-    leaving only the two invoke_boomi_api raw-escape-hatch lines (Serializer +
-    send_request) in meta_tools.py."""
+def test_bypass_inventory_is_the_documented_set():
+    """Pin the justified-bypass inventory. After adopting the SDK 3.0.1 JSON
+    methods the only documented bypasses are:
+
+      * meta_tools.py (2): the invoke_boomi_api raw escape hatch (Serializer +
+        send_request);
+      * shared_resources.py (2): the lossless raw-JSON read for the channel
+        update merge (_get_channel_raw_json) — the component-family endpoints got
+        no lossless dict GET in 3.0.1 (unlike SharedWebServer), and the hydrating
+        *_json GET drops nested config on a _map() round-trip.
+
+    Any other marker is an accidental bypass that should route through the SDK.
+    """
     marked = _marked_bypasses()
-    non_invoke = [m for m in marked if "invoke_boomi_api" not in m[2]]
-    assert not non_invoke, (
-        "Unexpected '# sdk-bypass-ok:' markers remain — only the invoke_boomi_api "
-        f"raw escape hatch is allowed: {non_invoke}"
-    )
-    assert all(m[0].endswith("meta_tools.py") for m in marked), (
-        f"invoke_boomi_api bypass markers should live only in meta_tools.py: {marked}"
-    )
-    assert len(marked) == 2, (
-        f"Expected exactly 2 invoke_boomi_api bypass markers (Serializer + "
-        f"send_request), got {len(marked)}: {marked}"
-    )
+    by_file = {}
+    for rel, _ln, _line in marked:
+        by_file[rel] = by_file.get(rel, 0) + 1
+    assert by_file == {
+        "src/boomi_mcp/categories/meta_tools.py": 2,
+        "src/boomi_mcp/categories/shared_resources.py": 2,
+    }, f"Unexpected sdk-bypass-ok inventory: {marked}"
+    # Each marker must name its sanctioned reason.
+    for rel, _ln, line in marked:
+        ok = "invoke_boomi_api" in line or "channel" in line.lower()
+        assert ok, f"Bypass marker with an unrecognized justification: {rel}: {line}"
 
 
 def test_guard_actually_detects_a_bypass(tmp_path):

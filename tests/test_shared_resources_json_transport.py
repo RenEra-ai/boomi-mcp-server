@@ -8,7 +8,7 @@ both JSON dicts and typed models; the update merge normalizes via
 ``_channel_to_wire_dict``.
 """
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from boomi.models import SharedCommunicationChannelComponent
 from boomi.net.transport.api_error import ApiError
@@ -69,18 +69,53 @@ def test_update_channel_get_then_post():
     sdk = MagicMock()
     resp = {"componentId": "ch-1", "componentName": "Ch1", "communicationType": "HTTP",
             "PartnerCommunication": {}, "PartnerArchiving": {}}
-    sdk.shared_communication_channel_component.get_shared_communication_channel_component_json.return_value = resp
     update = sdk.shared_communication_channel_component.update_shared_communication_channel_component_json
     update.return_value = resp
 
-    out = sr._action_update_channel(sdk, "work", resource_id="ch-1", name="Ch1b")
+    # The update merge reads the existing channel via the lossless raw-JSON GET.
+    with patch.object(sr, "_get_channel_raw_json", return_value=dict(resp)) as raw_get:
+        out = sr._action_update_channel(sdk, "work", resource_id="ch-1", name="Ch1b")
 
     assert out["_success"] is True, out
-    sdk.shared_communication_channel_component.get_shared_communication_channel_component_json.assert_called_once()
+    raw_get.assert_called_once()
     update.assert_called_once()
     # The merged wire dict is POSTed back with the rename applied.
     posted = update.call_args[0][1]
     assert posted["componentName"] == "Ch1b"
+
+
+def test_update_channel_is_lossless():
+    """A metadata-only update must POST the FULL existing document, preserving
+    nested protocol config the generated model drops on a _map() round-trip
+    (e.g. HTTPCommunicationOptions.sharedClientSSLCertificate) and unmodeled keys
+    (folderFullPath). Regression guard for the channel update data-loss finding.
+    """
+    sdk = MagicMock()
+    full_doc = {
+        "componentId": "ch-1",
+        "componentName": "Ch1",
+        "communicationType": "HTTP",
+        "folderFullPath": "Home/Sub",
+        "PartnerArchiving": {"enableArchiving": False},
+        "PartnerCommunication": {
+            "HTTPCommunicationOptions": {
+                "HTTPSettings": {"url": "https://ex"},
+                "sharedClientSSLCertificate": {"clientauthEnabled": True},
+            }
+        },
+    }
+    update = sdk.shared_communication_channel_component.update_shared_communication_channel_component_json
+    update.return_value = full_doc
+
+    with patch.object(sr, "_get_channel_raw_json", return_value=dict(full_doc)):
+        out = sr._action_update_channel(sdk, "work", resource_id="ch-1", description="new desc")
+
+    assert out["_success"] is True, out
+    posted = update.call_args[0][1]
+    # Nested SSL-cert config and the unmodeled folderFullPath survive GET->mutate->POST.
+    http_opts = posted["PartnerCommunication"]["HTTPCommunicationOptions"]
+    assert http_opts["sharedClientSSLCertificate"]["clientauthEnabled"] is True
+    assert posted["folderFullPath"] == "Home/Sub"
 
 
 def test_channel_to_dict_accepts_typed_model():
