@@ -66,27 +66,33 @@ def _raw_web_server_request(sdk: Boomi, resource_id: str, method: str = "GET",
                             body: dict = None) -> dict:
     """Documented JSON transport for the SharedWebServer endpoint.
 
-    SharedWebServer supports JSON, and updates require POSTing the full modified
-    settings JSON. The SDK's typed ``update_shared_web_server`` takes a
-    ``SharedWebServer`` model whose nested settings (``SharedWebServerGeneral`` /
-    cloud-tenant / listener-port / authentication) have strict constructors, so
-    rebuilding them from a sparse cloud-atom GET is impractical and lossy. We
-    therefore GET/modify/POST the JSON directly here. This is a deliberate JSON
-    path for a JSON endpoint — not one of the stale raw-XML SDK bypasses; only the
-    XML-only generic /Component endpoint uses the SDK's raw-XML methods.
+    SharedWebServer is a JSON endpoint and an update is a GET -> modify -> POST of
+    the full settings. We deliberately keep raw JSON here rather than the SDK's
+    typed ``get_shared_web_server`` / ``update_shared_web_server`` because the SDK
+    model is LOSSY for cloud runtimes: ``SharedWebServerCloudTennantGeneral`` only
+    defines ``api_type``/``auth_type``/``base_url``/``listener_ports``, so real
+    cloud fields such as ``externalHost``, ``internalHost``, ``sslCertificate``
+    and ``maxNumberOfThreads`` land in the model's ``_kwargs`` and are dropped by
+    ``_map()`` on serialization. Routing get/update through the typed methods
+    would silently strip those (data loss on update); the raw JSON transport
+    preserves the full config. (``SharedWebServer._unmap`` itself is now tolerant
+    of sparse GETs — the old TypeError reason is gone — but the field-drop above
+    remains.) See ``tests/test_shared_web_server_transport.py``. This is a
+    deliberate JSON path for a JSON endpoint — not a stale raw-XML SDK bypass;
+    only the XML-only generic /Component endpoint uses the SDK's raw-XML methods.
     """
     svc = sdk.shared_web_server
     base = svc.base_url or Environment.DEFAULT.url
     url = f"{base}/SharedWebServer/{resource_id}"
 
-    ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])  # sdk-bypass-ok: SharedWebServer JSON transport (typed update needs strict nested models)
+    ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])  # sdk-bypass-ok: SharedWebServer JSON transport (SDK cloud-tenant model drops externalHost/maxNumberOfThreads)
     ser = ser.add_header("Accept", "application/json")
     serialized = ser.serialize().set_method(method)
 
     if body is not None:
         serialized = serialized.set_body(body, "application/json")
 
-    response, status, _ = svc.send_request(serialized)  # sdk-bypass-ok: SharedWebServer JSON transport
+    response, status, _ = svc.send_request(serialized)  # sdk-bypass-ok: SharedWebServer JSON transport (SDK cloud-tenant model is lossy)
     return response
 
 
