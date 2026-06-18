@@ -44,8 +44,6 @@ from .components._shared import (
     paginate_metadata,
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
-    component_family_json_request,
-    _json_error_message,
 )
 from .components.builders._preservation_policy import (
     OwnedPath,
@@ -3473,13 +3471,12 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
 
         try:
             if comp.type == "trading_partner":
-                # Existence check via JSON (SDK 3.0.0 typed get is XML-only).
-                _resp, _st = component_family_json_request(
-                    boomi_client.trading_partner_component,
-                    f"TradingPartnerComponent/{component_id}", "GET"
+                # Existence check via the SDK JSON method (SDK 3.0.1). A non-2xx
+                # (e.g. an unknown id) raises ApiError, caught by the handler
+                # below — same as the old JSON transport, which raised on >=400.
+                boomi_client.trading_partner_component.get_trading_partner_component_json(
+                    component_id
                 )
-                if _st and _st >= 400:
-                    raise Exception(_json_error_message(_resp))
             else:
                 component_get_xml(boomi_client, component_id)
             verification["components"][comp.key] = {"verified": True, "component_id": component_id}

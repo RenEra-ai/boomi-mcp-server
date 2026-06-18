@@ -20,11 +20,6 @@ from boomi.models import (
     ComponentMetadataSimpleExpressionProperty,
 )
 from boomi.net.transport.api_error import ApiError
-# Serializer/Environment are used ONLY for the documented JSON transport of the
-# B2B component-family endpoints (see component_family_json_request). The
-# XML-only generic /Component endpoint uses the SDK's raw-XML methods instead.
-from boomi.net.transport.serializer import Serializer
-from boomi.net.environment.environment import Environment
 
 
 # ============================================================================
@@ -440,58 +435,6 @@ def _update_component_xml(boomi_client: Boomi, component_id: str, xml: str) -> D
         'folder_name': root.attrib.get('folderName', ''),
         'version': root.attrib.get('version', ''),
     }
-
-
-def component_family_json_request(
-    service,
-    path: str,
-    method: str = "POST",
-    body: Any = None,
-    body_content_type: str = "application/json",
-):
-    """Send a JSON request to a B2B component-family endpoint; return ``(body, status)``.
-
-    The Boomi B2B component-family endpoints (OrganizationComponent,
-    TradingPartnerComponent, SharedCommunicationChannelComponent) accept JSON,
-    and the MCP keeps building/reading the SDK *typed models* for them. SDK 3.0.0,
-    however, made the typed ``create``/``get``/``update`` methods raw-**XML** only
-    (they ``require_raw_xml`` and reject models), so we serialize the model to
-    JSON and transport it here. This is a deliberate, documented JSON path for
-    endpoints that support JSON — NOT one of the stale raw-XML bypasses the SDK
-    3.0.0 cleanup removed; only the XML-only generic ``/Component`` endpoint uses
-    the SDK's raw-XML methods (see ``component_get_xml``).
-
-    ``body`` may be a typed model, dict, or str (e.g. a queryMore token); the SDK
-    transport serializes a model via its ``_map()``. Returns the parsed response
-    body (a dict for JSON) and the HTTP status; the caller hydrates a typed model
-    with ``Model._unmap`` and checks ``status`` for non-2xx.
-    """
-    base = service.base_url or Environment.DEFAULT.url
-    url = f"{base.rstrip('/')}/{path.lstrip('/')}"
-    ser = Serializer(url, [service.get_access_token(), service.get_basic_auth()])  # sdk-bypass-ok: component-family JSON transport (SDK 3.0.0 typed methods are XML-only)
-    ser = ser.add_header("Accept", "application/json")
-    serialized = ser.serialize().set_method(method)
-    if body is not None:
-        serialized = serialized.set_body(body, body_content_type)
-    response, status, _ = service.send_request(serialized)  # sdk-bypass-ok: component-family JSON transport
-    return response, status
-
-
-def _json_error_message(resp) -> str:
-    """Best-effort user-facing message from a JSON (or raw) error response body."""
-    if isinstance(resp, dict):
-        return resp.get("message") or resp.get("error") or str(resp)
-    if isinstance(resp, (bytes, bytearray)):
-        resp = resp.decode("utf-8", errors="replace")
-    if isinstance(resp, str):
-        try:
-            import json as _json
-            parsed = _json.loads(resp)
-            if isinstance(parsed, dict):
-                return parsed.get("message") or parsed.get("error") or resp
-        except Exception:
-            return resp.split("\n")[0][:300]
-    return str(resp)
 
 
 def _extract_api_error_msg(e) -> str:

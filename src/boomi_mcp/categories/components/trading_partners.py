@@ -45,8 +45,6 @@ from boomi.models import (
 from boomi.net.transport.api_error import ApiError
 from boomi_mcp.categories.components._shared import (
     _extract_api_error_msg,
-    component_family_json_request,
-    _json_error_message,
     component_get_xml,
 )
 from boomi_mcp.categories.components.organizations import (
@@ -249,19 +247,11 @@ def create_trading_partner(boomi_client, profile: str, request_data: Dict[str, A
                 "message": f"Invalid trading partner configuration: {str(ve)}"
             }
 
-        # Create trading partner. TradingPartnerComponent accepts JSON; SDK 3.0.0's
-        # typed create is XML-only, so transport the typed model as JSON and hydrate
-        # the response back into a model for the existing field readers.
-        resp, status = component_family_json_request(
-            boomi_client.trading_partner_component, "TradingPartnerComponent", "POST", body=tp_model
-        )
-        if status and status >= 400:
-            msg = _json_error_message(resp)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to create trading partner: {msg}"
-            }
+        # Create trading partner via the SDK JSON method (SDK 3.0.1): it transports
+        # the typed model as JSON and returns the parsed response (a non-2xx raises
+        # ApiError, handled below). Hydrate a dict response into a model so the
+        # existing field readers below are unchanged.
+        resp = boomi_client.trading_partner_component.create_trading_partner_component_json(tp_model)
         result = TradingPartnerComponent._unmap(resp) if isinstance(resp, dict) else resp
 
         # Extract component ID using the same pattern as SDK example
@@ -323,18 +313,10 @@ def get_trading_partner(boomi_client, profile: str, component_id: str) -> Dict[s
         Trading partner details or error
     """
     try:
-        # Get trading partner (JSON; SDK 3.0.0 typed get is XML-only). Hydrate into
-        # a model so the existing field readers below are unchanged.
-        resp, status = component_family_json_request(
-            boomi_client.trading_partner_component, f"TradingPartnerComponent/{component_id}", "GET"
-        )
-        if status and status >= 400:
-            msg = _json_error_message(resp)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to get trading partner: {msg}"
-            }
+        # Get trading partner via the SDK JSON method (SDK 3.0.1). Hydrate a dict
+        # response into a model so the existing field readers below are unchanged;
+        # a non-2xx raises ApiError (handled below).
+        resp = boomi_client.trading_partner_component.get_trading_partner_component_json(component_id)
         result = TradingPartnerComponent._unmap(resp) if isinstance(resp, dict) else resp
 
         # Extract using SDK model attributes
@@ -1187,12 +1169,13 @@ def list_trading_partners(boomi_client, profile: str, filters: Optional[Dict[str
                 # If still None, retrieve standard via GET (lightweight per-partner call)
                 if std_val is None and partner_id:
                     try:
-                        _resp, _st = component_family_json_request(
-                            boomi_client.trading_partner_component,
-                            f"TradingPartnerComponent/{partner_id}", "GET"
+                        _resp = boomi_client.trading_partner_component.get_trading_partner_component_json(
+                            partner_id
                         )
-                        if not (_st and _st >= 400) and isinstance(_resp, dict):
+                        if isinstance(_resp, dict):
                             std_val = _resp.get("standard") or std_val
+                        elif _resp is not None:
+                            std_val = getattr(_resp, "standard", None) or std_val
                     except Exception:
                         pass  # leave as None if GET fails
                 partners.append({
@@ -1315,13 +1298,16 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     "Also consider setting ftp_move_force_override='true' if target may already exist."
                 )
 
-        # Step 1: Get the existing trading partner (JSON; SDK 3.0.0 typed get is
-        # XML-only). Hydrate into a model so the merge logic below is unchanged.
-        resp, status = component_family_json_request(
-            boomi_client.trading_partner_component, f"TradingPartnerComponent/{component_id}", "GET"
-        )
-        if status and status >= 400:
-            msg = _json_error_message(resp)
+        # Step 1: Get the existing trading partner via the SDK JSON method (SDK
+        # 3.0.1). Hydrate a dict response into a model so the merge logic below is
+        # unchanged. A non-2xx (e.g. an unknown id) raises ApiError — surface the
+        # not-found envelope here rather than the generic update-failure handler.
+        try:
+            resp = boomi_client.trading_partner_component.get_trading_partner_component_json(
+                component_id
+            )
+        except ApiError as e:
+            msg = _extract_api_error_msg(e)
             return {
                 "_success": False,
                 "error": f"Component not found: {msg}",
@@ -2763,19 +2749,12 @@ def update_trading_partner(boomi_client, profile: str, component_id: str, update
                     from boomi_mcp.models.trading_partner_builders import PartnerCommunicationDict
                     existing_tp.partner_communication = PartnerCommunicationDict(preserved)
 
-        # Step 3: Update the trading partner (JSON; SDK 3.0.0 typed update is
-        # XML-only). The typed model serializes to JSON via its _map().
-        resp2, status2 = component_family_json_request(
-            boomi_client.trading_partner_component, f"TradingPartnerComponent/{component_id}",
-            "POST", body=existing_tp
+        # Step 3: Update the trading partner via the SDK JSON method (SDK 3.0.1).
+        # The typed model is transported as JSON via its _map(); a non-2xx raises
+        # ApiError (handled below).
+        boomi_client.trading_partner_component.update_trading_partner_component_json(
+            component_id, existing_tp
         )
-        if status2 and status2 >= 400:
-            msg = _json_error_message(resp2)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to update trading partner: {msg}"
-            }
 
         return {
             "_success": True,
@@ -2854,17 +2833,9 @@ def analyze_trading_partner_usage(boomi_client, profile: str, component_id: str)
         Usage analysis including processes, connections, and dependencies
     """
     try:
-        # Get the trading partner details (JSON; SDK 3.0.0 typed get is XML-only).
-        resp, status = component_family_json_request(
-            boomi_client.trading_partner_component, f"TradingPartnerComponent/{component_id}", "GET"
-        )
-        if status and status >= 400:
-            msg = _json_error_message(resp)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to analyze trading partner usage: {msg}"
-            }
+        # Get the trading partner details via the SDK JSON method (SDK 3.0.1); a
+        # non-2xx raises ApiError (handled below).
+        resp = boomi_client.trading_partner_component.get_trading_partner_component_json(component_id)
         partner = TradingPartnerComponent._unmap(resp) if isinstance(resp, dict) else resp
         partner_name = getattr(partner, 'name', None) or getattr(partner, 'component_name', 'Unknown')
 

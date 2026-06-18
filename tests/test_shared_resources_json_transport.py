@@ -1,44 +1,64 @@
-"""Shared communication channel create/get/update keep JSON under SDK 3.0.0.
+"""Shared communication channel create/get/update use the SDK 3.0.1 JSON methods.
 
-The SharedCommunicationChannelComponent endpoint accepts JSON; SDK 3.0.0's typed
-create/get/update are XML-only, so the MCP keeps building the typed model and
-transports JSON via ``component_family_json_request``. ``_channel_to_dict`` now
-accepts both JSON dicts (transport path) and typed models (query path).
+SDK 3.0.1 added first-class JSON create/get/update for
+SharedCommunicationChannelComponent, so the MCP calls those directly instead of
+hand-rolling a JSON transport. Non-2xx errors now propagate as ApiError to the
+action router (``manage_shared_resources_action``). ``_channel_to_dict`` accepts
+both JSON dicts and typed models; the update merge normalizes via
+``_channel_to_wire_dict``.
 """
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from boomi.models import SharedCommunicationChannelComponent
+from boomi.net.transport.api_error import ApiError
 import boomi_mcp.categories.shared_resources as sr
 
 
+def _api_error(status, message):
+    return ApiError(
+        message=f"{status} error",
+        status=status,
+        response=SimpleNamespace(body={"message": message}),
+    )
+
+
 def test_create_channel_transports_model_as_json():
-    calls = {}
+    sdk = MagicMock()
+    create = sdk.shared_communication_channel_component.create_shared_communication_channel_component_json
+    create.return_value = {"componentId": "ch-1", "componentName": "Ch1", "communicationType": "HTTP"}
 
-    def fake(service, path, method="POST", body=None, body_content_type="application/json"):
-        calls.update(path=path, method=method, body=body)
-        return {"componentId": "ch-1", "componentName": "Ch1", "communicationType": "HTTP"}, 200
+    out = sr._action_create_channel(sdk, "work", name="Ch1", channel_type="HTTP")
 
-    with patch.object(sr, "component_family_json_request", fake):
-        out = sr._action_create_channel(MagicMock(), "work", name="Ch1", channel_type="HTTP")
     assert out["_success"] is True, out
-    assert calls["path"] == "SharedCommunicationChannelComponent"
-    assert calls["method"] == "POST"
-    assert isinstance(calls["body"], SharedCommunicationChannelComponent)
+    create.assert_called_once()
+    assert isinstance(create.call_args[0][0], SharedCommunicationChannelComponent)
     assert out["channel"]["id"] == "ch-1"
     assert out["channel"]["type"] == "HTTP"
 
 
-def test_create_channel_error_status():
-    with patch.object(sr, "component_family_json_request", lambda *a, **k: ({"message": "bad"}, 400)):
-        out = sr._action_create_channel(MagicMock(), "work", name="Ch1", channel_type="HTTP")
+def test_create_channel_error_routes_through_router():
+    sdk = MagicMock()
+    create = sdk.shared_communication_channel_component.create_shared_communication_channel_component_json
+    create.side_effect = _api_error(400, "bad")
+
+    out = sr.manage_shared_resources_action(
+        sdk, "work", "create_channel", config_data={"name": "Ch1", "channel_type": "HTTP"}
+    )
+
     assert out["_success"] is False
     assert "bad" in out["error"]
+    assert out["exception_type"] == "ApiError"
 
 
 def test_get_channel_reads_json_dict():
-    resp = {"componentId": "ch-1", "componentName": "Ch1", "communicationType": "FTP", "folderName": "Home"}
-    with patch.object(sr, "component_family_json_request", lambda *a, **k: (resp, 200)):
-        out = sr._action_get_channel(MagicMock(), "work", resource_id="ch-1")
+    sdk = MagicMock()
+    sdk.shared_communication_channel_component.get_shared_communication_channel_component_json.return_value = {
+        "componentId": "ch-1", "componentName": "Ch1", "communicationType": "FTP", "folderName": "Home",
+    }
+
+    out = sr._action_get_channel(sdk, "work", resource_id="ch-1")
+
     assert out["_success"] is True
     assert out["channel"]["id"] == "ch-1"
     assert out["channel"]["type"] == "FTP"
@@ -46,18 +66,21 @@ def test_get_channel_reads_json_dict():
 
 
 def test_update_channel_get_then_post():
-    seq = []
+    sdk = MagicMock()
     resp = {"componentId": "ch-1", "componentName": "Ch1", "communicationType": "HTTP",
             "PartnerCommunication": {}, "PartnerArchiving": {}}
+    sdk.shared_communication_channel_component.get_shared_communication_channel_component_json.return_value = resp
+    update = sdk.shared_communication_channel_component.update_shared_communication_channel_component_json
+    update.return_value = resp
 
-    def fake(service, path, method="POST", body=None, body_content_type="application/json"):
-        seq.append(method)
-        return resp, 200
+    out = sr._action_update_channel(sdk, "work", resource_id="ch-1", name="Ch1b")
 
-    with patch.object(sr, "component_family_json_request", fake):
-        out = sr._action_update_channel(MagicMock(), "work", resource_id="ch-1", name="Ch1b")
     assert out["_success"] is True, out
-    assert seq[0] == "GET" and seq[-1] == "POST"
+    sdk.shared_communication_channel_component.get_shared_communication_channel_component_json.assert_called_once()
+    update.assert_called_once()
+    # The merged wire dict is POSTed back with the rename applied.
+    posted = update.call_args[0][1]
+    assert posted["componentName"] == "Ch1b"
 
 
 def test_channel_to_dict_accepts_typed_model():

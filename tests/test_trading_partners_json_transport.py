@@ -1,16 +1,33 @@
-"""Trading partner create/get/update keep JSON under SDK 3.0.0.
+"""Trading partner create/get/update use the SDK 3.0.1 JSON methods.
 
-TradingPartnerComponent accepts JSON; SDK 3.0.0's typed create/get/update are
-XML-only, so the MCP keeps building/reading the typed model and transports JSON
-via ``component_family_json_request``. These verify a typed *model* (never raw
-XML) is transported, responses hydrate back into a model, the dead
-``bulk_create_trading_partners`` wrapper is gone, and the parent-component lookup
-uses the SDK-backed ``component_get_xml`` helper.
+SDK 3.0.1 added first-class JSON create/get/update for TradingPartnerComponent,
+so the MCP calls those directly instead of hand-rolling a JSON transport. These
+verify a typed *model* is passed to create, dict responses hydrate back into a
+model (TradingPartnerComponent._unmap is root-tolerant), a non-2xx ApiError maps
+to the failure envelope, the dead ``bulk_create_trading_partners`` wrapper is
+gone, and the parent-component lookup uses the SDK-backed ``component_get_xml``.
 """
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from boomi.models import TradingPartnerComponent
+from boomi.net.transport.api_error import ApiError
 import boomi_mcp.categories.components.trading_partners as tp
+
+_TP_JSON = {
+    "componentId": "tp-1",
+    "componentName": "TP1",
+    "standard": "x12",
+    "classification": "tradingpartner",
+}
+
+
+def _api_error(status, message):
+    return ApiError(
+        message=f"{status} error",
+        status=status,
+        response=SimpleNamespace(body={"message": message}),
+    )
 
 
 def test_bulk_create_wrapper_is_removed():
@@ -18,52 +35,60 @@ def test_bulk_create_wrapper_is_removed():
 
 
 def test_create_transports_model_as_json():
-    calls = {}
+    client = MagicMock()
+    client.trading_partner_component.create_trading_partner_component_json.return_value = dict(_TP_JSON)
 
-    def fake(service, path, method="POST", body=None, body_content_type="application/json"):
-        calls.update(path=path, method=method, body=body)
-        return {"componentId": "tp-1", "componentName": "TP1", "standard": "x12",
-                "classification": "tradingpartner"}, 200
+    out = tp.create_trading_partner(client, "work", {"component_name": "TP1", "standard": "x12"})
 
-    with patch.object(tp, "component_family_json_request", fake):
-        out = tp.create_trading_partner(MagicMock(), "work", {"component_name": "TP1", "standard": "x12"})
     assert out["_success"] is True, out
-    assert calls["path"] == "TradingPartnerComponent"
-    assert calls["method"] == "POST"
-    # The typed model is transported — never raw XML / a plain dict.
-    assert isinstance(calls["body"], TradingPartnerComponent)
     assert out["trading_partner"]["component_id"] == "tp-1"
+    create = client.trading_partner_component.create_trading_partner_component_json
+    create.assert_called_once()
+    # The typed model is transported — never raw XML / a plain dict.
+    assert isinstance(create.call_args[0][0], TradingPartnerComponent)
 
 
-def test_create_error_status_maps_to_failure():
-    with patch.object(tp, "component_family_json_request", lambda *a, **k: ({"message": "no B2B"}, 400)):
-        out = tp.create_trading_partner(MagicMock(), "work", {"component_name": "TP1", "standard": "x12"})
+def test_create_error_maps_to_failure():
+    client = MagicMock()
+    client.trading_partner_component.create_trading_partner_component_json.side_effect = _api_error(400, "no B2B")
+
+    out = tp.create_trading_partner(client, "work", {"component_name": "TP1", "standard": "x12"})
+
     assert out["_success"] is False
     assert "no B2B" in out["error"]
 
 
 def test_get_hydrates_and_returns_details():
-    resp = {"componentId": "tp-1", "componentName": "TP1", "standard": "x12",
-            "classification": "tradingpartner"}
-    with patch.object(tp, "component_family_json_request", lambda *a, **k: (resp, 200)):
-        out = tp.get_trading_partner(MagicMock(), "work", "tp-1")
+    client = MagicMock()
+    client.trading_partner_component.get_trading_partner_component_json.return_value = dict(_TP_JSON)
+
+    out = tp.get_trading_partner(client, "work", "tp-1")
+
     assert out["_success"] is True, out
 
 
 def test_update_does_get_then_post():
-    seq = []
-    resp = {"componentId": "tp-1", "componentName": "TP1", "standard": "x12",
-            "classification": "tradingpartner"}
+    client = MagicMock()
+    client.trading_partner_component.get_trading_partner_component_json.return_value = dict(_TP_JSON)
+    client.trading_partner_component.update_trading_partner_component_json.return_value = dict(_TP_JSON)
 
-    def fake(service, path, method="POST", body=None, body_content_type="application/json"):
-        seq.append(method)
-        return resp, 200
+    out = tp.update_trading_partner(client, "work", "tp-1", {"component_name": "TP1b"})
 
-    with patch.object(tp, "component_family_json_request", fake):
-        out = tp.update_trading_partner(MagicMock(), "work", "tp-1", {"component_name": "TP1b"})
     assert out["_success"] is True, out
-    assert seq[0] == "GET" and seq[-1] == "POST"
+    client.trading_partner_component.get_trading_partner_component_json.assert_called_once()
+    client.trading_partner_component.update_trading_partner_component_json.assert_called_once()
     assert "component_name" in out["trading_partner"]["updated_fields"]
+
+
+def test_update_unknown_id_returns_not_found_envelope():
+    client = MagicMock()
+    client.trading_partner_component.get_trading_partner_component_json.side_effect = _api_error(404, "nope")
+
+    out = tp.update_trading_partner(client, "work", "missing", {"component_name": "X"})
+
+    assert out["_success"] is False
+    assert "Component not found" in out["error"]
+    client.trading_partner_component.update_trading_partner_component_json.assert_not_called()
 
 
 def test_analyze_uses_component_get_xml_for_parent():
@@ -79,13 +104,13 @@ def test_analyze_uses_component_get_xml_for_parent():
 
     client = MagicMock()
     client.component_reference.query_component_reference.return_value = query_result
+    client.trading_partner_component.get_trading_partner_component_json.return_value = {
+        "componentId": "tp-1", "componentName": "TP1",
+    }
 
-    def fake_json(service, path, method="POST", body=None, body_content_type="application/json"):
-        return {"componentId": "tp-1", "componentName": "TP1"}, 200
-
-    with patch.object(tp, "component_family_json_request", fake_json), \
-         patch.object(tp, "component_get_xml", return_value={"name": "ParentProc", "type": "process"}) as cgx:
+    with patch.object(tp, "component_get_xml", return_value={"name": "ParentProc", "type": "process"}) as cgx:
         out = tp.analyze_trading_partner_usage(client, "work", "tp-1")
+
     assert out["_success"] is True, out
     cgx.assert_called_once()
     refs = out["trading_partner"]["referenced_by"] if "referenced_by" in out.get("trading_partner", {}) else out.get("referenced_by")

@@ -18,17 +18,7 @@ from typing import Dict, Any, Optional, List
 
 from boomi import Boomi
 from boomi.net.transport.api_error import ApiError
-# Serializer/Environment are used only by the documented SharedWebServer JSON
-# transport (_raw_web_server_request); component-family create/get/update use the
-# shared component_family_json_request helper.
-from boomi.net.transport.serializer import Serializer
-from boomi.net.environment import Environment
-from boomi_mcp.categories.components._shared import (
-    component_family_json_request,
-    _json_error_message,
-)
 from boomi.models import (
-    SharedWebServer,
     SharedCommunicationChannelComponent,
     SharedCommunicationChannelComponentQueryConfig,
     SharedCommunicationChannelComponentSimpleExpression,
@@ -61,40 +51,6 @@ _CHANNEL_TYPE_COMM_OPTIONS = {
 # ============================================================================
 # Helpers
 # ============================================================================
-
-def _raw_web_server_request(sdk: Boomi, resource_id: str, method: str = "GET",
-                            body: dict = None) -> dict:
-    """Documented JSON transport for the SharedWebServer endpoint.
-
-    SharedWebServer is a JSON endpoint and an update is a GET -> modify -> POST of
-    the full settings. We deliberately keep raw JSON here rather than the SDK's
-    typed ``get_shared_web_server`` / ``update_shared_web_server`` because the SDK
-    model is LOSSY for cloud runtimes: ``SharedWebServerCloudTennantGeneral`` only
-    defines ``api_type``/``auth_type``/``base_url``/``listener_ports``, so real
-    cloud fields such as ``externalHost``, ``internalHost``, ``sslCertificate``
-    and ``maxNumberOfThreads`` land in the model's ``_kwargs`` and are dropped by
-    ``_map()`` on serialization. Routing get/update through the typed methods
-    would silently strip those (data loss on update); the raw JSON transport
-    preserves the full config. (``SharedWebServer._unmap`` itself is now tolerant
-    of sparse GETs — the old TypeError reason is gone — but the field-drop above
-    remains.) See ``tests/test_shared_web_server_transport.py``. This is a
-    deliberate JSON path for a JSON endpoint — not a stale raw-XML SDK bypass;
-    only the XML-only generic /Component endpoint uses the SDK's raw-XML methods.
-    """
-    svc = sdk.shared_web_server
-    base = svc.base_url or Environment.DEFAULT.url
-    url = f"{base}/SharedWebServer/{resource_id}"
-
-    ser = Serializer(url, [svc.get_access_token(), svc.get_basic_auth()])  # sdk-bypass-ok: SharedWebServer JSON transport (SDK cloud-tenant model drops externalHost/maxNumberOfThreads)
-    ser = ser.add_header("Accept", "application/json")
-    serialized = ser.serialize().set_method(method)
-
-    if body is not None:
-        serialized = serialized.set_body(body, "application/json")
-
-    response, status, _ = svc.send_request(serialized)  # sdk-bypass-ok: SharedWebServer JSON transport (SDK cloud-tenant model is lossy)
-    return response
-
 
 def _web_server_to_dict(data: dict) -> Dict[str, Any]:
     """Convert raw SharedWebServer JSON response to a clean dict.
@@ -204,6 +160,31 @@ def _channel_to_dict(channel) -> Dict[str, Any]:
     return result
 
 
+def _channel_to_wire_dict(value) -> Dict[str, Any]:
+    """Normalize a SharedCommunicationChannelComponent JSON response to a wire dict.
+
+    ``get_shared_communication_channel_component_json`` (SDK 3.0.1) returns
+    ``Union[model, dict, str]``. The update merge mutates camelCase wire keys in
+    place, so map a hydrated model back through ``_map()``, pass a raw dict through
+    unchanged, and parse a JSON string; anything else becomes ``{}``.
+    """
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "_map"):
+        mapped = value._map()
+        return mapped if isinstance(mapped, dict) else {}
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        try:
+            import json as _json
+            parsed = _json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 def _query_all_channels(sdk: Boomi, expression=None) -> List[Dict[str, Any]]:
     """Execute channel query with pagination, return list of dicts."""
     if expression:
@@ -269,7 +250,7 @@ def _action_list_web_servers(sdk: Boomi, profile: str, **kwargs) -> Dict[str, An
     if not resource_id:
         return {"_success": False, "error": "resource_id (atom_id) is required for 'list_web_servers' action"}
 
-    data = _raw_web_server_request(sdk, resource_id)
+    data = sdk.shared_web_server.get_shared_web_server_json(resource_id)
     return {
         "_success": True,
         "web_server": _web_server_to_dict(data),
@@ -308,8 +289,11 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
                      "Port fields: port, ssl, external_port, external_ssl, auth_type, enable_port",
         }
 
-    # GET JSON, modify, POST back via the documented SharedWebServer JSON transport
-    current = _raw_web_server_request(sdk, resource_id)
+    # GET JSON, modify, POST the full document back via the SDK lossless JSON
+    # methods (SDK 3.0.1). The dict body is sent as-is, preserving cloud-runtime
+    # fields (externalHost / internalHost / sslCertificate / maxNumberOfThreads)
+    # that the typed SharedWebServer model would drop on a round-trip.
+    current = sdk.shared_web_server.get_shared_web_server_json(resource_id)
 
     # Cloud atoms use cloudTennantGeneral, local atoms use generalSettings
     gs = current.get("generalSettings") or current.get("cloudTennantGeneral")
@@ -345,7 +329,7 @@ def _action_update_web_server(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
         for p in targets:
             p.update(port_updates)
 
-    updated = _raw_web_server_request(sdk, resource_id, method="POST", body=current)
+    updated = sdk.shared_web_server.update_shared_web_server_json(resource_id, current)
 
     # Collect user-facing field names for the response
     updated_names = [k for k in kwargs if k in {*GENERAL_MAP, *PORT_MAP}]
@@ -385,14 +369,12 @@ def _action_get_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]:
     if not resource_id:
         return {"_success": False, "error": "resource_id (channel_id) is required for 'get_channel' action"}
 
-    # The SharedCommunicationChannelComponent endpoint accepts JSON; SDK 3.0.0's
-    # typed get is XML-only, so transport JSON and read the response dict.
-    resp, status = component_family_json_request(
-        sdk.shared_communication_channel_component,
-        f"SharedCommunicationChannelComponent/{resource_id}", "GET"
+    # Get the channel via the SDK JSON method (SDK 3.0.1). A non-2xx raises
+    # ApiError (handled by the action router); _channel_to_dict accepts either a
+    # typed model or a raw dict.
+    resp = sdk.shared_communication_channel_component.get_shared_communication_channel_component_json(
+        resource_id
     )
-    if status and status >= 400:
-        return {"_success": False, "error": _json_error_message(resp)}
     return {
         "_success": True,
         "channel": _channel_to_dict(resp),
@@ -437,13 +419,13 @@ def _action_create_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
         partner_communication=pc,
         **channel_kwargs,
     )
-    # Transport the typed model as JSON (the SDK's typed create is XML-only).
-    resp, status = component_family_json_request(
-        sdk.shared_communication_channel_component,
-        "SharedCommunicationChannelComponent", "POST", body=channel
+    # Create the channel via the SDK JSON method (SDK 3.0.1): it transports the
+    # typed model as JSON and returns the parsed response (a non-2xx raises
+    # ApiError, handled by the action router). _channel_to_dict accepts either a
+    # typed model or a raw dict.
+    resp = sdk.shared_communication_channel_component.create_shared_communication_channel_component_json(
+        channel
     )
-    if status and status >= 400:
-        return {"_success": False, "error": _json_error_message(resp)}
 
     return {
         "_success": True,
@@ -461,15 +443,14 @@ def _action_update_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
     if not resource_id:
         return {"_success": False, "error": "resource_id (channel_id) is required for 'update_channel' action"}
 
-    # Fetch existing channel (JSON) to preserve its full config; merge on the
-    # dict and POST it back (the SDK's typed get/update are XML-only).
-    resp, status = component_family_json_request(
-        sdk.shared_communication_channel_component,
-        f"SharedCommunicationChannelComponent/{resource_id}", "GET"
+    # Fetch existing channel (JSON) to preserve its full config; merge on the wire
+    # dict and POST it back (SDK 3.0.1). A non-2xx raises ApiError (handled by the
+    # action router). Normalize a hydrated model back to the wire dict the merge
+    # below mutates in place.
+    resp = sdk.shared_communication_channel_component.get_shared_communication_channel_component_json(
+        resource_id
     )
-    if status and status >= 400:
-        return {"_success": False, "error": _json_error_message(resp)}
-    existing = resp if isinstance(resp, dict) else {}
+    existing = _channel_to_wire_dict(resp)
 
     # Normalize channel_type / communication_type the same way as create
     new_type = kwargs.get("channel_type") or kwargs.get("communication_type")
@@ -501,12 +482,9 @@ def _action_update_channel(sdk: Boomi, profile: str, **kwargs) -> Dict[str, Any]
         if val is not None:
             existing[wire] = val
 
-    resp2, status2 = component_family_json_request(
-        sdk.shared_communication_channel_component,
-        f"SharedCommunicationChannelComponent/{resource_id}", "POST", body=existing
+    resp2 = sdk.shared_communication_channel_component.update_shared_communication_channel_component_json(
+        resource_id, existing
     )
-    if status2 and status2 >= 400:
-        return {"_success": False, "error": _json_error_message(resp2)}
     return {
         "_success": True,
         "channel": _channel_to_dict(resp2),

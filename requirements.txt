@@ -8,4 +8,4 @@ requests>=2.31.0
 itsdangerous>=2.1.0
 py-key-value-aio[mongodb]>=0.4.4,<0.5.0
 motor>=3.3,<4.0
-boomi>=3.0.0
+boomi>=3.0.1

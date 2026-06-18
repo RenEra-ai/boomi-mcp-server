@@ -24,10 +24,36 @@ from boomi.models import (
 from boomi.net.transport.api_error import ApiError
 from boomi_mcp.categories.components._shared import (
     _extract_api_error_msg,
-    component_family_json_request,
-    _json_error_message,
 )
 import json as json_mod
+
+
+def _json_to_wire_dict(value) -> Dict[str, Any]:
+    """Normalize an SDK JSON response to a camelCase wire ``dict``.
+
+    The SDK 3.0.1 ``*_json`` and typed query methods return
+    ``Union[model, dict, str]`` via ``_deserialize_or_raw``. Map a hydrated model
+    back through ``_map()``, pass a raw dict through, and parse a JSON string;
+    anything else (e.g. an empty/undecodable 2xx body) becomes ``{}``. Used for
+    both single-component responses and query/queryMore responses (whose ``_map()``
+    yields ``{"result": [...], "queryToken": ...}``). Organization responses are
+    read as dicts because the strict ``OrganizationContactInfo`` constructor
+    rejects sparse payloads, so the SDK falls back to the raw dict here.
+    """
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "_map"):
+        mapped = value._map()
+        return mapped if isinstance(mapped, dict) else {}
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        try:
+            parsed = json_mod.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
 def build_organization_contact_info(**kwargs) -> OrganizationContactInfo:
@@ -105,22 +131,13 @@ def create_organization(boomi_client, profile: str, request_data: Dict[str, Any]
             folder_name=request_data.get("folder_name", "Home")
         )
 
-        # Create organization. The OrganizationComponent endpoint accepts JSON;
-        # SDK 3.0.0's typed create is XML-only, so transport the typed model as
-        # JSON and hydrate the response back into a model for field access.
-        resp, status = component_family_json_request(
-            boomi_client.organization_component, "OrganizationComponent", "POST", body=org_model
-        )
-        if status and status >= 400:
-            msg = _json_error_message(resp)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to create organization: {msg}"
-            }
-        # Read the JSON response as a dict (the strict typed model rejects sparse
-        # OrganizationContactInfo, so we never re-hydrate it).
-        result = resp if isinstance(resp, dict) else {}
+        # Create organization via the SDK JSON method (SDK 3.0.1): it transports
+        # the typed model as JSON and returns the parsed response (a non-2xx raises
+        # ApiError, handled below). Read the response as a wire dict — the strict
+        # typed OrganizationContactInfo rejects sparse payloads, so we never
+        # re-hydrate it.
+        resp = boomi_client.organization_component.create_organization_component_json(org_model)
+        result = _json_to_wire_dict(resp)
         component_id = result.get("componentId") or result.get("id")
 
         return {
@@ -160,19 +177,11 @@ def get_organization(boomi_client, profile: str, organization_id: str) -> Dict[s
         Organization details or error
     """
     try:
-        resp, status = component_family_json_request(
-            boomi_client.organization_component, f"OrganizationComponent/{organization_id}", "GET"
-        )
-        if status and status >= 400:
-            msg = _json_error_message(resp)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to get organization: {msg}"
-            }
-        # Read the JSON response as a dict (avoids the strict typed model, which
-        # rejects sparse OrganizationContactInfo payloads).
-        result = resp if isinstance(resp, dict) else {}
+        resp = boomi_client.organization_component.get_organization_component_json(organization_id)
+        # Read the JSON response as a wire dict (avoids the strict typed model,
+        # which rejects sparse OrganizationContactInfo payloads). A non-2xx raises
+        # ApiError (handled below).
+        result = _json_to_wire_dict(resp)
 
         # Extract contact info with normalized contact_* field names (matches input config format)
         org_data = {
@@ -241,32 +250,20 @@ def list_organizations(boomi_client, profile: str, filters: Optional[Dict[str, A
         if filters and "name_pattern" in filters:
             name_pattern = filters["name_pattern"]
 
-        query_body = {
-            "QueryFilter": {
-                "expression": {
-                    "operator": "LIKE",
-                    "property": "name",
-                    "argument": [name_pattern]
-                }
-            }
-        }
-
-        # OrganizationComponent query accepts JSON; transport it via the shared
-        # component-family JSON helper (SDK 3.0.0's typed query path is fine too,
-        # but keeping JSON preserves this list's sparse-tolerant field handling).
-        response, status = component_family_json_request(
-            boomi_client.organization_component, "OrganizationComponent/query", "POST", body=query_body
+        # OrganizationComponent query via the SDK typed query (SDK 3.0.1). The
+        # response is Union[QueryResponse, dict, str]; normalize it to the wire
+        # dict ({"result": [...], "queryToken": ...}) the ingest/pagination logic
+        # below consumes. A non-2xx raises ApiError (handled below).
+        expression = OrganizationComponentSimpleExpression(
+            operator=OrganizationComponentSimpleExpressionOperator.LIKE,
+            property=OrganizationComponentSimpleExpressionProperty.NAME,
+            argument=[name_pattern],
         )
-        if status and status >= 400:
-            msg = _json_error_message(response)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to list organizations: {msg}"
-            }
-        if isinstance(response, (bytes, bytearray)):
-            response = response.decode("utf-8")
-        data = json_mod.loads(response) if isinstance(response, str) else response
+        query_filter = OrganizationComponentQueryConfigQueryFilter(expression=expression)
+        query_config = OrganizationComponentQueryConfig(query_filter=query_filter)
+        data = _json_to_wire_dict(
+            boomi_client.organization_component.query_organization_component(query_config)
+        )
 
         organizations = []
         seen = {}  # component_id -> index in organizations list
@@ -299,13 +296,9 @@ def list_organizations(boomi_client, profile: str, filters: Optional[Dict[str, A
         # Handle pagination
         while data.get("queryToken"):
             token = data["queryToken"]
-            response2, _ = component_family_json_request(
-                boomi_client.organization_component, "OrganizationComponent/queryMore",
-                "POST", body=token, body_content_type="text/plain"
+            data = _json_to_wire_dict(
+                boomi_client.organization_component.query_more_organization_component(token)
             )
-            if isinstance(response2, (bytes, bytearray)):
-                response2 = response2.decode("utf-8")
-            data = json_mod.loads(response2) if isinstance(response2, str) else response2
             if "result" in data:
                 _ingest(data["result"])
 
@@ -352,20 +345,11 @@ def update_organization(boomi_client, profile: str, organization_id: str, update
         Updated organization details or error
     """
     try:
-        # Get existing organization (JSON; hydrate into a typed model to merge).
-        resp, status = component_family_json_request(
-            boomi_client.organization_component, f"OrganizationComponent/{organization_id}", "GET"
-        )
-        if status and status >= 400:
-            msg = _json_error_message(resp)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to update organization: {msg}"
-            }
-        # Work on the JSON dict directly (avoids the strict typed model) and POST
-        # it back, preserving any fields the MCP doesn't own.
-        existing_org = resp if isinstance(resp, dict) else {}
+        # Get existing organization JSON; work on the wire dict directly (avoids
+        # the strict typed model) and POST it back, preserving any fields the MCP
+        # doesn't own. A non-2xx raises ApiError (handled below).
+        resp = boomi_client.organization_component.get_organization_component_json(organization_id)
+        existing_org = _json_to_wire_dict(resp)
 
         # Update component name / folder if provided (wire keys are camelCase)
         if "component_name" in updates:
@@ -401,18 +385,11 @@ def update_organization(boomi_client, profile: str, organization_id: str, update
                 contact_params[_contact_wire_keys[k]] = v
         existing_org["OrganizationContactInfo"] = contact_params
 
-        # Update organization (JSON POST to the dedicated endpoint).
-        resp2, status2 = component_family_json_request(
-            boomi_client.organization_component, f"OrganizationComponent/{organization_id}",
-            "POST", body=existing_org
+        # Update organization via the SDK JSON method (full-document POST). The
+        # dict body is sent as-is; a non-2xx raises ApiError (handled below).
+        boomi_client.organization_component.update_organization_component_json(
+            organization_id, existing_org
         )
-        if status2 and status2 >= 400:
-            msg = _json_error_message(resp2)
-            return {
-                "_success": False,
-                "error": msg,
-                "message": f"Failed to update organization: {msg}"
-            }
 
         return {
             "_success": True,

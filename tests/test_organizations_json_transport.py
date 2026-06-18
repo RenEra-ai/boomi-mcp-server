@@ -1,14 +1,17 @@
-"""Organization create/get/list/update keep JSON under SDK 3.0.0.
+"""Organization create/get/list/update use the SDK 3.0.1 JSON methods.
 
-The OrganizationComponent endpoint accepts JSON; SDK 3.0.0's typed create/get/
-update are XML-only, so the MCP keeps building/reading the typed model and
-transports JSON via ``component_family_json_request``. These verify a typed
-*model* (never raw XML) is transported, the JSON response is hydrated back into
-a model, and the public response shapes + error handling are preserved.
+SDK 3.0.1 added first-class JSON create/get/update (and the typed query already
+existed) for OrganizationComponent, so the MCP now calls those directly instead
+of hand-rolling a JSON transport. These verify a typed *model* is passed to
+create, responses are read as the wire dict the readers expect (org stays
+dict-normalized — the strict OrganizationContactInfo rejects sparse payloads), a
+non-2xx ApiError maps to the failure envelope, and update does GET-then-POST.
 """
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from boomi.models import OrganizationComponent
+from boomi.net.transport.api_error import ApiError
 import boomi_mcp.categories.components.organizations as orgs
 
 _ORG_JSON = {
@@ -23,28 +26,37 @@ _ORG_JSON = {
 }
 
 
+def _api_error(status, message):
+    """Build an ApiError whose JSON body carries a user-facing message."""
+    return ApiError(
+        message=f"{status} error",
+        status=status,
+        response=SimpleNamespace(body={"message": message}),
+    )
+
+
 def test_create_organization_transports_model_as_json():
-    calls = {}
+    client = MagicMock()
+    client.organization_component.create_organization_component_json.return_value = dict(_ORG_JSON)
 
-    def fake(service, path, method="POST", body=None, body_content_type="application/json"):
-        calls.update(path=path, method=method, body=body)
-        return dict(_ORG_JSON), 200
+    out = orgs.create_organization(
+        client, "work", {"component_name": "Acme", "contact_email": "jane@acme.com"}
+    )
 
-    with patch.object(orgs, "component_family_json_request", fake):
-        out = orgs.create_organization(
-            MagicMock(), "work", {"component_name": "Acme", "contact_email": "jane@acme.com"}
-        )
     assert out["_success"] is True
     assert out["organization"]["component_id"] == "org-1"
-    assert calls["path"] == "OrganizationComponent"
-    assert calls["method"] == "POST"
+    create = client.organization_component.create_organization_component_json
+    create.assert_called_once()
     # The typed model is transported — NOT raw XML and NOT a plain dict.
-    assert isinstance(calls["body"], OrganizationComponent)
+    assert isinstance(create.call_args[0][0], OrganizationComponent)
 
 
 def test_get_organization_parses_json_into_fields():
-    with patch.object(orgs, "component_family_json_request", lambda *a, **k: (dict(_ORG_JSON), 200)):
-        out = orgs.get_organization(MagicMock(), "work", "org-1")
+    client = MagicMock()
+    client.organization_component.get_organization_component_json.return_value = dict(_ORG_JSON)
+
+    out = orgs.get_organization(client, "work", "org-1")
+
     assert out["_success"] is True
     o = out["organization"]
     assert o["component_id"] == "org-1"
@@ -52,35 +64,42 @@ def test_get_organization_parses_json_into_fields():
     assert o["contact_email"] == "jane@acme.com"
 
 
-def test_get_organization_error_status_maps_to_failure():
-    with patch.object(orgs, "component_family_json_request", lambda *a, **k: ({"message": "not found"}, 404)):
-        out = orgs.get_organization(MagicMock(), "work", "missing")
+def test_get_organization_error_maps_to_failure():
+    client = MagicMock()
+    client.organization_component.get_organization_component_json.side_effect = _api_error(404, "not found")
+
+    out = orgs.get_organization(client, "work", "missing")
+
     assert out["_success"] is False
     assert "not found" in out["error"]
 
 
-def test_list_organizations_json():
-    def fake(service, path, method="POST", body=None, body_content_type="application/json"):
-        if path.endswith("query"):
-            return {"result": [{"componentId": "org-1", "componentName": "Acme", "folderName": "Home"}]}, 200
-        return {}, 200
+def test_list_organizations_via_typed_query():
+    client = MagicMock()
+    client.organization_component.query_organization_component.return_value = {
+        "result": [{"componentId": "org-1", "componentName": "Acme", "folderName": "Home"}]
+    }
 
-    with patch.object(orgs, "component_family_json_request", fake):
-        out = orgs.list_organizations(MagicMock(), "work")
+    out = orgs.list_organizations(client, "work")
+
     assert out["_success"] is True
     assert out["total_count"] == 1
     assert out["organizations"][0]["component_id"] == "org-1"
+    client.organization_component.query_organization_component.assert_called_once()
 
 
-def test_update_organization_merges_then_posts():
-    seq = []
+def test_update_organization_does_get_then_post():
+    client = MagicMock()
+    client.organization_component.get_organization_component_json.return_value = dict(_ORG_JSON)
+    client.organization_component.update_organization_component_json.return_value = dict(_ORG_JSON)
 
-    def fake(service, path, method="POST", body=None, body_content_type="application/json"):
-        seq.append(method)
-        return dict(_ORG_JSON), 200
+    out = orgs.update_organization(client, "work", "org-1", {"component_name": "Acme2"})
 
-    with patch.object(orgs, "component_family_json_request", fake):
-        out = orgs.update_organization(MagicMock(), "work", "org-1", {"component_name": "Acme2"})
     assert out["_success"] is True
     assert "component_name" in out["organization"]["updated_fields"]
-    assert seq[0] == "GET" and seq[-1] == "POST"
+    client.organization_component.get_organization_component_json.assert_called_once()
+    client.organization_component.update_organization_component_json.assert_called_once()
+    # The full wire dict is POSTed back (componentName updated, contact preserved).
+    posted = client.organization_component.update_organization_component_json.call_args[0][1]
+    assert posted["componentName"] == "Acme2"
+    assert posted["OrganizationContactInfo"]["email"] == "jane@acme.com"
