@@ -7,8 +7,14 @@ Provides 22 environment management actions:
 - create: Create new environment with name + classification
 - update: Update environment name (classification is immutable)
 - delete: Delete environment (permanent)
-- get_extensions: Get environment-specific config overrides
-- update_extensions: Update environment extensions (partial merge by default)
+- get_extensions: Get environment-specific config overrides (only fields the
+  deployed process DECLARES as extensions appear as override points)
+- update_extensions: Update environment extensions (partial merge by default).
+  Can only override fields the deployed process declares as extensions; a
+  partial_update success with a "not found in verified response" warning means
+  the field is not a declared override point (rebuild/redeploy the process with
+  the field declared — see process_extensions in the database_to_api_sync
+  protocol, issue #92 M4.5.7), not that the update silently applied.
 - query_extensions: Query which environments have extensions configured
 - stats: Environment summary by classification
 - get_properties: Get persisted process properties for a runtime (async)
@@ -582,6 +588,21 @@ def _action_update_extensions(sdk: Boomi, profile: str, **kwargs) -> Dict[str, A
     }
     if warnings:
         response["verification_warnings"] = warnings
+        # Issue #92 M4.5.7: a "not found in verified response" warning means the
+        # field is not a declared override point on the deployed process — the
+        # update did NOT take effect even though partial_update is True. Surface
+        # the root cause so callers don't read partial_update success as proof
+        # the override applied.
+        if any("not found in verified response" in w for w in warnings):
+            response["hint"] = (
+                "One or more fields are not declared as environment extensions "
+                "on the deployed process, so the override did not apply despite "
+                "partial_update=true. Rebuild/redeploy the process declaring "
+                "those connection fields as extensions (typed builders emit this "
+                "via config.process_extensions; see "
+                "get_schema_template(resource_type='process', "
+                "protocol='database_to_api_sync')), then retry update_extensions."
+            )
     return response
 
 

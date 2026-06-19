@@ -256,6 +256,17 @@ def test_wrapper_subprocess_separation_is_emittable():
     assert entry["capability_status"] == "emittable_today"
 
 
+def test_config_externalization_is_emittable_and_live_verified():
+    # Issue #92 M4.5.7: the typed builder now emits connection-field
+    # environment-extension declarations, so config_externalization flips from
+    # gated to emittable_today (declaration shape live-verified from the work
+    # exemplar; runtime acceptance proven by live QA).
+    entry = DESIGN_DOCTRINE_ENTRIES["config_externalization"]
+    assert entry["capability_status"] == "emittable_today"
+    assert entry["verification_status"] == "live_verified"
+    assert entry["provenance"] == "live_verified"
+
+
 def test_fifo_parallel_mutual_exclusion_is_symmetric():
     fifo = DESIGN_DOCTRINE_ENTRIES["reliable_and_sequential_messaging"]
     parallel = DESIGN_DOCTRINE_ENTRIES["combine_split_flow_control"]

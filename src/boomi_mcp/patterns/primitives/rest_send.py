@@ -320,6 +320,12 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         conn_key: str,
         folder: Optional[str],
     ) -> IntegrationComponentSpec:
+        # Issue #92 M4.5.7: REST endpoint environment-extension declarations
+        # (base URL field id / xpath) are DEFERRED — companion_unverified until a
+        # UI-authored REST fixture pins the exact field metadata, and create-mode
+        # REST auth is NONE here (no credential to externalize). The DB source
+        # connection's credential fields are declared by the archetype instead;
+        # see process_flow_builder._emit_process_overrides.
         connection = params.connection
 
         if connection.mode == "create":

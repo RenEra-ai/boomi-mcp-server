@@ -845,3 +845,198 @@ def test_process_flow_update_preserves_process_overrides():
     assert envs == {"env-1", "env-2"}
     # And the process subtree was renamed via owned root attr
     assert root.attrib["name"] == "renamed"
+
+
+# ---------------------------------------------------------------------------
+# Issue #92 M4.5.7 — environment-extension declarations for connection fields
+# ---------------------------------------------------------------------------
+
+_FIXTURE_OVERRIDES = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "process_overrides"
+    / "database_connection_fields_process_overrides.xml"
+)
+
+# The four DB connection fields, in the live-verified exemplar order. The
+# ConnectionOverride id deliberately matches the source binding's connection id
+# so the override targets the same connection the process reads from.
+_EXTENSION_FIELDS = [
+    {"id": "host", "label": "Host", "xpath": "DatabaseConnectionSettings/@host"},
+    {"id": "port", "label": "Port", "xpath": "DatabaseConnectionSettings/@port"},
+    {"id": "username", "label": "User", "xpath": "DatabaseConnectionSettings/@username"},
+    {"id": "password", "label": "Password", "xpath": "DatabaseConnectionSettings/@password"},
+]
+
+
+def _extension_config(**overrides):
+    return _base_config(
+        process_extensions={
+            "connections": [
+                {
+                    "connection_id": _DB_CONN_ID,
+                    "connector_type": "database",
+                    "fields": _EXTENSION_FIELDS,
+                }
+            ]
+        },
+        **overrides,
+    )
+
+
+def _canon(elem_or_xml) -> str:
+    """Canonicalize a processOverrides element (or XML string) for comparison.
+
+    Registering the boomi prefix makes serialization deterministic across the
+    built tree and the parsed fixture, and ET.canonicalize normalizes attribute
+    ordering + whitespace so the pretty-printed fixture matches the inline build.
+    """
+    ET.register_namespace("bns", "http://api.platform.boomi.com/")
+    if not isinstance(elem_or_xml, str):
+        elem_or_xml = ET.tostring(elem_or_xml, encoding="unicode")
+    # strip_text drops the fixture's pretty-print whitespace so the readable
+    # fixture matches the builder's inline (no inter-tag whitespace) output.
+    return ET.canonicalize(elem_or_xml, strip_text=True)
+
+
+def test_build_emits_connection_field_environment_extensions():
+    xml = ProcessFlowBuilder.build(_extension_config(), name="Ext Process")
+    root = ET.fromstring(xml)
+    overrides = root.find("bns:processOverrides", NS)
+    assert overrides is not None
+    inner = overrides.find("Overrides")
+    assert inner is not None
+    connection_overrides = inner.findall("Connections/ConnectionOverride")
+    assert len(connection_overrides) == 1
+    # ConnectionOverride id must equal the DB connection the source binds to.
+    assert connection_overrides[0].attrib["id"] == _DB_CONN_ID
+    fields = connection_overrides[0].findall("field")
+    assert [f.attrib["id"] for f in fields] == ["host", "port", "username", "password"]
+    for f in fields:
+        assert f.attrib["overrideable"] == "true"
+        assert f.attrib["xpath"].startswith("DatabaseConnectionSettings/@")
+        assert f.attrib["label"]
+    # Verified live sibling order under <Overrides>.
+    assert [child.tag for child in list(inner)] == [
+        "Connections",
+        "Operations",
+        "PartnerOverrides",
+        "Properties",
+        "Extensions",
+        "CrossReferenceOverrides",
+        "PGPOverrides",
+        "DefinedProcessPropertyOverrides",
+    ]
+    ext = inner.find("Extensions")
+    assert ext.find("ObjectDefinitions/unusedProfiles") is not None
+    assert ext.find("DataMaps/unusedMaps") is not None
+
+
+def test_build_process_overrides_matches_golden_fixture():
+    xml = ProcessFlowBuilder.build(_extension_config(), name="Ext Process")
+    root = ET.fromstring(xml)
+    built = root.find("bns:processOverrides", NS)
+    assert built is not None
+    fixture_root = ET.parse(_FIXTURE_OVERRIDES).getroot()
+    assert _canon(built) == _canon(fixture_root)
+
+
+def test_build_without_process_extensions_emits_empty_overrides():
+    # Byte-for-byte regression: no process_extensions -> empty element exactly.
+    xml = ProcessFlowBuilder.build(_base_config(), name="No Ext")
+    assert "<bns:processOverrides/>" in xml
+    assert "<Overrides" not in xml
+
+
+def test_wrapper_subprocess_emits_empty_overrides():
+    from src.boomi_mcp.categories.components.builders import WrapperSubprocessBuilder
+
+    xml = WrapperSubprocessBuilder.build(
+        {
+            "process_kind": "wrapper_subprocess",
+            "process_calls": [{"process_id": "55555555-5555-5555-5555-555555555555"}],
+        },
+        name="Wrapper",
+    )
+    assert "<bns:processOverrides/>" in xml
+    assert "<Overrides" not in xml
+
+
+def test_build_update_discards_emitted_declaration_preserving_live_overrides():
+    """CREATE-only: an emitted declaration must NOT clobber live per-environment
+    override VALUES on a structured update (processOverrides is unowned)."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    # A freshly-built process now CARRIES a declaration (the desired update).
+    desired = ProcessFlowBuilder.build(_extension_config(), name="renamed")
+    assert "<Overrides" in desired
+    # The live component has UI-populated per-environment override values.
+    current = ProcessFlowBuilder.build(_base_config(), name="original").replace(
+        "<bns:processOverrides/>",
+        (
+            '<bns:processOverrides>'
+            '<override field="password" environmentId="env-1" value="prod-secret"/>'
+            "</bns:processOverrides>"
+        ),
+    )
+    merged = merge_for_update(
+        current, desired, ProcessFlowBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    overrides = root.find("bns:processOverrides", NS)
+    # The live override survives; the builder's declaration is discarded.
+    assert overrides.find("override") is not None
+    assert overrides.find("Overrides") is None
+
+
+@pytest.mark.parametrize(
+    "process_extensions",
+    [
+        "not-a-dict",
+        {"connections": "not-a-list"},
+        {"connections": ["not-a-dict"]},
+        {"connections": [{"connection_id": "", "fields": _EXTENSION_FIELDS}]},
+        {"connections": [{"connection_id": _DB_CONN_ID, "fields": []}]},
+        {"connections": [{"connection_id": _DB_CONN_ID, "fields": ["not-a-dict"]}]},
+        {"connections": [{"connection_id": _DB_CONN_ID, "fields": [{"id": "x", "label": "X"}]}]},
+        {"connections": [{"connection_id": _DB_CONN_ID, "fields": [{"id": " ", "label": "X", "xpath": "y"}]}]},
+    ],
+)
+def test_build_rejects_malformed_process_extensions(process_extensions):
+    cfg = _base_config(process_extensions=process_extensions)
+    with pytest.raises(BuilderValidationError) as excinfo:
+        ProcessFlowBuilder.build(cfg, name="Bad Ext")
+    assert excinfo.value.error_code == "PROCESS_EXTENSIONS_INVALID"
+
+
+def test_validate_config_surfaces_process_extensions_error():
+    cfg = _base_config(
+        process_extensions={"connections": [{"connection_id": _DB_CONN_ID, "fields": []}]}
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=set())
+    assert err is not None
+    assert err.error_code == "PROCESS_EXTENSIONS_INVALID"
+
+
+def test_validate_config_accepts_ref_connection_id_in_depends_on():
+    # A $ref connection_id in process_extensions is reachability-checked like any
+    # other ref: present in depends_on -> OK; absent -> MISSING_PROCESS_DEPENDENCY.
+    cfg = _base_config(
+        source={
+            "connector_type": "database",
+            "connection_id": "$ref:db_conn",
+            "operation_id": _DB_OP_ID,
+            "action_type": "Get",
+        },
+        process_extensions={
+            "connections": [
+                {"connection_id": "$ref:db_conn", "fields": _EXTENSION_FIELDS}
+            ]
+        },
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on={"db_conn"}) is None
+    missing = ProcessFlowBuilder.validate_config(cfg, depends_on=set())
+    assert missing is not None
+    assert missing.error_code == "MISSING_PROCESS_DEPENDENCY"

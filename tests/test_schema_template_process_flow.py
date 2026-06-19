@@ -242,6 +242,18 @@ def test_template_documents_notify_config_error(template):
     assert "PROCESS_NOTIFY_CONFIG_INVALID" in codes
 
 
+def test_template_lists_process_extensions_surface(template):
+    # Issue #92 M4.5.7: connection-field environment-extension declaration.
+    optional = template["optional_fields"]
+    assert "process_extensions" in optional
+    assert "process_extensions.connections" in optional
+    codes = {e["error_code"] for e in template["structured_errors"]}
+    assert "PROCESS_EXTENSIONS_INVALID" in codes
+    notes_blob = " ".join(template["notes"]).lower()
+    assert "get_extensions" in notes_blob
+    assert "create" in notes_blob  # CREATE-only behavior documented
+
+
 def test_example_demonstrates_wired_dlq_and_catch_notify(template):
     example = template["example_component_spec"]
     reliability = example["config"]["reliability"]

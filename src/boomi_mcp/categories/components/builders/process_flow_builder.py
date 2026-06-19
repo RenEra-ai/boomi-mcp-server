@@ -91,6 +91,36 @@ _CATCH_NOTIFY_ALLOWED_KEYS = frozenset({"level", "message_template"})
 # token for the {1} placeholder and emits the matching track-parameter binding.
 _NOTIFY_CAUGHT_ERROR_TOKEN = "meta.base.catcherrorsmessage"
 
+# Issue #92 M4.5.7 — environment-extension declarations for connection fields.
+# A deployed process exposes a connection/operation field as an environment
+# override point ONLY when the process DECLARES it as an extension. The typed
+# builders previously emitted an empty `<bns:processOverrides/>`, so
+# manage_environments(get_extensions) returned zero override points and
+# update_extensions silently no-op'd (live-proven 2026-06-12/13). Declaring the
+# DB connection fields here makes them overrideable per environment without
+# embedding a credential in the connection component.
+#
+# Field ids / labels / xpaths are `live_verified` — transcribed from the
+# `work`-profile main-sync exemplar (component ab040894-...). Runtime
+# availability through get_extensions / update_extensions is `live_QA_required`
+# (unit tests verify only the emitted declaration shape; boomi-qa-tester proves
+# the deploy -> override -> run path).
+#
+# CREATE-only: `<bns:processOverrides>` is deliberately UNOWNED by
+# PRESERVATION_POLICY (see the policy comment near the bottom of this module),
+# so a structured UPDATE preserves the LIVE per-environment override VALUES that
+# Boomi populates via the UI rather than overwriting them with this declaration.
+# The declaration therefore lands on the initial CREATE — the deploy path the
+# acceptance criteria exercise.
+DB_CONNECTION_EXTENSION_FIELDS_CREDENTIAL: Tuple[Dict[str, str], ...] = (
+    {"id": "username", "label": "User", "xpath": "DatabaseConnectionSettings/@username"},
+    {"id": "password", "label": "Password", "xpath": "DatabaseConnectionSettings/@password"},
+)
+DB_CONNECTION_EXTENSION_FIELDS_ENDPOINT: Tuple[Dict[str, str], ...] = (
+    {"id": "host", "label": "Host", "xpath": "DatabaseConnectionSettings/@host"},
+    {"id": "port", "label": "Port", "xpath": "DatabaseConnectionSettings/@port"},
+)
+
 # Visual layout. Geometry is decorative only — process correctness is
 # driven by toShape wiring. Numbers approximate the live Renera examples
 # so the rendered diagram stays readable.
@@ -314,6 +344,14 @@ class ProcessFlowBuilder:
         if reliability_err is not None:
             return reliability_err
 
+        # Issue #92 M4.5.7: validate the optional process_extensions declaration
+        # shape at plan time. build() calls the same helper (which raises) so a
+        # validate_config-bypass path stays total; here we surface the error.
+        try:
+            _extract_process_extension_connections(config)
+        except BuilderValidationError as exc:
+            return exc
+
         # Dependency reachability: every $ref:KEY token in the config tree
         # must appear in depends_on (shared helper — see _validate_ref_reachability).
         return _validate_ref_reachability(config, set(depends_on or []))
@@ -479,12 +517,175 @@ class ProcessFlowBuilder:
                 )
             shape_xml_parts = _emit_linear_shapes(flow)
 
+        # Issue #92 M4.5.7: emit a non-empty <bns:processOverrides> declaring
+        # connection-field environment extensions when the config carries a
+        # process_extensions block; otherwise _assemble emits the empty override
+        # element byte-for-byte as before. validate_config already proved the
+        # shape; _extract stays defensive so build() is total on a bypass path.
+        # Connection ids inside process_extensions resolve via the same $ref
+        # walker as connector shapes (apply-time substitution + reachability),
+        # so no resolver change is needed. The forbidden-secret scanner matches
+        # dict KEYS only (id/label/xpath are not secret-shaped, and the field id
+        # value "password" sits under key "id"), so the declaration is clean.
+        process_overrides_xml = ""
+        connections = _extract_process_extension_connections(config)
+        if connections:
+            process_overrides_xml = _emit_process_overrides(connections)
+
         return _assemble_process_component_xml(
             shape_xml_parts,
             name=name,
             description=description,
             folder_name=folder_name,
+            process_overrides_xml=process_overrides_xml,
         )
+
+
+def _extract_process_extension_connections(
+    config: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Read + normalize ``config["process_extensions"]["connections"]``.
+
+    Returns ``[]`` when the block is absent/empty. Otherwise returns a list of
+    ``{"connection_id": <resolved id or $ref token>, "connector_type"?: str,
+    "fields": [{"id","label","xpath"}, ...]}`` with field order preserved.
+
+    Raises ``BuilderValidationError(error_code="PROCESS_EXTENSIONS_INVALID")``
+    on any malformed shape so both validate_config (which catches it) and
+    build() (which lets it raise) share one source of truth for the contract.
+    """
+    process_extensions = config.get("process_extensions")
+    if process_extensions in (None, {}, []):
+        return []
+    if not isinstance(process_extensions, dict):
+        raise BuilderValidationError(
+            "process_extensions must be a JSON object with a 'connections' list.",
+            error_code="PROCESS_EXTENSIONS_INVALID",
+            field="process_extensions",
+            hint='Shape: {"connections": [{"connection_id": "...", "fields": [...]}]}.',
+        )
+    raw_connections = process_extensions.get("connections")
+    if raw_connections in (None, []):
+        return []
+    if not isinstance(raw_connections, list):
+        raise BuilderValidationError(
+            "process_extensions.connections must be a list of connection-override "
+            "declarations.",
+            error_code="PROCESS_EXTENSIONS_INVALID",
+            field="process_extensions.connections",
+            hint='Each entry: {"connection_id": "...", "fields": [{"id","label","xpath"}]}.',
+        )
+
+    normalized: List[Dict[str, Any]] = []
+    for i, entry in enumerate(raw_connections):
+        loc = f"process_extensions.connections[{i}]"
+        if not isinstance(entry, dict):
+            raise BuilderValidationError(
+                f"{loc} must be a JSON object.",
+                error_code="PROCESS_EXTENSIONS_INVALID",
+                field=loc,
+                hint='Each entry: {"connection_id": "...", "fields": [{"id","label","xpath"}]}.',
+            )
+        conn_id = entry.get("connection_id")
+        if not isinstance(conn_id, str) or not conn_id.strip():
+            raise BuilderValidationError(
+                f"{loc}.connection_id is required and must be a non-empty string.",
+                error_code="PROCESS_EXTENSIONS_INVALID",
+                field=f"{loc}.connection_id",
+                hint=(
+                    "Use the same connection id / $ref:KEY token the connector "
+                    "shapes bind to, so the override declaration resolves to the "
+                    "same component."
+                ),
+            )
+        raw_fields = entry.get("fields")
+        if not isinstance(raw_fields, list) or not raw_fields:
+            raise BuilderValidationError(
+                f"{loc}.fields must be a non-empty list of field declarations.",
+                error_code="PROCESS_EXTENSIONS_INVALID",
+                field=f"{loc}.fields",
+                hint='Each field: {"id": "password", "label": "Password", "xpath": "..."}.',
+            )
+        fields: List[Dict[str, str]] = []
+        for j, raw_field in enumerate(raw_fields):
+            floc = f"{loc}.fields[{j}]"
+            if not isinstance(raw_field, dict):
+                raise BuilderValidationError(
+                    f"{floc} must be a JSON object with id, label, and xpath.",
+                    error_code="PROCESS_EXTENSIONS_INVALID",
+                    field=floc,
+                    hint='Each field: {"id": "...", "label": "...", "xpath": "..."}.',
+                )
+            normalized_field: Dict[str, str] = {}
+            for key in ("id", "label", "xpath"):
+                value = raw_field.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    raise BuilderValidationError(
+                        f"{floc}.{key} is required and must be a non-empty string.",
+                        error_code="PROCESS_EXTENSIONS_INVALID",
+                        field=f"{floc}.{key}",
+                        hint="Field declarations carry an id, a label, and an xpath.",
+                    )
+                # label intentionally not stripped — a leading/trailing space is
+                # cosmetic and the value is escaped on emission anyway. id/xpath
+                # are structural, so canonicalize them.
+                normalized_field[key] = value.strip() if key in ("id", "xpath") else value
+            fields.append(normalized_field)
+        normalized_entry: Dict[str, Any] = {
+            "connection_id": conn_id.strip(),
+            "fields": fields,
+        }
+        connector_type = entry.get("connector_type")
+        if isinstance(connector_type, str) and connector_type.strip():
+            normalized_entry["connector_type"] = connector_type.strip()
+        normalized.append(normalized_entry)
+    return normalized
+
+
+def _emit_process_overrides(connections: List[Dict[str, Any]]) -> str:
+    """Emit a non-empty ``<bns:processOverrides>`` declaring connection-field
+    environment extensions (issue #92 M4.5.7).
+
+    ``connections`` is the normalized list from
+    :func:`_extract_process_extension_connections`. The container shape and
+    sibling order are ``live_verified`` from the ``work``-profile main-sync
+    exemplar; field order is preserved from the input. All attribute values are
+    XML-escaped. ``connector_type`` is carried in config for downstream tooling
+    but is not part of the emitted declaration (Boomi keys overrides by the
+    connection id + field id, not by connector type).
+    """
+    connection_parts: List[str] = []
+    for conn in connections:
+        field_parts: List[str] = []
+        for field in conn["fields"]:
+            field_parts.append(
+                f'<field id="{_escape_xml(str(field["id"]))}" '
+                f'label="{_escape_xml(str(field["label"]))}" '
+                f'overrideable="true" '
+                f'xpath="{_escape_xml(str(field["xpath"]))}"/>'
+            )
+        connection_parts.append(
+            f'<ConnectionOverride id="{_escape_xml(str(conn["connection_id"]))}">'
+            f"{''.join(field_parts)}"
+            '</ConnectionOverride>'
+        )
+    return (
+        '<bns:processOverrides>'
+        '<Overrides xmlns="">'
+        f"<Connections>{''.join(connection_parts)}</Connections>"
+        '<Operations/>'
+        '<PartnerOverrides/>'
+        '<Properties/>'
+        '<Extensions>'
+        '<ObjectDefinitions><unusedProfiles/></ObjectDefinitions>'
+        '<DataMaps><unusedMaps/></DataMaps>'
+        '</Extensions>'
+        '<CrossReferenceOverrides/>'
+        '<PGPOverrides/>'
+        '<DefinedProcessPropertyOverrides/>'
+        '</Overrides>'
+        '</bns:processOverrides>'
+    )
 
 
 def _assemble_process_component_xml(
@@ -493,6 +694,7 @@ def _assemble_process_component_xml(
     name: str,
     description: str = "",
     folder_name: Optional[str] = None,
+    process_overrides_xml: str = "",
 ) -> str:
     """Wrap emitted shapes in the ``<process>`` / ``<bns:Component>`` envelope.
 
@@ -541,7 +743,10 @@ def _assemble_process_component_xml(
         '<bns:object>'
         f"{process_inner}"
         '</bns:object>'
-        '<bns:processOverrides/>'
+        # Issue #92 M4.5.7: a connection-field extension declaration when one was
+        # emitted, else the empty element (byte-for-byte unchanged for all
+        # existing process XML, including wrapper_subprocess).
+        f"{process_overrides_xml or '<bns:processOverrides/>'}"
         '</bns:Component>'
     )
 
@@ -1716,4 +1921,6 @@ __all__ = [
     "WrapperSubprocessBuilder",
     "PROCESS_FLOW_BUILDERS",
     "get_process_flow_builder",
+    "DB_CONNECTION_EXTENSION_FIELDS_CREDENTIAL",
+    "DB_CONNECTION_EXTENSION_FIELDS_ENDPOINT",
 ]

@@ -27,6 +27,10 @@ from ...categories.components.builders.connector_builder import (
     DatabaseConnectorBuilder,
     DatabaseGetOperationBuilder,
 )
+from ...categories.components.builders.process_flow_builder import (
+    DB_CONNECTION_EXTENSION_FIELDS_CREDENTIAL,
+    DB_CONNECTION_EXTENSION_FIELDS_ENDPOINT,
+)
 from ...categories.components.builders.profile_builder import (
     DatabaseReadProfileBuilder,
 )
@@ -48,6 +52,29 @@ from ._helpers import (
 
 # DB read profile / parameter field types accepted by the profile builder.
 _DB_FIELD_TYPE = Literal["character", "number", "datetime"]
+
+
+def db_connection_extension_fields(
+    *, credentials: bool = True, endpoint: bool = False
+) -> List[Dict[str, str]]:
+    """Ordered DB source-connection field declarations for environment extensions.
+
+    Issue #92 M4.5.7. Returns endpoint fields (host, port) first, then credential
+    fields (username, password) — matching the live-verified exemplar order — so a
+    ``database_to_api_sync`` archetype can declare which connection fields become
+    per-environment override points. Each field is a fresh ``{id, label, xpath}``
+    dict (copied from the builder-owned constants so callers cannot mutate them).
+    Returns ``[]`` when both flags are off.
+
+    The xpath / id contract is owned by ``process_flow_builder`` (which emits the
+    declaration XML); this primitive only selects which fields to declare.
+    """
+    fields: List[Dict[str, str]] = []
+    if endpoint:
+        fields.extend(dict(field) for field in DB_CONNECTION_EXTENSION_FIELDS_ENDPOINT)
+    if credentials:
+        fields.extend(dict(field) for field in DB_CONNECTION_EXTENSION_FIELDS_CREDENTIAL)
+    return fields
 
 
 # ---------------------------------------------------------------------------

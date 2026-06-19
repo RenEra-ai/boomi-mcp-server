@@ -77,7 +77,11 @@ from ..primitives._helpers import (
     ROLE_TRANSFORM_MAP,
     primitive_component_key,
 )
-from ..primitives.db_extract import DbExtractParameters, DbExtractPrimitive
+from ..primitives.db_extract import (
+    DbExtractParameters,
+    DbExtractPrimitive,
+    db_connection_extension_fields,
+)
 from ..primitives.field_map import FieldMapParameters, FieldMapPrimitive
 from ..primitives.operational import (
     ErrorClassifierParameters,
@@ -1874,6 +1878,46 @@ def _required_simple_leaf_paths(profile: JSONPayloadProfile) -> Set[str]:
 # ---------------------------------------------------------------------------
 
 
+class EnvironmentExtensionsConfig(BaseModel):
+    """Which source-connection fields the emitted process declares as
+    per-environment override points (issue #92 M4.5.7).
+
+    A deployed Boomi process exposes a connection field through
+    ``manage_environments(get_extensions)`` / ``update_extensions`` ONLY when the
+    process declares it as an extension. Declaring the credential fields by
+    default lets TEST -> PROD promotion supply the password per environment
+    without embedding it in the connection component (the live-proven failure
+    this milestone fixes). Endpoint fields default OFF because host/port are
+    usually stable within a deployment lane and changing them can affect
+    connection-pool / runtime behavior — so they require explicit opt-in.
+
+    Applies to create-mode ``username_password`` DB sources; reuse-mode and
+    ``windows_integrated`` sources declare nothing (no archetype-owned
+    credential to externalize). Runtime acceptance is ``live_QA_required``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    credential_connection_fields: bool = Field(
+        default=True,
+        description=(
+            "Declare the source DB connection credential fields (username, "
+            "password) as per-environment override points. Default true: "
+            "credentials vary per environment and must not be embedded in the "
+            "connection component."
+        ),
+    )
+    endpoint_connection_fields: bool = Field(
+        default=False,
+        description=(
+            "Also declare the source DB connection endpoint fields (host, port) "
+            "as override points. Default false (opt-in): endpoints are usually "
+            "stable within a deployment lane; override them only when promotion "
+            "actually retargets the host/port."
+        ),
+    )
+
+
 class DatabaseToApiSyncParameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1919,6 +1963,16 @@ class DatabaseToApiSyncParameters(BaseModel):
         description=(
             "Retry policy, dead-letter policy, and error classifier applied "
             "to the send step."
+        ),
+    )
+    environment_extensions: EnvironmentExtensionsConfig = Field(
+        default_factory=EnvironmentExtensionsConfig,
+        description=(
+            "Which source DB connection fields the emitted process declares as "
+            "per-environment override points (issue #92 M4.5.7). Defaults: "
+            "credential fields (username, password) declared extensible; "
+            "endpoint fields (host, port) opt-in. Only create-mode "
+            "username_password DB sources emit a declaration."
         ),
     )
 
@@ -2508,6 +2562,39 @@ def _build_main_process(
     if naming.folder_path:
         config["folder_name"] = naming.folder_path
 
+    # Issue #92 M4.5.7: declare the source DB connection fields as
+    # per-environment override points so the deployed process exposes them
+    # through manage_environments(get_extensions) — TEST -> PROD promotion can
+    # then supply the credential per environment instead of embedding it in the
+    # connection component. Only create-mode username_password DB sources carry
+    # an archetype-owned credential to externalize; reuse / windows_integrated
+    # declare nothing. The declaration reuses the SAME $ref:db_conn_key the
+    # source connector shape binds to, so apply-time substitution resolves both
+    # to the one connection component (db_conn_key is already in depends_on, so
+    # no new dependency edge is needed). ProcessFlowBuilder emits the declaration
+    # on CREATE only (its preservation policy leaves processOverrides UNOWNED so
+    # UI-populated per-environment override VALUES survive structured updates).
+    source_binding = parameters.source.binding
+    if (
+        source_binding.mode == "create"
+        and source_binding.settings is not None
+        and source_binding.settings.auth_mode == "username_password"
+    ):
+        extension_fields = db_connection_extension_fields(
+            credentials=parameters.environment_extensions.credential_connection_fields,
+            endpoint=parameters.environment_extensions.endpoint_connection_fields,
+        )
+        if extension_fields:
+            config["process_extensions"] = {
+                "connections": [
+                    {
+                        "connection_id": f"$ref:{db_conn_key}",
+                        "connector_type": "database",
+                        "fields": extension_fields,
+                    }
+                ]
+            }
+
     # depends_on must contain exactly the keys referenced by $ref tokens in the
     # process config (ProcessFlowBuilder enforces this). The read profile and
     # target profile are depended transitively by the operation/map components.
@@ -2813,7 +2900,7 @@ def _build_operational_intent(
 class DatabaseToApiSyncArchetype(ArchetypePattern):
     metadata = PatternMetadata(
         name="database_to_api_sync",
-        version="0.4.1",
+        version="0.5.0",
         kind=PatternKind.ARCHETYPE,
         description=(
             "Archetype for replicating SQL Server records to a REST API on a "
@@ -2862,6 +2949,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "All XML is produced by the existing component builders; the archetype emits JSON component specs only.",
         "Emits a verified Try/Catch + DLQ catch path when dlq.enabled with mode document_cache_ref or error_subprocess_ref; caller retry (max_attempts 1..6) is wired as platform-timed Try/Catch retry_count 0..5 (#51 M3.R1a / #88 M4.5.3).",
         "Optionally emits a verified Notify step at the head of the wired catch path (reliability.catch_notify) that logs the caught error to the process log; level INFO/WARNING/ERROR (#89 M4.5.4).",
+        "Declares source DB connection credential fields (username, password) as per-environment override points by default so TEST -> PROD promotion supplies the password via environment extensions, never an embedded credential; host/port opt-in via environment_extensions.endpoint_connection_fields (#92 M4.5.7).",
         "Credentials cross the contract only as opaque credential_ref values and are never echoed in errors.",
     ]
     limitations = [
@@ -2873,6 +2961,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "Watermark is represented as metadata only; watermark-update and dynamic operation-property wiring are deferred (#51).",
         "REST create-mode emits only auth='none'; secured auth (basic / bearer / oauth2) requires binding.mode='reuse'.",
         "DB create-mode supports auth_mode='username_password' only; 'windows_integrated' requires reuse (#51).",
+        "Environment-extension declarations are emitted for create-mode username_password DB sources only (reuse / windows_integrated declare nothing) and land on CREATE; the builder leaves processOverrides unowned so UI-populated per-environment override values survive structured updates. REST endpoint extensions are deferred (companion_unverified). Override availability at runtime is live_QA_required (#92 M4.5.7).",
         "jdbc_options and REST default_headers are metadata-deferred (no builder field in M2); use reuse for connections needing them.",
         "Does not mix map_function and map_script in one call (UNSUPPORTED_TRANSFORM_ROUTE); split into separate maps.",
         "Does not infer DB result fields from SQL, browse, metadata, or row samples; run infer_profile_fields (issue #47) separately for read-only inference from supplied metadata summaries / sample JSON / XSD / sample XML.",
@@ -3389,7 +3478,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                 "component_count": len(components),
                 "raw_xml_exposed": False,
                 "boomi_mutation": False,
-                "metadata_version": "0.4.1",
+                "metadata_version": "0.5.0",
                 # Representation of trigger / schedule / watermark / retry intent /
                 # DLQ intent / error classifier / run metadata / expected status
                 # codes / deferred follow-up notes. Verified DLQ modes + caller
@@ -3417,6 +3506,16 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                     "watermark_update": "#51 (dynamic operation-property wiring)",
                     "db_create_auth": (
                         "username_password only; windows_integrated requires reuse"
+                    ),
+                    "environment_extensions": (
+                        "create-mode username_password DB sources declare "
+                        "credential connection fields (username/password) as "
+                        "per-environment override points by default; host/port "
+                        "opt-in via environment_extensions.endpoint_connection_fields; "
+                        "emitted on CREATE only (processOverrides is unowned so "
+                        "UI-populated override values survive updates); REST "
+                        "endpoint extensions deferred (companion_unverified); "
+                        "runtime override availability is live_QA_required (#92)"
                     ),
                     "rest_create_auth": (
                         "auth='none' only; secured auth requires reuse"

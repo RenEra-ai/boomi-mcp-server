@@ -524,7 +524,10 @@ _ENTRIES: List[Dict[str, Any]] = [
             "business rule that changes without a redeploy. One connection "
             "per endpoint per environment — no duplicate test/prod copies "
             "(a licensing-cost driver); a fleet-wide change is one "
-            "environment-level extension plus a single redeploy."
+            "environment-level extension plus a single redeploy. The typed "
+            "database-to-API builder now declares the source connection's "
+            "credential fields as override points by default, so promotion "
+            "supplies the credential per environment rather than baking it in."
         ),
         "when_not_to_use": (
             "Operation static values and literals are not extendable — do "
@@ -532,11 +535,11 @@ _ENTRIES: List[Dict[str, Any]] = [
             "externalization."
         ),
         "verification_status": "live_verified",
-        "capability_status": "gated",
+        "capability_status": "emittable_today",
         "category": "governance",
         "mutual_exclusion": [],
         "cross_refs": ["component_profile_reuse", "platform_selection"],
-        "provenance": "companion_unverified",
+        "provenance": "live_verified",
     },
     {
         "name": "component_profile_reuse",

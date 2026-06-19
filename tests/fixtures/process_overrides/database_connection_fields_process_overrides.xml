@@ -1,0 +1,34 @@
+<!--
+  Golden fixture (issue #92 M4.5.7): the <bns:processOverrides> environment-
+  extension declaration ProcessFlowBuilder emits for a database_to_api_sync
+  process whose config carries a process_extensions block declaring the four DB
+  connection fields (host, port, username, password) as override points.
+
+  Shape + field ids/labels/xpaths are live_verified (transcribed from the
+  work-profile main-sync exemplar, component ab040894-...); the ConnectionOverride
+  id is a deterministic synthetic placeholder, not a vendor component id. The
+  builder emits this element with no inter-tag whitespace; the test normalizes
+  whitespace before comparing, so this file is pretty-printed for readability.
+-->
+<bns:processOverrides xmlns:bns="http://api.platform.boomi.com/">
+  <Overrides xmlns="">
+    <Connections>
+      <ConnectionOverride id="11111111-1111-1111-1111-111111111111">
+        <field id="host" label="Host" overrideable="true" xpath="DatabaseConnectionSettings/@host"/>
+        <field id="port" label="Port" overrideable="true" xpath="DatabaseConnectionSettings/@port"/>
+        <field id="username" label="User" overrideable="true" xpath="DatabaseConnectionSettings/@username"/>
+        <field id="password" label="Password" overrideable="true" xpath="DatabaseConnectionSettings/@password"/>
+      </ConnectionOverride>
+    </Connections>
+    <Operations/>
+    <PartnerOverrides/>
+    <Properties/>
+    <Extensions>
+      <ObjectDefinitions><unusedProfiles/></ObjectDefinitions>
+      <DataMaps><unusedMaps/></DataMaps>
+    </Extensions>
+    <CrossReferenceOverrides/>
+    <PGPOverrides/>
+    <DefinedProcessPropertyOverrides/>
+  </Overrides>
+</bns:processOverrides>

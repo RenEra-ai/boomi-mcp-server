@@ -5369,6 +5369,11 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.catch_notify",
             "reliability.catch_notify.message_template",
             "reliability.catch_notify.level",
+            # Issue #92 M4.5.7: declare connection fields as per-environment
+            # override points on the deployed process (see notes for the
+            # CREATE-only behavior and the connection_id / fields shape).
+            "process_extensions",
+            "process_extensions.connections",
         ],
         # Issue #28 added primitives that PRODUCE these fields as process
         # fragments (schedule_envelope, run_metadata, dlq_writer,
@@ -5430,6 +5435,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
             {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
+            {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
         ],
         "notes": [
@@ -5462,6 +5468,20 @@ _PROCESS_FLOW_PROTOCOLS = {
             "dlq_writer fragment IS now consumed (above).",
             "Map components are referenced by id or $ref token only; map creation "
             "is tracked by issue #26.",
+            "Issue #92 M4.5.7: process_extensions declares connection fields as "
+            "per-environment override points so the DEPLOYED process exposes them "
+            "via manage_environments(get_extensions) / update_extensions — without "
+            "embedding a credential in the connection component. Shape: "
+            "{\"connections\": [{\"connection_id\": <same id/$ref the connector "
+            "shape binds>, \"connector_type\": \"database\", \"fields\": [{\"id\": "
+            "\"password\", \"label\": \"Password\", \"xpath\": <connection-field "
+            "xpath>}]}]}. The declaration is emitted on CREATE only: the builder "
+            "leaves the override element unowned so UI-populated per-environment "
+            "override VALUES survive structured updates. A field is overrideable "
+            "at runtime only because the process declares it; a partial_update "
+            "success from update_extensions is not proof a field exists as an "
+            "override point — verify via get_extensions after deploy. Malformed "
+            "shapes return PROCESS_EXTENSIONS_INVALID.",
             "Schedule activation, deployment, and execution remain M3 scope.",
         ],
         "example_component_spec": {
