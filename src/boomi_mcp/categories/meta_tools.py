@@ -5529,6 +5529,32 @@ _PROCESS_FLOW_PROTOCOLS = {
                         "message_template": "<<caller-authored notify message referencing meta.base.catcherrorsmessage>>",
                     },
                 },
+                # Issue #92 M4.5.7: declare the DB connection credential fields
+                # as per-environment override points (no embedded credential).
+                # connection_id reuses the same $ref the source binds, so the
+                # override targets the one DB connection; it must appear in
+                # depends_on. The archetype emits this by default for create-mode
+                # username_password DB sources.
+                "process_extensions": {
+                    "connections": [
+                        {
+                            "connection_id": "$ref:db_connection",
+                            "connector_type": "database",
+                            "fields": [
+                                {
+                                    "id": "username",
+                                    "label": "User",
+                                    "xpath": "DatabaseConnectionSettings/@username",
+                                },
+                                {
+                                    "id": "password",
+                                    "label": "Password",
+                                    "xpath": "DatabaseConnectionSettings/@password",
+                                },
+                            ],
+                        }
+                    ]
+                },
             },
         },
     },

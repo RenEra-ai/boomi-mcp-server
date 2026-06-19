@@ -254,6 +254,22 @@ def test_template_lists_process_extensions_surface(template):
     assert "create" in notes_blob  # CREATE-only behavior documented
 
 
+def test_template_example_includes_process_extensions(template):
+    # Issue #92 M4.5.7: the example must demonstrate the process_extensions
+    # block so callers copy a working override declaration, not omit it.
+    example = template["example_component_spec"]
+    pe = example["config"].get("process_extensions")
+    assert pe is not None, "example must demonstrate process_extensions"
+    conn = pe["connections"][0]
+    # The override id reuses a $ref already declared in depends_on.
+    assert conn["connection_id"].startswith("$ref:")
+    assert conn["connection_id"].split(":", 1)[1] in example["depends_on"]
+    field_ids = {f["id"] for f in conn["fields"]}
+    assert {"username", "password"} <= field_ids
+    for field in conn["fields"]:
+        assert field["label"] and field["xpath"]
+
+
 def test_example_demonstrates_wired_dlq_and_catch_notify(template):
     example = template["example_component_spec"]
     reliability = example["config"]["reliability"]
