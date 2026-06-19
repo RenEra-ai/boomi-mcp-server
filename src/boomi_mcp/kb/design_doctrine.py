@@ -163,7 +163,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "the coupling cost: a subprocess change requires repackaging and "
             "redeploying the parent."
         ),
-        "verification_status": "companion_unverified",
+        "verification_status": "live_verified",
         "capability_status": "emittable_today",
         "category": "decomposition",
         "mutual_exclusion": [
@@ -178,7 +178,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "unit_testing_via_swappable_data_source",
             "microservice_vs_monolith_decomposition",
         ],
-        "provenance": "companion_unverified",
+        "provenance": "live_verified",
     },
     {
         "name": "connector_retry_design",
@@ -209,7 +209,13 @@ _ENTRIES: List[Dict[str, Any]] = [
             "non-idempotent writes that cannot be made safe. The platform owns "
             "the retry timing, so a caller-selected fixed or exponential backoff "
             "interval is not available; if a custom backoff window is required, "
-            "design a scheduled re-run or queue-based retry instead."
+            "design a scheduled re-run or queue-based retry instead. Note that "
+            "the typed builder currently emits one process-level Try/Catch "
+            "spanning the whole connector chain rather than a per-connector "
+            "retry unit, so any upstream read inside that chain re-executes on "
+            "each retry — keep upstream reads idempotent, or isolate the "
+            "retried call in its own subprocess, until per-connector scoping "
+            "ships."
         ),
         "verification_status": "docs_corroborated",
         "capability_status": "emittable_today",
