@@ -564,9 +564,29 @@ def _extract_process_extension_connections(
             field="process_extensions",
             hint='Shape: {"connections": [{"connection_id": "...", "fields": [...]}]}.',
         )
+    # A present, non-empty process_extensions block MUST carry a 'connections'
+    # key. A missing/misspelled key (e.g. "connection") or a null value would
+    # otherwise silently drop the caller's override declaration — reject it so
+    # the documented PROCESS_EXTENSIONS_INVALID contract holds. An absent/empty
+    # block (handled above) or an explicitly empty connections list is a no-op.
+    if "connections" not in process_extensions:
+        raise BuilderValidationError(
+            "process_extensions must contain a 'connections' list.",
+            error_code="PROCESS_EXTENSIONS_INVALID",
+            field="process_extensions.connections",
+            hint=(
+                'Shape: {"connections": [{"connection_id": "...", "fields": '
+                '[...]}]}. (Did you mean "connections"?)'
+            ),
+        )
     raw_connections = process_extensions.get("connections")
-    if raw_connections in (None, []):
-        return []
+    if raw_connections is None:
+        raise BuilderValidationError(
+            "process_extensions.connections must be a list, not null.",
+            error_code="PROCESS_EXTENSIONS_INVALID",
+            field="process_extensions.connections",
+            hint='Provide a list: {"connections": [{"connection_id": "...", "fields": [...]}]}.',
+        )
     if not isinstance(raw_connections, list):
         raise BuilderValidationError(
             "process_extensions.connections must be a list of connection-override "
@@ -575,6 +595,9 @@ def _extract_process_extension_connections(
             field="process_extensions.connections",
             hint='Each entry: {"connection_id": "...", "fields": [{"id","label","xpath"}]}.',
         )
+    if not raw_connections:
+        # Explicitly empty connections list — nothing to declare, valid no-op.
+        return []
 
     normalized: List[Dict[str, Any]] = []
     for i, entry in enumerate(raw_connections):

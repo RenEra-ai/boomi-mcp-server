@@ -3737,6 +3737,68 @@ class TestBuildPlanProcessFlowRefTypes:
         assert ve["details"]["expected_role"] == "REST Client connector-action"
 
     @patch(_PATCH_TARGET)
+    def test_process_extensions_ref_to_non_connection_errors(self, mock_pag):
+        # Issue #92: a process_extensions connection-override id pointing at an
+        # in-spec non-connection component (here the DB Get operation, which is
+        # in depends_on so reachability passes) must be rejected — otherwise it
+        # would emit a ConnectionOverride against a connector-action.
+        mock_pag.return_value = []
+        bad = _process_flow_comp()
+        bad.config["process_extensions"] = {
+            "connections": [
+                {
+                    "connection_id": "$ref:db_query_operation",
+                    "connector_type": "database",
+                    "fields": [
+                        {"id": "password", "label": "Password",
+                         "xpath": "DatabaseConnectionSettings/@password"},
+                    ],
+                }
+            ]
+        }
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "process_extensions.connections[0].connection_id"
+        assert ve["details"]["expected_role"] == "connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_process_extensions_ref_to_db_connection_ok(self, mock_pag):
+        # The archetype's own shape: the override id is the DB connection ref —
+        # a connector-settings — so the type-check passes.
+        mock_pag.return_value = []
+        good = _process_flow_comp()
+        good.config["process_extensions"] = {
+            "connections": [
+                {
+                    "connection_id": "$ref:db_connection",
+                    "connector_type": "database",
+                    "fields": [
+                        {"id": "password", "label": "Password",
+                         "xpath": "DatabaseConnectionSettings/@password"},
+                    ],
+                }
+            ]
+        }
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            good,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
     def test_target_action_type_method_mismatch_errors(self, mock_pag):
         mock_pag.return_value = []
         # Default stub method is POST. target.action_type="PATCH" on the

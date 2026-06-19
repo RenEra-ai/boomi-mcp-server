@@ -995,6 +995,11 @@ def test_build_update_discards_emitted_declaration_preserving_live_overrides():
     "process_extensions",
     [
         "not-a-dict",
+        # Present non-empty block whose connections key is missing/misspelled or
+        # null must be rejected, not silently dropped (Codex review finding).
+        {"connection": [{"connection_id": _DB_CONN_ID, "fields": _EXTENSION_FIELDS}]},
+        {"operations": []},
+        {"connections": None},
         {"connections": "not-a-list"},
         {"connections": ["not-a-dict"]},
         {"connections": [{"connection_id": "", "fields": _EXTENSION_FIELDS}]},
@@ -1009,6 +1014,16 @@ def test_build_rejects_malformed_process_extensions(process_extensions):
     with pytest.raises(BuilderValidationError) as excinfo:
         ProcessFlowBuilder.build(cfg, name="Bad Ext")
     assert excinfo.value.error_code == "PROCESS_EXTENSIONS_INVALID"
+
+
+@pytest.mark.parametrize("process_extensions", [{}, {"connections": []}])
+def test_build_empty_process_extensions_is_noop(process_extensions):
+    # An absent/empty block or an explicitly empty connections list emits the
+    # empty override element (no declaration), never an error.
+    cfg = _base_config(process_extensions=process_extensions)
+    xml = ProcessFlowBuilder.build(cfg, name="Empty Ext")
+    assert "<bns:processOverrides/>" in xml
+    assert "<Overrides" not in xml
 
 
 def test_validate_config_surfaces_process_extensions_error():

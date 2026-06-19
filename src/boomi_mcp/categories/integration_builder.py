@@ -1151,6 +1151,29 @@ def _check_process_flow_ref_types(
         slot_rules.append(
             ("reliability.dlq.process_id", dlq.get("process_id"), "error subprocess")
         )
+    # Issue #92 M4.5.7: process_extensions connection-override ids are
+    # $ref-resolvable too. The override declares connection FIELDS, so each id
+    # must resolve to a connection (connector-settings) component — never a map,
+    # profile, or process. Without this, a hand-authored spec could declare an
+    # override against a non-connection in-spec component, pass planning, and
+    # apply-time substitution would emit a <ConnectionOverride> that can never
+    # expose those fields. The archetype always sets the source DB connection,
+    # so this guards the hand-authored path.
+    process_extensions = (
+        raw_config.get("process_extensions")
+        if isinstance(raw_config.get("process_extensions"), dict)
+        else {}
+    )
+    pe_connections = process_extensions.get("connections")
+    if isinstance(pe_connections, list):
+        for i, pe_conn in enumerate(pe_connections):
+            if not isinstance(pe_conn, dict):
+                continue
+            slot_rules.append((
+                f"process_extensions.connections[{i}].connection_id",
+                pe_conn.get("connection_id"),
+                "connector-settings",
+            ))
     slot_rules = tuple(slot_rules)
 
     target_op_ref_component: Optional[IntegrationComponentSpec] = None
@@ -1186,6 +1209,11 @@ def _check_process_flow_ref_types(
             # Issue #51: the DLQ error-subprocess catch leg must point at a
             # process component.
             ok = _effective_component_type(target_comp) == "process"
+        elif expected_role == "connector-settings":
+            # Issue #92: a process_extensions connection-override ref must
+            # resolve to a connection (connector-settings) of any connector
+            # family — DB or REST. A map/profile/process is rejected.
+            ok = _classify_connector_settings(target_comp) is not None
         else:
             ok = True
 
