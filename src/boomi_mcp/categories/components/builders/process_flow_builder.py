@@ -2020,6 +2020,25 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
             _extract_process_extension_connections(config)
         except BuilderValidationError as exc:
             return exc
+        # A process_extensions connection $ref must be reachable (in depends_on)
+        # AND an exact '$ref:KEY' shape so apply-time substitution resolves it.
+        # The synthesis pass adds in-spec hoisted/seeded connection refs to
+        # depends_on; a hand-authored ref that is undeclared, whitespace-padded,
+        # or an empty-key '$ref:' must fail cleanly here rather than leak an
+        # unresolved token into the emitted processOverrides (the stripped
+        # connection_id from _extract masks padding, and _resolve_dependency_tokens
+        # only substitutes a value that starts with '$ref:' at byte 0 with a
+        # non-empty key). Reuse the shared reachability helper, scoped to the
+        # process_extensions subtree ONLY — the wrapper's subprocess_ref children
+        # use edge synthesis (not depends_on), so the full-config walk cannot be
+        # applied to a wrapper.
+        pe_block = config.get("process_extensions")
+        if pe_block is not None:
+            reach_err = _validate_ref_reachability(
+                {"process_extensions": pe_block}, set(depends_on or [])
+            )
+            if reach_err is not None:
+                return reach_err
         # Reuse the plaintext-secret scan shared with the database_to_api_sync
         # builder. No depends_on-membership requirement here: a processcall
         # $ref:KEY child is wired by an implicit edge synthesized at plan time

@@ -5633,6 +5633,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "process_calls[N].subprocess_ref|process_extensions.connections[N].connection_id"},
             {"error_code": "PROCESS_CALL_CONFIG_INVALID", "field": "process_calls[N].process_id|process_calls[N].wait|process_calls[N].abort_on_error"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
+            {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "process_extensions"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
         ],

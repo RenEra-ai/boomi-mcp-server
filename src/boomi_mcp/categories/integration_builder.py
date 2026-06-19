@@ -492,25 +492,42 @@ def _synthesize_wrapper_subprocess_extensions(spec: IntegrationSpecV1) -> None:
                     ordered.append(new_entry)
                 else:
                     rec = index[cid]
+                    existing_fields = rec["entry"].get("fields")
+                    if not isinstance(existing_fields, list):
+                        # Malformed wrapper seed (a hand-authored entry whose
+                        # 'fields' is not a list) — do NOT merge into it. Leave it
+                        # untouched so WrapperSubprocessBuilder.validate_config
+                        # surfaces the structured PROCESS_EXTENSIONS_INVALID rather
+                        # than crashing with AttributeError here (synthesis runs
+                        # before per-component validation).
+                        continue
                     for field in (centry.get("fields") or []):
                         if not isinstance(field, dict):
                             continue
                         fid = field.get("id")
                         if fid in rec["field_ids"]:
                             continue  # wrapper or earlier child already declares it
-                        rec["entry"].setdefault("fields", []).append(copy.deepcopy(field))
+                        existing_fields.append(copy.deepcopy(field))
                         rec["field_ids"].add(fid)
-                # The wrapper now references this connection — make a $ref:KEY
-                # reachable + ordered before the wrapper at apply time.
-                if cid.startswith("$ref:"):
-                    ckey = cid[len("$ref:"):]
-                    if ckey and ckey != comp.key and ckey not in comp.depends_on:
-                        comp.depends_on.append(ckey)
 
         if ordered:
             merged_pe = dict(wrapper_pe)
             merged_pe["connections"] = ordered
             cfg["process_extensions"] = merged_pe
+            # Every connection the wrapper now references (seeded by the wrapper
+            # itself OR hoisted from a child) that is an in-spec $ref:KEY must be
+            # applied before the wrapper, so add the dependency edge — gated on
+            # in-spec keys, matching _synthesize_wrapper_subprocess_edges. An
+            # out-of-spec / unreachable $ref is caught by validate_config's
+            # process_extensions reachability check (a clean structured error),
+            # not silently emitted as an unresolved token.
+            for entry in ordered:
+                cid = entry.get("connection_id")
+                if not (isinstance(cid, str) and cid.startswith("$ref:")):
+                    continue
+                ckey = cid[len("$ref:"):]
+                if ckey and ckey != comp.key and ckey in components_by_key and ckey not in comp.depends_on:
+                    comp.depends_on.append(ckey)
 
 
 def _build_auto_wrapper_spec(
