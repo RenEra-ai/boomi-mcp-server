@@ -209,15 +209,14 @@ _ENTRIES: List[Dict[str, Any]] = [
             "non-idempotent writes that cannot be made safe. The platform owns "
             "the retry timing, so a caller-selected fixed or exponential backoff "
             "interval is not available; if a custom backoff window is required, "
-            "design a scheduled re-run or queue-based retry instead. Note that "
-            "the typed builder currently emits one process-level Try/Catch "
-            "spanning the whole connector chain rather than a per-connector "
-            "retry unit, so any upstream read inside that chain re-executes on "
-            "each retry — keep upstream reads idempotent, or isolate the "
-            "retried call in its own subprocess, until per-connector scoping "
-            "ships."
+            "design a scheduled re-run or queue-based retry instead. The typed "
+            "builder now scopes the Try/Catch to each connector (the source read "
+            "in its own Try/Catch with zero retries, the target send in its own "
+            "Try/Catch with the bounded retry), so a target retry re-runs only "
+            "the target connector and the upstream read executes once — keep that "
+            "upstream read idempotent anyway as defense in depth."
         ),
-        "verification_status": "docs_corroborated",
+        "verification_status": "live_verified",
         "capability_status": "emittable_today",
         "category": "reliability",
         "mutual_exclusion": [],
@@ -227,7 +226,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "idempotency_and_duplicates",
             "reliable_and_sequential_messaging",
         ],
-        "provenance": "docs_corroborated",
+        "provenance": "live_verified",
     },
     {
         "name": "try_catch_placement",
@@ -239,23 +238,28 @@ _ENTRIES: List[Dict[str, Any]] = [
         "boomi_shape_mapping": (
             "Specific Try/Catch shapes placed immediately after the "
             "connectors that return data, scoping each catch to one "
-            "failure source — not one catch wrapping the whole process."
+            "failure source — not one catch wrapping the whole process. The "
+            "typed builder emits this connector-scoped placement: one Try/Catch "
+            "per connector, separated by the connectors so each scopes its own "
+            "failures independently, each with its own dead-letter catch leg."
         ),
         "when_to_use": (
             "After each data-returning connector in a process, so the catch "
-            "leg names the exact failing operation."
+            "leg names the exact failing operation. Prefer this over a single "
+            "process-wide catch whenever more than one connector can fail."
         ),
         "when_not_to_use": (
             "A single Try/Catch at the start of a scheduled main process — "
             "it hides the real error source. Avoid blanket process-wide "
-            "catches."
+            "catches. (A whole-process catch remains available as an explicit "
+            "legacy scope for the rare single-failure-source flow.)"
         ),
-        "verification_status": "docs_corroborated",
-        "capability_status": "guidance_only",
+        "verification_status": "live_verified",
+        "capability_status": "emittable_today",
         "category": "reliability",
         "mutual_exclusion": [],
         "cross_refs": ["connector_retry_design", "error_routing_and_dlq"],
-        "provenance": "docs_corroborated",
+        "provenance": "live_verified",
     },
     {
         "name": "error_routing_and_dlq",
@@ -277,7 +281,14 @@ _ENTRIES: List[Dict[str, Any]] = [
         "when_not_to_use": (
             "Do not route to a bare Stop with no record of the failed "
             "document. Retry-with-replay paths belong to "
-            "connector_retry_design, not the dead-letter leg."
+            "connector_retry_design, not the dead-letter leg. A Document Cache "
+            "dead-letter sink captures the failed payload only on a best-effort "
+            "basis — a malformed failed document may not be cleanly stored — and "
+            "it is execution-scoped, so cross-run replay is manual; when "
+            "guaranteed capture of the failed payload or durable cross-run replay "
+            "is required, route to a reusable error-handling subprocess instead. "
+            "The notification still records the failure durably either way, so "
+            "the failure is never silent."
         ),
         "verification_status": "live_verified",
         "capability_status": "emittable_today",

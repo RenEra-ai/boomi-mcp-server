@@ -260,3 +260,74 @@ def test_build_bypass_raises_on_missing_target():
     with pytest.raises(BuilderValidationError) as exc:
         WrapperSubprocessBuilder.build(cfg, name="N")
     assert exc.value.error_code == "PROCESS_REF_MISSING"
+
+
+# ---------------------------------------------------------------------------
+# Issue #99 G3 — wrapper carries process_extensions (env-extension overrides)
+#
+# So a wrapper-deployed package surfaces the child connection override points
+# through get_extensions. The block is validated + emitted exactly like
+# ProcessFlowBuilder's, reusing _emit_process_overrides; integration_builder
+# HOISTS it from a called child (see test_integration_builder).
+# ---------------------------------------------------------------------------
+
+_CONN_ID = "33333333-3333-3333-3333-333333333333"
+
+_PE_BLOCK = {
+    "connections": [
+        {
+            "connection_id": _CONN_ID,
+            "fields": [
+                {"id": "host", "label": "Host", "xpath": "DatabaseConnectionSettings/@host"},
+                {"id": "password", "label": "Password", "xpath": "DatabaseConnectionSettings/@password"},
+            ],
+        }
+    ]
+}
+
+
+def test_wrapper_without_process_extensions_emits_empty_overrides():
+    """The pre-#99 wrapper output is unchanged: an absent block emits the empty
+    <bns:processOverrides/> element."""
+    cfg = {"process_kind": "wrapper_subprocess", "process_calls": [{"process_id": _CHILD_ID}]}
+    xml = WrapperSubprocessBuilder.build(cfg, name="N")
+    root = ET.fromstring(xml)
+    overrides = root.find("bns:object/process/bns:processOverrides", NS)
+    # Empty element: no ConnectionOverride children.
+    assert overrides is None or len(list(overrides)) == 0
+
+
+def test_wrapper_emits_process_extension_overrides():
+    cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": _CHILD_ID}],
+        "process_extensions": _PE_BLOCK,
+    }
+    assert WrapperSubprocessBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = WrapperSubprocessBuilder.build(cfg, name="N")
+    assert "processOverrides" in xml and "ConnectionOverride" in xml
+    assert _CONN_ID in xml
+    assert "@password" in xml and "@host" in xml
+
+
+def test_wrapper_rejects_malformed_process_extensions():
+    cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": _CHILD_ID}],
+        # connections must be a list of objects with a connection_id.
+        "process_extensions": {"connections": [{"fields": []}]},
+    }
+    err = WrapperSubprocessBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_EXTENSIONS_INVALID"
+
+
+def test_wrapper_build_bypass_raises_on_malformed_process_extensions():
+    cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": _CHILD_ID}],
+        "process_extensions": {"connections": "not-a-list"},
+    }
+    with pytest.raises(BuilderValidationError) as exc:
+        WrapperSubprocessBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_EXTENSIONS_INVALID"

@@ -2493,10 +2493,19 @@ def _derive_process_reliability(
         else None
     )
 
+    # Issue #99 G1: the wired DB->API sync path emits a connector-scoped
+    # Try/Catch (a Try/Catch per connector — source retry 0, target retry N)
+    # rather than one process-level Try/Catch spanning the whole chain. #91
+    # Scenario 2 proved the old process scope re-executes the DB read on every
+    # REST retry; connector scope isolates the retried send so the upstream read
+    # runs once. ProcessFlowBuilder defaults try_catch_scope to "process" for
+    # direct process authoring (back-compat); the archetype opts the sync into
+    # the connector scope explicitly.
     target = dlq.target
     if target.mode == "document_cache_ref":
         block: Dict[str, Any] = {
             "retry_count": retry_count,
+            "try_catch_scope": "connector",
             "dlq": {
                 "mode": "document_cache_ref",
                 "document_cache_id": target.document_cache_id,
@@ -2508,6 +2517,7 @@ def _derive_process_reliability(
     if target.mode == "error_subprocess_ref":
         block = {
             "retry_count": retry_count,
+            "try_catch_scope": "connector",
             "dlq": {"mode": "error_subprocess_ref", "process_id": target.process_id},
         }
         if notify_block is not None:

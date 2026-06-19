@@ -72,6 +72,12 @@ _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subpr
 # these modes wired.
 _TRY_CATCH_DLQ_MODES = frozenset({"document_cache_ref", "error_subprocess_ref"})
 
+# Issue #99 G1 — Try/Catch placement scope. "process" (default) wraps the whole
+# source -> [transform] -> target chain in one Try/Catch (the pre-#99 shape).
+# "connector" emits a Try/Catch per connector (source retry 0, target retry N)
+# so a target retry does not re-execute the source read.
+_SUPPORTED_TRY_CATCH_SCOPES = frozenset({"process", "connector"})
+
 # Per the Boomi Try/Catch shape docs, Retry Count ranges 0..5 (count 1 retries
 # immediately; 2..5 use the platform's built-in escalating wait schedule). The
 # platform offers no caller-selected backoff. Issue #88 un-gated 1..5 (with a
@@ -492,7 +498,21 @@ class ProcessFlowBuilder:
             # _should_emit_try_catch already proved reliability_cfg["dlq"] is a
             # non-empty dict and retry_count is a valid int 0..5, so subscript
             # directly (no dead `or {}` fallback).
-            shape_xml_parts: List[str] = _emit_try_catch_shapes(
+            #
+            # Issue #99 G1: reliability.try_catch_scope selects the wrapper
+            # layout. "process" (default — absent key keeps the pre-#99 output
+            # byte-for-byte identical) wraps the whole chain in ONE Try/Catch;
+            # "connector" emits a Try/Catch per connector (source retry 0, target
+            # retry N) so a target retry does not re-run the source read.
+            try_catch_scope = str(
+                reliability_cfg.get("try_catch_scope") or "process"
+            ).strip().lower()
+            emitter = (
+                _emit_connector_scoped_try_catch_shapes
+                if try_catch_scope == "connector"
+                else _emit_try_catch_shapes
+            )
+            shape_xml_parts: List[str] = emitter(
                 flow,
                 reliability_cfg["dlq"],
                 retry_count=int(reliability_cfg.get("retry_count", 0)),
@@ -951,6 +971,20 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
             field="reliability.retry_count",
             hint=f"Boomi Try/Catch retry range is 0..{_MAX_RETRY_COUNT}.",
         )
+    # Issue #99 G1: optional Try/Catch placement scope. Absent -> "process"
+    # (the pre-#99 whole-chain wrapper). "connector" emits a Try/Catch per
+    # connector. Validated here so a bad value fails at plan time rather than
+    # silently falling back to the process scope in build().
+    scope = reliability.get("try_catch_scope")
+    if scope is not None:
+        if not isinstance(scope, str) or scope.strip().lower() not in _SUPPORTED_TRY_CATCH_SCOPES:
+            return BuilderValidationError(
+                "reliability.try_catch_scope must be 'process' or 'connector'.",
+                error_code="PROCESS_RETRY_UNVERIFIED",
+                field="reliability.try_catch_scope",
+                hint=f"Supported scopes: {sorted(_SUPPORTED_TRY_CATCH_SCOPES)}.",
+            )
+
     # Issue #88 (M4.5.3): retry_count 0..5 is un-gated. The Try/Catch Retry
     # Count range (0..5) and its built-in platform wait schedule (count 1
     # retries immediately; 2..5 use escalating built-in waits) are
@@ -1381,26 +1415,12 @@ def _emit_try_catch_shapes(
     first_try_name = f"shape{first_try_index}"
     stop_index = catcherrors_index + n  # last normal (Try-path stop) shape index
 
-    # A present-but-empty/invalid catch_notify still counts as "notify intended"
-    # so the validate_config-bypass path rejects it consistently (matches
-    # _validate_catch_notify, which treats only None as "absent").
-    notify_present = catch_notify is not None
-    if notify_present:
-        # Catch leg: notify (stop_index+1) -> dlq route (stop_index+2)
-        #            -> catch stop (stop_index+3).
-        notify_index = stop_index + 1
-        notify_name = f"shape{notify_index}"
-        dlq_index = stop_index + 2
-        catch_stop_index = stop_index + 3
-        catch_stop_name = f"shape{catch_stop_index}"
-        catch_target_name = notify_name
-        dlq_next_name: Optional[str] = catch_stop_name
-    else:
-        # Catch leg: a single terminal dlq route (unchanged pre-#89 shape).
-        dlq_index = stop_index + 1
-        catch_target_name = f"shape{dlq_index}"
-        dlq_next_name = None
-    dlq_name = f"shape{dlq_index}"
+    # Catch leg shapes follow the Try chain (indices stop_index+1..). The catch
+    # target name (catcherrors Catch dragpoint) is the leg's first shape.
+    mode = str(dlq.get("mode") or "").strip().lower()
+    catch_parts, catch_target_name, _next = _emit_catch_leg(
+        stop_index + 1, dlq, mode, catch_notify
+    )
 
     parts: List[str] = []
     # Start keeps its noaction config; only its outgoing edge moves to catcherrors.
@@ -1417,12 +1437,56 @@ def _emit_try_catch_shapes(
         is_last = j == n - 1
         next_name = None if is_last else f"shape{shape_index + 1}"
         parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
-    # Catch leg. Bindings are normally validated by _validate_dlq_binding /
-    # _validate_catch_notify; ids are literals or $ref:KEY already resolved by
-    # integration_builder before build(). Stay total on the validate_config-
-    # bypass path: raise on a missing/invalid binding instead of emitting broken
-    # XML (mirrors build()'s empty-name guard).
-    mode = str(dlq.get("mode") or "").strip().lower()
+    parts.extend(catch_parts)
+    return parts
+
+
+def _emit_catch_leg(
+    start_index: int,
+    dlq: Dict[str, Any],
+    mode: str,
+    catch_notify: Optional[Dict[str, Any]],
+) -> Tuple[List[str], str, int]:
+    """Emit one Try/Catch catch leg and return ``(parts, first_name, next_index)``.
+
+    The catch leg is ``[notify ->] dlq route [-> catch stop]``: without
+    ``catch_notify`` it is a single terminal ``doccacheload``/``processcall``
+    (the issue #51/#88 shape); with ``catch_notify`` (issue #89) it is
+    ``notify -> dlq route -> catch stop``. ``first_name`` is the shape the
+    catcherrors Catch dragpoint targets; ``next_index`` is the first free shape
+    index after this leg (so a second leg can be laid out without colliding —
+    issue #99 G1 connector scope emits two legs).
+
+    Bindings are normally validated by ``_validate_dlq_binding`` /
+    ``_validate_catch_notify``; ids are literals or ``$ref:KEY`` already resolved
+    by integration_builder before ``build()``. This stays total on the
+    validate_config-bypass path: it raises on a missing/invalid binding rather
+    than emitting broken XML (mirrors ``build()``'s empty-name guard).
+    """
+    # A present-but-empty/invalid catch_notify still counts as "notify intended"
+    # so the validate_config-bypass path rejects it consistently (matches
+    # _validate_catch_notify, which treats only None as "absent").
+    notify_present = catch_notify is not None
+    if notify_present:
+        # Catch leg: notify (start_index) -> dlq route (start_index+1)
+        #            -> catch stop (start_index+2).
+        notify_index = start_index
+        notify_name = f"shape{notify_index}"
+        dlq_index = start_index + 1
+        catch_stop_index = start_index + 2
+        catch_stop_name = f"shape{catch_stop_index}"
+        first_name = notify_name
+        dlq_next_name: Optional[str] = catch_stop_name
+        next_index = catch_stop_index + 1
+    else:
+        # Catch leg: a single terminal dlq route (unchanged pre-#89 shape).
+        dlq_index = start_index
+        first_name = f"shape{dlq_index}"
+        dlq_next_name = None
+        next_index = dlq_index + 1
+    dlq_name = f"shape{dlq_index}"
+
+    parts: List[str] = []
     if notify_present:
         notify_err = _validate_catch_notify(catch_notify, mode)
         if notify_err is not None:
@@ -1459,6 +1523,104 @@ def _emit_try_catch_shapes(
         )
     if notify_present:
         parts.append(_emit_stop(catch_stop_name, {"continue_": True}, y=_CATCH_SHAPE_Y))
+    return parts, first_name, next_index
+
+
+def _emit_connector_scoped_try_catch_shapes(
+    flow: List[Tuple[str, Dict[str, Any]]],
+    dlq: Dict[str, Any],
+    retry_count: int = 0,
+    catch_notify: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Connector-scoped Try/Catch: one Try/Catch per connector (issue #99 G1).
+
+    The whole-process variant (:func:`_emit_try_catch_shapes`) wraps the entire
+    ``source -> [transform] -> target`` chain in ONE catcherrors, so a target
+    (REST) retry re-executes the source (DB) read on every attempt — live-proven
+    a problem in #91 Scenario 2. This variant instead emits a SEPARATE Try/Catch
+    around each connector:
+
+      * the SOURCE connector in its own catcherrors with ``retryCount=0`` (a
+        re-read on transient is rarely safe and the source read is not the
+        retriable unit here);
+      * the TARGET connector in its own catcherrors with the configured
+        ``retryCount`` (the retriable send).
+
+    Per the Boomi Try/Catch docs ("two Try/Catch steps separated by other steps
+    — each behaves according to its own Failure Trigger setting"), the two
+    catcherrors are SEPARATED by the source connector (and the optional
+    transform), so each scopes its own failures independently: a target retry
+    no longer re-runs the source read. Each catch leg routes to the same DLQ
+    (and optional Notify) as the whole-process variant.
+
+    Layout (``m`` = number of transform shapes, 0 or 1)::
+
+        shape1  start            -> shape2
+        shape2  catcherrors(src)  Try -> shape3 ; Catch -> src catch leg   (retry 0)
+        shape3  source           -> shape4 (transform) | catcherrors(tgt)
+        shape4  [transform]      -> catcherrors(tgt)                       (if m)
+        shapeK  catcherrors(tgt)  Try -> target ; Catch -> tgt catch leg   (retry N)
+        target                   -> stop
+        stop
+        <src catch leg> ; <tgt catch leg>
+    """
+    source = flow[1]            # ("connectoraction_source", {...})
+    middle = flow[2:-2]         # [] or [("map"|"message", {...})]
+    target = flow[-2]           # ("connectoraction_target", {...})
+    stop = flow[-1]             # ("stop", {...})
+    m = len(middle)
+
+    ce_src_index = 2
+    source_index = 3
+    transform_index = 4         # only used when m == 1
+    ce_tgt_index = 4 + m
+    target_index = 5 + m
+    stop_index = 6 + m
+
+    ce_src_name = f"shape{ce_src_index}"
+    source_name = f"shape{source_index}"
+    ce_tgt_name = f"shape{ce_tgt_index}"
+    target_name = f"shape{target_index}"
+    stop_name = f"shape{stop_index}"
+
+    mode = str(dlq.get("mode") or "").strip().lower()
+    # Two catch legs laid out after the Try-row stop, source leg first. Both
+    # route to the same DLQ + (optional) Notify config.
+    src_leg, src_catch_first, after_src = _emit_catch_leg(
+        stop_index + 1, dlq, mode, catch_notify
+    )
+    tgt_leg, tgt_catch_first, _after_tgt = _emit_catch_leg(
+        after_src, dlq, mode, catch_notify
+    )
+
+    # The source connector's forward edge goes to the transform (if any) else
+    # straight to the target Try/Catch.
+    source_next_name = f"shape{transform_index}" if m else ce_tgt_name
+
+    parts: List[str] = []
+    parts.append(_emit_start_noaction("shape1", ce_src_name, 1))
+    # Source Try/Catch (retry 0).
+    parts.append(
+        _emit_catcherrors(ce_src_name, source_name, src_catch_first, ce_src_index, 0)
+    )
+    parts.append(
+        _emit_flow_shape(source[0], source[1], source_name, source_next_name, source_index)
+    )
+    if m:
+        t_kind, t_params = middle[0]
+        parts.append(
+            _emit_flow_shape(t_kind, t_params, f"shape{transform_index}", ce_tgt_name, transform_index)
+        )
+    # Target Try/Catch (configured retry).
+    parts.append(
+        _emit_catcherrors(ce_tgt_name, target_name, tgt_catch_first, ce_tgt_index, retry_count)
+    )
+    parts.append(
+        _emit_flow_shape(target[0], target[1], target_name, stop_name, target_index)
+    )
+    parts.append(_emit_flow_shape(stop[0], stop[1], stop_name, None, stop_index))
+    parts.extend(src_leg)
+    parts.extend(tgt_leg)
     return parts
 
 
@@ -1846,6 +2008,18 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
             entry_err = _validate_processcall_entry(call, i)
             if entry_err is not None:
                 return entry_err
+        # Issue #99 G3: a wrapper may carry a process_extensions block — either
+        # declared directly or HOISTED from a called child by integration_builder
+        # (_synthesize_wrapper_subprocess_extensions) — so a wrapper-deployed
+        # package surfaces the child connection override points through
+        # get_extensions (the #90 facade + #92 env-ext composition; the override
+        # points did NOT surface through a wrapper Process Call deployment before
+        # this — #91 capstone gap G3). Validate the same shape ProcessFlowBuilder
+        # enforces; build() lets it raise so both paths share one contract.
+        try:
+            _extract_process_extension_connections(config)
+        except BuilderValidationError as exc:
+            return exc
         # Reuse the plaintext-secret scan shared with the database_to_api_sync
         # builder. No depends_on-membership requirement here: a processcall
         # $ref:KEY child is wired by an implicit edge synthesized at plan time
@@ -1896,11 +2070,21 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
                 },
             ))
         flow.append(("stop", {"continue_": True}))
+        # Issue #99 G3: emit the hoisted/declared connection env-extension
+        # override points so the wrapper-deployed package surfaces them through
+        # get_extensions. Absent block -> empty <bns:processOverrides> (the
+        # pre-#99 wrapper output is byte-for-byte unchanged). _extract stays
+        # defensive so build() is total on a validate_config-bypass path.
+        process_overrides_xml = ""
+        connections = _extract_process_extension_connections(config)
+        if connections:
+            process_overrides_xml = _emit_process_overrides(connections)
         return _assemble_process_component_xml(
             _emit_linear_shapes(flow),
             name=name,
             description=description,
             folder_name=folder_name,
+            process_overrides_xml=process_overrides_xml,
         )
 
 

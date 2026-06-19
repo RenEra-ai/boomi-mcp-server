@@ -644,3 +644,141 @@ class TestNotifyValidation:
             ProcessFlowBuilder.build(cfg, name="N")
         assert exc.value.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
         assert exc.value.field == "reliability.catch_notify"
+
+
+# ---------------------------------------------------------------------------
+# Issue #99 G1 — connector-scoped Try/Catch (one Try/Catch per connector)
+#
+# The whole-process scope (above) wraps the entire chain in ONE catcherrors, so
+# a target (REST) retry re-runs the source (DB) read — live-proven a problem in
+# #91 Scenario 2. Connector scope emits a Try/Catch per connector (source retry
+# 0, target retry N) SEPARATED by the source connector, so each scopes its own
+# failures independently (Boomi docs: "two Try/Catch steps separated by other
+# steps — each behaves according to its own Failure Trigger") and the target
+# retry no longer re-executes the source read.
+# ---------------------------------------------------------------------------
+
+_MAP_ID = "88888888-8888-8888-8888-888888888888"
+
+_CONNECTOR_SCOPE_FIXTURE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "connector_scoped_trycatch_notify_dlq_document_cache.xml"
+)
+
+
+def _connector_config(retry_count=2, transform=None, catch_notify=None, dlq=None):
+    cfg = _config(
+        dlq or {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+        transform=transform or {"mode": "map_ref", "map_ref": _MAP_ID},
+        catch_notify=catch_notify,
+    )
+    cfg["reliability"]["retry_count"] = retry_count
+    cfg["reliability"]["try_catch_scope"] = "connector"
+    return cfg
+
+
+def test_connector_scope_matches_golden_fixture():
+    """The canonical connector-scoped build (map + document_cache + retry 2 +
+    Notify — the #91 production pattern) must match the committed golden."""
+    cfg = _connector_config(retry_count=2, catch_notify=_CATCH_NOTIFY)
+    emitted = ProcessFlowBuilder.build(
+        cfg, name="Connector Scope DLQ Golden", folder_name="Golden/Fixtures"
+    )
+    assert ET.canonicalize(emitted) == ET.canonicalize(_CONNECTOR_SCOPE_FIXTURE.read_text())
+
+
+def test_connector_scope_emits_two_try_catch_with_retry_placement():
+    """Source connector gets its own Try/Catch (retry 0); target connector gets
+    its own Try/Catch (the configured retry)."""
+    cfg = _connector_config(retry_count=2)
+    _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    assert _by_type(shapes) == [
+        "start", "catcherrors", "connectoraction", "map", "catcherrors",
+        "connectoraction", "stop", "doccacheload", "doccacheload",
+    ]
+    catcherrors = [s for s in shapes if s.attrib["shapetype"] == "catcherrors"]
+    retries = [c.find("configuration/catcherrors").attrib["retryCount"] for c in catcherrors]
+    # Source Try/Catch retry 0; target Try/Catch retry 2.
+    assert retries == ["0", "2"]
+
+
+def test_connector_scope_target_retry_does_not_re_run_source():
+    """The target Try/Catch's Try branch wraps ONLY the target connector; the
+    source connector is UPSTREAM of it, so a target retry cannot re-execute the
+    source read (the #99 G1 isolation guarantee)."""
+    cfg = _connector_config(retry_count=3)
+    root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    by_name = {s.attrib["name"]: s for s in shapes}
+
+    def _drag(shape, identifier):
+        for dp in shape.findall("dragpoints/dragpoint"):
+            if dp.attrib.get("identifier") == identifier:
+                return dp.attrib["toShape"]
+        return None
+
+    def _forward(shape):
+        # A non-catcherrors flow shape has at most one (unnamed-identifier) edge.
+        dps = shape.findall("dragpoints/dragpoint")
+        return dps[0].attrib["toShape"] if dps else None
+
+    catcherrors = [s for s in shapes if s.attrib["shapetype"] == "catcherrors"]
+    src_ce, tgt_ce = catcherrors[0], catcherrors[1]
+    # Source Try -> the source connector; target Try -> the target connector.
+    src_try = by_name[_drag(src_ce, "default")]
+    tgt_try = by_name[_drag(tgt_ce, "default")]
+    assert src_try.attrib["shapetype"] == "connectoraction"
+    assert tgt_try.attrib["shapetype"] == "connectoraction"
+    assert src_try is not tgt_try
+    # The source connector flows FORWARD into the target Try/Catch (via the map),
+    # i.e. the source is upstream of the target catcherrors and therefore outside
+    # the target's retry unit (the target Try wraps only the REST connector).
+    nxt = _forward(src_try)
+    hops = 0
+    while nxt is not None and by_name[nxt].attrib["shapetype"] != "catcherrors" and hops < 5:
+        nxt = _forward(by_name[nxt])
+        hops += 1
+    assert nxt == tgt_ce.attrib["name"], "source connector must flow into the target Try/Catch"
+    # And the target Try branch (the retry unit) is exactly the target connector,
+    # which terminates at the Try-row stop — the source is not on that branch.
+    assert _forward(tgt_try) is not None
+    assert by_name[_forward(tgt_try)].attrib["shapetype"] == "stop"
+
+
+def test_connector_scope_passthrough_no_transform():
+    cfg = _connector_config(retry_count=1, transform={"mode": "passthrough"})
+    _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    assert _by_type(shapes) == [
+        "start", "catcherrors", "connectoraction", "catcherrors",
+        "connectoraction", "stop", "doccacheload", "doccacheload",
+    ]
+
+
+def test_process_scope_explicit_equals_default():
+    """try_catch_scope='process' must be byte-identical to omitting the key —
+    the legacy whole-process wrapper is preserved unchanged."""
+    base = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
+    explicit = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
+    explicit["reliability"]["try_catch_scope"] = "process"
+    assert ProcessFlowBuilder.build(base, name="X") == ProcessFlowBuilder.build(
+        explicit, name="X"
+    )
+
+
+def test_connector_scope_each_leg_routes_to_dlq_cache():
+    cfg = _connector_config(retry_count=2)
+    _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    legs = [s for s in shapes if s.attrib["shapetype"] == "doccacheload"]
+    assert len(legs) == 2
+    for leg in legs:
+        assert leg.find("configuration/doccacheload").attrib["docCache"] == _CACHE_ID
+
+
+def test_invalid_try_catch_scope_rejected():
+    cfg = _config({"mode": "document_cache_ref", "document_cache_id": _CACHE_ID})
+    cfg["reliability"]["try_catch_scope"] = "bogus"
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
+    assert err.field == "reliability.try_catch_scope"

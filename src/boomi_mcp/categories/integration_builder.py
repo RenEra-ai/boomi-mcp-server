@@ -9,6 +9,7 @@ This module provides a single action router that can:
 
 from __future__ import annotations
 
+import copy
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -397,6 +398,119 @@ def _synthesize_wrapper_subprocess_edges(spec: IntegrationSpecV1) -> None:
                     and key not in comp.depends_on
                 ):
                     comp.depends_on.append(key)
+
+
+def _synthesize_wrapper_subprocess_extensions(spec: IntegrationSpecV1) -> None:
+    """Hoist a called child's connection env-extension declarations onto the
+    wrapper parent (issue #99 G3).
+
+    #92 writes ``<ConnectionOverride>`` override points into the DECLARING
+    process's ``processOverrides``. But when that process is invoked as a
+    subprocess via a #90 wrapper Process Call and the WRAPPER is the deployed
+    package, ``get_extensions`` / ``query_extensions`` returned 0 connections —
+    the override points only surfaced when the declaring process was deployed
+    DIRECTLY (#91 capstone gap G3). To make a wrapper-deployed package surface
+    the child override points, copy each called in-spec child's
+    ``process_extensions.connections`` onto the wrapper. The child keeps its own
+    copy so it stays independently deployable.
+
+    Merge rules (architect plan):
+      * dedup by ``(connection_id, field.id)``; a wrapper-DECLARED override for
+        the same connection+field wins (the wrapper's own intent is
+        authoritative), so wrapper entries are kept first;
+      * a connection_id already on the wrapper gains only the child fields it is
+        missing (wrapper fields first, then the missing child fields, in order);
+      * each hoisted connection ``$ref:KEY`` is added to the wrapper's
+        ``depends_on`` so apply-time substitution + topo-sort resolve it on the
+        wrapper.
+
+    Runs after :func:`_synthesize_wrapper_subprocess_edges` so the parent->child
+    edges already exist; adds only parent->connection edges (no new components,
+    so the component_count stays in sync).
+    """
+    components_by_key = {comp.key: comp for comp in spec.components}
+    for comp in spec.components:
+        cfg = comp.config
+        if not isinstance(cfg, dict):
+            continue
+        if (
+            str(cfg.get("process_kind") or cfg.get("process_type") or "").strip().lower()
+            != WrapperSubprocessBuilder.PROCESS_KIND
+        ):
+            continue
+        calls = cfg.get("process_calls")
+        if not isinstance(calls, list):
+            continue
+
+        # Seed the merge with the wrapper's own declared overrides (wrapper wins).
+        wrapper_pe = cfg.get("process_extensions")
+        wrapper_pe = wrapper_pe if isinstance(wrapper_pe, dict) else {}
+        seed_conns = wrapper_pe.get("connections")
+        seed_conns = seed_conns if isinstance(seed_conns, list) else []
+        ordered: List[Dict[str, Any]] = []
+        index: Dict[str, Dict[str, Any]] = {}  # connection_id -> {entry, field_ids}
+        for entry in seed_conns:
+            if not isinstance(entry, dict):
+                continue
+            cid = entry.get("connection_id")
+            if not isinstance(cid, str) or not cid.strip():
+                continue
+            fields = entry.get("fields") if isinstance(entry.get("fields"), list) else []
+            fids = {f.get("id") for f in fields if isinstance(f, dict)}
+            index[cid] = {"entry": entry, "field_ids": fids}
+            ordered.append(entry)
+
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            sref = call.get("subprocess_ref")
+            if not (isinstance(sref, str) and sref.startswith("$ref:")):
+                continue
+            child = components_by_key.get(sref[len("$ref:"):])
+            if child is None or child is comp:
+                continue
+            child_cfg = child.config if isinstance(child.config, dict) else {}
+            child_pe = child_cfg.get("process_extensions")
+            if not isinstance(child_pe, dict):
+                continue
+            child_conns = child_pe.get("connections")
+            if not isinstance(child_conns, list):
+                continue
+            for centry in child_conns:
+                if not isinstance(centry, dict):
+                    continue
+                cid = centry.get("connection_id")
+                if not isinstance(cid, str) or not cid.strip():
+                    continue
+                if cid not in index:
+                    new_entry = copy.deepcopy(centry)
+                    new_fields = new_entry.get("fields") if isinstance(new_entry.get("fields"), list) else []
+                    index[cid] = {
+                        "entry": new_entry,
+                        "field_ids": {f.get("id") for f in new_fields if isinstance(f, dict)},
+                    }
+                    ordered.append(new_entry)
+                else:
+                    rec = index[cid]
+                    for field in (centry.get("fields") or []):
+                        if not isinstance(field, dict):
+                            continue
+                        fid = field.get("id")
+                        if fid in rec["field_ids"]:
+                            continue  # wrapper or earlier child already declares it
+                        rec["entry"].setdefault("fields", []).append(copy.deepcopy(field))
+                        rec["field_ids"].add(fid)
+                # The wrapper now references this connection — make a $ref:KEY
+                # reachable + ordered before the wrapper at apply time.
+                if cid.startswith("$ref:"):
+                    ckey = cid[len("$ref:"):]
+                    if ckey and ckey != comp.key and ckey not in comp.depends_on:
+                        comp.depends_on.append(ckey)
+
+        if ordered:
+            merged_pe = dict(wrapper_pe)
+            merged_pe["connections"] = ordered
+            cfg["process_extensions"] = merged_pe
 
 
 def _build_auto_wrapper_spec(
@@ -1347,6 +1461,49 @@ def _check_wrapper_subprocess_ref_types(
                     "actual_role": actual_role,
                 },
             )
+
+    # Issue #99 G3: a wrapper may carry hoisted/declared process_extensions
+    # connection overrides. Each in-spec connection_id $ref must resolve to a
+    # connector-settings (DB or REST) — a map/profile/process is rejected (same
+    # discipline as the #92 process-flow check). Hoisted refs are always valid
+    # (copied from in-spec children); this guards the hand-authored wrapper path.
+    process_extensions = (
+        raw_config.get("process_extensions")
+        if isinstance(raw_config.get("process_extensions"), dict)
+        else {}
+    )
+    pe_connections = process_extensions.get("connections")
+    if isinstance(pe_connections, list):
+        for i, pe_conn in enumerate(pe_connections):
+            if not isinstance(pe_conn, dict):
+                continue
+            raw_value = pe_conn.get("connection_id")
+            if not (isinstance(raw_value, str) and raw_value.startswith("$ref:")):
+                continue
+            ref_key = raw_value[5:]
+            if not ref_key:
+                continue
+            target_comp = components_by_key.get(ref_key)
+            if target_comp is None:
+                continue
+            if _classify_connector_settings(target_comp) is None:
+                field_path = f"process_extensions.connections[{i}].connection_id"
+                actual_role = _format_actual_role(target_comp)
+                return BuilderValidationError(
+                    f"{field_path} {raw_value!r} must reference a connector-settings "
+                    f"component (got {actual_role}).",
+                    error_code="PROCESS_REF_TYPE_MISMATCH",
+                    field=field_path,
+                    hint=(
+                        "A process_extensions override declares connection FIELDS, "
+                        "so it must target a connection (connector-settings) component."
+                    ),
+                    details={
+                        "ref_key": ref_key,
+                        "expected_role": "connector-settings",
+                        "actual_role": actual_role,
+                    },
+                )
     return None
 
 
@@ -2227,6 +2384,11 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     # implicit dependencies — synthesize the edges so the topo-sort applies
     # children before the parent regardless of input order.
     _synthesize_wrapper_subprocess_edges(spec)
+    # Issue #99 G3: hoist a called child's connection env-extension overrides onto
+    # the wrapper so a wrapper-deployed package surfaces them through
+    # get_extensions (the #90 facade + #92 env-ext composition). Runs after the
+    # edges so parent->child links exist; adds parent->connection edges only.
+    _synthesize_wrapper_subprocess_extensions(spec)
     # Wrapper synthesis can add components (a transform.function per script-route
     # map), so keep an archetype-authored validation_rules.component_count in
     # sync with the planned component list. Otherwise the dumped plan spec is

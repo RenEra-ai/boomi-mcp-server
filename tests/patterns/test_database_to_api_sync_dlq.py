@@ -150,8 +150,10 @@ def _operational_intent(spec: dict) -> dict:
 
 def test_document_cache_ref_emits_wired_reliability():
     spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
+    # Issue #99 G1: the wired sync path opts into the connector-scoped Try/Catch.
     assert _main_process(spec)["config"]["reliability"] == {
         "retry_count": 0,
+        "try_catch_scope": "connector",
         "dlq": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
     }
 
@@ -160,6 +162,7 @@ def test_error_subprocess_ref_emits_wired_reliability():
     spec = _emit({"enabled": True, "target": {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID}})
     assert _main_process(spec)["config"]["reliability"] == {
         "retry_count": 0,
+        "try_catch_scope": "connector",
         "dlq": {"mode": "error_subprocess_ref", "process_id": _HANDLER_ID},
     }
 
@@ -446,12 +449,24 @@ def test_archetype_dlq_shape_sequence_is_trycatch_with_map_and_dlq():
     spec = _emit({"enabled": True, "target": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID}})
     root = ET.fromstring(_build_archetype_process_xml(spec))
     shapes = root.find("bns:object/process", NS).find("shapes").findall("shape")
+    # Issue #99 G1: connector scope emits a Try/Catch per connector — the source
+    # connector (DB Get) in its own catcherrors and the target connector (REST)
+    # in its own catcherrors, separated by the source so the target retry does
+    # not re-run the DB read. Each connector gets its own DLQ catch leg.
     assert [s.attrib["shapetype"] for s in shapes] == [
-        "start", "catcherrors", "connectoraction", "map", "connectoraction", "stop", "doccacheload",
+        "start", "catcherrors", "connectoraction", "map", "catcherrors",
+        "connectoraction", "stop", "doccacheload", "doccacheload",
     ]
-    catch_leg = shapes[6]
-    assert catch_leg.attrib["shapetype"] == "doccacheload"
-    assert catch_leg.find("configuration/doccacheload").attrib["docCache"] == _CACHE_ID
+    # Both catch legs route to the same DLQ document cache.
+    dlq_legs = [s for s in shapes if s.attrib["shapetype"] == "doccacheload"]
+    assert len(dlq_legs) == 2
+    for leg in dlq_legs:
+        assert leg.find("configuration/doccacheload").attrib["docCache"] == _CACHE_ID
+    # The source Try/Catch carries retry 0; the target carries the configured
+    # retry (here 0 — the default max_attempts=1).
+    catcherrors = [s for s in shapes if s.attrib["shapetype"] == "catcherrors"]
+    assert len(catcherrors) == 2
+    assert catcherrors[0].find("configuration/catcherrors").attrib["retryCount"] == "0"
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +481,7 @@ def test_catch_notify_reaches_process_reliability_document_cache():
     spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
     assert _main_process(spec)["config"]["reliability"] == {
         "retry_count": 0,
+        "try_catch_scope": "connector",
         "dlq": {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
         "catch_notify": {"level": "ERROR", "message_template": _CATCH_NOTIFY["message_template"]},
     }
@@ -540,7 +556,11 @@ def test_archetype_notify_shape_sequence():
     spec = _emit(_WIRED_DC, catch_notify=_CATCH_NOTIFY)
     root = ET.fromstring(_build_archetype_process_xml(spec, name="Archetype Notify DLQ Golden"))
     shapes = root.find("bns:object/process", NS).find("shapes").findall("shape")
+    # Issue #99 G1: connector scope — each connector's catch leg is the full
+    # notify -> dlq route -> catch stop sequence (one per connector).
     assert [s.attrib["shapetype"] for s in shapes] == [
-        "start", "catcherrors", "connectoraction", "map", "connectoraction",
-        "stop", "notify", "doccacheload", "stop",
+        "start", "catcherrors", "connectoraction", "map", "catcherrors",
+        "connectoraction", "stop",
+        "notify", "doccacheload", "stop",
+        "notify", "doccacheload", "stop",
     ]

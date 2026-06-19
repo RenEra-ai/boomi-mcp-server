@@ -5356,6 +5356,11 @@ _PROCESS_FLOW_PROTOCOLS = {
             "transform.map_ref",
             "reliability",
             "reliability.retry_count",
+            # Issue #99 G1: Try/Catch placement scope. "process" (default — the
+            # pre-#99 whole-chain wrapper) or "connector" (a Try/Catch per
+            # connector: source retry 0, target retry N) so a target retry does
+            # not re-run the source read.
+            "reliability.try_catch_scope",
             "reliability.dlq",
             "reliability.dlq.mode",
             # Issue #51 M3.R1a / #88 M4.5.3: DLQ catch-path bindings consumed by
@@ -5431,7 +5436,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target"},
             {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type"},
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
-            {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count"},
+            {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.try_catch_scope"},
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
             {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
@@ -5452,6 +5457,25 @@ _PROCESS_FLOW_PROTOCOLS = {
             "field. retry_count > 0 requires a wired DLQ catch path; retry_count "
             "outside 0..5 (or > 0 without a DLQ mode) returns "
             "PROCESS_RETRY_UNVERIFIED.",
+            "Issue #99 G1: reliability.try_catch_scope selects the Try/Catch "
+            "placement. 'process' (default) wraps the whole source -> [transform] "
+            "-> target chain in ONE Try/Catch, so a target (REST) retry re-runs "
+            "the source (DB) read. 'connector' emits a Try/Catch per connector — "
+            "the source in its own Try/Catch with retry 0 and the target in its "
+            "own Try/Catch with the configured retry, separated by the source so "
+            "the target retry does NOT re-execute the source read (keep source "
+            "reads idempotent regardless). Each connector gets its own DLQ (and "
+            "optional Notify) catch leg. The database_to_api_sync archetype emits "
+            "connector scope by default; an unsupported value returns "
+            "PROCESS_RETRY_UNVERIFIED.",
+            "Issue #99 G4 (limitation): the DLQ document-cache catch leg captures "
+            "the failed document on a best-effort basis — a malformed failed-REST "
+            "document can log 'executed with errors' at the doccacheload step. The "
+            "failure is never silent (the Notify step logs the real caught error "
+            "durably), but for guaranteed capture of the failed payload use "
+            "reliability.dlq.mode='error_subprocess_ref' (a custom error "
+            "subprocess) as the durable escape hatch. The Document Cache is also "
+            "execution-scoped, so cross-run DLQ replay is currently manual.",
             "Issue #89 M4.5.4: reliability.catch_notify (optional) emits a "
             "verified Notify step at the HEAD of the catch leg — the leg becomes "
             "notify -> dlq route -> catch stop. It requires a wired DLQ "
@@ -5518,8 +5542,11 @@ _PROCESS_FLOW_PROTOCOLS = {
                 # Wired DLQ + optional Notify (#51 / #89): the catch leg logs the
                 # caught error then routes failed documents to the DLQ cache. The
                 # message_template references the platform caught-error property.
+                # try_catch_scope='connector' (#99 G1) gives each connector its
+                # own Try/Catch so a target retry does not re-run the source read.
                 "reliability": {
                     "retry_count": 0,
+                    "try_catch_scope": "connector",
                     "dlq": {
                         "mode": "document_cache_ref",
                         "document_cache_id": "$ref:dlq_document_cache",
@@ -5583,6 +5610,11 @@ _PROCESS_FLOW_PROTOCOLS = {
             "process_calls[].wait",
             "process_calls[].abort_on_error",
             "process_calls[].label",
+            # Issue #99 G3: connection env-extension override points surfaced on
+            # the wrapper-deployed package. Usually HOISTED automatically from a
+            # called child's process_extensions; may also be declared directly.
+            "process_extensions",
+            "process_extensions.connections",
         ],
         "field_notes": {
             "process_calls": "Non-empty list; each entry is one standalone Process Call to a child process.",
@@ -5590,6 +5622,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "process_calls[].process_id": "Component id of an EXISTING Boomi process (no in-spec child required).",
             "process_calls[].wait": "Wait for the child to finish before continuing (default true).",
             "process_calls[].abort_on_error": "Abort the parent if the child fails (default false — the parent continues, matching the live wrapper exemplar).",
+            "process_extensions": "Issue #99 G3: same shape as the database_to_api_sync process_extensions (connections[].connection_id + fields[].{id,label,xpath}). The integration builder HOISTS a called child's process_extensions onto the wrapper automatically so a wrapper-deployed package surfaces the child override points via get_extensions; you rarely declare it by hand.",
         },
         "structured_errors": [
             {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
@@ -5597,8 +5630,9 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_REF_AMBIGUOUS", "field": "process_calls[N]"},
             {"error_code": "PROCESS_REF_SELF_REFERENCE", "field": "process_calls[N].subprocess_ref"},
             {"error_code": "PROCESS_REF_NOT_FOUND", "field": "process_calls[N].subprocess_ref"},
-            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "process_calls[N].subprocess_ref"},
+            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "process_calls[N].subprocess_ref|process_extensions.connections[N].connection_id"},
             {"error_code": "PROCESS_CALL_CONFIG_INVALID", "field": "process_calls[N].process_id|process_calls[N].wait|process_calls[N].abort_on_error"},
+            {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
         ],
@@ -5616,6 +5650,16 @@ _PROCESS_FLOW_PROTOCOLS = {
             "Parent-redeploy implication: the parent is the release boundary — when "
             "a child subprocess changes, repackage and redeploy the parent so the "
             "deployed wrapper references the intended child implementation.",
+            "Issue #99 G3: a called child's connection env-extension overrides "
+            "(#92 process_extensions) do NOT surface through a wrapper Process "
+            "Call deployment on their own — they only surface when the declaring "
+            "process is deployed directly. The integration builder therefore "
+            "HOISTS the child's process_extensions.connections onto the wrapper at "
+            "plan time (deduped by connection+field; a wrapper-declared override "
+            "wins) and adds the connection $ref to the wrapper's depends_on, so a "
+            "wrapper-deployed package exposes the override points through "
+            "get_extensions / update_extensions. Verify via get_extensions after "
+            "deploy — a partial_update success is not proof the override exists.",
             "Invalid references fail at plan time before any Boomi mutation: a "
             "missing/ambiguous target, a self-reference, a key not present in the "
             "spec, or a non-process target each return a structured PROCESS_REF_* "
