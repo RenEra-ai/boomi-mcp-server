@@ -5476,6 +5476,16 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.dlq.mode='error_subprocess_ref' (a custom error "
             "subprocess) as the durable escape hatch. The Document Cache is also "
             "execution-scoped, so cross-run DLQ replay is currently manual.",
+            "Issue #99 G2 (deferred): per-document dynamic REST path replacement "
+            "(e.g. PATCH /clients/{clientCode} bound to a mapped field) is NOT "
+            "supported. send_request.path is a fixed string; there is no "
+            "path_replacements surface. Boomi REST/HTTP path replacement is not a "
+            "path-string change — it needs the operation to declare resource-path "
+            "elements flagged as replacement variables AND a Set Properties step "
+            "setting a Dynamic Document Property (case-sensitive) bound to a "
+            "mapped field, neither of which the typed builder emits yet. A "
+            "multi-record sync must therefore use a static per-client path today; "
+            "the dynamic-path emission is a separate live-XML-grounded feature.",
             "Issue #89 M4.5.4: reliability.catch_notify (optional) emits a "
             "verified Notify step at the HEAD of the catch leg — the leg becomes "
             "notify -> dlq route -> catch stop. It requires a wired DLQ "

@@ -69,6 +69,9 @@ from .components.builders import (
     get_profile_builder,
 )
 from .components.builders.connector_builder import _resolve_rest_connector_type
+from .components.builders.process_flow_builder import (
+    _extract_process_extension_connections,
+)
 from .components.builders.json_profile_builder import JSONGeneratedProfileBuilder
 from .components.builders.xml_profile_builder import XMLGeneratedProfileBuilder
 from .components.builders.map_builder import DirectMapBuilder, get_map_builder
@@ -400,6 +403,114 @@ def _synthesize_wrapper_subprocess_edges(spec: IntegrationSpecV1) -> None:
                     comp.depends_on.append(key)
 
 
+def _is_malformed_ref_token(value: Any) -> bool:
+    """True if ``value`` is a $ref token that is whitespace-padded or empty-key.
+
+    ``_resolve_dependency_tokens`` only substitutes a value that starts with
+    ``$ref:`` at byte 0 with a non-empty key, so ``" $ref:x "`` or ``"$ref:"``
+    never resolve and would leak unresolved. Such shapes must be REJECTED by
+    validation, never deduped away — so synthesis leaves them for
+    WrapperSubprocessBuilder.validate_config (whose reachability check raises
+    MISSING_PROCESS_DEPENDENCY) rather than folding them into a canonical twin.
+    """
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    return stripped.startswith("$ref:") and (value != stripped or stripped == "$ref:")
+
+
+def _override_entry_is_valid(entry: Any) -> bool:
+    """True if a single ``process_extensions`` connection entry is structurally
+    valid per the shape authority :func:`_extract_process_extension_connections`
+    (non-empty connection_id, a non-empty fields list, each field carrying a
+    non-empty id/label/xpath).
+
+    Used to decide whether a seed/hoisted entry is safe to dedup (valid) or must
+    be PRESERVED raw for validate_config to reject (malformed) — so dedup never
+    silently drops a malformed entry/field that canonicalizes onto a valid twin.
+    This is the only validation a REUSE child's process_extensions receives (the
+    reuse path skips the child's own validate_config), so the hoist must not mask
+    its malformed declarations.
+    """
+    try:
+        _extract_process_extension_connections(
+            {"process_extensions": {"connections": [entry]}}
+        )
+        return True
+    except BuilderValidationError:
+        return False
+
+
+def _merge_override_connection(
+    index: Dict[str, Dict[str, Any]],
+    ordered: List[Dict[str, Any]],
+    entry: Dict[str, Any],
+) -> None:
+    """Merge one connection-override entry into ``ordered``/``index``, deduping by
+    ``(connection_id, field.id)`` (issue #99 G3).
+
+    The first entry seen for a connection_id wins its slot and base fields; later
+    entries — a duplicate among the wrapper's OWN declarations, or a hoisted
+    child entry — contribute only the fields not already present (in order). A
+    deep copy is stored so the merged result never aliases the caller's input.
+    Shared by the wrapper-seed and child-hoist passes so dedup is uniform.
+
+    Dedup keys (connection_id and field id) are the STRIPPED values, matching the
+    canonicalization _extract_process_extension_connections / the builder apply
+    at emission — so a whitespace-padded duplicate (e.g. ``"abc"`` vs ``" abc "``,
+    or fields ``"host"`` vs ``" host "``) collapses here instead of emitting two
+    ConnectionOverride / field elements with the same canonical id.
+
+    ONLY a structurally-valid entry (per :func:`_override_entry_is_valid`) with a
+    well-formed connection_id (not a padded / empty-key $ref — see
+    :func:`_is_malformed_ref_token`) is deduped. Anything else is PRESERVED raw
+    (appended, never folded into a canonical twin) so it always reaches
+    WrapperSubprocessBuilder.validate_config, which rejects it
+    (PROCESS_EXTENSIONS_INVALID for a bad shape, MISSING_PROCESS_DEPENDENCY for a
+    malformed $ref). This holds uniformly for the wrapper's own seed entries AND
+    hoisted child entries — a REUSE child's process_extensions is otherwise never
+    validated, so dedup must not silently drop its malformed entries/fields.
+    """
+    def _id_key(value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
+
+    cid = entry.get("connection_id")
+    if not _override_entry_is_valid(entry) or _is_malformed_ref_token(cid):
+        # Not safe to dedup — preserve raw for validate_config to reject.
+        ordered.append(copy.deepcopy(entry))
+        return
+    cid_key = cid.strip()
+    if cid_key not in index:
+        new_entry = copy.deepcopy(entry)
+        # Dedup the entry's OWN fields by canonical id too — a single entry may
+        # declare the same field id twice (e.g. fields=[host, host]); copying the
+        # list wholesale would emit duplicate <field> elements for one connection.
+        seen_fids: set = set()
+        deduped_fields: List[Any] = []
+        for f in (new_entry.get("fields") if isinstance(new_entry.get("fields"), list) else []):
+            fid_key = _id_key(f.get("id")) if isinstance(f, dict) else f
+            if fid_key in seen_fids:
+                continue
+            seen_fids.add(fid_key)
+            deduped_fields.append(f)
+        new_entry["fields"] = deduped_fields
+        index[cid_key] = {"entry": new_entry, "field_ids": seen_fids}
+        ordered.append(new_entry)
+        return
+    rec = index[cid_key]
+    existing_fields = rec["entry"].get("fields")
+    if not isinstance(existing_fields, list):
+        return
+    for field in (entry.get("fields") or []):
+        if not isinstance(field, dict):
+            continue
+        fid_key = _id_key(field.get("id"))
+        if fid_key in rec["field_ids"]:
+            continue
+        existing_fields.append(copy.deepcopy(field))
+        rec["field_ids"].add(fid_key)
+
+
 def _synthesize_wrapper_subprocess_extensions(spec: IntegrationSpecV1) -> None:
     """Hoist a called child's connection env-extension declarations onto the
     wrapper parent (issue #99 G3).
@@ -442,24 +553,41 @@ def _synthesize_wrapper_subprocess_extensions(spec: IntegrationSpecV1) -> None:
         if not isinstance(calls, list):
             continue
 
-        # Seed the merge with the wrapper's own declared overrides (wrapper wins).
-        wrapper_pe = cfg.get("process_extensions")
-        wrapper_pe = wrapper_pe if isinstance(wrapper_pe, dict) else {}
-        seed_conns = wrapper_pe.get("connections")
-        seed_conns = seed_conns if isinstance(seed_conns, list) else []
+        # The wrapper's OWN declared process_extensions must be structurally valid
+        # BEFORE synthesis transforms it. Synthesis runs ahead of
+        # WrapperSubprocessBuilder.validate_config, and hoisting/dedup can rewrite
+        # a malformed hand-authored block into a valid-looking one — masking the
+        # error (a malformed top-level block, OR a malformed duplicate entry that
+        # dedup silently drops; Codex §6 review). Gate on the single shape
+        # authority, _extract_process_extension_connections: if the wrapper's
+        # declared block is malformed in ANY way, skip synthesis for this wrapper
+        # and leave it for validate_config to reject (PROCESS_EXTENSIONS_INVALID).
+        # None / {} / [] are valid no-ops (a wrapper with no declared block can
+        # still RECEIVE hoisted child overrides).
+        try:
+            _extract_process_extension_connections(cfg)
+        except BuilderValidationError:
+            continue
+        raw_pe = cfg.get("process_extensions")
+        wrapper_pe = raw_pe if isinstance(raw_pe, dict) else {}
+        # NB: a malformed $ref connection_id (padded / empty-key) from EITHER the
+        # wrapper's own block OR a hoisted child is preserved (not deduped) by
+        # _merge_override_connection so it reaches validate_config's reachability
+        # check — see that helper. Malformed SHAPE in the wrapper's own block is
+        # rejected by the _extract gate above (skip -> validate_config rejects).
+
         ordered: List[Dict[str, Any]] = []
         index: Dict[str, Dict[str, Any]] = {}  # connection_id -> {entry, field_ids}
-        for entry in seed_conns:
-            if not isinstance(entry, dict):
-                continue
-            cid = entry.get("connection_id")
-            if not isinstance(cid, str) or not cid.strip():
-                continue
-            fields = entry.get("fields") if isinstance(entry.get("fields"), list) else []
-            fids = {f.get("id") for f in fields if isinstance(f, dict)}
-            index[cid] = {"entry": entry, "field_ids": fids}
-            ordered.append(entry)
+        # Seed with the wrapper's own declared overrides (wrapper wins), deduped
+        # by (connection_id, field.id) via _merge_override_connection — so even
+        # duplicate entries AMONG the wrapper's own declarations collapse rather
+        # than emitting two ConnectionOverrides for the same connection (Codex §6
+        # finding 2).
+        for entry in (wrapper_pe.get("connections") or []):
+            if isinstance(entry, dict):
+                _merge_override_connection(index, ordered, entry)
 
+        # Hoist each called in-spec child's declared overrides (same merge path).
         for call in calls:
             if not isinstance(call, dict):
                 continue
@@ -471,44 +599,24 @@ def _synthesize_wrapper_subprocess_extensions(spec: IntegrationSpecV1) -> None:
                 continue
             child_cfg = child.config if isinstance(child.config, dict) else {}
             child_pe = child_cfg.get("process_extensions")
-            if not isinstance(child_pe, dict):
-                continue
-            child_conns = child_pe.get("connections")
-            if not isinstance(child_conns, list):
-                continue
-            for centry in child_conns:
-                if not isinstance(centry, dict):
-                    continue
-                cid = centry.get("connection_id")
-                if not isinstance(cid, str) or not cid.strip():
-                    continue
-                if cid not in index:
-                    new_entry = copy.deepcopy(centry)
-                    new_fields = new_entry.get("fields") if isinstance(new_entry.get("fields"), list) else []
-                    index[cid] = {
-                        "entry": new_entry,
-                        "field_ids": {f.get("id") for f in new_fields if isinstance(f, dict)},
-                    }
-                    ordered.append(new_entry)
-                else:
-                    rec = index[cid]
-                    existing_fields = rec["entry"].get("fields")
-                    if not isinstance(existing_fields, list):
-                        # Malformed wrapper seed (a hand-authored entry whose
-                        # 'fields' is not a list) — do NOT merge into it. Leave it
-                        # untouched so WrapperSubprocessBuilder.validate_config
-                        # surfaces the structured PROCESS_EXTENSIONS_INVALID rather
-                        # than crashing with AttributeError here (synthesis runs
-                        # before per-component validation).
-                        continue
-                    for field in (centry.get("fields") or []):
-                        if not isinstance(field, dict):
-                            continue
-                        fid = field.get("id")
-                        if fid in rec["field_ids"]:
-                            continue  # wrapper or earlier child already declares it
-                        existing_fields.append(copy.deepcopy(field))
-                        rec["field_ids"].add(fid)
+            if child_pe in (None, {}, []):
+                continue  # nothing declared — valid no-op
+            # A REUSE child's process_extensions gets no other validation (the
+            # reuse path skips its own validate_config), so a malformed shape must
+            # be SURFACED on the wrapper (validate_config rejects it) rather than
+            # silently dropped. Merge a list of connections entry-by-entry (the
+            # merge helper preserves malformed entries incl. padded $refs); a
+            # non-dict block / non-list connections is surfaced via a sentinel that
+            # validate_config's _extract rejects (PROCESS_EXTENSIONS_INVALID).
+            child_conns = child_pe.get("connections") if isinstance(child_pe, dict) else None
+            if isinstance(child_conns, list):
+                for centry in child_conns:
+                    if isinstance(centry, dict):
+                        _merge_override_connection(index, ordered, centry)
+                    else:
+                        ordered.append(centry)  # non-dict entry -> _extract rejects
+            else:
+                ordered.append({"connection_id": "", "fields": []})  # malformed block -> _extract rejects
 
         if ordered:
             merged_pe = dict(wrapper_pe)
@@ -522,6 +630,8 @@ def _synthesize_wrapper_subprocess_extensions(spec: IntegrationSpecV1) -> None:
             # process_extensions reachability check (a clean structured error),
             # not silently emitted as an unresolved token.
             for entry in ordered:
+                if not isinstance(entry, dict):
+                    continue  # preserved malformed (non-dict) entry — validate_config rejects
                 cid = entry.get("connection_id")
                 if not (isinstance(cid, str) and cid.startswith("$ref:")):
                     continue
