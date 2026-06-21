@@ -97,7 +97,9 @@ def test_pre_selection_budget_caps():
     assert r["governance_shown"] <= 5
     assert r["doctrine_total"] == get_design_doctrine_catalog()["entry_count"]
     assert r["governance_total"] == get_account_governance_catalog()["entry_count"]
-    assert "showing" in r["budget_note"]
+    # budget_note must carry the exact N-of-M counts, not just the word "showing".
+    assert f"showing {r['doctrine_shown']} of {r['doctrine_total']}" in r["budget_note"]
+    assert f"{r['governance_shown']} of {r['governance_total']}" in r["budget_note"]
     # Always surfaces governance even when nothing strongly matches.
     assert r["governance_shown"] >= 1
 
@@ -249,6 +251,14 @@ def test_no_hardcoded_archetype_names_in_source():
     for archetype_name in _archetype_names():
         assert archetype_name not in source, (
             f"hard-coded archetype name {archetype_name!r} leaked into the assembler"
+        )
+    # No canned flag->entry mapping either: no design_doctrine or
+    # account_governance entry name may be hard-coded in the assembler.
+    entry_names = {e["name"] for e in get_design_doctrine_catalog()["entries"]}
+    entry_names |= {e["name"] for e in get_account_governance_catalog()["entries"]}
+    for entry_name in entry_names:
+        assert entry_name not in source, (
+            f"hard-coded registry entry name {entry_name!r} leaked into the assembler"
         )
 
 

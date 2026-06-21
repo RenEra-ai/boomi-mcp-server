@@ -2438,30 +2438,30 @@ if plan_integration_design_action:
         intent_flags: list[str] = None,
         profile: str = None,
     ):
-        """Assemble a budgeted design brief for a Boomi integration.
+        """Read-only assembler that returns a budgeted Boomi integration design brief.
 
-        Joins the archetype registry, design_doctrine, and account_governance
-        into one structured brief: recommended patterns with their
-        capability_status, capability gaps, required user decisions (in archetype
-        mode), and read-only discovery steps. Deterministic — no API calls, no
-        free-text parsing.
+        The brief is a deterministic join over the archetype registry,
+        design_doctrine, and account_governance: recommended patterns with their
+        capability_status, capability gaps, required user decisions (present in
+        archetype mode), and read-only discovery steps. It makes no API calls and
+        performs no free-text parsing.
 
-        Sibling tools, for disambiguation: list_capabilities returns the full
-        tool catalog; get_schema_template(schema_name='design_doctrine') returns
-        the raw doctrine catalog; list_integration_archetypes lists archetypes;
+        Disambiguation from sibling tools: list_capabilities returns the full tool
+        catalog; get_schema_template(schema_name='design_doctrine') returns the raw
+        doctrine catalog; list_integration_archetypes returns the archetype list;
         get_integration_archetype(name=...) returns one archetype's full schema.
         This tool returns the joined brief, not any single source verbatim.
 
         Args:
-            archetype: Optional archetype name from list_integration_archetypes().
-                Omit it for a pre-selection brief (intent-flag doctrine plus a
-                missing_inputs marker); supply it for the full brief including
-                parameter-schema-derived required decisions.
+            archetype: Optional archetype name (one from list_integration_archetypes).
+                When omitted, the result is a pre-selection brief (intent-flag
+                doctrine plus a missing_inputs marker); when supplied, the result is
+                the full brief including parameter-schema-derived required decisions.
             intent_flags: Optional list of short tokens (e.g. retry, dlq,
-                incremental, bidirectional, notify) used to score relevant
-                doctrine. Tokens only — never free-text task descriptions.
-            profile: Optional credential-profile name, echoed into the suggested
-                discovery-step arguments only. No account call is made.
+                incremental, bidirectional, notify) that scope the doctrine
+                relevance scoring. Tokens only — not free-text task descriptions.
+            profile: Optional credential-profile name. When present, it appears in
+                the suggested discovery-step arguments; the tool makes no account call.
         """
         payload = plan_integration_design_action(
             archetype=archetype,
