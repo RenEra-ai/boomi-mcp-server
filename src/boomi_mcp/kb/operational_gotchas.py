@@ -885,7 +885,15 @@ def search_operational_gotchas(
         }
 
     # --- Lexical ranking ----------------------------------------------------
-    k = max(1, min(int(top_k) if top_k else 5, 10))
+    # Only a missing/uncoercible top_k falls back to the default; an explicit
+    # value (including 0 or a negative) is clamped to the documented 1..10.
+    if top_k is None:
+        k = 5
+    else:
+        try:
+            k = max(1, min(int(top_k), 10))
+        except (TypeError, ValueError):
+            k = 5
     scored = [
         (gid, _score(_ENTRY_TOKENS[gid], query_tokens))
         for gid in OPERATIONAL_GOTCHA_ENTRIES

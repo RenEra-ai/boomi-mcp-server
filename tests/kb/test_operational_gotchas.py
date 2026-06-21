@@ -170,10 +170,15 @@ def test_ranking_status_ok_for_strong_match():
 
 
 def test_top_k_clamped():
+    # "process" matches several entries, so the clamp boundaries are observable.
+    assert len(search_operational_gotchas("process")["results"]) > 1
     wide = search_operational_gotchas("process", top_k=99)
     assert len(wide["results"]) <= 10
-    narrow = search_operational_gotchas("process", top_k=0)
-    assert len(narrow["results"]) >= 1  # clamped up to 1
+    # Explicit 0 / negative clamp to the documented minimum of 1, not the default.
+    assert len(search_operational_gotchas("process", top_k=0)["results"]) == 1
+    assert len(search_operational_gotchas("process", top_k=-5)["results"]) == 1
+    # None falls back to the default (5), then clamps.
+    assert len(search_operational_gotchas("process", top_k=None)["results"]) <= 5
 
 
 def test_results_carry_full_provenance_and_verification():
