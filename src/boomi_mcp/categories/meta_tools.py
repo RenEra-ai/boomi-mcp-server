@@ -12,6 +12,7 @@ from boomi.net.transport.serializer import Serializer
 from boomi.net.environment.environment import Environment
 
 from ..errors import (
+    INVALID_INPUT,
     PATTERN_NOT_FOUND,
     RAW_WRITE_CONFIRMATION_REQUIRED,
     SCHEMA_LOOKUP_FAILED,
@@ -6163,6 +6164,616 @@ def _get_monitoring_template(operation=None, **_):
     return {"_success": True, **tpl}
 
 
+# ============================================================================
+# plan_integration_design — read-only design-brief assembler (issue #94)
+# ============================================================================
+#
+# A DETERMINISTIC join over three EXISTING read-only registries — the archetype
+# registry, design_doctrine (#86), and account_governance (#93) — plus a static
+# discovery catalog. It parses NO natural language, calls NO LLM / Sampling,
+# calls NO Boomi, invents NO archetype, and carries NO canned task->archetype or
+# flag->entry table (anti-template rule). The AGENT owns task -> archetype +
+# intent_flags; this tool only ASSEMBLES the brief. Sibling of list_capabilities.
+
+# Generic intent token -> related SEARCH tokens. This only widens the search
+# vocabulary used to SCORE catalog entries; it names no entry and no archetype,
+# so it is NOT a flag->entry or task->archetype map. Tokens are generic
+# integration concepts only.
+_PLAN_INTENT_KEYWORD_EXPANSIONS: Dict[str, frozenset] = {
+    "retry": frozenset({"retry", "reliability", "resilience", "error", "backoff", "transient"}),
+    "dlq": frozenset({"dlq", "dead", "letter", "reliability", "error", "quarantine", "queue"}),
+    "reliability": frozenset({"reliability", "retry", "dlq", "error", "resilience", "idempotent"}),
+    "notify": frozenset({"notify", "notification", "alert", "observability", "monitoring"}),
+    "incremental": frozenset({"incremental", "sync", "watermark", "delta", "cdc", "change"}),
+    "bidirectional": frozenset({"bidirectional", "sync", "master", "conflict", "reconcile"}),
+    "sync": frozenset({"sync", "incremental", "watermark", "delta", "replication"}),
+    "async_queue": frozenset({"async", "queue", "messaging", "decoupling", "buffer"}),
+    "human_workflow": frozenset({"human", "workflow", "approval", "task", "review"}),
+    "migration": frozenset({"migration", "migrate", "cutover", "backfill"}),
+    "routing": frozenset({"routing", "route", "fanout", "dispatch", "branch"}),
+    "security": frozenset({"security", "auth", "credential", "secret", "encryption"}),
+    "testing": frozenset({"testing", "test", "verification", "mock", "stub"}),
+}
+
+# Generic decision-point keywords — a parameter_schema field whose leaf name OR
+# description contains one is surfaced as a required user decision. Generic
+# integration concepts, never archetype-specific names. Tiered so the
+# cross-cutting ARCHITECTURAL choices (watermark, dlq, retry, notification, …)
+# rank ahead of required connection plumbing, which ranks ahead of generic
+# config keywords — otherwise a deep source/target binding subtree would exhaust
+# the decision budget before execution/reliability fields are reached.
+_PLAN_DESIGN_KEYWORDS = (
+    "watermark", "master", "channel", "destination", "queue", "schedule",
+    "retry", "dlq", "notify", "notification", "conflict", "reconcile",
+)
+_PLAN_CONFIG_KEYWORDS = (
+    "auth", "credential", "folder", "runtime", "source", "target",
+)
+# Combined view (kept for any caller/test referencing the full keyword set).
+_PLAN_DECISION_KEYWORDS = _PLAN_DESIGN_KEYWORDS + _PLAN_CONFIG_KEYWORDS
+
+# Decision priority tiers (lower sorts first).
+_PLAN_DECISION_PRIORITY_DESIGN = 0   # architectural choice (design keyword)
+_PLAN_DECISION_PRIORITY_REQUIRED = 1  # required field at its schema level
+_PLAN_DECISION_PRIORITY_CONFIG = 2   # generic config keyword only
+
+# Generic decision verbs that mark a doctrine when_to_use clause as actionable.
+_PLAN_DECISION_VERBS = ("choose", "select", "configure", "decide", "specify", "set")
+
+_PLAN_DOCTRINE_CAP = 10
+_PLAN_GOVERNANCE_CAP = 5
+_PLAN_SCHEMA_DECISION_CAP = 25
+_PLAN_DOCTRINE_DECISION_CAP = 5
+_PLAN_WHEN_TO_USE_TRUNCATE = 200
+_PLAN_SCHEMA_MAX_DEPTH = 6
+_PLAN_STATUS_RANK = {"emittable_today": 0, "gated": 1, "guidance_only": 2, "na": 3}
+_PLAN_FLAG_ALLOWED = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+)
+
+
+PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "_success": {"type": "boolean"},
+        "tool": {"const": "plan_integration_design"},
+        "mode": {"enum": ["archetype", "pre_selection", "error"]},
+        "archetype": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "intent_flags": {"type": "array", "items": {"type": "string"}},
+        "profile": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "missing_inputs": {"type": "array", "items": {"type": "string"}},
+        "recommended_doctrine_patterns": {
+            "type": "array", "items": {"$ref": "#/$defs/pattern"}
+        },
+        "recommended_governance_patterns": {
+            "type": "array", "items": {"$ref": "#/$defs/pattern"}
+        },
+        "capability_gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+        "required_user_decisions": {
+            "type": "array", "items": {"$ref": "#/$defs/decision"}
+        },
+        "discovery_steps": {
+            "type": "array", "items": {"$ref": "#/$defs/discovery_step"}
+        },
+        "doctrine_shown": {"type": "integer"},
+        "doctrine_total": {"type": "integer"},
+        "governance_shown": {"type": "integer"},
+        "governance_total": {"type": "integer"},
+        "budget_note": {"type": "string"},
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "read_only": {"type": "boolean"},
+        "boomi_mutation": {"type": "boolean"},
+        "raw_xml_exposed": {"type": "boolean"},
+        "text": {"type": "string"},
+        "error": {"type": "string"},
+        "error_code": {"type": "string"},
+        "valid_archetypes": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "_success", "tool", "mode", "read_only", "boomi_mutation",
+        "raw_xml_exposed", "text",
+    ],
+    "$defs": {
+        "pattern": {
+            "type": "object",
+            "properties": {
+                "source": {"enum": ["design_doctrine", "account_governance"]},
+                "name": {"type": "string"},
+                "category": {"type": "string"},
+                "capability_status": {
+                    "enum": ["emittable_today", "gated", "guidance_only", "na"]
+                },
+                "when_to_use": {"type": "string"},
+                "cross_refs": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": [
+                "source", "name", "category", "capability_status",
+                "when_to_use", "cross_refs",
+            ],
+        },
+        "gap": {
+            "type": "object",
+            "properties": {
+                "source": {"enum": ["design_doctrine", "account_governance"]},
+                "name": {"type": "string"},
+                "category": {"type": "string"},
+                "capability_status": {"enum": ["gated", "guidance_only", "na"]},
+            },
+            "required": ["source", "name", "category", "capability_status"],
+        },
+        "decision": {
+            "type": "object",
+            "properties": {
+                "field": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "description": {"type": "string"},
+                "from": {"type": "string"},
+            },
+            "required": ["field", "description", "from"],
+        },
+        "discovery_step": {
+            "type": "object",
+            "properties": {
+                "tool": {"type": "string"},
+                "purpose": {"type": "string"},
+                "arguments": {"type": "object", "additionalProperties": True},
+            },
+            "required": ["tool", "purpose", "arguments"],
+        },
+    },
+}
+
+
+def _plan_valid_flag(flag: Any) -> bool:
+    """A flag is a short ``[A-Za-z0-9_-]`` token — never free text."""
+    return isinstance(flag, str) and bool(flag) and all(
+        ch in _PLAN_FLAG_ALLOWED for ch in flag
+    )
+
+
+def _plan_tokenize(text: str) -> set:
+    """Lowercase, split on non-alphanumerics, drop tokens shorter than 2."""
+    out: set = set()
+    cur: list = []
+    for ch in str(text).lower():
+        if ch.isalnum():
+            cur.append(ch)
+        elif cur:
+            token = "".join(cur)
+            if len(token) >= 2:
+                out.add(token)
+            cur = []
+    if cur:
+        token = "".join(cur)
+        if len(token) >= 2:
+            out.add(token)
+    return out
+
+
+def _plan_intent_keywords(flags: list) -> set:
+    """Expand normalized flags into a generic search-keyword set."""
+    keywords: set = set()
+    for flag in flags:
+        normalized = flag.lower()
+        keywords.update(_PLAN_INTENT_KEYWORD_EXPANSIONS.get(normalized, ()))
+        keywords.update(_plan_tokenize(normalized))
+    return keywords
+
+
+def _plan_archetype_keywords(cls: Any) -> set:
+    """Tokens drawn from archetype metadata — generic, registry-sourced."""
+    keywords: set = set()
+    md = cls.metadata
+    sources = (
+        list(md.tags)
+        + list(md.use_cases)
+        + list(getattr(cls, "capability_notes", []))
+        + list(getattr(cls, "limitations", []))
+    )
+    for item in sources:
+        keywords.update(_plan_tokenize(str(item)))
+    return keywords
+
+
+def _plan_entry_haystack(entry: Dict[str, Any]) -> set:
+    parts = [entry.get("name", ""), entry.get("category", "")]
+    parts.extend(entry.get("cross_refs", []) or [])
+    parts.append(entry.get("when_to_use", "") or "")
+    return _plan_tokenize(" ".join(parts))
+
+
+def _plan_score(entry: Dict[str, Any], keywords: set) -> int:
+    if not keywords:
+        return 0
+    return len(keywords & _plan_entry_haystack(entry))
+
+
+def _plan_project_pattern(entry: Dict[str, Any], source: str) -> Dict[str, Any]:
+    wtu = entry.get("when_to_use", "") or ""
+    if len(wtu) > _PLAN_WHEN_TO_USE_TRUNCATE:
+        wtu = wtu[: _PLAN_WHEN_TO_USE_TRUNCATE - 3].rstrip() + "..."
+    return {
+        "source": source,
+        "name": entry["name"],
+        "category": entry.get("category", ""),
+        "capability_status": entry.get("capability_status", "na"),
+        "when_to_use": wtu,
+        "cross_refs": list(entry.get("cross_refs", []) or []),
+    }
+
+
+def _plan_select_doctrine(entries: list, keywords: set) -> list:
+    """Score doctrine entries, expand by cross_refs, rank, and cap.
+
+    Returns the raw selected entries (not yet projected), deterministically
+    ordered by (score desc, catalog order asc).
+    """
+    by_name = {e["name"]: (i, e) for i, e in enumerate(entries)}
+    candidates: Dict[str, tuple] = {}
+    for i, entry in enumerate(entries):
+        score = _plan_score(entry, keywords)
+        if score > 0:
+            candidates[entry["name"]] = (score, i, entry)
+    # Expand selected entries through their cross_refs (score may be 0).
+    for name in list(candidates):
+        _, _, entry = candidates[name]
+        for ref in entry.get("cross_refs", []) or []:
+            if ref in by_name and ref not in candidates:
+                ref_i, ref_entry = by_name[ref]
+                candidates[ref] = (_plan_score(ref_entry, keywords), ref_i, ref_entry)
+    ranked = sorted(candidates.values(), key=lambda t: (-t[0], t[1]))
+    return [entry for _, _, entry in ranked[:_PLAN_DOCTRINE_CAP]]
+
+
+def _plan_select_governance(entries: list, keywords: set) -> list:
+    """Rank governance entries by (relevance desc, capability_status, catalog).
+
+    With no matching keywords this naturally falls back to capability-status
+    order (emittable_today first), so every brief still surfaces governance.
+    """
+    ranked = sorted(
+        ((_plan_score(e, keywords), _PLAN_STATUS_RANK.get(e.get("capability_status"), 9), i, e)
+         for i, e in enumerate(entries)),
+        key=lambda t: (-t[0], t[1], t[2]),
+    )
+    return [entry for _, _, _, entry in ranked[:_PLAN_GOVERNANCE_CAP]]
+
+
+def _plan_resolve_ref(schema_root: Dict[str, Any], node: Any) -> Any:
+    """Follow a local ``#/$defs/`` ``$ref`` chain; non-local refs pass through."""
+    seen: set = set()
+    while isinstance(node, dict) and "$ref" in node:
+        ref = node["$ref"]
+        if not ref.startswith("#/$defs/") or ref in seen:
+            return node
+        seen.add(ref)
+        node = schema_root.get("$defs", {}).get(ref[len("#/$defs/"):], {})
+    return node
+
+
+def _plan_schema_decisions(schema_root: Dict[str, Any]) -> list:
+    """Walk a parameter_schema and emit generic required-decision items.
+
+    A field is surfaced if its dotted path / description contains a generic
+    decision keyword (high priority) OR it is required at its level (lower
+    priority). The full schema is walked (depth- and count-bounded), then
+    keyword-matched decisions are ordered ahead of merely-required ones before
+    the budget cap is applied — so the semantically meaningful decisions
+    (watermark, dlq, retry, …) survive even when the schema has many required
+    leaf fields. No archetype-specific knowledge is used — purely structural.
+    """
+    candidates: list = []  # (priority, order, item)
+    seen_paths: set = set()
+    order = 0
+    # Hard guard against pathological/recursive schemas (cycles via $ref are
+    # already broken by _plan_resolve_ref, but bound total work anyway).
+    max_candidates = _PLAN_SCHEMA_DECISION_CAP * 20
+
+    def keyword_text(path: str, pnode: Any, resolved: Any) -> str:
+        # Match the LEAF field name (not the full dotted path) plus the
+        # description: a path prefix like "source"/"target" must not flood every
+        # nested descendant into a keyword hit.
+        leaf = path.rsplit(".", 1)[-1].replace("[]", "")
+        desc = ""
+        if isinstance(pnode, dict):
+            desc = pnode.get("description", "") or ""
+        if not desc and isinstance(resolved, dict):
+            desc = resolved.get("description", "") or ""
+        return (leaf + " " + str(desc)).lower()
+
+    def emit(path: str, pnode: Any, resolved: Any, priority: int) -> None:
+        nonlocal order
+        if path in seen_paths:
+            return
+        seen_paths.add(path)
+        desc = (
+            (isinstance(pnode, dict) and pnode.get("description"))
+            or (isinstance(resolved, dict) and resolved.get("description"))
+            or f"Provide a value for {path}."
+        )
+        candidates.append((priority, order, {
+            "field": path,
+            "description": str(desc)[:_PLAN_WHEN_TO_USE_TRUNCATE],
+            "from": "archetype_parameter_schema",
+        }))
+        order += 1
+
+    def recurse(node: Any, path: str, depth: int) -> None:
+        if depth > _PLAN_SCHEMA_MAX_DEPTH or len(candidates) >= max_candidates:
+            return
+        node = _plan_resolve_ref(schema_root, node)
+        if not isinstance(node, dict):
+            return
+        if "anyOf" in node:
+            for branch in node["anyOf"]:
+                if isinstance(branch, dict) and branch.get("type") == "null":
+                    continue
+                recurse(branch, path, depth)
+            return
+        if node.get("type") == "object" or "properties" in node:
+            required = set(node.get("required", []) or [])
+            for pname, pnode in (node.get("properties") or {}).items():
+                child_path = f"{path}.{pname}" if path else pname
+                resolved = _plan_resolve_ref(schema_root, pnode)
+                text = keyword_text(child_path, pnode, resolved)
+                if any(kw in text for kw in _PLAN_DESIGN_KEYWORDS):
+                    emit(child_path, pnode, resolved, _PLAN_DECISION_PRIORITY_DESIGN)
+                elif pname in required:
+                    emit(child_path, pnode, resolved, _PLAN_DECISION_PRIORITY_REQUIRED)
+                elif any(kw in text for kw in _PLAN_CONFIG_KEYWORDS):
+                    emit(child_path, pnode, resolved, _PLAN_DECISION_PRIORITY_CONFIG)
+                recurse(pnode, child_path, depth + 1)
+            return
+        if node.get("type") == "array" or "items" in node:
+            items = node.get("items")
+            if isinstance(items, dict):
+                recurse(items, path + "[]", depth + 1)
+
+    recurse(schema_root, "", 0)
+    candidates.sort(key=lambda t: (t[0], t[1]))
+    return [item for _, _, item in candidates[:_PLAN_SCHEMA_DECISION_CAP]]
+
+
+def _plan_doctrine_decisions(shown_entries: list) -> list:
+    """Extract actionable decisions from selected doctrine ``when_to_use`` prose.
+
+    A clause is surfaced only if it contains a generic decision verb — no entry
+    is hard-coded; the verb match is purely textual.
+    """
+    decisions: list = []
+    for entry in shown_entries:
+        text = (entry.get("when_to_use", "") or "").replace(";", ".").replace("\n", ".")
+        for clause in text.split("."):
+            cleaned = clause.strip()
+            if not cleaned:
+                continue
+            low = cleaned.lower()
+            if any(verb in low for verb in _PLAN_DECISION_VERBS):
+                decisions.append({
+                    "field": None,
+                    "description": cleaned[:_PLAN_WHEN_TO_USE_TRUNCATE],
+                    "from": f"design_doctrine:{entry['name']}",
+                })
+                if len(decisions) >= _PLAN_DOCTRINE_DECISION_CAP:
+                    return decisions
+    return decisions
+
+
+def _plan_discovery_steps(profile: Optional[str], pre_selection: bool) -> list:
+    steps: list = []
+    if pre_selection:
+        steps.append({
+            "tool": "list_integration_archetypes",
+            "purpose": (
+                "Browse archetypes, pick one, then call plan_integration_design "
+                "again with archetype set for the full brief."
+            ),
+            "arguments": {},
+        })
+    steps.append({
+        "tool": "list_boomi_profiles",
+        "purpose": "List credential profiles; pass profile= to every account-scoped call.",
+        "arguments": {},
+    })
+    query_args: Dict[str, Any] = {"action": "list"}
+    if profile:
+        query_args["profile"] = profile
+    steps.append({
+        "tool": "query_components",
+        "purpose": "Discover reusable existing connection components before authoring new ones.",
+        "arguments": query_args,
+    })
+    steps.append({
+        "tool": "infer_profile_fields",
+        "purpose": "Derive builder-ready profile-field contracts from sample data, DB metadata, or XSD.",
+        "arguments": {},
+    })
+    return steps
+
+
+def _plan_error_envelope(
+    error: str,
+    error_code: str,
+    archetype: Optional[str],
+    intent_flags: list,
+    profile: Optional[str],
+    valid_archetypes: Optional[list] = None,
+) -> Dict[str, Any]:
+    envelope = {
+        "_success": False,
+        "tool": "plan_integration_design",
+        "mode": "error",
+        "archetype": archetype if isinstance(archetype, str) else None,
+        "intent_flags": list(intent_flags),
+        "profile": profile if isinstance(profile, str) else None,
+        "error": error,
+        "error_code": error_code,
+        "read_only": True,
+        "boomi_mutation": False,
+        "raw_xml_exposed": False,
+        "text": f"plan_integration_design error [{error_code}]: {error}",
+    }
+    if valid_archetypes is not None:
+        envelope["valid_archetypes"] = valid_archetypes
+    return envelope
+
+
+def plan_integration_design_action(
+    archetype: Optional[str] = None,
+    intent_flags: Optional[list] = None,
+    profile: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Deterministically assemble a budgeted integration design brief.
+
+    A read-only JOIN over the archetype registry, ``design_doctrine`` (#86), and
+    ``account_governance`` (#93), plus a static discovery catalog. Parses no free
+    text, calls no LLM/Boomi, infers no archetype. Two modes keyed on whether an
+    ``archetype`` is supplied (full brief vs pre-selection brief).
+    """
+    # --- Validate intent_flags (anti-free-text-parsing guard) ----------------
+    if intent_flags is None:
+        raw_flags: list = []
+    elif isinstance(intent_flags, list):
+        raw_flags = intent_flags
+    else:
+        return _plan_error_envelope(
+            "intent_flags must be a list of short tokens, not free text.",
+            INVALID_INPUT, archetype, [], profile,
+        )
+    for flag in raw_flags:
+        if not _plan_valid_flag(flag):
+            return _plan_error_envelope(
+                f"Invalid intent flag {flag!r}: flags must be short "
+                f"[A-Za-z0-9_-] tokens, not free text.",
+                INVALID_INPUT, archetype, [], profile,
+            )
+    flags = [flag.lower() for flag in raw_flags]
+
+    # --- Validate archetype type --------------------------------------------
+    if archetype is not None and not isinstance(archetype, str):
+        return _plan_error_envelope(
+            "archetype must be an archetype name string or omitted.",
+            INVALID_INPUT, None, flags, profile,
+        )
+    archetype_provided = isinstance(archetype, str) and archetype.strip() != ""
+
+    keywords = _plan_intent_keywords(flags)
+
+    # --- Archetype mode: resolve + schema-derived decisions ------------------
+    schema_decisions: list = []
+    cls = None
+    if archetype_provided:
+        # Call-time import — see _valid_schema_names for the rationale.
+        from .. import patterns as patterns_pkg
+        from ..patterns import PatternKind, PatternRegistry, PatternRegistryError
+        registry = PatternRegistry.from_package(patterns_pkg)
+        try:
+            cls = registry.get(archetype, kind=PatternKind.ARCHETYPE)
+        except PatternRegistryError as exc:
+            valid = [c.metadata.name for c in registry.list_patterns(kind=PatternKind.ARCHETYPE)]
+            return _plan_error_envelope(
+                f"Unknown archetype: {archetype}",
+                exc.error_code or PATTERN_NOT_FOUND,
+                archetype, flags, profile, valid_archetypes=valid,
+            )
+        keywords |= _plan_archetype_keywords(cls)
+        schema_decisions = _plan_schema_decisions(cls.parameter_schema())
+
+    # --- Join over design_doctrine + account_governance ----------------------
+    doctrine_catalog = get_design_doctrine_catalog()
+    governance_catalog = get_account_governance_catalog()
+    doctrine_entries = doctrine_catalog["entries"]
+    governance_entries = governance_catalog["entries"]
+
+    selected_doctrine = _plan_select_doctrine(doctrine_entries, keywords)
+    selected_governance = _plan_select_governance(governance_entries, keywords)
+
+    recommended_doctrine_patterns = [
+        _plan_project_pattern(e, "design_doctrine") for e in selected_doctrine
+    ]
+    recommended_governance_patterns = [
+        _plan_project_pattern(e, "account_governance") for e in selected_governance
+    ]
+
+    capability_gaps = [
+        {
+            "source": p["source"],
+            "name": p["name"],
+            "category": p["category"],
+            "capability_status": p["capability_status"],
+        }
+        for p in recommended_doctrine_patterns + recommended_governance_patterns
+        if p["capability_status"] != "emittable_today"
+    ]
+
+    # --- Mode-specific decisions + discovery + missing_inputs ----------------
+    notes: list = []
+    if archetype_provided:
+        mode = "archetype"
+        missing_inputs: list = []
+        required_user_decisions = (
+            schema_decisions + _plan_doctrine_decisions(selected_doctrine)
+        )
+        discovery_steps = _plan_discovery_steps(profile, pre_selection=False)
+    else:
+        mode = "pre_selection"
+        missing_inputs = ["archetype"]
+        required_user_decisions = [{
+            "field": None,
+            "description": "select an archetype (see list_integration_archetypes)",
+            "from": "missing_input:archetype",
+        }]
+        discovery_steps = _plan_discovery_steps(profile, pre_selection=True)
+        notes.append(
+            "Pre-selection brief: no archetype supplied, so "
+            "parameter-schema-derived decisions are omitted. Select an archetype "
+            "and call again for the full brief."
+        )
+
+    # --- Budget + summary ----------------------------------------------------
+    doctrine_total = doctrine_catalog["entry_count"]
+    governance_total = governance_catalog["entry_count"]
+    doctrine_shown = len(recommended_doctrine_patterns)
+    governance_shown = len(recommended_governance_patterns)
+    budget_note = (
+        f"showing {doctrine_shown} of {doctrine_total} design_doctrine entries "
+        f"and {governance_shown} of {governance_total} account_governance "
+        f"entries (relevance- and capability-ranked)."
+    )
+    text = "\n".join([
+        f"Design brief ({mode}) for archetype="
+        f"{archetype if archetype_provided else 'none'} intent_flags={flags}.",
+        budget_note,
+        f"{len(required_user_decisions)} required decision(s), "
+        f"{len(capability_gaps)} capability gap(s), "
+        f"{len(discovery_steps)} discovery step(s).",
+    ])
+
+    return {
+        "_success": True,
+        "tool": "plan_integration_design",
+        "mode": mode,
+        "archetype": archetype if archetype_provided else None,
+        "intent_flags": flags,
+        "profile": profile,
+        "missing_inputs": missing_inputs,
+        "recommended_doctrine_patterns": recommended_doctrine_patterns,
+        "recommended_governance_patterns": recommended_governance_patterns,
+        "capability_gaps": capability_gaps,
+        "required_user_decisions": required_user_decisions,
+        "discovery_steps": discovery_steps,
+        "doctrine_shown": doctrine_shown,
+        "doctrine_total": doctrine_total,
+        "governance_shown": governance_shown,
+        "governance_total": governance_total,
+        "budget_note": budget_note,
+        "notes": notes,
+        "read_only": True,
+        "boomi_mutation": False,
+        "raw_xml_exposed": False,
+        "text": text,
+    }
+
+
 def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
     """Return full catalog of MCP tools, actions, and workflows.
 
@@ -6893,6 +7504,28 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                     "Mutating POST/PUT requires confirm_write=true; DELETE still requires "
                     "confirm_delete=true. Raw Component XML writes are a full replacement "
                     "(typed tools preserve unknown XML via read-merge-write) — prefer typed tools.",
+        },
+        "plan_integration_design": {
+            "category": "Knowledge / Design",
+            "description": (
+                "Assemble a budgeted, read-only design brief by joining the "
+                "archetype registry, design_doctrine, and account_governance. "
+                "Returns recommended patterns with capability_status, capability "
+                "gaps, required user decisions (archetype mode), and discovery "
+                "steps. Deterministic — no LLM, no Boomi, no free-text parsing."
+            ),
+            "actions": ["(single action — returns an assembled design brief)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "archetype": "str (optional) — archetype name from list_integration_archetypes(); omit for the pre-selection brief",
+                "intent_flags": "list[str] (optional) — short tokens like retry, dlq, incremental, bidirectional, notify (no free text)",
+                "profile": "str (optional) — echoed into the suggested discovery-step arguments; no account call is made",
+            },
+            "examples": [
+                'plan_integration_design(intent_flags=["incremental", "retry"])',
+                'plan_integration_design(archetype="database_to_api_sync", intent_flags=["incremental", "dlq"])',
+            ],
         },
         "list_capabilities": {
             "category": "Meta Tools",

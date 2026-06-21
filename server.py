@@ -298,6 +298,18 @@ except ImportError as e:
     print(f"[WARNING] Failed to import list capabilities: {e}")
     list_capabilities_action = None
 
+# --- Plan Integration Design (read-only design-brief assembler, issue #94) ---
+try:
+    from boomi_mcp.categories.meta_tools import (
+        plan_integration_design_action,
+        PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA,
+    )
+    from fastmcp.tools.tool import ToolResult
+    print(f"[INFO] Plan integration design loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import plan integration design: {e}")
+    plan_integration_design_action = None
+
 # --- Environment Tools ---
 try:
     from boomi_mcp.categories.environments import manage_environments_action
@@ -2412,6 +2424,53 @@ if list_capabilities_action:
             return {"_success": False, "error": str(e)}
 
     print("[INFO] List capabilities tool registered successfully")
+
+
+# --- Plan Integration Design MCP Tool ---
+if plan_integration_design_action:
+    @mcp.tool(
+        title="Plan Integration Design",
+        output_schema=PLAN_INTEGRATION_DESIGN_OUTPUT_SCHEMA,
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    def plan_integration_design(
+        archetype: str = None,
+        intent_flags: list[str] = None,
+        profile: str = None,
+    ):
+        """Assemble a budgeted design brief for a Boomi integration.
+
+        Joins the archetype registry, design_doctrine, and account_governance
+        into one structured brief: recommended patterns with their
+        capability_status, capability gaps, required user decisions (in archetype
+        mode), and read-only discovery steps. Deterministic — no API calls, no
+        free-text parsing.
+
+        Sibling tools, for disambiguation: list_capabilities returns the full
+        tool catalog; get_schema_template(schema_name='design_doctrine') returns
+        the raw doctrine catalog; list_integration_archetypes lists archetypes;
+        get_integration_archetype(name=...) returns one archetype's full schema.
+        This tool returns the joined brief, not any single source verbatim.
+
+        Args:
+            archetype: Optional archetype name from list_integration_archetypes().
+                Omit it for a pre-selection brief (intent-flag doctrine plus a
+                missing_inputs marker); supply it for the full brief including
+                parameter-schema-derived required decisions.
+            intent_flags: Optional list of short tokens (e.g. retry, dlq,
+                incremental, bidirectional, notify) used to score relevant
+                doctrine. Tokens only — never free-text task descriptions.
+            profile: Optional credential-profile name, echoed into the suggested
+                discovery-step arguments only. No account call is made.
+        """
+        payload = plan_integration_design_action(
+            archetype=archetype,
+            intent_flags=intent_flags,
+            profile=profile,
+        )
+        return ToolResult(content=payload["text"], structured_content=payload)
+
+    print("[INFO] Plan integration design tool registered successfully")
 
 
 # --- Environment Management MCP Tools ---
