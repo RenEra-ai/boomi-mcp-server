@@ -30,6 +30,18 @@ _XML_REST_SUBTYPE_RE = re.compile(
     r'\bsubType\s*=\s*["\']officialboomi-X3979C-rest-prod["\']'
 )
 
+# Issue #93 (account_governance M4.5.8) — plan-time component-name governance
+# lint. Scope is NAMES on component create only; folder placement / roles /
+# locking stay GUI-only governance (no folder or role API in the typed
+# builders). The lint flags, it never silently rewrites.
+_NAME_GOVERNANCE_ERROR_ACTION = "error_name_governance"
+# Integration's default component names (lower-cased for case-insensitive
+# compare). A conformant create never ships one of these.
+_BOOMI_DEFAULT_COMPONENT_NAMES = frozenset({"new map", "new profile"})
+# Copy-induced numeric suffix: a display name ending in whitespace then 1 or 2
+# (Integration's "... 1"/"... 2" clone artifacts).
+_COPY_SUFFIX_NAME_RE = re.compile(r".+\s(?:1|2)$")
+
 from boomi import Boomi
 from boomi.models import (
     ComponentMetadataQueryConfig,
@@ -2500,6 +2512,138 @@ def _process_models_error_handling(comp: Any) -> bool:
     return False
 
 
+def _governance_display_name(comp: Any) -> Optional[str]:
+    """Effective display name a create would ship for ``comp``.
+
+    Mirrors the name precedence the create path uses: the top-level
+    ``comp.name``, then ``config.component_name``, then ``config.name``. Returns
+    the stripped name, or ``None`` when every source is blank/absent.
+    """
+    config = comp.config if isinstance(comp.config, dict) else {}
+    for candidate in (comp.name, config.get("component_name"), config.get("name")):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _lint_component_names(spec: IntegrationSpecV1) -> Dict[str, Any]:
+    """Plan-time name-governance lint over the spec's CREATE components (#93).
+
+    Returns ``{"errors": {component_key: validation_error}, "warnings":
+    [str, ...]}``. Scope is names only — folder placement / roles / locking are
+    GUI-only governance and are never linted here. The lint flags; it never
+    rewrites a name.
+
+    HARD errors (block apply, against ``IntegrationSpecV1.naming``):
+      * missing/blank name → ``COMPONENT_NAME_REQUIRED``
+      * an Integration default name → ``COMPONENT_NAME_BOOMI_DEFAULT``
+      * a duplicate (trimmed, case-insensitive) across create names →
+        ``COMPONENT_NAME_NOT_UNIQUE``
+      * when ``naming.component_name_pattern`` is a valid regex (opt-in), a
+        name that does not match it → ``COMPONENT_NAME_PATTERN_MISMATCH``
+
+    Soft WARNINGS (flag only, never block):
+      * a copy-induced numeric suffix ("... 1"/"... 2"). This signal is
+        ambiguous — it cannot be distinguished from legitimate enumeration
+        (e.g. an emitted "Map Script 1" script slot), so per issue #93's
+        "rejects/flags ... warnings/errors" latitude it is surfaced as a flag,
+        not a hard gate, and never blocks an archetype-emitted plan.
+      * a blank/invalid ``component_name_pattern`` (conformance not checked).
+
+    The duplicate scan only fires for genuine duplicates; a name that merely
+    *looks* like a copy (trailing " 1"/" 2") with no sibling is warned, not
+    rejected.
+    """
+    errors: Dict[str, Dict[str, Any]] = {}
+    warnings: List[str] = []
+
+    naming = spec.naming if isinstance(spec.naming, dict) else {}
+    raw_pattern = naming.get("component_name_pattern")
+    compiled_pattern = None
+    if raw_pattern is not None:
+        if isinstance(raw_pattern, str) and raw_pattern.strip():
+            try:
+                compiled_pattern = re.compile(raw_pattern)
+            except re.error as exc:
+                warnings.append(
+                    "naming.component_name_pattern is not a valid regular "
+                    f"expression ({exc}); name-pattern conformance was not "
+                    "checked. Names were not modified."
+                )
+        else:
+            warnings.append(
+                "naming.component_name_pattern is present but blank; "
+                "name-pattern conformance was not checked."
+            )
+
+    seen_lower: Dict[str, str] = {}
+    for comp in spec.components:
+        if comp.action != "create":
+            continue
+        if isinstance(comp.config, dict) and comp.config.get("reference_only"):
+            continue
+
+        name = _governance_display_name(comp)
+        if name is None:
+            errors[comp.key] = {
+                "error_code": "COMPONENT_NAME_REQUIRED",
+                "error": (
+                    f"Component '{comp.key}' is created without a display name. "
+                    "Governance requires a descriptive, account-unique name."
+                ),
+                "field": "name",
+            }
+            continue
+
+        if name.lower() in _BOOMI_DEFAULT_COMPONENT_NAMES:
+            errors[comp.key] = {
+                "error_code": "COMPONENT_NAME_BOOMI_DEFAULT",
+                "error": (
+                    f"Component '{comp.key}' uses the Integration default name "
+                    f"'{name}'. Governance requires a descriptive name."
+                ),
+                "field": "name",
+            }
+            continue
+
+        lower = name.lower()
+        if lower in seen_lower:
+            errors[comp.key] = {
+                "error_code": "COMPONENT_NAME_NOT_UNIQUE",
+                "error": (
+                    f"Component '{comp.key}' name '{name}' duplicates "
+                    f"component '{seen_lower[lower]}'. Governance requires "
+                    "account-unique component names."
+                ),
+                "field": "name",
+            }
+            continue
+        seen_lower[lower] = comp.key
+
+        if compiled_pattern is not None and not compiled_pattern.search(name):
+            errors[comp.key] = {
+                "error_code": "COMPONENT_NAME_PATTERN_MISMATCH",
+                "error": (
+                    f"Component '{comp.key}' name '{name}' does not match the "
+                    f"supplied naming.component_name_pattern '{raw_pattern}'."
+                ),
+                "field": "name",
+            }
+            continue
+
+        # Soft flag: an ambiguous copy-induced numeric suffix. Never a hard
+        # gate — see the docstring (archetype-emitted enumerations pass).
+        if _COPY_SUFFIX_NAME_RE.match(name):
+            warnings.append(
+                f"Component '{comp.key}' name '{name}' ends in a numeric "
+                "suffix that resembles a copy artifact ('... 1'/'... 2'). If it "
+                "is a copy, give it a descriptive name "
+                "(governance_pattern:descriptive_unique_component_names)."
+            )
+
+    return {"errors": errors, "warnings": warnings}
+
+
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     spec = _normalize_to_spec(config)
     # Issue #41 r3: inject transform.function wrappers between any
@@ -3547,6 +3691,39 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             "get_schema_template(schema_name='design_pattern:error_routing_and_dlq')."
         )
 
+    # Issue #93 (account_governance M4.5.8) — plan-time component-name
+    # governance lint. Flag create components whose declared name violates
+    # naming governance (missing / Integration-default / copy-suffix /
+    # duplicate / pattern-mismatch). Only a step that would actually CREATE a
+    # new component (create / create_clone) and that carries no earlier, more
+    # specific validation error is converted to error_name_governance — a
+    # reuse/already-errored step is left untouched. Names only; folder/role
+    # governance stays GUI-only and is never linted here.
+    name_governance = _lint_component_names(spec)
+    warnings.extend(name_governance["warnings"])
+    steps_by_key = {step["key"]: step for step in steps}
+    flagged_name_keys: List[str] = []
+    for comp_key, lint_error in name_governance["errors"].items():
+        step = steps_by_key.get(comp_key)
+        if step is None:
+            continue
+        if step.get("planned_action") not in ("create", "create_clone"):
+            continue
+        if step.get("validation_error") is not None:
+            continue
+        step["planned_action"] = _NAME_GOVERNANCE_ERROR_ACTION
+        step["validation_error"] = lint_error
+        flagged_name_keys.append(comp_key)
+    if flagged_name_keys:
+        warnings.append(
+            "Component(s) "
+            f"{flagged_name_keys} fail name governance (names only). "
+            "Consult get_schema_template(schema_name="
+            "'governance_pattern:descriptive_unique_component_names') and "
+            "get_schema_template(schema_name="
+            "'governance_pattern:encode_metadata_in_component_names')."
+        )
+
     return {
         "_success": True,
         "integration_spec": spec.model_dump(),
@@ -3581,6 +3758,9 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # introduced by r12 P2 must also fail fast — otherwise earlier
             # components mutate before apply hits the unsupported step.
             "error_unsupported_structured_update",
+            # Issue #93: a name-governance failure blocks apply before any
+            # mutation (names only — folder/role governance is GUI-only).
+            _NAME_GOVERNANCE_ERROR_ACTION,
         )
     ]
     if unresolvable_steps:
@@ -3652,6 +3832,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"structured update validation: "
                     f"{ve.get('error_code', 'UPDATE_PRESERVATION_POLICY_UNSUPPORTED')} "
                     f"on field {ve.get('field')!r}."
+                )
+            elif step["planned_action"] == _NAME_GOVERNANCE_ERROR_ACTION:
+                # Issue #93: report the name-governance failure (names only)
+                # without executing any mutation.
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed "
+                    f"name governance: "
+                    f"{ve.get('error_code', 'COMPONENT_NAME_GOVERNANCE_FAILED')} "
+                    f"on field {ve.get('field')!r}. "
+                    f"{ve.get('error', '')}".rstrip()
                 )
         return {
             "_success": False,

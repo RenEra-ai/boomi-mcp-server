@@ -87,6 +87,24 @@ def test_workflow_starts_profile_first_then_archetypes():
     assert "list_integration_archetypes" in wf["steps"][2], (
         f"third step must reference list_integration_archetypes, got: {wf['steps'][2]!r}"
     )
+    # Issue #93: the same consult step also routes through account_governance.
+    assert "account_governance" in wf["steps"][1], (
+        f"second step must also consult account_governance, got: {wf['steps'][1]!r}"
+    )
+
+
+def test_account_governance_in_capabilities_and_survives_filtering():
+    # Issue #93: account_governance is a top-level compact index, text-only, so
+    # it survives available_tools filtering like design_doctrine.
+    catalog = list_capabilities_action()
+    assert "account_governance" in catalog
+    ag = catalog["account_governance"]
+    assert ag["entry_count"] == 19
+    assert "get_schema_template" in ag["surface"]
+    assert "governance_pattern:<name>" in ag["pattern_surface"]
+    filtered = list_capabilities_action(available_tools={"build_integration"})
+    assert "account_governance" in filtered
+    assert filtered["account_governance"]["entry_count"] == 19
 
 
 def test_workflow_chain_runs_through_archetype_to_build_integration_plan():

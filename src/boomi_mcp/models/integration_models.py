@@ -51,7 +51,21 @@ class IntegrationSpecV1(BaseModel):
     goals: List[str] = Field(default_factory=list)
     endpoints: List[Dict[str, Any]] = Field(default_factory=list)
     flows: List[Dict[str, Any]] = Field(default_factory=list)
-    naming: Dict[str, Any] = Field(default_factory=dict)
+    naming: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Free-form naming governance anchor (issue #93 / account_governance "
+            "M4.5.8). Recognized keys: 'component_names' (per-role display names "
+            "an archetype emits) and the optional 'component_name_pattern' (a "
+            "regex every created component name must match). The build_integration "
+            "plan-time name lint reads this field and rejects/flags missing names, "
+            "platform default names ('New Map', 'New Profile'), copy-induced "
+            "numeric suffixes ('... 1'/'... 2'), duplicate create names, and "
+            "(when component_name_pattern is supplied) names that do not match it "
+            "— it never silently rewrites. Folder placement / roles / locking are "
+            "GUI-only governance (see account_governance) and are NOT linted."
+        ),
+    )
     folders: Dict[str, Any] = Field(default_factory=dict)
     runtime: Dict[str, Any] = Field(default_factory=dict)
     validation_rules: Dict[str, Any] = Field(default_factory=dict)

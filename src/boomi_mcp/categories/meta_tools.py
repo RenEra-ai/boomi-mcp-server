@@ -26,6 +26,12 @@ from ..kb.design_doctrine import (
     list_design_doctrine_index,
     valid_design_pattern_names,
 )
+from ..kb.account_governance import (
+    get_account_governance_catalog,
+    get_governance_pattern,
+    list_account_governance_index,
+    valid_governance_pattern_names,
+)
 
 
 # ============================================================================
@@ -4818,7 +4824,7 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
                 # tool is absent rather than advertising an unusable consult.
                 # Routing lives in this response payload, never in a tool
                 # description (MCP-conformance, issue #86).
-                "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing an archetype; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Select patterns by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / note the gap), or guidance_only (GUI/handoff).",
+                "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing an archetype; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Also consult get_schema_template(schema_name='account_governance') for folder placement, component naming, and role/write-restriction governance (fetch one with get_schema_template(schema_name='governance_pattern:<name>')). Select entries from BOTH surfaces by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / propose for GUI apply), or guidance_only (GUI/handoff).",
                 "3. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
                 "4. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
                 "5. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
@@ -4883,11 +4889,20 @@ def _valid_schema_names() -> list:
     Best effort on archetype discovery: a registry failure must never break the
     error envelope that calls this for its valid_schema_names listing.
     """
-    names = ["IntegrationSpecV1", "workflow_sequences", "design_doctrine"]
+    names = [
+        "IntegrationSpecV1",
+        "workflow_sequences",
+        "design_doctrine",
+        "account_governance",
+    ]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
-    # design_doctrine is a stdlib-only static module — import-safe, so no
-    # try/except guard (unlike the archetype registry discovery below).
+    # design_doctrine / account_governance are stdlib-only static modules —
+    # import-safe, so no try/except guard (unlike the archetype registry
+    # discovery below).
     names += [f"design_pattern:{name}" for name in valid_design_pattern_names()]
+    names += [
+        f"governance_pattern:{name}" for name in valid_governance_pattern_names()
+    ]
     try:
         # Call-time import — registry discovery imports patterns.archetypes.*,
         # which imports categories.components.builders; keep meta_tools free of
@@ -4998,6 +5013,42 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
             "_success": True,
             "schema_name": schema_name,
             "design_pattern": entry,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "read_only": True,
+        }
+
+    if schema_name == "account_governance":
+        # Read-only account/workspace governance knowledge surface (issue #93).
+        # Folder placement, naming, role/write-restriction, copy/versioning
+        # decisions — never GUI click-paths or folder-API mechanics (see the
+        # boomi_mcp.kb.account_governance module + its anti-template test).
+        catalog = get_account_governance_catalog()
+        return {
+            "_success": True,
+            "schema_name": "account_governance",
+            "surface": "account_governance",
+            "pattern_surface": "get_schema_template(schema_name='governance_pattern:<name>')",
+            **catalog,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "read_only": True,
+        }
+
+    if schema_name.startswith("governance_pattern:"):
+        pattern_name = schema_name[len("governance_pattern:"):]
+        entry = get_governance_pattern(pattern_name)
+        if entry is None:
+            return {
+                "_success": False,
+                "error": f"Unknown governance pattern: {pattern_name}",
+                "error_code": SCHEMA_NAME_UNSUPPORTED,
+                "valid_governance_patterns": valid_governance_pattern_names(),
+            }
+        return {
+            "_success": True,
+            "schema_name": schema_name,
+            "governance_pattern": entry,
             "raw_xml_exposed": False,
             "boomi_mutation": False,
             "read_only": True,
@@ -6793,7 +6844,9 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "component_type": "str (optional) — for component: process, connector-settings, transform.map, etc.",
                 "protocol": "str (optional) — for trading_partner: http, as2, ftp, sftp, etc.",
                 "schema_name": "str (optional) — authoring schema selector: 'IntegrationSpecV1' | "
-                               "'archetype:<name>' | 'workflow_sequences' | 'workflow:<name>'. "
+                               "'archetype:<name>' | 'workflow_sequences' | 'workflow:<name>' | "
+                               "'design_doctrine' | 'design_pattern:<name>' | "
+                               "'account_governance' | 'governance_pattern:<name>'. "
                                "Takes precedence over resource_type.",
             },
             "examples": [
@@ -6804,6 +6857,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'get_schema_template(schema_name="IntegrationSpecV1")',
                 'get_schema_template(schema_name="archetype:database_to_api_sync")',
                 'get_schema_template(schema_name="workflow_sequences")',
+                'get_schema_template(schema_name="account_governance")',
             ],
             "note": "No profile needed — returns static reference data. No API calls. "
                     "Omitting both resource_type and schema_name returns SCHEMA_SELECTOR_REQUIRED.",
@@ -7142,6 +7196,25 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "index": list_design_doctrine_index(),
     }
 
+    # --- Account governance (issue #93 — folder/naming/role governance) ---
+    # A compact index only: name / category / capability_status per entry. The
+    # full prose lives behind get_schema_template(schema_name='account_governance')
+    # so list_capabilities stays a budgeted catalog. Text-only, so it survives
+    # available_tools filtering (like operating_doctrine / design_doctrine).
+    account_governance = {
+        "entry_count": get_account_governance_catalog()["entry_count"],
+        "surface": "get_schema_template(schema_name='account_governance')",
+        "pattern_surface": "get_schema_template(schema_name='governance_pattern:<name>')",
+        "note": (
+            "Account/workspace governance decisions (where a component goes, "
+            "what it is named, who may edit it). Consult when authoring; select "
+            "entries by capability_status (emittable_today names honored by the "
+            "build_integration name lint | gated folder/role decisions the user "
+            "applies in the GUI | guidance_only | na)."
+        ),
+        "index": list_account_governance_index(),
+    }
+
     return {
         "_success": True,
         "server_name": "Boomi MCP Server",
@@ -7157,4 +7230,5 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         "hints": hints,
         "operating_doctrine": operating_doctrine,
         "design_doctrine": design_doctrine,
+        "account_governance": account_governance,
     }
