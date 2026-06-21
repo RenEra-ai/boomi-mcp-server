@@ -803,31 +803,36 @@ _ENTRIES: List[Dict[str, Any]] = [
     },
     {
         "id": "marketplace_bundle_install_folder_id",
-        "title": "A Marketplace bundle install can land components under an unexpected folder",
+        "title": "A Marketplace bundle install rejects a Base64 folder id and needs a plain numeric one",
         "symptom": (
-            "After installing a Marketplace bundle, references break or "
-            "components are not found because they were created under a "
-            "different folder than the dependent references assume."
+            "A Marketplace bundle install is rejected when the folder id is "
+            "supplied in the Platform API's Base64 form, or it quietly creates "
+            "one oddly-named folder when a folder name containing slashes was "
+            "expected to build a nested path."
         ),
         "detection": "runtime_error",
         "frequency": "low",
         "root_cause": (
-            "A bundle install places components under a target folder whose id "
-            "may not match what dependent references expect, so a later lookup "
-            "by the assumed folder fails."
+            "The Bundle API requires a plain numeric folder id and rejects a "
+            "Base64-encoded Platform API folder id. A supplied folder name is "
+            "taken literally — slashes are part of the name, not path "
+            "separators — and is ignored when a folder id is given. An HTTP 200 "
+            "response alone does not confirm the install succeeded."
         ),
         "wrong_pattern": (
-            "Installing a Marketplace bundle and assuming its components land "
-            "under the folder that existing references already point at."
+            "Passing the Platform API's Base64 folder id straight to the Bundle "
+            "API, treating folder-name slashes as a folder path, or trusting an "
+            "HTTP 200 as proof the install succeeded."
         ),
         "correct_pattern": (
-            "Confirm the actual destination folder of an installed bundle and "
-            "reconcile dependent references to the real folder before relying on "
-            "them."
+            "Pass a plain numeric folder id, decoding a Base64 Platform id to "
+            "its numeric portion first; do not rely on a folder name to build a "
+            "nested path; and confirm the result from the returned installation "
+            "status and artifact folder id rather than the HTTP status alone."
         ),
         "remediation": (
-            "After a bundle install, verify component folder placement and "
-            "re-point references to the correct folder."
+            "Decode Base64 folder ids to numeric before installing, and verify "
+            "the returned installation status and folder id after the call."
         ),
         "applies_to": ["marketplace", "manage_folders", "bundle_install"],
         "provenance": {"source_label": _COMPANION_ONLY, "retrieval_date": "2026-06-10"},
