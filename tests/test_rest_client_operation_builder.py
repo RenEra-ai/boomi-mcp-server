@@ -536,6 +536,26 @@ def test_duplicate_replacement_names_rejected_at_builder():
     assert err.error_code == "REST_PATH_REPLACEMENT_INVALID"
 
 
+@pytest.mark.parametrize("path_value", ["", None])
+def test_duplicate_names_rejected_even_with_blank_or_absent_path(path_value):
+    # Duplicate names are ALWAYS invalid, independent of the path — a blank or
+    # absent path must not let duplicates slip through (architect review).
+    cfg = _minimal_get_config(
+        method="PATCH",
+        path_replacements=[
+            {"name": "clientId", "target_path": "Root/clientId"},
+            {"name": "clientId", "target_path": "Root/other"},
+        ],
+    )
+    if path_value is None:
+        cfg.pop("path")
+    else:
+        cfg["path"] = path_value
+    err = RestClientOperationBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "REST_PATH_REPLACEMENT_INVALID"
+
+
 def test_template_path_blanked_when_replacements_declared():
     # A direct builder caller passing a TEMPLATE path + usable path_replacements
     # must still emit a BLANK operation path — no literal {token} may reach the

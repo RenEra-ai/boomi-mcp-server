@@ -2844,30 +2844,32 @@ class RestClientOperationBuilder:
             )
         path = config.get("path")
         has_path_replacements = _is_usable_path_replacements(raw_replacements)
-        # When a NON-BLANK template path accompanies usable replacements, the
-        # replacements and the path's '{...}' tokens must match EXACTLY before the
-        # path is blanked — otherwise blanking would silently drop a static path
-        # segment or leave an unresolved '{token}'. Reject: duplicate replacement
-        # names; a name with no matching '{name}' token; a '{token}' with no
-        # matching replacement. (Callers that pre-validate against their own
-        # template pass a blank path here, so this fires for direct/hand-authored
-        # configs that still carry the template; it mirrors the archetype checks.)
-        if has_path_replacements and path is not None and str(path).strip():
-            path_str = str(path)
+        if has_path_replacements:
+            # Duplicate replacement names are ALWAYS invalid — independent of the
+            # path — so check them whenever replacements are usable (a blank/absent
+            # path must not let duplicates slip through).
             names = [str(entry.get("name")) for entry in raw_replacements]
             if len(names) != len(set(names)):
                 return _path_replacement_error("declares duplicate names")
-            path_tokens = re.findall(r"\{([^{}]+)\}", path_str)
-            name_set = set(names)
-            token_set = set(path_tokens)
-            if name_set - token_set:
-                return _path_replacement_error(
-                    "declares a name with no matching '{name}' token in path"
-                )
-            if token_set - name_set:
-                return _path_replacement_error(
-                    "leaves a '{token}' in path with no matching replacement"
-                )
+            # The name<->'{token}' coverage check needs the template path: when a
+            # NON-BLANK path accompanies usable replacements, every name must
+            # appear as a '{name}' token and every '{token}' must have a
+            # replacement — otherwise blanking the path would silently drop a
+            # static segment or leave an unresolved '{token}'. (Callers that
+            # pre-validate against their own template pass a blank path here; it
+            # mirrors the archetype checks.)
+            if path is not None and str(path).strip():
+                path_tokens = re.findall(r"\{([^{}]+)\}", str(path))
+                name_set = set(names)
+                token_set = set(path_tokens)
+                if name_set - token_set:
+                    return _path_replacement_error(
+                        "declares a name with no matching '{name}' token in path"
+                    )
+                if token_set - name_set:
+                    return _path_replacement_error(
+                        "leaves a '{token}' in path with no matching replacement"
+                    )
         if not has_path_replacements and (path is None or not str(path).strip()):
             return BuilderValidationError(
                 "path is required for REST operations",
