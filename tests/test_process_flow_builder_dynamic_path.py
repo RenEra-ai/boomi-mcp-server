@@ -17,7 +17,7 @@ from boomi_mcp.categories.components.builders.process_flow_builder import (
 
 def _dynamic_path():
     return {
-        "dpp_name": "DPP_PATH_CLIENTS",
+        "ddp_name": "DDP_PATH_CLIENTS",
         "request_profile_id": "PROFILE-UUID",
         "profile_type": "profile.json",
         "segments": [
@@ -82,8 +82,8 @@ def test_dynamic_path_emits_setproperties_before_target():
     dp = dps[0]
 
     prop = dp.find(".//documentproperty")
-    assert prop.get("propertyId") == "process.DPP_PATH_CLIENTS"
-    assert prop.get("name") == "Dynamic Process Property - DPP_PATH_CLIENTS"
+    assert prop.get("propertyId") == "dynamicdocument.DDP_PATH_CLIENTS"
+    assert prop.get("name") == "Dynamic Document Property - DDP_PATH_CLIENTS"
     assert prop.get("persist") == "false"
 
     params = prop.findall(".//parametervalue")
@@ -118,10 +118,12 @@ def test_connectoraction_emits_path_property():
     assert pv is not None
     assert pv.get("key") == "path"
     assert pv.get("name") == "Path"
-    assert pv.get("valueType") == "process"
-    pp = pv.find("processparameter")
-    assert pp.get("processproperty") == "DPP_PATH_CLIENTS"
-    assert pp.get("processpropertydefaultvalue") == ""
+    # Dynamic DOCUMENT Property source -> valueType="track" + <trackparameter>.
+    assert pv.get("valueType") == "track"
+    tp = pv.find("trackparameter")
+    assert tp.get("propertyId") == "dynamicdocument.DDP_PATH_CLIENTS"
+    assert tp.get("propertyName") == "Dynamic Document Property - DDP_PATH_CLIENTS"
+    assert tp.get("defaultValue") == ""
 
 
 def test_no_dynamic_path_is_unchanged():
@@ -157,9 +159,9 @@ def test_valid_dynamic_path_validates_clean():
     assert err is None
 
 
-def test_blank_dpp_name_rejected():
+def test_blank_ddp_name_rejected():
     bad = _dynamic_path()
-    bad["dpp_name"] = "   "
+    bad["ddp_name"] = "   "
     err = ProcessFlowBuilder.validate_config(_config(dynamic_path=bad), depends_on=[])
     assert err is not None
     assert err.error_code == "PROCESS_PATH_REPLACEMENT_INVALID"

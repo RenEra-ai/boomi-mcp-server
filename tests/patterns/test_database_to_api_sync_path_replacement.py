@@ -96,7 +96,7 @@ def test_path_replacement_lowered_to_dynamic_path():
         )
     )
     dp = proc["config"]["target"]["dynamic_path"]
-    assert dp["dpp_name"] == "DPP_PATH_CLIENTS"
+    assert dp["ddp_name"] == "DDP_PATH_CLIENTS"
     assert dp["request_profile_id"] == "$ref:transform_target_profile"
     assert dp["profile_type"] == "profile.json"
     assert dp["segments"] == [
@@ -125,7 +125,7 @@ def test_dpp_name_derives_from_resource_segment():
             [{"name": "clientId", "target_path": "Root/clientId"}],
         )
     )
-    assert proc["config"]["target"]["dynamic_path"]["dpp_name"] == "DPP_PATH_MATTERS"
+    assert proc["config"]["target"]["dynamic_path"]["ddp_name"] == "DDP_PATH_MATTERS"
 
 
 def test_trailing_static_segment_preserved():
@@ -172,6 +172,17 @@ def test_replacement_target_not_a_leaf_rejected():
         _params(
             "/v1/clients/{clientId}",
             [{"name": "clientId", "target_path": "Root/does_not_exist"}],
+        )
+    )
+
+
+def test_undeclared_path_token_rejected():
+    # '{region}' has no matching replacement -> would survive as a literal in the
+    # emitted path; reject it (Codex review P2).
+    _expect_rejected(
+        _params(
+            "/v1/clients/{clientId}/{region}",
+            [{"name": "clientId", "target_path": "Root/clientId"}],
         )
     )
 

@@ -479,7 +479,7 @@ class ProcessFlowBuilder:
             flow.append((
                 "setproperties",
                 {
-                    "dpp_name": str(dynamic_path.get("dpp_name") or "").strip(),
+                    "ddp_name": str(dynamic_path.get("ddp_name") or "").strip(),
                     "request_profile_id": str(dynamic_path.get("request_profile_id") or "").strip(),
                     "profile_type": str(dynamic_path.get("profile_type") or "profile.json").strip(),
                     "segments": dynamic_path.get("segments") or [],
@@ -925,7 +925,7 @@ def _validate_dynamic_path(dynamic_path: Any) -> Optional[BuilderValidationError
     """Validate the optional ``target.dynamic_path`` block (issue #100 G2).
 
     Absent (None) is valid — the path stays static. When present it must carry a
-    non-blank ``dpp_name`` + ``request_profile_id`` and a non-empty ``segments``
+    non-blank ``ddp_name`` + ``request_profile_id`` and a non-empty ``segments``
     list of well-formed static/profile entries with at least one profile segment
     (an all-static path would not be dynamic). Errors never echo segment values
     (path strings/element names can carry caller-specific identifiers).
@@ -937,7 +937,7 @@ def _validate_dynamic_path(dynamic_path: Any) -> Optional[BuilderValidationError
         error_code="PROCESS_PATH_REPLACEMENT_INVALID",
         field="target.dynamic_path",
         hint=(
-            "dynamic_path needs a non-blank dpp_name and request_profile_id and "
+            "dynamic_path needs a non-blank ddp_name and request_profile_id and "
             "a non-empty segments list (static {type,value} / profile "
             "{type,element_id,element_name}) with at least one profile segment. "
             "It is normally emitted by the database_to_api_sync archetype from "
@@ -946,7 +946,7 @@ def _validate_dynamic_path(dynamic_path: Any) -> Optional[BuilderValidationError
     )
     if not isinstance(dynamic_path, dict):
         return err
-    for key in ("dpp_name", "request_profile_id"):
+    for key in ("ddp_name", "request_profile_id"):
         value = dynamic_path.get(key)
         if not isinstance(value, str) or not value.strip():
             return err
@@ -1287,23 +1287,25 @@ def _emit_connectoraction(
 
     # Issue #100 G2: when the target carries a dynamic_path block, emit the
     # connector step's "Path" dynamic operation property sourcing the Dynamic
-    # Process Property a preceding Set Properties shape sets. The REST Client
-    # operation itself declares no URL path parameter (that is HTTP-Client only);
-    # the path is supplied here at process time. Transcribed from the live REST
-    # Client capture (issue #100). Absent dynamic_path, the body is byte-for-byte
-    # the pre-#100 empty <parameters/><dynamicProperties/> with no
-    # parameter-profile attribute.
+    # Document Property a preceding Set Properties shape sets (valueType="track"
+    # references a tracked document property). A DOCUMENT property is used so each
+    # document in a multi-record run carries its own path (Codex review P1). The
+    # REST Client operation itself declares no URL path parameter (that is
+    # HTTP-Client only); the path is supplied here at process time. Transcribed
+    # from the live REST Client capture (issue #100). Absent dynamic_path, the
+    # body is byte-for-byte the pre-#100 empty <parameters/><dynamicProperties/>
+    # with no parameter-profile attribute.
     dynamic_path = params.get("dynamic_path")
     if isinstance(dynamic_path, dict) and dynamic_path:
-        dpp_name = _escape_xml(str(dynamic_path.get("dpp_name") or "").strip())
+        ddp_name = _escape_xml(str(dynamic_path.get("ddp_name") or "").strip())
         profile_id = _escape_xml(str(dynamic_path.get("request_profile_id") or "").strip())
         parameter_profile_attr = f' parameter-profile="{profile_id}"'
         inner = (
             '<parameters/>'
             '<dynamicProperties>'
-            '<propertyvalue childKey="" key="path" name="Path" valueType="process">'
-            f'<processparameter processproperty="{dpp_name}" '
-            'processpropertydefaultvalue=""/>'
+            '<propertyvalue childKey="" key="path" name="Path" valueType="track">'
+            f'<trackparameter defaultValue="" propertyId="dynamicdocument.{ddp_name}" '
+            f'propertyName="Dynamic Document Property - {ddp_name}"/>'
             '</propertyvalue>'
             '</dynamicProperties>'
         )
@@ -1380,17 +1382,19 @@ def _emit_setproperties(
     shape_index: int,
 ) -> str:
     """Emit a Set Properties (``documentproperties``) shape that builds the REST
-    dynamic path into a Dynamic Process Property.
+    dynamic path into a Dynamic Document Property.
 
     Issue #100 G2: concatenates the ordered ``segments`` (static literals + mapped
-    profile elements) into ``process.<dpp_name>``; the following connector step's
-    "Path" dynamic operation property then sources that DPP. Transcribed verbatim
+    profile elements) into ``dynamicdocument.<ddp_name>``; the following connector
+    step's "Path" dynamic operation property then sources that DDP. A Dynamic
+    DOCUMENT Property (not a process property) is used so each document in a
+    multi-record run carries its own path (Codex review P1). Transcribed verbatim
     from the live REST Client export (see ``.codex/plans/issue-100-live-captures.md``)
     — the ``<profileelement>`` ``elementId`` / ``elementName`` come from the same
     JSON profile field index the map uses, so they match the generated profile.
     """
     dragpoints = _emit_dragpoints([next_name], shape_index)
-    dpp_name = _escape_xml(str(params.get("dpp_name") or "").strip())
+    ddp_name = _escape_xml(str(params.get("ddp_name") or "").strip())
     profile_id = _escape_xml(str(params.get("request_profile_id") or "").strip())
     profile_type = _escape_xml(str(params.get("profile_type") or "profile.json").strip())
     segments = params.get("segments") or []
@@ -1429,8 +1433,8 @@ def _emit_setproperties(
         f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
         '<configuration><documentproperties>'
         '<documentproperty defaultValue="" isDynamicCredential="false" '
-        f'isTradingPartner="false" name="Dynamic Process Property - {dpp_name}" '
-        f'persist="false" propertyId="process.{dpp_name}" shouldEncrypt="false">'
+        f'isTradingPartner="false" name="Dynamic Document Property - {ddp_name}" '
+        f'persist="false" propertyId="dynamicdocument.{ddp_name}" shouldEncrypt="false">'
         f'<sourcevalues>{"".join(parametervalues)}</sourcevalues>'
         '</documentproperty>'
         '</documentproperties></configuration>'

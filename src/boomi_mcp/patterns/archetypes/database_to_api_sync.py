@@ -862,8 +862,8 @@ class RestPathReplacement(BaseModel):
         ...,
         description=(
             "Replacement token name. Must appear literally as '{name}' in "
-            "RestSendRequest.path. Case-sensitive; used to derive the "
-            "per-endpoint Dynamic Process Property name."
+            "RestSendRequest.path. Case-sensitive; the per-endpoint Dynamic "
+            "Document Property name is derived from the path resource."
         ),
     )
     target_path: str = Field(
@@ -2123,6 +2123,20 @@ class DatabaseToApiSyncParameters(BaseModel):
                 replacement_unknown_target_refs += 1
             elif replacement.target_path not in bound_target_paths:
                 replacement_unbound_target_refs += 1
+        # Reverse check: when path_replacements is in use, every '{token}' in the
+        # path must have a matching replacement. Otherwise an undeclared token
+        # (e.g. '{region}' in '/clients/{clientId}/{region}') would survive into
+        # the emitted path as a literal '{region}' and break the request at
+        # runtime. Only enforced when the caller opts into dynamic paths so an
+        # empty path_replacements leaves a static path with literal braces (if
+        # any) byte-for-byte unchanged.
+        undeclared_token_count = 0
+        if send_request.path_replacements:
+            declared_names = set(replacement_names)
+            path_tokens = re.findall(r"\{([^{}]+)\}", send_request.path)
+            undeclared_token_count = sum(
+                1 for token in path_tokens if token not in declared_names
+            )
 
         issues: List[str] = []
         if unknown_source_refs:
@@ -2176,6 +2190,13 @@ class DatabaseToApiSyncParameters(BaseModel):
                 f"{replacement_unbound_target_refs} target_path(s) that no "
                 "transform output binds; a dynamic path segment can only "
                 "source a mapped leaf"
+            )
+        if undeclared_token_count:
+            issues.append(
+                f"target.send_request.path contains {undeclared_token_count} "
+                "'{name}' placeholder(s) with no matching path_replacements "
+                "entry; every token must be a declared replacement so no "
+                "unresolved placeholder reaches the emitted path"
             )
 
         if issues:
@@ -2625,13 +2646,16 @@ def _derive_process_reliability(
     return {"retry_count": 0, "dlq": {"mode": "disabled"}}, None
 
 
-def _path_dpp_name(segments: List[Dict[str, Any]]) -> str:
-    """Derive a per-endpoint Dynamic Process Property name for the REST path.
+def _path_ddp_name(segments: List[Dict[str, Any]]) -> str:
+    """Derive a per-endpoint Dynamic Document Property name for the REST path.
 
-    Issue #100 G2: one endpoint -> one DPP name (e.g. ``DPP_PATH_CLIENTS``), so a
-    process that sends to multiple endpoints never collides on a single shared
-    path property. The resource is the last static path segment before the first
-    dynamic token (``/admin/cdscm/api/v1/clients/{clientId}`` -> ``clients``).
+    Issue #100 G2: a Dynamic DOCUMENT Property (travels per-document) carries the
+    per-document path so a multi-record run never overwrites it across documents
+    (a Dynamic Process Property is execution-global and would clobber — Codex
+    review P1). One endpoint -> one DDP name (e.g. ``DDP_PATH_CLIENTS``) so a
+    process sending to multiple endpoints stays unambiguous. The resource is the
+    last static path segment before the first dynamic token
+    (``/admin/cdscm/api/v1/clients/{clientId}`` -> ``clients``).
     """
     resource = "PATH"
     for seg in segments:
@@ -2641,7 +2665,7 @@ def _path_dpp_name(segments: List[Dict[str, Any]]) -> str:
         if parts:
             resource = parts[-1]
     safe = re.sub(r"[^A-Za-z0-9]+", "_", resource).strip("_").upper() or "PATH"
-    return f"DPP_PATH_{safe}"
+    return f"DDP_PATH_{safe}"
 
 
 def _build_dynamic_path(
@@ -2654,7 +2678,8 @@ def _build_dynamic_path(
     the metadata ``ProcessFlowBuilder`` lowers into a Set Properties
     (``documentproperties``) shape that concatenates the path, plus the connector
     step's "Path" dynamic operation property sourcing the resulting Dynamic
-    Process Property. The profile-element references (``element_id`` /
+    Document Property (per-document — safe for multi-record runs). The
+    profile-element references (``element_id`` /
     ``element_name``) are read from the SAME ``JSONGeneratedProfileBuilder`` field
     index the transform map consumes, so the emitted ``<profileelement>`` matches
     the generated request profile by construction. Grounded in the live REST
@@ -2702,7 +2727,7 @@ def _build_dynamic_path(
         segments.append({"type": "static", "value": send.path[last:]})
 
     return {
-        "dpp_name": _path_dpp_name(segments),
+        "ddp_name": _path_ddp_name(segments),
         "request_profile_id": f"$ref:{target_profile_key}",
         "profile_type": "profile.json",
         "segments": segments,
@@ -3154,7 +3179,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "All XML is produced by the existing component builders; the archetype emits JSON component specs only.",
         "Emits a verified Try/Catch + DLQ catch path when dlq.enabled with mode document_cache_ref or error_subprocess_ref; caller retry (max_attempts 1..6) is wired as platform-timed Try/Catch retry_count 0..5 (#51 M3.R1a / #88 M4.5.3).",
         "Optionally emits a verified Notify step at the head of the wired catch path (reliability.catch_notify) that logs the caught error to the process log; level INFO/WARNING/ERROR (#89 M4.5.4).",
-        "Emits per-document dynamic REST paths (target.send_request.path_replacements) via a Set Properties shape that builds a per-endpoint Dynamic Process Property from mapped leaves, sourced by the connector step's 'Path' dynamic operation property; absent replacements the path stays static (#100 G2).",
+        "Emits per-document dynamic REST paths (target.send_request.path_replacements) via a Set Properties shape that builds a per-endpoint Dynamic Document Property from mapped leaves, sourced by the connector step's 'Path' dynamic operation property; the document-scoped property keeps each record's path correct in a multi-record run; absent replacements the path stays static (#100 G2).",
         "Declares source DB connection credential fields (username, password) as per-environment override points by default so TEST -> PROD promotion supplies the password via environment extensions, never an embedded credential; host/port opt-in via environment_extensions.endpoint_connection_fields (#92 M4.5.7).",
         "Credentials cross the contract only as opaque credential_ref values and are never echoed in errors.",
     ]
