@@ -6425,15 +6425,19 @@ def _plan_select_doctrine(entries: list, keywords: set) -> list:
 
 
 def _plan_select_governance(entries: list, keywords: set) -> list:
-    """Rank governance entries by (relevance desc, capability_status, catalog).
+    """Rank governance entries by (capability_status, relevance desc, catalog).
 
-    With no matching keywords this naturally falls back to capability-status
-    order (emittable_today first), so every brief still surfaces governance.
+    Capability status leads so the brief surfaces BUILDABLE governance first
+    (all emittable_today, then gated, then guidance_only/na); intent relevance
+    orders entries WITHIN each status tier. Status-first ranking is deliberate:
+    a relevance-first sort could let the 5-item cap fill with high-relevance
+    gated entries (e.g. intent_flags=["folder"]) and omit every emittable_today
+    naming pattern — the actionable guidance the agent must not miss.
     """
     ranked = sorted(
-        ((_plan_score(e, keywords), _PLAN_STATUS_RANK.get(e.get("capability_status"), 9), i, e)
+        ((_PLAN_STATUS_RANK.get(e.get("capability_status"), 9), _plan_score(e, keywords), i, e)
          for i, e in enumerate(entries)),
-        key=lambda t: (-t[0], t[1], t[2]),
+        key=lambda t: (t[0], -t[1], t[2]),
     )
     return [entry for _, _, _, entry in ranked[:_PLAN_GOVERNANCE_CAP]]
 

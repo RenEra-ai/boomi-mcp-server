@@ -153,6 +153,33 @@ def test_archetype_mode_recommends_named_patterns_with_status():
 # Capability-gap fidelity — gaps are COMPUTED from the registries
 # ---------------------------------------------------------------------------
 
+def test_governance_surfaces_buildable_before_relevance():
+    """Regression: a relevance-first governance sort could let the 5-item cap
+    fill with high-relevance gated entries and omit every emittable_today
+    naming pattern. Capability status must lead so buildable guidance survives,
+    even when an intent flag strongly matches gated (e.g. folder) governance."""
+    truth = _status_by_name()
+    emittable_governance = {
+        name for (source, name), status in truth.items()
+        if source == "account_governance" and status == "emittable_today"
+    }
+    r = plan_integration_design_action(intent_flags=["folder"])
+    shown = r["recommended_governance_patterns"]
+    shown_emittable = {
+        p["name"] for p in shown if p["capability_status"] == "emittable_today"
+    }
+    # Every emittable_today governance pattern that fits the cap must appear.
+    expected = set(list(emittable_governance)[: len(shown)])
+    assert expected <= shown_emittable, (
+        f"buildable governance crowded out: missing {expected - shown_emittable}"
+    )
+    # And they must lead the list (status-tier ordering).
+    statuses = [p["capability_status"] for p in shown]
+    assert statuses == sorted(
+        statuses, key=lambda s: {"emittable_today": 0, "gated": 1, "guidance_only": 2, "na": 3}[s]
+    ), statuses
+
+
 def test_capability_gaps_match_source_registries():
     r = plan_integration_design_action(
         archetype="database_to_api_sync",
