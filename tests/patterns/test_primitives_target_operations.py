@@ -188,6 +188,43 @@ class TestRestSendComponents:
         assert op.config["path"] == "/resource"
         assert op.depends_on == ["cust_rest_connection"]
 
+    def test_empty_path_replacements_kept_static(self):
+        # An explicit [] means "no dynamic path": the static path is kept and the
+        # empty list is NOT forwarded into the operation config (so the builder
+        # does not reject an otherwise-static operation) (Codex review).
+        comps = _emit(
+            RestSendWithRetryPrimitive,
+            _rest_create_params(
+                operation={"method": "PATCH", "path": "/resource", "path_replacements": []}
+            ),
+        )
+        op = comps[1]
+        assert op.config["path"] == "/resource"
+        assert "path_replacements" not in op.config
+
+    def test_path_replacements_blank_the_operation_path(self):
+        # Issue #100 G2: a templated path + path_replacements must emit a BLANK
+        # operation path (the path is supplied at the connector step), even for a
+        # direct primitive consumer — never a literal in-operation '{token}'
+        # (Codex review).
+        comps = _emit(
+            RestSendWithRetryPrimitive,
+            _rest_create_params(
+                operation={
+                    "method": "PATCH",
+                    "path": "/clients/{clientId}",
+                    "path_replacements": [
+                        {"name": "clientId", "target_path": "Root/clientId"}
+                    ],
+                }
+            ),
+        )
+        op = comps[1]
+        assert op.config["path"] == ""
+        assert op.config["path_replacements"] == [
+            {"name": "clientId", "target_path": "Root/clientId"}
+        ]
+
     def test_reuse_by_id_emits_reference_only(self):
         comps = _emit(
             RestSendWithRetryPrimitive,
@@ -235,6 +272,26 @@ class TestRestSendComponents:
                 _rest_create_params(operation={"method": "FETCH", "path": "/x"}),
             )
         assert exc.value.error_code == "UNSUPPORTED_REST_METHOD"
+
+    def test_direct_primitive_rejects_unmatched_replacement(self):
+        # Issue #100 G2: a direct primitive caller whose replacement name is not a
+        # {name} token in the (template) path must be rejected — the primitive now
+        # validates against the template BEFORE blanking, so this is caught rather
+        # than silently emitting a blank-path operation (Codex review).
+        with pytest.raises(BuilderValidationError) as exc:
+            _emit(
+                RestSendWithRetryPrimitive,
+                _rest_create_params(
+                    operation={
+                        "method": "PATCH",
+                        "path": "/resource",
+                        "path_replacements": [
+                            {"name": "id", "target_path": "Root/id"}
+                        ],
+                    }
+                ),
+            )
+        assert exc.value.error_code == "REST_PATH_REPLACEMENT_INVALID"
 
     def test_invalid_profile_type_surfaces_builder_error(self):
         with pytest.raises(BuilderValidationError) as exc:
@@ -388,6 +445,30 @@ class TestRestSendFragment:
         assert target["operation_id"] == "$ref:cust_rest_operation"
         assert target["action_type"] == "PATCH"
         assert set(frag["depends_on"]) == {"cust_rest_connection", "cust_rest_operation"}
+        # No path_replacements -> no dynamic-path signal on the fragment target.
+        assert "path_replacements" not in target
+
+    def test_fragment_does_not_emit_partial_dynamic_path(self):
+        # Issue #100 G2: per-document dynamic paths are wired at the process level
+        # (Set Properties + connector "Path" property = target.dynamic_path), which
+        # needs the request-profile field index this primitive lacks. The fragment
+        # must NOT carry a partial dynamic-path signal it cannot complete — the
+        # consuming archetype builds the process target (dynamic_path) directly.
+        frag = _fragment(
+            RestSendWithRetryPrimitive,
+            _rest_create_params(
+                operation={
+                    "method": "PATCH",
+                    "path": "/clients/{clientId}",
+                    "path_replacements": [
+                        {"name": "clientId", "target_path": "Root/clientId"}
+                    ],
+                }
+            ),
+        )
+        target = frag["process_config"]["target"]
+        assert "path_replacements" not in target
+        assert "dynamic_path" not in target
 
     def test_action_type_uppercases_method(self):
         frag = _fragment(

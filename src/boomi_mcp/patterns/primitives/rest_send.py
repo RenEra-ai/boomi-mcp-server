@@ -171,6 +171,11 @@ class RestOperationParams(BaseModel):
     # they cannot coerce and bypass RestClientOperationBuilder's non-bool check.
     return_application_errors: Optional[StrictBool] = Field(default=None)
     track_response: Optional[StrictBool] = Field(default=None)
+    # Issue #100 G2: per-document dynamic-path replacements. Carried so the REST
+    # Client operation builder permits a blank operation path (the path is
+    # supplied at the process connector step, not in the operation). Forwarded to
+    # the operation config; the builder does not emit it as XML.
+    path_replacements: Optional[List[Dict[str, str]]] = Field(default=None)
 
 
 class RestRetryPolicy(BaseModel):
@@ -297,6 +302,18 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
             "action_type": params.operation.method.upper(),
             "label": f"{context.component_prefix} REST Send",
         }
+        # Issue #100 G2: per-document dynamic REST paths are wired at the PROCESS
+        # level — a Set Properties shape building a Dynamic Document Property +
+        # the connector step's "Path" dynamic operation property (target.dynamic_
+        # path). Building that requires the request-profile field index (element
+        # id / name_path per target leaf), which this primitive does not have.
+        # So this fragment carries ONLY the target binding: it deliberately does
+        # NOT emit a partial dynamic-path signal it cannot complete. The consuming
+        # database_to_api_sync archetype builds the process target (including
+        # target.dynamic_path) directly in _build_main_process and does not
+        # consume this fragment for that wiring (emit_fragment is not invoked for
+        # this primitive today; emit_components owns the operation, which blanks
+        # the path when path_replacements is set).
         fragment: Dict[str, Any] = {
             "process_config": {"target": target},
             "depends_on": [conn_key, op_key],
@@ -404,6 +421,9 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
             "component_name": op_name,
             "connection_ref_key": conn_key,
             "method": op.method,
+            # Issue #100 G2: pass the TEMPLATE path here so the operation builder
+            # validates token/name coverage against it (a pre-blanked path would
+            # bypass those checks); the path is blanked AFTER validation below.
             "path": op.path,
         }
         for field in (
@@ -420,10 +440,23 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
             value = getattr(op, field)
             if value is not None:
                 config[field] = value
+        # Forward path_replacements only when NON-EMPTY. An explicit [] means
+        # "no dynamic path" — forwarding it would make the operation builder
+        # reject an otherwise-static operation (REST_PATH_REPLACEMENT_INVALID),
+        # and the blank-path branch above already treats [] as static.
+        if op.path_replacements:
+            config["path_replacements"] = op.path_replacements
         if folder:
             config["folder_name"] = folder
 
         raise_for_builder_error(RestClientOperationBuilder.validate_config(config))
+
+        # Issue #100 G2: validation passed against the TEMPLATE path; now blank the
+        # operation path so the emitted component carries no in-operation '{token}'
+        # (the per-document path is supplied at the process connector step). build()
+        # also blanks at XML emission; doing it here keeps the spec config blank too.
+        if op.path_replacements:
+            config["path"] = ""
 
         # Each in-spec profile referenced by $ref must appear in depends_on so
         # build_integration orders the profile before the operation and

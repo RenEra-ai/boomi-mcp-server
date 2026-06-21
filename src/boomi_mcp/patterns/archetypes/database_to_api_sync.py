@@ -2528,6 +2528,13 @@ def _build_rest_send_params(
             connection["component_name"] = binding.component_name
 
     target_profile_key = primitive_component_key(_TRANSFORM_PREFIX, ROLE_TARGET_PROFILE)
+    # Issue #100 G2: with per-document path replacements the REST Client operation
+    # declares NO in-operation path (the live REST Execute export carries a blank
+    # path field); the full per-document path is supplied at the process connector
+    # step's "Path" dynamic operation property. Pass the template path + flag
+    # path_replacements; the rest_send primitive blanks the operation path when
+    # replacements are present and the operation builder permits the blank. Without
+    # replacements the static path is emitted verbatim as before.
     operation: Dict[str, Any] = {
         "method": send.method,
         "path": send.path,
@@ -2535,6 +2542,11 @@ def _build_rest_send_params(
         "request_profile_id": f"$ref:{target_profile_key}",
         "request_profile_type": "json",
     }
+    if send.path_replacements:
+        operation["path_replacements"] = [
+            {"name": r.name, "target_path": r.target_path}
+            for r in send.path_replacements
+        ]
     # Only literal query parameters are emitted onto the operation. Watermark-
     # sourced parameters need dynamic operation-property wiring (#51) and are
     # represented as operational intent, never as static query parameters.

@@ -108,6 +108,42 @@ def _format_xml_value(value: Any) -> str:
     return _escape_xml(str(value))
 
 
+def _is_usable_path_replacements(value: Any) -> bool:
+    """True only for a well-formed, non-empty path_replacements declaration.
+
+    Issue #100 G2: a blank REST operation path is permitted ONLY when the caller
+    declares per-document path replacements (the path is then supplied at the
+    process connector step). The waiver must not be triggered by a merely-truthy
+    but malformed value (e.g. the string "yes" or ``[{}]``), which would yield a
+    blank-path operation with no usable replacement — so require a non-empty list
+    whose every entry is a dict with a non-blank ``name`` and ``target_path``.
+    """
+    if not isinstance(value, list) or not value:
+        return False
+    for entry in value:
+        if not isinstance(entry, dict):
+            return False
+        for key in ("name", "target_path"):
+            field = entry.get(key)
+            if not isinstance(field, str) or not field.strip():
+                return False
+    return True
+
+
+def _path_replacement_error(detail: str) -> "BuilderValidationError":
+    """A REST_PATH_REPLACEMENT_INVALID error with a non-echoing detail."""
+    return BuilderValidationError(
+        f"path_replacements {detail}",
+        error_code="REST_PATH_REPLACEMENT_INVALID",
+        field="path_replacements",
+        hint=(
+            "Every replacement name must appear exactly once as a '{name}' token "
+            "in the operation path and every '{token}' must have a replacement; "
+            "omit path_replacements for a static path."
+        ),
+    )
+
+
 _DATABASE_CONNECTOR_POLICY = PreservationPolicy(
     component_type="connector-settings",
     subtype="database",
@@ -2782,9 +2818,57 @@ class RestClientOperationBuilder:
                 hint=f"Supported methods: {supported}.",
             )
 
-        # 6) path required.
+        # 6) path required — UNLESS per-document path replacements are declared
+        # (#100 G2). The Boomi REST Client operation cannot hold an in-operation
+        # URL path parameter, so when the caller drives a dynamic per-document
+        # path the operation carries a BLANK path (matching the live REST Execute
+        # export, value="") and the full path is supplied at the process connector
+        # step's "Path" dynamic operation property. The blank is emitted verbatim.
+        #
+        # path_replacements is the signal that the path is supplied dynamically,
+        # so a PRESENT-but-malformed declaration must be REJECTED (not silently
+        # ignored) — otherwise a non-blank template path with bad replacements
+        # (e.g. [{}]) would pass and emit a literal '{token}'.
+        raw_replacements = config.get("path_replacements")
+        if raw_replacements is not None and not _is_usable_path_replacements(raw_replacements):
+            return BuilderValidationError(
+                "path_replacements must be a non-empty list of "
+                "{name, target_path} objects with non-blank values",
+                error_code="REST_PATH_REPLACEMENT_INVALID",
+                field="path_replacements",
+                hint=(
+                    "Each replacement needs a non-blank name (a '{name}' token in "
+                    "the path) and target_path (a mapped leaf). Omit the field "
+                    "entirely for a static path."
+                ),
+            )
         path = config.get("path")
-        if path is None or not str(path).strip():
+        has_path_replacements = _is_usable_path_replacements(raw_replacements)
+        # When a NON-BLANK template path accompanies usable replacements, the
+        # replacements and the path's '{...}' tokens must match EXACTLY before the
+        # path is blanked — otherwise blanking would silently drop a static path
+        # segment or leave an unresolved '{token}'. Reject: duplicate replacement
+        # names; a name with no matching '{name}' token; a '{token}' with no
+        # matching replacement. (Callers that pre-validate against their own
+        # template pass a blank path here, so this fires for direct/hand-authored
+        # configs that still carry the template; it mirrors the archetype checks.)
+        if has_path_replacements and path is not None and str(path).strip():
+            path_str = str(path)
+            names = [str(entry.get("name")) for entry in raw_replacements]
+            if len(names) != len(set(names)):
+                return _path_replacement_error("declares duplicate names")
+            path_tokens = re.findall(r"\{([^{}]+)\}", path_str)
+            name_set = set(names)
+            token_set = set(path_tokens)
+            if name_set - token_set:
+                return _path_replacement_error(
+                    "declares a name with no matching '{name}' token in path"
+                )
+            if token_set - name_set:
+                return _path_replacement_error(
+                    "leaves a '{token}' in path with no matching replacement"
+                )
+        if not has_path_replacements and (path is None or not str(path).strip()):
             return BuilderValidationError(
                 "path is required for REST operations",
                 error_code="REST_PATH_REQUIRED",
@@ -2792,7 +2876,9 @@ class RestClientOperationBuilder:
                 hint=(
                     "Provide the endpoint path appended onto the connection's "
                     "base_url (e.g. '/v1/items/{id}'). REST Client preserves "
-                    "the path verbatim in emitted XML."
+                    "the path verbatim in emitted XML. For a per-document dynamic "
+                    "path, declare path_replacements so the operation path may be "
+                    "blank and the path is supplied at the connector step."
                 ),
             )
 
@@ -2874,7 +2960,18 @@ class RestClientOperationBuilder:
 
         component_name = params["component_name"]
         method = params["method"].upper()
-        path = str(params["path"])
+        # Issue #100 G2: with a usable per-document path_replacements declaration
+        # the REST Client operation MUST carry a blank path (the path is supplied
+        # at the process connector step's "Path" dynamic operation property) — so
+        # blank it here at the lowest emission layer, covering EVERY caller
+        # (archetype, primitive, or a direct/hand-authored build_integration
+        # config) and never serializing a literal '{token}' the REST Client can't
+        # resolve. Otherwise normalize a missing/None path to "" so build() stays
+        # total (validate_config permits an absent/blank path with replacements).
+        if _is_usable_path_replacements(params.get("path_replacements")):
+            path = ""
+        else:
+            path = str(params.get("path") or "")
         folder_name = params.get("folder_name", "Home")
         description = params.get("description", "")
 

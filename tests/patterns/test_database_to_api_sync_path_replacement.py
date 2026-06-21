@@ -70,11 +70,14 @@ def _params(path: str, path_replacements, children=None) -> Dict[str, Any]:
     }
 
 
-def _main_process(payload):
+def _by_key(payload):
     result = build_from_archetype_action("database_to_api_sync", payload)
     assert result["_success"] is True, result
-    by_key = {c["key"]: c for c in result["integration_spec"]["components"]}
-    return by_key["main_process"]
+    return {c["key"]: c for c in result["integration_spec"]["components"]}
+
+
+def _main_process(payload):
+    return _by_key(payload)["main_process"]
 
 
 def _expect_rejected(payload):
@@ -111,11 +114,32 @@ def test_path_replacement_lowered_to_dynamic_path():
     assert "transform_target_profile" in proc["depends_on"]
 
 
+def test_path_replacement_blanks_operation_path():
+    # The REST Client operation cannot hold an in-operation URL path param, so
+    # with replacements the operation path is blank and flags path_replacements;
+    # the path is supplied at the connector step (Codex review finding 1).
+    op = _by_key(
+        _params(
+            "/admin/cdscm/api/v1/clients/{clientId}",
+            [{"name": "clientId", "target_path": "Root/clientId"}],
+        )
+    )["target_rest_operation"]
+    assert op["config"]["path"] == ""
+    assert op["config"]["path_replacements"] == [
+        {"name": "clientId", "target_path": "Root/clientId"}
+    ]
+
+
 def test_no_path_replacements_emits_no_dynamic_path():
     payload = _params("/v1/customers", [])
-    proc = _main_process(payload)
+    by_key = _by_key(payload)
+    proc = by_key["main_process"]
     assert "dynamic_path" not in proc["config"]["target"]
     assert "transform_target_profile" not in proc["depends_on"]
+    # static path is still emitted verbatim on the operation, no path_replacements
+    op = by_key["target_rest_operation"]
+    assert op["config"]["path"] == "/v1/customers"
+    assert "path_replacements" not in op["config"]
 
 
 def test_dpp_name_derives_from_resource_segment():

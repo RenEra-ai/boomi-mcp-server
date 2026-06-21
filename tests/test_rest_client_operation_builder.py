@@ -435,6 +435,122 @@ def test_missing_path_rejected():
     assert err.field == "path"
 
 
+def test_blank_path_allowed_with_path_replacements():
+    # Issue #100 G2: a per-document dynamic path means the operation carries a
+    # BLANK path (the path is supplied at the process connector step). When
+    # path_replacements is present the blank path is accepted and emitted as
+    # value="" (matching the live REST Execute export).
+    cfg = _minimal_get_config(
+        method="PATCH",
+        path="",
+        path_replacements=[{"name": "clientId", "target_path": "Root/clientId"}],
+    )
+    assert RestClientOperationBuilder.validate_config(cfg) is None
+    xml = RestClientOperationBuilder().build(**cfg)
+    assert '<field id="path" type="string" value=""/>' in xml
+
+
+def test_blank_path_without_replacements_still_rejected():
+    cfg = _minimal_get_config(path="")
+    err = RestClientOperationBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "REST_PATH_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    "bad_replacements",
+    [
+        "yes",                       # truthy string, not a list
+        [],                          # empty list
+        [{}],                        # entry missing name/target_path
+        [{"name": "clientId"}],      # entry missing target_path
+        [{"name": "", "target_path": "Root/clientId"}],  # blank name
+        [{"name": "clientId", "target_path": "  "}],      # blank target_path
+        ["clientId"],                # entry not a dict
+    ],
+)
+def test_malformed_replacements_rejected(bad_replacements):
+    # A present-but-malformed path_replacements is the signal that the path is
+    # supplied dynamically, so it must be REJECTED (not ignored) — whether the
+    # path is blank or a non-blank template (Codex review). Otherwise a template
+    # path with bad replacements would silently emit a literal {token}.
+    for path in ("", "/clients/{clientId}"):
+        cfg = _minimal_get_config(method="PATCH", path=path)
+        cfg["path_replacements"] = bad_replacements
+        err = RestClientOperationBuilder.validate_config(cfg)
+        assert err is not None
+        assert err.error_code == "REST_PATH_REPLACEMENT_INVALID"
+
+
+def test_omitted_path_with_replacements_builds_blank():
+    # validate_config permits an omitted path when path_replacements is present;
+    # build() must stay total (normalize to "") rather than KeyError.
+    cfg = _minimal_get_config(
+        method="PATCH",
+        path_replacements=[{"name": "clientId", "target_path": "Root/clientId"}],
+    )
+    cfg.pop("path")
+    assert RestClientOperationBuilder.validate_config(cfg) is None
+    xml = RestClientOperationBuilder().build(**cfg)
+    assert '<field id="path" type="string" value=""/>' in xml
+
+
+def test_unmatched_replacement_name_rejected():
+    # Usable replacements whose name is NOT a {name} token in a non-blank path
+    # must be rejected — otherwise blanking the path would silently drop the
+    # intended static path (Codex review).
+    cfg = _minimal_get_config(
+        method="PATCH",
+        path="/v1/customers",
+        path_replacements=[{"name": "id", "target_path": "Root/id"}],
+    )
+    err = RestClientOperationBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "REST_PATH_REPLACEMENT_INVALID"
+
+
+def test_undeclared_path_token_rejected():
+    # A '{token}' in the path with no matching replacement must be rejected —
+    # otherwise build() blanks the path and the token is silently dropped (Codex).
+    cfg = _minimal_get_config(
+        method="PATCH",
+        path="/clients/{clientId}/{region}",
+        path_replacements=[{"name": "clientId", "target_path": "Root/clientId"}],
+    )
+    err = RestClientOperationBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "REST_PATH_REPLACEMENT_INVALID"
+
+
+def test_duplicate_replacement_names_rejected_at_builder():
+    cfg = _minimal_get_config(
+        method="PATCH",
+        path="/clients/{clientId}",
+        path_replacements=[
+            {"name": "clientId", "target_path": "Root/clientId"},
+            {"name": "clientId", "target_path": "Root/other"},
+        ],
+    )
+    err = RestClientOperationBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "REST_PATH_REPLACEMENT_INVALID"
+
+
+def test_template_path_blanked_when_replacements_declared():
+    # A direct builder caller passing a TEMPLATE path + usable path_replacements
+    # must still emit a BLANK operation path — no literal {token} may reach the
+    # REST Client operation XML (Codex review; root-level guarantee in build()).
+    cfg = _minimal_get_config(
+        method="PATCH",
+        path="/clients/{clientId}",
+        path_replacements=[{"name": "clientId", "target_path": "Root/clientId"}],
+    )
+    assert RestClientOperationBuilder.validate_config(cfg) is None
+    xml = RestClientOperationBuilder().build(**cfg)
+    assert '<field id="path" type="string" value=""/>' in xml
+    assert "{clientId}" not in xml
+
+
 # ----------------------------------------------------------------------------
 # Query parameters / request headers — empty only until verified
 # ----------------------------------------------------------------------------
