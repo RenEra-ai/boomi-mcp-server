@@ -159,7 +159,23 @@ def test_ranking_tracked_field_repeating():
 
 
 def test_ranking_marketplace_recipe():
-    assert _top_id("marketplace recipe") == "marketplace_recipes_not_production"
+    assert _top_id("marketplace recipe production ready") == "marketplace_recipes_not_production"
+
+
+def test_ranking_listener_concurrency():
+    assert _top_id("web services server concurrent http 500") == "wss_listener_concurrency_http_500"
+
+
+def test_ranking_edi_taglist():
+    assert _top_id("edi taglist segment loop elementkey") == "edi_taglist_loop_vs_segment"
+
+
+def test_ranking_marketplace_recipe_filter():
+    assert _top_id("marketplace recipe filter asset type") == "marketplace_recipe_search_filter"
+
+
+def test_ranking_marketplace_bundle_folder():
+    assert _top_id("marketplace bundle install folder") == "marketplace_bundle_install_folder_id"
 
 
 def test_ranking_status_ok_for_strong_match():

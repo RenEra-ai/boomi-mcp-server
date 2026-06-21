@@ -52,6 +52,7 @@ OPERATIONAL_GOTCHA_REQUIRED_FIELDS = (
     "applies_to",
     "provenance",
     "verification_status",
+    "category",
 )
 
 #: How the failure first becomes visible to an agent or operator.
@@ -148,7 +149,7 @@ _COURSE = "Boomi architect course triage (#77 comment)"
 
 _ENTRIES: List[Dict[str, Any]] = [
     # ===================================================================
-    # Listener / WSS (2)
+    # Listener / WSS (3)
     # ===================================================================
     {
         "id": "listener_no_test_mode",
@@ -230,6 +231,45 @@ _ENTRIES: List[Dict[str, Any]] = [
             "listener_connector",
             "shared_web_server",
         ],
+        "provenance": {"source_label": _COMPANION_DOCS, "retrieval_date": "2026-06-10"},
+        "verification_status": "docs_corroborated",
+        "category": "listener_wss",
+    },
+    {
+        "id": "wss_listener_concurrency_http_500",
+        "title": "A Web Services Server listener at default options returns HTTP 500 under concurrent calls",
+        "symptom": (
+            "A deployed Web Services Server listener process that passed "
+            "single-request testing returns HTTP 500 errors in production as "
+            "soon as two requests arrive at the same time."
+        ),
+        "detection": "runtime_error",
+        "frequency": "medium",
+        "root_cause": (
+            "A Web Services Server listener process that does not permit "
+            "simultaneous executions rejects an overlapping concurrent request "
+            "with HTTP 500 while one execution is already in progress; the "
+            "general-mode defaults are the bad combination for a WSS listener "
+            "that must serve parallel callers."
+        ),
+        "wrong_pattern": (
+            "Deploying a Web Services Server listener at its default execution "
+            "options and assuming it tolerates parallel callers because "
+            "single-request tests passed."
+        ),
+        "correct_pattern": (
+            "Allow simultaneous executions on a Web Services Server listener "
+            "that must serve parallel callers, and design the process to be safe "
+            "under concurrency. Other listener types differ — the HTTP 500 "
+            "behavior is specific to the Web Services Server, so confirm each "
+            "connector's own concurrency semantics rather than assuming it."
+        ),
+        "remediation": (
+            "Enable simultaneous executions for a Web Services Server listener "
+            "expecting parallel traffic, and load-test concurrently before "
+            "release."
+        ),
+        "applies_to": ["web_services_server", "shared_web_server", "manage_deployment"],
         "provenance": {"source_label": _COMPANION_DOCS, "retrieval_date": "2026-06-10"},
         "verification_status": "docs_corroborated",
         "category": "listener_wss",
@@ -587,7 +627,7 @@ _ENTRIES: List[Dict[str, Any]] = [
         "category": "deployment_testing",
     },
     # ===================================================================
-    # Process serialization (2)
+    # Process serialization (3)
     # ===================================================================
     {
         "id": "return_documents_deferred_batch",
@@ -656,8 +696,45 @@ _ENTRIES: List[Dict[str, Any]] = [
         "verification_status": "docs_corroborated",
         "category": "process_serialization",
     },
+    {
+        "id": "edi_taglist_loop_vs_segment",
+        "title": "An EDI tagList elementKey must target the loop, not a segment within it",
+        "symptom": (
+            "An EDI map emits more output documents than expected, or child "
+            "segment data (such as the address lines under a name/address loop) "
+            "is silently missing from the output, with no error raised."
+        ),
+        "detection": "silent",
+        "frequency": "high",
+        "root_cause": (
+            "When the tagList elementKey points at a segment inside a qualified "
+            "repeating loop instead of at the loop element itself, each loop "
+            "iteration splits into a separate document AND the segment's sibling "
+            "segments fall out of scope entirely — silent data loss. Omitting the "
+            "tagList altogether also splits the loop into duplicated documents."
+        ),
+        "wrong_pattern": (
+            "Pointing the elementKey at a segment within the qualified loop (or "
+            "leaving the tagList off), so qualified iterations split into "
+            "separate documents and the loop's sibling segments are dropped."
+        ),
+        "correct_pattern": (
+            "Point the elementKey at the loop element's key, so the map "
+            "consolidates the qualified iterations into different target fields "
+            "of a single output document per transaction set."
+        ),
+        "remediation": (
+            "Set the elementKey to the loop's key, never a segment's key, and "
+            "verify against a transaction whose loop carries multiple sibling "
+            "segments that all reach the output."
+        ),
+        "applies_to": ["edi_profile", "trading_partner", "document_routing"],
+        "provenance": {"source_label": _COMPANION_ONLY, "retrieval_date": "2026-06-10"},
+        "verification_status": "companion_unverified",
+        "category": "process_serialization",
+    },
     # ===================================================================
-    # Marketplace (1)
+    # Marketplace (3)
     # ===================================================================
     {
         "id": "marketplace_recipes_not_production",
@@ -688,6 +765,71 @@ _ENTRIES: List[Dict[str, Any]] = [
             "design doctrine before promoting it."
         ),
         "applies_to": ["marketplace", "build_from_archetype", "recipe"],
+        "provenance": {"source_label": _COMPANION_ONLY, "retrieval_date": "2026-06-10"},
+        "verification_status": "companion_unverified",
+        "category": "marketplace",
+    },
+    {
+        "id": "marketplace_recipe_search_filter",
+        "title": "Marketplace search returns non-recipe assets unless filtered to recipes",
+        "symptom": (
+            "A search for a starting integration in the Marketplace surfaces "
+            "connectors and other asset types mixed in, and a non-recipe asset "
+            "is mistaken for a recipe and installed."
+        ),
+        "detection": "design_time",
+        "frequency": "low",
+        "root_cause": (
+            "Marketplace search spans multiple asset types; without filtering to "
+            "the recipe asset type, non-recipe results are interleaved and "
+            "easily mistaken for recipes."
+        ),
+        "wrong_pattern": (
+            "Searching the Marketplace and treating any top result as a recipe "
+            "without filtering by asset type."
+        ),
+        "correct_pattern": (
+            "Filter Marketplace search to the recipe asset type before selecting "
+            "a starting point, so only genuine recipes are considered."
+        ),
+        "remediation": (
+            "Apply the recipe asset-type filter in Marketplace search and "
+            "confirm the asset type before installing."
+        ),
+        "applies_to": ["marketplace", "recipe", "build_from_archetype"],
+        "provenance": {"source_label": _COMPANION_ONLY, "retrieval_date": "2026-06-10"},
+        "verification_status": "companion_unverified",
+        "category": "marketplace",
+    },
+    {
+        "id": "marketplace_bundle_install_folder_id",
+        "title": "A Marketplace bundle install can land components under an unexpected folder",
+        "symptom": (
+            "After installing a Marketplace bundle, references break or "
+            "components are not found because they were created under a "
+            "different folder than the dependent references assume."
+        ),
+        "detection": "runtime_error",
+        "frequency": "low",
+        "root_cause": (
+            "A bundle install places components under a target folder whose id "
+            "may not match what dependent references expect, so a later lookup "
+            "by the assumed folder fails."
+        ),
+        "wrong_pattern": (
+            "Installing a Marketplace bundle and assuming its components land "
+            "under the folder that existing references already point at."
+        ),
+        "correct_pattern": (
+            "Confirm the actual destination folder of an installed bundle and "
+            "reconcile dependent references to the real folder before relying on "
+            "them."
+        ),
+        "remediation": (
+            "After a bundle install, verify component folder placement and "
+            "re-point references to the correct folder."
+        ),
+        "applies_to": ["marketplace", "manage_folders", "bundle_install"],
         "provenance": {"source_label": _COMPANION_ONLY, "retrieval_date": "2026-06-10"},
         "verification_status": "companion_unverified",
         "category": "marketplace",
