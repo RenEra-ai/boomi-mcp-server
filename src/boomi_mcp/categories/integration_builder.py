@@ -38,6 +38,22 @@ _NAME_GOVERNANCE_ERROR_ACTION = "error_name_governance"
 # Integration's default component names (lower-cased for case-insensitive
 # compare). A conformant create never ships one of these.
 _BOOMI_DEFAULT_COMPONENT_NAMES = frozenset({"new map", "new profile"})
+# Component types whose create path emits ``config.component_name`` (with
+# ``comp.name`` setdefaulted in by ``_execute_component``) and IGNORES
+# ``config.name``: connectors, trading partners, and every builder-dispatched
+# generated component. The name lint resolves their emitted name from
+# component_name only (see _governance_primary_name).
+_COMPONENT_NAME_PRIMARY_TYPES = frozenset({
+    "connector-settings",
+    "connector-action",
+    "trading_partner",
+    "profile.db",
+    "profile.json",
+    "profile.xml",
+    "transform.map",
+    "script.mapping",
+    "transform.function",
+})
 # Copy-induced numeric suffix: a display name ending in whitespace then 1 or 2
 # (Integration's "... 1"/"... 2" clone artifacts).
 _COPY_SUFFIX_NAME_RE = re.compile(r".+\s(?:1|2)$")
@@ -2512,15 +2528,42 @@ def _process_models_error_handling(comp: Any) -> bool:
     return False
 
 
-def _governance_display_name(comp: Any) -> Optional[str]:
-    """Effective display name a create would ship for ``comp``.
+def _governance_primary_name(comp: Any) -> Optional[str]:
+    """The display name the create path will actually emit for ``comp``.
 
-    Mirrors the name precedence the create path uses: the top-level
-    ``comp.name``, then ``config.component_name``, then ``config.name``. Returns
-    the stripped name, or ``None`` when every source is blank/absent.
+    Emit precedence is type-specific (``_execute_component`` injects ``comp.name``
+    into a config field only via ``setdefault``, and each builder reads a
+    specific field), so the lint must evaluate the SAME field the emit will use —
+    checking the wrong field both misses prohibited names and falsely flags
+    valid ones (Codex review, rounds 1+2):
+
+    * ``process``: the process builder emits ``config.name`` (``_execute_component``
+      setdefaults ``name`` to ``comp.name``); ``config.component_name`` is never
+      emitted, so it is ignored here.
+    * ``_COMPONENT_NAME_PRIMARY_TYPES`` (connectors, trading partners, and every
+      builder-dispatched generated component — profiles, maps, scripts,
+      functions): these REQUIRE and emit ``config.component_name``
+      (``_execute_component`` setdefaults it to ``comp.name``) and their builders
+      IGNORE ``config.name`` on create, so it is ignored here too. (The
+      ``name``-aware path at ``connectors.update_connector`` is the smart-merge
+      UPDATE path, not create.)
+    * everything else (generic component types whose create path runs through
+      ``manage_component.create_component`` — e.g. document caches, certificates):
+      that path accepts ``config.name`` or ``config.component_name``, so both are
+      candidates, with ``comp.name`` last.
+
+    Returns the stripped emitted name, or ``None`` when every emit-relevant field
+    is blank/absent.
     """
     config = comp.config if isinstance(comp.config, dict) else {}
-    for candidate in (comp.name, config.get("component_name"), config.get("name")):
+    ctype = comp.type
+    if ctype == "process":
+        order = (config.get("name"), comp.name)
+    elif ctype in _COMPONENT_NAME_PRIMARY_TYPES:
+        order = (config.get("component_name"), comp.name)
+    else:
+        order = (config.get("component_name"), config.get("name"), comp.name)
+    for candidate in order:
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()
     return None
@@ -2534,13 +2577,18 @@ def _lint_component_names(spec: IntegrationSpecV1) -> Dict[str, Any]:
     GUI-only governance and are never linted here. The lint flags; it never
     rewrites a name.
 
+    Every check runs against the single emit-faithful display name from
+    ``_governance_primary_name`` (the field the create path will actually emit),
+    so the lint never evaluates a field the builder ignores.
+
     HARD errors (block apply, against ``IntegrationSpecV1.naming``):
-      * missing/blank name → ``COMPONENT_NAME_REQUIRED``
-      * an Integration default name → ``COMPONENT_NAME_BOOMI_DEFAULT``
-      * a duplicate (trimmed, case-insensitive) across create names →
-        ``COMPONENT_NAME_NOT_UNIQUE``
-      * when ``naming.component_name_pattern`` is a valid regex (opt-in), a
-        name that does not match it → ``COMPONENT_NAME_PATTERN_MISMATCH``
+      * missing/blank emitted name → ``COMPONENT_NAME_REQUIRED`` (only when the
+        emit-relevant field is blank AND there is no raw ``config.xml`` body)
+      * an Integration default emitted name → ``COMPONENT_NAME_BOOMI_DEFAULT``
+      * a duplicate emitted name (trimmed, case-insensitive) across create
+        components → ``COMPONENT_NAME_NOT_UNIQUE``
+      * when ``naming.component_name_pattern`` is a valid regex (opt-in), an
+        emitted name that does not match it → ``COMPONENT_NAME_PATTERN_MISMATCH``
 
     Soft WARNINGS (flag only, never block):
       * a copy-induced numeric suffix ("... 1"/"... 2"). This signal is
@@ -2550,9 +2598,9 @@ def _lint_component_names(spec: IntegrationSpecV1) -> Dict[str, Any]:
         not a hard gate, and never blocks an archetype-emitted plan.
       * a blank/invalid ``component_name_pattern`` (conformance not checked).
 
-    The duplicate scan only fires for genuine duplicates; a name that merely
-    *looks* like a copy (trailing " 1"/" 2") with no sibling is warned, not
-    rejected.
+    A raw-XML create (``config.xml`` set) is OUT of scope: the display name
+    lives inside author-controlled XML the lint does not parse, so it is never
+    flagged as missing (the raw escape hatch owns its own name).
     """
     errors: Dict[str, Dict[str, Any]] = {}
     warnings: List[str] = []
@@ -2580,10 +2628,16 @@ def _lint_component_names(spec: IntegrationSpecV1) -> Dict[str, Any]:
     for comp in spec.components:
         if comp.action != "create":
             continue
-        if isinstance(comp.config, dict) and comp.config.get("reference_only"):
+        config = comp.config if isinstance(comp.config, dict) else {}
+        if config.get("reference_only"):
+            continue
+        # Raw-XML create: name lives inside author-controlled XML the lint does
+        # not parse — out of scope, never a false "missing name" (Codex P2).
+        if isinstance(config.get("xml"), str) and config["xml"].strip():
             continue
 
-        name = _governance_display_name(comp)
+        # The single name the create path will actually emit for this type.
+        name = _governance_primary_name(comp)
         if name is None:
             errors[comp.key] = {
                 "error_code": "COMPONENT_NAME_REQUIRED",

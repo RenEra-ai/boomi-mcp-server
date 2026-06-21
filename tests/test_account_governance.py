@@ -371,6 +371,166 @@ def test_build_plan_rejects_boomi_default_component_name(_mock_pag):
 
 
 @patch(_PAGINATE, return_value=[])
+def test_build_plan_rejects_default_name_in_config_component_name(_mock_pag):
+    # Codex P2: a descriptive top-level name must not mask a default carried in
+    # config.component_name (the field profile/map/trading-partner builders
+    # actually emit). The lint checks ALL candidate name fields.
+    comp = IntegrationComponentSpec(
+        key="c", type="documentcache", action="create", name="Good Cache",
+        config={"component_name": "New Map"},
+    )
+    plan = _build_plan(MagicMock(), _plan_cfg([comp]))
+    step = _step(plan, "c")
+    assert step["planned_action"] == "error_name_governance"
+    assert step["validation_error"]["error_code"] == "COMPONENT_NAME_BOOMI_DEFAULT"
+    assert "New Map" in step["validation_error"]["error"]
+
+
+def test_lint_skips_raw_xml_create():
+    # Codex P2: a raw-XML create carries its name inside author-controlled XML
+    # the lint does not parse — it must NOT be rejected as missing.
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    comp = IntegrationComponentSpec(
+        key="c", type="documentcache", action="create", name=None,
+        config={"xml": "<DocumentCache name='Real Cache Name'/>"},
+    )
+    spec = IntegrationSpecV1(**_plan_cfg([comp])["integration_spec"])
+    out = _lint_component_names(spec)
+    assert out["errors"] == {}
+
+
+def test_lint_process_ignores_unused_component_name_for_duplicate():
+    # Codex round 2 P2: a process emits config.name, NOT config.component_name.
+    # Two processes with the same config.name but distinct component_name emit
+    # duplicate Boomi names — the lint must catch that (component_name must not
+    # mask the emitted name).
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    p1 = IntegrationComponentSpec(
+        key="p1", type="process", action="create", name=None,
+        config={"name": "Dup Process", "component_name": "A",
+                "process_kind": "database_to_api_sync"},
+    )
+    p2 = IntegrationComponentSpec(
+        key="p2", type="process", action="create", name=None,
+        config={"name": "Dup Process", "component_name": "B",
+                "process_kind": "database_to_api_sync"},
+    )
+    spec = IntegrationSpecV1(**_plan_cfg([p1, p2])["integration_spec"])
+    out = _lint_component_names(spec)
+    assert "p1" not in out["errors"]
+    assert out["errors"]["p2"]["error_code"] == "COMPONENT_NAME_NOT_UNIQUE"
+
+
+def test_lint_process_component_name_default_not_flagged():
+    # The flip side: a process whose emitted name (config.name) is descriptive
+    # must NOT be flagged just because an UNUSED config.component_name happens to
+    # be a Boomi default — the process never emits component_name.
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    p = IntegrationComponentSpec(
+        key="p", type="process", action="create", name=None,
+        config={"name": "Good Process", "component_name": "New Map",
+                "process_kind": "database_to_api_sync"},
+    )
+    spec = IntegrationSpecV1(**_plan_cfg([p])["integration_spec"])
+    out = _lint_component_names(spec)
+    assert out["errors"] == {}
+
+
+def test_lint_connector_emits_component_name_not_config_name():
+    # Codex round 3 P2: connector creates REQUIRE and emit config.component_name
+    # (create_connector), not config.name. A default in component_name must be
+    # caught even when config.name is descriptive.
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    c = IntegrationComponentSpec(
+        key="c", type="connector-settings", action="create", name="Good",
+        config={"name": "Good", "component_name": "New Map",
+                "connector_type": "database"},
+    )
+    spec = IntegrationSpecV1(**_plan_cfg([c])["integration_spec"])
+    out = _lint_component_names(spec)
+    assert out["errors"]["c"]["error_code"] == "COMPONENT_NAME_BOOMI_DEFAULT"
+
+
+def test_lint_connector_duplicate_on_component_name_not_config_name():
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    # Same component_name (the emitted field), distinct config.name → real
+    # duplicate, must be caught.
+    dup = [
+        IntegrationComponentSpec(
+            key="a", type="connector-settings", action="create", name="A name",
+            config={"name": "A name", "component_name": "Shared Conn",
+                    "connector_type": "database"},
+        ),
+        IntegrationComponentSpec(
+            key="b", type="connector-settings", action="create", name="B name",
+            config={"name": "B name", "component_name": "Shared Conn",
+                    "connector_type": "database"},
+        ),
+    ]
+    out = _lint_component_names(
+        IntegrationSpecV1(**_plan_cfg(dup)["integration_spec"])
+    )
+    assert "a" not in out["errors"]
+    assert out["errors"]["b"]["error_code"] == "COMPONENT_NAME_NOT_UNIQUE"
+
+    # Distinct component_name (the emitted field), same config.name → NOT a
+    # duplicate (config.name is ignored for connectors).
+    distinct = [
+        IntegrationComponentSpec(
+            key="a", type="connector-settings", action="create", name="Same",
+            config={"name": "Same", "component_name": "Conn A",
+                    "connector_type": "database"},
+        ),
+        IntegrationComponentSpec(
+            key="b", type="connector-settings", action="create", name="Same",
+            config={"name": "Same", "component_name": "Conn B",
+                    "connector_type": "database"},
+        ),
+    ]
+    out2 = _lint_component_names(
+        IntegrationSpecV1(**_plan_cfg(distinct)["integration_spec"])
+    )
+    assert out2["errors"] == {}
+
+
+def test_lint_generated_types_emit_component_name_not_config_name():
+    # Codex round 4 P2: builder-dispatched generated types (profile.db,
+    # transform.map, script.mapping, transform.function, trading_partner) emit
+    # config.component_name (with comp.name setdefaulted in) and IGNORE
+    # config.name. The lint must mirror the emitted field.
+    from boomi_mcp.models.integration_models import IntegrationSpecV1
+
+    for ctype in ("profile.db", "transform.map", "script.mapping",
+                  "transform.function", "trading_partner"):
+        # comp.name (the emitted fallback) is a default; config.name is
+        # descriptive but ignored by the builder → MUST be flagged.
+        bad = IntegrationComponentSpec(
+            key="x", type=ctype, action="create", name="New Map",
+            config={"name": "Good Descriptive Name"},
+        )
+        out = _lint_component_names(
+            IntegrationSpecV1(**_plan_cfg([bad])["integration_spec"])
+        )
+        assert out["errors"].get("x", {}).get("error_code") == "COMPONENT_NAME_BOOMI_DEFAULT", ctype
+
+        # Inverse: descriptive emitted name (comp.name), a default sitting only
+        # in the ignored config.name → MUST NOT be flagged.
+        ok = IntegrationComponentSpec(
+            key="y", type=ctype, action="create", name="Good Descriptive Name",
+            config={"name": "New Map"},
+        )
+        out2 = _lint_component_names(
+            IntegrationSpecV1(**_plan_cfg([ok])["integration_spec"])
+        )
+        assert out2["errors"] == {}, ctype
+
+
+@patch(_PAGINATE, return_value=[])
 def test_build_plan_rejects_duplicate_component_names(_mock_pag):
     # Case-insensitive / trimmed duplicate across the create set: second flagged.
     plan = _build_plan(
