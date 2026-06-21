@@ -6858,6 +6858,7 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'get_schema_template(schema_name="archetype:database_to_api_sync")',
                 'get_schema_template(schema_name="workflow_sequences")',
                 'get_schema_template(schema_name="account_governance")',
+                'get_schema_template(schema_name="governance_pattern:descriptive_unique_component_names")',
             ],
             "note": "No profile needed — returns static reference data. No API calls. "
                     "Omitting both resource_type and schema_name returns SCHEMA_SELECTOR_REQUIRED.",

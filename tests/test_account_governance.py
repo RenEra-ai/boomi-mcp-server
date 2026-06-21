@@ -623,9 +623,17 @@ def test_apply_rejects_name_governance_plan_before_execute(_mock_pag):
 @patch(_PAGINATE, return_value=[])
 def test_build_plan_allows_database_to_api_archetype_names(_mock_pag):
     # Acceptance criterion: archetype-emitted names pass the lint without caller
-    # effort. Build a real database_to_api_sync spec and route it through the
-    # plan; no create step may be converted to error_name_governance.
-    from boomi_mcp.categories.integration_authoring import build_from_archetype_action
+    # effort. Build a real database_to_api_sync spec via the archetype's own
+    # emit_spec (the same emit logic build_from_archetype uses) and route it
+    # through the plan; no create step may be converted to error_name_governance.
+    # We call emit_spec directly rather than build_from_archetype_action to keep
+    # this test independent of package-wide PatternRegistry discovery (which is
+    # fragile under a stale editable-install .pth) — the emitted names are
+    # identical either way.
+    from boomi_mcp.patterns.archetypes.database_to_api_sync import (
+        DatabaseToApiSyncArchetype,
+        DatabaseToApiSyncParameters,
+    )
 
     # Smallest executable database_to_api_sync payload (mirrors the e2e suite's
     # _minimal()): create DB + create REST + a single direct transform.
@@ -683,11 +691,12 @@ def test_build_plan_allows_database_to_api_archetype_names(_mock_pag):
             "error_classifier": {},
         },
     }
-    built = build_from_archetype_action("database_to_api_sync", payload)
-    assert built["_success"] is True, built
+    spec = DatabaseToApiSyncArchetype.emit_spec(
+        DatabaseToApiSyncParameters(**payload)
+    )
     plan = _build_plan(
         MagicMock(),
-        {"conflict_policy": "reuse", "integration_spec": built["integration_spec"]},
+        {"conflict_policy": "reuse", "integration_spec": spec.model_dump()},
     )
     assert plan["_success"] is True
     offenders = [
