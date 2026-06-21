@@ -468,6 +468,23 @@ class ProcessFlowBuilder:
                     "userlabel": str(transform.get("label") or ""),
                 },
             ))
+        # Issue #100 G2: when the target carries a dynamic_path block, insert a
+        # Set Properties (documentproperties) shape AFTER the transform and
+        # BEFORE the target connector so the path DPP is built per-document, and
+        # pass dynamic_path into the connector step so it emits the matching
+        # "Path" dynamic operation property. Absent dynamic_path, no shape is
+        # added and the flow is byte-for-byte the pre-#100 chain.
+        dynamic_path = target.get("dynamic_path") if isinstance(target.get("dynamic_path"), dict) else None
+        if dynamic_path:
+            flow.append((
+                "setproperties",
+                {
+                    "dpp_name": str(dynamic_path.get("dpp_name") or "").strip(),
+                    "request_profile_id": str(dynamic_path.get("request_profile_id") or "").strip(),
+                    "profile_type": str(dynamic_path.get("profile_type") or "profile.json").strip(),
+                    "segments": dynamic_path.get("segments") or [],
+                },
+            ))
         flow.append((
             "connectoraction_target",
             {
@@ -484,6 +501,7 @@ class ProcessFlowBuilder:
                 "connection_id": str(target.get("connection_id") or "").strip(),
                 "operation_id": str(target.get("operation_id") or "").strip(),
                 "userlabel": str(target.get("label") or ""),
+                "dynamic_path": dynamic_path,
             },
         ))
         flow.append(("stop", {"continue_": True}))
@@ -900,6 +918,62 @@ def _validate_target_binding(target: Any) -> Optional[BuilderValidationError]:
                     "depends_on)."
                 ),
             )
+    return _validate_dynamic_path(target.get("dynamic_path"))
+
+
+def _validate_dynamic_path(dynamic_path: Any) -> Optional[BuilderValidationError]:
+    """Validate the optional ``target.dynamic_path`` block (issue #100 G2).
+
+    Absent (None) is valid — the path stays static. When present it must carry a
+    non-blank ``dpp_name`` + ``request_profile_id`` and a non-empty ``segments``
+    list of well-formed static/profile entries with at least one profile segment
+    (an all-static path would not be dynamic). Errors never echo segment values
+    (path strings/element names can carry caller-specific identifiers).
+    """
+    if dynamic_path is None:
+        return None
+    err = BuilderValidationError(
+        "target.dynamic_path is malformed.",
+        error_code="PROCESS_PATH_REPLACEMENT_INVALID",
+        field="target.dynamic_path",
+        hint=(
+            "dynamic_path needs a non-blank dpp_name and request_profile_id and "
+            "a non-empty segments list (static {type,value} / profile "
+            "{type,element_id,element_name}) with at least one profile segment. "
+            "It is normally emitted by the database_to_api_sync archetype from "
+            "target.send_request.path_replacements."
+        ),
+    )
+    if not isinstance(dynamic_path, dict):
+        return err
+    for key in ("dpp_name", "request_profile_id"):
+        value = dynamic_path.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return err
+    segments = dynamic_path.get("segments")
+    if not isinstance(segments, list) or not segments:
+        return err
+    profile_segments = 0
+    for seg in segments:
+        if not isinstance(seg, dict):
+            return err
+        seg_type = seg.get("type")
+        if seg_type == "static":
+            if not isinstance(seg.get("value"), str):
+                return err
+        elif seg_type == "profile":
+            element_id = seg.get("element_id")
+            if isinstance(element_id, bool) or not isinstance(element_id, (int, str)):
+                return err
+            if isinstance(element_id, str) and not element_id.strip():
+                return err
+            if not isinstance(seg.get("element_name"), str) or not seg.get("element_name").strip():
+                return err
+            profile_segments += 1
+        else:
+            return err
+    if profile_segments == 0:
+        return err
     return None
 
 
@@ -1210,6 +1284,33 @@ def _emit_connectoraction(
     action_type = _escape_xml(params["action_type"])
     connection_id = _escape_xml(params["connection_id"])
     operation_id = _escape_xml(params["operation_id"])
+
+    # Issue #100 G2: when the target carries a dynamic_path block, emit the
+    # connector step's "Path" dynamic operation property sourcing the Dynamic
+    # Process Property a preceding Set Properties shape sets. The REST Client
+    # operation itself declares no URL path parameter (that is HTTP-Client only);
+    # the path is supplied here at process time. Transcribed from the live REST
+    # Client capture (issue #100). Absent dynamic_path, the body is byte-for-byte
+    # the pre-#100 empty <parameters/><dynamicProperties/> with no
+    # parameter-profile attribute.
+    dynamic_path = params.get("dynamic_path")
+    if isinstance(dynamic_path, dict) and dynamic_path:
+        dpp_name = _escape_xml(str(dynamic_path.get("dpp_name") or "").strip())
+        profile_id = _escape_xml(str(dynamic_path.get("request_profile_id") or "").strip())
+        parameter_profile_attr = f' parameter-profile="{profile_id}"'
+        inner = (
+            '<parameters/>'
+            '<dynamicProperties>'
+            '<propertyvalue childKey="" key="path" name="Path" valueType="process">'
+            f'<processparameter processproperty="{dpp_name}" '
+            'processpropertydefaultvalue=""/>'
+            '</propertyvalue>'
+            '</dynamicProperties>'
+        )
+    else:
+        parameter_profile_attr = ''
+        inner = '<parameters/><dynamicProperties/>'
+
     return (
         f'<shape image="connectoraction_icon" name="{shape_name}" '
         f'shapetype="connectoraction" userlabel="{userlabel}" '
@@ -1220,8 +1321,8 @@ def _emit_connectoraction(
         f'connectionId="{connection_id}" '
         f'connectorType="{connector_type}" '
         'hideSettings="false" '
-        f'operationId="{operation_id}">'
-        '<parameters/><dynamicProperties/>'
+        f'operationId="{operation_id}"{parameter_profile_attr}>'
+        f'{inner}'
         '</connectoraction>'
         '</configuration>'
         f'<dragpoints>{dragpoints}</dragpoints>'
@@ -1267,6 +1368,72 @@ def _emit_map(
         '<configuration>'
         f'<map mapId="{map_id}"/>'
         '</configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
+def _emit_setproperties(
+    shape_name: str,
+    params: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit a Set Properties (``documentproperties``) shape that builds the REST
+    dynamic path into a Dynamic Process Property.
+
+    Issue #100 G2: concatenates the ordered ``segments`` (static literals + mapped
+    profile elements) into ``process.<dpp_name>``; the following connector step's
+    "Path" dynamic operation property then sources that DPP. Transcribed verbatim
+    from the live REST Client export (see ``.codex/plans/issue-100-live-captures.md``)
+    — the ``<profileelement>`` ``elementId`` / ``elementName`` come from the same
+    JSON profile field index the map uses, so they match the generated profile.
+    """
+    dragpoints = _emit_dragpoints([next_name], shape_index)
+    dpp_name = _escape_xml(str(params.get("dpp_name") or "").strip())
+    profile_id = _escape_xml(str(params.get("request_profile_id") or "").strip())
+    profile_type = _escape_xml(str(params.get("profile_type") or "profile.json").strip())
+    segments = params.get("segments") or []
+
+    parametervalues: List[str] = []
+    for i, seg in enumerate(segments, start=1):
+        seg_type = str(seg.get("type") or "").strip()
+        if seg_type == "static":
+            value = _escape_xml(str(seg.get("value") or ""))
+            parametervalues.append(
+                f'<parametervalue key="{i}" usesEncryption="false" valueType="static">'
+                f'<staticparameter staticproperty="{value}"/>'
+                '</parametervalue>'
+            )
+        elif seg_type == "profile":
+            element_id = _escape_xml(str(seg.get("element_id") or ""))
+            element_name = _escape_xml(str(seg.get("element_name") or ""))
+            parametervalues.append(
+                f'<parametervalue key="{i}" usesEncryption="false" valueType="profile">'
+                f'<profileelement elementId="{element_id}" '
+                f'elementName="{element_name}" '
+                f'profileId="{profile_id}" profileType="{profile_type}"/>'
+                '</parametervalue>'
+            )
+        else:  # pragma: no cover — _validate_dynamic_path rejects other types
+            raise BuilderValidationError(
+                f"Unknown dynamic_path segment type {seg_type!r}.",
+                error_code="PROCESS_XML_VALIDATION_FAILED",
+                field="target.dynamic_path.segments",
+                hint="Internal builder bug — please report.",
+            )
+
+    return (
+        f'<shape image="documentproperties_icon" name="{shape_name}" '
+        f'shapetype="documentproperties" userlabel="" '
+        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        '<configuration><documentproperties>'
+        '<documentproperty defaultValue="" isDynamicCredential="false" '
+        f'isTradingPartner="false" name="Dynamic Process Property - {dpp_name}" '
+        f'persist="false" propertyId="process.{dpp_name}" shouldEncrypt="false">'
+        f'<sourcevalues>{"".join(parametervalues)}</sourcevalues>'
+        '</documentproperty>'
+        '</documentproperties></configuration>'
         f'<dragpoints>{dragpoints}</dragpoints>'
         '</shape>'
     )
@@ -1345,6 +1512,8 @@ def _emit_flow_shape(
         return _emit_message(shape_name, params, next_name, shape_index)
     if kind == "map":
         return _emit_map(shape_name, params, next_name, shape_index)
+    if kind == "setproperties":
+        return _emit_setproperties(shape_name, params, next_name, shape_index)
     if kind == "processcall":
         # Standalone main-flow Process Call (issue #90 wrapper_subprocess):
         # main-flow geometry, abort defaults False (parent continues past a
@@ -1565,17 +1734,28 @@ def _emit_connector_scoped_try_catch_shapes(
         <src catch leg> ; <tgt catch leg>
     """
     source = flow[1]            # ("connectoraction_source", {...})
-    middle = flow[2:-2]         # [] or [("map"|"message", {...})]
+    middle = flow[2:-2]         # [] | [map] | [map, setproperties] | [setproperties]
     target = flow[-2]           # ("connectoraction_target", {...})
     stop = flow[-1]             # ("stop", {...})
-    m = len(middle)
+
+    # Issue #100 G2: a Set Properties (documentproperties) shape that builds the
+    # per-document REST path must execute INSIDE the target Try/Catch retry unit
+    # (so each retry re-applies it before re-sending), while the map/message
+    # stays OUTSIDE as the separator between the two catcherrors. Split middle
+    # accordingly. With no setproperties shape (inside == []), the indices and
+    # output collapse to the pre-#100 connector-scoped layout byte-for-byte.
+    outside = [s for s in middle if s[0] != "setproperties"]
+    inside = [s for s in middle if s[0] == "setproperties"]
+    o = len(outside)
+    ins = len(inside)
 
     ce_src_index = 2
     source_index = 3
-    transform_index = 4         # only used when m == 1
-    ce_tgt_index = 4 + m
-    target_index = 5 + m
-    stop_index = 6 + m
+    first_outside_index = 4
+    ce_tgt_index = 4 + o
+    first_inside_index = ce_tgt_index + 1
+    target_index = ce_tgt_index + ins + 1
+    stop_index = target_index + 1
 
     ce_src_name = f"shape{ce_src_index}"
     source_name = f"shape{source_index}"
@@ -1593,28 +1773,34 @@ def _emit_connector_scoped_try_catch_shapes(
         after_src, dlq, mode, catch_notify
     )
 
-    # The source connector's forward edge goes to the transform (if any) else
-    # straight to the target Try/Catch.
-    source_next_name = f"shape{transform_index}" if m else ce_tgt_name
-
     parts: List[str] = []
     parts.append(_emit_start_noaction("shape1", ce_src_name, 1))
     # Source Try/Catch (retry 0).
     parts.append(
         _emit_catcherrors(ce_src_name, source_name, src_catch_first, ce_src_index, 0)
     )
+    # Source connector -> first outside (map) shape if any, else the target
+    # Try/Catch.
+    source_next_name = f"shape{first_outside_index}" if o else ce_tgt_name
     parts.append(
         _emit_flow_shape(source[0], source[1], source_name, source_next_name, source_index)
     )
-    if m:
-        t_kind, t_params = middle[0]
-        parts.append(
-            _emit_flow_shape(t_kind, t_params, f"shape{transform_index}", ce_tgt_name, transform_index)
-        )
-    # Target Try/Catch (configured retry).
+    # Outside (map/message) separator shapes between the two catcherrors.
+    for i, (kind, params) in enumerate(outside):
+        idx = first_outside_index + i
+        nxt = f"shape{idx + 1}" if i < o - 1 else ce_tgt_name
+        parts.append(_emit_flow_shape(kind, params, f"shape{idx}", nxt, idx))
+    # Target Try/Catch (configured retry); its Try branch enters the retry unit
+    # at the first inside (setproperties) shape if any, else the target connector.
+    target_try_first = f"shape{first_inside_index}" if ins else target_name
     parts.append(
-        _emit_catcherrors(ce_tgt_name, target_name, tgt_catch_first, ce_tgt_index, retry_count)
+        _emit_catcherrors(ce_tgt_name, target_try_first, tgt_catch_first, ce_tgt_index, retry_count)
     )
+    # Inside (setproperties) shapes — part of the target retry unit, before target.
+    for i, (kind, params) in enumerate(inside):
+        idx = first_inside_index + i
+        nxt = f"shape{idx + 1}" if i < ins - 1 else target_name
+        parts.append(_emit_flow_shape(kind, params, f"shape{idx}", nxt, idx))
     parts.append(
         _emit_flow_shape(target[0], target[1], target_name, stop_name, target_index)
     )

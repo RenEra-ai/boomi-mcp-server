@@ -55,6 +55,9 @@ from ...categories.components.builders.process_flow_builder import (
 from ...categories.components.builders.profile_generation import (
     build_profile_generation_artifacts,
 )
+from ...categories.components.builders.json_profile_builder import (
+    JSONGeneratedProfileBuilder,
+)
 from ...models.integration_models import (
     IntegrationComponentSpec,
     IntegrationSpecV1,
@@ -840,6 +843,44 @@ class RestQueryParameter(BaseModel):
         return self
 
 
+class RestPathReplacement(BaseModel):
+    """A single dynamic path-segment binding for the REST send request.
+
+    Issue #100 G2: the Boomi REST Client connector cannot declare in-operation
+    URL path parameters (that is an HTTP Client feature). A per-document path is
+    instead supplied at process time via the connector step's "Path" dynamic
+    operation property, whose value is built by a Set Properties step that
+    concatenates the static path segments with the mapped leaf value(s). Each
+    replacement maps a ``{name}`` token in ``RestSendRequest.path`` to a mapped
+    target leaf (``target_path``). Grounded in the live REST Client export — see
+    ``.codex/plans/issue-100-live-captures.md``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        ...,
+        description=(
+            "Replacement token name. Must appear literally as '{name}' in "
+            "RestSendRequest.path. Case-sensitive; used to derive the "
+            "per-endpoint Dynamic Process Property name."
+        ),
+    )
+    target_path: str = Field(
+        ...,
+        description=(
+            "Logical leaf path inside target.payload_profile whose mapped value "
+            "is bound into the path at the '{name}' position. Must be a declared "
+            "simple leaf that a transform output binds."
+        ),
+    )
+
+    @field_validator("name", "target_path")
+    @classmethod
+    def _strip_required(cls, value: str) -> str:
+        return _stripped_nonblank(value)
+
+
 class RestSendRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -852,7 +893,8 @@ class RestSendRequest(BaseModel):
         description=(
             "Path appended to base_url (e.g. '/v1/customers'). The contract "
             "validates that the value is non-blank but does not normalize "
-            "leading or trailing slashes."
+            "leading or trailing slashes. May contain '{name}' tokens bound by "
+            "path_replacements for per-document dynamic paths (issue #100 G2)."
         ),
     )
     query_parameters: List[RestQueryParameter] = Field(
@@ -860,6 +902,15 @@ class RestSendRequest(BaseModel):
         description=(
             "Optional query-string parameters. Each entry declares its name "
             "and where its value comes from at execution time."
+        ),
+    )
+    path_replacements: List[RestPathReplacement] = Field(
+        default_factory=list,
+        description=(
+            "Optional per-document dynamic path bindings (issue #100 G2). Each "
+            "maps a '{name}' token in 'path' to a mapped target leaf. When "
+            "empty, the path is sent verbatim (static, byte-for-byte the "
+            "pre-#100 behavior)."
         ),
     )
     expected_status_codes: List[int] = Field(
@@ -2053,6 +2104,26 @@ class DatabaseToApiSyncParameters(BaseModel):
         required_target_paths = _required_simple_leaf_paths(self.target.payload_profile)
         unmapped_required_count = len(required_target_paths - bound_target_paths)
 
+        # Issue #100 G2: validate per-document REST path replacements. Each
+        # {name} token must appear literally in the send path, names must be
+        # unique, and every target_path must be a declared simple leaf that a
+        # transform output binds (so the Set Properties step can source a mapped
+        # value at runtime). Offending names/paths are NOT echoed — same
+        # defense-in-depth policy as the branches above (counts only).
+        send_request = self.target.send_request
+        replacement_names: List[str] = [r.name for r in send_request.path_replacements]
+        duplicate_replacement_names = len(replacement_names) - len(set(replacement_names))
+        missing_token_count = 0
+        replacement_unknown_target_refs = 0
+        replacement_unbound_target_refs = 0
+        for replacement in send_request.path_replacements:
+            if "{" + replacement.name + "}" not in send_request.path:
+                missing_token_count += 1
+            if replacement.target_path not in target_leaves:
+                replacement_unknown_target_refs += 1
+            elif replacement.target_path not in bound_target_paths:
+                replacement_unbound_target_refs += 1
+
         issues: List[str] = []
         if unknown_source_refs:
             issues.append(
@@ -2080,6 +2151,31 @@ class DatabaseToApiSyncParameters(BaseModel):
                 "simple leaf in target.payload_profile must be the "
                 "destination of at least one direct/map_function/map_script "
                 "output"
+            )
+        if duplicate_replacement_names:
+            issues.append(
+                f"target.send_request.path_replacements declare "
+                f"{duplicate_replacement_names} duplicate name(s); each "
+                "replacement name must be unique"
+            )
+        if missing_token_count:
+            issues.append(
+                f"target.send_request.path_replacements declare "
+                f"{missing_token_count} name(s) that do not appear as a "
+                "'{name}' token in target.send_request.path"
+            )
+        if replacement_unknown_target_refs:
+            issues.append(
+                f"target.send_request.path_replacements reference "
+                f"{replacement_unknown_target_refs} target_path(s) that are "
+                "not a declared simple leaf in target.payload_profile"
+            )
+        if replacement_unbound_target_refs:
+            issues.append(
+                f"target.send_request.path_replacements reference "
+                f"{replacement_unbound_target_refs} target_path(s) that no "
+                "transform output binds; a dynamic path segment can only "
+                "source a mapped leaf"
             )
 
         if issues:
@@ -2529,6 +2625,90 @@ def _derive_process_reliability(
     return {"retry_count": 0, "dlq": {"mode": "disabled"}}, None
 
 
+def _path_dpp_name(segments: List[Dict[str, Any]]) -> str:
+    """Derive a per-endpoint Dynamic Process Property name for the REST path.
+
+    Issue #100 G2: one endpoint -> one DPP name (e.g. ``DPP_PATH_CLIENTS``), so a
+    process that sends to multiple endpoints never collides on a single shared
+    path property. The resource is the last static path segment before the first
+    dynamic token (``/admin/cdscm/api/v1/clients/{clientId}`` -> ``clients``).
+    """
+    resource = "PATH"
+    for seg in segments:
+        if seg["type"] != "static":
+            break
+        parts = [p for p in seg["value"].split("/") if p and "{" not in p]
+        if parts:
+            resource = parts[-1]
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", resource).strip("_").upper() or "PATH"
+    return f"DPP_PATH_{safe}"
+
+
+def _build_dynamic_path(
+    parameters: "DatabaseToApiSyncParameters",
+) -> Optional[Dict[str, Any]]:
+    """Build the process-target ``dynamic_path`` block for REST path replacements.
+
+    Issue #100 G2. Returns None when no ``path_replacements`` are configured (the
+    path stays static — byte-for-byte the pre-#100 behavior). Otherwise returns
+    the metadata ``ProcessFlowBuilder`` lowers into a Set Properties
+    (``documentproperties``) shape that concatenates the path, plus the connector
+    step's "Path" dynamic operation property sourcing the resulting Dynamic
+    Process Property. The profile-element references (``element_id`` /
+    ``element_name``) are read from the SAME ``JSONGeneratedProfileBuilder`` field
+    index the transform map consumes, so the emitted ``<profileelement>`` matches
+    the generated request profile by construction. Grounded in the live REST
+    Client capture (see ``.codex/plans/issue-100-live-captures.md``).
+    """
+    send = parameters.target.send_request
+    if not send.path_replacements:
+        return None
+
+    target_profile_key = primitive_component_key(_TRANSFORM_PREFIX, ROLE_TARGET_PROFILE)
+    # Compute the target field index exactly as field_map does, so element keys /
+    # name paths match the emitted profile component byte-for-byte.
+    profile_config = {
+        "profile_type": "json.generated",
+        "component_name": target_profile_key,
+        "root": parameters.target.payload_profile.model_dump().get("root"),
+    }
+    target_index = JSONGeneratedProfileBuilder.build_field_index(profile_config)
+
+    by_name = {r.name: r for r in send.path_replacements}
+    token_re = re.compile(r"\{([^{}]+)\}")
+    segments: List[Dict[str, Any]] = []
+    last = 0
+    for match in token_re.finditer(send.path):
+        replacement = by_name.get(match.group(1))
+        if replacement is None:
+            # Not a declared replacement — leave the literal braces inside the
+            # surrounding static segment (the validator already proved every
+            # declared name appears as a {name} token here).
+            continue
+        if match.start() > last:
+            segments.append({"type": "static", "value": send.path[last:match.start()]})
+        entry = target_index[replacement.target_path]
+        name_path = entry["name_path"]
+        leaf = name_path.split("/")[-1]
+        segments.append(
+            {
+                "type": "profile",
+                "element_id": entry["key"],
+                "element_name": f"{leaf} ({name_path})",
+            }
+        )
+        last = match.end()
+    if last < len(send.path):
+        segments.append({"type": "static", "value": send.path[last:]})
+
+    return {
+        "dpp_name": _path_dpp_name(segments),
+        "request_profile_id": f"$ref:{target_profile_key}",
+        "profile_type": "profile.json",
+        "segments": segments,
+    }
+
+
 def _build_main_process(
     parameters: "DatabaseToApiSyncParameters", overrides: Dict[str, str]
 ) -> IntegrationComponentSpec:
@@ -2569,6 +2749,14 @@ def _build_main_process(
         # disabled / guidance_only emit no Try/Catch (retry stays 0).
         "reliability": reliability_block,
     }
+    # Issue #100 G2: per-document dynamic REST path. When path_replacements are
+    # configured, emit a dynamic_path block the ProcessFlowBuilder lowers into a
+    # Set Properties shape + the connector step's "Path" dynamic operation
+    # property. Absent replacements, no dynamic_path key is added and the process
+    # XML stays byte-for-byte identical to the static-path output.
+    dynamic_path = _build_dynamic_path(parameters)
+    if dynamic_path is not None:
+        config["target"]["dynamic_path"] = dynamic_path
     if naming.folder_path:
         config["folder_name"] = naming.folder_path
 
@@ -2612,6 +2800,13 @@ def _build_main_process(
     depends_on = [db_conn_key, db_op_key, map_key, rest_conn_key, rest_op_key]
     if dlq_dep_key is not None and dlq_dep_key not in depends_on:
         depends_on.append(dlq_dep_key)
+    # Issue #100 G2: the dynamic_path block carries a $ref to the generated
+    # request profile (resolved to the profile uuid for the <profileelement>
+    # source); declare the edge so reachability validation passes.
+    if dynamic_path is not None:
+        target_profile_key = primitive_component_key(_TRANSFORM_PREFIX, ROLE_TARGET_PROFILE)
+        if target_profile_key not in depends_on:
+            depends_on.append(target_profile_key)
 
     return IntegrationComponentSpec(
         key=_MAIN_PROCESS_KEY,
@@ -2959,6 +3154,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "All XML is produced by the existing component builders; the archetype emits JSON component specs only.",
         "Emits a verified Try/Catch + DLQ catch path when dlq.enabled with mode document_cache_ref or error_subprocess_ref; caller retry (max_attempts 1..6) is wired as platform-timed Try/Catch retry_count 0..5 (#51 M3.R1a / #88 M4.5.3).",
         "Optionally emits a verified Notify step at the head of the wired catch path (reliability.catch_notify) that logs the caught error to the process log; level INFO/WARNING/ERROR (#89 M4.5.4).",
+        "Emits per-document dynamic REST paths (target.send_request.path_replacements) via a Set Properties shape that builds a per-endpoint Dynamic Process Property from mapped leaves, sourced by the connector step's 'Path' dynamic operation property; absent replacements the path stays static (#100 G2).",
         "Declares source DB connection credential fields (username, password) as per-environment override points by default so TEST -> PROD promotion supplies the password via environment extensions, never an embedded credential; host/port opt-in via environment_extensions.endpoint_connection_fields (#92 M4.5.7).",
         "Credentials cross the contract only as opaque credential_ref values and are never echoed in errors.",
     ]
