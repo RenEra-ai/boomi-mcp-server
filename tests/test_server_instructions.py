@@ -44,9 +44,10 @@ def test_instructions_carry_companion_unverified_auth_stop():
 
 
 def test_instructions_exclude_kb_text_when_docs_disabled():
-    # Default test env: BOOMI_DOCS_ENABLED unset → doctrine only.
-    if server.BOOMI_DOCS_ENABLED:
+    # Default test env: BOOMI_DOCS_ENABLED / BOOMI_GOTCHAS_ENABLED unset → doctrine only.
+    if server.BOOMI_DOCS_ENABLED or server.BOOMI_GOTCHAS_ENABLED:
         import pytest
-        pytest.skip("BOOMI_DOCS_ENABLED is set in this environment")
+        pytest.skip("a KB flag is set in this environment")
     assert server.SERVER_INSTRUCTIONS == server.AGENT_AUTHORING_INSTRUCTIONS
     assert "documentation retrieval" not in server.SERVER_INSTRUCTIONS
+    assert "operational gotchas" not in server.SERVER_INSTRUCTIONS

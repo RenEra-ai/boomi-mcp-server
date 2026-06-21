@@ -186,6 +186,35 @@ def test_docs_workflow_preserved_when_docs_tools_registered():
     assert "boomi_docs" in catalog["hints"]
 
 
+# ---------------------------------------------------------------------------
+# Issue #77 — search_boomi_gotchas discoverability
+# ---------------------------------------------------------------------------
+
+
+def test_list_capabilities_includes_gotchas_tool():
+    tools = list_capabilities_action()["tools"]
+    assert "search_boomi_gotchas" in tools
+    entry = tools["search_boomi_gotchas"]
+    assert entry["category"] == "Documentation"
+    assert entry["read_only"] is True
+    assert "issue_ids" in entry["parameters"]
+
+
+def test_gotchas_tool_and_hint_filtered_when_not_registered():
+    only = {"build_integration", "get_schema_template", "list_boomi_profiles"}
+    catalog = list_capabilities_action(available_tools=only)
+    assert "search_boomi_gotchas" not in catalog["tools"]
+    assert "boomi_gotchas" not in catalog["hints"]
+
+
+def test_gotchas_hint_present_when_registered():
+    only = {"search_boomi_gotchas"}
+    catalog = list_capabilities_action(available_tools=only)
+    assert "search_boomi_gotchas" in catalog["tools"]
+    assert "boomi_gotchas" in catalog["hints"]
+    assert "search_boomi_gotchas" in catalog["hints"]["boomi_gotchas"]
+
+
 def test_authoring_workflow_preserved_when_all_referenced_tools_present():
     """When the runtime exposes the authoring chain + build_integration, the
     archetype-first workflow survives the filter."""

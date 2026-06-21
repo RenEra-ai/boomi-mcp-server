@@ -81,6 +81,14 @@ async def run_strict_startup_probes() -> None:
 # so existing deployments are unchanged until an operator opts in.
 BOOMI_DOCS_ENABLED = os.getenv("BOOMI_DOCS_ENABLED", "").lower() in ("true", "1", "yes")
 
+# --- Boomi Operational Gotchas KB feature flag (issue #77, M9.1) ---
+# Independent of BOOMI_DOCS_ENABLED and parsed identically: a curated, stdlib-only
+# operational-gotcha catalog is a SEPARATE surface from search_boomi_docs (field
+# knowledge vs official docs). Defaulting it off — rather than inheriting the docs
+# flag — keeps the docs-KB resource/tool inventory unchanged for existing
+# deployments and lets an operator opt into either surface independently.
+BOOMI_GOTCHAS_ENABLED = os.getenv("BOOMI_GOTCHAS_ENABLED", "").lower() in ("true", "1", "yes")
+
 # Routing guidance passed to FastMCP as `instructions` when the KB is enabled, so
 # hosts steer Boomi factual questions to search_boomi_docs before answering from
 # model memory (spec §4.5).
@@ -126,11 +134,24 @@ AGENT_AUTHORING_INSTRUCTIONS = (
     "errors — repeated invalid-auth calls risk platform lockout."
 )
 
-SERVER_INSTRUCTIONS = (
-    AGENT_AUTHORING_INSTRUCTIONS + "\n\n" + KB_INSTRUCTIONS
-    if BOOMI_DOCS_ENABLED
-    else AGENT_AUTHORING_INSTRUCTIONS
+# Routing guidance for the operational gotcha KB, appended only when enabled, so
+# a cold client routes "why did this silently fail" questions to the right tool.
+GOTCHAS_INSTRUCTIONS = (
+    "This server includes a curated catalog of Boomi operational gotchas — known "
+    "silent-failure modes and field traps separate from official documentation. "
+    "For symptom-style questions (something deployed cleanly but misbehaves, a "
+    "value is silently dropped, a listener returns nothing), consult "
+    "`search_boomi_gotchas` (or pass issue_ids for an exact lookup). Honor each "
+    "entry's verification_status: treat companion_unverified and course_unverified "
+    "entries as hypotheses, not authority, and never invent entries on "
+    "low_confidence or no_match."
 )
+
+SERVER_INSTRUCTIONS = AGENT_AUTHORING_INSTRUCTIONS
+if BOOMI_DOCS_ENABLED:
+    SERVER_INSTRUCTIONS += "\n\n" + KB_INSTRUCTIONS
+if BOOMI_GOTCHAS_ENABLED:
+    SERVER_INSTRUCTIONS += "\n\n" + GOTCHAS_INSTRUCTIONS
 
 
 def _kb_hint(func):
@@ -4611,6 +4632,52 @@ if BOOMI_DOCS_ENABLED:
     print("[INFO] Boomi Docs KB registered: tools search_boomi_docs, "
           "read_boomi_doc_page; resource kb://boomi-docs/corpus "
           "(heavy build deferred to first use / eager warmup)")
+
+
+# --- Boomi Operational Gotchas KB (optional, issue #77) ---
+# Registered only when BOOMI_GOTCHAS_ENABLED=true. Deliberately independent of the
+# docs-KB block above: a curated, stdlib-only catalog that must NEVER import the
+# heavy ML stack (chromadb / sentence-transformers). No warmup, no deferred build
+# — the module validates itself at import and the tool/resource serve immediately.
+if BOOMI_GOTCHAS_ENABLED:
+    from boomi_mcp.kb.operational_gotchas import (
+        render_operational_gotchas_resource,
+        search_operational_gotchas,
+    )
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def search_boomi_gotchas(
+        query: str = "",
+        top_k: int = 5,
+        issue_ids: list = None,
+    ) -> dict:
+        """Search the curated catalog of Boomi operational gotchas — known
+        silent-failure modes and field traps that official documentation does not
+        cover (a separate surface from search_boomi_docs). Use this for
+        symptom-style questions: a process deployed cleanly but misbehaves, a value
+        is silently dropped, a listener returns nothing, a deploy did not take
+        effect. Each hit carries a symptom, root cause, a wrong/correct contrastive
+        pattern, remediation, provenance (source label + retrieval date), and a
+        verification_status — honor it: companion_unverified and course_unverified
+        entries are hypotheses, not authority. Pass issue_ids for a deterministic
+        exact lookup by gotcha id (it takes precedence over query and never
+        fabricates unknown ids). On status low_confidence or no_match, do not
+        invent entries — say the catalog has no strong match. Stdlib-only;
+        deterministic lexical ranking; no embeddings. Read-only.
+        """
+        return search_operational_gotchas(query=query, top_k=top_k, issue_ids=issue_ids)
+
+    @mcp.resource("kb://boomi-operational-gotchas/catalog", mime_type="text/markdown")
+    def boomi_operational_gotchas_catalog() -> str:
+        """Boomi operational gotcha catalog: every curated entry with its symptom,
+        detection/frequency taxonomy, verification_status, and provenance. Static
+        coverage map — use search_boomi_gotchas for symptom lookups.
+        """
+        return render_operational_gotchas_resource()
+
+    print("[INFO] Boomi Operational Gotchas KB registered: tool "
+          "search_boomi_gotchas; resource kb://boomi-operational-gotchas/catalog "
+          "(stdlib-only, no ML deps)")
 
 
 if __name__ == "__main__":

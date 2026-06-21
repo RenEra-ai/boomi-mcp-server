@@ -146,6 +146,28 @@ docs call and never contends with non-docs tools on a cold 1-vCPU instance),
 `BOOMI_DOCS_WARMUP_RETRY_COOLDOWN`
 (default 30 — seconds before a failed build re-attempts).
 
+### Boomi Operational Gotchas KB (optional)
+
+Registered only when the server starts with `BOOMI_GOTCHAS_ENABLED=true`. This is
+a **separate surface** from the docs KB (operational field knowledge vs official
+documentation) and is gated by its own independent flag:
+
+- `search_boomi_gotchas(query, top_k=5, issue_ids=None)` — search a curated
+  catalog of known Boomi silent-failure modes and field traps. Pass `issue_ids`
+  for a deterministic exact lookup by gotcha id (it takes precedence over
+  `query`). Empty/no-match behavior is explicit and never fabricates entries.
+- Resource `kb://boomi-operational-gotchas/catalog` — the full catalog with each
+  entry's symptom, detection/frequency taxonomy, provenance, and
+  `verification_status`.
+
+Unlike the docs KB, this catalog is **stdlib-only**: an in-repo curated dataset
+with deterministic lexical ranking, no `requirements-kb.txt` / chromadb /
+embedding dependency. Entries are curated summaries (OfficialBoomi BSD-2-Clause
+material + local issue/architect-course triage), not verbatim copies, and carry a
+`verification_status` (`live_verified` / `docs_corroborated` /
+`companion_unverified` / `course_unverified` / `disputed`) so agents can weigh how
+well-corroborated each claim is.
+
 ---
 
 ## Deployment

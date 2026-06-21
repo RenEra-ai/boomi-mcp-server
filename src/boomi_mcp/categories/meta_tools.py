@@ -7445,6 +7445,31 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             ],
             "note": "Use after search_boomi_docs when surrounding page context is needed.",
         },
+        "search_boomi_gotchas": {
+            "category": "Documentation",
+            "description": (
+                "Search the curated catalog of Boomi operational gotchas — known "
+                "silent-failure modes and field traps not covered by official "
+                "documentation. A separate surface from search_boomi_docs."
+            ),
+            "actions": ["(single action — symptom search / issue_ids exact lookup)"],
+            "read_only": True,
+            "parameters": {
+                "query": "str (optional) — symptom or error search terms",
+                "top_k": "int (optional, default 5, clamped 1..10)",
+                "issue_ids": "list[str] (optional) — exact gotcha ids; precedence over query",
+            },
+            "examples": [
+                'search_boomi_gotchas(query="listener test mode returns nothing")',
+                'search_boomi_gotchas(issue_ids=["process_call_parent_redeploy"])',
+            ],
+            "note": (
+                "Use for symptom-style questions (deployed cleanly but "
+                "misbehaves, value silently dropped). Honor each entry's "
+                "verification_status; on low_confidence/no_match do not invent "
+                "entries."
+            ),
+        },
 
         # === Category 9: Meta / Power Tools ===
         "get_schema_template": {
@@ -7742,6 +7767,15 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "start with search_boomi_docs(). On a cold start it may return "
             "'warming_up' (wait retry_after_seconds and retry) or 'kb_unavailable' "
             "(temporarily unavailable — don't invent facts)."
+        )
+    # Only point at the gotcha KB when the live runtime actually registers it.
+    if available_tools is None or "search_boomi_gotchas" in available_tools:
+        hints["boomi_gotchas"] = (
+            "For 'why did this silently fail / why is this empty / why didn't my "
+            "change take effect' operational issues (silent drops, listener "
+            "test-mode, tracked-field scope, parent redeploy after a subprocess "
+            "change), consult search_boomi_gotchas() — curated failure patterns "
+            "with corrected approaches, separate from search_boomi_docs."
         )
     # Only recommend the archetype-first flow when the entry-point tool is
     # actually registered; otherwise the hint points at a tool the catalog
