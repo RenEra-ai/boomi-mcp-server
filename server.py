@@ -1962,6 +1962,10 @@ if build_integration_action:
 
             verify:
                 - Verify components exist and declared dependencies were resolved
+                - Parses each built/updated process component's graph and reports
+                  verification[<process_key>].process_graph
+                  ({errors, warnings, shapes_checked}); graph errors fail
+                  verification, GUI/runtime attribute lints are warnings only
                 Example:
                     config='{"build_id":"<uuid-from-apply>"}'
         """

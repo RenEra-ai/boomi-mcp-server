@@ -233,6 +233,36 @@ def _execute_stub(**kwargs):
     return {"_success": True, "component_id": f"id-{kwargs['comp'].key}"}
 
 
+def _verify_get_side_effect(_client, component_id, *args, **kwargs):
+    """component_get_xml replacement for the verify path (issue #80).
+
+    Returns a graph-valid process Component XML for the main process so the new
+    process-graph verifier runs and reports a clean section, and a non-process
+    stub for every other component so those records correctly omit process_graph
+    (mirroring production: only process components are graph-verified)."""
+    from pathlib import Path
+
+    if component_id == "id-main_process":
+        xml = (
+            Path(__file__).parent.parent
+            / "fixtures"
+            / "process_graph"
+            / "valid_linear_process.xml"
+        ).read_text(encoding="utf-8")
+        return {
+            "type": "process",
+            "component_id": component_id,
+            "name": "main_process",
+            "xml": xml,
+        }
+    return {
+        "type": "connector-settings",
+        "component_id": component_id,
+        "name": component_id,
+        "xml": "<bns:Component/>",
+    }
+
+
 def _has_ref_token(value: Any) -> bool:
     """True if any string anywhere in the structure still starts with '$ref:'."""
     if isinstance(value, str):
@@ -497,7 +527,10 @@ class TestVerifyPath:
     @patch(_PAGINATE_TARGET)
     def test_verify_after_mocked_apply_succeeds(self, mock_pag, mock_exec, mock_get):
         mock_pag.return_value = []
-        mock_get.return_value = "<component/>"
+        # Issue #80: verify now consumes component_get_xml's return value, so the
+        # mock must return the real dict shape. The main process returns a
+        # graph-valid process XML; non-process components a non-process stub.
+        mock_get.side_effect = _verify_get_side_effect
         spec = _spec(_minimal())
         applied = build_integration_action(
             MagicMock(),
@@ -512,6 +545,11 @@ class TestVerifyPath:
         assert verified["_success"] is True, verified
         assert verified["failed_components"] == 0
         assert not verified["dependency_issues"]
+        # The process component carries a clean graph section; non-process
+        # components carry none (issue #80, M9.4).
+        proc_record = verified["verification"]["main_process"]
+        assert proc_record["process_graph"]["errors"] == []
+        assert "process_graph" not in verified["verification"]["source_db_connection"]
 
 
 # ===========================================================================

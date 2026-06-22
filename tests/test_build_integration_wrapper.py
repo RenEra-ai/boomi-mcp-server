@@ -189,3 +189,64 @@ def test_unknown_action_through_wrapper_returns_failure():
         result = server.build_integration(profile="qa", action="frobnicate", config=config)
     assert result["_success"] is False
     assert "Unknown action" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #80 (M9.4): the wrapper passes the extended verify shape through, and a
+# process-graph error flips _success false end-to-end.
+# ---------------------------------------------------------------------------
+
+
+def _verify_get(_client, component_id, *args, **kwargs):
+    err_xml = (
+        Path(__file__).parent
+        / "fixtures"
+        / "process_graph"
+        / "non_terminal_no_outbound.xml"
+    ).read_text(encoding="utf-8")
+    if component_id == "id-main_process":
+        return {"type": "process", "xml": err_xml}
+    return {"type": "connector-settings", "xml": "<bns:Component/>"}
+
+
+def test_verify_through_wrapper_passes_process_graph_and_fails_on_error():
+    spec = _emit_spec()
+    apply_config = json.dumps(
+        {"integration_spec": spec, "dry_run": False, "conflict_policy": "reuse"}
+    )
+    m_user, m_secret, m_boomi = _patch_creds()
+    with (
+        m_user,
+        m_secret,
+        m_boomi,
+        patch(_PAGINATE_TARGET) as mock_pag,
+        patch(
+            _EXECUTE_TARGET,
+            side_effect=lambda **kw: {
+                "_success": True,
+                "component_id": f"id-{kw['comp'].key}",
+            },
+        ),
+        patch(
+            "boomi_mcp.categories.integration_builder.component_get_xml",
+            side_effect=_verify_get,
+        ),
+    ):
+        mock_pag.return_value = []
+        applied = server.build_integration(
+            profile="qa", action="apply", config=apply_config
+        )
+        assert applied["_success"] is True, applied
+        verified = server.build_integration(
+            profile="qa",
+            action="verify",
+            config=json.dumps({"build_id": applied["build_id"]}),
+        )
+    # The wrapper returns the handler result unwrapped, including the new
+    # process_graph section, and the graph error flips overall success false.
+    assert verified["_success"] is False, verified
+    record = verified["verification"]["main_process"]
+    assert record["verified"] is False
+    assert record["error_code"] == "PROCESS_GRAPH_INTEGRITY_FAILED"
+    assert record["process_graph"]["errors"]
+    assert "process_graph" not in verified["verification"]["source_db_connection"]

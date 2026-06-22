@@ -6124,3 +6124,122 @@ class TestWrapperSubprocessPlan:
             .find("shapes").findall("shape")[1].find("configuration/processcall")
         assert pc.attrib["processId"] == resolved_child
         assert "$ref" not in pc.attrib["processId"]
+
+
+# ============================================================================
+# Issue #80 (M9.4) — process-graph integrity in build_integration verify
+# ============================================================================
+
+
+class TestVerifyProcessGraph:
+    """Handler-level verify tests for the process-graph integrity pass.
+
+    Seeds the in-memory build registry directly, then routes through the public
+    build_integration_action verify entry with a patched component GET so the
+    new graph verifier runs against fixture XML.
+    """
+
+    _FIXTURES = Path(__file__).parent / "fixtures" / "process_graph"
+
+    def _seed_build(self, build_id, components, results):
+        from src.boomi_mcp.categories.integration_builder import _BUILD_REGISTRY
+        from src.boomi_mcp.models.integration_models import IntegrationSpecV1
+
+        spec = IntegrationSpecV1(name="GraphVerify", components=components)
+        _BUILD_REGISTRY[build_id] = {
+            "created_at": "2026-01-01T00:00:00Z",
+            "profile": "prof",
+            "spec": spec.model_dump(),
+            "results": results,
+            "execution_order": [c.key for c in components],
+        }
+
+    def _fixture(self, name):
+        return (self._FIXTURES / name).read_text(encoding="utf-8")
+
+    def test_graph_error_flips_success_false(self):
+        from src.boomi_mcp.categories.integration_builder import build_integration_action
+
+        comp = _comp(key="p1", name="Proc", comp_type="process")
+        self._seed_build("graph-err", [comp], {"p1": {"component_id": "id-p1"}})
+        err_xml = self._fixture("non_terminal_no_outbound.xml")
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml",
+            return_value={"type": "process", "xml": err_xml},
+        ):
+            result = build_integration_action(
+                MagicMock(), "prof", "verify", {"build_id": "graph-err"}
+            )
+        assert result["_success"] is False, result
+        assert result["failed_components"] >= 1
+        record = result["verification"]["p1"]
+        assert record["verified"] is False
+        assert record["error_code"] == "PROCESS_GRAPH_INTEGRITY_FAILED"
+        assert record["reason"] == "Process graph integrity errors"
+        assert record["process_graph"]["errors"]
+        assert "NON_TERMINAL_SHAPE_DEAD_END" in {
+            e["code"] for e in record["process_graph"]["errors"]
+        }
+
+    def test_graph_warning_only_keeps_success_true(self):
+        from src.boomi_mcp.categories.integration_builder import build_integration_action
+
+        comp = _comp(key="p1", name="Proc", comp_type="process")
+        self._seed_build("graph-warn", [comp], {"p1": {"component_id": "id-p1"}})
+        warn_xml = self._fixture("stop_missing_continue.xml")
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml",
+            return_value={"type": "process", "xml": warn_xml},
+        ):
+            result = build_integration_action(
+                MagicMock(), "prof", "verify", {"build_id": "graph-warn"}
+            )
+        assert result["_success"] is True, result
+        assert result["failed_components"] == 0
+        record = result["verification"]["p1"]
+        assert record["verified"] is True
+        assert "error_code" not in record
+        assert record["process_graph"]["errors"] == []
+        assert record["process_graph"]["warnings"]
+        assert "STOP_CONTINUE_MISSING" in {
+            w["code"] for w in record["process_graph"]["warnings"]
+        }
+
+    def test_valid_process_graph_attaches_clean_section(self):
+        from src.boomi_mcp.categories.integration_builder import build_integration_action
+
+        comp = _comp(key="p1", name="Proc", comp_type="process")
+        self._seed_build("graph-ok", [comp], {"p1": {"component_id": "id-p1"}})
+        ok_xml = self._fixture("valid_linear_process.xml")
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml",
+            return_value={"type": "process", "xml": ok_xml},
+        ):
+            result = build_integration_action(
+                MagicMock(), "prof", "verify", {"build_id": "graph-ok"}
+            )
+        assert result["_success"] is True, result
+        record = result["verification"]["p1"]
+        assert record["verified"] is True
+        assert record["process_graph"] == {
+            "errors": [],
+            "warnings": [],
+            "shapes_checked": 3,
+        }
+
+    def test_non_process_component_has_no_process_graph(self):
+        from src.boomi_mcp.categories.integration_builder import build_integration_action
+
+        comp = _comp(key="c1", name="Conn", comp_type="connector-settings")
+        self._seed_build("non-proc", [comp], {"c1": {"component_id": "id-c1"}})
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml",
+            return_value={"type": "connector-settings", "xml": "<bns:Component/>"},
+        ):
+            result = build_integration_action(
+                MagicMock(), "prof", "verify", {"build_id": "non-proc"}
+            )
+        assert result["_success"] is True, result
+        record = result["verification"]["c1"]
+        assert record["verified"] is True
+        assert "process_graph" not in record

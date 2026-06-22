@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bns="http://api.platform.boomi.com/" type="process" name="DanglingToShape">
+  <bns:encryptedValues/>
+  <bns:description></bns:description>
+  <bns:object>
+    <process xmlns="" allowSimultaneous="false" enableUserLog="false" processLogOnErrorOnly="false" purgeDataImmediately="false" stopProcessingIfZeroDocuments="true" updateRunDates="true" workload="general">
+      <shapes>
+        <shape image="start" name="shape1" shapetype="start" userlabel="" x="96" y="160">
+          <configuration><noaction/></configuration>
+          <dragpoints><dragpoint name="shape1.dragpoint1" toShape="shape2" x="150" y="180"/></dragpoints>
+        </shape>
+        <shape image="connectoraction_icon" name="shape2" shapetype="connectoraction" userlabel="" x="208" y="160">
+          <configuration><connectoraction actionType="GET" connectionId="c1" connectorType="http" operationId="o1"><parameters/><dynamicProperties/></connectoraction></configuration>
+          <dragpoints>
+            <dragpoint name="shape2.dragpoint1" toShape="shape3" x="262" y="180"/>
+            <dragpoint name="shape2.dragpoint2" toShape="shape99" x="262" y="240"/>
+          </dragpoints>
+        </shape>
+        <shape image="stop_icon" name="shape3" shapetype="stop" x="320" y="160">
+          <configuration><stop continue="true"/></configuration>
+          <dragpoints/>
+        </shape>
+      </shapes>
+    </process>
+  </bns:object>
+  <bns:processOverrides/>
+</bns:Component>

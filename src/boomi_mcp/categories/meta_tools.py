@@ -685,6 +685,8 @@ _INTEGRATION_VERIFY = {
     },
     "notes": [
         "verify is read-only and validates component existence plus dependency resolution.",
+        "For process components it also reports verification[<process_key>].process_graph "
+        "({errors, warnings, shapes_checked}); graph errors fail verification, attribute lints are warnings.",
     ],
 }
 

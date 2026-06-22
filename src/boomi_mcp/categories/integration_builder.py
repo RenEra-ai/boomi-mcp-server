@@ -74,6 +74,7 @@ from .components._shared import (
     ComponentGetDeadlineExceeded,
     component_get_deadline_envelope,
 )
+from .components.process_graph_verifier import verify_process_graph
 from .components.builders._preservation_policy import (
     OwnedPath,
     PreservationPolicy,
@@ -4039,10 +4040,35 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
                 boomi_client.trading_partner_component.get_trading_partner_component_json(
                     component_id
                 )
+                verification["components"][comp.key] = {"verified": True, "component_id": component_id}
+                verified_count += 1
             else:
-                component_get_xml(boomi_client, component_id)
-            verification["components"][comp.key] = {"verified": True, "component_id": component_id}
-            verified_count += 1
+                # Existence check; the returned dict carries the live component
+                # type + raw XML. For process components we additionally verify
+                # graph integrity (issue #80, M9.4) — report-only, never a
+                # rewrite (#50 owns XML preservation). Non-process components
+                # verify exactly as before, with no process_graph key.
+                component_data = component_get_xml(boomi_client, component_id)
+                record: Dict[str, Any] = {"verified": True, "component_id": component_id}
+                is_process = comp.type == "process" or (
+                    isinstance(component_data, dict)
+                    and component_data.get("type") == "process"
+                )
+                process_xml = (
+                    component_data.get("xml") if isinstance(component_data, dict) else None
+                )
+                if is_process and isinstance(process_xml, str):
+                    graph = verify_process_graph(process_xml)
+                    record["process_graph"] = graph
+                    if graph["errors"]:
+                        record["verified"] = False
+                        record["error_code"] = "PROCESS_GRAPH_INTEGRITY_FAILED"
+                        record["reason"] = "Process graph integrity errors"
+                if record["verified"]:
+                    verified_count += 1
+                else:
+                    failed_count += 1
+                verification["components"][comp.key] = record
         except ComponentGetDeadlineExceeded as exc:
             verification["components"][comp.key] = {
                 "verified": False,
