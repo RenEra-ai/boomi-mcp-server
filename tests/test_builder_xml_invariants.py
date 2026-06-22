@@ -41,6 +41,9 @@ import xml.etree.ElementTree as ET
 from boomi_mcp.categories.components.builders.connector_builder import (
     RestClientOperationBuilder,
 )
+from boomi_mcp.categories.components.component_update_preservation import (
+    merge_for_update,
+)
 from boomi_mcp.categories.components.builders.json_profile_builder import (
     JSONGeneratedProfileBuilder,
 )
@@ -366,6 +369,73 @@ def test_inv_componentid_absent_on_create():
     assert "componentId" not in root.attrib
 
 
+def test_inv_componentid_preserved_on_update():
+    # The other half of the invariant: a structured update must keep the live
+    # component's GUID. The builder emits create-style XML (no componentId), so
+    # the #45 preservation layer (componentId is NOT an owned root attr) must
+    # carry the existing GUID through merge_for_update.
+    desired = ProcessFlowBuilder.build(_process_config(), name="renamed")
+    current = ProcessFlowBuilder.build(_process_config(), name="original").replace(
+        "<bns:Component ", '<bns:Component componentId="GUID-LIVE-123" ', 1
+    )
+    merged = merge_for_update(
+        current, desired, ProcessFlowBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    assert root.attrib.get("componentId") == "GUID-LIVE-123"
+    assert root.attrib.get("name") == "renamed"  # owned attr still applied
+
+
+def test_inv_display_attrs_present_at_binding_sites():
+    # Null-prevention: name/propertyName/defaultValue must be present at every
+    # emitted parameter-binding site or the GUI renders "null".
+    notify_root = ET.fromstring(ProcessFlowBuilder.build(_notify_config(), name="P"))
+    tp = notify_root.find(
+        "bns:object/process/shapes/shape/configuration/notify/"
+        "notifyParameters/parametervalue/trackparameter",
+        NS,
+    )
+    assert tp is not None
+    assert "defaultValue" in tp.attrib
+    assert tp.attrib.get("propertyName")  # present + non-empty
+    assert tp.attrib.get("propertyId")
+
+    dp_root = ET.fromstring(ProcessFlowBuilder.build(_dynamic_path_config(), name="P"))
+    # Set Properties documentproperty carries name + defaultValue.
+    docprop = dp_root.find(
+        "bns:object/process/shapes/shape/configuration/documentproperties/"
+        "documentproperty",
+        NS,
+    )
+    assert docprop is not None
+    assert docprop.attrib.get("name")
+    assert "defaultValue" in docprop.attrib
+    # Connector Path trackparameter carries propertyName + defaultValue.
+    path_tp = dp_root.find(
+        "bns:object/process/shapes/shape/configuration/connectoraction/"
+        "dynamicProperties/propertyvalue/trackparameter",
+        NS,
+    )
+    assert path_tp is not None
+    assert path_tp.attrib.get("propertyName")
+    assert "defaultValue" in path_tp.attrib
+
+
+def test_inv_no_branch_shapes_emitted():
+    # Branch numBranches==dragpoint-count is not-applicable-yet: the plan
+    # requires asserting current process builders emit NO branch shapes (so a
+    # future Branch builder must add the lock when it lands).
+    for cfg in (
+        _process_config(),
+        _process_config(transform={"mode": "message", "message_text": "'{}'"}),
+        _process_config(transform={"mode": "map_ref", "map_ref": "M"}),
+        _dynamic_path_config(),
+        _notify_config(),
+    ):
+        shapes = _parse_process_shapes(ProcessFlowBuilder.build(cfg, name="P"))
+        assert all(s.attrib["shapetype"] != "branch" for s in shapes)
+
+
 # ---------------------------------------------------------------------------
 # Invariant assertions — Profiles
 # ---------------------------------------------------------------------------
@@ -530,7 +600,14 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "invariant": "componentId absent on create (preserved as GUID on update via the #45 preservation layer)",
         "emitter": "process_flow_builder.build (create) / component_update_preservation",
         "disposition": "guaranteed-by-construction",
-        "test": "test_inv_componentid_absent_on_create",
+        "test": "test_inv_componentid_absent_on_create, test_inv_componentid_preserved_on_update",
+    },
+    {
+        "id": "display_null_prevention_attrs",
+        "invariant": "name/propertyName/defaultValue present at every emitted parameter-binding site (GUI renders null otherwise)",
+        "emitter": "process_flow_builder._emit_notify/_emit_setproperties/_emit_connectoraction param emitters",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_display_attrs_present_at_binding_sites",
     },
     {
         "id": "json_profile_type",
@@ -594,7 +671,7 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "invariant": "branch numBranches equals dragpoint count (un-gated Branch emission)",
         "emitter": "(no branch typed builder; process_graph_verifier checks imported XML)",
         "disposition": "not-applicable-yet",
-        "test": "table-only (no Branch builder emits this yet)",
+        "test": "test_inv_no_branch_shapes_emitted (negative lock — current builders emit no branch shape)",
     },
     {
         "id": "listener_shapes",
