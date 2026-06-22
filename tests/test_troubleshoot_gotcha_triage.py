@@ -69,13 +69,20 @@ def test_triage_dedupes_when_multiple_signatures_fire():
 
 def test_triage_orders_by_route_table():
     # A blob hitting several routes returns ids in _SYMPTOM_ROUTES order.
-    blob = "404 error and extension values disappearing and no data produced from map"
+    blob = "404 on a deployed endpoint and extension values disappearing and no data produced from map"
     ids = triage_symptoms(blob)
     assert ids == [
         "wss_path_objectname_verbatim",
         "empty_process_overrides_hides_extensions",
         "edi_taglist_loop_vs_segment",
     ]
+
+
+def test_bare_404_without_boomi_context_does_not_route():
+    # A generic outbound 404 (no deployed/listener/api/wss/endpoint/path context)
+    # must NOT route to the listener-path gotcha — guards against over-broad 404.
+    assert triage_symptoms("outbound http call returned 404 not found from vendor") == []
+    assert triage_symptoms("the response code was 404") == []
 
 
 # ---------------------------------------------------------------------------
@@ -87,15 +94,24 @@ def test_matches_projected_compactly():
     matches = gotcha_matches_for_symptoms("404 on a deployed API")
     assert len(matches) == 1
     match = matches[0]
-    # Exactly the four compact keys — no full-entry prose leaks through.
-    assert set(match) == {"id", "title", "remediation", "lookup"}
+    # Exactly the five compact keys — no full-entry prose leaks through.
+    assert set(match) == {"id", "title", "remediation", "verification_status", "lookup"}
     assert match["id"] == "wss_path_objectname_verbatim"
     assert match["title"] == OPERATIONAL_GOTCHA_ENTRIES["wss_path_objectname_verbatim"]["title"]
     assert match["remediation"] == OPERATIONAL_GOTCHA_ENTRIES["wss_path_objectname_verbatim"]["remediation"]
+    assert match["verification_status"] == OPERATIONAL_GOTCHA_ENTRIES["wss_path_objectname_verbatim"]["verification_status"]
     assert match["lookup"] == "search_boomi_gotchas(issue_ids=['wss_path_objectname_verbatim'])"
     # The verbose contrastive fields must NOT be surfaced in the compact match.
     assert "wrong_pattern" not in match
     assert "root_cause" not in match
+
+
+def test_unverified_match_carries_verification_status():
+    # A companion_unverified entry must still expose its status so callers can
+    # treat its remediation as a hypothesis, not authority.
+    matches = gotcha_matches_for_symptoms("the variable appears literally in the output")
+    match = next(m for m in matches if m["id"] == "env_var_literal_in_component_xml")
+    assert match["verification_status"] == "companion_unverified"
 
 
 def test_matches_empty_on_no_route():
@@ -103,7 +119,7 @@ def test_matches_empty_on_no_route():
 
 
 def test_matches_preserve_route_order():
-    blob = "404 and no data produced from map"
+    blob = "404 on a deployed api and no data produced from map"
     matches = gotcha_matches_for_symptoms(blob)
     ids = [m["id"] for m in matches]
     assert ids == ["wss_path_objectname_verbatim", "edi_taglist_loop_vs_segment"]

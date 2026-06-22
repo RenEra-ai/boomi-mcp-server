@@ -61,7 +61,7 @@ def test_gotcha_match_from_execution_message(mock_query):
     ids = [m["id"] for m in result["gotcha_matches"]]
     assert "wss_path_objectname_verbatim" in ids
     match = result["gotcha_matches"][0]
-    assert set(match) == {"id", "title", "remediation", "lookup"}
+    assert set(match) == {"id", "title", "remediation", "verification_status", "lookup"}
 
 
 # ---------------------------------------------------------------------------

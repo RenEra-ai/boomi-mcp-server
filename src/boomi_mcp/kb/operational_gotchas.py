@@ -1129,10 +1129,19 @@ _SYMPTOM_ROUTES: List[tuple] = [
         ],
     ),
     # A deployed listener/API returning 404 → endpoint path objectname trap.
+    # Require Boomi-endpoint context alongside the 404 so a generic outbound 404
+    # (e.g. an HTTP Client step getting Not Found from a third-party URL) is not
+    # misrouted to this listener-path gotcha. Documented symptom: "404 on a
+    # deployed API".
     (
         "wss_path_objectname_verbatim",
         [
-            ("404",),                      # "404 on a deployed API"
+            ("404", "deployed"),
+            ("404", "listener"),
+            ("404", "api"),
+            ("404", "wss"),
+            ("404", "endpoint"),
+            ("404", "path"),
         ],
     ),
     # Extension declarations vanishing after deploy → empty-overrides push.
@@ -1188,7 +1197,7 @@ def triage_symptoms(symptom_text: str) -> List[str]:
 
 def gotcha_matches_for_symptoms(symptom_text: str) -> List[Dict[str, str]]:
     """Triage ``symptom_text`` and project the matched catalog entries to a
-    compact match shape (id / title / remediation / lookup).
+    compact match shape (id / title / remediation / verification_status / lookup).
 
     Returns an empty list when no symptom routes. The projection is intentionally
     compact — it never dumps the full entry prose into the troubleshooting
@@ -1201,11 +1210,15 @@ def gotcha_matches_for_symptoms(symptom_text: str) -> List[Dict[str, str]]:
     matches: List[Dict[str, str]] = []
     for entry in found.get("results", []):
         gid = entry["id"]
+        # verification_status travels with every match so callers can honor the
+        # KB's provenance discipline (treat companion_unverified /
+        # course_unverified as hypotheses) without a second lookup.
         matches.append(
             {
                 "id": gid,
                 "title": entry["title"],
                 "remediation": entry["remediation"],
+                "verification_status": entry["verification_status"],
                 "lookup": f"search_boomi_gotchas(issue_ids=[{gid!r}])",
             }
         )
