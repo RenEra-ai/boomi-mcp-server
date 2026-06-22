@@ -80,6 +80,12 @@ _STORE_STREAM_RE = re.compile(r'dataContext\s*\.\s*storeStream\s*\(')
 # Groovy/script CDATA payloads inside a raw-XML component — used to size the
 # embedded script body for the long-script lint without counting XML structure.
 _CDATA_RE = re.compile(r'<!\[CDATA\[(.*?)\]\]>', re.DOTALL)
+# Each Data Process script element in a raw-XML component. A component may carry
+# several, so storeStream is checked per-script (a storeStream in one must not
+# mask a missing one in another) — Codex review #82.
+_DATAPROCESSSCRIPT_RE = re.compile(
+    r'<dataprocessscript\b[^>]*>(.*?)</dataprocessscript>', re.DOTALL
+)
 
 from boomi import Boomi
 from boomi.models import (
@@ -2727,11 +2733,20 @@ def _collect_script_bodies(
 ) -> List[Tuple[str, str, str]]:
     """Collect a component's inline script content for the #82 script lints.
 
-    Returns ``(label, kind, text)`` tuples where ``kind`` is ``"processing"``
-    (a Data Process ``script.processing`` Groovy body — storeStream applies) or
-    ``"mapping"`` (a ``script.mapping`` MappingScript body — storeStream does
-    NOT apply; only the long-script smell does). Pure/read-only — never mutates
-    the spec and never raises.
+    Returns ``(label, kind, text)`` tuples whose ``kind`` is one of:
+      * ``"mapping"`` — a ``script.mapping`` MappingScript body. storeStream
+        does NOT apply; only the long-script smell does.
+      * ``"processing"`` — a single Data Process (``script.processing``) Groovy
+        body, isolated per ``<dataprocessscript>`` element / CDATA payload so the
+        storeStream check examines each script independently (a storeStream in
+        one script must not mask a missing one in another) and the long-script
+        check sizes the script alone, not the surrounding XML.
+      * ``"processing_raw"`` — a loose Data Process raw-XML payload with no
+        extractable ``<dataprocessscript>`` element or CDATA. storeStream is
+        scanned over the whole string (the only signal available); it is
+        length-EXEMPT so XML structure lines are never miscounted as a script.
+
+    Pure/read-only — never mutates the spec and never raises.
     """
     config = comp.config if isinstance(comp.config, dict) else {}
     ctype = (comp.type or "").strip().lower()
@@ -2755,14 +2770,31 @@ def _collect_script_bodies(
                     )
 
     # Raw-XML escape hatch: a Data Process (script.processing) shape carries its
-    # Groovy in author-controlled XML the typed builders never emit. The whole
-    # XML string is the storeStream scan target (string-level, per the issue);
-    # the long-script smell is sized from the embedded CDATA payload(s) so XML
-    # structure lines are never counted as "script".
+    # Groovy in author-controlled XML the typed builders never emit. Isolate each
+    # script so the storeStream check is per-script (Codex #82): a component with
+    # several Data Process steps must flag the one that never stores its stream
+    # even if a sibling does.
     xml = config.get("xml")
     if isinstance(xml, str) and xml.strip():
         if ctype == "script.processing" or _DATAPROCESS_CUE_RE.search(xml):
-            bodies.append(("config.xml", "processing", xml))
+            script_blocks = _DATAPROCESSSCRIPT_RE.findall(xml)
+            if script_blocks:
+                for i, block in enumerate(script_blocks):
+                    cdata = _CDATA_RE.findall(block)
+                    script_text = "\n".join(cdata) if cdata else block
+                    bodies.append(
+                        (f"config.xml dataprocessscript[{i}]", "processing", script_text)
+                    )
+            else:
+                cdata = _CDATA_RE.findall(xml)
+                if cdata:
+                    for i, block in enumerate(cdata):
+                        bodies.append((f"config.xml CDATA[{i}]", "processing", block))
+                else:
+                    # No script element / CDATA to isolate — scan the whole raw
+                    # XML for storeStream, but never size it for the long-script
+                    # lint (it is the component XML, not a script body).
+                    bodies.append(("config.xml", "processing_raw", xml))
 
     return bodies
 
@@ -2784,7 +2816,9 @@ def _lint_script_bodies(spec: IntegrationSpecV1) -> List[str]:
     warnings: List[str] = []
     for comp in spec.components:
         for label, kind, text in _collect_script_bodies(comp):
-            if kind == "processing" and not _STORE_STREAM_RE.search(text):
+            # storeStream applies to every Data Process script — each isolated
+            # body is checked on its own (per-script, not whole-XML).
+            if kind in ("processing", "processing_raw") and not _STORE_STREAM_RE.search(text):
                 warnings.append(
                     f"[{_SCRIPT_LINT_STORE_STREAM_MISSING}] Component "
                     f"'{comp.key}' ({label}) carries a Data Process "
@@ -2793,15 +2827,11 @@ def _lint_script_bodies(spec: IntegrationSpecV1) -> List[str]:
                     "dropped downstream. Confirm the script is terminal or add "
                     "a storeStream call. (Warning only — apply is not blocked.)"
                 )
-            # The long-script smell applies to every inline body. For raw-XML
-            # processing content, size the embedded CDATA payload(s) so XML
-            # structure is not miscounted as script lines.
-            if kind == "processing":
-                candidates = _CDATA_RE.findall(text) or []
-            else:
-                candidates = [text]
-            for body_text in candidates:
-                line_count = body_text.count("\n") + 1
+            # The long-script smell applies to real script bodies only. The
+            # loose ``processing_raw`` payload is the component XML, not a script
+            # body, so it is length-exempt (XML structure must not be counted).
+            if kind in ("processing", "mapping"):
+                line_count = text.count("\n") + 1
                 if line_count > _SCRIPT_BODY_MAX_LINES:
                     warnings.append(
                         f"[{_SCRIPT_LINT_BODY_LONG}] Component '{comp.key}' "

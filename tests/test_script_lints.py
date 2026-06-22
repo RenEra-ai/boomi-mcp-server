@@ -150,6 +150,51 @@ def test_script_processing_type_without_cdata_still_storestream_scanned():
     assert _SCRIPT_LINT_STORE_STREAM_MISSING in _codes(_lint_script_bodies(_spec(comp)))
 
 
+def test_storestream_checked_per_dataprocess_script():
+    # Codex #82 review: a storeStream in ONE Data Process script must not mask a
+    # missing storeStream in ANOTHER. A component with two <dataprocessscript>
+    # blocks — one that stores, one that doesn't — flags exactly the bad one.
+    xml = (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'type="process" name="DP"><bns:object><process><shapes>'
+        '<shape shapetype="dataprocess" name="good"><configuration>'
+        "<dataprocessscript language=\"groovy2\" useCache=\"true\">"
+        "<![CDATA[def s = dataContext.getStream(0); dataContext.storeStream(s, props)]]>"
+        "</dataprocessscript></configuration></shape>"
+        '<shape shapetype="dataprocess" name="bad"><configuration>'
+        "<dataprocessscript language=\"groovy2\" useCache=\"true\">"
+        "<![CDATA[def s = dataContext.getStream(0) // forgot to store]]>"
+        "</dataprocessscript></configuration></shape>"
+        "</shapes></process></bns:object></bns:Component>"
+    )
+    comp = IntegrationComponentSpec(
+        key="dp1", type="process", action="create", name="DP", config={"xml": xml}
+    )
+    warnings = _lint_script_bodies(_spec(comp))
+    store_warnings = [w for w in warnings if _SCRIPT_LINT_STORE_STREAM_MISSING in w]
+    # Exactly one missing-storeStream warning — for the "bad" script only.
+    assert len(store_warnings) == 1
+    assert "dataprocessscript[1]" in store_warnings[0]
+
+
+def test_all_dataprocess_scripts_storing_emit_no_warning():
+    xml = (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'type="process" name="DP"><bns:object><process><shapes>'
+        '<shape shapetype="dataprocess"><configuration>'
+        "<dataprocessscript><![CDATA[dataContext.storeStream(a, p)]]></dataprocessscript>"
+        "</configuration></shape>"
+        '<shape shapetype="dataprocess"><configuration>'
+        "<dataprocessscript><![CDATA[dataContext.storeStream(b, p)]]></dataprocessscript>"
+        "</configuration></shape>"
+        "</shapes></process></bns:object></bns:Component>"
+    )
+    comp = IntegrationComponentSpec(
+        key="dp1", type="process", action="create", name="DP", config={"xml": xml}
+    )
+    assert _SCRIPT_LINT_STORE_STREAM_MISSING not in _codes(_lint_script_bodies(_spec(comp)))
+
+
 # ---------------------------------------------------------------------------
 # long-script lint — applies to every inline body
 # ---------------------------------------------------------------------------
