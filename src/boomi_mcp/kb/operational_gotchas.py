@@ -1108,7 +1108,8 @@ _SYMPTOM_ROUTES: List[tuple] = [
             ("variable", "literal"),       # "variables appearing literally"
             ("literally", "output"),
             ("unresolved", "variable"),
-            ("unresolved", "reference"),
+            ("unresolved", "reference"),   # "unresolved reference(s)"
+            ("unresolved", "env"),         # "unresolved env refs" / "env var"
             ("unresolved", "token"),
             ("despite", "credential"),     # "auth failures despite configured credentials"
             ("auth", "despite"),

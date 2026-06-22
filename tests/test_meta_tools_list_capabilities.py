@@ -266,6 +266,23 @@ def test_troubleshoot_catalog_entry_documents_observed_symptoms():
     assert "gotcha_matches" in entry["description"]
 
 
+def test_canonical_workflow_surface_includes_gotcha_step():
+    """The gotcha step lives in the canonical _authoring_workflow_sequences so
+    get_schema_template(workflow:troubleshoot_failed_execution) stays consistent
+    with list_capabilities — not appended only inside list_capabilities."""
+    from boomi_mcp.categories.meta_tools import (
+        _authoring_workflow_sequences,
+        get_schema_template_action,
+    )
+
+    steps = _authoring_workflow_sequences()["troubleshoot_failed_execution"]["steps"]
+    assert "search_boomi_gotchas(" in steps[-1]
+
+    tmpl = get_schema_template_action(schema_name="workflow:troubleshoot_failed_execution")
+    assert tmpl["_success"] is True
+    assert any("search_boomi_gotchas(" in s for s in tmpl["workflow"]["steps"])
+
+
 def test_authoring_workflow_preserved_when_all_referenced_tools_present():
     """When the runtime exposes the authoring chain + build_integration, the
     archetype-first workflow survives the filter."""

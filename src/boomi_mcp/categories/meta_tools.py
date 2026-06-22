@@ -4857,11 +4857,18 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
         },
         "troubleshoot_failed_execution": {
             "description": "Debug why a process execution failed",
+            # Issue #78: the canonical chain routes execution record → logs →
+            # artifacts → dependencies → gotcha search. The final gotcha step is
+            # stripped in list_capabilities_action when search_boomi_gotchas is
+            # not in the live registry (mirrors how research_boomi_docs is
+            # filtered there), so the live capability catalog never advertises an
+            # unregistered tool while this canonical surface stays complete.
             "steps": [
                 "1. monitor_platform(action='execution_records', config='{\"status\": \"ERROR\", \"limit\": 10}') → find failures",
                 "2. monitor_platform(action='execution_logs', config='{\"execution_id\": \"...\"}') → get error logs",
                 "3. monitor_platform(action='execution_artifacts', config='{\"execution_id\": \"...\"}') → get output docs",
                 "4. analyze_component(action='dependencies', component_id='...') → check dependencies",
+                "5. search_boomi_gotchas(query='<observed symptom phrase>') → match the failure against known silent-failure modes / field traps when logs and dependencies are inconclusive",
             ],
         },
         "research_boomi_docs": {
@@ -7701,21 +7708,19 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
     # --- Workflow suggestions (canonical source: _authoring_workflow_sequences) ---
     workflows = _authoring_workflow_sequences()
 
-    # Issue #78: route the troubleshooting workflow through the gotcha catalog as
-    # a final step — but only when search_boomi_gotchas is actually registered.
-    # Added BEFORE the available_tools filter so the parsable "5. search_boomi_
-    # gotchas(" step is tracked by _refs_in_steps: when the tool is present the
-    # step survives the filter; when absent the step is never appended, so the
-    # base 4-step workflow (records → logs → artifacts → dependencies) is left
-    # intact rather than being dropped for referencing an unregistered tool.
-    if available_tools is None or "search_boomi_gotchas" in available_tools:
+    # Issue #78: the canonical troubleshoot_failed_execution chain ends with a
+    # search_boomi_gotchas step. Strip it here when that tool is NOT in the live
+    # registry, BEFORE the available_tools filter runs — otherwise _refs_in_steps
+    # would see the unregistered "5. search_boomi_gotchas(" reference and drop the
+    # whole workflow. When available_tools is None (no live registry to filter
+    # against) the canonical 5-step chain is surfaced as-is, matching
+    # get_schema_template(schema_name='workflow:troubleshoot_failed_execution').
+    if available_tools is not None and "search_boomi_gotchas" not in available_tools:
         tsfe = workflows.get("troubleshoot_failed_execution")
         if tsfe:
-            tsfe["steps"].append(
-                "5. search_boomi_gotchas(query='<observed symptom phrase>') → "
-                "match the failure against known silent-failure modes / field "
-                "traps when logs and dependencies are inconclusive"
-            )
+            tsfe["steps"] = [
+                s for s in tsfe["steps"] if "search_boomi_gotchas(" not in s
+            ]
 
     # --- Filter workflows to only reference tools in the catalog ---
     if available_tools is not None:
