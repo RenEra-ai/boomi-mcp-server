@@ -19,8 +19,12 @@ optional ``run_test`` execution + log/artifact summary stage:
   later stage. When ``run_test=True``, a final optional stage executes the resolved process
   (polling to a terminal status) and fetches bounded log excerpts/artifact metadata for
   diagnostics; a failed test execution is surfaced as ``_success=False`` with the prior
-  stages preserved, while a log/artifact fetch failure is diagnostic only. Cleanup remains a
-  placeholder. The run-test stage never runs in dry-run or after any prior-stage failure.
+  stages preserved, while a log/artifact fetch failure is diagnostic only — unless
+  ``require_test_logs=True`` (issue #81), which promotes an absent/unavailable log fetch after a
+  successful test into a ``TEST_LOGS_UNAVAILABLE`` orchestration failure. Cleanup remains a
+  placeholder. The run-test stage never runs in dry-run or after any prior-stage failure. Every
+  full response also carries a top-level ``behavior_verified`` marker (issue #81) so the
+  deploy-clean-is-not-verification gap is visible without parsing stage statuses.
 
 It is intentionally not wired into ``server.py`` as a public MCP tool; public wiring is
 deferred to issue #64.
@@ -114,6 +118,11 @@ TEST_EXECUTION_FAILED = "TEST_EXECUTION_FAILED"
 TEST_EXECUTION_TIMEOUT = "TEST_EXECUTION_TIMEOUT"
 TEST_REQUEST_ID_MISSING = "TEST_REQUEST_ID_MISSING"
 
+# Behavioral-verification opt-in code (issue #81). Unlike LOG_RETRIEVAL_FAILED (diagnostic-only),
+# this code FLIPS ``_success`` to False: it is only emitted when the caller set
+# ``require_test_logs=True`` and a test ran but its ProcessLog retrieval was absent/unavailable.
+TEST_LOGS_UNAVAILABLE = "TEST_LOGS_UNAVAILABLE"
+
 # Failure-hardening + cleanup-planning codes (issue #65).
 # LOG_RETRIEVAL_FAILED / ARTIFACT_RETRIEVAL_FAILED are *diagnostic* — they annotate the logs
 # stage but never flip ``_success`` to False. CLEANUP_OPERATION_FAILED is recorded only when
@@ -161,6 +170,12 @@ class OrchestrateDeployRequest(BaseModel):
     test_fetch_logs: bool = True
     test_fetch_artifacts: bool = True
     test_log_fetch_content: bool = True
+    # Behavioral-verification opt-in (issue #81). When True and a test ran but its ProcessLog
+    # retrieval is absent/unavailable, the logs stage fails the orchestration with
+    # ``TEST_LOGS_UNAVAILABLE`` instead of the default diagnostic-only success-with-warning. Plain
+    # ``bool`` (lax coercion is acceptable) — unlike ``cleanup_on_failure`` this flag triggers NO
+    # destruction; the wrapper still validates it as a real bool before any SDK call.
+    require_test_logs: bool = False
 
 
 class ComponentSummaryEntry(BaseModel):
@@ -291,8 +306,9 @@ class LogsStage(BaseModel):
     artifact_download_url: Optional[str] = None
     error: Optional[str] = None
     artifact_error: Optional[str] = None
-    # Structured diagnostics for a log/artifact retrieval failure (issue #65). These are
-    # diagnostic only — a failed retrieval never flips orchestration ``_success`` to False.
+    # Structured diagnostics for a log/artifact retrieval failure (issue #65). ``LOG_RETRIEVAL_FAILED``
+    # / ``ARTIFACT_RETRIEVAL_FAILED`` are diagnostic only and never flip orchestration ``_success``,
+    # UNLESS ``require_test_logs=True`` (issue #81) promotes a log failure to ``TEST_LOGS_UNAVAILABLE``.
     error_code: Optional[str] = None
     failed_stage: Optional[str] = None
     next_step: Optional[str] = None
@@ -1504,6 +1520,31 @@ def _content_download_failed(result: Dict[str, Any]) -> bool:
     return result.get("_downloaded") is False
 
 
+def _promote_logs_unavailable_error(
+    stage: LogsStage, execution_id: Optional[str]
+) -> OrchestrateDeployError:
+    """Promote an unavailable/absent log fetch to a ``TEST_LOGS_UNAVAILABLE`` failure (issue #81).
+
+    Mutates ``stage`` so the failed logs stage carries the structured code/next-step, and returns
+    the contract error that flips ``_success`` to False. Only called when ``require_test_logs=True``
+    and a test ran but its ProcessLog retrieval was absent or unavailable.
+    """
+    stage.error_code = TEST_LOGS_UNAVAILABLE
+    stage.failed_stage = "logs"
+    stage.next_step = (
+        "The deployment and test execution succeeded, but log retrieval was required "
+        "(require_test_logs=true) and unavailable. Re-fetch via "
+        "monitor_platform(action='execution_logs', execution_id=...), or re-run with "
+        "require_test_logs=false to treat logs as diagnostic-only."
+    )
+    return _error(
+        TEST_LOGS_UNAVAILABLE,
+        "Test execution succeeded but required log retrieval (require_test_logs=true) was unavailable.",
+        field="require_test_logs",
+        details={"execution_id": execution_id, "logs_status": "unavailable"},
+    )
+
+
 def _logs_stage_from_results(
     log_result: Optional[Dict[str, Any]],
     artifact_result: Optional[Dict[str, Any]],
@@ -1512,13 +1553,22 @@ def _logs_stage_from_results(
     log_level: str,
     fetch_logs: bool,
     fetch_artifacts: bool,
-) -> LogsStage:
+    require_test_logs: bool = False,
+    execution_succeeded: bool = True,
+) -> Tuple[LogsStage, Optional[OrchestrateDeployError]]:
     """Normalize log + artifact monitor results into a ``LogsStage``.
 
     A failed/absent log fetch — including a created URL whose content download/extract failed
     (``_success=True`` but ``_downloaded=False``) — is *diagnostic only* (``status="unavailable"``,
-    error surfaced, ``download_url`` preserved for manual retry). It never turns a successful test
-    execution into a failed orchestration. The artifact leg is independent.
+    error surfaced, ``download_url`` preserved for manual retry): it never turns a successful test
+    execution into a failed orchestration UNLESS ``require_test_logs=True`` (issue #81), which
+    promotes it to a ``TEST_LOGS_UNAVAILABLE`` failure. ``test_fetch_logs=False`` with
+    ``require_test_logs=True`` is treated as absent logs and likewise fails. The artifact leg is
+    independent and never produces ``TEST_LOGS_UNAVAILABLE``. ``execution_succeeded`` controls the
+    diagnostic wording: on a FAILED execution (ERROR/ABORTED, where logs are still fetched) the
+    "the test execution succeeded" phrasing would be contradictory, so neutral wording is used
+    (#81 review). Returns ``(stage, log_error)`` where ``log_error`` is non-None only for the
+    require-test-logs promotion.
     """
     stage = LogsStage(
         status="not_required",
@@ -1526,6 +1576,7 @@ def _logs_stage_from_results(
         log_level=log_level if fetch_logs else None,
     )
     warnings: List[str] = []
+    log_error: Optional[OrchestrateDeployError] = None
 
     if fetch_logs:
         if (
@@ -1556,11 +1607,31 @@ def _logs_stage_from_results(
             # Structured diagnostic metadata (issue #65) — does NOT flip orchestration success.
             stage.error_code = LOG_RETRIEVAL_FAILED
             stage.failed_stage = "logs"
-            stage.next_step = (
-                "The test execution itself succeeded; only log retrieval was unavailable. "
-                "Re-fetch via monitor_platform(action='execution_logs', execution_id=...)."
-            )
-            warnings.append("Test execution succeeded but log retrieval was unavailable.")
+            if execution_succeeded:
+                stage.next_step = (
+                    "The test execution itself succeeded; only log retrieval was unavailable. "
+                    "Re-fetch via monitor_platform(action='execution_logs', execution_id=...)."
+                )
+                warnings.append("Test execution succeeded but log retrieval was unavailable.")
+            else:
+                # The execution itself failed (#81 review): never claim it succeeded here.
+                stage.next_step = (
+                    "Log retrieval was unavailable. Re-fetch via "
+                    "monitor_platform(action='execution_logs', execution_id=...)."
+                )
+                warnings.append("Log retrieval was unavailable.")
+            # Issue #81: when logs are required, promote this diagnostic to a hard failure.
+            if require_test_logs:
+                log_error = _promote_logs_unavailable_error(stage, execution_id)
+    elif require_test_logs and execution_id:
+        # ``test_fetch_logs=False`` but logs are required (issue #81): an absent log fetch after a
+        # successful execution is itself the failure — mark the stage unavailable and fail.
+        stage.status = "unavailable"
+        stage.error = (
+            "Log retrieval was required (require_test_logs=true) but test_fetch_logs=false; "
+            "no logs were fetched."
+        )
+        log_error = _promote_logs_unavailable_error(stage, execution_id)
 
     if fetch_artifacts:
         if (
@@ -1586,13 +1657,20 @@ def _logs_stage_from_results(
             # Structured diagnostic metadata (issue #65) — does NOT flip orchestration success.
             stage.artifact_error_code = ARTIFACT_RETRIEVAL_FAILED
             stage.artifact_failed_stage = "logs"
-            stage.artifact_next_step = (
-                "The test execution itself succeeded; only artifact retrieval was unavailable. "
-                "Re-fetch via monitor_platform(action='execution_artifacts', execution_id=...)."
-            )
+            if execution_succeeded:
+                stage.artifact_next_step = (
+                    "The test execution itself succeeded; only artifact retrieval was unavailable. "
+                    "Re-fetch via monitor_platform(action='execution_artifacts', execution_id=...)."
+                )
+            else:
+                # The execution itself failed (#81 review): never claim it succeeded here.
+                stage.artifact_next_step = (
+                    "Artifact retrieval was unavailable. Re-fetch via "
+                    "monitor_platform(action='execution_artifacts', execution_id=...)."
+                )
 
     stage.warnings = warnings
-    return stage
+    return stage, log_error
 
 
 def _run_test_stage(
@@ -1610,8 +1688,10 @@ def _run_test_stage(
     Diagnostics (logs + artifacts) are fetched whenever an ``execution_id`` resolved — including
     on ERROR/ABORTED, where the logs are the whole point of the stage. TIMEOUT and a missing
     request id never produce an ``execution_id``, so there is nothing to fetch and logs are
-    ``blocked``. Returns ``(execution_stage, logs_stage, error)`` where ``error`` is non-None only
-    for a *failed test execution* (not for a diagnostic log/artifact fetch failure).
+    ``blocked``. Returns ``(execution_stage, logs_stage, error)`` where ``error`` is non-None for a
+    *failed test execution* or, when ``require_test_logs=True`` (issue #81), an absent/unavailable
+    log fetch after a SUCCESSFUL execution. Execution failures take precedence: an ERROR/ABORTED
+    test still surfaces ``TEST_EXECUTION_FAILED``, never masked by a ``TEST_LOGS_UNAVAILABLE``.
     """
     exec_result = _call_execute_process_action(
         boomi_client,
@@ -1632,11 +1712,40 @@ def _run_test_stage(
     execution_id = execution_stage.execution_id
     if not execution_id:
         # No execution id (timeout / missing request id / completed-without-id): nothing to fetch.
-        logs_stage = LogsStage(
-            status="blocked" if execution_error is not None else "not_required",
-            execution_id=None,
-        )
-        return execution_stage, logs_stage, execution_error
+        if execution_error is not None:
+            # The execution itself failed — logs are blocked and the execution error stands.
+            logs_stage = LogsStage(status="blocked", execution_id=None)
+            return execution_stage, logs_stage, execution_error
+        # A terminal SUCCESS that returned no execution_id: no ProcessLog can ever be fetched, so
+        # with require_test_logs=true this is an absent-logs failure (#81 review). Otherwise it
+        # stays the existing diagnostic-only not_required.
+        logs_stage = LogsStage(status="not_required", execution_id=None)
+        if request.require_test_logs:
+            # No execution id exists, so the generic "re-fetch by execution_id" remediation is
+            # impossible — use no-execution-id-specific metadata instead (#81 review).
+            no_id_next_step = (
+                "The test execution reached a terminal status but returned no execution_id, so "
+                "its ProcessLog can never be retrieved. Re-run the test to obtain a run with a "
+                "retrievable execution_id, or re-run with require_test_logs=false to treat log "
+                "retrieval as diagnostic-only (prior stages are reused)."
+            )
+            logs_stage.status = "unavailable"
+            logs_stage.error = (
+                "Test execution completed but returned no execution_id, so no logs could be "
+                "fetched and log retrieval was required (require_test_logs=true)."
+            )
+            logs_stage.error_code = TEST_LOGS_UNAVAILABLE
+            logs_stage.failed_stage = "logs"
+            logs_stage.next_step = no_id_next_step
+            log_error = _error(
+                TEST_LOGS_UNAVAILABLE,
+                "Test execution completed but returned no execution_id; required log retrieval "
+                "is impossible.",
+                field="require_test_logs",
+                details={"execution_id": None, "logs_status": "unavailable"},
+            )
+            return execution_stage, logs_stage, log_error
+        return execution_stage, logs_stage, None
 
     fetch_logs = bool(request.test_fetch_logs)
     fetch_artifacts = bool(request.test_fetch_artifacts)
@@ -1666,15 +1775,22 @@ def _run_test_stage(
             creds=creds,
         )
 
-    logs_stage = _logs_stage_from_results(
+    # Execution-failure precedence: only enforce required-logs when the execution SUCCEEDED. On a
+    # failed execution (ERROR/ABORTED) log retrieval stays diagnostic — the top-level failure is
+    # TEST_EXECUTION_FAILED, and promoting the logs stage would contradictorily annotate it as
+    # TEST_LOGS_UNAVAILABLE with a "test execution succeeded" hint (#81 review).
+    require_logs_effective = request.require_test_logs and execution_error is None
+    logs_stage, log_error = _logs_stage_from_results(
         log_result,
         artifact_result,
         execution_id=execution_id,
         log_level=request.test_log_level,
         fetch_logs=fetch_logs,
         fetch_artifacts=fetch_artifacts,
+        require_test_logs=require_logs_effective,
+        execution_succeeded=execution_error is None,
     )
-    return execution_stage, logs_stage, execution_error
+    return execution_stage, logs_stage, execution_error if execution_error is not None else log_error
 
 
 # ---------------------------------------------------------------------------
@@ -1763,6 +1879,37 @@ def _stage_summary(
     return summary
 
 
+def _behavior_verified_marker(
+    *, dry_run: bool, execution: ExecutionStage, logs: LogsStage
+) -> Dict[str, Any]:
+    """Top-level marker making the "deploy-clean is not behavioral verification" gap explicit (#81).
+
+    ``verified`` is True ONLY when a test actually ran to a clean COMPLETE terminal status AND its
+    logs were retrieved — so an agent never has to re-derive that fact by parsing stage statuses.
+    Every other path (dry-run, run_test=false, a prior-stage block, COMPLETE_WARN/ERROR/timeout, or
+    completed-but-logs-unavailable) is ``verified=False`` with a ``reason`` it can branch on. The
+    marker is purely additive: it changes no existing stage field and never flips ``_success``.
+    """
+    logs_status = logs.status
+    if dry_run:
+        return {"verified": False, "reason": "dry_run", "logs_status": logs_status}
+    if execution.status == "skipped":
+        return {"verified": False, "reason": "test_not_run", "logs_status": logs_status}
+    if execution.status == "blocked":
+        return {"verified": False, "reason": "test_blocked", "logs_status": logs_status}
+    if execution.status == "completed":
+        if logs_status == "retrieved":
+            return {
+                "verified": True,
+                "reason": "test_ran_logs_retrieved",
+                "logs_status": logs_status,
+            }
+        return {"verified": False, "reason": "logs_unavailable", "logs_status": logs_status}
+    # warning (COMPLETE_WARN) / failed (ERROR/ABORTED) / timeout — a test ran but did not cleanly
+    # complete, so it is never behaviorally verified.
+    return {"verified": False, "reason": "test_failed_or_warned", "logs_status": logs_status}
+
+
 # ---------------------------------------------------------------------------
 # Failure hardening + cleanup planning (issue #65)
 # ---------------------------------------------------------------------------
@@ -1799,6 +1946,7 @@ _ERROR_CODE_STAGES: Dict[str, str] = {
     TEST_REQUEST_ID_MISSING: "execution",
     LOG_RETRIEVAL_FAILED: "logs",
     ARTIFACT_RETRIEVAL_FAILED: "logs",
+    TEST_LOGS_UNAVAILABLE: "logs",
 }
 
 # Stage execution order — used to derive the "prior stages" a retry can rely on.
@@ -1906,6 +2054,24 @@ def _next_step_for_failure(error: OrchestrateDeployError, failed_stage: str) -> 
         return (
             "The deployment succeeded but the test execution failed; inspect summary.test/logs, "
             "fix the process, then re-run with run_test=true (prior stages are reused)."
+        )
+    if failed_stage == "logs":
+        # Only reachable when require_test_logs=true promoted a log fetch failure (issue #81); the
+        # default diagnostic-only LOG_RETRIEVAL_FAILED never sets a top-level failed_stage.
+        if (error.details or {}).get("execution_id") is None:
+            # No execution id ever resolved — a re-fetch by execution_id is impossible (#81 review).
+            return (
+                "The test execution reached a terminal status but returned no execution_id, so its "
+                "ProcessLog can never be retrieved. Re-run the test to obtain a run with a "
+                "retrievable execution_id, or re-run with require_test_logs=false to treat log "
+                "retrieval as diagnostic-only (prior stages are reused)."
+            )
+        return (
+            "The deployment and test execution succeeded, but log retrieval was required "
+            "(require_test_logs=true) and unavailable. Re-fetch the logs via "
+            "monitor_platform(action='execution_logs', execution_id=...), or re-run with "
+            "require_test_logs=false to treat log retrieval as diagnostic-only (prior stages are "
+            "reused)."
         )
     return "Inspect the errors array and re-run orchestrate_deploy after addressing the failure."
 
@@ -2213,6 +2379,13 @@ def _assemble_response(
         "build_id": build_id,
         "dry_run": dry_run,
         "plan_only": plan_only,
+        # Additive behavioral-verification marker (issue #81) — present on every full envelope;
+        # every terminal path routes through here, so dry-run/plan/blocked/test paths all carry it.
+        "behavior_verified": _behavior_verified_marker(
+            dry_run=dry_run,
+            execution=downstream["execution"],
+            logs=downstream["logs"],
+        ),
         "integration_name": target.integration_name,
         "target": target.model_dump(),
         "component_summary": target.component_summary.model_dump(),
@@ -2495,6 +2668,7 @@ def orchestrate_deploy_action(
     test_fetch_logs: bool = True,
     test_fetch_artifacts: bool = True,
     test_log_fetch_content: bool = True,
+    require_test_logs: bool = False,
     creds: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Resolve a build, then plan (dry-run) or package/deploy/bind/schedule it (#60/#61/#62).
@@ -2513,6 +2687,15 @@ def orchestrate_deploy_action(
     The cleanup plan defaults to dry-run (no mutation); pass ``cleanup_on_failure=True`` to execute
     it. Because every stage reuses (never duplicates) existing resources, a retry after a partial
     failure resumes safely from the failed stage.
+
+    Behavioral verification (issue #81): every full response carries a top-level
+    ``behavior_verified`` marker (``{"verified", "reason", "logs_status"}``). Deploy/test success is
+    not behavioral correctness — read the returned log excerpts before declaring an integration
+    working; a terminal COMPLETE status alone is not behavioral verification. Set
+    ``require_test_logs=True`` to make a failed/absent ProcessLog fetch (after a test ran) fail the
+    orchestration with ``TEST_LOGS_UNAVAILABLE`` instead of the default diagnostic-only
+    success-with-warning. The marker is additive and ``require_test_logs`` defaults False, so the
+    existing success shape is preserved.
     """
     # 0. Normalize the request through the typed contract so malformed input TYPES
     #    (e.g. a list build_id, which is unhashable, or a non-dict schedule_override)
@@ -2537,6 +2720,7 @@ def orchestrate_deploy_action(
             test_fetch_logs=test_fetch_logs,
             test_fetch_artifacts=test_fetch_artifacts,
             test_log_fetch_content=test_log_fetch_content,
+            require_test_logs=require_test_logs,
         )
     except ValidationError as exc:
         return _error_response(
@@ -2750,7 +2934,8 @@ def orchestrate_deploy_action(
     #     the execution/log/cleanup stages stay skipped placeholders; with run_test the optional
     #     test stage executes the process (wait=True), then fetches bounded log/artifact
     #     diagnostics. A failed test execution returns _success=False with the prior stages
-    #     preserved; a log/artifact fetch failure stays _success=True (diagnostic only). (#63)
+    #     preserved; a log/artifact fetch failure stays _success=True (diagnostic only) unless
+    #     require_test_logs=True promotes a required-log failure to TEST_LOGS_UNAVAILABLE. (#63/#81)
     if not run_test:
         return _real_run_response(
             profile=profile,

@@ -407,6 +407,25 @@ def test_orchestrate_deploy_in_capabilities():
         assert key in entry["response_keys"], f"{key} missing from documented response_keys"
 
 
+def test_orchestrate_deploy_documents_behavior_verified_and_require_test_logs():
+    """Issue #81: the behavior_verified response key + require_test_logs config key are documented,
+    and the description carries the read-the-log-excerpts doctrine line."""
+    entry = list_capabilities_action()["tools"]["orchestrate_deploy"]
+    assert "behavior_verified" in entry["response_keys"]
+    assert "require_test_logs" in entry["parameters"]["config"]
+    assert "log excerpts" in entry["description"]
+    assert "behavioral correctness" in entry["description"]
+
+
+def test_doctrine_review_logs_mentions_require_test_logs():
+    """Issue #81: the review-logs doctrine names require_test_logs as the enforcement option and
+    still tells the agent to read log excerpts before declaring behavior verified."""
+    doctrine = list_capabilities_action()["operating_doctrine"]["review_logs_after_test"]
+    assert "require_test_logs" in doctrine
+    assert "log excerpts" in doctrine
+    assert "TEST_LOGS_UNAVAILABLE" in doctrine
+
+
 def test_orchestrate_deploy_filtered_out_when_not_registered():
     only = {"build_integration"}
     tools = list_capabilities_action(available_tools=only)["tools"]

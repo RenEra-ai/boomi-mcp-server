@@ -2994,6 +2994,7 @@ _ORCH_CONFIG_KEYS = (
     "test_fetch_logs",
     "test_fetch_artifacts",
     "test_log_fetch_content",
+    "require_test_logs",
 )
 
 
@@ -3111,9 +3112,12 @@ if orchestrate_deploy_action:
                 build_id, environment_id, runtime_id, schedule_override, run_test, dry_run,
                 package_version, cleanup_on_failure, test_timeout_seconds,
                 test_dynamic_properties, test_process_properties, test_log_level, test_fetch_logs,
-                test_fetch_artifacts, test_log_fetch_content. Top-level args override the matching
-                config values. cleanup_on_failure=false (default) returns a dry-run cleanup PLAN on
-                a failed real run; true executes the planned cleanup (destructive).
+                test_fetch_artifacts, test_log_fetch_content, require_test_logs. Top-level args
+                override the matching config values. cleanup_on_failure=false (default) returns a
+                dry-run cleanup PLAN on a failed real run; true executes the planned cleanup
+                (destructive). require_test_logs=false (default) keeps a failed test-log fetch
+                diagnostic-only; true fails the run (TEST_LOGS_UNAVAILABLE) when a test ran but its
+                logs were absent/unavailable.
 
         Credential behavior:
             dry_run=true (the default) makes NO Boomi SDK call and reads no credentials. A real
@@ -3130,10 +3134,13 @@ if orchestrate_deploy_action:
         Returns:
             High-level summary envelope: _success, build_id, process_id, environment_id,
             runtime_id, package, deployment, runtime_attachment, schedule, execution, logs,
-            cleanup, summary, errors, warnings, and next_steps. A failed real run additionally
-            carries error_code, failed_stage, prior_stage_summary, and next_step, plus a cleanup
-            plan naming exactly what this attempt created (dry-run by default). Agents can branch
-            on this single response without calling each low-level tool.
+            cleanup, summary, errors, warnings, and next_steps. Every full response also carries a
+            top-level behavior_verified marker ({verified, reason, logs_status}) — true only when a
+            test ran to a clean COMPLETE status with logs retrieved; deploy/test status alone is not
+            behavioral verification. A failed real run additionally carries error_code,
+            failed_stage, prior_stage_summary, and next_step, plus a cleanup plan naming exactly
+            what this attempt created (dry-run by default). Agents can branch on this single
+            response without calling each low-level tool.
         """
         # 1. Parse config JSON — wrapper-level errors short-circuit before any auth/SDK/action.
         config_data = {}
@@ -3237,6 +3244,32 @@ if orchestrate_deploy_action:
                 "next_steps": [
                     "Pass cleanup_on_failure as a JSON boolean: true to execute the planned "
                     "cleanup on a failed real run, false (default) to only plan it.",
+                ],
+            }
+
+        # require_test_logs (issue #81) is the behavioral-verification opt-in: true makes an
+        # absent/unavailable ProcessLog fetch after a test fail the orchestration. Like
+        # cleanup_on_failure it governs response semantics, not the credential gate, but validate
+        # it up front so a non-bool fails closed with the same INVALID_CONFIG_TYPE contract.
+        require_test_logs_value = merged.get("require_test_logs", False)
+        if not isinstance(require_test_logs_value, bool):
+            return {
+                "_success": False,
+                "error": (
+                    "config 'require_test_logs' must be a boolean (true or false), not "
+                    + type(require_test_logs_value).__name__ + "."
+                ),
+                "errors": [
+                    {
+                        "code": "INVALID_CONFIG_TYPE",
+                        "message": "require_test_logs must be a boolean.",
+                        "field": "require_test_logs",
+                    }
+                ],
+                "warnings": [],
+                "next_steps": [
+                    "Pass require_test_logs as a JSON boolean: true to fail the run when test "
+                    "log retrieval is unavailable, false (default) to treat logs as diagnostic.",
                 ],
             }
 

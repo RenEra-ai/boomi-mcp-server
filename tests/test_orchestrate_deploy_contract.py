@@ -507,11 +507,17 @@ def test_full_success_contract(registry):
     )
 
     expected_keys = {
-        "_success", "profile", "build_id", "dry_run", "plan_only", "integration_name",
-        "target", "component_summary", "package", "deployment", "runtime_attachment",
-        "schedule", "execution", "logs", "cleanup", "summary", "warnings", "errors",
+        "_success", "profile", "build_id", "dry_run", "plan_only", "behavior_verified",
+        "integration_name", "target", "component_summary", "package", "deployment",
+        "runtime_attachment", "schedule", "execution", "logs", "cleanup", "summary",
+        "warnings", "errors",
     }
     assert set(result.keys()) == expected_keys
+
+    # Additive behavioral-verification marker (issue #81): a dry-run is never verified.
+    assert result["behavior_verified"] == {
+        "verified": False, "reason": "dry_run", "logs_status": "skipped",
+    }
 
     assert result["_success"] is True
     assert result["dry_run"] is True
@@ -1502,6 +1508,9 @@ def test_error_code_constants_match_module():
     assert orchestration.LOG_RETRIEVAL_FAILED == "LOG_RETRIEVAL_FAILED"
     assert orchestration.ARTIFACT_RETRIEVAL_FAILED == "ARTIFACT_RETRIEVAL_FAILED"
     assert orchestration.CLEANUP_OPERATION_FAILED == "CLEANUP_OPERATION_FAILED"
+    # Behavioral-verification opt-in code (issue #81).
+    assert orchestration.TEST_LOGS_UNAVAILABLE == "TEST_LOGS_UNAVAILABLE"
+    assert orchestration._ERROR_CODE_STAGES["TEST_LOGS_UNAVAILABLE"] == "logs"
 
 
 # ===========================================================================
@@ -1971,6 +1980,256 @@ def test_run_test_log_fetch_unavailable_is_diagnostic_not_execution_failure(regi
     assert not any(c.startswith("TEST_") for c in _codes(result))
     assert result["summary"]["test"]["logs_status"] == "unavailable"
     assert result["summary"]["test"]["log_error"]
+
+
+# ===========================================================================
+# require_test_logs + behavior_verified marker (issue #81)
+# ===========================================================================
+def test_require_test_logs_true_log_failure_fails_with_structured_error(registry, monkeypatch):
+    # A successful test execution whose log fetch is unavailable, with require_test_logs=true,
+    # promotes the diagnostic to a TEST_LOGS_UNAVAILABLE orchestration failure (issue #81).
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-reqlogs-fail")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_fail(), "execution_artifacts": _artifacts_ok()}
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        run_test=True, dry_run=False, require_test_logs=True,
+    )
+    assert result["_success"] is False
+    assert "TEST_LOGS_UNAVAILABLE" in _codes(result)
+    # The execution itself still succeeded; only the required log retrieval failed.
+    assert result["execution"]["status"] == "completed"
+    assert result["logs"]["status"] == "unavailable"
+    assert result["logs"]["error_code"] == "TEST_LOGS_UNAVAILABLE"
+    assert result["failed_stage"] == "logs"
+    assert result["error_code"] == "TEST_LOGS_UNAVAILABLE"
+    assert result["next_step"]  # actionable hint for the logs failure
+    assert result["behavior_verified"] == {
+        "verified": False, "reason": "logs_unavailable", "logs_status": "unavailable",
+    }
+
+
+def test_require_test_logs_true_passes_when_logs_retrieved(registry, monkeypatch):
+    # require_test_logs=true with a successful execution AND retrieved logs is a clean pass —
+    # the marker reports verified=true.
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-reqlogs-ok")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        run_test=True, dry_run=False, require_test_logs=True,
+    )
+    assert result["_success"] is True
+    assert result["logs"]["status"] == "retrieved"
+    assert not any(c.startswith("TEST_") for c in _codes(result))
+    assert result["behavior_verified"] == {
+        "verified": True, "reason": "test_ran_logs_retrieved", "logs_status": "retrieved",
+    }
+
+
+def test_require_test_logs_default_false_log_failure_stays_diagnostic(registry, monkeypatch):
+    # The DEFAULT (require_test_logs=false) preserves the issue-#65 diagnostic-only semantics
+    # byte-for-byte; the only delta is the additive behavior_verified marker (issue #81).
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-reqlogs-default")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_fail(), "execution_artifacts": _artifacts_ok()}
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is True
+    logs = result["logs"]
+    assert logs["status"] == "unavailable"
+    assert logs["error_code"] == "LOG_RETRIEVAL_FAILED"  # NOT promoted to TEST_LOGS_UNAVAILABLE
+    assert logs["warnings"]  # existing diagnostic warning preserved
+    assert not any(c.startswith("TEST_") for c in _codes(result))
+    assert "failed_stage" not in result  # success path never gets top-level failure metadata
+    assert result["behavior_verified"] == {
+        "verified": False, "reason": "logs_unavailable", "logs_status": "unavailable",
+    }
+
+
+def test_require_test_logs_true_fails_when_log_fetch_disabled(registry, monkeypatch):
+    # test_fetch_logs=false is "absent logs": with require_test_logs=true a successful execution
+    # with no fetched logs is itself the failure — the monitor's execution_logs is never called.
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-reqlogs-nofetch")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction({"execution_artifacts": _artifacts_ok()})
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        run_test=True, dry_run=False, require_test_logs=True, test_fetch_logs=False,
+    )
+    assert result["_success"] is False
+    assert "TEST_LOGS_UNAVAILABLE" in _codes(result)
+    assert result["logs"]["status"] == "unavailable"
+    assert result["failed_stage"] == "logs"
+    assert "execution_logs" not in monitor.actions_called()
+
+
+def test_require_test_logs_true_does_not_fail_on_artifact_failure(registry, monkeypatch):
+    # The artifact leg is independent of behavioral verification: logs retrieved but artifacts
+    # unavailable is still a verified pass under require_test_logs=true (issue #81).
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-reqlogs-artifact")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_ok(), "execution_artifacts": _artifacts_download_failed()}
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        run_test=True, dry_run=False, require_test_logs=True,
+    )
+    assert result["_success"] is True
+    assert result["logs"]["status"] == "retrieved"
+    assert result["logs"]["artifact_status"] == "unavailable"
+    assert not any(c.startswith("TEST_") for c in _codes(result))
+    assert result["behavior_verified"]["verified"] is True
+
+
+def test_require_test_logs_true_execution_failure_takes_precedence(registry, monkeypatch):
+    # An ERROR execution dominates: the surfaced code is TEST_EXECUTION_FAILED, never masked by a
+    # log failure, and the marker reports test_failed_or_warned (not logs_unavailable).
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-reqlogs-execfail")
+    execute = _FakeExecuteAction(_exec_failed(status="ERROR"))
+    monitor = _FakeMonitorAction(
+        {"execution_logs": _logs_fail(), "execution_artifacts": _artifacts_ok()}
+    )
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        run_test=True, dry_run=False, require_test_logs=True,
+    )
+    assert result["_success"] is False
+    assert "TEST_EXECUTION_FAILED" in _codes(result)
+    assert "TEST_LOGS_UNAVAILABLE" not in _codes(result)
+    assert result["failed_stage"] == "execution"
+    assert result["behavior_verified"]["reason"] == "test_failed_or_warned"
+    # The logs stage stays diagnostic-only on a failed execution — never contradictorily promoted
+    # to TEST_LOGS_UNAVAILABLE with a "test execution succeeded" hint (#81 review).
+    assert result["logs"]["error_code"] == "LOG_RETRIEVAL_FAILED"
+    # ...and its diagnostic wording must NOT claim the execution succeeded (#81 review).
+    assert "succeeded" not in (result["logs"]["next_step"] or "").lower()
+    assert result["logs"]["warnings"] == ["Log retrieval was unavailable."]
+
+
+def test_require_test_logs_true_fails_when_execution_has_no_log_id(registry, monkeypatch):
+    # A COMPLETE execution that returns no execution_id can never yield a ProcessLog; with
+    # require_test_logs=true that absent-logs case must fail, and the monitor is never called
+    # (the early no-execution-id return) (#81 review).
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-reqlogs-noid")
+    execute = _FakeExecuteAction(_exec_complete(execution_id=None))
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1",
+        run_test=True, dry_run=False, require_test_logs=True,
+    )
+    assert result["_success"] is False
+    assert "TEST_LOGS_UNAVAILABLE" in _codes(result)
+    assert result["execution"]["status"] == "completed"
+    assert result["logs"]["status"] == "unavailable"
+    assert result["failed_stage"] == "logs"
+    assert monitor.calls == []  # no execution_id → no log/artifact fetch attempted
+    assert result["behavior_verified"] == {
+        "verified": False, "reason": "logs_unavailable", "logs_status": "unavailable",
+    }
+    # With no execution_id, the remediation must NOT instruct a monitor_platform re-fetch by id —
+    # that is impossible here (#81 review). Both top-level and stage next_step are no-id specific.
+    assert "no execution_id" in result["next_step"]
+    assert "monitor_platform" not in result["next_step"]
+    assert "no execution_id" in (result["logs"]["next_step"] or "")
+
+
+def test_require_test_logs_default_false_no_log_id_stays_not_required(registry, monkeypatch):
+    # The DEFAULT keeps the completed-without-execution_id path a diagnostic not_required success.
+    bid = _seed_real_run(registry, monkeypatch, "b-rt-noid-default")
+    execute = _FakeExecuteAction(_exec_complete(execution_id=None))
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["execution"]["status"] == "completed"
+    assert result["logs"]["status"] == "not_required"
+    assert not any(c.startswith("TEST_") for c in _codes(result))
+    assert monitor.calls == []
+
+
+def test_behavior_verified_marker_dry_run(registry):
+    bid = registry("b-bv-dry", _single_process_entry(process_id="CID-1"))
+    result = orchestrate_deploy_action(
+        boomi_client=_ExplodingClient(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=True,
+    )
+    assert result["_success"] is True
+    assert result["behavior_verified"] == {
+        "verified": False, "reason": "dry_run", "logs_status": "planned",
+    }
+
+
+def test_behavior_verified_marker_run_test_false(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b-bv-notest")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=False, dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["behavior_verified"] == {
+        "verified": False, "reason": "test_not_run", "logs_status": "skipped",
+    }
+
+
+def test_behavior_verified_marker_prior_stage_blocked(registry, monkeypatch):
+    bid = registry("b-bv-blocked", _single_process_entry(process_id="CID-1"))
+    _patch_stage_failure(monkeypatch, bid, "deploy")
+    execute = _FakeExecuteAction(_exec_complete())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert result["execution"]["status"] == "blocked"
+    assert result["behavior_verified"] == {
+        "verified": False, "reason": "test_blocked", "logs_status": "blocked",
+    }
+
+
+def test_behavior_verified_marker_complete_warn(registry, monkeypatch):
+    bid = _seed_real_run(registry, monkeypatch, "b-bv-warn")
+    execute = _FakeExecuteAction(_exec_warn())
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    # COMPLETE_WARN is success-with-warning, but it is NOT behavioral verification.
+    assert result["_success"] is True
+    assert result["execution"]["status"] == "warning"
+    assert result["behavior_verified"] == {
+        "verified": False, "reason": "test_failed_or_warned", "logs_status": "retrieved",
+    }
 
 
 def test_run_test_execute_setup_failure_is_execution_failed_not_request_id_missing(registry, monkeypatch):

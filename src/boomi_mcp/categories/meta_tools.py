@@ -7041,7 +7041,11 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "partial failure resumes safely. A failed real run returns structured failure "
                 "metadata (error_code, failed_stage, prior_stage_summary, next_step) and a "
                 "dry-run cleanup PLAN naming exactly what would be undeployed/deleted/detached; "
-                "cleanup defaults to no mutation unless cleanup_on_failure=true."
+                "cleanup defaults to no mutation unless cleanup_on_failure=true. Every full "
+                "response carries a top-level behavior_verified marker: deploy/test success is not "
+                "behavioral correctness — when run_test=true, read the returned log excerpts before "
+                "declaring the integration working, and set require_test_logs=true to fail the run "
+                "(TEST_LOGS_UNAVAILABLE) when a test ran but its logs were unavailable."
             ),
             "read_only": False,
             "implemented": True,
@@ -7057,15 +7061,17 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                     "build_id, environment_id, runtime_id, schedule_override, run_test, dry_run, "
                     "package_version, cleanup_on_failure, test_timeout_seconds, "
                     "test_dynamic_properties, test_process_properties, test_log_level, "
-                    "test_fetch_logs, test_fetch_artifacts, test_log_fetch_content. Top-level args "
-                    "override matching config values. cleanup_on_failure=false (default) plans "
-                    "cleanup on failure; true executes it (destructive)."
+                    "test_fetch_logs, test_fetch_artifacts, test_log_fetch_content, "
+                    "require_test_logs. Top-level args override matching config values. "
+                    "cleanup_on_failure=false (default) plans cleanup on failure; true executes it "
+                    "(destructive). require_test_logs=false (default) keeps a failed test-log fetch "
+                    "diagnostic-only; true fails the run with TEST_LOGS_UNAVAILABLE."
                 ),
             },
             "response_keys": [
                 "_success", "build_id", "process_id", "environment_id", "runtime_id",
                 "package", "deployment", "runtime_attachment", "schedule", "execution", "logs",
-                "cleanup", "summary", "errors", "warnings", "next_steps",
+                "cleanup", "summary", "errors", "warnings", "next_steps", "behavior_verified",
                 "error_code", "failed_stage", "prior_stage_summary", "next_step",
             ],
             "examples": [
@@ -7847,9 +7853,13 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "ones — reuse keeps credentials out of the conversation."
         ),
         "review_logs_after_test": (
-            "Deploy/test success is not behavioral correctness: after a test "
-            "execution, read the execution log excerpts (e.g. Groovy compiles "
-            "only at first Atom execution)."
+            "Deploy/test success is not behavioral correctness: a terminal "
+            "COMPLETE status alone is not verification. Read the execution log "
+            "excerpts before declaring behavior verified (e.g. Groovy compiles "
+            "only at first Atom execution). orchestrate_deploy surfaces this as a "
+            "top-level behavior_verified marker; set require_test_logs=true to "
+            "enforce log retrieval (a missing fetch then fails the run with "
+            "TEST_LOGS_UNAVAILABLE rather than passing diagnostic-only)."
         ),
         "bounded_escalation": (
             "Escalation ladder: (1) check the docs KB first — the most common "

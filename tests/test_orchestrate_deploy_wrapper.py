@@ -175,6 +175,39 @@ def test_invalid_cleanup_on_failure_in_config_fails_closed(_mock_auth_and_sdk):
         _mock_auth_and_sdk["boomi"].assert_not_called()
 
 
+def test_require_test_logs_config_forwarded_to_engine(_mock_auth_and_sdk):
+    """A valid bool require_test_logs from config is threaded into the engine call (issue #81)."""
+    plan = {"_success": True, "plan_only": True, "target": {}, "summary": {}, "errors": [], "warnings": []}
+    with patch.object(server, "orchestrate_deploy_action", return_value=plan) as m_action:
+        result = server.orchestrate_deploy(
+            profile="dev", build_id="b1", environment_id="e1", runtime_id="r1",
+            config='{"dry_run": true, "require_test_logs": true}',
+        )
+    assert result["_success"] is True
+    assert m_action.call_args.kwargs["require_test_logs"] is True
+
+
+def test_invalid_require_test_logs_in_config_fails_closed(_mock_auth_and_sdk):
+    """A non-bool require_test_logs is rejected with INVALID_CONFIG_TYPE before any engine call."""
+    for bad in (
+        '{"require_test_logs": "yes"}',
+        '{"require_test_logs": []}',
+        '{"require_test_logs": 1}',
+    ):
+        with patch.object(server, "orchestrate_deploy_action") as m_action:
+            result = server.orchestrate_deploy(
+                profile="dev", build_id="b1", environment_id="e1", runtime_id="r1",
+                config=bad,
+            )
+        assert result["_success"] is False, f"require_test_logs={bad} must be rejected"
+        assert result["errors"][0]["code"] == "INVALID_CONFIG_TYPE"
+        assert result["errors"][0]["field"] == "require_test_logs"
+        assert "next_steps" in result
+        m_action.assert_not_called()
+        _mock_auth_and_sdk["secret"].assert_not_called()
+        _mock_auth_and_sdk["boomi"].assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # 4. Missing required fields surface before credentials (real engine)
 # ---------------------------------------------------------------------------
