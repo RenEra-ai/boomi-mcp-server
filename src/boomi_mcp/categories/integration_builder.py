@@ -58,6 +58,29 @@ _COMPONENT_NAME_PRIMARY_TYPES = frozenset({
 # (Integration's "... 1"/"... 2" clone artifacts).
 _COPY_SUFFIX_NAME_RE = re.compile(r".+\s(?:1|2)$")
 
+# Issue #82 (M9.6) — cheap, string-level script lints surfaced as plan-time
+# WARNINGS (never errors, never blocking). They mirror two Companion
+# silent-failure catalog entries:
+#   * A Data Process (``script.processing``) Groovy script that never calls
+#     ``dataContext.storeStream(...)`` silently drops every document downstream.
+#   * Any inline script body over ~50 lines crosses the Companion anti-scripting
+#     threshold (prefer a typed builder / split the logic).
+# String-level only — JVM Groovy compilation is explicitly out of scope.
+_SCRIPT_LINT_STORE_STREAM_MISSING = "SCRIPT_PROCESSING_STORE_STREAM_MISSING"
+_SCRIPT_LINT_BODY_LONG = "SCRIPT_BODY_LONG"
+_SCRIPT_BODY_MAX_LINES = 50
+# A raw-XML component is treated as carrying ``script.processing`` content when
+# it declares a Data Process shape / dataprocess script element. Quote/whitespace
+# tolerant so author-formatted raw XML still matches.
+_DATAPROCESS_CUE_RE = re.compile(
+    r'shapetype\s*=\s*["\']dataprocess["\']|<dataprocessscript|script\.processing'
+)
+# The document-emit idiom; tolerant of incidental whitespace around the members.
+_STORE_STREAM_RE = re.compile(r'dataContext\s*\.\s*storeStream\s*\(')
+# Groovy/script CDATA payloads inside a raw-XML component — used to size the
+# embedded script body for the long-script lint without counting XML structure.
+_CDATA_RE = re.compile(r'<!\[CDATA\[(.*?)\]\]>', re.DOTALL)
+
 from boomi import Boomi
 from boomi.models import (
     ComponentMetadataQueryConfig,
@@ -2699,6 +2722,97 @@ def _lint_component_names(spec: IntegrationSpecV1) -> Dict[str, Any]:
     return {"errors": errors, "warnings": warnings}
 
 
+def _collect_script_bodies(
+    comp: "IntegrationComponentSpec",
+) -> List[Tuple[str, str, str]]:
+    """Collect a component's inline script content for the #82 script lints.
+
+    Returns ``(label, kind, text)`` tuples where ``kind`` is ``"processing"``
+    (a Data Process ``script.processing`` Groovy body — storeStream applies) or
+    ``"mapping"`` (a ``script.mapping`` MappingScript body — storeStream does
+    NOT apply; only the long-script smell does). Pure/read-only — never mutates
+    the spec and never raises.
+    """
+    config = comp.config if isinstance(comp.config, dict) else {}
+    ctype = (comp.type or "").strip().lower()
+    bodies: List[Tuple[str, str, str]] = []
+
+    # Typed inline MappingScript bodies (script.mapping component + the
+    # map_script ops nested under a transform.map config). These are
+    # MappingScripts, not Data Process scripts, so storeStream never applies —
+    # only the universal long-script smell does.
+    body = config.get("script_body")
+    if isinstance(body, str) and body.strip():
+        bodies.append(("script_body", "mapping", body))
+    script_mappings = config.get("script_mappings")
+    if isinstance(script_mappings, list):
+        for i, sm in enumerate(script_mappings):
+            if isinstance(sm, dict):
+                sm_body = sm.get("script_body")
+                if isinstance(sm_body, str) and sm_body.strip():
+                    bodies.append(
+                        (f"script_mappings[{i}].script_body", "mapping", sm_body)
+                    )
+
+    # Raw-XML escape hatch: a Data Process (script.processing) shape carries its
+    # Groovy in author-controlled XML the typed builders never emit. The whole
+    # XML string is the storeStream scan target (string-level, per the issue);
+    # the long-script smell is sized from the embedded CDATA payload(s) so XML
+    # structure lines are never counted as "script".
+    xml = config.get("xml")
+    if isinstance(xml, str) and xml.strip():
+        if ctype == "script.processing" or _DATAPROCESS_CUE_RE.search(xml):
+            bodies.append(("config.xml", "processing", xml))
+
+    return bodies
+
+
+def _lint_script_bodies(spec: IntegrationSpecV1) -> List[str]:
+    """Plan-time script lints (#82 M9.6) — WARNINGS ONLY, never blocking.
+
+    Two string-level checks over component script content:
+      * ``script.processing`` content lacking ``dataContext.storeStream(`` →
+        ``SCRIPT_PROCESSING_STORE_STREAM_MISSING`` (silent document loss).
+      * any inline script body over ``_SCRIPT_BODY_MAX_LINES`` lines →
+        ``SCRIPT_BODY_LONG`` (Companion anti-scripting threshold).
+
+    Returns a list of warning strings (each embedding its code token). It only
+    ever appends to the plan's ``warnings`` list — it never creates a
+    ``validation_error``, never changes a ``planned_action``, and never mutates
+    script text.
+    """
+    warnings: List[str] = []
+    for comp in spec.components:
+        for label, kind, text in _collect_script_bodies(comp):
+            if kind == "processing" and not _STORE_STREAM_RE.search(text):
+                warnings.append(
+                    f"[{_SCRIPT_LINT_STORE_STREAM_MISSING}] Component "
+                    f"'{comp.key}' ({label}) carries a Data Process "
+                    "(script.processing) script that never calls "
+                    "dataContext.storeStream(...); documents may be silently "
+                    "dropped downstream. Confirm the script is terminal or add "
+                    "a storeStream call. (Warning only — apply is not blocked.)"
+                )
+            # The long-script smell applies to every inline body. For raw-XML
+            # processing content, size the embedded CDATA payload(s) so XML
+            # structure is not miscounted as script lines.
+            if kind == "processing":
+                candidates = _CDATA_RE.findall(text) or []
+            else:
+                candidates = [text]
+            for body_text in candidates:
+                line_count = body_text.count("\n") + 1
+                if line_count > _SCRIPT_BODY_MAX_LINES:
+                    warnings.append(
+                        f"[{_SCRIPT_LINT_BODY_LONG}] Component '{comp.key}' "
+                        f"({label}) carries a script body of {line_count} lines "
+                        f"(> {_SCRIPT_BODY_MAX_LINES}); long inline scripts are "
+                        "a Companion anti-pattern. Prefer a typed builder or "
+                        "split the logic. (Warning only — apply is not blocked.)"
+                    )
+    return warnings
+
+
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     spec = _normalize_to_spec(config)
     # Issue #41 r3: inject transform.function wrappers between any
@@ -3778,6 +3892,12 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             "get_schema_template(schema_name="
             "'governance_pattern:encode_metadata_in_component_names')."
         )
+
+    # Issue #82 (M9.6) — cheap script lints. Warn (never block) on
+    # script.processing bodies missing dataContext.storeStream(...) and on
+    # over-long inline scripts. Purely additive to ``warnings``; never touches
+    # steps / planned_action / validation_error / unresolvable_steps.
+    warnings.extend(_lint_script_bodies(spec))
 
     return {
         "_success": True,
