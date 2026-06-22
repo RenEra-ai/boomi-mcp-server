@@ -171,6 +171,26 @@ def _kb_hint(func):
     return func
 
 
+def _gotcha_hint(func):
+    """Append the operational-gotcha cross-reference to a tool's docstring — but
+    only when the gotcha KB is enabled.
+
+    Applied below @mcp.tool() on high-risk write/config/exec tools so the hint
+    is captured into the registered tool description (issue #78). Independent of
+    _kb_hint / BOOMI_DOCS_ENABLED: gated on BOOMI_GOTCHAS_ENABLED so default
+    deployments — and docs-only deployments — never point the model at a
+    search_boomi_gotchas tool that isn't registered.
+    """
+    if BOOMI_GOTCHAS_ENABLED and func.__doc__:
+        func.__doc__ = func.__doc__.rstrip() + (
+            "\n\n        For known silent-failure modes and field traps (a value "
+            "silently dropped, a deploy that didn't take effect, a listener "
+            "404/401, an extension that vanished), check search_boomi_gotchas "
+            "first.\n"
+        )
+    return func
+
+
 # Additional imports for production mode
 if not LOCAL_MODE:
     import secrets
@@ -1619,6 +1639,7 @@ if query_components_action:
 # --- Component Management MCP Tools ---
 if manage_component_action:
     @mcp.tool()
+    @_gotcha_hint
     @_kb_hint
     def manage_component(
         profile: str,
@@ -1910,6 +1931,7 @@ if manage_connector_action:
 # --- Integration Builder MCP Tool ---
 if build_integration_action:
     @mcp.tool(annotations={"openWorldHint": True})
+    @_gotcha_hint
     @_kb_hint
     def build_integration(
         profile: str,
@@ -2287,6 +2309,7 @@ if get_schema_template_action:
 # --- Generic API Invoker MCP Tool ---
 if invoke_api:
     @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+    @_gotcha_hint
     @_kb_hint
     def invoke_boomi_api(
         profile: str,
@@ -3055,6 +3078,7 @@ def _normalize_orchestrate_response(result, environment_id, runtime_id):
 # --- Deployment Orchestration MCP Tool (issue #64) ---
 if orchestrate_deploy_action:
     @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+    @_gotcha_hint
     @_kb_hint
     def orchestrate_deploy(
         profile: str,
@@ -3396,7 +3420,14 @@ if troubleshoot_execution_action:
             error_details — Get error info from failed executions
                 execution_id: specific execution to analyze
                 process_id: filter recent errors by process
-                config: {"days": 7, "limit": 10, "fetch_logs": true, "log_level": "ALL"}
+                config: {"days": 7, "limit": 10, "fetch_logs": true, "log_level": "ALL",
+                         "observed_symptoms": ["404 on deployed API", "variable appears literally in output"]}
+                observed_symptoms (optional, single-execution path): a string or
+                list of symptom phrases routed — together with the execution's
+                error message — through the operational-gotcha catalog. When the
+                gotcha KB is enabled and a symptom matches, the response carries a
+                gotcha_matches list (id + title + remediation pointer); the
+                section is omitted when nothing matches or the KB is disabled.
 
             retry — Retry a failed execution with same process/atom
                 execution_id: required - the failed execution to retry
@@ -3450,6 +3481,7 @@ if troubleshoot_execution_action:
                 process_id=process_id,
                 environment_id=environment_id,
                 config=cfg,
+                gotchas_enabled=BOOMI_GOTCHAS_ENABLED,
             )
 
         except Exception as e:
@@ -3783,6 +3815,7 @@ if manage_schedules_action:
 # --- Listener Management MCP Tools ---
 if manage_listeners_action:
     @mcp.tool()
+    @_gotcha_hint
     def manage_listeners(
         profile: str,
         action: str,

@@ -1086,6 +1086,133 @@ def search_operational_gotchas(
 
 
 # ---------------------------------------------------------------------------
+# Symptom triage — route observed failure symptoms to catalog ids (issue #78).
+#
+# A deterministic, stdlib-only mapping from common troubleshooting symptoms to
+# existing catalog entries. troubleshoot_execution(action="error_details") uses
+# this to surface known failure modes alongside logs/artifacts/dependency
+# findings. Each route is (gotcha_id, [signature, ...]) where a signature is a
+# tuple of lowercased substrings that must ALL appear in the symptom text for
+# that signature to fire; a route matches if ANY of its signatures fire. The
+# ids referenced here are asserted to exist in the catalog at import.
+# ---------------------------------------------------------------------------
+
+_SYMPTOM_ROUTES: List[tuple] = [
+    # Variables/credentials/uniform-401 → an env-var reference carried verbatim.
+    # The catalog has no dedicated API-auth-route entry, so auth-despite-creds
+    # and uniform-401 both route here (the literal-reference gotcha is the
+    # documented #78 choice for these auth symptoms).
+    (
+        "env_var_literal_in_component_xml",
+        [
+            ("variable", "literal"),       # "variables appearing literally"
+            ("literally", "output"),
+            ("unresolved", "variable"),
+            ("unresolved", "reference"),
+            ("unresolved", "token"),
+            ("despite", "credential"),     # "auth failures despite configured credentials"
+            ("auth", "despite"),
+            ("uniform", "401"),            # "uniform 401 on every route"
+            ("401", "every"),
+        ],
+    ),
+    # A subprocess edit that does not take effect → parent needs a redeploy.
+    (
+        "process_call_parent_redeploy",
+        [
+            ("subprocess", "ignored"),     # "subprocess changes apparently ignored"
+            ("subprocess", "not taking effect"),
+            ("subprocess", "no effect"),
+            ("subprocess", "didn't take effect"),
+            ("subprocess", "did not take effect"),
+            ("subprocess", "stale"),
+        ],
+    ),
+    # A deployed listener/API returning 404 → endpoint path objectname trap.
+    (
+        "wss_path_objectname_verbatim",
+        [
+            ("404",),                      # "404 on a deployed API"
+        ],
+    ),
+    # Extension declarations vanishing after deploy → empty-overrides push.
+    (
+        "empty_process_overrides_hides_extensions",
+        [
+            ("extension", "disappear"),    # "extension values disappearing"
+            ("extension", "vanish"),
+            ("extension", "orphan"),
+            ("extension", "gone"),
+        ],
+    ),
+    # Missing records / no map output → EDI tagList elementKey on a segment.
+    (
+        "edi_taglist_loop_vs_segment",
+        [
+            ("no data produced",),         # "no data produced from map"
+            ("no data", "map"),
+            ("silently missing",),         # "record silently missing from multi-record output"
+            ("missing", "multi-record"),
+            ("missing", "multi record"),
+            ("split", "document"),
+        ],
+    ),
+]
+
+# Fail loudly at import if a route points at an id the catalog no longer has.
+for _gid, _signatures in _SYMPTOM_ROUTES:
+    if _gid not in OPERATIONAL_GOTCHA_ENTRIES:
+        raise ValueError(
+            f"_SYMPTOM_ROUTES references unknown gotcha id: {_gid!r}"
+        )
+
+
+def triage_symptoms(symptom_text: str) -> List[str]:
+    """Map free-text symptom prose to matching catalog ids (ordered, de-duped).
+
+    Pure and deterministic — no SDK, no I/O. Returns an empty list when nothing
+    matches or the input is not usable text.
+    """
+    if not isinstance(symptom_text, str) or not symptom_text.strip():
+        return []
+    text = symptom_text.lower()
+    matched: List[str] = []
+    for gid, signatures in _SYMPTOM_ROUTES:
+        for signature in signatures:
+            if all(token in text for token in signature):
+                if gid not in matched:
+                    matched.append(gid)
+                break
+    return matched
+
+
+def gotcha_matches_for_symptoms(symptom_text: str) -> List[Dict[str, str]]:
+    """Triage ``symptom_text`` and project the matched catalog entries to a
+    compact match shape (id / title / remediation / lookup).
+
+    Returns an empty list when no symptom routes. The projection is intentionally
+    compact — it never dumps the full entry prose into the troubleshooting
+    response; callers wanting the whole entry use the ``lookup`` pointer.
+    """
+    ids = triage_symptoms(symptom_text)
+    if not ids:
+        return []
+    found = search_operational_gotchas(issue_ids=ids)
+    matches: List[Dict[str, str]] = []
+    for entry in found.get("results", []):
+        gid = entry["id"]
+        matches.append(
+            {
+                "id": gid,
+                "title": entry["title"],
+                "remediation": entry["remediation"],
+                "lookup": f"search_boomi_gotchas(issue_ids=[{gid!r}])",
+            }
+        )
+    return matches
+
+
+# ---------------------------------------------------------------------------
 # Catalog / resource / index accessors — each returns a deepcopy so a caller can
 # never mutate shared module state.
 # ---------------------------------------------------------------------------

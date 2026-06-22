@@ -158,9 +158,44 @@ def _execution_to_dict(execution) -> Dict[str, Any]:
 # Action: error_details
 # ============================================================================
 
+def _collect_symptom_text(exec_dict: Dict[str, Any],
+                          config: Dict[str, Any]) -> str:
+    """Build one blob of symptom text from the execution message plus any
+    caller-supplied config.observed_symptoms (a string or list of strings)."""
+    parts: List[str] = []
+    message = exec_dict.get("message")
+    if isinstance(message, str) and message.strip():
+        parts.append(message)
+    observed = config.get("observed_symptoms")
+    if isinstance(observed, str):
+        parts.append(observed)
+    elif isinstance(observed, list):
+        parts.extend(s for s in observed if isinstance(s, str))
+    return " ".join(parts)
+
+
+def _gotcha_matches(exec_dict: Dict[str, Any],
+                    config: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Route the execution's symptoms through the gotcha catalog (issue #78).
+
+    Imported lazily so the stdlib-only gotcha KB is pulled in only when the
+    feature is actually exercised. Never raises: a triage failure must not break
+    error-details reporting.
+    """
+    symptom_text = _collect_symptom_text(exec_dict, config)
+    if not symptom_text:
+        return []
+    try:
+        from boomi_mcp.kb.operational_gotchas import gotcha_matches_for_symptoms
+        return gotcha_matches_for_symptoms(symptom_text)
+    except Exception:
+        return []
+
+
 def handle_error_details(sdk: Boomi, execution_id: str = None,
                          process_id: str = None,
-                         config: Dict[str, Any] = None) -> Dict[str, Any]:
+                         config: Dict[str, Any] = None,
+                         gotchas_enabled: bool = False) -> Dict[str, Any]:
     """Get error details from failed execution records and optionally download logs."""
     if config is None:
         config = {}
@@ -186,6 +221,15 @@ def handle_error_details(sdk: Boomi, execution_id: str = None,
             "execution": exec_dict,
             "error_analysis": _analyze_error(exec_dict),
         }
+
+        # Symptom-to-gotcha triage (issue #78). Only when the gotcha KB is
+        # enabled, and only on this detailed single-execution path — matches are
+        # added alongside logs/artifacts/dependency findings, and the section is
+        # omitted cleanly when nothing routes.
+        if gotchas_enabled:
+            gotcha_matches = _gotcha_matches(exec_dict, config)
+            if gotcha_matches:
+                result["gotcha_matches"] = gotcha_matches
 
         if not fetch_logs:
             result["error_analysis"]["troubleshooting_tips"].append(
@@ -762,6 +806,7 @@ def troubleshoot_execution_action(
     process_id: str = None,
     environment_id: str = None,
     config: Dict[str, Any] = None,
+    gotchas_enabled: bool = False,
 ) -> Dict[str, Any]:
     """
     Consolidated troubleshooting function. Routes to handler based on action.
@@ -773,6 +818,8 @@ def troubleshoot_execution_action(
         process_id: Process ID (for error_details, reprocess)
         environment_id: Environment ID (for reprocess)
         config: Action-specific configuration dict
+        gotchas_enabled: When True, the error_details action routes observed
+            symptoms through the operational-gotcha catalog (issue #78)
 
     Returns:
         Action result dict with _success status
@@ -783,7 +830,8 @@ def troubleshoot_execution_action(
     try:
         if action == "error_details":
             return handle_error_details(sdk, execution_id=execution_id,
-                                        process_id=process_id, config=config)
+                                        process_id=process_id, config=config,
+                                        gotchas_enabled=gotchas_enabled)
         elif action == "retry":
             return handle_retry(sdk, execution_id=execution_id, config=config)
         elif action == "reprocess":

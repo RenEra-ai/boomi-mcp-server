@@ -215,6 +215,57 @@ def test_gotchas_hint_present_when_registered():
     assert "search_boomi_gotchas" in catalog["hints"]["boomi_gotchas"]
 
 
+# ---------------------------------------------------------------------------
+# Issue #78 — troubleshoot_failed_execution routes through the gotcha catalog
+# ---------------------------------------------------------------------------
+
+# The base troubleshooting chain references these tools; include them so the
+# workflow itself survives available_tools filtering and we isolate the
+# gotcha-step gating.
+_TROUBLESHOOT_BASE_TOOLS = {"monitor_platform", "analyze_component"}
+
+
+def test_troubleshoot_workflow_routes_through_gotchas_unfiltered():
+    """With no available_tools filter, the troubleshooting workflow ends with a
+    search_boomi_gotchas step after records → logs → artifacts → dependencies."""
+    wf = list_capabilities_action()["workflows"]["troubleshoot_failed_execution"]
+    steps = wf["steps"]
+    # Order preserved: records → logs → artifacts → dependencies → gotchas.
+    assert "execution_records" in steps[0]
+    assert "execution_logs" in steps[1]
+    assert "execution_artifacts" in steps[2]
+    assert "analyze_component" in steps[3]
+    assert "search_boomi_gotchas(" in steps[-1]
+
+
+def test_troubleshoot_workflow_includes_gotcha_step_when_registered():
+    only = _TROUBLESHOOT_BASE_TOOLS | {"search_boomi_gotchas"}
+    wf = list_capabilities_action(available_tools=only)["workflows"]["troubleshoot_failed_execution"]
+    steps = wf["steps"]
+    assert any("search_boomi_gotchas(" in s for s in steps)
+    # Base chain order is preserved ahead of the new step.
+    assert "execution_records" in steps[0]
+    assert "analyze_component" in steps[3]
+
+
+def test_troubleshoot_workflow_omits_gotcha_step_when_not_registered():
+    # Base tools present, but search_boomi_gotchas absent → workflow still shows,
+    # 4 steps, no gotcha reference.
+    only = set(_TROUBLESHOOT_BASE_TOOLS)
+    catalog = list_capabilities_action(available_tools=only)
+    assert "troubleshoot_failed_execution" in catalog["workflows"]
+    steps = catalog["workflows"]["troubleshoot_failed_execution"]["steps"]
+    assert all("search_boomi_gotchas" not in s for s in steps)
+    assert len(steps) == 4
+
+
+def test_troubleshoot_catalog_entry_documents_observed_symptoms():
+    entry = list_capabilities_action()["tools"]["troubleshoot_execution"]
+    blob = entry["description"] + " " + entry["parameters"]["config"] + " " + " ".join(entry.get("examples", []))
+    assert "observed_symptoms" in blob
+    assert "gotcha_matches" in entry["description"]
+
+
 def test_authoring_workflow_preserved_when_all_referenced_tools_present():
     """When the runtime exposes the authoring chain + build_integration, the
     archetype-first workflow survives the filter."""

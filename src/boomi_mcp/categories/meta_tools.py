@@ -7260,7 +7260,10 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
 
         "troubleshoot_execution": {
             "category": "Execution",
-            "description": "Troubleshoot failed executions — error details, retry, reprocess, cancel, queue management",
+            "description": "Troubleshoot failed executions — error details, retry, reprocess, cancel, queue management. "
+                           "On the error_details single-execution path, pass config.observed_symptoms (a string or list) "
+                           "to route symptoms through the operational-gotcha catalog; when the gotcha KB is enabled and a "
+                           "symptom matches, the response carries a gotcha_matches list (id + title + remediation pointer).",
             "actions": ["error_details", "retry", "reprocess", "cancel", "list_queues", "clear_queue", "move_queue"],
             "read_only": False,
             "parameters": {
@@ -7269,10 +7272,12 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "execution_id": "str (optional) — required for error_details, retry; optional for reprocess (see process_id, environment_id, config.atom_id)",
                 "process_id": "str (optional) — required for reprocess (with environment_id)",
                 "environment_id": "str (optional) — required for reprocess (with process_id)",
-                "config": "JSON str (optional) — action-specific options (e.g. days, limit, atom_id, queue_name, dest_queue)",
+                "config": "JSON str (optional) — action-specific options (e.g. days, limit, atom_id, queue_name, dest_queue, "
+                          "observed_symptoms for error_details gotcha triage)",
             },
             "examples": [
                 'troubleshoot_execution(profile="prod", action="error_details", config=\'{"days": 1, "limit": 5}\')',
+                'troubleshoot_execution(profile="prod", action="error_details", execution_id="exec-123", config=\'{"observed_symptoms": ["404 on deployed API"]}\')',
                 'troubleshoot_execution(profile="prod", action="retry", execution_id="exec-123")',
                 'troubleshoot_execution(profile="prod", action="reprocess", execution_id="exec-123")',
                 'troubleshoot_execution(profile="prod", action="reprocess", process_id="proc-456", environment_id="env-789")',
@@ -7695,6 +7700,22 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
 
     # --- Workflow suggestions (canonical source: _authoring_workflow_sequences) ---
     workflows = _authoring_workflow_sequences()
+
+    # Issue #78: route the troubleshooting workflow through the gotcha catalog as
+    # a final step — but only when search_boomi_gotchas is actually registered.
+    # Added BEFORE the available_tools filter so the parsable "5. search_boomi_
+    # gotchas(" step is tracked by _refs_in_steps: when the tool is present the
+    # step survives the filter; when absent the step is never appended, so the
+    # base 4-step workflow (records → logs → artifacts → dependencies) is left
+    # intact rather than being dropped for referencing an unregistered tool.
+    if available_tools is None or "search_boomi_gotchas" in available_tools:
+        tsfe = workflows.get("troubleshoot_failed_execution")
+        if tsfe:
+            tsfe["steps"].append(
+                "5. search_boomi_gotchas(query='<observed symptom phrase>') → "
+                "match the failure against known silent-failure modes / field "
+                "traps when logs and dependencies are inconclusive"
+            )
 
     # --- Filter workflows to only reference tools in the catalog ---
     if available_tools is not None:
