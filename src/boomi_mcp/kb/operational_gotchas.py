@@ -1110,8 +1110,8 @@ _SYMPTOM_ROUTES: List[tuple] = [
             ("unresolved", "variable"),    # "unresolved (environment) variable"
             ("unresolved", "reference"),   # "unresolved (environment) reference(s)"
             ("unresolved", "token"),
-            ("env ref",),                  # abbreviated "env refs" / "env reference"
-            ("env var",),                  # abbreviated "env var(s)"
+            ("unresolved", "env ref"),     # abbreviated "unresolved env refs"
+            ("unresolved", "env var"),     # abbreviated "unresolved env var(s)"
             ("despite", "credential"),     # "auth failures despite configured credentials"
             ("auth", "despite"),
             ("uniform", "401"),            # "uniform 401 on every route"

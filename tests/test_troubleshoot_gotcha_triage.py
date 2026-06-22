@@ -73,6 +73,16 @@ def test_env_substring_does_not_overfire():
         assert triage_symptoms(phrase) == [], phrase
 
 
+def test_env_abbreviation_requires_unresolved_cue():
+    # A benign mention of env vars/refs (no unresolved/failure cue) must NOT route
+    # — the abbreviated forms are gated on an actual "unresolved" symptom.
+    for phrase in (
+        "env vars are configured on the process",
+        "the env ref is set in extensions",
+    ):
+        assert triage_symptoms(phrase) == [], phrase
+
+
 def test_no_match_returns_empty():
     assert triage_symptoms("everything completed successfully with no errors") == []
 
