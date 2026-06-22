@@ -172,11 +172,42 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
 
     # Index shapes by their ``name`` attribute (the canvas shape id). Shapes
     # without a name cannot be referenced by a dragpoint.
+    # Validate shape ids first. A shape with no ``name`` cannot be referenced by
+    # a dragpoint (so it is unreachable and unwireable), and a duplicate name
+    # makes the graph ambiguous — the index would silently collapse the two and
+    # mask reachability/dead-end problems. Both are graph-integrity errors, not
+    # lints: without this, malformed escape-hatch XML verifies false-clean.
     shapes_by_id: Dict[str, ET.Element] = {}
+    seen_names: set = set()
+    flagged_duplicates: set = set()
     for shape in shape_elems:
         name = shape.get("name")
-        if name:
-            shapes_by_id[name] = shape
+        stype = _shape_type(shape)
+        if not name:
+            errors.append(
+                _issue(
+                    "SHAPE_NAME_MISSING",
+                    "",
+                    stype,
+                    f"A shape ({stype or 'unknown'}) is missing its required 'name' attribute.",
+                    "Give every shape a unique non-empty name so it can be wired and reached.",
+                )
+            )
+            continue
+        if name in seen_names:
+            if name not in flagged_duplicates:
+                flagged_duplicates.add(name)
+                errors.append(
+                    _issue(
+                        "DUPLICATE_SHAPE_NAME",
+                        name,
+                        stype,
+                        f"Shape name '{name}' is used by more than one shape.",
+                        f"Make shape names unique; rename the duplicate '{name}'.",
+                    )
+                )
+        seen_names.add(name)
+        shapes_by_id[name] = shape
 
     # ------------------------------------------------------------------
     # Pass 1 — edges, dangling/unset dragpoints, per-shape attribute lints.

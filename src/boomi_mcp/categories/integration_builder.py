@@ -4049,16 +4049,27 @@ def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]
                 # rewrite (#50 owns XML preservation). Non-process components
                 # verify exactly as before, with no process_graph key.
                 component_data = component_get_xml(boomi_client, component_id)
+                # component_get_xml returns a dict {type, xml, ...}; tolerate a
+                # raw-string return defensively.
+                if isinstance(component_data, dict):
+                    data_type = component_data.get("type")
+                    process_xml = component_data.get("xml")
+                elif isinstance(component_data, str):
+                    data_type = None
+                    process_xml = component_data
+                else:
+                    data_type = None
+                    process_xml = None
                 record: Dict[str, Any] = {"verified": True, "component_id": component_id}
-                is_process = comp.type == "process" or (
-                    isinstance(component_data, dict)
-                    and component_data.get("type") == "process"
-                )
-                process_xml = (
-                    component_data.get("xml") if isinstance(component_data, dict) else None
-                )
-                if is_process and isinstance(process_xml, str):
-                    graph = verify_process_graph(process_xml)
+                is_process = comp.type == "process" or data_type == "process"
+                if is_process:
+                    # Always graph-verify a detected process. If its XML could
+                    # not be extracted, verify_process_graph reports an empty/
+                    # unparseable error rather than letting the process pass
+                    # unverified (a silent false-clean).
+                    graph = verify_process_graph(
+                        process_xml if isinstance(process_xml, str) else ""
+                    )
                     record["process_graph"] = graph
                     if graph["errors"]:
                         record["verified"] = False

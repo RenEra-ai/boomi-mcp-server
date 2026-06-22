@@ -107,6 +107,46 @@ def test_exception_terminal_is_clean():
     assert result["shapes_checked"] == 3
 
 
+def test_duplicate_shape_name_is_error():
+    """Two shapes sharing a name make the graph ambiguous and must not pass
+    clean — the index would otherwise collapse them and mask wiring problems."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="connectoraction_icon" name="shape2" shapetype="connectoraction" x="2" y="1">'
+        '<configuration/><dragpoints><dragpoint name="d2" toShape="shape3" x="3" y="2"/></dragpoints></shape>'
+        '<shape image="connectoraction_icon" name="shape2" shapetype="connectoraction" x="2" y="3">'
+        '<configuration/><dragpoints/></shape>'
+        '<shape image="stop_icon" name="shape3" shapetype="stop" x="3" y="1">'
+        '<configuration><stop continue="true"/></configuration><dragpoints/></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "DUPLICATE_SHAPE_NAME" in codes
+    dup = [e for e in result["errors"] if e["code"] == "DUPLICATE_SHAPE_NAME"]
+    assert dup[0]["shape"] == "shape2"
+
+
+def test_missing_shape_name_is_error():
+    """A shape with no name cannot be referenced or reached; flag it."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="stop_icon" name="shape2" shapetype="stop" x="2" y="1">'
+        '<configuration><stop continue="true"/></configuration><dragpoints/></shape>'
+        '<shape image="stop_icon" shapetype="stop" x="3" y="1">'
+        '<configuration><stop continue="true"/></configuration><dragpoints/></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    assert "SHAPE_NAME_MISSING" in _codes(result["errors"])
+
+
 def test_malformed_xml_reported_not_raised():
     result = verify_process_graph("<process><shapes><shape></shapes>")  # unbalanced
     assert "PROCESS_XML_PARSE_FAILED" in _codes(result["errors"])

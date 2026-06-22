@@ -6243,3 +6243,23 @@ class TestVerifyProcessGraph:
         record = result["verification"]["c1"]
         assert record["verified"] is True
         assert "process_graph" not in record
+
+    def test_process_with_no_usable_xml_does_not_silently_pass(self):
+        """A detected process whose GET yields no usable XML must surface a
+        failing process_graph, not verify clean unverified."""
+        from src.boomi_mcp.categories.integration_builder import build_integration_action
+
+        comp = _comp(key="p1", name="Proc", comp_type="process")
+        self._seed_build("graph-noxml", [comp], {"p1": {"component_id": "id-p1"}})
+        with patch(
+            "src.boomi_mcp.categories.integration_builder.component_get_xml",
+            return_value={"type": "process", "xml": None},
+        ):
+            result = build_integration_action(
+                MagicMock(), "prof", "verify", {"build_id": "graph-noxml"}
+            )
+        assert result["_success"] is False, result
+        record = result["verification"]["p1"]
+        assert record["verified"] is False
+        assert record["error_code"] == "PROCESS_GRAPH_INTEGRITY_FAILED"
+        assert record["process_graph"]["errors"]
