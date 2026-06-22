@@ -98,6 +98,15 @@ def test_missing_display_attrs_is_warning_only():
     assert "DISPLAY_ATTRIBUTE_MISSING" in warn_codes
 
 
+def test_exception_terminal_is_clean():
+    """A process ending in a terminal Exception step (empty <dragpoints/>) must
+    verify clean — Exception terminates execution and is not a dead end."""
+    result = verify_process_graph(_load("exception_terminal_process.xml"))
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+    assert result["shapes_checked"] == 3
+
+
 def test_malformed_xml_reported_not_raised():
     result = verify_process_graph("<process><shapes><shape></shapes>")  # unbalanced
     assert "PROCESS_XML_PARSE_FAILED" in _codes(result["errors"])

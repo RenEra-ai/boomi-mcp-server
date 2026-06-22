@@ -37,7 +37,12 @@ from typing import Any, Dict, List, Optional
 # ``doccacheload`` is a terminal DLQ sink emitted by today's builder for
 # ``dlq.mode="document_cache_ref"`` catch legs without notify — it ends the leg
 # with an empty ``<dragpoints/>`` and must not be flagged as a dead end.
-_TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "doccacheload"})
+# ``exception`` (throw a user-defined error) terminates document/process
+# execution on unhappy paths and is always authored with an empty
+# ``<dragpoints/>`` (see boomi_companion .../steps/exception_step.md: "Exception
+# is a terminal shape"); it is common in escape-hatch process XML, which is
+# exactly what this pass verifies.
+_TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "doccacheload", "exception"})
 
 # Shape types whose outputs are explicit branch outputs that must be wired.
 _BRANCHING_SHAPE_TYPES = frozenset({"branch", "decision", "route"})
