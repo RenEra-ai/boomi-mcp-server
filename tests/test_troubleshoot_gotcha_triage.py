@@ -53,8 +53,24 @@ def test_triage_is_case_insensitive():
 def test_triage_matches_unresolved_env_ref_variants():
     # The plan lists "unresolved env refs" as a trigger; both the abbreviated
     # and spelled-out forms must route to the env-var-literal gotcha.
-    for phrase in ("unresolved env refs", "unresolved env var", "unresolved environment reference"):
+    for phrase in (
+        "unresolved env refs",
+        "unresolved env var",
+        "unresolved environment reference",
+        "unresolved environment variable",
+    ):
         assert "env_var_literal_in_component_xml" in triage_symptoms(phrase), phrase
+
+
+def test_env_substring_does_not_overfire():
+    # "env" is a substring of "environment"/"envelope" — the route must require a
+    # specific env-ref/env-var form, not the bare token, so these do NOT route.
+    for phrase in (
+        "unresolved environment id",
+        "unresolved EDI envelope",
+        "the environment is unavailable",
+    ):
+        assert triage_symptoms(phrase) == [], phrase
 
 
 def test_no_match_returns_empty():
