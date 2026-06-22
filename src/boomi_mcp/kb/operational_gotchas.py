@@ -1128,20 +1128,20 @@ _SYMPTOM_ROUTES: List[tuple] = [
             ("subprocess", "stale"),
         ],
     ),
-    # A deployed listener/API returning 404 → endpoint path objectname trap.
-    # Require Boomi-endpoint context alongside the 404 so a generic outbound 404
-    # (e.g. an HTTP Client step getting Not Found from a third-party URL) is not
-    # misrouted to this listener-path gotcha. Documented symptom: "404 on a
-    # deployed API".
+    # A deployed Boomi listener returning 404 → endpoint path objectname trap.
+    # Require unambiguous Boomi listener / deployed-endpoint context alongside the
+    # 404. Generic tokens like "api"/"path"/"endpoint" are deliberately NOT used:
+    # an outbound HTTP Client step that *receives* 404 from a third-party "api" or
+    # "path" is a different failure and must not be routed here. The documented
+    # symptom "404 on a deployed API" still matches via "deployed".
     (
         "wss_path_objectname_verbatim",
         [
             ("404", "deployed"),
             ("404", "listener"),
-            ("404", "api"),
             ("404", "wss"),
-            ("404", "endpoint"),
-            ("404", "path"),
+            ("404", "web services server"),
+            ("404", "shared web server"),
         ],
     ),
     # Extension declarations vanishing after deploy → empty-overrides push.

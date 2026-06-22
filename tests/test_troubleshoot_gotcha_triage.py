@@ -79,10 +79,25 @@ def test_triage_orders_by_route_table():
 
 
 def test_bare_404_without_boomi_context_does_not_route():
-    # A generic outbound 404 (no deployed/listener/api/wss/endpoint/path context)
-    # must NOT route to the listener-path gotcha — guards against over-broad 404.
+    # A generic outbound 404 must NOT route to the listener-path gotcha — only
+    # explicit Boomi listener / deployed-endpoint context does. Guards against
+    # over-broad 404 matching (the api/path substrings are deliberately excluded).
     assert triage_symptoms("outbound http call returned 404 not found from vendor") == []
     assert triage_symptoms("the response code was 404") == []
+    assert triage_symptoms("third-party API returned 404") == []
+    assert triage_symptoms("vendor path returned 404") == []
+
+
+def test_404_routes_only_with_boomi_listener_context():
+    # The supported Boomi-listener contexts each route a 404 to the gotcha.
+    for phrase in (
+        "404 on a deployed API",
+        "the listener returns 404",
+        "404 from the wss endpoint",
+        "web services server returns 404",
+        "shared web server 404",
+    ):
+        assert "wss_path_objectname_verbatim" in triage_symptoms(phrase), phrase
 
 
 # ---------------------------------------------------------------------------
