@@ -1862,13 +1862,23 @@ if prepare_component_edit_action:
             component_id: Component to edit (required)
             patch: JSON string with the structured edit. Shape:
                 {"component_type": "connector-settings",   # optional; defaults to live type
-                 "config": { ... structured fields ... },  # e.g. {"name": "Renamed"} or
-                                                            #      {"host": "db.internal", ...}
+                 "config": { ... },
                  "map_context": {"source_index": {...},     # only for transform.map body edits
                                  "target_index": {...}}}
-                Metadata-only configs (name/component_name/description/folder_name/
-                folder_id) smart-merge the live root; other fields route through the
-                typed builder + #45/#50 preservation merge. Raw config.xml is rejected.
+                Two patch modes:
+                - METADATA (partial): config holds ONLY name/component_name/
+                  description/folder_name/folder_id. The live root is smart-merged
+                  in place — change just those fields, everything else preserved.
+                - BODY (full config): for any non-metadata field, config must be the
+                  COMPLETE structured config the typed builder consumes (same as
+                  build_integration's update path) — e.g. connector_type + all
+                  connection fields, or profile_type + its fields. The builder
+                  rebuilds its owned subtree; the #45/#50 merge preserves encrypted
+                  values + unknown XML. A body config is NOT a field-level delta:
+                  omitting the discriminator or a required builder field is rejected.
+                  Use get_schema_template(resource_type='component', operation='create',
+                  component_type=...) to see the full config a type needs.
+                Raw config.xml is rejected (use manage_component for full XML replace).
             max_diff_lines: Cap the returned unified diff (default 200).
 
         Returns:

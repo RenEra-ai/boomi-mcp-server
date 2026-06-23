@@ -14,6 +14,17 @@ Companion edit discipline into MCP without LLM-authored raw XML:
 
 Rollback / version restore is intentionally NOT part of this surface (deferred).
 
+Two patch modes (``patch["config"]`` keys decide which):
+- METADATA (partial): only ``name``/``component_name``/``description``/
+  ``folder_name``/``folder_id`` — the live root is smart-merged in place, so the
+  caller changes just those fields and everything else is preserved verbatim.
+- BODY (full config): any other field routes through the typed builder, which
+  rebuilds its owned subtree from the config. The body config must therefore be
+  the COMPLETE structured config that builder consumes (the same contract as
+  ``build_integration``'s update path — e.g. a connector needs ``connector_type``
+  plus all connection fields). It is NOT a field-level delta; the #45/#50 merge
+  preserves encrypted values + unknown XML *outside* the builder's owned subtree.
+
 The structured body path reuses ``integration_builder.build_structured_update_xml``
 (builder dispatch + ``PRESERVATION_POLICY``) and
 ``component_update_preservation.merge_for_update`` so the previewed diff matches
@@ -73,6 +84,18 @@ def _sha256(text: str) -> str:
 def _make_confirmation_token(
     component_id: str, version: int, base_xml_sha256: str, patch_sha256: str
 ) -> str:
+    # The token is a stateless workflow + integrity FINGERPRINT, not an auth
+    # secret or capability grant: the caller of apply already holds the profile
+    # credentials and could mutate the component directly via manage_component, so
+    # the token is intentionally unsigned (no server-side secret / nonce store
+    # exists in this per-credential, potentially multi-instance MCP server — a
+    # per-process HMAC key would reject legitimate tokens across Cloud Run
+    # instances). The real safety guarantees are re-validated server-side at apply
+    # time regardless of the token's provenance: confirm_apply=true is the explicit
+    # confirmation gate, the version + base_xml_sha256 drift check re-fetches the
+    # live component and aborts on any change, and patch_sha256 binds the applied
+    # patch to the previewed one. A forged token can therefore never push a stale
+    # or mismatched write.
     payload = _canonical_json({
         "component_id": component_id,
         "version": version,
@@ -261,7 +284,14 @@ def _compute_merged_xml(
             "update_mode": "metadata_smart_merge",
         }
 
-    # Body patch -> structured builder + #45/#50 preservation merge.
+    # Body patch -> structured builder + #45/#50 preservation merge. The builder
+    # rebuilds its owned subtree from `config`, so `config` must be the COMPLETE
+    # structured config that builder requires (incl. the type discriminator such
+    # as connector_type / profile_type), not a field-level delta. An incomplete
+    # body config surfaces the builder's own structured error (missing field /
+    # UPDATE_PRESERVATION_POLICY_UNSUPPORTED with a hint to use metadata-only
+    # fields for a partial edit). merge_for_update then preserves everything
+    # outside the owned subtree (encrypted values, unknown XML).
     comp = IntegrationComponentSpec(
         key="safe_edit",
         type=component_type,

@@ -4127,13 +4127,39 @@ _COMPONENT_SAFE_EDIT = {
         "rejected — use structured fields so encrypted values and unknown XML are "
         "preserved through the #45/#50 merge."
     ),
-    "patch_template": {
+    "patch_modes": {
+        "metadata_partial": (
+            "Partial edit: config holds ONLY metadata fields "
+            "(name/component_name, description, folder_name, folder_id). The live "
+            "root is smart-merged in place, so you change just those fields and "
+            "everything else is preserved verbatim."
+        ),
+        "structured_body": (
+            "Body edit: config must be the COMPLETE structured config the typed "
+            "builder for this component_type consumes (same contract as "
+            "build_integration's update path) — e.g. a connector edit needs "
+            "connector_type plus all required connection fields, a profile edit "
+            "needs profile_type plus its fields. The builder rebuilds its owned "
+            "subtree from that config; the #45/#50 merge then preserves encrypted "
+            "values and any unknown XML outside it. A body config that omits the "
+            "type discriminator or a required builder field is rejected (it is NOT "
+            "a field-level delta — only metadata fields support partial edits)."
+        ),
+    },
+    "patch_template_metadata": {
+        "config": {
+            "name": "(optional) new name",
+            "description": "(optional) new description",
+            "folder_name": "(optional) target folder",
+            "folder_id": "(optional) target folder id",
+        },
+    },
+    "patch_template_body": {
         "component_type": "(optional) defaults to the live component type",
         "config": {
-            "name": "(metadata) optional new name",
-            "description": "(metadata) optional new description",
-            "folder_name": "(metadata) optional target folder",
-            "host": "(example body field) structured field routed through the typed builder",
+            "connector_type": "database  # required discriminator for a connector body edit",
+            "component_name": "...  # plus EVERY field the typed builder requires",
+            "...": "full structured config (see get_schema_template operation='create' for the type)",
         },
         "map_context": {
             "source_index": "(transform.map body edits only)",
@@ -6933,18 +6959,25 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
 
         "prepare_component_edit": {
             "category": "Components",
-            "description": "Safe edit phase 1 (M9.7): pull an existing component, preview a structured patch, return a diff + confirmation_token. Read-only — no Boomi mutation.",
+            "description": (
+                "Safe edit phase 1 (M9.7): pull an existing component, preview a structured patch, "
+                "return a diff + confirmation_token. Read-only — no Boomi mutation. Metadata fields "
+                "(name/description/folder) support partial edits; body edits require the full typed-builder "
+                "config (see get_schema_template operation='create')."
+            ),
             "actions": ["prepare"],
             "read_only": True,
             "parameters": {
                 "profile": "str (required)",
                 "component_id": "str (required)",
-                "patch": "JSON str (required) — {\"component_type\"?, \"config\": {...}, \"map_context\"?}; raw config.xml is rejected",
+                "patch": "JSON str (required) — {\"component_type\"?, \"config\": {...}, \"map_context\"?}; metadata config = partial edit, body config = full builder config; raw config.xml is rejected",
                 "max_diff_lines": "int (optional, default 200)",
             },
             "examples": [
-                'prepare_component_edit(profile="prod", component_id="abc-123", patch=\'{"config": {"name": "Renamed"}}\')',
-                'prepare_component_edit(profile="prod", component_id="abc-123", patch=\'{"component_type": "connector-settings", "config": {"host": "db.internal"}}\')',
+                '# Partial metadata edit:',
+                'prepare_component_edit(profile="prod", component_id="abc-123", patch=\'{"config": {"name": "Renamed", "description": "updated"}}\')',
+                '# Body edit needs the FULL typed-builder config (connector_type + all fields), not a single field:',
+                'prepare_component_edit(profile="prod", component_id="abc-123", patch=\'{"component_type": "connector-settings", "config": {"connector_type": "database", "component_name": "...", "driver_id": "mysql", "host": "db.internal", "dbname": "app", "auth_mode": "username_password", "username": "svc", "credential_ref": "..."}}\')',
             ],
         },
         "apply_component_edit": {
