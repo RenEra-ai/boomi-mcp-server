@@ -4146,26 +4146,29 @@ _COMPONENT_SAFE_EDIT = {
             "a field-level delta — only metadata fields support partial edits)."
         ),
     },
+    # A copy-pasteable, structurally-valid patch (the simplest case: a partial
+    # metadata edit; component_type is optional and defaults to the live type).
+    # For a body edit, see body_edit_example below.
     "patch_template": {
-        "metadata_partial_edit": {
-            "config": {
-                "name": "(optional) new name",
-                "description": "(optional) new description",
-                "folder_name": "(optional) target folder",
-                "folder_id": "(optional) target folder id",
-            },
+        "config": {
+            "name": "(metadata edit) optional new name",
+            "description": "(metadata edit) optional new description",
+            "folder_name": "(metadata edit) optional target folder",
+            "folder_id": "(metadata edit) optional target folder id",
         },
-        "structured_body_edit": {
-            "component_type": "(optional) defaults to the live component type",
-            "config": {
-                "connector_type": "database  # required discriminator for a connector body edit",
-                "component_name": "...  # plus EVERY field the typed builder requires",
-                "...": "full structured config (see get_schema_template operation='create' for the type)",
-            },
-            "map_context": {
-                "source_index": "(transform.map body edits only)",
-                "target_index": "(transform.map body edits only)",
-            },
+    },
+    # A separate, full-config body edit (NOT a field-level delta): config must be
+    # the complete config the typed builder for this component_type consumes.
+    "body_edit_example": {
+        "component_type": "connector-settings",
+        "config": {
+            "connector_type": "database  # required type discriminator",
+            "component_name": "...  # plus EVERY field the typed builder requires",
+            "...": "full structured config (see get_schema_template operation='create' for the type)",
+        },
+        "map_context": {
+            "source_index": "(transform.map body edits only)",
+            "target_index": "(transform.map body edits only)",
         },
     },
     "workflow": [
