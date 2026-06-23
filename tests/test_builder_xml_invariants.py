@@ -229,22 +229,27 @@ def _build_function_map_xml() -> str:
 
 
 def test_inv_message_quote_escaping_handled_by_emitter():
-    # The caller hands raw JSON-payload text (quotes, angle brackets, ampersand,
-    # apostrophe); the emitter alone produces well-formed XML that round-trips.
-    payload = "'{\"status\":\"<a & b>\",\"q\":\"it's\"}'"
+    # The caller hands RAW JSON-payload text (quotes, angle brackets, ampersand,
+    # apostrophe); the emitter alone owns the MessageFormat quoting (#102 C3) —
+    # wrapping the JSON in single quotes and doubling the internal apostrophe —
+    # and produces well-formed XML that round-trips through the parser.
+    payload = "{\"status\":\"<a & b>\",\"q\":\"it's\"}"
     xml = ProcessFlowBuilder.build(
         _process_config(transform={"mode": "message", "message_text": payload}),
         name="P",
     )
     shapes = _parse_process_shapes(xml)
     msg = next(s for s in shapes if s.attrib["shapetype"] == "message")
-    assert msg.find("configuration/message/msgTxt").text == payload
+    assert (
+        msg.find("configuration/message/msgTxt").text
+        == "'{\"status\":\"<a & b>\",\"q\":\"it''s\"}'"
+    )
 
 
 def test_inv_message_combined_attr_not_combinedocuments():
     xml = ProcessFlowBuilder.build(
         _process_config(
-            transform={"mode": "message", "message_text": "'{\"a\":1}'"}
+            transform={"mode": "message", "message_text": "{\"a\":1}"}
         ),
         name="P",
     )
@@ -427,7 +432,7 @@ def test_inv_no_branch_shapes_emitted():
     # future Branch builder must add the lock when it lands).
     for cfg in (
         _process_config(),
-        _process_config(transform={"mode": "message", "message_text": "'{}'"}),
+        _process_config(transform={"mode": "message", "message_text": "{}"}),
         _process_config(transform={"mode": "map_ref", "map_ref": "M"}),
         _dynamic_path_config(),
         _notify_config(),

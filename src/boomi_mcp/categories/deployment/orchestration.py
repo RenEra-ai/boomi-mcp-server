@@ -123,6 +123,11 @@ TEST_REQUEST_ID_MISSING = "TEST_REQUEST_ID_MISSING"
 # ``require_test_logs=True`` and a test ran but its ProcessLog retrieval was absent/unavailable.
 TEST_LOGS_UNAVAILABLE = "TEST_LOGS_UNAVAILABLE"
 
+# Issue #102 B4 — an explicitly empty process-overrides set over a build whose process
+# declares environment extensions orphans those extension values (the deploy pushes an empty
+# override). Rejected before any SDK call.
+EMPTY_PROCESS_OVERRIDES_REJECTED = "EMPTY_PROCESS_OVERRIDES_REJECTED"
+
 # Failure-hardening + cleanup-planning codes (issue #65).
 # LOG_RETRIEVAL_FAILED / ARTIFACT_RETRIEVAL_FAILED are *diagnostic* — they annotate the logs
 # stage but never flip ``_success`` to False. CLEANUP_OPERATION_FAILED is recorded only when
@@ -176,6 +181,11 @@ class OrchestrateDeployRequest(BaseModel):
     # ``bool`` (lax coercion is acceptable) — unlike ``cleanup_on_failure`` this flag triggers NO
     # destruction; the wrapper still validates it as a real bool before any SDK call.
     require_test_logs: bool = False
+    # Issue #102 B4 — process-overrides supplied for the deploy. ``None`` = "not supplied"
+    # (existing environment-extension values are preserved). An explicitly empty ``{}`` over a
+    # process that declares extensions is rejected (EMPTY_PROCESS_OVERRIDES_REJECTED) because it
+    # would orphan those extension values. Inspected only — this issue does not mutate extensions.
+    process_overrides: Optional[Dict[str, Any]] = None
 
 
 class ComponentSummaryEntry(BaseModel):
@@ -560,6 +570,35 @@ def _resolve_build_deployment_target(
         component_summary=_build_component_summary(components, results, execution_order),
     )
     return target, None
+
+
+def _build_declares_process_extensions(build_id: str) -> bool:
+    """True when a recorded build's process declares environment extensions (#102 B4).
+
+    Read-only registry scan: a process component whose ``config.process_extensions``
+    carries connection / property / cross-reference override declarations. Used to gate
+    the empty-process-overrides deploy guard. Tolerant of a missing/malformed registry
+    entry (returns False).
+    """
+    entry = integration_builder._BUILD_REGISTRY.get(build_id)
+    if not isinstance(entry, dict):
+        return False
+    spec = entry.get("spec")
+    components = spec.get("components") if isinstance(spec, dict) else None
+    if not isinstance(components, list):
+        return False
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+        config = comp.get("config")
+        if not isinstance(config, dict):
+            continue
+        ext = config.get("process_extensions")
+        if isinstance(ext, dict) and any(
+            bool(ext.get(k)) for k in ("connections", "properties", "process_properties", "cross_references")
+        ):
+            return True
+    return False
 
 
 def _error_response(
@@ -2669,6 +2708,7 @@ def orchestrate_deploy_action(
     test_fetch_artifacts: bool = True,
     test_log_fetch_content: bool = True,
     require_test_logs: bool = False,
+    process_overrides: Optional[Dict[str, Any]] = None,
     creds: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Resolve a build, then plan (dry-run) or package/deploy/bind/schedule it (#60/#61/#62).
@@ -2721,6 +2761,7 @@ def orchestrate_deploy_action(
             test_fetch_artifacts=test_fetch_artifacts,
             test_log_fetch_content=test_log_fetch_content,
             require_test_logs=require_test_logs,
+            process_overrides=process_overrides,
         )
     except ValidationError as exc:
         return _error_response(
@@ -2769,9 +2810,52 @@ def orchestrate_deploy_action(
     if schedule_override_error is not None:
         return _error_response(schedule_override_error.message, [schedule_override_error])
 
+    # 2c. Build-basics deploy guards (issue #102). Read-only registry inspection, before any
+    #     SDK call, in BOTH dry-run and real-run.
+    declares_extensions = _build_declares_process_extensions(build_id)
+    process_overrides = request.process_overrides
+    # B4 — an EXPLICITLY empty process-overrides set over a process that declares extensions
+    #      would orphan those values. Reject fail-fast. (None = "not supplied" is fine — it
+    #      preserves existing extension values; only an explicit empty {} is rejected.)
+    if (
+        isinstance(process_overrides, dict)
+        and not process_overrides
+        and declares_extensions
+    ):
+        return _error_response(
+            "Empty process_overrides over a process that declares environment extensions.",
+            [
+                _error(
+                    EMPTY_PROCESS_OVERRIDES_REJECTED,
+                    "process_overrides was supplied as an empty set, but this build's process "
+                    "declares environment extensions. Deploying empty overrides orphans those "
+                    "extension values. Supply the intended overrides, or omit process_overrides "
+                    "to preserve the existing environment-extension values.",
+                    field="process_overrides",
+                    details={"build_id": build_id},
+                )
+            ],
+        )
+    # F1 + B4 steering warnings (advisory, never block). Surfaced on the dry-run plan where
+    # they are actionable before the caller commits to a real deploy.
+    steering_warnings: List[str] = []
+    if run_test and not require_test_logs:
+        steering_warnings.append(
+            "[REQUIRE_TEST_LOGS_RECOMMENDED] run_test=true without require_test_logs=true: a "
+            "terminal COMPLETE status is NOT behavioral verification. Set require_test_logs=true "
+            "so a missing/unavailable ProcessLog after the test fails the orchestration instead "
+            "of passing silently."
+        )
+    if declares_extensions and process_overrides is None:
+        steering_warnings.append(
+            "[PROCESS_OVERRIDES_NOT_SUPPLIED] this build's process declares environment "
+            "extensions but no process_overrides were supplied; the deploy preserves the "
+            "existing environment-extension values and does not set them."
+        )
+
     # 3a. Dry-run: assemble the plan-only response without any SDK call.
     if dry_run:
-        return _plan_response(
+        plan = _plan_response(
             profile=profile,
             build_id=build_id,
             target=target,
@@ -2781,6 +2865,9 @@ def orchestrate_deploy_action(
             run_test=run_test,
             package_version=package_version,
         )
+        if steering_warnings:
+            plan.setdefault("warnings", []).extend(steering_warnings)
+        return plan
 
     # 3b. Real run: a Boomi client is required to package/deploy.
     effective_version = _effective_package_version(package_version, build_id)

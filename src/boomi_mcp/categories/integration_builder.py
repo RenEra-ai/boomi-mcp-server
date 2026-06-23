@@ -10,10 +10,12 @@ This module provides a single action router that can:
 from __future__ import annotations
 
 import copy
+import ipaddress
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 # Matches `subType="database"` and `subType='database'` with any (or no)
@@ -57,6 +59,21 @@ _COMPONENT_NAME_PRIMARY_TYPES = frozenset({
 # Copy-induced numeric suffix: a display name ending in whitespace then 1 or 2
 # (Integration's "... 1"/"... 2" clone artifacts).
 _COPY_SUFFIX_NAME_RE = re.compile(r".+\s(?:1|2)$")
+
+# Issue #102 (M9.8) — mechanical integration-build basics promoted from served
+# doctrine to plan-time guards. New hard-failure planned_actions (B3 env-var
+# tokens reuse the existing database/REST validation actions):
+_DUPLICATE_CONNECTION_ERROR_ACTION = "error_duplicate_connection"  # A1
+# A literal ${ENV_VAR}-style token in a connection field (B3). Boomi stores it
+# verbatim in the component XML and never interpolates it at runtime, so it is a
+# silent auth/routing failure — rejected at plan time.
+_ENV_VAR_TOKEN_RE = re.compile(r"\$\{[^}]*\}")
+# DEV/TEST/PROD encoded in a component name (Group D: environment lives in
+# atoms/folders/extensions, never in a name). Word-boundary, case-insensitive.
+_ENV_IN_NAME_RE = re.compile(r"\b(dev|test|prod|qa|stage|staging|uat)\b", re.IGNORECASE)
+# Group D2 — document/process property names: ``DPP_``/``DDP_`` + UPPER_SNAKE,
+# no period.
+_PROPERTY_NAME_RE = re.compile(r"^(?:DPP_|DDP_)[A-Z0-9_]+$")
 
 # Issue #82 (M9.6) — cheap, string-level script lints surfaced as plan-time
 # WARNINGS (never errors, never blocking). They mirror two Companion
@@ -2937,6 +2954,13 @@ def _lint_component_names(spec: IntegrationSpecV1) -> Dict[str, Any]:
     warnings: List[str] = []
 
     naming = spec.naming if isinstance(spec.naming, dict) else {}
+    # Issue #102 D1 — the bracketed account naming convention is an OPT-IN
+    # chosen convention (Boomi mandates no single style). Per-type bracketed
+    # checks run only when it is explicitly activated, and only as warnings.
+    convention_active = (
+        isinstance(naming.get("convention"), str)
+        and naming["convention"].strip().lower() == "bracketed"
+    )
     raw_pattern = naming.get("component_name_pattern")
     compiled_pattern = None
     if raw_pattern is not None:
@@ -3026,7 +3050,389 @@ def _lint_component_names(spec: IntegrationSpecV1) -> Dict[str, Any]:
                 "(governance_pattern:descriptive_unique_component_names)."
             )
 
+        # Issue #102 D1: bracketed-convention per-type flag (opt-in, warning,
+        # never a rewrite).
+        if convention_active:
+            bracketed = _bracketed_naming_warning(comp, name)
+            if bracketed is not None:
+                warnings.append(bracketed)
+
     return {"errors": errors, "warnings": warnings}
+
+
+def _is_ip_literal(host: str) -> bool:
+    """True when ``host`` is an IPv4/IPv6 literal (stdlib ``ipaddress``)."""
+    try:
+        ipaddress.ip_address(host.strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _connection_endpoint_key(
+    comp: "IntegrationComponentSpec", role: str
+) -> Optional[Tuple[Any, ...]]:
+    """Normalized endpoint identity for an in-spec connection (#102 A1).
+
+    Returns a hashable key that is equal for two connections that target the
+    same physical endpoint, or ``None`` when the endpoint cannot be derived from
+    the typed config (raw XML / missing fields). REST keys on scheme + host +
+    effective port; DB keys on host + port + driver family.
+    """
+    config = comp.config if isinstance(comp.config, dict) else {}
+    if role == "REST Client connector-settings":
+        base_url = config.get("base_url")
+        if not isinstance(base_url, str) or not base_url.strip():
+            return None
+        try:
+            parts = urlsplit(base_url.strip())
+            host = (parts.hostname or "").lower()
+            scheme = (parts.scheme or "").lower()
+            port = parts.port
+        except ValueError:
+            return None
+        if not host:
+            return None
+        if port is None:
+            port = {"https": 443, "http": 80}.get(scheme)
+        return ("rest", scheme, host, port)
+    if role == "database connector-settings":
+        host = config.get("host")
+        if not isinstance(host, str) or not host.strip():
+            return None
+        port = config.get("port")
+        port_str = str(port).strip() if port is not None else ""
+        driver = config.get("driver_id")
+        driver_str = driver.strip().lower() if isinstance(driver, str) else ""
+        return ("db", host.strip().lower(), port_str, driver_str)
+    return None
+
+
+def _connection_auth_compatible(
+    a: "IntegrationComponentSpec", b: "IntegrationComponentSpec"
+) -> bool:
+    """True when two same-endpoint connections share auth/security config (#102 A1).
+
+    Only the auth-relevant fields are compared; a mismatch means the two
+    connections are genuinely different and must not be silently aliased.
+    """
+    ca = a.config if isinstance(a.config, dict) else {}
+    cb = b.config if isinstance(b.config, dict) else {}
+    for key in ("auth_mode", "credential_ref", "username"):
+        if (ca.get(key) or None) != (cb.get(key) or None):
+            return False
+    return True
+
+
+def _is_lintable_create_connection(
+    comp: "IntegrationComponentSpec",
+) -> Optional[str]:
+    """Return the connector-settings role for a lint-eligible CREATE connection.
+
+    Skips non-creates, ``reference_only`` reuse, and raw-XML creates (the author
+    owns the XML body). Returns ``"database connector-settings"`` /
+    ``"REST Client connector-settings"`` or ``None``.
+    """
+    if comp.action != "create":
+        return None
+    config = comp.config if isinstance(comp.config, dict) else {}
+    if config.get("reference_only"):
+        return None
+    if isinstance(config.get("xml"), str) and config["xml"].strip():
+        return None
+    return _classify_connector_settings(comp)
+
+
+def _lint_duplicate_connections(spec: IntegrationSpecV1) -> Dict[str, Any]:
+    """In-spec duplicate-connection guard (#102 A1).
+
+    Two create connections to the same endpoint burn separate connection
+    licenses and drift apart. Returns ``{"errors": {key: validation_error},
+    "aliases": {duplicate_key: canonical_key}, "warnings": [str, ...]}``:
+
+      * same endpoint + compatible auth → alias the duplicate to the canonical
+        connection (recorded in ``aliases``) + a WARNING; emission is not
+        rewritten here (account-wide reuse is #83).
+      * same endpoint + incompatible auth → HARD ``DUPLICATE_CONNECTION_CONFLICT``.
+    """
+    errors: Dict[str, Dict[str, Any]] = {}
+    aliases: Dict[str, str] = {}
+    warnings: List[str] = []
+    canonical: Dict[Tuple[Any, ...], "IntegrationComponentSpec"] = {}
+    for comp in spec.components:
+        role = _is_lintable_create_connection(comp)
+        if role is None:
+            continue
+        key = _connection_endpoint_key(comp, role)
+        if key is None:
+            continue
+        canon = canonical.get(key)
+        if canon is None:
+            canonical[key] = comp
+            continue
+        field = "base_url" if role == "REST Client connector-settings" else "host"
+        if _connection_auth_compatible(comp, canon):
+            aliases[comp.key] = canon.key
+            warnings.append(
+                f"Connection '{comp.key}' targets the same endpoint as "
+                f"'{canon.key}' with compatible auth; a second connection "
+                "component burns a separate connection license. Reference the "
+                f"canonical connection '{canon.key}' instead of creating a "
+                "duplicate (see connection_aliases)."
+            )
+        else:
+            errors[comp.key] = {
+                "error_code": "DUPLICATE_CONNECTION_CONFLICT",
+                "error": (
+                    f"Connection '{comp.key}' targets the same endpoint as "
+                    f"'{canon.key}' but with incompatible auth/security config. "
+                    "Two connections to one endpoint burn separate licenses and "
+                    "drift; reconcile them into a single connection."
+                ),
+                "field": field,
+            }
+    return {"errors": errors, "aliases": aliases, "warnings": warnings}
+
+
+def _lint_connection_hygiene(spec: IntegrationSpecV1) -> List[str]:
+    """Advisory connection-hygiene lints (#102 A2 FQDN-not-IP, A3 minimal).
+
+    Warning-only — never blocks emission. Flags IP-literal endpoints (IPs
+    change) and per-call values placed on the connection that belong on the
+    operation/step or an environment extension.
+    """
+    warnings: List[str] = []
+    for comp in spec.components:
+        role = _is_lintable_create_connection(comp)
+        if role is None:
+            continue
+        config = comp.config if isinstance(comp.config, dict) else {}
+        if role == "REST Client connector-settings":
+            base_url = config.get("base_url")
+            if isinstance(base_url, str) and base_url.strip():
+                try:
+                    parts = urlsplit(base_url.strip())
+                    host = parts.hostname or ""
+                    path = parts.path or ""
+                    query = parts.query or ""
+                except ValueError:
+                    host = path = query = ""
+                if host and _is_ip_literal(host):
+                    warnings.append(
+                        f"[CONNECTION_ENDPOINT_IP_LITERAL] Connection '{comp.key}' "
+                        f"base_url targets IP literal '{host}'; prefer an FQDN — "
+                        "IP addresses change and break the connection."
+                    )
+                if (path and path not in ("", "/")) or query:
+                    warnings.append(
+                        f"[CONNECTION_BASE_URL_HAS_PATH] Connection '{comp.key}' "
+                        "base_url carries a resource path/query; per-call routing "
+                        "belongs on the operation/step, not the connection."
+                    )
+            percall = [
+                f for f in ("request_headers", "query_parameters", "path", "resource_path")
+                if config.get(f)
+            ]
+            if percall:
+                warnings.append(
+                    f"[CONNECTION_CARRIES_PER_CALL_FIELDS] Connection '{comp.key}' "
+                    f"carries per-call field(s) {percall} that belong on the "
+                    "operation/step or an environment extension."
+                )
+        elif role == "database connector-settings":
+            host = config.get("host")
+            if isinstance(host, str) and host.strip() and _is_ip_literal(host):
+                warnings.append(
+                    f"[CONNECTION_ENDPOINT_IP_LITERAL] Connection '{comp.key}' host "
+                    f"is IP literal '{host.strip()}'; prefer an FQDN — IP "
+                    "addresses change and break the connection."
+                )
+            percall = [f for f in ("query", "sql", "statement", "batch_count") if config.get(f)]
+            if percall:
+                warnings.append(
+                    f"[CONNECTION_CARRIES_PER_CALL_FIELDS] Connection '{comp.key}' "
+                    f"carries per-call field(s) {percall} that belong on the "
+                    "operation/step."
+                )
+    return warnings
+
+
+def _find_env_var_token(value: Any, path: str = "") -> Optional[Tuple[str, str]]:
+    """First ``(field_path, value)`` whose string carries a ``${...}`` token, else None.
+
+    Recurses dicts/lists so a token nested inside (e.g.) a pooling sub-block is
+    still caught. The ``xml`` raw-body key is skipped (author-owned).
+    """
+    if isinstance(value, str):
+        if _ENV_VAR_TOKEN_RE.search(value):
+            return (path or "<root>", value)
+        return None
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if k == "xml":
+                continue
+            child = f"{path}.{k}" if path else str(k)
+            found = _find_env_var_token(v, child)
+            if found is not None:
+                return found
+        return None
+    if isinstance(value, list):
+        for i, v in enumerate(value):
+            found = _find_env_var_token(v, f"{path}[{i}]")
+            if found is not None:
+                return found
+    return None
+
+
+def _lint_env_var_tokens(spec: IntegrationSpecV1) -> Dict[str, Tuple[Dict[str, Any], str]]:
+    """Reject literal ``${ENV_VAR}`` tokens in connection fields (#102 B3).
+
+    Returns ``{component_key: (validation_error, role)}``. Boomi stores the
+    literal token verbatim in the component XML and never interpolates it, so a
+    deployed connection silently hits the wrong endpoint / fails auth. HARD —
+    routes through the existing database/REST validation fail-fast actions.
+    """
+    errors: Dict[str, Tuple[Dict[str, Any], str]] = {}
+    for comp in spec.components:
+        role = _is_lintable_create_connection(comp)
+        if role is None:
+            continue
+        config = comp.config if isinstance(comp.config, dict) else {}
+        found = _find_env_var_token(config)
+        if found is None:
+            continue
+        field, value = found
+        errors[comp.key] = (
+            {
+                "error_code": "ENV_VAR_LITERAL_REJECTED",
+                "error": (
+                    f"Connection '{comp.key}' field '{field}' contains a literal "
+                    f"${{…}} token ({value!r}). Boomi stores it verbatim in the "
+                    "component XML and never interpolates it at runtime, so the "
+                    "connection silently fails. Use a credential reference or an "
+                    "environment extension override instead of a shell-style token."
+                ),
+                "field": field,
+            },
+            role,
+        )
+    return errors
+
+
+def _lint_folder_placement(spec: IntegrationSpecV1) -> List[str]:
+    """Folder-on-create lint (#102 E1) — prevents SILENT account-root placement.
+
+    Flags every CREATE component that resolves to neither a ``folder_id`` nor a
+    ``folder_name`` (it would land in the account root). Reference-only reuse and
+    raw-XML creates (author owns placement) are exempt.
+
+    WARNING, not a hard failure: folderless creates are a pervasive, currently-
+    valid pattern across the typed builders and archetypes (the
+    ``database_to_api_sync`` archetype treats ``folder_path`` as optional by
+    design), so blocking them would be a backward-incompatible break of shipped
+    behavior. The issue specified a hard guard; this surfaces the same risk
+    loudly on every offending create — root placement is never silent — without
+    rejecting existing builds. Promotion to a hard failure is gated behind a
+    future folder-required opt-in / archetype contract change.
+    """
+    warnings: List[str] = []
+    for comp in spec.components:
+        if comp.action != "create":
+            continue
+        config = comp.config if isinstance(comp.config, dict) else {}
+        if config.get("reference_only"):
+            continue
+        if isinstance(config.get("xml"), str) and config["xml"].strip():
+            continue
+        folder_id = config.get("folder_id")
+        folder_name = config.get("folder_name")
+        has_folder = (isinstance(folder_id, str) and folder_id.strip()) or (
+            isinstance(folder_name, str) and folder_name.strip()
+        )
+        if not has_folder:
+            warnings.append(
+                f"[FOLDER_REQUIRED_ON_CREATE] Component '{comp.key}' is created "
+                "with no folder_id or folder_name and would land in the account "
+                "root. Set a resolved folder so components are organized, never "
+                "at root."
+            )
+    return warnings
+
+
+def _lint_property_names(spec: IntegrationSpecV1) -> List[str]:
+    """Property-naming lint (#102 D2): ``DPP_``/``DDP_`` UPPER_SNAKE, no period.
+
+    Warning-only. Today the typed builders emit a property name via the dynamic
+    document-property path (``dynamic_path.ddp_name`` → ``dynamicdocument.<name>``);
+    flag a name that does not match the document-property convention.
+    """
+    warnings: List[str] = []
+    for comp in spec.components:
+        if comp.action != "create":
+            continue
+        config = comp.config if isinstance(comp.config, dict) else {}
+        dynamic_path = config.get("dynamic_path")
+        if not isinstance(dynamic_path, dict):
+            continue
+        ddp_name = dynamic_path.get("ddp_name")
+        if not isinstance(ddp_name, str) or not ddp_name.strip():
+            continue
+        name = ddp_name.strip()
+        if "." in name or not _PROPERTY_NAME_RE.match(name):
+            warnings.append(
+                f"[PROPERTY_NAMING] Component '{comp.key}' document property "
+                f"'{name}' does not follow the DDP_/DPP_ UPPER_SNAKE convention "
+                "(no period) — e.g. 'DDP_REST_PATH'."
+            )
+    return warnings
+
+
+def _bracketed_naming_warning(comp: "IntegrationComponentSpec", name: str) -> Optional[str]:
+    """One bracketed-convention warning for ``comp`` (#102 D1), or None.
+
+    Chosen-convention (Boomi does not mandate this style), so warning-only and
+    flag-don't-rewrite. Patterns per component type — process
+    ``[Source] Action DataType [Target]`` (or ``SUB ...`` subprocess), operation
+    ``[System] Object Action``, profile ``[System] Object <TYPE>``, map
+    ``<from> to <to>``, connection a short system token with no DEV/TEST/PROD.
+    """
+    ctype = _effective_component_type(comp)
+    config = comp.config if isinstance(comp.config, dict) else {}
+
+    def _flag(detail: str) -> str:
+        return (
+            f"[NAMING_CONVENTION_BRACKETED] Component '{comp.key}' name '{name}' "
+            f"{detail} (bracketed account naming convention is active; this is a "
+            "flag, not a rewrite)."
+        )
+
+    if ctype == "process":
+        kind = str(config.get("process_kind") or config.get("process_type") or "").strip().lower()
+        if kind == "wrapper_subprocess":
+            if not name.startswith("SUB "):
+                return _flag("should start with the 'SUB ' subprocess prefix")
+            return None
+        # Top-level process: [Source] Action DataType [Target].
+        if not (re.match(r"^\[[^\]]+\].*\[[^\]]+\]\s*$", name) or name.startswith("SUB ")):
+            return _flag("should be '[Source] Action DataType [Target]'")
+        return None
+    if ctype == "connector-action":
+        if not name.startswith("["):
+            return _flag("should be '[System] Object Action'")
+        return None
+    if ctype in ("profile.db", "profile.json", "profile.xml", "profile.edi", "profile.flatfile"):
+        if not name.startswith("["):
+            return _flag("should be '[System] Object <XML|JSON|FF|DB|EDI>'")
+        return None
+    if ctype == "transform.map":
+        if " to " not in name:
+            return _flag("should be '<from> to <to>'")
+        return None
+    if ctype == "connector-settings":
+        if _ENV_IN_NAME_RE.search(name):
+            return _flag("encodes an environment (DEV/TEST/PROD/...) — environment lives in atoms/folders/extensions, never the name")
+        return None
+    return None
 
 
 def _collect_script_bodies(
@@ -4224,13 +4630,64 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             "'governance_pattern:encode_metadata_in_component_names')."
         )
 
+    # ------------------------------------------------------------------
+    # Issue #102 (M9.8) — mechanical integration-build basics. Each guard flags
+    # its CREATE steps using the same pattern as the name-governance lint above:
+    # only a create/create_clone step with no earlier (more specific) validation
+    # error is converted to an error planned_action; advisory lints append to
+    # ``warnings`` and never block emission.
+    # ------------------------------------------------------------------
+    def _flag_step(comp_key: str, action: str, lint_error: Dict[str, Any]) -> bool:
+        step = steps_by_key.get(comp_key)
+        if step is None:
+            return False
+        if step.get("planned_action") not in ("create", "create_clone"):
+            return False
+        if step.get("validation_error") is not None:
+            return False
+        step["planned_action"] = action
+        step["validation_error"] = lint_error
+        return True
+
+    # A1 — in-spec duplicate-connection guard (hard conflict / aliased warning).
+    dup = _lint_duplicate_connections(spec)
+    warnings.extend(dup["warnings"])
+    connection_aliases = dup["aliases"]
+    flagged_dup_keys = [
+        comp_key
+        for comp_key, lint_error in dup["errors"].items()
+        if _flag_step(comp_key, _DUPLICATE_CONNECTION_ERROR_ACTION, lint_error)
+    ]
+    if flagged_dup_keys:
+        warnings.append(
+            f"Connection(s) {flagged_dup_keys} duplicate an in-spec endpoint with "
+            "incompatible auth and were rejected (each duplicate burns a separate "
+            "connection license)."
+        )
+
+    # B3 — reject literal ${ENV_VAR} tokens in connection fields (reuses the
+    # existing database/REST validation fail-fast actions).
+    for comp_key, (lint_error, role) in _lint_env_var_tokens(spec).items():
+        action = (
+            "error_rest_validation"
+            if role == "REST Client connector-settings"
+            else "error_database_validation"
+        )
+        _flag_step(comp_key, action, lint_error)
+
+    # A2/A3 + E1 + D2 — advisory connection-hygiene, folder-placement, and
+    # property-naming lints (warnings only, never block emission).
+    warnings.extend(_lint_connection_hygiene(spec))
+    warnings.extend(_lint_folder_placement(spec))
+    warnings.extend(_lint_property_names(spec))
+
     # Issue #82 (M9.6) — cheap script lints. Warn (never block) on
     # script.processing bodies missing dataContext.storeStream(...) and on
     # over-long inline scripts. Purely additive to ``warnings``; never touches
     # steps / planned_action / validation_error / unresolvable_steps.
     warnings.extend(_lint_script_bodies(spec))
 
-    return {
+    result = {
         "_success": True,
         "integration_spec": spec.model_dump(),
         "conflict_policy": conflict_policy,
@@ -4238,6 +4695,9 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         "steps": steps,
         "warnings": warnings or None,
     }
+    if connection_aliases:
+        result["connection_aliases"] = connection_aliases
+    return result
 
 
 def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -4267,6 +4727,9 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # Issue #93: a name-governance failure blocks apply before any
             # mutation (names only — folder/role governance is GUI-only).
             _NAME_GOVERNANCE_ERROR_ACTION,
+            # Issue #102 A1: an in-spec duplicate-connection conflict (incompatible
+            # auth) blocks apply before any mutation.
+            _DUPLICATE_CONNECTION_ERROR_ACTION,
         )
     ]
     if unresolvable_steps:
@@ -4347,6 +4810,17 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' failed "
                     f"name governance: "
                     f"{ve.get('error_code', 'COMPONENT_NAME_GOVERNANCE_FAILED')} "
+                    f"on field {ve.get('field')!r}. "
+                    f"{ve.get('error', '')}".rstrip()
+                )
+            elif step["planned_action"] == _DUPLICATE_CONNECTION_ERROR_ACTION:
+                # Issue #102 A1: an in-spec duplicate-connection conflict blocks
+                # apply before any mutation.
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed the "
+                    f"duplicate-connection guard: "
+                    f"{ve.get('error_code', 'DUPLICATE_CONNECTION_CONFLICT')} "
                     f"on field {ve.get('field')!r}. "
                     f"{ve.get('error', '')}".rstrip()
                 )

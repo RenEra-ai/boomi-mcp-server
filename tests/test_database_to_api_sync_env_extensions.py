@@ -122,6 +122,53 @@ def test_reuse_mode_emits_no_declaration():
     assert "process_extensions" not in mp.config
 
 
+def _rest_conn_entry(mp):
+    conns = mp.config["process_extensions"]["connections"]
+    rest = [c for c in conns if c["connector_type"] == "rest"]
+    assert len(rest) == 1
+    return rest[0]
+
+
+def _reuse_rest_payload(**ext):
+    # Reuse-mode REST target = an existing, already-authenticated connection; this
+    # is the supported path for an authenticated REST target (create-mode authed
+    # REST is rejected upstream). The DB source stays create-mode so a DB
+    # extension is also emitted.
+    p = {"target": {
+        "binding": {"mode": "reuse", "component_id": "EXISTING-REST-CONN"},
+        "send_request": {"method": "POST", "path": "/v1/items"},
+        "payload_profile": _PAYLOAD["target"]["payload_profile"],
+    }}
+    if ext:
+        p["environment_extensions"] = ext
+    return _payload(**p)
+
+
+def test_reuse_rest_target_declares_rest_credential_extension():
+    # Issue #102 B1: a reuse-mode (authenticated) REST target externalizes its
+    # credential as a per-environment override (id-keyed, no xpath).
+    mp = _main_process(_emit(_reuse_rest_payload()))
+    rest = _rest_conn_entry(mp)
+    assert rest["connection_id"].startswith("$ref:")
+    assert [f["id"] for f in rest["fields"]] == ["username", "password"]
+    # REST overrides key purely by field id — no xpath.
+    assert all("xpath" not in f for f in rest["fields"])
+
+
+def test_reuse_rest_target_endpoint_opt_in_adds_base_url():
+    mp = _main_process(_emit(_reuse_rest_payload(rest_endpoint_connection_fields=True)))
+    rest = _rest_conn_entry(mp)
+    assert [f["id"] for f in rest["fields"]] == ["url", "username", "password"]
+
+
+def test_unauthenticated_rest_target_declares_no_rest_extension():
+    # Default payload uses REST create-mode auth_mode='none' — no credential to
+    # externalize and endpoint opt-in off, so no REST extension is declared.
+    mp = _main_process(_emit(_payload()))
+    conns = mp.config["process_extensions"]["connections"]
+    assert all(c["connector_type"] != "rest" for c in conns)
+
+
 def test_emitted_config_carries_no_secret_value():
     mp = _main_process(_emit(_payload()))
     pe = mp.config["process_extensions"]

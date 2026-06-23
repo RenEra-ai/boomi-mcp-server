@@ -66,6 +66,29 @@ def test_minimum_required_fields_produce_valid_xml():
     assert root.attrib["folderName"] == "Home"
 
 
+def test_set_by_extension_placeholder_round_trips_for_username():
+    """Issue #102 B2: a non-secret extension-bound field (username) may carry the
+    SET_BY_EXTENSION fail-fast placeholder — it validates, emits verbatim, and is
+    not flagged as a plaintext secret."""
+    from src.boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    cfg = _minimal_config(username=SET_BY_EXTENSION)
+    assert DatabaseConnectorBuilder.validate_config(cfg) is None
+    assert DatabaseConnectorBuilder.scan_forbidden_secret_fields(cfg) is None
+    xml = _build_minimal(username=SET_BY_EXTENSION)
+    settings = ET.fromstring(xml).find("bns:object/DatabaseConnectionSettings", NS)
+    assert settings.attrib["username"] == "SET_BY_EXTENSION"
+
+
+def test_set_by_extension_never_substitutes_for_a_secret():
+    """The placeholder is for NON-secret fields only — a secret-shaped field
+    (password) is still rejected outright, never replaced by the placeholder."""
+    from src.boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    with pytest.raises(BuilderValidationError):
+        DatabaseConnectorBuilder().build(**_minimal_config(password=SET_BY_EXTENSION))
+
+
 def test_encrypted_password_block_marked_unset():
     xml = _build_minimal()
     root = ET.fromstring(xml)

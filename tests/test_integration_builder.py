@@ -6186,7 +6186,10 @@ class TestVerifyProcessGraph:
 
         comp = _comp(key="p1", name="Proc", comp_type="process")
         self._seed_build("graph-warn", [comp], {"p1": {"component_id": "id-p1"}})
-        warn_xml = self._fixture("stop_missing_continue.xml")
+        # A display-attribute lint is warning-only (issue #102 promoted the bare
+        # <stop/> STOP_CONTINUE_MISSING lint to a hard error, so this verifies the
+        # warning-only path with a still-advisory fixture).
+        warn_xml = self._fixture("missing_display_attrs.xml")
         with patch(
             "src.boomi_mcp.categories.integration_builder.component_get_xml",
             return_value={"type": "process", "xml": warn_xml},
@@ -6201,7 +6204,7 @@ class TestVerifyProcessGraph:
         assert "error_code" not in record
         assert record["process_graph"]["errors"] == []
         assert record["process_graph"]["warnings"]
-        assert "STOP_CONTINUE_MISSING" in {
+        assert "DISPLAY_ATTRIBUTE_MISSING" in {
             w["code"] for w in record["process_graph"]["warnings"]
         }
 

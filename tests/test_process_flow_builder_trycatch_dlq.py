@@ -235,7 +235,7 @@ def test_error_subprocess_emits_terminal_processcall():
 def test_transform_is_inside_try_path():
     cfg = _config(
         {"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
-        transform={"mode": "message", "message_text": "'{\"k\":1}'"},
+        transform={"mode": "message", "message_text": "{\"k\":1}"},
     )
     _, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
     # Try chain now: source -> message -> target -> stop, all inside Try.

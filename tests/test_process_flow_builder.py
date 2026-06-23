@@ -299,9 +299,11 @@ def test_every_dragpoint_target_resolves_to_a_real_shape():
 # ---------------------------------------------------------------------------
 
 def test_message_transform_inserts_message_shape_between_source_and_target():
+    # Issue #102 C3: the caller hands RAW JSON; the emitter owns MessageFormat
+    # quoting and wraps it in single quotes so its braces are not read as {N}.
     cfg = _base_config(transform={
         "mode": "message",
-        "message_text": "'{\"status\":\"CLSD\"}'",
+        "message_text": "{\"status\":\"CLSD\"}",
     })
     xml = ProcessFlowBuilder.build(cfg, name="With Message")
     _, _, shapes = _parse_process(xml)
@@ -322,8 +324,28 @@ def test_message_text_is_xml_escaped():
     xml = ProcessFlowBuilder.build(cfg, name="N")
     _, _, shapes = _parse_process(xml)
     # ElementTree decodes the escaped text back to its raw form, which
-    # proves the encoder produced well-formed XML.
+    # proves the encoder produced well-formed XML. Non-JSON text with no
+    # apostrophes is unchanged by the MessageFormat escaper.
     assert shapes[2].find("configuration/message/msgTxt").text == "<x a=\"&b\">"
+
+
+def test_message_text_apostrophe_doubled_by_emitter():
+    # Issue #102 C3: a literal apostrophe in plain message text is doubled so it
+    # renders (Boomi strips a lone single quote) and does not escape the rest of
+    # the message. Not JSON -> not wrapped.
+    cfg = _base_config(transform={"mode": "message", "message_text": "today's date {1}"})
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    assert shapes[2].find("configuration/message/msgTxt").text == "today''s date {1}"
+
+
+def test_message_text_json_with_apostrophe_wrapped_and_doubled():
+    # Issue #102 C3: raw JSON is wrapped in single quotes AND its internal
+    # apostrophe is doubled (so the wrap is not broken by the inner quote).
+    cfg = _base_config(transform={"mode": "message", "message_text": "{\"q\":\"it's\"}"})
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    assert shapes[2].find("configuration/message/msgTxt").text == "'{\"q\":\"it''s\"}'"
 
 
 def test_map_ref_transform_inserts_map_shape_with_map_id():
@@ -899,6 +921,32 @@ def _canon(elem_or_xml) -> str:
     return ET.canonicalize(elem_or_xml, strip_text=True)
 
 
+def test_build_emits_rest_id_keyed_override_without_xpath():
+    """Issue #102 B1: a REST Client override keys purely by field id and emits NO
+    xpath attribute — live_verified from the `Rest Example` process export."""
+    cfg = _base_config(
+        process_extensions={
+            "connections": [
+                {
+                    "connection_id": _DB_CONN_ID,  # any resolvable id; REST shape under test
+                    "connector_type": "rest",
+                    "fields": [
+                        {"id": "url", "label": "Base URL"},
+                        {"id": "username", "label": "User"},
+                        {"id": "password", "label": "Password"},
+                    ],
+                }
+            ]
+        }
+    )
+    root = ET.fromstring(ProcessFlowBuilder.build(cfg, name="REST Ext"))
+    fields = root.findall("bns:processOverrides/Overrides/Connections/ConnectionOverride/field", NS)
+    assert [f.attrib["id"] for f in fields] == ["url", "username", "password"]
+    for f in fields:
+        assert f.attrib["overrideable"] == "true"
+        assert "xpath" not in f.attrib  # REST overrides carry no xpath
+
+
 def test_build_emits_connection_field_environment_extensions():
     xml = ProcessFlowBuilder.build(_extension_config(), name="Ext Process")
     root = ET.fromstring(xml)
@@ -1005,7 +1053,9 @@ def test_build_update_discards_emitted_declaration_preserving_live_overrides():
         {"connections": [{"connection_id": "", "fields": _EXTENSION_FIELDS}]},
         {"connections": [{"connection_id": _DB_CONN_ID, "fields": []}]},
         {"connections": [{"connection_id": _DB_CONN_ID, "fields": ["not-a-dict"]}]},
-        {"connections": [{"connection_id": _DB_CONN_ID, "fields": [{"id": "x", "label": "X"}]}]},
+        # xpath is now OPTIONAL (#102 B1 — REST overrides omit it), but a PRESENT
+        # blank xpath is still rejected.
+        {"connections": [{"connection_id": _DB_CONN_ID, "fields": [{"id": "x", "label": "X", "xpath": " "}]}]},
         {"connections": [{"connection_id": _DB_CONN_ID, "fields": [{"id": " ", "label": "X", "xpath": "y"}]}]},
     ],
 )

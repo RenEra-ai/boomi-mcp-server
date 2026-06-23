@@ -3167,6 +3167,8 @@ _ORCH_CONFIG_KEYS = (
     "test_fetch_artifacts",
     "test_log_fetch_content",
     "require_test_logs",
+    # Issue #102 B4 — process-overrides inspected by the empty-overrides deploy guard.
+    "process_overrides",
 )
 
 

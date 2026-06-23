@@ -99,6 +99,7 @@ from ..primitives.operational import (
 from ..primitives.rest_send import (
     RestSendWithRetryParameters,
     RestSendWithRetryPrimitive,
+    rest_connection_extension_fields,
 )
 
 # ---------------------------------------------------------------------------
@@ -1967,6 +1968,24 @@ class EnvironmentExtensionsConfig(BaseModel):
             "actually retargets the host/port."
         ),
     )
+    rest_credential_connection_fields: bool = Field(
+        default=True,
+        description=(
+            "Issue #102 B1: declare the REST target connection credential fields "
+            "(username, password) as per-environment override points. Default "
+            "true: an authenticated REST target's credential must not be embedded "
+            "in the connection component. Applies when the REST target uses a "
+            "non-'none' auth mode."
+        ),
+    )
+    rest_endpoint_connection_fields: bool = Field(
+        default=False,
+        description=(
+            "Issue #102 B1: also declare the REST target connection endpoint "
+            "field (Base URL) as an override point. Default false (opt-in): "
+            "declare it when TEST -> PROD promotion retargets the REST base URL."
+        ),
+    )
 
 
 class DatabaseToApiSyncParameters(BaseModel):
@@ -2809,6 +2828,7 @@ def _build_main_process(
     # no new dependency edge is needed). ProcessFlowBuilder emits the declaration
     # on CREATE only (its preservation policy leaves processOverrides UNOWNED so
     # UI-populated per-environment override VALUES survive structured updates).
+    ext_connections: List[Dict[str, Any]] = []
     source_binding = parameters.source.binding
     if (
         source_binding.mode == "create"
@@ -2820,15 +2840,44 @@ def _build_main_process(
             endpoint=parameters.environment_extensions.endpoint_connection_fields,
         )
         if extension_fields:
-            config["process_extensions"] = {
-                "connections": [
-                    {
-                        "connection_id": f"$ref:{db_conn_key}",
-                        "connector_type": "database",
-                        "fields": extension_fields,
-                    }
-                ]
+            ext_connections.append(
+                {
+                    "connection_id": f"$ref:{db_conn_key}",
+                    "connector_type": "database",
+                    "fields": extension_fields,
+                }
+            )
+
+    # Issue #102 B1: broaden env-extension emission to the REST TARGET connection.
+    # Create-mode authed REST is rejected upstream (UNSUPPORTED_REST_AUTH_MODE —
+    # an executable create-mode REST connection is always UNAUTHENTICATED), so an
+    # archetype-owned REST CREDENTIAL only exists for a reuse-mode (existing,
+    # already-authenticated) connection; a create-mode REST target has only its
+    # endpoint (Base URL) to externalize. A REST Client override keys purely by
+    # field id with NO xpath — live_verified from the `Rest Example` process
+    # export (ConnectionOverride 5a2c4949-...). The $ref:rest_conn_key resolves to
+    # the same connection the target connector shape binds to (already in
+    # depends_on), in both create and reuse modes.
+    target_binding = parameters.target.binding
+    rest_is_reuse = target_binding.mode == "reuse"
+    rest_fields = rest_connection_extension_fields(
+        credentials=(
+            rest_is_reuse
+            and parameters.environment_extensions.rest_credential_connection_fields
+        ),
+        endpoint=parameters.environment_extensions.rest_endpoint_connection_fields,
+    )
+    if rest_fields:
+        ext_connections.append(
+            {
+                "connection_id": f"$ref:{rest_conn_key}",
+                "connector_type": "rest",
+                "fields": rest_fields,
             }
+        )
+
+    if ext_connections:
+        config["process_extensions"] = {"connections": ext_connections}
 
     # depends_on must contain exactly the keys referenced by $ref tokens in the
     # process config (ProcessFlowBuilder enforces this). The read profile and

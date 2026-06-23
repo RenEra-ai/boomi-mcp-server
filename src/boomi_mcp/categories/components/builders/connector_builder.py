@@ -21,6 +21,18 @@ from boomi_mcp.categories.components.builders._preservation_policy import (
     PreservationPolicy,
 )
 
+# Issue #102 B2 — fail-fast placeholder for an extension-bound, NON-secret
+# connection field (e.g. a database username externalized as an environment
+# extension). Emitting this literal as the saved component value means a deploy
+# whose environment extension was never promoted fails loudly at runtime instead
+# of silently connecting with a stale (often TEST) value. Secret fields are
+# NEVER given this placeholder — they are rejected outright by the
+# FORBIDDEN_SECRET_FIELDS scanner and resolved via credential_ref. The builders
+# accept it as an ordinary non-empty value (it passes required-field validation
+# and is not secret-shaped), so a caller/archetype can opt a non-secret
+# extension-bound field into the fail-fast placeholder convention.
+SET_BY_EXTENSION = "SET_BY_EXTENSION"
+
 
 class BuilderValidationError(ValueError):
     """Structured connector-builder validation failure.

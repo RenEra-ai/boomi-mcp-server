@@ -40,6 +40,10 @@ from ...categories.components.builders.connector_builder import (
     RestClientConnectionBuilder,
     RestClientOperationBuilder,
 )
+from ...categories.components.builders.process_flow_builder import (
+    REST_CONNECTION_EXTENSION_FIELDS_CREDENTIAL,
+    REST_CONNECTION_EXTENSION_FIELDS_ENDPOINT,
+)
 from ...models.integration_models import IntegrationComponentSpec
 from ..base import (
     PatternIOContract,
@@ -55,6 +59,29 @@ from ._helpers import (
     raise_for_builder_error,
     ref_key,
 )
+
+
+def rest_connection_extension_fields(
+    *, credentials: bool = True, endpoint: bool = False
+) -> List[Dict[str, str]]:
+    """Ordered REST target-connection field declarations for environment extensions.
+
+    Issue #102 B1. Returns endpoint fields (url) first, then credential fields
+    (username, password) — so a ``database_to_api_sync`` archetype can declare
+    which REST connection fields become per-environment override points. Each
+    field is a fresh ``{id, label}`` dict (no xpath — a REST Client override keys
+    purely by field id, live_verified from the ``Rest Example`` process export).
+    Returns ``[]`` when both flags are off.
+
+    The id contract is owned by ``process_flow_builder`` (which emits the
+    declaration XML); this primitive only selects which fields to declare.
+    """
+    fields: List[Dict[str, str]] = []
+    if endpoint:
+        fields.extend(dict(field) for field in REST_CONNECTION_EXTENSION_FIELDS_ENDPOINT)
+    if credentials:
+        fields.extend(dict(field) for field in REST_CONNECTION_EXTENSION_FIELDS_CREDENTIAL)
+    return fields
 
 
 # ---------------------------------------------------------------------------

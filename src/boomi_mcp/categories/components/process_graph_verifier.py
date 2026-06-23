@@ -47,6 +47,15 @@ _TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "doccacheload", "e
 # Shape types whose outputs are explicit branch outputs that must be wired.
 _BRANCHING_SHAPE_TYPES = frozenset({"branch", "decision", "route"})
 
+# Control shapes that split documents into rejected/unmatched/error branches
+# (issue #102 C2). A bare Stop wired directly off one of these branches drops
+# the rejected documents with no Message/Notify/Return-Documents/Document-Cache
+# trail, so they become untraceable. ``catcherrors`` is Boomi's Try/Catch shape;
+# the builder itself never wires a catcherrors/route/decision branch straight to
+# a Stop (its catch legs route through notify/doccacheload first), so this lint
+# does not fire on builder output.
+_CONTROL_BRANCH_SHAPE_TYPES = frozenset({"route", "decision", "catcherrors"})
+
 # Display attributes whose absence renders as "null" in the GUI canvas.
 # ``userlabel`` is intentionally excluded — today's Stop shapes omit it by
 # design and must stay clean.
@@ -279,7 +288,11 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
             config = _first_direct(shape, "configuration")
             stop_cfg = _first_direct(config, "stop")
             if stop_cfg is None or stop_cfg.get("continue") is None:
-                warnings.append(
+                # Issue #102 C1: a bare <stop/> with no continue= is a runtime NPE
+                # and a GUI stack overflow — promoted from a warning to a hard
+                # error so it blocks emission/verification rather than merely
+                # advising.
+                errors.append(
                     _issue(
                         "STOP_CONTINUE_MISSING",
                         name,
@@ -327,6 +340,51 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                     f"Wire '{name}' to a next shape, or make it a terminal shape (stop/returndocuments).",
                 )
             )
+
+    # ------------------------------------------------------------------
+    # Pass 2b — terminal-shape exclusivity / untraceable rejected docs (#102 C2).
+    # ------------------------------------------------------------------
+    for shape in shape_elems:
+        name = shape.get("name") or ""
+        stype = _shape_type(shape)
+        for target_name in edges.get(name, []):
+            target = shapes_by_id.get(target_name)
+            if target is None:
+                continue
+            target_type = _shape_type(target)
+            # C2a — Return Documents and Stop are mutually exclusive terminals;
+            # a Return-Documents shape wired onward into a Stop means a path
+            # carries both, and the returned documents never reach the caller.
+            if stype == "returndocuments" and target_type == "stop":
+                errors.append(
+                    _issue(
+                        "RETURN_DOCS_STOP_EXCLUSIVE",
+                        name,
+                        stype,
+                        f"Return Documents shape '{name}' is wired into Stop shape "
+                        f"'{target_name}'; Return Documents and Stop are mutually "
+                        "exclusive path terminals.",
+                        f"End the path at either '{name}' (Return Documents) or a Stop, "
+                        "not both — remove the edge into the Stop.",
+                    )
+                )
+            # C2b — a bare Stop wired straight off a Route/Decision/Try-Catch
+            # reject branch drops those documents with no trace (warning: an
+            # intentional drop is legal, but it should log/notify/return first).
+            if stype in _CONTROL_BRANCH_SHAPE_TYPES and target_type == "stop":
+                warnings.append(
+                    _issue(
+                        "CONTROL_BRANCH_BARE_STOP",
+                        name,
+                        stype,
+                        f"{stype.capitalize()} shape '{name}' routes a branch directly "
+                        f"into Stop shape '{target_name}'; rejected documents are "
+                        "dropped with no trace.",
+                        "Route the rejected branch through a Message, Notify, Return "
+                        "Documents, or Document Cache before the Stop so the documents "
+                        "remain traceable.",
+                    )
+                )
 
     # ------------------------------------------------------------------
     # Pass 3 — reachability from the start shape.

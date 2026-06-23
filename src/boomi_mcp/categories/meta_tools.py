@@ -590,6 +590,19 @@ _INTEGRATION_OVERVIEW = {
     "config_format": "JSON (config parameter)",
     "conflict_policy": ["reuse", "clone", "fail"],
     "hint": "Use operation='plan' for full IntegrationSpecV1 templates and routing behavior.",
+    # Issue #102 (M9.8) — mechanical build-basics guards enforced at plan time.
+    "build_basics_guards": {
+        "hard_failures": [
+            "DUPLICATE_CONNECTION_CONFLICT — two in-spec connections to the same endpoint with incompatible auth (each duplicate burns a separate connection license); a compatible duplicate is aliased to the canonical one (see connection_aliases) with a warning.",
+            "ENV_VAR_LITERAL_REJECTED — a literal ${ENV_VAR} token in a connection field (Boomi stores it verbatim and never interpolates it; use credential_ref / environment extensions).",
+            "STOP_CONTINUE_MISSING / RETURN_DOCS_STOP_EXCLUSIVE — process-graph shape errors (verify action).",
+        ],
+        "warnings": [
+            "CONNECTION_ENDPOINT_IP_LITERAL (prefer FQDN), CONNECTION_BASE_URL_HAS_PATH / CONNECTION_CARRIES_PER_CALL_FIELDS (minimal-connection), FOLDER_REQUIRED_ON_CREATE (no folder → account root), PROPERTY_NAMING (DPP_/DDP_ UPPER_SNAKE), and — when naming.convention=='bracketed' — NAMING_CONVENTION_BRACKETED per-type checks.",
+        ],
+        "naming_convention": "bracketed naming is a CHOSEN account convention (Boomi mandates no single style); activate it with naming.convention='bracketed'. The lint flags, never rewrites.",
+        "extensions": "Environment-extension declarations cover DB (xpath-keyed) and REST (id-keyed, no xpath) connections, including reuse-mode REST credentials; SET_BY_EXTENSION is the fail-fast placeholder convention for a non-secret extension-bound field.",
+    },
 }
 
 _INTEGRATION_PLAN = {

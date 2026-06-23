@@ -40,6 +40,7 @@ substitutes `$ref`->id; changing a child requires redeploying the parent.
 
 from __future__ import annotations
 
+import json
 import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -125,6 +126,19 @@ DB_CONNECTION_EXTENSION_FIELDS_CREDENTIAL: Tuple[Dict[str, str], ...] = (
 DB_CONNECTION_EXTENSION_FIELDS_ENDPOINT: Tuple[Dict[str, str], ...] = (
     {"id": "host", "label": "Host", "xpath": "DatabaseConnectionSettings/@host"},
     {"id": "port", "label": "Port", "xpath": "DatabaseConnectionSettings/@port"},
+)
+
+# REST Client connection-field extensions (#102 B1). live_verified from the
+# `renera` ``Rest Example`` process export (ConnectionOverride id
+# 5a2c4949-...): a REST Client override keys PURELY by field id with NO xpath
+# attribute — unlike the DB connector. ``url`` is the Base URL field; ``username``
+# / ``password`` are the basic-auth credential fields.
+REST_CONNECTION_EXTENSION_FIELDS_CREDENTIAL: Tuple[Dict[str, str], ...] = (
+    {"id": "username", "label": "User"},
+    {"id": "password", "label": "Password"},
+)
+REST_CONNECTION_EXTENSION_FIELDS_ENDPOINT: Tuple[Dict[str, str], ...] = (
+    {"id": "url", "label": "Base URL"},
 )
 
 # Visual layout. Geometry is decorative only — process correctness is
@@ -678,19 +692,33 @@ def _extract_process_extension_connections(
                     hint='Each field: {"id": "...", "label": "...", "xpath": "..."}.',
                 )
             normalized_field: Dict[str, str] = {}
-            for key in ("id", "label", "xpath"):
+            for key in ("id", "label"):
                 value = raw_field.get(key)
                 if not isinstance(value, str) or not value.strip():
                     raise BuilderValidationError(
                         f"{floc}.{key} is required and must be a non-empty string.",
                         error_code="PROCESS_EXTENSIONS_INVALID",
                         field=f"{floc}.{key}",
-                        hint="Field declarations carry an id, a label, and an xpath.",
+                        hint="Field declarations carry an id and a label (xpath optional).",
                     )
                 # label intentionally not stripped — a leading/trailing space is
-                # cosmetic and the value is escaped on emission anyway. id/xpath
-                # are structural, so canonicalize them.
-                normalized_field[key] = value.strip() if key in ("id", "xpath") else value
+                # cosmetic and the value is escaped on emission anyway. id is
+                # structural, so canonicalize it.
+                normalized_field[key] = value.strip() if key == "id" else value
+            # xpath is OPTIONAL (#102 B1): DB connector-settings overrides carry an
+            # xpath (e.g. DatabaseConnectionSettings/@username), but live REST Client
+            # overrides key purely by field id (<field id="username" .../> — no xpath),
+            # so emission omits the attribute when xpath is absent.
+            xpath = raw_field.get("xpath")
+            if xpath is not None:
+                if not isinstance(xpath, str) or not xpath.strip():
+                    raise BuilderValidationError(
+                        f"{floc}.xpath must be a non-empty string when present.",
+                        error_code="PROCESS_EXTENSIONS_INVALID",
+                        field=f"{floc}.xpath",
+                        hint="Omit xpath entirely for id-keyed (REST) overrides.",
+                    )
+                normalized_field["xpath"] = xpath.strip()
             fields.append(normalized_field)
         normalized_entry: Dict[str, Any] = {
             "connection_id": conn_id.strip(),
@@ -719,11 +747,15 @@ def _emit_process_overrides(connections: List[Dict[str, Any]]) -> str:
     for conn in connections:
         field_parts: List[str] = []
         for field in conn["fields"]:
+            # xpath is emitted only when present (#102 B1): DB overrides carry an
+            # xpath; live REST Client overrides key purely by field id and emit
+            # none — matching the live `Rest Example` process export.
+            xpath = field.get("xpath")
+            xpath_attr = f' xpath="{_escape_xml(str(xpath))}"' if xpath else ""
             field_parts.append(
                 f'<field id="{_escape_xml(str(field["id"]))}" '
                 f'label="{_escape_xml(str(field["label"]))}" '
-                f'overrideable="true" '
-                f'xpath="{_escape_xml(str(field["xpath"]))}"/>'
+                f'overrideable="true"{xpath_attr}/>'
             )
         connection_parts.append(
             f'<ConnectionOverride id="{_escape_xml(str(conn["connection_id"]))}">'
@@ -1332,6 +1364,47 @@ def _emit_connectoraction(
     )
 
 
+def _looks_like_json(text: str) -> bool:
+    """True when ``text`` is a JSON object/array literal.
+
+    Used to decide whether a Message/Notify body needs MessageFormat single-quote
+    wrapping (its ``{ }`` braces would otherwise be read as ``{N}`` placeholders).
+    """
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "{[":
+        return False
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(parsed, (dict, list))
+
+
+def _escape_message_format_text(text: str) -> str:
+    """Escape free text for a Boomi Message/Notify MessageFormat field (#102 C3).
+
+    Boomi MessageFormat (Message step, Notify step, Business Rules step — see
+    help.boomi.com Message step docs) treats the single quote ``'`` as an escape
+    character and ``{N}`` as a numbered variable placeholder:
+
+      * a lone single quote is stripped — ``today's`` renders as ``todays``;
+      * two single quotes render as one — ``today''s`` renders as ``today's``;
+      * an unmatched single quote escapes the rest of the message, suppressing
+        ``{N}`` substitution from there on;
+      * JSON content must be wrapped in single quotes so its ``{ }`` braces are
+        not interpreted as variable placeholders.
+
+    So this doubles every apostrophe and, when the body is a JSON object/array,
+    wraps the doubled result in single quotes. Emission owns this escaping — the
+    #1 most-common Message/Notify bug — so callers pass raw text/JSON and never
+    hand-author the quoting.
+    """
+    doubled = text.replace("'", "''")
+    if _looks_like_json(text):
+        return f"'{doubled}'"
+    return doubled
+
+
 def _emit_message(
     shape_name: str,
     params: Dict[str, Any],
@@ -1340,7 +1413,7 @@ def _emit_message(
 ) -> str:
     dragpoints = _emit_dragpoints([next_name], shape_index)
     userlabel = _escape_xml(params.get("userlabel") or "")
-    text = _escape_xml(params.get("text") or "")
+    text = _escape_xml(_escape_message_format_text(params.get("text") or ""))
     return (
         f'<shape image="message_icon" name="{shape_name}" shapetype="message" '
         f'userlabel="{userlabel}" x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
@@ -1870,11 +1943,10 @@ def _emit_notify(
     # Boomi Notify message text uses Java-MessageFormat quoting: a single quote
     # is an escape char, so an unmatched apostrophe (e.g. "couldn't") would quote
     # the rest of the message and stop the {1} placeholder from expanding — the
-    # caught error would silently not appear. The caller's template is plain
-    # literal text, so double every apostrophe (the MessageFormat literal-quote
-    # escape) BEFORE inserting the {1} placeholder, which keeps the apostrophe
-    # rendering literally and the placeholder substituting.
-    message = template.replace("'", "''").replace(_NOTIFY_CAUGHT_ERROR_TOKEN, "{1}")
+    # caught error would silently not appear. Route through the shared
+    # MessageFormat escaper (#102 C3) so Message and Notify share one quoting
+    # source of truth, THEN insert the {1} placeholder for the caught-error token.
+    message = _escape_message_format_text(template).replace(_NOTIFY_CAUGHT_ERROR_TOKEN, "{1}")
     dragpoints = _emit_dragpoints([next_name], shape_index, y=_CATCH_DRAGPOINT_Y)
     return (
         f'<shape image="notify_icon" name="{shape_name}" shapetype="notify" '
