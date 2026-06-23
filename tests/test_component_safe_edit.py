@@ -8,15 +8,9 @@ post-write version comparison.
 
 from __future__ import annotations
 
-import sys
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import pytest
-
-_src = str(Path(__file__).resolve().parent.parent / "src")
-if _src not in sys.path:
-    sys.path.insert(0, _src)
 
 from boomi_mcp.categories.components import safe_edit_component
 from boomi_mcp.categories.components.safe_edit_component import (
