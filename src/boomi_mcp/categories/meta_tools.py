@@ -4146,24 +4146,26 @@ _COMPONENT_SAFE_EDIT = {
             "a field-level delta — only metadata fields support partial edits)."
         ),
     },
-    "patch_template_metadata": {
-        "config": {
-            "name": "(optional) new name",
-            "description": "(optional) new description",
-            "folder_name": "(optional) target folder",
-            "folder_id": "(optional) target folder id",
+    "patch_template": {
+        "metadata_partial_edit": {
+            "config": {
+                "name": "(optional) new name",
+                "description": "(optional) new description",
+                "folder_name": "(optional) target folder",
+                "folder_id": "(optional) target folder id",
+            },
         },
-    },
-    "patch_template_body": {
-        "component_type": "(optional) defaults to the live component type",
-        "config": {
-            "connector_type": "database  # required discriminator for a connector body edit",
-            "component_name": "...  # plus EVERY field the typed builder requires",
-            "...": "full structured config (see get_schema_template operation='create' for the type)",
-        },
-        "map_context": {
-            "source_index": "(transform.map body edits only)",
-            "target_index": "(transform.map body edits only)",
+        "structured_body_edit": {
+            "component_type": "(optional) defaults to the live component type",
+            "config": {
+                "connector_type": "database  # required discriminator for a connector body edit",
+                "component_name": "...  # plus EVERY field the typed builder requires",
+                "...": "full structured config (see get_schema_template operation='create' for the type)",
+            },
+            "map_context": {
+                "source_index": "(transform.map body edits only)",
+                "target_index": "(transform.map body edits only)",
+            },
         },
     },
     "workflow": [
