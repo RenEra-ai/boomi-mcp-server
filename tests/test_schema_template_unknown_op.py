@@ -17,7 +17,7 @@ RESOURCE_CASES = [
     ("trading_partner", ["create", "list", "update"]),
     ("process", ["create", "list"]),
     ("integration", ["plan", "apply", "verify"]),
-    ("component", ["create", "search", "clone", "compare_versions"]),
+    ("component", ["create", "search", "clone", "compare_versions", "safe_edit"]),
     ("environment", ["create"]),
     ("package", ["create", "deploy"]),
     ("execution_request", ["execute"]),
@@ -61,3 +61,14 @@ def test_unknown_resource_type():
     assert result["error"] == "Unknown resource_type: __nonexistent__"
     assert "valid_types" in result
     assert result["error_code"] == SCHEMA_LOOKUP_FAILED
+
+
+def test_component_safe_edit_operation_returns_template():
+    """The new M9.7 safe_edit operation must resolve to a structured template."""
+    result = get_schema_template_action(resource_type="component", operation="safe_edit")
+
+    assert result["_success"] is True
+    assert result["operation"] == "safe_edit"
+    assert "prepare_component_edit (read-only preview)" in result["tools"]
+    assert "apply_component_edit (confirmed write)" in result["tools"]
+    assert "COMPONENT_EDIT_DRIFT_DETECTED" in result["error_codes"]

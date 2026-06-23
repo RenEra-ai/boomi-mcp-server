@@ -291,6 +291,18 @@ except ImportError as e:
     print(f"[WARNING] Failed to import component analysis tools: {e}")
     analyze_component_action = None
 
+# --- Safe Existing-Component Edit Workflow (M9.7 / #97) ---
+try:
+    from boomi_mcp.categories.components.safe_edit_component import (
+        prepare_component_edit_action,
+        apply_component_edit_action,
+    )
+    print(f"[INFO] Safe component edit workflow loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import safe component edit workflow: {e}")
+    prepare_component_edit_action = None
+    apply_component_edit_action = None
+
 # --- Connector Tools ---
 try:
     from boomi_mcp.categories.components.connectors import manage_connector_action
@@ -1824,6 +1836,156 @@ if analyze_component_action:
             return {"_success": False, "error": str(e)}
 
     print("[INFO] Component analysis tool registered successfully (1 consolidated tool)")
+
+
+# --- Safe Existing-Component Edit Workflow MCP Tools (M9.7 / #97) ---
+if prepare_component_edit_action:
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    @_kb_hint
+    def prepare_component_edit(
+        profile: str,
+        component_id: str,
+        patch: str,
+        max_diff_lines: int = 200,
+    ):
+        """
+        Preview a safe, structured edit to an existing component — READ-ONLY.
+
+        Phase 1 of the safe edit workflow (pull -> structured patch -> diff -> push).
+        Pulls the live component, applies a STRUCTURED patch in memory (no raw XML),
+        and returns a unified diff plus a confirmation_token. Performs NO Boomi
+        mutation. Pass the token (and the same patch) to apply_component_edit with
+        confirm_apply=true to commit.
+
+        Args:
+            profile: Boomi profile name (required)
+            component_id: Component to edit (required)
+            patch: JSON string with the structured edit. Shape:
+                {"component_type": "connector-settings",   # optional; defaults to live type
+                 "config": { ... structured fields ... },  # e.g. {"name": "Renamed"} or
+                                                            #      {"host": "db.internal", ...}
+                 "map_context": {"source_index": {...},     # only for transform.map body edits
+                                 "target_index": {...}}}
+                Metadata-only configs (name/component_name/description/folder_name/
+                folder_id) smart-merge the live root; other fields route through the
+                typed builder + #45/#50 preservation merge. Raw config.xml is rejected.
+            max_diff_lines: Cap the returned unified diff (default 200).
+
+        Returns:
+            diff, confirmation_token, base_version, update_mode, and no_change flag.
+        """
+        try:
+            patch_data = json.loads(patch)
+        except (json.JSONDecodeError, TypeError) as e:
+            return {"_success": False, "error": f"Invalid patch (must be a JSON string): {e}", "boomi_mutation": False}
+        if not isinstance(patch_data, dict):
+            return {"_success": False, "error": "patch must be a JSON object, not " + type(patch_data).__name__, "boomi_mutation": False}
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] prepare_component_edit called by user: {subject}, profile: {profile}, component: {component_id}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            return prepare_component_edit_action(sdk, profile, component_id, patch_data, max_diff_lines)
+
+        except Exception as e:
+            print(f"[ERROR] Failed to prepare_component_edit: {e}")
+            return {"_success": False, "error": str(e), "boomi_mutation": False}
+
+    print("[INFO] Safe component edit (prepare) tool registered successfully")
+
+
+if apply_component_edit_action:
+    @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+    @_gotcha_hint
+    @_kb_hint
+    def apply_component_edit(
+        profile: str,
+        component_id: str,
+        patch: str,
+        confirmation_token: str,
+        confirm_apply: bool = False,
+        max_diff_lines: int = 200,
+    ):
+        """
+        Commit a previewed safe edit to an existing component — WRITES to Boomi.
+
+        Phase 2 of the safe edit workflow. Requires confirm_apply=true plus the
+        confirmation_token from prepare_component_edit and the SAME patch. Re-fetches
+        the component and ABORTS (no mutation) if it drifted since preview or the
+        patch changed; otherwise pushes the merged XML through the typed builder +
+        #45/#50 preservation path and returns a version comparison.
+
+        Args:
+            profile: Boomi profile name (required)
+            component_id: Component to edit (required)
+            patch: JSON string — the exact patch previewed by prepare_component_edit.
+            confirmation_token: The token returned by prepare_component_edit (required).
+            confirm_apply: Must be true to commit. Defaults to false (no-op gate).
+            max_diff_lines: Cap any fallback diff in the response (default 200).
+
+        Returns:
+            base_version, new_version, version_comparison, and update_mode.
+        """
+        try:
+            patch_data = json.loads(patch)
+        except (json.JSONDecodeError, TypeError) as e:
+            return {"_success": False, "error": f"Invalid patch (must be a JSON string): {e}", "boomi_mutation": False}
+        if not isinstance(patch_data, dict):
+            return {"_success": False, "error": "patch must be a JSON object, not " + type(patch_data).__name__, "boomi_mutation": False}
+
+        # Confirmation gate BEFORE any credential access (no creds touched on an
+        # unconfirmed call). The action layer re-checks as defense in depth.
+        if confirm_apply is not True:
+            return {
+                "_success": False,
+                "error_code": "COMPONENT_EDIT_CONFIRMATION_REQUIRED",
+                "error": "apply_component_edit requires confirm_apply=true.",
+                "field": "confirm_apply",
+                "hint": (
+                    "Run prepare_component_edit first, review the diff, then call "
+                    "apply_component_edit with the same patch, its confirmation_token, "
+                    "and confirm_apply=true."
+                ),
+                "boomi_mutation": False,
+            }
+
+        try:
+            subject = get_current_user()
+            print(f"[INFO] apply_component_edit called by user: {subject}, profile: {profile}, component: {component_id}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            return apply_component_edit_action(
+                sdk, profile, component_id, patch_data, confirmation_token, confirm_apply, max_diff_lines
+            )
+
+        except Exception as e:
+            print(f"[ERROR] Failed to apply_component_edit: {e}")
+            return {"_success": False, "error": str(e), "boomi_mutation": False}
+
+    print("[INFO] Safe component edit (apply) tool registered successfully")
 
 
 # --- Connector MCP Tools ---

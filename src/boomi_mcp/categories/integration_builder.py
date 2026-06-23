@@ -1954,6 +1954,307 @@ def _apply_structured_update(
     }
 
 
+def _builder_validation_envelope(exc: BuilderValidationError) -> Dict[str, Any]:
+    """Structured error envelope for a BuilderValidationError raised by a build()."""
+    envelope: Dict[str, Any] = {
+        "_success": False,
+        "error_code": exc.error_code,
+        "error": str(exc),
+        "field": exc.field,
+        "hint": exc.hint,
+    }
+    if getattr(exc, "details", None):
+        envelope["details"] = exc.details
+    return envelope
+
+
+def build_structured_update_xml(
+    boomi_client: Boomi,
+    comp: IntegrationComponentSpec,
+    payload: Dict[str, Any],
+    *,
+    components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
+    source_index: Optional[Dict[str, Any]] = None,
+    target_index: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the desired UPDATE XML for a structured *body* patch and resolve
+    its preservation policy — READ-ONLY (no current-XML fetch, no push, no
+    create).
+
+    This is the build half of the read-merge-write update that
+    ``_apply_structured_update`` finishes. ``_execute_component`` (live apply)
+    and the #97 safe-edit prepare/apply workflow (no-mutation preview + confirmed
+    write) both call it so the same builder dispatch and the same
+    ``PRESERVATION_POLICY`` are used — a previewed diff therefore matches exactly
+    what apply later pushes.
+
+    Returns ``{"_success": True, "built_xml": str, "policy": PreservationPolicy}``
+    or a structured error envelope (the same envelopes ``_execute_component``
+    used to return inline). Callers MUST handle raw-XML rejection and the
+    metadata-only smart-merge route BEFORE calling this — a metadata-only payload
+    has no structured builder and would fail required-field validation here.
+
+    ``payload`` must already carry ``component_type`` / ``component_name`` exactly
+    as ``_execute_component`` prepares them. ``source_index`` / ``target_index``
+    override the transform.map field indexes (the safe-edit workflow supplies them
+    via ``map_context`` because there are no in-spec profile components to resolve
+    them from).
+    """
+    if comp.type == "process":
+        process_kind = str(
+            payload.get("process_kind") or payload.get("process_type") or ""
+        ).strip().lower()
+        if not process_kind:
+            return {
+                "_success": False,
+                "error_code": "PROCESS_KIND_REQUIRED",
+                "field": "config.process_kind",
+                "error": (
+                    "Process components must set config.process_kind; legacy "
+                    "freeform process JSON authoring has been removed."
+                ),
+                "hint": (
+                    "Set process_kind to one of "
+                    f"{sorted(PROCESS_FLOW_BUILDERS)}, or use manage_component "
+                    "with raw XML as an explicit escape hatch."
+                ),
+            }
+        builder_cls = get_process_flow_builder(process_kind)
+        if builder_cls is None:
+            return {
+                "_success": False,
+                "error_code": "PROCESS_KIND_UNSUPPORTED",
+                "error": (
+                    f"process_kind {process_kind!r} is not supported "
+                    f"by the structured process-flow builder."
+                ),
+                "field": "process_kind",
+                "hint": f"Supported process_kind values: {sorted(PROCESS_FLOW_BUILDERS)}.",
+            }
+        try:
+            built_xml = builder_cls.build(
+                payload,
+                name=payload.get("name") or comp.name,
+                folder_name=payload.get("folder_name"),
+            )
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(builder_cls, "PRESERVATION_POLICY", None),
+        }
+
+    if comp.type in ("connector-settings", "connector-action"):
+        rest_canonical = _resolve_rest_connector_type(payload.get("connector_type"))
+        if rest_canonical is not None:
+            payload["connector_type"] = rest_canonical
+        connector_type = payload.get("connector_type")
+        if connector_type:
+            try:
+                boomi_client.connector.get_connector(connector_type)
+            except Exception as exc:
+                return {
+                    "_success": False,
+                    "error": f"Connector type validation failed for '{connector_type}': {exc}",
+                }
+        if comp.type == "connector-settings":
+            builder_instance = get_connector_builder(connector_type or "")
+        else:
+            operation_mode = payload.get("operation_mode") or ""
+            builder_instance = get_connector_action_builder(
+                connector_type or "", operation_mode
+            )
+        if builder_instance is None:
+            return {
+                "_success": False,
+                "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+                "error": (
+                    f"No structured builder registered for connector "
+                    f"type {connector_type!r}"
+                    + (
+                        f" operation_mode {payload.get('operation_mode') or ''!r}"
+                        if comp.type == "connector-action"
+                        else ""
+                    )
+                    + ". Structured body-field updates require a builder."
+                ),
+                "field": (
+                    "operation_mode"
+                    if comp.type == "connector-action"
+                    else "connector_type"
+                ),
+                "hint": (
+                    "Use the raw-XML escape hatch (config.xml on "
+                    "manage_connector / manage_component) for unsupported "
+                    "connector types, or restrict the config to metadata-only "
+                    "fields (name, description, folder_name, folder_id) for a "
+                    "smart-merge update."
+                ),
+            }
+        try:
+            built_xml = builder_instance.build(**payload)
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+        }
+
+    if comp.type == "transform.function":
+        wrapper_cls = get_transform_function_wrapper_builder(comp.type)
+        if wrapper_cls is None:
+            return {
+                "_success": False,
+                "error_code": "SCRIPT_MAPPING_VALIDATION_FAILED",
+                "error": f"No TransformFunctionWrapperBuilder registered for {comp.type!r}.",
+                "field": "component_type",
+            }
+        try:
+            built_xml = wrapper_cls().build(**payload)
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(wrapper_cls, "PRESERVATION_POLICY", None),
+        }
+
+    if comp.type == "script.mapping":
+        builder_class = get_script_mapping_builder(comp.type)
+        if builder_class is None:
+            return {
+                "_success": False,
+                "error_code": "SCRIPT_MAPPING_VALIDATION_FAILED",
+                "error": f"No ScriptMappingBuilder registered for {comp.type!r}.",
+                "field": "component_type",
+            }
+        try:
+            built_xml = builder_class().build(**payload)
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(builder_class, "PRESERVATION_POLICY", None),
+        }
+
+    if comp.type == "profile.db":
+        profile_type = _safe_lower(payload.get("profile_type"))
+        builder_instance = get_profile_builder("profile.db", profile_type)
+        if builder_instance is None:
+            return {
+                "_success": False,
+                "error_code": "UNSUPPORTED_PROFILE_GENERATION_MODE",
+                "error": f"profile_type {profile_type!r} is not supported for profile.db.",
+                "field": "profile_type",
+            }
+        try:
+            built_xml = builder_instance.build(**payload)
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+        }
+
+    if comp.type in ("profile.json", "profile.xml"):
+        profile_type = _safe_lower(payload.get("profile_type"))
+        builder_instance = get_profile_builder(comp.type, profile_type)
+        if builder_instance is None:
+            return {
+                "_success": False,
+                "error_code": "UNSUPPORTED_PROFILE_GENERATION_MODE",
+                "error": f"profile_type {profile_type!r} is not supported for {comp.type}.",
+                "field": "profile_type",
+            }
+        try:
+            built_xml = builder_instance.build(**payload)
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(type(builder_instance), "PRESERVATION_POLICY", None),
+        }
+
+    if comp.type == "transform.map":
+        map_type = (payload.get("map_type") or "").lower()
+        map_builder_instance = get_map_builder(comp.type, map_type)
+        if map_builder_instance is None:
+            return {
+                "_success": False,
+                "error_code": "UNSUPPORTED_TRANSFORM_ROUTE",
+                "error": (
+                    f"map_type {map_type!r} is not supported for transform.map. "
+                    "Supported: direct, function, map_function, script, map_script."
+                ),
+                "field": "map_type",
+                "hint": (
+                    "Use map_type='direct' for profile-to-profile direct field "
+                    "mappings; map_type='function' for structured map-function "
+                    "primitives (#40); map_type='script' for in-map calls to "
+                    "reusable script.mapping components (#41)."
+                ),
+            }
+        s_index = source_index
+        t_index = target_index
+        if s_index is None or t_index is None:
+            raw_comp_config = comp.config or {}
+            if s_index is None:
+                s_index = resolve_map_profile_index(
+                    raw_comp_config.get("source_profile_id"), components_by_key
+                )
+            if t_index is None:
+                t_index = resolve_map_profile_index(
+                    raw_comp_config.get("target_profile_id"), components_by_key
+                )
+        if s_index is None or t_index is None:
+            return {
+                "_success": False,
+                "error_code": "MAP_PROFILE_INDEX_UNAVAILABLE",
+                "error": (
+                    "Cannot compute source/target field index for the map. "
+                    "Literal existing-profile UUIDs are not indexable in M2."
+                ),
+                "hint": (
+                    "Reference both source and target profiles as in-spec "
+                    "components via '$ref:KEY', or supply source_index / "
+                    "target_index via map_context."
+                ),
+            }
+        try:
+            built_xml = map_builder_instance.build(
+                source_index=s_index,
+                target_index=t_index,
+                **payload,
+            )
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(type(map_builder_instance), "PRESERVATION_POLICY", None),
+        }
+
+    return {
+        "_success": False,
+        "error_code": "UPDATE_PRESERVATION_POLICY_UNSUPPORTED",
+        "error": (
+            f"No structured update builder registered for component type "
+            f"{comp.type!r}."
+        ),
+        "field": "component_type",
+        "hint": (
+            "Use the raw-XML escape hatch (config.xml on manage_component) to "
+            "update via full XML replacement, or restrict the patch to "
+            "metadata-only fields for a smart-merge update."
+        ),
+    }
+
+
 def _execute_component(
     boomi_client: Boomi,
     profile: str,

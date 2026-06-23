@@ -494,3 +494,63 @@ def test_new_doctrine_hints_present():
                 "reuse_connections", "avoid_scripts"):
         assert key in hints, f"hints missing {key}"
     assert "confirm_write=true" in hints["raw_write_gate"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #97 (M9.7) — safe existing-component edit workflow discoverability
+# ---------------------------------------------------------------------------
+
+_SAFE_EDIT_TOOLS = ("prepare_component_edit", "apply_component_edit")
+
+
+def test_safe_edit_tools_in_capabilities():
+    tools = list_capabilities_action()["tools"]
+    for name in _SAFE_EDIT_TOOLS:
+        assert name in tools, f"{name} missing from list_capabilities tools"
+        assert tools[name]["category"] == "Components"
+    # prepare is read-only; apply mutates.
+    assert tools["prepare_component_edit"]["read_only"] is True
+    assert tools["apply_component_edit"]["read_only"] is False
+    # apply documents the confirmation gate.
+    assert "confirm_apply" in tools["apply_component_edit"]["parameters"]
+
+
+def test_safe_edit_workflow_surfaced_unfiltered():
+    wf = list_capabilities_action()["workflows"]
+    assert "safe_edit_existing_component" in wf
+    steps = " ".join(wf["safe_edit_existing_component"]["steps"])
+    assert "prepare_component_edit(" in steps
+    assert "apply_component_edit(" in steps
+    assert "confirm_apply=true" in steps
+
+
+def test_safe_edit_tools_filtered_when_not_registered():
+    only = {"build_integration", "get_schema_template", "list_boomi_profiles"}
+    catalog = list_capabilities_action(available_tools=only)
+    for name in _SAFE_EDIT_TOOLS:
+        assert name not in catalog["tools"]
+
+
+def test_safe_edit_workflow_dropped_when_apply_absent():
+    """The workflow references apply_component_edit; absent that tool the
+    available_tools filter must drop the whole workflow (repo discipline)."""
+    only = {
+        "query_components",
+        "prepare_component_edit",
+        "analyze_component",
+        "list_boomi_profiles",
+    }
+    catalog = list_capabilities_action(available_tools=only)
+    assert "safe_edit_existing_component" not in catalog["workflows"]
+
+
+def test_safe_edit_workflow_preserved_when_all_tools_present():
+    only = {
+        "query_components",
+        "prepare_component_edit",
+        "apply_component_edit",
+        "analyze_component",
+        "list_boomi_profiles",
+    }
+    catalog = list_capabilities_action(available_tools=only)
+    assert "safe_edit_existing_component" in catalog["workflows"]

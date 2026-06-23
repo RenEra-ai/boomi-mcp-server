@@ -701,6 +701,8 @@ _COMPONENT_OVERVIEW = {
         "query_components": ["list", "get", "search", "bulk_get"],
         "manage_component": ["create", "update", "clone", "delete"],
         "analyze_component": ["where_used", "dependencies", "compare_versions", "merge"],
+        "prepare_component_edit": ["prepare"],
+        "apply_component_edit": ["apply"],
     },
     "component_types": [
         "process", "processproperty", "processroute",
@@ -4111,6 +4113,50 @@ _COMPONENT_COMPARE = {
     "hint": "Version numbers are integers starting at 1. Use query_components get to see current version.",
 }
 
+_COMPONENT_SAFE_EDIT = {
+    "resource_type": "component",
+    "operation": "safe_edit",
+    "tools": [
+        "prepare_component_edit (read-only preview)",
+        "apply_component_edit (confirmed write)",
+    ],
+    "summary": (
+        "Two-phase safe edit of an existing component (M9.7): pull -> structured "
+        "patch -> diff -> push. Preview is read-only; the write requires explicit "
+        "confirmation and aborts if the component drifted since preview. Raw XML is "
+        "rejected — use structured fields so encrypted values and unknown XML are "
+        "preserved through the #45/#50 merge."
+    ),
+    "patch_template": {
+        "component_type": "(optional) defaults to the live component type",
+        "config": {
+            "name": "(metadata) optional new name",
+            "description": "(metadata) optional new description",
+            "folder_name": "(metadata) optional target folder",
+            "host": "(example body field) structured field routed through the typed builder",
+        },
+        "map_context": {
+            "source_index": "(transform.map body edits only)",
+            "target_index": "(transform.map body edits only)",
+        },
+    },
+    "workflow": [
+        "1. query_components(action='get', component_id=...) — inspect the live component",
+        "2. prepare_component_edit(profile, component_id, patch) — review diff + confirmation_token (no mutation)",
+        "3. apply_component_edit(profile, component_id, patch, confirmation_token, confirm_apply=true) — commit",
+        "4. analyze_component(action='compare_versions', ...) — confirm what changed",
+    ],
+    "error_codes": [
+        "COMPONENT_EDIT_RAW_XML_UNSUPPORTED",
+        "COMPONENT_EDIT_CONFIRMATION_REQUIRED",
+        "COMPONENT_EDIT_TOKEN_INVALID",
+        "COMPONENT_EDIT_PATCH_MISMATCH",
+        "COMPONENT_EDIT_DRIFT_DETECTED",
+        "COMPONENT_EDIT_TYPE_MISMATCH",
+    ],
+    "note": "Rollback / version restore stays deferred (not part of this surface).",
+}
+
 
 # ============================================================================
 # Organization Templates
@@ -4801,6 +4847,15 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
                 "2. query_components(action='list', config='{\"type\": \"process\"}') → list processes",
                 "3. query_components(action='get', component_id='...') → get details",
                 "4. analyze_component(action='where_used', component_id='...') → find dependencies",
+            ],
+        },
+        "safe_edit_existing_component": {
+            "description": "Safely edit an existing component (M9.7): pull → structured patch → diff → confirmed push, preserving encrypted values and unknown XML; aborts if the component drifted since preview.",
+            "steps": [
+                "1. query_components(action='get', component_id='...') → inspect the live component and its current version",
+                "2. prepare_component_edit(profile='...', component_id='...', patch='{\"config\": {\"name\": \"...\"}}') → review the diff and capture confirmation_token (read-only, no Boomi mutation)",
+                "3. apply_component_edit(profile='...', component_id='...', patch='<same patch>', confirmation_token='<token>', confirm_apply=true) → commit the merged XML (aborts on drift / patch change)",
+                "4. analyze_component(action='compare_versions', component_id='...', config='{\"source_version\": <base>, \"target_version\": <new>}') → confirm exactly what changed",
             ],
         },
         "create_and_deploy_process": {
@@ -5954,10 +6009,13 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
     if operation == "compare_versions":
         return {"_success": True, **_COMPONENT_COMPARE}
 
+    if operation == "safe_edit":
+        return {"_success": True, **_COMPONENT_SAFE_EDIT}
+
     return {
         "_success": False,
         "error": f"Unknown component operation: {operation}",
-        "valid_operations": ["create", "search", "clone", "compare_versions"],
+        "valid_operations": ["create", "search", "clone", "compare_versions", "safe_edit"],
     }
 
 
@@ -6870,6 +6928,40 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "compare_component_versions.py",
                 "component_diff.py",
                 "merge_components.py",
+            ],
+        },
+
+        "prepare_component_edit": {
+            "category": "Components",
+            "description": "Safe edit phase 1 (M9.7): pull an existing component, preview a structured patch, return a diff + confirmation_token. Read-only — no Boomi mutation.",
+            "actions": ["prepare"],
+            "read_only": True,
+            "parameters": {
+                "profile": "str (required)",
+                "component_id": "str (required)",
+                "patch": "JSON str (required) — {\"component_type\"?, \"config\": {...}, \"map_context\"?}; raw config.xml is rejected",
+                "max_diff_lines": "int (optional, default 200)",
+            },
+            "examples": [
+                'prepare_component_edit(profile="prod", component_id="abc-123", patch=\'{"config": {"name": "Renamed"}}\')',
+                'prepare_component_edit(profile="prod", component_id="abc-123", patch=\'{"component_type": "connector-settings", "config": {"host": "db.internal"}}\')',
+            ],
+        },
+        "apply_component_edit": {
+            "category": "Components",
+            "description": "Safe edit phase 2 (M9.7): commit a previewed structured patch with the confirmation_token. Requires confirm_apply=true; aborts if the component drifted since preview. Preserves encrypted values / unknown XML.",
+            "actions": ["apply"],
+            "read_only": False,
+            "parameters": {
+                "profile": "str (required)",
+                "component_id": "str (required)",
+                "patch": "JSON str (required) — the same patch previewed by prepare_component_edit",
+                "confirmation_token": "str (required) — from prepare_component_edit",
+                "confirm_apply": "bool (required to commit; defaults false)",
+                "max_diff_lines": "int (optional, default 200)",
+            },
+            "examples": [
+                'apply_component_edit(profile="prod", component_id="abc-123", patch=\'{"config": {"name": "Renamed"}}\', confirmation_token="<token>", confirm_apply=true)',
             ],
         },
 

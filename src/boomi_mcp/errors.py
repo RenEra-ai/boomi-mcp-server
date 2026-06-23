@@ -41,6 +41,14 @@ SCHEMA_NAME_UNSUPPORTED = "SCHEMA_NAME_UNSUPPORTED"
 SCHEMA_LOOKUP_FAILED = "SCHEMA_LOOKUP_FAILED"
 WORKFLOW_SEQUENCE_NOT_FOUND = "WORKFLOW_SEQUENCE_NOT_FOUND"
 
+# --- Safe existing-component edit workflow (M9.7 / issue #97) -----------------
+COMPONENT_EDIT_RAW_XML_UNSUPPORTED = "COMPONENT_EDIT_RAW_XML_UNSUPPORTED"
+COMPONENT_EDIT_CONFIRMATION_REQUIRED = "COMPONENT_EDIT_CONFIRMATION_REQUIRED"
+COMPONENT_EDIT_TOKEN_INVALID = "COMPONENT_EDIT_TOKEN_INVALID"
+COMPONENT_EDIT_PATCH_MISMATCH = "COMPONENT_EDIT_PATCH_MISMATCH"
+COMPONENT_EDIT_DRIFT_DETECTED = "COMPONENT_EDIT_DRIFT_DETECTED"
+COMPONENT_EDIT_TYPE_MISMATCH = "COMPONENT_EDIT_TYPE_MISMATCH"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -170,6 +178,48 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary="Unknown workflow sequence name; see valid_workflows.",
             owner="#10",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_RAW_XML_UNSUPPORTED,
+            category="component_edit",
+            retryable=False,
+            summary="Safe edit rejects raw XML patches; use structured fields or manage_component config.xml.",
+            owner="#97",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_CONFIRMATION_REQUIRED,
+            category="component_edit",
+            retryable=False,
+            summary="apply_component_edit needs confirm_apply=true plus a prepare confirmation_token.",
+            owner="#97",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_TOKEN_INVALID,
+            category="component_edit",
+            retryable=False,
+            summary="confirmation_token is missing, malformed, or issued for another component.",
+            owner="#97",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_PATCH_MISMATCH,
+            category="component_edit",
+            retryable=False,
+            summary="The applied patch differs from the previewed one; re-run prepare for the new patch.",
+            owner="#97",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_DRIFT_DETECTED,
+            category="component_edit",
+            retryable=False,
+            summary="The component changed since preview; the edit was aborted. Re-run prepare.",
+            owner="#97",
+        ),
+        ErrorCodeSpec(
+            code=COMPONENT_EDIT_TYPE_MISMATCH,
+            category="component_edit",
+            retryable=False,
+            summary="patch.component_type does not match the live component type.",
+            owner="#97",
         ),
     )
 }
