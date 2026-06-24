@@ -1943,8 +1943,8 @@ def _required_simple_leaf_paths(profile: JSONPayloadProfile) -> Set[str]:
 
 
 class EnvironmentExtensionsConfig(BaseModel):
-    """Which source-connection fields the emitted process declares as
-    per-environment override points (issue #92 M4.5.7).
+    """Which source DB and REST target connection fields the emitted process
+    declares as per-environment override points (issue #92 M4.5.7 / #102 B1).
 
     A deployed Boomi process exposes a connection field through
     ``manage_environments(get_extensions)`` / ``update_extensions`` ONLY when the
@@ -1989,8 +1989,9 @@ class EnvironmentExtensionsConfig(BaseModel):
             "Issue #102 B1: declare the REST target connection credential fields "
             "(username, password) as per-environment override points. Default "
             "true: an authenticated REST target's credential must not be embedded "
-            "in the connection component. Applies when the REST target uses a "
-            "non-'none' auth mode."
+            "in the connection component. Applies to REUSE-mode REST targets (an "
+            "existing, already-authenticated connection); create-mode REST is "
+            "always unauthenticated, so no REST credential is declared for it."
         ),
     )
     rest_endpoint_connection_fields: bool = Field(
