@@ -347,44 +347,59 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
     for shape in shape_elems:
         name = shape.get("name") or ""
         stype = _shape_type(shape)
-        for target_name in edges.get(name, []):
-            target = shapes_by_id.get(target_name)
-            if target is None:
-                continue
-            target_type = _shape_type(target)
-            # C2a — Return Documents and Stop are mutually exclusive terminals;
-            # a Return-Documents shape wired onward into a Stop means a path
-            # carries both, and the returned documents never reach the caller.
-            if stype == "returndocuments" and target_type == "stop":
+        # C2a — Return Documents and Stop are mutually exclusive path terminals.
+        # A Return-Documents shape is itself terminal, so ANY downstream Stop
+        # reachable from it (directly OR via intervening shapes, e.g.
+        # returndocuments -> message -> stop) means one path uses BOTH terminal
+        # mechanisms and the returned documents never reach the caller (Codex
+        # review — walk reachability, not just the direct edge).
+        if stype == "returndocuments":
+            visited: set = set()
+            queue: List[str] = list(edges.get(name, []))
+            reached_stop: Optional[str] = None
+            while queue:
+                cur = queue.pop()
+                if cur in visited:
+                    continue
+                visited.add(cur)
+                cur_shape = shapes_by_id.get(cur)
+                if cur_shape is not None and _shape_type(cur_shape) == "stop":
+                    reached_stop = cur
+                    break
+                queue.extend(edges.get(cur, []))
+            if reached_stop is not None:
                 errors.append(
                     _issue(
                         "RETURN_DOCS_STOP_EXCLUSIVE",
                         name,
                         stype,
-                        f"Return Documents shape '{name}' is wired into Stop shape "
-                        f"'{target_name}'; Return Documents and Stop are mutually "
-                        "exclusive path terminals.",
+                        f"Return Documents shape '{name}' reaches Stop shape "
+                        f"'{reached_stop}' downstream; Return Documents and Stop "
+                        "are mutually exclusive path terminals.",
                         f"End the path at either '{name}' (Return Documents) or a Stop, "
-                        "not both — remove the edge into the Stop.",
+                        "not both — remove the downstream path into the Stop.",
                     )
                 )
-            # C2b — a bare Stop wired straight off a Route/Decision/Try-Catch
-            # reject branch drops those documents with no trace (warning: an
-            # intentional drop is legal, but it should log/notify/return first).
-            if stype in _CONTROL_BRANCH_SHAPE_TYPES and target_type == "stop":
-                warnings.append(
-                    _issue(
-                        "CONTROL_BRANCH_BARE_STOP",
-                        name,
-                        stype,
-                        f"{stype.capitalize()} shape '{name}' routes a branch directly "
-                        f"into Stop shape '{target_name}'; rejected documents are "
-                        "dropped with no trace.",
-                        "Route the rejected branch through a Message, Notify, Return "
-                        "Documents, or Document Cache before the Stop so the documents "
-                        "remain traceable.",
+        # C2b — a bare Stop wired straight off a Route/Decision/Try-Catch reject
+        # branch drops those documents with no trace (warning: an intentional
+        # drop is legal, but it should log/notify/return first).
+        if stype in _CONTROL_BRANCH_SHAPE_TYPES:
+            for target_name in edges.get(name, []):
+                target = shapes_by_id.get(target_name)
+                if target is not None and _shape_type(target) == "stop":
+                    warnings.append(
+                        _issue(
+                            "CONTROL_BRANCH_BARE_STOP",
+                            name,
+                            stype,
+                            f"{stype.capitalize()} shape '{name}' routes a branch "
+                            f"directly into Stop shape '{target_name}'; rejected "
+                            "documents are dropped with no trace.",
+                            "Route the rejected branch through a Message, Notify, "
+                            "Return Documents, or Document Cache before the Stop so "
+                            "the documents remain traceable.",
+                        )
                     )
-                )
 
     # ------------------------------------------------------------------
     # Pass 3 — reachability from the start shape.

@@ -60,6 +60,30 @@ def _build_minimal(**overrides):
     return RestClientConnectionBuilder().build(**params)
 
 
+def test_set_by_extension_on_base_url_is_exempt_from_scheme_check():
+    """Issue #102 B2 (Codex review): base_url is extension-bound, so the
+    SET_BY_EXTENSION fail-fast placeholder is accepted there (exempt from the
+    http(s) scheme check) instead of being rejected as a bad URL."""
+    from boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    assert RestClientConnectionBuilder.validate_config(
+        _minimal_oauth2_config(base_url=SET_BY_EXTENSION)
+    ) is None
+
+
+def test_set_by_extension_rejected_on_non_extension_rest_field():
+    """SET_BY_EXTENSION on a non-extension REST field (component_name) is
+    rejected — the placeholder is gated to base_url / username only."""
+    from boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    err = RestClientConnectionBuilder.validate_config(
+        _minimal_oauth2_config(component_name=SET_BY_EXTENSION)
+    )
+    assert err is not None
+    assert err.error_code == "SET_BY_EXTENSION_FIELD_NOT_ALLOWED"
+    assert err.field == "component_name"
+
+
 # ----------------------------------------------------------------------------
 # Subtype and aliases
 # ----------------------------------------------------------------------------

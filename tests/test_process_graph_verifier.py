@@ -171,6 +171,32 @@ def test_return_docs_into_stop_is_error():
     assert rd[0]["shape"] == "shape2"
 
 
+def test_return_docs_reaches_stop_via_intermediate_is_error():
+    """Issue #102 C2a (Codex review): Return Documents reaching a Stop downstream
+    via an intervening shape (returndocuments -> message -> stop) still uses both
+    terminal mechanisms — flagged by reachability, not just a direct edge."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="returndocuments_icon" name="shape2" shapetype="returndocuments" x="2" y="1">'
+        '<configuration/>'
+        '<dragpoints><dragpoint name="d2" toShape="shape3" x="3" y="2"/></dragpoints></shape>'
+        '<shape image="message_icon" name="shape3" shapetype="message" x="3" y="1">'
+        '<configuration/>'
+        '<dragpoints><dragpoint name="d3" toShape="shape4" x="4" y="2"/></dragpoints></shape>'
+        '<shape image="stop_icon" name="shape4" shapetype="stop" x="4" y="1">'
+        '<configuration><stop continue="true"/></configuration><dragpoints/></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "RETURN_DOCS_STOP_EXCLUSIVE" in codes
+    rd = [e for e in result["errors"] if e["code"] == "RETURN_DOCS_STOP_EXCLUSIVE"]
+    assert rd[0]["shape"] == "shape2"
+
+
 def test_terminal_return_documents_is_clean():
     """A Return Documents used as a proper terminal (no outbound edge) is clean
     — C2a only flags the Return-Documents -> Stop wiring."""

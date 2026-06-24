@@ -4969,13 +4969,21 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         "execution_order": execution_order,
     }
 
-    return {
+    apply_result = {
         "_success": True,
         "build_id": build_id,
         "message": f"Applied integration '{spec.name}' with {len(results)} steps.",
         "execution_order": execution_order,
         "results": results,
     }
+    # Forward the plan's advisory output (build-basics warnings, connection
+    # aliases) onto the apply envelope so a real apply does not silently drop it
+    # (Codex review).
+    if planned.get("warnings"):
+        apply_result["warnings"] = planned["warnings"]
+    if planned.get("connection_aliases"):
+        apply_result["connection_aliases"] = planned["connection_aliases"]
+    return apply_result
 
 
 def _verify_build(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:

@@ -250,6 +250,18 @@ class NamingConfig(BaseModel):
             "interpret keys."
         ),
     )
+    convention: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional component-naming convention to activate in the emitted "
+            "spec's naming block (issue #102 D1). Set to 'bracketed' to have "
+            "build_integration's name-governance lint flag names that do not "
+            "follow the bracketed account convention. Default None (off) — the "
+            "archetype emits descriptive names that are not bracketed, so "
+            "activating it by default would flag the archetype's own output; it "
+            "is the caller's opt-in."
+        ),
+    )
 
     @field_validator("integration_name", "component_prefix")
     @classmethod
@@ -2830,11 +2842,17 @@ def _build_main_process(
     # UI-populated per-environment override VALUES survive structured updates).
     ext_connections: List[Dict[str, Any]] = []
     source_binding = parameters.source.binding
-    if (
+    # Declare the DB SOURCE connection fields as per-environment override points
+    # for create-mode username_password sources AND for reuse-mode (an existing
+    # connection still benefits from per-environment credential overrides — the
+    # #102 B1 reuse-mode requirement; Codex review). windows_integrated create
+    # has no archetype-owned credential to externalize.
+    db_externalize = source_binding.mode == "reuse" or (
         source_binding.mode == "create"
         and source_binding.settings is not None
         and source_binding.settings.auth_mode == "username_password"
-    ):
+    )
+    if db_externalize:
         extension_fields = db_connection_extension_fields(
             credentials=parameters.environment_extensions.credential_connection_fields,
             endpoint=parameters.environment_extensions.endpoint_connection_fields,
@@ -3703,6 +3721,12 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
             "component_prefix": naming.component_prefix,
             "component_names": naming.component_names or {},
         }
+        # Issue #102 D1: pass the opt-in naming convention through so a caller can
+        # activate build_integration's bracketed name-governance lint for the
+        # emitted spec. Off by default (the archetype's own names are descriptive,
+        # not bracketed) so it never floods the happy path with warnings.
+        if naming.convention:
+            naming_block["convention"] = naming.convention
 
         folders_block: Dict[str, Any] = (
             {"path": naming.folder_path} if naming.folder_path else {}

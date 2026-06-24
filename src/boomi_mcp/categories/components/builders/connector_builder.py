@@ -33,6 +33,40 @@ from boomi_mcp.categories.components.builders._preservation_policy import (
 # extension-bound field into the fail-fast placeholder convention.
 SET_BY_EXTENSION = "SET_BY_EXTENSION"
 
+# The ONLY config fields (per connector family) for which SET_BY_EXTENSION is a
+# valid fail-fast placeholder: non-secret, extension-bound endpoint/principal
+# fields (Codex review — gate it to an explicit registry). Secret fields are
+# rejected earlier by the secret scanner; every other field rejects the
+# placeholder as meaningless, so handling is consistent across fields.
+_DB_EXTENSION_BOUND_PLACEHOLDER_FIELDS = frozenset({"username"})
+_REST_EXTENSION_BOUND_PLACEHOLDER_FIELDS = frozenset({"base_url", "username"})
+
+
+def _reject_misplaced_set_by_extension(
+    config: Dict[str, Any], allowed: frozenset, family: str
+) -> Optional["BuilderValidationError"]:
+    """Reject SET_BY_EXTENSION in a field that is not extension-bound (#102 B2).
+
+    Returns a structured error when the placeholder appears in any field outside
+    ``allowed``; None otherwise. (Secret fields are handled earlier by the secret
+    scanner, so they never reach here.)
+    """
+    for key, value in config.items():
+        if value == SET_BY_EXTENSION and key not in allowed:
+            return BuilderValidationError(
+                f"SET_BY_EXTENSION is only valid for {family} extension-bound "
+                f"non-secret fields {sorted(allowed)}; field '{key}' must carry a "
+                "real value.",
+                error_code="SET_BY_EXTENSION_FIELD_NOT_ALLOWED",
+                field=key,
+                hint=(
+                    "Provide a concrete value, or externalize a supported "
+                    "non-secret field (username / base URL) via an environment "
+                    "extension. Secrets use credential_ref, never this placeholder."
+                ),
+            )
+    return None
+
 
 class BuilderValidationError(ValueError):
     """Structured connector-builder validation failure.
@@ -926,6 +960,14 @@ class DatabaseConnectorBuilder:
         if secret_err is not None:
             return secret_err
 
+        # 1b) SET_BY_EXTENSION is only valid on a non-secret extension-bound
+        #     field (username); reject it elsewhere (#102 B2, Codex review).
+        placeholder_err = _reject_misplaced_set_by_extension(
+            config, _DB_EXTENSION_BOUND_PLACEHOLDER_FIELDS, "database"
+        )
+        if placeholder_err is not None:
+            return placeholder_err
+
         # 2) driver_id presence + recognized.
         driver_id = config.get("driver_id") or ""
         supported_drivers = ", ".join(cls.SUPPORTED_DRIVER_IDS)
@@ -1686,6 +1728,14 @@ class RestClientConnectionBuilder:
         if secret_err is not None:
             return secret_err
 
+        # 1b) SET_BY_EXTENSION is only valid on a non-secret extension-bound field
+        #     (base_url / username); reject it elsewhere (#102 B2, Codex review).
+        placeholder_err = _reject_misplaced_set_by_extension(
+            config, _REST_EXTENSION_BOUND_PLACEHOLDER_FIELDS, "REST"
+        )
+        if placeholder_err is not None:
+            return placeholder_err
+
         # 2) component_name required.
         component_name = config.get("component_name")
         if not component_name or not str(component_name).strip():
@@ -1709,7 +1759,11 @@ class RestClientConnectionBuilder:
                 ),
             )
         base_url_str = str(base_url).strip()
-        if not (base_url_str.startswith("http://") or base_url_str.startswith("https://")):
+        # base_url is extension-bound, so the SET_BY_EXTENSION fail-fast
+        # placeholder is exempt from the scheme check (#102 B2, Codex review).
+        if base_url_str != SET_BY_EXTENSION and not (
+            base_url_str.startswith("http://") or base_url_str.startswith("https://")
+        ):
             return BuilderValidationError(
                 f"base_url {base_url_str!r} must begin with http:// or https://",
                 error_code="REST_BASE_URL_INVALID",

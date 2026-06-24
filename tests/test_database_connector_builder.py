@@ -89,6 +89,18 @@ def test_set_by_extension_never_substitutes_for_a_secret():
         DatabaseConnectorBuilder().build(**_minimal_config(password=SET_BY_EXTENSION))
 
 
+def test_set_by_extension_rejected_on_non_extension_field():
+    """Issue #102 B2 (Codex review): SET_BY_EXTENSION is gated to extension-bound
+    non-secret fields (username) — using it on a non-extension field (dbname) is
+    rejected, so handling is consistent across fields."""
+    from src.boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    err = DatabaseConnectorBuilder.validate_config(_minimal_config(dbname=SET_BY_EXTENSION))
+    assert err is not None
+    assert err.error_code == "SET_BY_EXTENSION_FIELD_NOT_ALLOWED"
+    assert err.field == "dbname"
+
+
 def test_encrypted_password_block_marked_unset():
     xml = _build_minimal()
     root = ET.fromstring(xml)

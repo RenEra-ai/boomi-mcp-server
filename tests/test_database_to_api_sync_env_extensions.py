@@ -112,12 +112,47 @@ def test_credentials_off_emits_no_declaration():
     assert "process_extensions" not in mp.config
 
 
-def test_reuse_mode_emits_no_declaration():
+def test_reuse_mode_db_source_declares_extension():
+    # Issue #102 B1 (Codex review): a reuse-mode DB source still declares its
+    # credential fields as per-environment override points (an existing
+    # connection benefits from per-environment overrides too).
     mp = _main_process(
         _emit(_payload(source={
             "binding": {"mode": "reuse", "component_id": "EXISTING-DB-CONN"},
             "read_operation": _PAYLOAD["source"]["read_operation"],
         }))
+    )
+    conns = mp.config["process_extensions"]["connections"]
+    db = [c for c in conns if c["connector_type"] == "database"]
+    assert len(db) == 1
+    assert db[0]["connection_id"] == f"$ref:{_DB_CONN_KEY}"
+    assert [f["id"] for f in db[0]["fields"]] == ["username", "password"]
+
+
+def test_naming_convention_passthrough_opt_in():
+    # Issue #102 D1 (Codex review): the bracketed naming convention is OFF by
+    # default (archetype names are descriptive, not bracketed) but a caller can
+    # opt in, activating build_integration's name-governance bracketed lint.
+    default_spec = _emit(_payload())
+    assert "convention" not in (default_spec.naming or {})
+    opted_spec = _emit(_payload(naming={
+        "integration_name": "demo-sync", "component_prefix": "DEMO",
+        "convention": "bracketed",
+    }))
+    assert opted_spec.naming.get("convention") == "bracketed"
+
+
+def test_credentials_off_reuse_db_emits_no_declaration():
+    # With credentials externalization turned off, a reuse-mode DB source emits
+    # no DB declaration (nothing to externalize).
+    mp = _main_process(
+        _emit(_payload(
+            environment_extensions={"credential_connection_fields": False},
+            source={
+                "binding": {"mode": "reuse", "component_id": "EXISTING-DB-CONN"},
+                "read_operation": _PAYLOAD["source"]["read_operation"],
+            },
+        ))
     )
     assert "process_extensions" not in mp.config
 
