@@ -84,6 +84,20 @@ def test_set_by_extension_rejected_on_non_extension_rest_field():
     assert err.field == "component_name"
 
 
+def test_set_by_extension_rejected_in_nested_oauth_block():
+    """A placeholder nested in a sub-block (oauth2.client_id) is misplaced — no
+    nested field is extension-bound — and is rejected with its dotted path
+    (Codex review — the gate now recurses)."""
+    from boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    cfg = _minimal_oauth2_config()
+    cfg["oauth2"] = {**cfg["oauth2"], "client_id": SET_BY_EXTENSION}
+    err = RestClientConnectionBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "SET_BY_EXTENSION_FIELD_NOT_ALLOWED"
+    assert err.field == "oauth2.client_id"
+
+
 # ----------------------------------------------------------------------------
 # Subtype and aliases
 # ----------------------------------------------------------------------------

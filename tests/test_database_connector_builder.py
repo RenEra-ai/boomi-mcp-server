@@ -101,6 +101,14 @@ def test_set_by_extension_rejected_on_non_extension_field():
     assert err.field == "dbname"
 
 
+def test_set_by_extension_allowed_on_host_endpoint_field():
+    """host is a non-secret extension-bound endpoint field, so the placeholder is
+    valid there (Codex review — was over-restricted to username only)."""
+    from src.boomi_mcp.categories.components.builders.connector_builder import SET_BY_EXTENSION
+
+    assert DatabaseConnectorBuilder.validate_config(_minimal_config(host=SET_BY_EXTENSION)) is None
+
+
 def test_encrypted_password_block_marked_unset():
     xml = _build_minimal()
     root = ET.fromstring(xml)

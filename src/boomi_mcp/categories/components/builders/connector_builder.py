@@ -38,34 +38,57 @@ SET_BY_EXTENSION = "SET_BY_EXTENSION"
 # fields (Codex review — gate it to an explicit registry). Secret fields are
 # rejected earlier by the secret scanner; every other field rejects the
 # placeholder as meaningless, so handling is consistent across fields.
-_DB_EXTENSION_BOUND_PLACEHOLDER_FIELDS = frozenset({"username"})
+# `host` is a non-secret DB endpoint field declared overrideable when DB endpoint
+# extensions are enabled (db_connection_extension_fields(endpoint=True)), so the
+# placeholder is valid there too (Codex review). `port` is excluded — it is
+# numeric and the placeholder would fail the port type check downstream.
+_DB_EXTENSION_BOUND_PLACEHOLDER_FIELDS = frozenset({"username", "host"})
 _REST_EXTENSION_BOUND_PLACEHOLDER_FIELDS = frozenset({"base_url", "username"})
 
 
 def _reject_misplaced_set_by_extension(
     config: Dict[str, Any], allowed: frozenset, family: str
 ) -> Optional["BuilderValidationError"]:
-    """Reject SET_BY_EXTENSION in a field that is not extension-bound (#102 B2).
+    """Reject SET_BY_EXTENSION outside a top-level extension-bound field (#102 B2).
 
-    Returns a structured error when the placeholder appears in any field outside
-    ``allowed``; None otherwise. (Secret fields are handled earlier by the secret
-    scanner, so they never reach here.)
+    Walks the config recursively (Codex review): the placeholder is valid ONLY as
+    a DIRECT top-level value whose key is in ``allowed``. Any placeholder nested
+    inside a sub-block (e.g. ``oauth2.client_id``, ``write_options.sql_file_path``)
+    is misplaced — no nested field is extension-bound — and is rejected with its
+    dotted path. (Secret fields are handled earlier by the secret scanner.)
     """
-    for key, value in config.items():
-        if value == SET_BY_EXTENSION and key not in allowed:
-            return BuilderValidationError(
-                f"SET_BY_EXTENSION is only valid for {family} extension-bound "
-                f"non-secret fields {sorted(allowed)}; field '{key}' must carry a "
-                "real value.",
-                error_code="SET_BY_EXTENSION_FIELD_NOT_ALLOWED",
-                field=key,
-                hint=(
-                    "Provide a concrete value, or externalize a supported "
-                    "non-secret field (username / base URL) via an environment "
-                    "extension. Secrets use credential_ref, never this placeholder."
-                ),
-            )
-    return None
+    def _make_error(path: str) -> "BuilderValidationError":
+        return BuilderValidationError(
+            f"SET_BY_EXTENSION is only valid for {family} extension-bound "
+            f"non-secret fields {sorted(allowed)}; field '{path}' must carry a "
+            "real value.",
+            error_code="SET_BY_EXTENSION_FIELD_NOT_ALLOWED",
+            field=path,
+            hint=(
+                "Provide a concrete value, or externalize a supported non-secret "
+                "field (username / host / base URL) via an environment extension. "
+                "Secrets use credential_ref, never this placeholder."
+            ),
+        )
+
+    def _walk(value: Any, path: str) -> Optional["BuilderValidationError"]:
+        if isinstance(value, str):
+            if value == SET_BY_EXTENSION and path not in allowed:
+                return _make_error(path or "<root>")
+            return None
+        if isinstance(value, dict):
+            for k, v in value.items():
+                err = _walk(v, f"{path}.{k}" if path else str(k))
+                if err is not None:
+                    return err
+        elif isinstance(value, (list, tuple)):
+            for i, v in enumerate(value):
+                err = _walk(v, f"{path}[{i}]")
+                if err is not None:
+                    return err
+        return None
+
+    return _walk(config, "")
 
 
 class BuilderValidationError(ValueError):
