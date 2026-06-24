@@ -1955,9 +1955,12 @@ class EnvironmentExtensionsConfig(BaseModel):
     usually stable within a deployment lane and changing them can affect
     connection-pool / runtime behavior — so they require explicit opt-in.
 
-    Applies to create-mode ``username_password`` DB sources; reuse-mode and
-    ``windows_integrated`` sources declare nothing (no archetype-owned
-    credential to externalize). Runtime acceptance is ``live_QA_required``.
+    Applies to create-mode ``username_password`` DB sources AND reuse-mode DB
+    sources (issue #102 B1 — an existing connection still benefits from
+    per-environment credential overrides); ``windows_integrated`` create declares
+    nothing. The REST target connection is covered separately by
+    ``rest_credential_connection_fields`` / ``rest_endpoint_connection_fields``.
+    Runtime acceptance is ``live_QA_required``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2050,11 +2053,14 @@ class DatabaseToApiSyncParameters(BaseModel):
     environment_extensions: EnvironmentExtensionsConfig = Field(
         default_factory=EnvironmentExtensionsConfig,
         description=(
-            "Which source DB connection fields the emitted process declares as "
-            "per-environment override points (issue #92 M4.5.7). Defaults: "
-            "credential fields (username, password) declared extensible; "
-            "endpoint fields (host, port) opt-in. Only create-mode "
-            "username_password DB sources emit a declaration."
+            "Which connection fields the emitted process declares as "
+            "per-environment override points (issue #92 M4.5.7 / #102 B1). "
+            "Defaults: DB credential fields (username, password) declared "
+            "extensible; DB endpoint fields (host, port) opt-in. The REST target "
+            "declares reuse-mode credentials by default and the base URL on "
+            "opt-in (rest_*_connection_fields). Create-mode username_password AND "
+            "reuse-mode DB sources emit a DB declaration; windows_integrated "
+            "create declares nothing."
         ),
     )
 
@@ -2828,18 +2834,16 @@ def _build_main_process(
     if naming.folder_path:
         config["folder_name"] = naming.folder_path
 
-    # Issue #92 M4.5.7: declare the source DB connection fields as
+    # Issue #92 M4.5.7 (+ #102 B1): declare the source DB connection fields as
     # per-environment override points so the deployed process exposes them
     # through manage_environments(get_extensions) — TEST -> PROD promotion can
     # then supply the credential per environment instead of embedding it in the
-    # connection component. Only create-mode username_password DB sources carry
-    # an archetype-owned credential to externalize; reuse / windows_integrated
-    # declare nothing. The declaration reuses the SAME $ref:db_conn_key the
+    # connection component. The declaration reuses the SAME $ref:db_conn_key the
     # source connector shape binds to, so apply-time substitution resolves both
     # to the one connection component (db_conn_key is already in depends_on, so
-    # no new dependency edge is needed). ProcessFlowBuilder emits the declaration
-    # on CREATE only (its preservation policy leaves processOverrides UNOWNED so
-    # UI-populated per-environment override VALUES survive structured updates).
+    # no new dependency edge is needed). ProcessFlowBuilder leaves processOverrides
+    # UNOWNED so UI-populated per-environment override VALUES survive structured
+    # updates.
     ext_connections: List[Dict[str, Any]] = []
     source_binding = parameters.source.binding
     # Declare the DB SOURCE connection fields as per-environment override points
@@ -3271,7 +3275,7 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
         "Watermark is represented as metadata only; watermark-update and dynamic operation-property wiring are deferred (#51).",
         "REST create-mode emits only auth='none'; secured auth (basic / bearer / oauth2) requires binding.mode='reuse'.",
         "DB create-mode supports auth_mode='username_password' only; 'windows_integrated' requires reuse (#51).",
-        "Environment-extension declarations are emitted for create-mode username_password DB sources only (reuse / windows_integrated declare nothing) and land on CREATE; the builder leaves processOverrides unowned so UI-populated per-environment override values survive structured updates. REST endpoint extensions are deferred (companion_unverified). Override availability at runtime is live_QA_required (#92 M4.5.7).",
+        "Environment-extension declarations cover create-mode username_password AND reuse-mode DB sources (windows_integrated create declares nothing), plus the REST target connection: reuse-mode REST credentials (username/password) by default and the REST base URL on opt-in (rest_endpoint_connection_fields). DB overrides are xpath-keyed, REST overrides are id-keyed (no xpath). The builder leaves processOverrides unowned so UI-populated per-environment override values survive structured updates. Override availability at runtime is live_QA_required (#92 M4.5.7 / #102 B1).",
         "jdbc_options and REST default_headers are metadata-deferred (no builder field in M2); use reuse for connections needing them.",
         "Does not mix map_function and map_script in one call (UNSUPPORTED_TRANSFORM_ROUTE); split into separate maps.",
         "Does not infer DB result fields from SQL, browse, metadata, or row samples; run infer_profile_fields (issue #47) separately for read-only inference from supplied metadata summaries / sample JSON / XSD / sample XML.",
@@ -3824,14 +3828,17 @@ class DatabaseToApiSyncArchetype(ArchetypePattern):
                         "username_password only; windows_integrated requires reuse"
                     ),
                     "environment_extensions": (
-                        "create-mode username_password DB sources declare "
-                        "credential connection fields (username/password) as "
-                        "per-environment override points by default; host/port "
+                        "create-mode username_password AND reuse-mode DB sources "
+                        "declare credential connection fields (username/password) "
+                        "as per-environment override points by default; host/port "
                         "opt-in via environment_extensions.endpoint_connection_fields; "
-                        "emitted on CREATE only (processOverrides is unowned so "
-                        "UI-populated override values survive updates); REST "
-                        "endpoint extensions deferred (companion_unverified); "
-                        "runtime override availability is live_QA_required (#92)"
+                        "the REST target also declares reuse-mode credentials by "
+                        "default and the base URL on opt-in "
+                        "(rest_endpoint_connection_fields). DB overrides are "
+                        "xpath-keyed, REST overrides are id-keyed (no xpath). "
+                        "processOverrides is unowned so UI-populated override "
+                        "values survive updates; runtime override availability is "
+                        "live_QA_required (#92 / #102 B1)"
                     ),
                     "rest_create_auth": (
                         "auth='none' only; secured auth requires reuse"
