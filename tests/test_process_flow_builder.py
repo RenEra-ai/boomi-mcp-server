@@ -947,6 +947,48 @@ def test_build_emits_rest_id_keyed_override_without_xpath():
         assert "xpath" not in f.attrib  # REST overrides carry no xpath
 
 
+def test_rest_connector_aliases_accept_id_keyed_override_without_xpath():
+    """Issue #102 B1 (Codex review): every accepted REST connector alias
+    (rest / rest_client / the canonical subtype) is recognized as id-keyed, so a
+    no-xpath override is valid — only true non-REST (DB) entries require xpath."""
+    for alias in ("rest", "rest_client", "officialboomi-X3979C-rest-prod"):
+        cfg = _base_config(
+            process_extensions={
+                "connections": [
+                    {
+                        "connection_id": _DB_CONN_ID,
+                        "connector_type": alias,
+                        "fields": [{"id": "username", "label": "User"}],
+                    }
+                ]
+            }
+        )
+        root = ET.fromstring(ProcessFlowBuilder.build(cfg, name="REST alias"))
+        field = root.find("bns:processOverrides/Overrides/Connections/ConnectionOverride/field", NS)
+        assert field.attrib["id"] == "username"
+        assert "xpath" not in field.attrib, f"alias {alias!r} should be id-keyed"
+
+
+def test_id_keyed_override_without_connector_type_builds():
+    """Issue #102 B1 (Codex review): a hand-authored id-keyed override (fields
+    without xpath) that OMITS connector_type still builds — only an explicit
+    connector_type='database' entry requires xpath."""
+    cfg = _base_config(
+        process_extensions={
+            "connections": [
+                {
+                    "connection_id": _DB_CONN_ID,  # no connector_type
+                    "fields": [{"id": "username", "label": "User"}],
+                }
+            ]
+        }
+    )
+    root = ET.fromstring(ProcessFlowBuilder.build(cfg, name="No CT"))
+    field = root.find("bns:processOverrides/Overrides/Connections/ConnectionOverride/field", NS)
+    assert field.attrib["id"] == "username"
+    assert "xpath" not in field.attrib
+
+
 def test_build_emits_connection_field_environment_extensions():
     xml = ProcessFlowBuilder.build(_extension_config(), name="Ext Process")
     root = ET.fromstring(xml)
@@ -1053,9 +1095,11 @@ def test_build_update_discards_emitted_declaration_preserving_live_overrides():
         {"connections": [{"connection_id": "", "fields": _EXTENSION_FIELDS}]},
         {"connections": [{"connection_id": _DB_CONN_ID, "fields": []}]},
         {"connections": [{"connection_id": _DB_CONN_ID, "fields": ["not-a-dict"]}]},
-        # xpath is now OPTIONAL (#102 B1 — REST overrides omit it), but a PRESENT
-        # blank xpath is still rejected.
-        {"connections": [{"connection_id": _DB_CONN_ID, "fields": [{"id": "x", "label": "X", "xpath": " "}]}]},
+        # xpath is REQUIRED only for an EXPLICIT database override (xpath-keyed);
+        # omitting it there is rejected (#102 B1, Codex review).
+        {"connections": [{"connection_id": _DB_CONN_ID, "connector_type": "database", "fields": [{"id": "x", "label": "X"}]}]},
+        # A PRESENT but blank xpath is rejected for any connector type.
+        {"connections": [{"connection_id": _DB_CONN_ID, "connector_type": "rest", "fields": [{"id": "x", "label": "X", "xpath": " "}]}]},
         {"connections": [{"connection_id": _DB_CONN_ID, "fields": [{"id": " ", "label": "X", "xpath": "y"}]}]},
     ],
 )

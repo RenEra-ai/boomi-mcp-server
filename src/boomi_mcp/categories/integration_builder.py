@@ -61,9 +61,9 @@ _COMPONENT_NAME_PRIMARY_TYPES = frozenset({
 _COPY_SUFFIX_NAME_RE = re.compile(r".+\s(?:1|2)$")
 
 # Issue #102 (M9.8) — mechanical integration-build basics promoted from served
-# doctrine to plan-time guards. New hard-failure planned_actions (B3 env-var
-# tokens reuse the existing database/REST validation actions):
-_DUPLICATE_CONNECTION_ERROR_ACTION = "error_duplicate_connection"  # A1
+# doctrine to plan-time guards. (A1 duplicate-connection is advisory: warning +
+# canonical alias mapping, never a hard block. B3 env-var tokens reuse the
+# existing database/REST validation actions.)
 # A literal ${ENV_VAR}-style token in a connection field (B3). Boomi stores it
 # verbatim in the component XML and never interpolates it at runtime, so it is a
 # silent auth/routing failure — rejected at plan time.
@@ -3104,24 +3104,70 @@ def _connection_endpoint_key(
         port_str = str(port).strip() if port is not None else ""
         driver = config.get("driver_id")
         driver_str = driver.strip().lower() if isinstance(driver, str) else ""
-        return ("db", host.strip().lower(), port_str, driver_str)
+        # dbname is part of the endpoint identity: two connections to the same
+        # host/port/driver but DIFFERENT databases are distinct endpoints, not a
+        # duplicate. Case is PRESERVED (Codex review): some DB engines (e.g.
+        # MySQL on Linux) are case-sensitive on the database name, so `Sales`
+        # and `sales` are different databases and must not collapse into a false
+        # duplicate. (host is lowercased — DNS hostnames are case-insensitive;
+        # driver_id is a fixed enum.)
+        dbname = config.get("dbname")
+        dbname_str = dbname.strip() if isinstance(dbname, str) else ""
+        return ("db", host.strip().lower(), port_str, driver_str, dbname_str)
     return None
 
 
-def _connection_auth_compatible(
-    a: "IntegrationComponentSpec", b: "IntegrationComponentSpec"
-) -> bool:
-    """True when two same-endpoint connections share auth/security config (#102 A1).
+def _norm_identity(value: Any) -> Optional[str]:
+    """Canonicalize an auth-identity scalar for comparison (strip only), else None.
 
-    Only the auth-relevant fields are compared; a mismatch means the two
-    connections are genuinely different and must not be silently aliased.
+    Case is PRESERVED for every field (Codex review): the connector builders
+    validate auth modes case-SENSITIVELY (``DatabaseConnectorBuilder`` rejects
+    ``'USERNAME_PASSWORD'``), and ``credential_ref`` / ``client_secret_ref`` /
+    ``username`` are opaque identifiers whose store may be case-sensitive. So a
+    case variant is a genuine difference here too — lowercasing it would alias a
+    duplicate as "compatible" for a value the builder actually rejects.
     """
-    ca = a.config if isinstance(a.config, dict) else {}
-    cb = b.config if isinstance(b.config, dict) else {}
-    for key in ("auth_mode", "credential_ref", "username"):
-        if (ca.get(key) or None) != (cb.get(key) or None):
-            return False
-    return True
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _connection_auth_identity(config: Dict[str, Any], role: str) -> Tuple[Any, ...]:
+    """High-confidence, connector-FAMILY-scoped auth identity for the A1 CONFLICT.
+
+    Compares ONLY the auth fields the relevant builder actually consumes for the
+    connection's family — DB: ``auth_mode``/``username``/``credential_ref``; REST:
+    ``auth``/``username``/``credential_ref``/OAuth2 ``client_secret_ref``. A stray
+    cross-family key (e.g. a leftover REST ``auth`` on a DB config, ignored by
+    ``DatabaseConnectorBuilder``) is excluded so it cannot cause a false conflict
+    (Codex review). A hard DUPLICATE_CONNECTION_CONFLICT fires only when this
+    identity differs.
+
+    Deliberately NOT the full config (Codex review): differences in
+    normalization-sensitive fields — ``connector_type`` aliases (``rest`` vs
+    ``rest_client``), scalar formatting (``1433`` vs ``"1433"``), or explicit
+    values that equal a builder default (``cookie_scope='GLOBAL'``) — describe
+    BUILD-EQUIVALENT connections and must NOT hard-block a valid plan. Such
+    lower-confidence differences (and others like NTLM ``domain`` or OAuth
+    ``scope``) leave the pair compatible: surfaced as an aliased duplicate
+    WARNING, never a block, because false-blocking a build-equivalent spec is
+    worse than an advisory alias.
+    """
+    if role == "database connector-settings":
+        return (
+            "db",
+            _norm_identity(config.get("auth_mode")),
+            _norm_identity(config.get("username")),
+            _norm_identity(config.get("credential_ref")),
+        )
+    oauth2 = config.get("oauth2") if isinstance(config.get("oauth2"), dict) else {}
+    return (
+        "rest",
+        _norm_identity(config.get("auth")),
+        _norm_identity(config.get("username")),
+        _norm_identity(config.get("credential_ref")),
+        _norm_identity(oauth2.get("client_secret_ref")),
+    )
 
 
 def _is_lintable_create_connection(
@@ -3144,21 +3190,36 @@ def _is_lintable_create_connection(
 
 
 def _lint_duplicate_connections(spec: IntegrationSpecV1) -> Dict[str, Any]:
-    """In-spec duplicate-connection guard (#102 A1).
+    """In-spec duplicate-connection guard (#102 A1) — ADVISORY (never blocks).
 
     Two create connections to the same endpoint burn separate connection
-    licenses and drift apart. Returns ``{"errors": {key: validation_error},
-    "aliases": {duplicate_key: canonical_key}, "warnings": [str, ...]}``:
+    licenses and drift apart. Returns ``{"aliases": {duplicate_key:
+    canonical_key}, "warnings": [str, ...]}``:
 
-      * same endpoint + compatible auth → alias the duplicate to the canonical
-        connection (recorded in ``aliases``) + a WARNING; emission is not
-        rewritten here (account-wide reuse is #83).
-      * same endpoint + incompatible auth → HARD ``DUPLICATE_CONNECTION_CONFLICT``.
+      * same endpoint + compatible auth (family-scoped high-confidence identity)
+        → record the duplicate→canonical mapping in ``aliases`` and warn to
+        reference the canonical connection instead of emitting a duplicate.
+      * same endpoint + DIFFERENT auth → warn that the two are distinct
+        connections to one endpoint (no alias recorded, since referencing the
+        canonical would route to different auth) and should be reconciled.
+
+    This guard is intentionally warning-only (a hard block was reverted): a false
+    block stops a valid build, whereas reliably proving two connections are
+    "different enough" to block would require enumerating every connector's auth
+    surface (unbounded). The issue's A1 requirement — detect the duplicate and
+    auto-REFERENCE the canonical — is met by the advisory warning + recorded
+    alias; the license-burn harm is surfaced regardless of auth compatibility.
+    Emission is not rewritten here (account-wide reuse is #83).
     """
-    errors: Dict[str, Dict[str, Any]] = {}
     aliases: Dict[str, str] = {}
     warnings: List[str] = []
-    canonical: Dict[Tuple[Any, ...], "IntegrationComponentSpec"] = {}
+    # A canonical PER (endpoint, auth-identity) group, so a compatible duplicate
+    # is aliased to the canonical of its OWN auth group even when an earlier,
+    # different-auth connection to the same endpoint exists (Codex review). The
+    # first connection seen at an endpoint anchors the cross-group "distinct
+    # connections" warning.
+    canonical_by_group: Dict[Tuple[Any, ...], "IntegrationComponentSpec"] = {}
+    first_at_endpoint: Dict[Tuple[Any, ...], "IntegrationComponentSpec"] = {}
     for comp in spec.components:
         role = _is_lintable_create_connection(comp)
         if role is None:
@@ -3166,32 +3227,35 @@ def _lint_duplicate_connections(spec: IntegrationSpecV1) -> Dict[str, Any]:
         key = _connection_endpoint_key(comp, role)
         if key is None:
             continue
-        canon = canonical.get(key)
-        if canon is None:
-            canonical[key] = comp
-            continue
-        field = "base_url" if role == "REST Client connector-settings" else "host"
-        if _connection_auth_compatible(comp, canon):
-            aliases[comp.key] = canon.key
+        config = comp.config if isinstance(comp.config, dict) else {}
+        group = (key, _connection_auth_identity(config, role))
+        group_canon = canonical_by_group.get(group)
+        if group_canon is not None:
+            # Compatible duplicate (same endpoint AND same auth identity) → alias
+            # to this auth group's canonical.
+            aliases[comp.key] = group_canon.key
             warnings.append(
-                f"Connection '{comp.key}' targets the same endpoint as "
-                f"'{canon.key}' with compatible auth; a second connection "
-                "component burns a separate connection license. Reference the "
-                f"canonical connection '{canon.key}' instead of creating a "
-                "duplicate (see connection_aliases)."
+                f"[DUPLICATE_CONNECTION] Connection '{comp.key}' targets the same "
+                f"endpoint as '{group_canon.key}' with compatible auth; a second "
+                "connection component burns a separate connection license. "
+                f"Reference the canonical connection '{group_canon.key}' instead "
+                "of creating a duplicate (see connection_aliases)."
             )
+            continue
+        canonical_by_group[group] = comp
+        endpoint_first = first_at_endpoint.get(key)
+        if endpoint_first is None:
+            first_at_endpoint[key] = comp
         else:
-            errors[comp.key] = {
-                "error_code": "DUPLICATE_CONNECTION_CONFLICT",
-                "error": (
-                    f"Connection '{comp.key}' targets the same endpoint as "
-                    f"'{canon.key}' but with incompatible auth/security config. "
-                    "Two connections to one endpoint burn separate licenses and "
-                    "drift; reconcile them into a single connection."
-                ),
-                "field": field,
-            }
-    return {"errors": errors, "aliases": aliases, "warnings": warnings}
+            # Same endpoint, a DIFFERENT auth group → distinct connections.
+            warnings.append(
+                f"[DUPLICATE_CONNECTION] Connection '{comp.key}' targets the same "
+                f"endpoint as '{endpoint_first.key}' but with different auth/"
+                "security config — they are distinct connections to one endpoint "
+                "that each burn a separate license. Reconcile them into a single "
+                "connection or confirm both are intentional."
+            )
+    return {"aliases": aliases, "warnings": warnings}
 
 
 def _lint_connection_hygiene(spec: IntegrationSpecV1) -> List[str]:
@@ -3363,15 +3427,23 @@ def _lint_property_names(spec: IntegrationSpecV1) -> List[str]:
     """Property-naming lint (#102 D2): ``DPP_``/``DDP_`` UPPER_SNAKE, no period.
 
     Warning-only. Today the typed builders emit a property name via the dynamic
-    document-property path (``dynamic_path.ddp_name`` → ``dynamicdocument.<name>``);
-    flag a name that does not match the document-property convention.
+    document-property path the process flow builder consumes —
+    ``config.target.dynamic_path.ddp_name`` → ``dynamicdocument.<name>`` (the
+    archetype sets ``config['target']['dynamic_path']``; a top-level
+    ``config.dynamic_path`` is accepted too for hand-authored specs). Flag a name
+    that does not match the document-property convention.
     """
     warnings: List[str] = []
     for comp in spec.components:
         if comp.action != "create":
             continue
         config = comp.config if isinstance(comp.config, dict) else {}
-        dynamic_path = config.get("dynamic_path")
+        target = config.get("target") if isinstance(config.get("target"), dict) else {}
+        # The builder reads target.dynamic_path; tolerate a top-level
+        # config.dynamic_path for hand-authored specs.
+        dynamic_path = target.get("dynamic_path")
+        if not isinstance(dynamic_path, dict):
+            dynamic_path = config.get("dynamic_path")
         if not isinstance(dynamic_path, dict):
             continue
         ddp_name = dynamic_path.get("ddp_name")
@@ -4649,21 +4721,11 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         step["validation_error"] = lint_error
         return True
 
-    # A1 — in-spec duplicate-connection guard (hard conflict / aliased warning).
+    # A1 — in-spec duplicate-connection guard (ADVISORY: warning + canonical
+    # alias mapping; never blocks — see _lint_duplicate_connections).
     dup = _lint_duplicate_connections(spec)
     warnings.extend(dup["warnings"])
     connection_aliases = dup["aliases"]
-    flagged_dup_keys = [
-        comp_key
-        for comp_key, lint_error in dup["errors"].items()
-        if _flag_step(comp_key, _DUPLICATE_CONNECTION_ERROR_ACTION, lint_error)
-    ]
-    if flagged_dup_keys:
-        warnings.append(
-            f"Connection(s) {flagged_dup_keys} duplicate an in-spec endpoint with "
-            "incompatible auth and were rejected (each duplicate burns a separate "
-            "connection license)."
-        )
 
     # B3 — reject literal ${ENV_VAR} tokens in connection fields (reuses the
     # existing database/REST validation fail-fast actions).
@@ -4727,9 +4789,6 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             # Issue #93: a name-governance failure blocks apply before any
             # mutation (names only — folder/role governance is GUI-only).
             _NAME_GOVERNANCE_ERROR_ACTION,
-            # Issue #102 A1: an in-spec duplicate-connection conflict (incompatible
-            # auth) blocks apply before any mutation.
-            _DUPLICATE_CONNECTION_ERROR_ACTION,
         )
     ]
     if unresolvable_steps:
@@ -4810,17 +4869,6 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' failed "
                     f"name governance: "
                     f"{ve.get('error_code', 'COMPONENT_NAME_GOVERNANCE_FAILED')} "
-                    f"on field {ve.get('field')!r}. "
-                    f"{ve.get('error', '')}".rstrip()
-                )
-            elif step["planned_action"] == _DUPLICATE_CONNECTION_ERROR_ACTION:
-                # Issue #102 A1: an in-spec duplicate-connection conflict blocks
-                # apply before any mutation.
-                ve = step.get("validation_error") or {}
-                errors.append(
-                    f"Component '{step.get('name') or step['key']}' failed the "
-                    f"duplicate-connection guard: "
-                    f"{ve.get('error_code', 'DUPLICATE_CONNECTION_CONFLICT')} "
                     f"on field {ve.get('field')!r}. "
                     f"{ve.get('error', '')}".rstrip()
                 )

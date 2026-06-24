@@ -705,19 +705,41 @@ def _extract_process_extension_connections(
                 # cosmetic and the value is escaped on emission anyway. id is
                 # structural, so canonicalize it.
                 normalized_field[key] = value.strip() if key == "id" else value
-            # xpath is OPTIONAL (#102 B1): DB connector-settings overrides carry an
-            # xpath (e.g. DatabaseConnectionSettings/@username), but live REST Client
-            # overrides key purely by field id (<field id="username" .../> — no xpath),
-            # so emission omits the attribute when xpath is absent.
+            # xpath is REQUIRED only for an EXPLICIT DB override entry
+            # (connector_type='database'), which is xpath-keyed (e.g.
+            # DatabaseConnectionSettings/@username) — a missing xpath there emits a
+            # declaration that never maps to the DB field. A no-xpath field is the
+            # id-keyed (REST) form, valid by ITSELF without requiring connector_type
+            # to be set (Codex review: a hand-authored REST override that omits
+            # connector_type must still build). So only an explicitly-DB entry
+            # mandates xpath; REST aliases / omitted / unknown connector_type leave
+            # it optional.
+            connector_type = entry.get("connector_type")
+            entry_is_db = (
+                isinstance(connector_type, str)
+                and connector_type.strip().lower() == "database"
+            )
             xpath = raw_field.get("xpath")
-            if xpath is not None:
-                if not isinstance(xpath, str) or not xpath.strip():
+            if xpath is None:
+                if entry_is_db:
                     raise BuilderValidationError(
-                        f"{floc}.xpath must be a non-empty string when present.",
+                        f"{floc}.xpath is required for a database connection override.",
                         error_code="PROCESS_EXTENSIONS_INVALID",
                         field=f"{floc}.xpath",
-                        hint="Omit xpath entirely for id-keyed (REST) overrides.",
+                        hint=(
+                            "DB overrides are xpath-keyed; set xpath (e.g. "
+                            "'DatabaseConnectionSettings/@username'). REST overrides "
+                            "are id-keyed and omit xpath."
+                        ),
                     )
+            elif not isinstance(xpath, str) or not xpath.strip():
+                raise BuilderValidationError(
+                    f"{floc}.xpath must be a non-empty string when present.",
+                    error_code="PROCESS_EXTENSIONS_INVALID",
+                    field=f"{floc}.xpath",
+                    hint="Omit xpath entirely for id-keyed (REST) overrides.",
+                )
+            else:
                 normalized_field["xpath"] = xpath.strip()
             fields.append(normalized_field)
         normalized_entry: Dict[str, Any] = {
