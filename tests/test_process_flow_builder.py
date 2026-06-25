@@ -501,6 +501,16 @@ def test_dataprocess_rejects_use_cache_false():
     assert err.field == "transform.steps[0].use_cache"
 
 
+def test_dataprocess_build_bypass_empty_steps_raises():
+    # build() stays total on the validate_config-bypass path: empty steps must
+    # raise rather than emit a semantically broken <dataprocess/> with no <step>.
+    cfg = _base_config(transform={"mode": "dataprocess", "label": "x", "steps": []})
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert exc.value.field == "transform.steps"
+
+
 def test_dataprocess_rejects_unknown_step_key():
     cfg = _dataprocess_config(
         steps=[{"operation": "custom_scripting", "script": "x", "bogus": 1}]

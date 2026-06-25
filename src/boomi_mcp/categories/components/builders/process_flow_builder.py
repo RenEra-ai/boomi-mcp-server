@@ -1598,6 +1598,18 @@ def _emit_dataprocess(
     dragpoints = _emit_dragpoints([next_name], shape_index)
     userlabel = _escape_xml(params.get("userlabel") or "")
     steps = params.get("steps") or []
+    if not steps:
+        # build() stays total on the validate_config-bypass path: an empty step
+        # list would emit a semantically broken <dataprocess/> with no <step>
+        # (well-formed XML, so the parse-back guard would not catch it), so raise
+        # rather than emit it — mirrors the catch_notify / unsupported-operation
+        # bypass guards. validate_config already rejects this on the normal path.
+        raise BuilderValidationError(
+            "transform.steps must be a non-empty list when mode='dataprocess'.",
+            error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+            field="transform.steps",
+            hint="Provide at least one Data Process operation step.",
+        )
     step_parts = [_emit_dataprocess_step(step, i) for i, step in enumerate(steps, start=1)]
     return (
         f'<shape image="dataprocess_icon" name="{shape_name}" '
