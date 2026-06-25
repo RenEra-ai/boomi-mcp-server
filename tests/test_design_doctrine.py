@@ -281,6 +281,23 @@ def test_config_externalization_is_emittable_and_live_verified():
     assert entry["provenance"] == "live_verified"
 
 
+def test_content_based_routing_branch_fanout_is_emittable():
+    # Issue #112 M10.8: the unconditional Branch fan-out is now builder-emittable,
+    # so the content_based_routing doctrine flips to emittable_today / live_verified
+    # while the prose keeps conditional Decision/Route/Business Rules as guidance.
+    entry = DESIGN_DOCTRINE_ENTRIES["content_based_routing"]
+    assert entry["capability_status"] == "emittable_today"
+    assert entry["verification_status"] == "live_verified"
+    assert entry["provenance"] == "live_verified"
+    blob = (entry["boomi_shape_mapping"] + " " + entry["when_to_use"]).lower()
+    assert "branch" in blob and "fan" in blob
+    # Conditional selection stays guidance, not over-claimed as emittable.
+    assert "design guidance" in blob or "not yet" in blob
+    # The Branch shape is registered as an emittable (non-flow-dispatch) emitter.
+    assert EMITTABLE_SHAPE_REGISTRY["branch"]["emittable"] is True
+    assert EMITTABLE_SHAPE_REGISTRY["branch"]["emitter_kind"] == "branch"
+
+
 def test_fifo_parallel_mutual_exclusion_is_symmetric():
     fifo = DESIGN_DOCTRINE_ENTRIES["reliable_and_sequential_messaging"]
     parallel = DESIGN_DOCTRINE_ENTRIES["combine_split_flow_control"]

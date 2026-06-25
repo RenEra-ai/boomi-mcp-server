@@ -67,6 +67,17 @@ _DB_ACTION_TYPES = frozenset({"Get"})
 _SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "message", "map_ref", "dataprocess"})
 _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subprocess_ref"})
 
+# Issue #112 M10.8: Branch (N-way forward fan-out) shape. The optional ``branch``
+# block carries an ``enabled`` flag and a ``targets`` list (legs 2..N — leg 1 is
+# the top-level ``target``). Boomi's Branch step supports 2..25 paths (KB
+# r-atm-Branch_shape_83d94692; invalid values default to 2), so the total leg
+# count (1 + len(branch.targets)) must stay in that range. v1 fans the
+# post-source document to N independent REST targets, each ending in its own Stop
+# — forward-only, no join/merge, sequential per-path execution (see
+# .codex/plans/issue-112-live-captures.md).
+_BRANCH_ALLOWED_KEYS = frozenset({"enabled", "targets"})
+_BRANCH_MAX_LEGS = 25
+
 # Issue #106 M10.2: process-level Data Process shape. v1 ships ONLY the
 # live-observed Custom Scripting (Groovy) operation (processtype 12) — captured
 # from the live `work` account, see .codex/plans/issue-106-live-captures.md. Every
@@ -411,6 +422,13 @@ class ProcessFlowBuilder:
         if target_err is not None:
             return target_err
 
+        # Issue #112 M10.8: validate the optional Branch (N-way fan-out) block.
+        # Leg 1 is the top-level target (validated just above); branch.targets are
+        # legs 2..N. Absent/disabled keeps the single-target flow.
+        branch_err = _validate_branch_config(config)
+        if branch_err is not None:
+            return branch_err
+
         transform_err = _validate_transform(config.get("transform"))
         if transform_err is not None:
             return transform_err
@@ -561,116 +579,137 @@ class ProcessFlowBuilder:
                     "userlabel": str(transform.get("label") or ""),
                 },
             ))
-        # Issue #100 G2: when the target carries a dynamic_path block, insert a
-        # Set Properties (documentproperties) shape AFTER the transform and
-        # BEFORE the target connector so the path DPP is built per-document, and
-        # pass dynamic_path into the connector step so it emits the matching
-        # "Path" dynamic operation property. Absent dynamic_path, no shape is
-        # added and the flow is byte-for-byte the pre-#100 chain.
-        dynamic_path = target.get("dynamic_path") if isinstance(target.get("dynamic_path"), dict) else None
-        if dynamic_path:
+        # Issue #112 M10.8: a Branch (N-way fan-out) block replaces the single
+        # target + terminal with a forward fan-out — the post-source document is
+        # branched to N independent REST-target -> Stop legs (leg 1 = top-level
+        # target, legs 2..N = branch.targets). At this point ``flow`` holds only
+        # the shared pre-branch chain (start -> source -> [transform]). v1 Branch
+        # does not compose with dynamic_path / Try-Catch / Return Documents
+        # (validate_config rejects those combinations; the guard below re-checks
+        # so a validate_config-bypass build() stays total instead of silently
+        # dropping an unsupported combination).
+        if _branch_enabled(config):
+            combo_err = _branch_unsupported_combo_error(config)
+            if combo_err is not None:
+                raise combo_err
+            legs: List[List[Tuple[str, Dict[str, Any]]]] = []
+            for leg_target in _branch_leg_targets(config):
+                legs.append([
+                    ("connectoraction_target", _branch_target_params(leg_target)),
+                    ("stop", {"continue_": True}),
+                ])
+            shape_xml_parts: List[str] = _emit_branch_shapes(flow, legs)
+        else:
+            # Issue #100 G2: when the target carries a dynamic_path block, insert a
+            # Set Properties (documentproperties) shape AFTER the transform and
+            # BEFORE the target connector so the path DPP is built per-document, and
+            # pass dynamic_path into the connector step so it emits the matching
+            # "Path" dynamic operation property. Absent dynamic_path, no shape is
+            # added and the flow is byte-for-byte the pre-#100 chain.
+            dynamic_path = target.get("dynamic_path") if isinstance(target.get("dynamic_path"), dict) else None
+            if dynamic_path:
+                flow.append((
+                    "setproperties",
+                    {
+                        "ddp_name": str(dynamic_path.get("ddp_name") or "").strip(),
+                        "request_profile_id": str(dynamic_path.get("request_profile_id") or "").strip(),
+                        "profile_type": str(dynamic_path.get("profile_type") or "profile.json").strip(),
+                        "segments": dynamic_path.get("segments") or [],
+                    },
+                ))
             flow.append((
-                "setproperties",
+                "connectoraction_target",
                 {
-                    "ddp_name": str(dynamic_path.get("ddp_name") or "").strip(),
-                    "request_profile_id": str(dynamic_path.get("request_profile_id") or "").strip(),
-                    "profile_type": str(dynamic_path.get("profile_type") or "profile.json").strip(),
-                    "segments": dynamic_path.get("segments") or [],
+                    # _canonical_connector_type maps REST aliases ("rest",
+                    # "rest_client") to the canonical subtype.
+                    "connector_type": _canonical_connector_type(target.get("connector_type")),
+                    # REST HTTP methods are case-insensitive on input (validator
+                    # uppercases for membership check) but Boomi's live XML uses
+                    # uppercase actionType="POST" — uppercase here so the emitted
+                    # XML matches the canonical form. Codex review C3.
+                    "action_type": str(target.get("action_type") or "").strip().upper(),
+                    # Strip ID whitespace so whitespace-padded refs don't leak
+                    # into emitted XML. Codex review r6 P2.2.
+                    "connection_id": str(target.get("connection_id") or "").strip(),
+                    "operation_id": str(target.get("operation_id") or "").strip(),
+                    "userlabel": str(target.get("label") or ""),
+                    "dynamic_path": dynamic_path,
                 },
             ))
-        flow.append((
-            "connectoraction_target",
-            {
-                # _canonical_connector_type maps REST aliases ("rest",
-                # "rest_client") to the canonical subtype.
-                "connector_type": _canonical_connector_type(target.get("connector_type")),
-                # REST HTTP methods are case-insensitive on input (validator
-                # uppercases for membership check) but Boomi's live XML uses
-                # uppercase actionType="POST" — uppercase here so the emitted
-                # XML matches the canonical form. Codex review C3.
-                "action_type": str(target.get("action_type") or "").strip().upper(),
-                # Strip ID whitespace so whitespace-padded refs don't leak
-                # into emitted XML. Codex review r6 P2.2.
-                "connection_id": str(target.get("connection_id") or "").strip(),
-                "operation_id": str(target.get("operation_id") or "").strip(),
-                "userlabel": str(target.get("label") or ""),
-                "dynamic_path": dynamic_path,
-            },
-        ))
-        # Issue #107 M10.3: the terminal is normally a Stop, but a
-        # return_documents.enabled=True block swaps it for a Return Documents
-        # shape (subprocess return value) — no Stop is appended after it.
-        flow.append(_terminal_flow_entry(config))
+            # Issue #107 M10.3: the terminal is normally a Stop, but a
+            # return_documents.enabled=True block swaps it for a Return Documents
+            # shape (subprocess return value) — no Stop is appended after it.
+            flow.append(_terminal_flow_entry(config))
 
-        # Issue #51 M3.R1a + #88 M4.5.3: when retry_count is 0..5 and a supported
-        # DLQ mode is set, wrap the linear flow in the verified Try/Catch
-        # (catcherrors) shape with a DLQ catch path, emitting the validated
-        # retry count. Otherwise emit the unchanged linear flow so existing
-        # non-DLQ process XML is byte-for-byte identical.
-        reliability_cfg = config.get("reliability")
-        if cls._should_emit_try_catch(reliability_cfg):
-            # _should_emit_try_catch proved retry_count is a valid int 0..5 and
-            # EITHER reliability_cfg["dlq"] is a Try/Catch DLQ mode OR
-            # reliability_cfg["catch_exception"] is a dict (issue #108 M10.4 — a
-            # bare catcherrors -> exception leg needs no DLQ). So dlq may be absent
-            # for a catch_exception-only leg; default it to {} (the emitter skips
-            # the DLQ route when the mode is not a supported DLQ mode).
-            #
-            # Issue #99 G1: reliability.try_catch_scope selects the wrapper
-            # layout. "process" (default — absent key keeps the pre-#99 output
-            # byte-for-byte identical) wraps the whole chain in ONE Try/Catch;
-            # "connector" emits a Try/Catch per connector (source retry 0, target
-            # retry N) so a target retry does not re-run the source read.
-            try_catch_scope = str(
-                reliability_cfg.get("try_catch_scope") or "process"
-            ).strip().lower()
-            emitter = (
-                _emit_connector_scoped_try_catch_shapes
-                if try_catch_scope == "connector"
-                else _emit_try_catch_shapes
-            )
-            shape_xml_parts: List[str] = emitter(
-                flow,
-                reliability_cfg.get("dlq") or {},
-                retry_count=int(reliability_cfg.get("retry_count", 0)),
-                catch_notify=reliability_cfg.get("catch_notify"),
-                catch_exception=reliability_cfg.get("catch_exception"),
-            )
-        else:
-            # build() stays total on the validate_config-bypass path: a present
-            # catch_notify cannot be honored without a Try/Catch catch leg, so
-            # raise rather than silently dropping it (issue #89; mirrors the DLQ
-            # binding guard inside _emit_try_catch_shapes). validate_config
-            # already rejects this combination on the normal path.
-            if isinstance(reliability_cfg, dict) and reliability_cfg.get("catch_notify") is not None:
-                raise BuilderValidationError(
-                    "reliability.catch_notify requires a wired Try/Catch catch path.",
-                    error_code="PROCESS_NOTIFY_CONFIG_INVALID",
-                    field="reliability.catch_notify",
-                    hint=(
-                        "Notify is emitted only on a catch leg. Set "
-                        "reliability.dlq.mode to document_cache_ref or "
-                        "error_subprocess_ref."
-                    ),
+            # Issue #51 M3.R1a + #88 M4.5.3: when retry_count is 0..5 and a supported
+            # DLQ mode is set, wrap the linear flow in the verified Try/Catch
+            # (catcherrors) shape with a DLQ catch path, emitting the validated
+            # retry count. Otherwise emit the unchanged linear flow so existing
+            # non-DLQ process XML is byte-for-byte identical.
+            reliability_cfg = config.get("reliability")
+            if cls._should_emit_try_catch(reliability_cfg):
+                # _should_emit_try_catch proved retry_count is a valid int 0..5 and
+                # EITHER reliability_cfg["dlq"] is a Try/Catch DLQ mode OR
+                # reliability_cfg["catch_exception"] is a dict (issue #108 M10.4 — a
+                # bare catcherrors -> exception leg needs no DLQ). So dlq may be absent
+                # for a catch_exception-only leg; default it to {} (the emitter skips
+                # the DLQ route when the mode is not a supported DLQ mode).
+                #
+                # Issue #99 G1: reliability.try_catch_scope selects the wrapper
+                # layout. "process" (default — absent key keeps the pre-#99 output
+                # byte-for-byte identical) wraps the whole chain in ONE Try/Catch;
+                # "connector" emits a Try/Catch per connector (source retry 0, target
+                # retry N) so a target retry does not re-run the source read.
+                try_catch_scope = str(
+                    reliability_cfg.get("try_catch_scope") or "process"
+                ).strip().lower()
+                emitter = (
+                    _emit_connector_scoped_try_catch_shapes
+                    if try_catch_scope == "connector"
+                    else _emit_try_catch_shapes
                 )
-            # Issue #108 M10.4: same totality guard for catch_exception — a present
-            # (but malformed, so _should_emit_try_catch rejected it) catch_exception
-            # cannot be honored without a wired Try/Catch leg. A WELL-FORMED
-            # catch_exception always makes _should_emit_try_catch True, so this only
-            # fires on the bypass path with an invalid block; validate_config
-            # rejects it with PROCESS_EXCEPTION_CONFIG_INVALID on the normal path.
-            if isinstance(reliability_cfg, dict) and reliability_cfg.get("catch_exception") is not None:
-                raise BuilderValidationError(
-                    "reliability.catch_exception requires a wired Try/Catch catch path.",
-                    error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
-                    field="reliability.catch_exception",
-                    hint=(
-                        "The Exception throw is emitted only on a catch leg. Provide "
-                        "a well-formed reliability.catch_exception "
-                        '(message_template required).'
-                    ),
+                shape_xml_parts = emitter(
+                    flow,
+                    reliability_cfg.get("dlq") or {},
+                    retry_count=int(reliability_cfg.get("retry_count", 0)),
+                    catch_notify=reliability_cfg.get("catch_notify"),
+                    catch_exception=reliability_cfg.get("catch_exception"),
                 )
-            shape_xml_parts = _emit_linear_shapes(flow)
+            else:
+                # build() stays total on the validate_config-bypass path: a present
+                # catch_notify cannot be honored without a Try/Catch catch leg, so
+                # raise rather than silently dropping it (issue #89; mirrors the DLQ
+                # binding guard inside _emit_try_catch_shapes). validate_config
+                # already rejects this combination on the normal path.
+                if isinstance(reliability_cfg, dict) and reliability_cfg.get("catch_notify") is not None:
+                    raise BuilderValidationError(
+                        "reliability.catch_notify requires a wired Try/Catch catch path.",
+                        error_code="PROCESS_NOTIFY_CONFIG_INVALID",
+                        field="reliability.catch_notify",
+                        hint=(
+                            "Notify is emitted only on a catch leg. Set "
+                            "reliability.dlq.mode to document_cache_ref or "
+                            "error_subprocess_ref."
+                        ),
+                    )
+                # Issue #108 M10.4: same totality guard for catch_exception — a present
+                # (but malformed, so _should_emit_try_catch rejected it) catch_exception
+                # cannot be honored without a wired Try/Catch leg. A WELL-FORMED
+                # catch_exception always makes _should_emit_try_catch True, so this only
+                # fires on the bypass path with an invalid block; validate_config
+                # rejects it with PROCESS_EXCEPTION_CONFIG_INVALID on the normal path.
+                if isinstance(reliability_cfg, dict) and reliability_cfg.get("catch_exception") is not None:
+                    raise BuilderValidationError(
+                        "reliability.catch_exception requires a wired Try/Catch catch path.",
+                        error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+                        field="reliability.catch_exception",
+                        hint=(
+                            "The Exception throw is emitted only on a catch leg. Provide "
+                            "a well-formed reliability.catch_exception "
+                            '(message_template required).'
+                        ),
+                    )
+                shape_xml_parts = _emit_linear_shapes(flow)
 
         # Issue #92 M4.5.7: emit a non-empty <bns:processOverrides> declaring
         # connection-field environment extensions when the config carries a
@@ -1033,41 +1072,50 @@ def _validate_source_binding(source: Any) -> Optional[BuilderValidationError]:
     return None
 
 
-def _validate_target_binding(target: Any) -> Optional[BuilderValidationError]:
+def _validate_target_binding(
+    target: Any, field_prefix: str = "target"
+) -> Optional[BuilderValidationError]:
+    """Validate one REST connector target binding.
+
+    ``field_prefix`` scopes every emitted ``field``/message to the binding's
+    location in the config tree — ``"target"`` for the top-level target (leg 1)
+    and ``"branch.targets[i]"`` for Branch legs 2..N (issue #112 M10.8). The
+    contract is identical regardless of prefix, so both share this one validator.
+    """
     if not isinstance(target, dict):
         return BuilderValidationError(
-            "target binding must be a JSON object with connector_type, "
+            f"{field_prefix} binding must be a JSON object with connector_type, "
             "connection_id, operation_id, and action_type.",
             error_code="PROCESS_CONNECTOR_BINDING_INVALID",
-            field="target",
+            field=field_prefix,
             hint="See get_schema_template(resource_type='process', operation='create', protocol='database_to_api_sync').",
         )
     raw_connector_type = target.get("connector_type")
     canonical = _resolve_rest_connector_type(raw_connector_type)
     if canonical is None:
         return BuilderValidationError(
-            f"target.connector_type must be 'rest', 'rest_client', or "
+            f"{field_prefix}.connector_type must be 'rest', 'rest_client', or "
             f"{REST_CLIENT_SUBTYPE!r}; got {raw_connector_type!r}.",
             error_code="PROCESS_CONNECTOR_BINDING_INVALID",
-            field="target.connector_type",
+            field=f"{field_prefix}.connector_type",
             hint="REST Client is the only supported target connector in M2.5.",
         )
     action_type = str(target.get("action_type") or "").strip().upper()
     if action_type not in _REST_ACTION_TYPES:
         return BuilderValidationError(
-            f"target.action_type must be one of {sorted(_REST_ACTION_TYPES)}; "
+            f"{field_prefix}.action_type must be one of {sorted(_REST_ACTION_TYPES)}; "
             f"got {target.get('action_type')!r}.",
             error_code="PROCESS_CONNECTOR_BINDING_INVALID",
-            field="target.action_type",
+            field=f"{field_prefix}.action_type",
             hint="REST Client supports standard HTTP verbs.",
         )
     for required in ("connection_id", "operation_id"):
         value = target.get(required)
         if not isinstance(value, str) or not value.strip():
             return BuilderValidationError(
-                f"target.{required} is required.",
+                f"{field_prefix}.{required} is required.",
                 error_code="PROCESS_CONNECTOR_BINDING_INVALID",
-                field=f"target.{required}",
+                field=f"{field_prefix}.{required}",
                 hint=(
                     "Pass the component_id of the already-built REST "
                     "connector-settings / connector-action, or a "
@@ -1075,24 +1123,27 @@ def _validate_target_binding(target: Any) -> Optional[BuilderValidationError]:
                     "depends_on)."
                 ),
             )
-    return _validate_dynamic_path(target.get("dynamic_path"))
+    return _validate_dynamic_path(target.get("dynamic_path"), field_prefix=field_prefix)
 
 
-def _validate_dynamic_path(dynamic_path: Any) -> Optional[BuilderValidationError]:
-    """Validate the optional ``target.dynamic_path`` block (issue #100 G2).
+def _validate_dynamic_path(
+    dynamic_path: Any, field_prefix: str = "target"
+) -> Optional[BuilderValidationError]:
+    """Validate the optional ``<target>.dynamic_path`` block (issue #100 G2).
 
     Absent (None) is valid — the path stays static. When present it must carry a
     non-blank ``ddp_name`` + ``request_profile_id`` and a non-empty ``segments``
     list of well-formed static/profile entries with at least one profile segment
     (an all-static path would not be dynamic). Errors never echo segment values
     (path strings/element names can carry caller-specific identifiers).
+    ``field_prefix`` scopes the error to the owning target (issue #112 M10.8).
     """
     if dynamic_path is None:
         return None
     err = BuilderValidationError(
-        "target.dynamic_path is malformed.",
+        f"{field_prefix}.dynamic_path is malformed.",
         error_code="PROCESS_PATH_REPLACEMENT_INVALID",
-        field="target.dynamic_path",
+        field=f"{field_prefix}.dynamic_path",
         hint=(
             "dynamic_path needs a non-blank ddp_name and request_profile_id and "
             "a non-empty segments list (static {type,value} / profile "
@@ -1132,6 +1183,191 @@ def _validate_dynamic_path(dynamic_path: Any) -> Optional[BuilderValidationError
     if profile_segments == 0:
         return err
     return None
+
+
+# ----------------------------------------------------------------------
+# Issue #112 M10.8 — Branch (N-way forward fan-out)
+# ----------------------------------------------------------------------
+
+
+def _branch_enabled(config: Dict[str, Any]) -> bool:
+    """True when the config carries an enabled ``branch`` fan-out block.
+
+    Absent block, a non-dict block, or ``enabled: False`` all keep the process on
+    the single-target linear/Try-Catch path (byte-for-byte the pre-#112 output).
+    """
+    branch = config.get("branch")
+    if not isinstance(branch, dict):
+        return False
+    return branch.get("enabled", True) is True
+
+
+def _branch_leg_targets(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Ordered Branch leg targets: leg 1 = top-level ``target``, legs 2..N =
+    ``branch.targets[]`` (issue #112 M10.8)."""
+    branch = config.get("branch") or {}
+    legs: List[Dict[str, Any]] = [config.get("target") or {}]
+    extra = branch.get("targets")
+    if isinstance(extra, list):
+        legs.extend(t for t in extra if isinstance(t, dict))
+    return legs
+
+
+def _validate_branch_config(config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+    """Validate the optional ``branch`` N-way fan-out block (issue #112 M10.8).
+
+    Absent, or ``enabled: False``, is valid — the process stays single-target.
+    When enabled:
+
+      * ``branch.targets`` must be a non-empty list (legs 2..N; leg 1 is the
+        top-level ``target``) → else ``BRANCH_OUTPUT_UNSET`` (the verifier's hard
+        error for an unset branch output, reused at build time);
+      * the total leg count ``1 + len(targets)`` must stay in Boomi's 2..25 Branch
+        range;
+      * each leg is a well-formed REST connector binding (shared
+        ``_validate_target_binding`` with a ``branch.targets[i]`` field prefix).
+
+    v1 does NOT compose Branch with per-target ``dynamic_path``, Try/Catch
+    ``reliability`` (retry/DLQ/notify/exception), or a Return Documents terminal —
+    each is a clean ``PROCESS_BRANCH_CONFIG_INVALID`` rejection (follow-up work),
+    never a silent drop.
+    """
+    branch = config.get("branch")
+    if branch is None:
+        return None
+    if not isinstance(branch, dict):
+        return BuilderValidationError(
+            "branch must be a JSON object with an optional 'enabled' flag and a 'targets' list.",
+            error_code="PROCESS_BRANCH_CONFIG_INVALID",
+            field="branch",
+            hint='Shape: {"enabled": true, "targets": [{connector_type, connection_id, operation_id, action_type}, ...]}.',
+        )
+    unknown = set(branch) - _BRANCH_ALLOWED_KEYS
+    if unknown:
+        return BuilderValidationError(
+            f"branch has unsupported key(s): {sorted(unknown)}.",
+            error_code="PROCESS_BRANCH_CONFIG_INVALID",
+            field="branch",
+            hint=f"Supported branch keys: {sorted(_BRANCH_ALLOWED_KEYS)}.",
+        )
+    enabled = branch.get("enabled", True)
+    if not isinstance(enabled, bool):
+        return BuilderValidationError(
+            "branch.enabled must be a boolean.",
+            error_code="PROCESS_BRANCH_CONFIG_INVALID",
+            field="branch.enabled",
+            hint="Use true to fan out, or omit/false to keep the single-target flow.",
+        )
+    if not enabled:
+        return None
+    targets = branch.get("targets")
+    if not isinstance(targets, list) or not targets:
+        return BuilderValidationError(
+            "branch.targets must be a non-empty list when branch is enabled "
+            "(legs 2..N; leg 1 is the top-level target).",
+            error_code="BRANCH_OUTPUT_UNSET",
+            field="branch.targets",
+            hint=(
+                "Provide at least one additional REST target binding; a Branch "
+                "needs at least 2 paths total (the top-level target plus one "
+                "branch.targets entry)."
+            ),
+        )
+    num_branches = 1 + len(targets)
+    if num_branches > _BRANCH_MAX_LEGS:
+        return BuilderValidationError(
+            f"branch fan-out supports 2..{_BRANCH_MAX_LEGS} legs; got {num_branches}.",
+            error_code="PROCESS_BRANCH_CONFIG_INVALID",
+            field="branch.targets",
+            hint=(
+                f"Boomi Branch supports up to {_BRANCH_MAX_LEGS} paths "
+                f"(the top-level target plus up to {_BRANCH_MAX_LEGS - 1} branch.targets)."
+            ),
+        )
+    for i, leg in enumerate(targets):
+        leg_err = _validate_target_binding(leg, field_prefix=f"branch.targets[{i}]")
+        if leg_err is not None:
+            return leg_err
+    return _branch_unsupported_combo_error(config)
+
+
+def _branch_unsupported_combo_error(
+    config: Dict[str, Any]
+) -> Optional[BuilderValidationError]:
+    """v1 Branch composition guard (issue #112 M10.8).
+
+    Branch fan-out v1 emits plain ``target -> Stop`` legs. It does not yet compose
+    with a dynamic REST path, a Try/Catch reliability wrapper, or a Return
+    Documents terminal — each would change the per-leg sub-flow shape and needs
+    its own live capture + tests. Returning a structured error here (rather than
+    silently ignoring the combination) is shared by ``validate_config`` (surfaces
+    it) and ``build()`` (raises it for totality on a validate_config bypass).
+    """
+    target = config.get("target")
+    if isinstance(target, dict) and target.get("dynamic_path") is not None:
+        return BuilderValidationError(
+            "target.dynamic_path is not supported together with a branch fan-out in v1.",
+            error_code="PROCESS_BRANCH_CONFIG_INVALID",
+            field="target.dynamic_path",
+            hint="Remove dynamic_path, or drop the branch block to keep the dynamic-path single target.",
+        )
+    branch = config.get("branch") or {}
+    for i, leg in enumerate(branch.get("targets") or []):
+        if isinstance(leg, dict) and leg.get("dynamic_path") is not None:
+            return BuilderValidationError(
+                f"branch.targets[{i}].dynamic_path is not supported in a branch fan-out in v1.",
+                error_code="PROCESS_BRANCH_CONFIG_INVALID",
+                field=f"branch.targets[{i}].dynamic_path",
+                hint="Branch legs are plain REST targets in v1; remove the per-leg dynamic_path.",
+            )
+    reliability = config.get("reliability")
+    if isinstance(reliability, dict) and _reliability_requests_try_catch(reliability):
+        return BuilderValidationError(
+            "reliability (Try/Catch retry/DLQ/notify/exception) is not supported "
+            "together with a branch fan-out in v1.",
+            error_code="PROCESS_BRANCH_CONFIG_INVALID",
+            field="reliability",
+            hint="Drop the branch block to use a Try/Catch, or drop reliability to fan out.",
+        )
+    rd = config.get("return_documents")
+    if isinstance(rd, dict) and rd.get("enabled") is True:
+        return BuilderValidationError(
+            "return_documents is not supported together with a branch fan-out in v1.",
+            error_code="PROCESS_BRANCH_CONFIG_INVALID",
+            field="return_documents",
+            hint="Each branch leg ends in its own Stop; a Return Documents terminal is a follow-up.",
+        )
+    return None
+
+
+def _reliability_requests_try_catch(reliability: Dict[str, Any]) -> bool:
+    """True when a reliability block would emit a Try/Catch wrapper.
+
+    Used by the Branch v1 composition guard. Delegates to
+    ``ProcessFlowBuilder._should_emit_try_catch`` so Branch rejects exactly the
+    reliability configs that would otherwise produce a catcherrors wrapper — a
+    no-op ``{retry_count: 0, dlq: {mode: "disabled"}}`` block emits nothing and is
+    harmless alongside Branch (it is the default reliability shape), so it is NOT
+    rejected.
+    """
+    return ProcessFlowBuilder._should_emit_try_catch(reliability)
+
+
+def _branch_target_params(leg_target: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the ``connectoraction_target`` emitter params for one Branch leg.
+
+    Mirrors the top-level target coercion in ``build()`` (canonical REST subtype,
+    uppercased HTTP verb, whitespace-stripped ids) minus ``dynamic_path`` — v1
+    Branch legs are plain REST targets (see ``_branch_unsupported_combo_error``).
+    """
+    return {
+        "connector_type": _canonical_connector_type(leg_target.get("connector_type")),
+        "action_type": str(leg_target.get("action_type") or "").strip().upper(),
+        "connection_id": str(leg_target.get("connection_id") or "").strip(),
+        "operation_id": str(leg_target.get("operation_id") or "").strip(),
+        "userlabel": str(leg_target.get("label") or ""),
+        "dynamic_path": None,
+    }
 
 
 def _validate_transform(transform: Any) -> Optional[BuilderValidationError]:
@@ -2121,6 +2357,89 @@ def _emit_linear_shapes(flow: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
         shape_name = f"shape{shape_index}"
         next_name = f"shape{shape_index + 1}" if shape_index < total else None
         parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
+    return parts
+
+
+def _emit_branch(
+    shape_name: str, leg_first_names: List[str], shape_index: int
+) -> str:
+    """Emit a Branch (N-way forward fan-out) shape (issue #112 M10.8).
+
+    Transcribed from a live ``work``-profile export (component b34d3812 shape53,
+    see .codex/plans/issue-112-live-captures.md): a
+    ``<branch numBranches="N"/>`` configuration plus N ``<dragpoint>`` children
+    with 1-based integer ``identifier``/``text`` labels, each wiring to a leg's
+    first shape via ``toShape`` (forward only — no back edges, no join/merge).
+    ``numBranches`` equals the dragpoint count (the verifier's
+    ``BRANCH_NUM_BRANCHES_MISMATCH`` invariant); every dragpoint carries a
+    non-empty ``toShape`` (``BRANCH_OUTPUT_UNSET``). Branch dragpoints are built
+    inline here — like ``_emit_catcherrors`` — because the plain
+    ``_emit_dragpoints`` helper emits no ``identifier``/``text`` (those are
+    label-bearing edges).
+    """
+    dragpoints = "".join(
+        f'<dragpoint identifier="{i}" name="{shape_name}.dragpoint{i}" '
+        f'text="{i}" toShape="{_escape_xml(to_shape)}" '
+        f'x="{_dragpoint_x(shape_index)}" y="{_DRAGPOINT_Y}"/>'
+        for i, to_shape in enumerate(leg_first_names, start=1)
+    )
+    return (
+        f'<shape image="branch_icon" name="{shape_name}" shapetype="branch" '
+        f'userlabel="" x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        f'<configuration><branch numBranches="{len(leg_first_names)}"/></configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
+def _emit_branch_shapes(
+    pre_branch: List[Tuple[str, Dict[str, Any]]],
+    legs: List[List[Tuple[str, Dict[str, Any]]]],
+) -> List[str]:
+    """Emit ``start -> ... -> branch -> N independent legs`` (issue #112 M10.8).
+
+    ``pre_branch`` is the shared chain before the fan-out (start -> source ->
+    [transform]); its last shape forwards to the Branch shape. ``legs`` is the
+    ordered list of leg sub-flows (each a ``[target, terminal]`` chain); each
+    Branch dragpoint targets its leg's first shape and every leg runs forward to
+    its own terminal with no merge. Shape indices are assigned positionally
+    (pre-branch 1..p, branch p+1, then each leg in turn) so names never collide —
+    the same index-walk ``_emit_catch_leg`` uses for Try/Catch legs.
+    """
+    parts: List[str] = []
+    p = len(pre_branch)
+    branch_index = p + 1
+    branch_name = f"shape{branch_index}"
+
+    # Pre-branch chain: forward each shape to the next; the last pre-branch shape
+    # forwards to the Branch shape (index p+1).
+    for i, (kind, params) in enumerate(pre_branch):
+        shape_index = i + 1
+        shape_name = f"shape{shape_index}"
+        next_name = f"shape{shape_index + 1}"  # i == p-1 -> branch_name
+        parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
+
+    # Allocate leg shape indices and record each leg's first shape name (the
+    # Branch dragpoint target). Legs are laid out one after another, after the
+    # Branch shape.
+    leg_first_names: List[str] = []
+    leg_layouts: List[Tuple[int, List[Tuple[str, Dict[str, Any]]]]] = []
+    idx = branch_index + 1
+    for leg in legs:
+        leg_first_names.append(f"shape{idx}")
+        leg_layouts.append((idx, leg))
+        idx += len(leg)
+
+    parts.append(_emit_branch(branch_name, leg_first_names, branch_index))
+
+    # Each leg is an independent forward sub-flow ending in its own terminal.
+    for start_index, leg in leg_layouts:
+        m = len(leg)
+        for j, (kind, params) in enumerate(leg):
+            shape_index = start_index + j
+            shape_name = f"shape{shape_index}"
+            next_name = None if j == m - 1 else f"shape{shape_index + 1}"
+            parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
     return parts
 
 

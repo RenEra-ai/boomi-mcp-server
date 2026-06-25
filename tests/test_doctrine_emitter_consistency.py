@@ -55,6 +55,10 @@ PINNED_EMITTABLE = frozenset(
         "returndocuments",
         # M10.4 (issue #108): deliberate Exception (Throw) catch-leg terminal.
         "exception",
+        # M10.8 (issue #112): Branch (N-way forward fan-out) shape — its own
+        # emitter (_emit_branch / _emit_branch_shapes), neither a _emit_flow_shape
+        # dispatch kind nor a catch-path shape.
+        "branch",
     }
 )
 
@@ -162,6 +166,26 @@ def _emit_full_catch_shapetypes():
     return _shapetypes_from_parts(parts)
 
 
+def _emit_branch_shapetypes():
+    """Drive the real Branch fan-out emitter and return all shapetypes produced.
+
+    Branch (issue #112 M10.8) is neither a ``_emit_flow_shape`` dispatch kind nor a
+    catch-path shape: it has its own ``_emit_branch`` / ``_emit_branch_shapes``
+    emitter (an N-way fan-out carries N labelled edges, not one). This is the third
+    emission category the registry guardrail must recognize.
+    """
+    pre_branch = [
+        ("start_noaction", {}),
+        ("connectoraction_source", dict(_CONN_PARAMS)),
+    ]
+    legs = [
+        [("connectoraction_target", dict(_CONN_PARAMS)), ("stop", {"continue_": True})],
+        [("connectoraction_target", dict(_CONN_PARAMS)), ("stop", {"continue_": True})],
+    ]
+    parts = pfb._emit_branch_shapes(pre_branch, legs)
+    return _shapetypes_from_parts(parts)
+
+
 def test_registry_entry_shape():
     """Every registry value is exactly ``{"emittable": bool, "emitter_kind": str}``."""
     assert EMITTABLE_SHAPE_REGISTRY, "registry must not be empty"
@@ -202,10 +226,13 @@ def test_every_emittable_entry_is_backed_by_a_real_emitter():
     Flow-dispatched entries are emitted through ``_emit_flow_shape`` and the
     produced ``shapetype`` must equal the registry key (proves the dispatch
     branch, not a name coincidence). Catch-path-only entries are proven by the
-    real Try/Catch emission producing their shapetype.
+    real Try/Catch emission producing their shapetype; the Branch fan-out (issue
+    #112) is proven by the real ``_emit_branch_shapes`` emission.
     """
     dispatch = _flow_dispatch_kinds()
-    catch_shapetypes = _emit_full_catch_shapetypes()
+    # Non-dispatch emission categories: catch-path-only shapes (catcherrors /
+    # notify / doccacheload / exception) and the Branch fan-out shape.
+    non_dispatch_shapetypes = _emit_full_catch_shapetypes() | _emit_branch_shapetypes()
     for shapetype, entry in EMITTABLE_SHAPE_REGISTRY.items():
         if not entry["emittable"]:
             continue
@@ -219,7 +246,7 @@ def test_every_emittable_entry_is_backed_by_a_real_emitter():
                 f"emitted shapetype {produced!r}"
             )
         else:
-            assert shapetype in catch_shapetypes, (
+            assert shapetype in non_dispatch_shapetypes, (
                 f"{shapetype!r} marked emittable but no real emitter produces it "
                 f"(emitter_kind {emitter_kind!r})"
             )
@@ -236,6 +263,20 @@ def test_catch_path_shapes_match_registry():
         entry = EMITTABLE_SHAPE_REGISTRY[shapetype]
         assert entry["emittable"] is True
         assert entry["emitter_kind"] == shapetype
+
+
+def test_branch_shape_matches_registry():
+    """Issue #112 M10.8: the Branch fan-out is emitted by its own
+    ``_emit_branch_shapes`` (NOT a ``_emit_flow_shape`` dispatch kind — a Branch
+    carries N labelled edges). Its registry entry is consistent and the emitter
+    really produces a ``shapetype="branch"`` shape."""
+    branch_shapetypes = _emit_branch_shapetypes()
+    assert "branch" in branch_shapetypes
+    entry = EMITTABLE_SHAPE_REGISTRY["branch"]
+    assert entry["emittable"] is True
+    assert entry["emitter_kind"] == "branch"
+    # Branch is deliberately NOT a single-edge flow-dispatch kind.
+    assert "branch" not in _flow_dispatch_kinds()
 
 
 def test_supported_transform_modes_are_dispatch_backed():

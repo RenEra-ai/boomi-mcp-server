@@ -16,8 +16,9 @@ Disposition vocabulary (issue #82):
   * ``fixed-here`` — an audit gap closed in this issue (the only behavioral
     change M9.6 ships is the non-blocking script lints, see test_script_lints).
   * ``not-applicable-yet`` — no typed builder emits this shape yet (e.g.
-    Salesforce, listener, flat-file, branch); table-only until the builder
-    lands and inherits this checklist.
+    Salesforce, listener, flat-file); table-only until the builder lands and
+    inherits this checklist. (Branch graduated to guaranteed-by-construction in
+    issue #112 M10.8.)
   * ``disputed-owned-elsewhere`` — the REST request/response ProfileType
     attributes: the Companion says never-emit, but this account's live exports
     carry them on working operations and our builder emits them by design.
@@ -517,19 +518,35 @@ def test_inv_display_attrs_present_at_binding_sites():
     assert "defaultValue" in path_tp.attrib
 
 
-def test_inv_no_branch_shapes_emitted():
-    # Branch numBranches==dragpoint-count is not-applicable-yet: the plan
-    # requires asserting current process builders emit NO branch shapes (so a
-    # future Branch builder must add the lock when it lands).
-    for cfg in (
-        _process_config(),
-        _process_config(transform={"mode": "message", "message_text": "{}"}),
-        _process_config(transform={"mode": "map_ref", "map_ref": "M"}),
-        _dynamic_path_config(),
-        _notify_config(),
-    ):
+def test_inv_branch_numbranches_matches_dragpoints():
+    # Issue #112 M10.8: a builder-emitted Branch shape is numBranches-consistent by
+    # construction — numBranches equals the dragpoint count, every dragpoint carries
+    # a non-empty toShape (no unset output), and identifiers/texts are the
+    # sequential 1-based integers. _emit_branch derives all three from one leg list,
+    # so they cannot drift. Replaces the pre-#112 negative lock (no branch emitted).
+    for extra_legs in (1, 2, 4):
+        legs = [
+            {
+                "connector_type": "rest",
+                "connection_id": f"5555555{i}-5555-5555-5555-555555555555",
+                "operation_id": f"6666666{i}-6666-6666-6666-666666666666",
+                "action_type": "PUT",
+            }
+            for i in range(extra_legs)
+        ]
+        cfg = _process_config(branch={"enabled": True, "targets": legs})
         shapes = _parse_process_shapes(ProcessFlowBuilder.build(cfg, name="P"))
-        assert all(s.attrib["shapetype"] != "branch" for s in shapes)
+        branch_shapes = [s for s in shapes if s.attrib["shapetype"] == "branch"]
+        assert len(branch_shapes) == 1
+        branch = branch_shapes[0]
+        dragpoints = branch.findall("dragpoints/dragpoint")
+        num_branches = int(branch.find("configuration/branch").attrib["numBranches"])
+        expected = 1 + extra_legs  # leg 1 is the top-level target
+        assert num_branches == len(dragpoints) == expected
+        assert all(d.attrib.get("toShape") for d in dragpoints)
+        labels = [str(i) for i in range(1, expected + 1)]
+        assert [d.attrib["identifier"] for d in dragpoints] == labels
+        assert [d.attrib["text"] for d in dragpoints] == labels
 
 
 # ---------------------------------------------------------------------------
@@ -765,9 +782,9 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
     {
         "id": "branch_numbranches",
         "invariant": "branch numBranches equals dragpoint count (un-gated Branch emission)",
-        "emitter": "(no branch typed builder; process_graph_verifier checks imported XML)",
-        "disposition": "not-applicable-yet",
-        "test": "test_inv_no_branch_shapes_emitted (negative lock — current builders emit no branch shape)",
+        "emitter": "process_flow_builder._emit_branch",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_branch_numbranches_matches_dragpoints",
     },
     {
         "id": "listener_shapes",

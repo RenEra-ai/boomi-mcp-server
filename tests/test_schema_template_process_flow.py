@@ -185,6 +185,34 @@ def test_template_documents_return_documents_surface(template):
     assert "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID" in codes
 
 
+def test_template_documents_branch_surface(template):
+    # Issue #112 M10.8: the Branch fan-out fields, the supported control-shape set,
+    # the BRANCH_OUTPUT_UNSET / PROCESS_BRANCH_CONFIG_INVALID structured errors, and
+    # the BRANCH_NUM_BRANCHES_MISMATCH verifier-warning note are all documented.
+    optional = template["optional_fields"]
+    for field in (
+        "branch",
+        "branch.enabled",
+        "branch.targets",
+        "branch.targets[].connector_type",
+        "branch.targets[].connection_id",
+        "branch.targets[].operation_id",
+        "branch.targets[].action_type",
+        "branch.targets[].label",
+    ):
+        assert field in optional, field
+    assert template["supported_control_shapes"] == ["branch"]
+    codes = {e["error_code"] for e in template["structured_errors"]}
+    assert "BRANCH_OUTPUT_UNSET" in codes
+    assert "PROCESS_BRANCH_CONFIG_INVALID" in codes
+    # BRANCH_NUM_BRANCHES_MISMATCH is a graph-verifier WARNING, never a builder
+    # structured error — it must be documented in notes, not structured_errors.
+    assert "BRANCH_NUM_BRANCHES_MISMATCH" not in codes
+    notes_blob = " ".join(template["notes"])
+    assert "BRANCH_NUM_BRANCHES_MISMATCH" in notes_blob
+    assert "warning" in notes_blob.lower()
+
+
 def test_both_process_protocols_advertise_return_documents_surface():
     # Issue #107 M10.3 (QA Bug #140): BOTH process kinds support a Return
     # Documents terminal at runtime, so BOTH protocol templates must advertise

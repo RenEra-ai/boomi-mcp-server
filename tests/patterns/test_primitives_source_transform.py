@@ -29,6 +29,7 @@ from boomi_mcp.categories.components.builders.profile_builder import (
 from boomi_mcp.models.integration_models import IntegrationComponentSpec
 from boomi_mcp.patterns.base import PatternKind, PrimitiveBuildContext
 from boomi_mcp.patterns.primitives import (
+    BranchPrimitive,
     DataProcessPrimitive,
     DbExtractPrimitive,
     FieldMapPrimitive,
@@ -1159,3 +1160,89 @@ class TestThrowException:
             {"message_template": "static halt", "parameter_source": "none"}
         )
         assert params.parameter_source == "none"
+
+
+_BRANCH_LEG = {
+    "connector_type": "rest",
+    "connection_id": "55555555-5555-5555-5555-555555555555",
+    "operation_id": "66666666-6666-6666-6666-666666666666",
+    "action_type": "PUT",
+}
+
+
+class TestBranch:
+    def test_registry_discovers_branch(self):
+        try:
+            reg = PatternRegistry.from_package("boomi_mcp.patterns")
+        except TypeError as exc:  # pragma: no cover — interpreter-specific
+            # Same Python 3.9.6 inspect.isclass quirk the sibling
+            # test_registry_discovers_data_process documents.
+            pytest.skip(f"registry discovery unavailable on this interpreter: {exc}")
+        cls = reg.get("branch_fanout")
+        assert cls is BranchPrimitive
+        assert cls.metadata.kind == PatternKind.PRIMITIVE
+
+    def test_describe_includes_contracts_and_no_raw_artifacts(self):
+        described = BranchPrimitive.describe()
+        for key in ("metadata", "parameter_schema", "input_contract", "output_contract", "required_builders"):
+            assert key in described
+        assert described["required_builders"] == ["ProcessFlowBuilder"]
+        dumped = json.dumps(described)
+        for forbidden in ("<bns:", "</", "<?xml", "```"):
+            assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
+
+    def test_emit_components_is_empty(self):
+        params = BranchPrimitive.validate_parameters({"targets": [dict(_BRANCH_LEG)]})
+        assert BranchPrimitive.emit_components(_ctx(), params) == []
+
+    def test_emit_fragment_returns_branch_block(self):
+        params = BranchPrimitive.validate_parameters({"targets": [
+            dict(_BRANCH_LEG),
+            {**_BRANCH_LEG, "action_type": "GET", "label": "audit"},
+        ]})
+        fragment = BranchPrimitive.emit_fragment(_ctx(), params)
+        branch = fragment["process_config"]["branch"]
+        assert branch["enabled"] is True
+        assert branch["targets"] == [
+            {
+                "connector_type": "rest",
+                "connection_id": "55555555-5555-5555-5555-555555555555",
+                "operation_id": "66666666-6666-6666-6666-666666666666",
+                "action_type": "PUT",
+            },
+            {
+                "connector_type": "rest",
+                "connection_id": "55555555-5555-5555-5555-555555555555",
+                "operation_id": "66666666-6666-6666-6666-666666666666",
+                "action_type": "GET",
+                "label": "audit",
+            },
+        ]
+        assert fragment["depends_on"] == []
+
+    def test_emit_fragment_omits_absent_label(self):
+        params = BranchPrimitive.validate_parameters({"targets": [dict(_BRANCH_LEG)]})
+        target = BranchPrimitive.emit_fragment(_ctx(), params)["process_config"]["branch"]["targets"][0]
+        assert "label" not in target
+
+    def test_validation_rejects_empty_targets(self):
+        with pytest.raises(ValidationError):
+            BranchPrimitive.validate_parameters({"targets": []})
+
+    def test_validation_requires_targets(self):
+        with pytest.raises(ValidationError):
+            BranchPrimitive.validate_parameters({})
+
+    def test_validation_rejects_unknown_parameter(self):
+        with pytest.raises(ValidationError):
+            BranchPrimitive.validate_parameters({"targets": [dict(_BRANCH_LEG)], "bogus": 1})
+
+    def test_validation_rejects_unknown_leg_field(self):
+        with pytest.raises(ValidationError):
+            BranchPrimitive.validate_parameters({"targets": [{**_BRANCH_LEG, "bogus": 1}]})
+
+    def test_validation_rejects_blank_leg_binding(self):
+        # The primitive mirrors the builder: required leg binding fields must be
+        # non-blank so a validated primitive never emits a builder-rejected fragment.
+        with pytest.raises(ValidationError):
+            BranchPrimitive.validate_parameters({"targets": [{**_BRANCH_LEG, "connection_id": "   "}]})

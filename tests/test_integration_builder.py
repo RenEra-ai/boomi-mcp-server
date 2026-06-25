@@ -4117,6 +4117,84 @@ def _direct_map_comp(
     )
 
 
+class TestBuildPlanProcessFlowBranchRefTypes:
+    """Issue #112 M10.8: typed $ref validation for Branch fan-out leg targets."""
+
+    _BRANCH_DEPS = (
+        "db_connection",
+        "db_query_operation",
+        "target_rest_connection",
+        "target_rest_operation",
+        "branch_leg_connection",
+        "branch_leg_operation",
+    )
+
+    def _branch_components(self, leg, method="POST"):
+        bad = _process_flow_comp(depends_on=self._BRANCH_DEPS)
+        bad.config["branch"] = {"enabled": True, "targets": [leg]}
+        return [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _stub_dep_comp("branch_leg_connection", role="REST Client connector-settings"),
+            _stub_dep_comp("branch_leg_operation", role="REST Client connector-action", method=method),
+            bad,
+        ]
+
+    @staticmethod
+    def _good_leg(**overrides):
+        leg = {
+            "connector_type": "rest",
+            "action_type": "POST",
+            "connection_id": "$ref:branch_leg_connection",
+            "operation_id": "$ref:branch_leg_operation",
+        }
+        leg.update(overrides)
+        return leg
+
+    @patch(_PATCH_TARGET)
+    def test_branch_leg_connection_id_pointing_to_rest_op_errors(self, mock_pag):
+        mock_pag.return_value = []
+        leg = self._good_leg(connection_id="$ref:branch_leg_operation")  # points at an op
+        ve = next(s for s in _build_plan(MagicMock(), _build_config(self._branch_components(leg)))["steps"]
+                  if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "branch.targets[0].connection_id"
+        assert ve["details"]["expected_role"] == "REST Client connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_branch_leg_operation_id_pointing_to_rest_connection_errors(self, mock_pag):
+        mock_pag.return_value = []
+        leg = self._good_leg(operation_id="$ref:branch_leg_connection")  # points at a connection
+        ve = next(s for s in _build_plan(MagicMock(), _build_config(self._branch_components(leg)))["steps"]
+                  if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "branch.targets[0].operation_id"
+        assert ve["details"]["expected_role"] == "REST Client connector-action"
+
+    @patch(_PATCH_TARGET)
+    def test_branch_leg_action_type_method_mismatch_errors(self, mock_pag):
+        mock_pag.return_value = []
+        # The referenced op declares POST; the leg action_type=PATCH disagrees.
+        leg = self._good_leg(action_type="PATCH")
+        ve = next(s for s in _build_plan(MagicMock(), _build_config(self._branch_components(leg, method="POST")))["steps"]
+                  if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "branch.targets[0].action_type"
+        assert ve["details"]["expected_role"] == "POST"
+        assert ve["details"]["actual_role"] == "PATCH"
+
+    @patch(_PATCH_TARGET)
+    def test_branch_leg_clean_typed_refs_plan_without_error(self, mock_pag):
+        mock_pag.return_value = []
+        leg = self._good_leg()  # connection->settings, operation->action, action_type matches method
+        plan = _build_plan(MagicMock(), _build_config(self._branch_components(leg)))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step.get("validation_error") is None
+        assert process_step["planned_action"] == "create"
+
+
 class TestBuildPlanGeneratedProfileJson:
 
     @patch(_PATCH_TARGET)

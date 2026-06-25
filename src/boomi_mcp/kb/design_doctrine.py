@@ -132,6 +132,15 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     # emitter _emit_exception produces it. Live-captured from work component
     # 1139079f-fff5-434c-aedc-d2758cc20525.
     "exception": {"emittable": True, "emitter_kind": "exception"},
+    # M10.8 (issue #112): Branch (N-way forward fan-out) shape. Emittable today
+    # via the branch config block on ProcessFlowBuilder (the post-source document
+    # fans to N independent target legs — leg 1 = top-level target, legs 2..N =
+    # branch.targets — each ending in its own Stop; forward-only, no join/merge).
+    # Like exception, it is NOT in the _emit_flow_shape single-edge dispatch ladder
+    # (a Branch shape carries N labelled outgoing edges); the dedicated emitter
+    # _emit_branch (driven by _emit_branch_shapes) produces it. Live-captured from
+    # work component b34d3812-900d-41b6-b44c-c812fb9b04aa (shape53).
+    "branch": {"emittable": True, "emitter_kind": "branch"},
 }
 
 #: JSON-schema-shaped description of one entry, returned alongside the catalog so
@@ -518,7 +527,12 @@ _ENTRIES: List[Dict[str, Any]] = [
         "boomi_shape_mapping": (
             "Unconditional fan-out (the same document down every path) uses "
             "a Branch; value-comparing selection uses Decision, Route, or "
-            "Business Rules; per-type dispatch uses Process Route. "
+            "Business Rules; per-type dispatch uses Process Route. The "
+            "unconditional Branch fan-out is builder-emittable today: the same "
+            "document fans to N independent target paths, each one run in "
+            "sequence to its own end, with no rejoin. Value-comparing "
+            "selection (Decision, Route, Business Rules) and per-type dispatch "
+            "(Process Route) remain design guidance, not yet builder-emitted. "
             "Transformation can live in a Map, Data Process, Business Rules, "
             "Route, or Process Route — not the Map alone. Publish/subscribe "
             "fan-out routes to per-subscriber subprocesses backed by a "
@@ -527,15 +541,19 @@ _ENTRIES: List[Dict[str, Any]] = [
         "when_to_use": (
             "When document type or field values determine downstream "
             "handling. Put routing in the process when whole documents take "
-            "different paths; in the map when only field shaping differs."
+            "different paths; in the map when only field shaping differs. "
+            "Reach for the emittable Branch fan-out when every path should "
+            "receive the same document (for example one path sends to a "
+            "target while another logs an audit copy)."
         ),
         "when_not_to_use": (
             "Do not scatter routing logic across both process and map for "
             "the same decision — pick one home. Branch is for same-document "
-            "fan-out, not value selection."
+            "fan-out, not value selection — do not use it where one path is "
+            "chosen by a value comparison."
         ),
-        "verification_status": "companion_unverified",
-        "capability_status": "gated",
+        "verification_status": "live_verified",
+        "capability_status": "emittable_today",
         "category": "routing",
         "mutual_exclusion": [],
         "cross_refs": [
@@ -543,7 +561,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "process_route_fanout",
             "combine_split_flow_control",
         ],
-        "provenance": "companion_unverified",
+        "provenance": "live_verified",
     },
     {
         "name": "combine_split_flow_control",

@@ -5562,6 +5562,22 @@ _PROCESS_FLOW_PROTOCOLS = {
             "return_documents",
             "return_documents.enabled",
             "return_documents.label",
+            # Issue #112 M10.8: optional Branch (N-way forward fan-out). When
+            # branch.enabled is true (default when the block is present), the
+            # post-source document fans to N independent target legs — leg 1 is the
+            # top-level target, legs 2..N are branch.targets[] — each ending in its
+            # own Stop (forward-only, no join/merge; numBranches = 1 + len(targets),
+            # in Boomi's 2..25 range). Each leg target is a REST connector binding
+            # with the same fields as the top-level target. Default (branch absent
+            # or enabled=false) keeps the single-target flow.
+            "branch",
+            "branch.enabled",
+            "branch.targets",
+            "branch.targets[].connector_type",
+            "branch.targets[].connection_id",
+            "branch.targets[].operation_id",
+            "branch.targets[].action_type",
+            "branch.targets[].label",
             # Issue #92 M4.5.7: declare connection fields as per-environment
             # override points on the deployed process (see notes for the
             # CREATE-only behavior and the connection_id / fields shape).
@@ -5608,6 +5624,10 @@ _PROCESS_FLOW_PROTOCOLS = {
         # return_documents.enabled=true it is "returndocuments" instead (and no
         # Stop follows — the verifier's RETURN_DOCS_STOP_EXCLUSIVE invariant).
         "supported_terminal_shapes": ["stop", "returndocuments"],
+        # Issue #112 M10.8: control-flow shapes the builder can emit. Branch is the
+        # N-way forward fan-out (the only emittable control shape today); Decision /
+        # Route remain design guidance (not yet builder-emitted).
+        "supported_control_shapes": ["branch"],
         "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
         "supported_notify_levels": ["INFO", "WARNING", "ERROR"],
         "supported_connector_action_bindings": {
@@ -5637,6 +5657,16 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
             {"error_code": "PROCESS_EXCEPTION_CONFIG_INVALID", "field": "reliability.catch_exception|reliability.catch_exception.message_template|reliability.catch_exception.title|reliability.catch_exception.stop_single_document|reliability.catch_exception.parameter_source"},
             {"error_code": "PROCESS_PATH_REPLACEMENT_INVALID", "field": "target.dynamic_path|target.dynamic_path.ddp_name|target.dynamic_path.segments"},
+            # Issue #112 M10.8: Branch fan-out. BRANCH_OUTPUT_UNSET is the hard error
+            # for an enabled branch with no targets (also the verifier's hard error
+            # for an unset branch output); PROCESS_BRANCH_CONFIG_INVALID covers a
+            # malformed branch block, too many legs (>25), or an unsupported v1
+            # composition (dynamic_path / Try-Catch reliability / return_documents).
+            # BRANCH_NUM_BRANCHES_MISMATCH is a graph-verifier WARNING (numBranches
+            # vs dragpoint count), never produced by the builder, which derives
+            # numBranches from the leg count.
+            {"error_code": "BRANCH_OUTPUT_UNSET", "field": "branch.targets"},
+            {"error_code": "PROCESS_BRANCH_CONFIG_INVALID", "field": "branch|branch.enabled|branch.targets|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type|branch.targets[N].dynamic_path|reliability|return_documents|target.dynamic_path"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
@@ -5754,6 +5784,22 @@ _PROCESS_FLOW_PROTOCOLS = {
             "Stop byte-for-byte. Malformed config returns "
             "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID. Live-verified against a real "
             "work-account process export.",
+            "Issue #112 M10.8: an optional branch block fans the post-source "
+            "document out to N independent forward legs (an unconditional Branch — "
+            "use a Decision/Route for value-comparing selection). Leg 1 is the "
+            "top-level target; branch.targets[] are legs 2..N, each a REST connector "
+            "binding with the same fields as the top-level target. numBranches is "
+            "derived as 1 + len(branch.targets) and must stay in Boomi's 2..25 "
+            "range; each leg ends in its own Stop with no join/merge, and the legs "
+            "run in sequence (each completes before the next begins — never truly "
+            "parallel). An enabled branch with no targets returns BRANCH_OUTPUT_UNSET; "
+            "a malformed branch, >25 legs, or an unsupported v1 composition "
+            "(dynamic_path, Try/Catch reliability, or return_documents alongside "
+            "branch) returns PROCESS_BRANCH_CONFIG_INVALID. BRANCH_NUM_BRANCHES_MISMATCH "
+            "is a graph-verifier warning only — the builder always derives numBranches "
+            "from the leg count, so it never emits a mismatch. Default (branch absent "
+            "or enabled=false) keeps the single-target flow byte-for-byte. "
+            "Live-verified against a real work-account process export.",
             "Issue #92 M4.5.7: process_extensions declares connection fields as "
             "per-environment override points so the DEPLOYED process exposes them "
             "via manage_environments(get_extensions) / update_extensions — without "

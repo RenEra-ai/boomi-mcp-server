@@ -1665,3 +1665,181 @@ def test_build_bypass_raises_for_non_dict_catch_exception_with_valid_dlq():
     with pytest.raises(BuilderValidationError) as exc:
         ProcessFlowBuilder.build(cfg, name="P")
     assert exc.value.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+
+
+# ---------------------------------------------------------------------------
+# Issue #112 M10.8 — Branch (N-way forward fan-out)
+# ---------------------------------------------------------------------------
+
+_REST_CONN_ID_2 = "55555555-5555-5555-5555-555555555555"
+_REST_OP_ID_2 = "66666666-6666-6666-6666-666666666666"
+_REST_CONN_ID_3 = "77777777-7777-7777-7777-777777777777"
+_REST_OP_ID_3 = "88888888-8888-8888-8888-888888888888"
+
+_BRANCH_FANOUT_GOLDEN = (
+    Path(__file__).resolve().parent / "fixtures" / "golden_xml" / "branch_fanout.xml"
+)
+
+
+def _branch_leg(connection_id=_REST_CONN_ID_2, operation_id=_REST_OP_ID_2,
+                action_type="PUT", **extra):
+    leg = {
+        "connector_type": "rest",
+        "connection_id": connection_id,
+        "operation_id": operation_id,
+        "action_type": action_type,
+    }
+    leg.update(extra)
+    return leg
+
+
+def _branch_config(targets=None, enabled=True, **overrides):
+    branch = {"enabled": enabled, "targets": targets if targets is not None else [_branch_leg()]}
+    return _base_config(branch=branch, **overrides)
+
+
+def test_branch_inserts_branch_after_source_with_target_stop_legs():
+    xml = ProcessFlowBuilder.build(_branch_config(), name="Branch Fanout")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "branch",
+        "connectoraction", "stop",   # leg 1 (top-level target)
+        "connectoraction", "stop",   # leg 2 (branch.targets[0])
+    ]
+
+
+def test_branch_shape_attributes_and_num_branches():
+    xml = ProcessFlowBuilder.build(_branch_config(), name="Branch Fanout")
+    _, _, shapes = _parse_process(xml)
+    branch = next(s for s in shapes if s.attrib["shapetype"] == "branch")
+    assert branch.attrib["image"] == "branch_icon"
+    assert branch.attrib["userlabel"] == ""
+    inner = branch.find("configuration/branch")
+    assert inner is not None
+    assert inner.attrib["numBranches"] == "2"
+
+
+def test_branch_dragpoints_are_sequential_and_target_each_leg():
+    xml = ProcessFlowBuilder.build(_branch_config(), name="Branch Fanout")
+    _, _, shapes = _parse_process(xml)
+    branch = next(s for s in shapes if s.attrib["shapetype"] == "branch")
+    dragpoints = branch.findall("dragpoints/dragpoint")
+    assert [d.attrib["identifier"] for d in dragpoints] == ["1", "2"]
+    assert [d.attrib["text"] for d in dragpoints] == ["1", "2"]
+    assert [d.attrib["name"] for d in dragpoints] == [
+        "shape3.dragpoint1", "shape3.dragpoint2",
+    ]
+    # Leg 1 first shape is shape4, leg 2 first shape is shape6 (each leg = target+stop).
+    assert [d.attrib["toShape"] for d in dragpoints] == ["shape4", "shape6"]
+    # Every dragpoint wires to a real shape (no unset/dangling output).
+    shape_names = {s.attrib["name"] for s in shapes}
+    assert all(d.attrib["toShape"] in shape_names for d in dragpoints)
+
+
+def test_branch_numbranches_scales_with_leg_count():
+    cfg = _branch_config(targets=[
+        _branch_leg(),
+        _branch_leg(connection_id=_REST_CONN_ID_3, operation_id=_REST_OP_ID_3, action_type="GET"),
+    ])
+    xml = ProcessFlowBuilder.build(cfg, name="Branch Fanout 3way")
+    _, _, shapes = _parse_process(xml)
+    branch = next(s for s in shapes if s.attrib["shapetype"] == "branch")
+    assert branch.find("configuration/branch").attrib["numBranches"] == "3"
+    dragpoints = branch.findall("dragpoints/dragpoint")
+    assert [d.attrib["identifier"] for d in dragpoints] == ["1", "2", "3"]
+    # Three independent target->stop legs after the branch.
+    assert [s.attrib["shapetype"] for s in shapes].count("branch") == 1
+    assert [s.attrib["shapetype"] for s in shapes].count("connectoraction") == 4  # source + 3 legs
+
+
+def test_branch_leg_target_carries_its_own_rest_binding():
+    cfg = _branch_config(targets=[_branch_leg(action_type="PUT")])
+    xml = ProcessFlowBuilder.build(cfg, name="Branch Fanout")
+    _, _, shapes = _parse_process(xml)
+    # leg-2 target is the 2nd connectoraction after the branch (shape6).
+    leg2 = next(s for s in shapes if s.attrib["name"] == "shape6")
+    ca = leg2.find("configuration/connectoraction")
+    assert ca.attrib["actionType"] == "PUT"
+    assert ca.attrib["connectionId"] == _REST_CONN_ID_2
+    assert ca.attrib["operationId"] == _REST_OP_ID_2
+
+
+def test_branch_fanout_matches_golden_fixture():
+    """Byte-exact golden (issue #112 g): the Branch shape, its derived numBranches,
+    the sequential identifier/text dragpoints, and the per-leg target/stop layout
+    are load-bearing and must match byte-for-byte."""
+    emitted = ProcessFlowBuilder.build(
+        _branch_config(), name="Branch Fanout", folder_name="Golden/Fixtures"
+    )
+    assert emitted == _BRANCH_FANOUT_GOLDEN.read_text()
+
+
+def test_branch_disabled_is_byte_identical_to_no_branch():
+    """branch.enabled=false keeps the single-target linear flow byte-for-byte."""
+    no_branch = ProcessFlowBuilder.build(_base_config(), name="P")
+    disabled = ProcessFlowBuilder.build(
+        _base_config(branch={"enabled": False, "targets": [_branch_leg()]}), name="P"
+    )
+    assert no_branch == disabled
+
+
+def test_branch_enabled_missing_targets_raises_branch_output_unset():
+    for branch in ({"enabled": True}, {"enabled": True, "targets": []},
+                   {"enabled": True, "targets": "x"}):
+        err = ProcessFlowBuilder.validate_config(_base_config(branch=branch))
+        assert err is not None and err.error_code == "BRANCH_OUTPUT_UNSET"
+        assert err.field == "branch.targets"
+
+
+def test_branch_invalid_leg_binding_is_field_scoped():
+    err = ProcessFlowBuilder.validate_config(
+        _base_config(branch={"enabled": True, "targets": [_branch_leg(connection_id="")]})
+    )
+    assert err is not None and err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+    assert err.field == "branch.targets[0].connection_id"
+
+
+def test_branch_too_many_legs_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _base_config(branch={"enabled": True, "targets": [_branch_leg() for _ in range(25)]})
+    )
+    assert err is not None and err.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+    assert err.field == "branch.targets"
+
+
+def test_branch_unknown_key_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _base_config(branch={"enabled": True, "targets": [_branch_leg()], "foo": 1})
+    )
+    assert err is not None and err.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+    assert err.field == "branch"
+
+
+def test_branch_does_not_compose_with_reliability_in_v1():
+    err = ProcessFlowBuilder.validate_config(_base_config(
+        reliability={"retry_count": 0, "dlq": {"mode": "document_cache_ref", "document_cache_id": "C"}},
+        branch={"enabled": True, "targets": [_branch_leg()]},
+    ))
+    assert err is not None and err.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+    assert err.field == "reliability"
+
+
+def test_branch_does_not_compose_with_return_documents_in_v1():
+    err = ProcessFlowBuilder.validate_config(_base_config(
+        return_documents={"enabled": True},
+        branch={"enabled": True, "targets": [_branch_leg()]},
+    ))
+    assert err is not None and err.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+    assert err.field == "return_documents"
+
+
+def test_branch_build_bypass_raises_for_unsupported_combo():
+    # validate_config-bypass: branch + reliability(Try/Catch) must raise rather than
+    # silently dropping the reliability block.
+    cfg = _base_config(
+        reliability={"retry_count": 2, "dlq": {"mode": "document_cache_ref", "document_cache_id": "C"}},
+        branch={"enabled": True, "targets": [_branch_leg()]},
+    )
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert exc.value.error_code == "PROCESS_BRANCH_CONFIG_INVALID"

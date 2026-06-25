@@ -13,9 +13,34 @@ from pathlib import Path
 
 import pytest
 
+from boomi_mcp.categories.components.builders.process_flow_builder import ProcessFlowBuilder
 from boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "process_graph"
+
+
+def _branch_process_xml(num_extra_legs: int = 1) -> str:
+    """Build a real Branch fan-out process via ProcessFlowBuilder (issue #112)."""
+    legs = [
+        {
+            "connector_type": "rest",
+            "connection_id": f"5555555{i}-5555-5555-5555-555555555555",
+            "operation_id": f"6666666{i}-6666-6666-6666-666666666666",
+            "action_type": "PUT",
+        }
+        for i in range(num_extra_legs)
+    ]
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "action_type": "Get",
+                   "connection_id": "11111111-1111-1111-1111-111111111111",
+                   "operation_id": "22222222-2222-2222-2222-222222222222"},
+        "target": {"connector_type": "rest", "action_type": "POST",
+                   "connection_id": "33333333-3333-3333-3333-333333333333",
+                   "operation_id": "44444444-4444-4444-4444-444444444444"},
+        "branch": {"enabled": True, "targets": legs},
+    }
+    return ProcessFlowBuilder.build(cfg, name="Branch Fanout")
 
 
 def _load(name: str) -> str:
@@ -238,6 +263,27 @@ def test_control_branch_bare_stop_is_warning():
     result = verify_process_graph(xml)
     assert "CONTROL_BRANCH_BARE_STOP" in _codes(result["warnings"])
     # Advisory only — it must never block emission.
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["errors"])
+
+
+def test_builder_branch_fanout_is_clean():
+    """Issue #112 M10.8: a builder-emitted Branch fan-out passes the graph verifier
+    with zero errors AND zero warnings — numBranches matches the dragpoint count
+    (no BRANCH_NUM_BRANCHES_MISMATCH), every dragpoint has a real toShape (no
+    BRANCH_OUTPUT_UNSET / dangling edge)."""
+    for extra_legs in (1, 3):
+        result = verify_process_graph(_branch_process_xml(extra_legs))
+        assert result["errors"] == [], (extra_legs, result["errors"])
+        assert result["warnings"] == [], (extra_legs, result["warnings"])
+
+
+def test_branch_to_stop_legs_do_not_trigger_control_branch_bare_stop():
+    """Issue #112 M10.8: Branch legs legitimately end in a Stop, so a Branch wired
+    to Stops must NOT raise CONTROL_BRANCH_BARE_STOP — Branch is deliberately kept
+    out of _CONTROL_BRANCH_SHAPE_TYPES (unlike Decision/Route/Try-Catch, where a
+    rejected-document path into a bare Stop drops documents untraceably)."""
+    result = verify_process_graph(_branch_process_xml(1))
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
     assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["errors"])
 
 

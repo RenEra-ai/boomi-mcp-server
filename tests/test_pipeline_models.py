@@ -30,6 +30,11 @@ def test_edge_kind_defaults_to_ordering():
 
 
 def test_branch_and_decision_stage_kinds_are_reserved_and_accepted():
+    # Both are accepted as PipelineStageKind vocabulary. Issue #112 M10.8 made the
+    # Branch *shape* emittable through ProcessFlowBuilder (the branch process-config
+    # block), but there is still no PipelineSpec->XML lowering for the branch stage
+    # kind — so as a PipelineSpec stage kind it stays reserved, like decision (which
+    # remains fully reserved, no shape emitter either).
     spec = PipelineSpec(
         stages=[
             StageSpec(key="r", kind="read"),

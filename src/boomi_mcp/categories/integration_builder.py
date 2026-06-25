@@ -1594,7 +1594,128 @@ def _check_process_flow_ref_types(
                 },
             )
 
+    # Issue #112 M10.8: type-check the Branch fan-out leg targets with the same
+    # discipline as the top-level target. Done in its own pass (not via the
+    # slot_rules loop above) so the top-level target's connector-action capture for
+    # the method/action_type check is not clobbered by a leg's operation_id ref.
+    branch_err = _check_branch_target_ref_types(raw_config, components_by_key)
+    if branch_err is not None:
+        return branch_err
+
     return None
+
+
+def _check_branch_target_ref_types(
+    raw_config: Dict[str, Any],
+    components_by_key: Dict[str, IntegrationComponentSpec],
+) -> Optional[BuilderValidationError]:
+    """Type-check $ref:KEY tokens in a Branch fan-out's leg targets (issue #112 M10.8).
+
+    Each ``branch.targets[i]`` is a REST target like the top-level target:
+    ``connection_id`` must reference a REST Client connector-settings,
+    ``operation_id`` a REST Client connector-action, and ``action_type`` (when the
+    referenced operation declares a method) must match it. Direct UUID / literal ids
+    are skipped (outside-spec, like the top-level target). Disabled branches and
+    non-list ``targets`` are no-ops.
+    """
+    branch = raw_config.get("branch")
+    if not isinstance(branch, dict) or branch.get("enabled", True) is False:
+        return None
+    legs = branch.get("targets")
+    if not isinstance(legs, list):
+        return None
+
+    for i, leg in enumerate(legs):
+        if not isinstance(leg, dict):
+            continue
+        prefix = f"branch.targets[{i}]"
+
+        # connection_id -> REST Client connector-settings
+        conn_raw = leg.get("connection_id")
+        if isinstance(conn_raw, str) and conn_raw.startswith("$ref:") and conn_raw[5:]:
+            conn_comp = components_by_key.get(conn_raw[5:])
+            if conn_comp is not None and (
+                _classify_connector_settings(conn_comp) != "REST Client connector-settings"
+            ):
+                return _process_ref_type_mismatch(
+                    f"{prefix}.connection_id", conn_raw, "REST Client connector-settings",
+                    conn_comp, conn_raw[5:],
+                )
+
+        # operation_id -> REST Client connector-action (captured for the action check)
+        op_comp: Optional[IntegrationComponentSpec] = None
+        op_raw = leg.get("operation_id")
+        if isinstance(op_raw, str) and op_raw.startswith("$ref:") and op_raw[5:]:
+            candidate = components_by_key.get(op_raw[5:])
+            if candidate is not None:
+                role, _ = _classify_connector_action(candidate)
+                if role != "REST Client connector-action":
+                    return _process_ref_type_mismatch(
+                        f"{prefix}.operation_id", op_raw, "REST Client connector-action",
+                        candidate, op_raw[5:],
+                    )
+                op_comp = candidate
+
+        # action_type must match the referenced operation's declared method.
+        if op_comp is not None:
+            _, declared_method = _classify_connector_action(op_comp)
+            declared_action_type = leg.get("action_type")
+            declared_action_upper = (
+                declared_action_type.strip().upper()
+                if isinstance(declared_action_type, str) and declared_action_type.strip()
+                else None
+            )
+            if (
+                declared_method is not None
+                and declared_action_upper is not None
+                and declared_method != declared_action_upper
+            ):
+                op_ref_key = op_raw[5:] if isinstance(op_raw, str) and op_raw.startswith("$ref:") else ""
+                return BuilderValidationError(
+                    f"{prefix}.action_type {declared_action_upper!r} does not match "
+                    f"the method {declared_method!r} declared on the referenced "
+                    f"REST operation",
+                    error_code="PROCESS_REF_TYPE_MISMATCH",
+                    field=f"{prefix}.action_type",
+                    hint=(
+                        "Align the branch leg action_type with the HTTP method "
+                        "declared on the referenced REST connector-action, or change "
+                        "the referenced operation to one whose method matches."
+                    ),
+                    details={
+                        "ref_key": op_ref_key,
+                        "expected_role": declared_method,
+                        "actual_role": declared_action_upper,
+                    },
+                )
+    return None
+
+
+def _process_ref_type_mismatch(
+    field_path: str,
+    raw_value: str,
+    expected_role: str,
+    target_comp: IntegrationComponentSpec,
+    ref_key: str,
+) -> BuilderValidationError:
+    """Build the shared PROCESS_REF_TYPE_MISMATCH error (issue #112 M10.8)."""
+    actual_role = _format_actual_role(target_comp)
+    return BuilderValidationError(
+        f"{field_path} {raw_value!r} must reference a {expected_role} "
+        f"component (got {actual_role})",
+        error_code="PROCESS_REF_TYPE_MISMATCH",
+        field=field_path,
+        hint=(
+            "Point this $ref at a component whose declared role matches the "
+            "expected_role; swapped refs and unrelated component types are "
+            "rejected at plan time."
+        ),
+        details={
+            "ref_key": ref_key,
+            "expected_role": expected_role,
+            "actual_role": actual_role,
+        },
+    )
 
 
 def _check_wrapper_subprocess_ref_types(
