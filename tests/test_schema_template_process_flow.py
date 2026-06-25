@@ -202,12 +202,23 @@ def test_template_documents_branch_surface(template):
     ):
         assert field in optional, field
     assert template["supported_control_shapes"] == ["branch"]
-    codes = {e["error_code"] for e in template["structured_errors"]}
-    assert "BRANCH_OUTPUT_UNSET" in codes
-    assert "PROCESS_BRANCH_CONFIG_INVALID" in codes
+    errors_by_code = {e["error_code"]: e["field"] for e in template["structured_errors"]}
+    assert "BRANCH_OUTPUT_UNSET" in errors_by_code
+    assert "PROCESS_BRANCH_CONFIG_INVALID" in errors_by_code
+    # The branch structural/composition error documents the branch block + the
+    # unsupported v1 compositions — NOT the leg binding fields.
+    branch_cfg_fields = errors_by_code["PROCESS_BRANCH_CONFIG_INVALID"]
+    assert "branch.targets[N].dynamic_path" in branch_cfg_fields
+    assert "branch.targets[N].connection_id" not in branch_cfg_fields
+    # A malformed branch leg BINDING reuses PROCESS_CONNECTOR_BINDING_INVALID, and a
+    # swapped leg $ref reuses PROCESS_REF_TYPE_MISMATCH — field-scoped to the leg.
+    assert "branch.targets[N].connection_id" in errors_by_code["PROCESS_CONNECTOR_BINDING_INVALID"]
+    assert "branch.targets[N].operation_id" in errors_by_code["PROCESS_CONNECTOR_BINDING_INVALID"]
+    assert "branch.targets[N].action_type" in errors_by_code["PROCESS_CONNECTOR_BINDING_INVALID"]
+    assert "branch.targets[N].connection_id" in errors_by_code["PROCESS_REF_TYPE_MISMATCH"]
     # BRANCH_NUM_BRANCHES_MISMATCH is a graph-verifier WARNING, never a builder
     # structured error — it must be documented in notes, not structured_errors.
-    assert "BRANCH_NUM_BRANCHES_MISMATCH" not in codes
+    assert "BRANCH_NUM_BRANCHES_MISMATCH" not in errors_by_code
     notes_blob = " ".join(template["notes"])
     assert "BRANCH_NUM_BRANCHES_MISMATCH" in notes_blob
     assert "warning" in notes_blob.lower()

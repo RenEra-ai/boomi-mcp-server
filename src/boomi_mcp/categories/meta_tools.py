@@ -5646,8 +5646,8 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_NAME_REQUIRED", "field": "name"},
             {"error_code": "PROCESS_NAME_CONFLICT", "field": "name"},
             {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "depends_on"},
-            {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target"},
-            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type"},
+            {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target|branch.targets[N]|branch.targets[N].connector_type|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type"},
+            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type"},
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
             {"error_code": "PROCESS_DATAPROCESS_CONFIG_INVALID", "field": "transform|transform.steps|transform.steps[N].script|transform.steps[N].language|transform.steps[N].use_cache"},
             {"error_code": "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED", "field": "transform.steps[N].operation"},
@@ -5659,14 +5659,18 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_PATH_REPLACEMENT_INVALID", "field": "target.dynamic_path|target.dynamic_path.ddp_name|target.dynamic_path.segments"},
             # Issue #112 M10.8: Branch fan-out. BRANCH_OUTPUT_UNSET is the hard error
             # for an enabled branch with no targets (also the verifier's hard error
-            # for an unset branch output); PROCESS_BRANCH_CONFIG_INVALID covers a
-            # malformed branch block, too many legs (>25), or an unsupported v1
-            # composition (dynamic_path / Try-Catch reliability / return_documents).
-            # BRANCH_NUM_BRANCHES_MISMATCH is a graph-verifier WARNING (numBranches
-            # vs dragpoint count), never produced by the builder, which derives
-            # numBranches from the leg count.
+            # for an unset branch output). PROCESS_BRANCH_CONFIG_INVALID covers a
+            # malformed branch block (non-dict / non-bool enabled / unknown key), too
+            # many legs (>25), or an unsupported v1 composition (dynamic_path /
+            # Try-Catch reliability / return_documents alongside Branch). A malformed
+            # branch LEG BINDING (connector_type / connection_id / operation_id /
+            # action_type) reuses PROCESS_CONNECTOR_BINDING_INVALID, and a swapped leg
+            # $ref reuses PROCESS_REF_TYPE_MISMATCH — both field-scoped to
+            # branch.targets[N].* (see those rows above). BRANCH_NUM_BRANCHES_MISMATCH
+            # is a graph-verifier WARNING (numBranches vs dragpoint count), never
+            # produced by the builder, which derives numBranches from the leg count.
             {"error_code": "BRANCH_OUTPUT_UNSET", "field": "branch.targets"},
-            {"error_code": "PROCESS_BRANCH_CONFIG_INVALID", "field": "branch|branch.enabled|branch.targets|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type|branch.targets[N].dynamic_path|reliability|return_documents|target.dynamic_path"},
+            {"error_code": "PROCESS_BRANCH_CONFIG_INVALID", "field": "branch|branch.enabled|branch.targets|branch.targets[N].dynamic_path|reliability|return_documents|target.dynamic_path"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},

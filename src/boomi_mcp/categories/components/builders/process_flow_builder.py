@@ -418,16 +418,27 @@ class ProcessFlowBuilder:
         if source_err is not None:
             return source_err
 
-        target_err = _validate_target_binding(config.get("target"))
-        if target_err is not None:
-            return target_err
-
-        # Issue #112 M10.8: validate the optional Branch (N-way fan-out) block.
-        # Leg 1 is the top-level target (validated just above); branch.targets are
-        # legs 2..N. Absent/disabled keeps the single-target flow.
+        # Issue #112 M10.8 (review): validate the optional Branch (N-way fan-out)
+        # block BEFORE the top-level target binding. _validate_branch_config owns a
+        # single fixed precedence — branch-block structure -> BRANCH_OUTPUT_UNSET
+        # (missing/empty/non-list targets) -> leg count -> unsupported v1
+        # composition (dynamic_path / Try-Catch reliability / return_documents
+        # alongside Branch) -> leg bindings. Running it ahead of
+        # _validate_target_binding lets its composition guard report a
+        # target.dynamic_path + Branch as PROCESS_BRANCH_CONFIG_INVALID (the
+        # persistent blocker) instead of the binding-stage
+        # PROCESS_PATH_REPLACEMENT_INVALID. build() funnels through the SAME
+        # validator, so validate_config and build() cannot diverge on which
+        # structured error a malformed branch yields. Non-branch configs return
+        # from this validator immediately (branch absent), keeping the
+        # single-target validation order byte-for-byte unchanged.
         branch_err = _validate_branch_config(config)
         if branch_err is not None:
             return branch_err
+
+        target_err = _validate_target_binding(config.get("target"))
+        if target_err is not None:
+            return target_err
 
         transform_err = _validate_transform(config.get("transform"))
         if transform_err is not None:
@@ -583,15 +594,18 @@ class ProcessFlowBuilder:
         # target + terminal with a forward fan-out — the post-source document is
         # branched to N independent REST-target -> Stop legs (leg 1 = top-level
         # target, legs 2..N = branch.targets). At this point ``flow`` holds only
-        # the shared pre-branch chain (start -> source -> [transform]). v1 Branch
-        # does not compose with dynamic_path / Try-Catch / Return Documents
-        # (validate_config rejects those combinations; the guard below re-checks
-        # so a validate_config-bypass build() stays total instead of silently
-        # dropping an unsupported combination).
+        # the shared pre-branch chain (start -> source -> [transform]). build()
+        # stays total on a validate_config-bypass by funnelling through the SAME
+        # _validate_branch_config validator validate_config uses (so the two paths
+        # cannot diverge on the structured error): a non-list/empty targets raises
+        # BRANCH_OUTPUT_UNSET (rather than emitting a degenerate 1-leg fan-out),
+        # >25 legs / malformed leg bindings / an unsupported v1 composition
+        # (dynamic_path / Try-Catch / Return Documents alongside Branch) all raise
+        # rather than silently dropping or degrading.
         if _branch_enabled(config):
-            combo_err = _branch_unsupported_combo_error(config)
-            if combo_err is not None:
-                raise combo_err
+            branch_err = _validate_branch_config(config)
+            if branch_err is not None:
+                raise branch_err
             legs: List[List[Tuple[str, Dict[str, Any]]]] = []
             for leg_target in _branch_leg_targets(config):
                 legs.append([
@@ -1284,11 +1298,22 @@ def _validate_branch_config(config: Dict[str, Any]) -> Optional[BuilderValidatio
                 f"(the top-level target plus up to {_BRANCH_MAX_LEGS - 1} branch.targets)."
             ),
         )
+    # Unsupported v1 composition (dynamic_path / Try-Catch reliability / return
+    # documents alongside Branch) is rejected here — AFTER the branch-block
+    # structure + BRANCH_OUTPUT_UNSET + leg-count checks (a missing/empty branch
+    # output is the more fundamental error, reported first), and BEFORE the leg
+    # binding loop (so a leg carrying a malformed dynamic_path is reported as the
+    # composition error, not the binding-stage PROCESS_PATH_REPLACEMENT_INVALID).
+    # Both validate_config and build() funnel through this one validator, so the
+    # two paths cannot diverge on which structured error a malformed branch yields.
+    combo_err = _branch_unsupported_combo_error(config)
+    if combo_err is not None:
+        return combo_err
     for i, leg in enumerate(targets):
         leg_err = _validate_target_binding(leg, field_prefix=f"branch.targets[{i}]")
         if leg_err is not None:
             return leg_err
-    return _branch_unsupported_combo_error(config)
+    return None
 
 
 def _branch_unsupported_combo_error(
@@ -1311,15 +1336,22 @@ def _branch_unsupported_combo_error(
             field="target.dynamic_path",
             hint="Remove dynamic_path, or drop the branch block to keep the dynamic-path single target.",
         )
-    branch = config.get("branch") or {}
-    for i, leg in enumerate(branch.get("targets") or []):
-        if isinstance(leg, dict) and leg.get("dynamic_path") is not None:
-            return BuilderValidationError(
-                f"branch.targets[{i}].dynamic_path is not supported in a branch fan-out in v1.",
-                error_code="PROCESS_BRANCH_CONFIG_INVALID",
-                field=f"branch.targets[{i}].dynamic_path",
-                hint="Branch legs are plain REST targets in v1; remove the per-leg dynamic_path.",
-            )
+    # NOTE: this guard now runs (via validate_config) BEFORE _validate_branch_config
+    # has checked that branch.targets is a list, so it must stay total on a
+    # malformed targets value. Only iterate when it is actually a list — a non-list
+    # targets (e.g. a scalar 1/true, which is truthy but not iterable) is reported
+    # as BRANCH_OUTPUT_UNSET by _validate_branch_config, not crashed on here.
+    branch = config.get("branch") if isinstance(config.get("branch"), dict) else {}
+    branch_targets = branch.get("targets")
+    if isinstance(branch_targets, list):
+        for i, leg in enumerate(branch_targets):
+            if isinstance(leg, dict) and leg.get("dynamic_path") is not None:
+                return BuilderValidationError(
+                    f"branch.targets[{i}].dynamic_path is not supported in a branch fan-out in v1.",
+                    error_code="PROCESS_BRANCH_CONFIG_INVALID",
+                    field=f"branch.targets[{i}].dynamic_path",
+                    hint="Branch legs are plain REST targets in v1; remove the per-leg dynamic_path.",
+                )
     reliability = config.get("reliability")
     if isinstance(reliability, dict) and _reliability_requests_try_catch(reliability):
         return BuilderValidationError(

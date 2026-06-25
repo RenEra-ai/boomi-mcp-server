@@ -1784,11 +1784,69 @@ def test_branch_disabled_is_byte_identical_to_no_branch():
 
 
 def test_branch_enabled_missing_targets_raises_branch_output_unset():
+    # Includes non-iterable truthy scalars (1 / True / 1.5): the combo guard now
+    # runs BEFORE the targets-is-list check (review reorder), so it must stay total
+    # on a malformed targets rather than raising TypeError on enumerate(scalar).
     for branch in ({"enabled": True}, {"enabled": True, "targets": []},
-                   {"enabled": True, "targets": "x"}):
+                   {"enabled": True, "targets": "x"}, {"enabled": True, "targets": 1},
+                   {"enabled": True, "targets": True}, {"enabled": True, "targets": 1.5},
+                   {"enabled": True, "targets": {"k": 1}}):
         err = ProcessFlowBuilder.validate_config(_base_config(branch=branch))
-        assert err is not None and err.error_code == "BRANCH_OUTPUT_UNSET"
+        assert err is not None and err.error_code == "BRANCH_OUTPUT_UNSET", branch
         assert err.field == "branch.targets"
+
+
+def test_branch_validate_config_and_build_report_identical_errors():
+    # Issue #112 review: validate_config and build() funnel through ONE branch
+    # validator, so for every malformed branch config they MUST report the same
+    # structured (error_code, field) — never diverge (e.g. validate_config saying
+    # dynamic_path while build() says BRANCH_OUTPUT_UNSET).
+    malformed_branches = [
+        {"enabled": True},                                   # no targets
+        {"enabled": True, "targets": []},                    # empty
+        {"enabled": True, "targets": 1},                     # non-iterable scalar
+        {"enabled": True, "targets": [_branch_leg(dynamic_path=_VALID_DYNAMIC_PATH)]},
+        {"enabled": True, "targets": [_branch_leg(dynamic_path={"x": 1})]},
+        {"enabled": True, "targets": [_branch_leg(connection_id="")]},
+        {"enabled": True, "targets": [_branch_leg() for _ in range(25)]},
+        {"enabled": True, "targets": [_branch_leg()], "foo": 1},
+    ]
+    extra_for_combo = [
+        # no-targets + an unsupported composition: BRANCH_OUTPUT_UNSET wins (the
+        # more fundamental error), in BOTH paths.
+        ({"enabled": True}, {"reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref", "document_cache_id": "C"}}}),
+        ({"enabled": True, "targets": [_branch_leg()]}, {"return_documents": {"enabled": True}}),
+    ]
+    def _vc_err(cfg):
+        return ProcessFlowBuilder.validate_config(cfg)
+    def _build_err(cfg):
+        try:
+            ProcessFlowBuilder.build(cfg, name="P")
+            return None
+        except BuilderValidationError as exc:
+            return exc
+    for branch in malformed_branches:
+        cfg = _base_config(branch=branch)
+        v, b = _vc_err(cfg), _build_err(cfg)
+        assert v is not None and b is not None, branch
+        assert (v.error_code, v.field) == (b.error_code, b.field), (branch, v.error_code, b.error_code)
+    for branch, extra in extra_for_combo:
+        cfg = _base_config(branch=branch, **extra)
+        v, b = _vc_err(cfg), _build_err(cfg)
+        assert v is not None and b is not None, (branch, extra)
+        assert (v.error_code, v.field) == (b.error_code, b.field), (branch, extra, v.error_code, b.error_code)
+
+
+def test_branch_build_bypass_total_on_malformed_targets():
+    # build() must stay total on a validate_config bypass with malformed targets —
+    # raise BRANCH_OUTPUT_UNSET, never crash (TypeError) or emit a degenerate
+    # 1-leg fan-out (numBranches=1).
+    for targets in (1, True, [], "x", None, {"k": 1}):
+        with pytest.raises(BuilderValidationError) as exc:
+            ProcessFlowBuilder.build(
+                _base_config(branch={"enabled": True, "targets": targets}), name="P"
+            )
+        assert exc.value.error_code == "BRANCH_OUTPUT_UNSET", targets
 
 
 def test_branch_invalid_leg_binding_is_field_scoped():
@@ -1831,6 +1889,42 @@ def test_branch_does_not_compose_with_return_documents_in_v1():
     ))
     assert err is not None and err.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
     assert err.field == "return_documents"
+
+
+_VALID_DYNAMIC_PATH = {
+    "ddp_name": "DDP_PATH",
+    "request_profile_id": "p1",
+    "segments": [{"type": "profile", "element_id": "e1", "element_name": "id"}],
+}
+
+
+def test_branch_with_dynamic_path_uniformly_rejects_branch_config_invalid():
+    # Issue #112 review: dynamic_path + Branch is the unsupported v1 composition, so
+    # it is rejected as PROCESS_BRANCH_CONFIG_INVALID — the persistent blocker —
+    # whether the dynamic_path is well-formed or malformed (a malformed dynamic_path
+    # is moot once you learn it cannot be used with Branch at all).
+    for dp in (_VALID_DYNAMIC_PATH, {"x": 1}):
+        top = ProcessFlowBuilder.validate_config(_base_config(
+            target={**_base_config()["target"], "dynamic_path": dp},
+            branch={"enabled": True, "targets": [_branch_leg()]},
+        ))
+        assert top is not None and top.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+        assert top.field == "target.dynamic_path"
+        leg = ProcessFlowBuilder.validate_config(_base_config(
+            branch={"enabled": True, "targets": [_branch_leg(dynamic_path=dp)]},
+        ))
+        assert leg is not None and leg.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+        assert leg.field == "branch.targets[0].dynamic_path"
+
+
+def test_non_branch_malformed_dynamic_path_still_reports_path_replacement_invalid():
+    # The combo reorder must NOT change non-branch validation: a malformed
+    # dynamic_path with no Branch stays the specific PROCESS_PATH_REPLACEMENT_INVALID.
+    err = ProcessFlowBuilder.validate_config(_base_config(
+        target={**_base_config()["target"], "dynamic_path": {"x": 1}},
+    ))
+    assert err is not None and err.error_code == "PROCESS_PATH_REPLACEMENT_INVALID"
+    assert err.field == "target.dynamic_path"
 
 
 def test_branch_build_bypass_raises_for_unsupported_combo():
