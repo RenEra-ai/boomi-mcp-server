@@ -83,22 +83,38 @@ _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subpr
 _BRANCH_ALLOWED_KEYS = frozenset({"enabled", "targets"})
 _BRANCH_MAX_LEGS = 25
 
-# Issue #106 M10.2: process-level Data Process shape. v1 ships ONLY the
-# live-observed Custom Scripting (Groovy) operation (processtype 12) — captured
-# from the live `work` account, see .codex/plans/issue-106-live-captures.md. Every
-# other documented Data Process operation (Search/Replace, Zip, Unzip, Base64
-# encode/decode, Split/Combine Documents, character encoding) is rejected with
-# PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED until each has its own byte-accurate
-# live capture, so we never over-claim the operation union from docs alone.
-# ``processtype``/``name`` are the exact Boomi step attributes (see the companion
-# reference data_process_step.md); ``name`` MUST stay the standard operation name
-# (a custom step name causes GUI display issues), descriptive text goes on the
-# shape ``userlabel``.
+# Issue #106 M10.2 / #115 M10.2a: process-level Data Process shape. v1 ships the
+# live-observed Custom Scripting (Groovy, processtype 12) operation plus the two
+# profile-driven, cardinality-changing operations Split Documents (1->N,
+# processtype 8) and Combine Documents (N->1, processtype 9). Split is captured
+# from the live `work` account (see .codex/plans/issue-115-m10.2a-live-captures.md);
+# the JSON-split and JSON/XML-combine variants are reconciled against the companion
+# reference data_process_step.md. Every OTHER documented Data Process operation
+# (Search/Replace, Zip, Unzip, Base64 encode/decode, character encoding) stays
+# rejected with PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED until each has its own
+# byte-accurate live capture, so we never over-claim the operation union from docs
+# alone. ``processtype``/``name`` are the exact Boomi step attributes (see the
+# companion reference data_process_step.md); ``name`` MUST stay the standard
+# operation name (a custom step name causes GUI display issues), descriptive text
+# goes on the shape ``userlabel``.
 _DATAPROCESS_OPERATIONS: Dict[str, Dict[str, str]] = {
     "custom_scripting": {"processtype": "12", "name": "Custom Scripting"},
+    "split_documents": {"processtype": "8", "name": "Split Documents"},
+    "combine_documents": {"processtype": "9", "name": "Combine Documents"},
 }
 # The only script engine the typed builder accepts/emits for Custom Scripting.
 _DATAPROCESS_SCRIPT_LANGUAGE = "groovy2"
+# Issue #115 M10.2a: the two profile-driven cardinality operations and the profile
+# kinds they bind. ``json`` -> <JSONOptions>, ``xml`` -> <XMLOptions> (the
+# live-observed child of <SplitOptions> for Split / of <dataprocesscombine> for
+# Combine). The link-element + profile fields are caller-authored, opaque
+# UI-captured tokens (linkElementKey/linkElementName/profileId) — no canned values.
+_DATAPROCESS_PROFILE_TYPES = frozenset({"json", "xml"})
+_DATAPROCESS_PROFILE_OPERATIONS = frozenset({"split_documents", "combine_documents"})
+_DATAPROCESS_SPLIT_KEYS = frozenset(
+    {"operation", "profile_type", "profile_id", "link_element_key", "link_element_name"}
+)
+_DATAPROCESS_COMBINE_KEYS = _DATAPROCESS_SPLIT_KEYS | {"combine_into_link_element_key"}
 
 # Issue #107 M10.3: process-level Return Documents terminal shape. Live-captured
 # from the `work` account (component 64e5397b-3583-42c9-8fe3-08ccefb0da6c, see
@@ -1542,14 +1558,16 @@ def _validate_transform(transform: Any) -> Optional[BuilderValidationError]:
 def _validate_dataprocess_transform(
     transform: Dict[str, Any],
 ) -> Optional[BuilderValidationError]:
-    """Validate a ``transform.mode='dataprocess'`` config (issue #106 M10.2).
+    """Validate a ``transform.mode='dataprocess'`` config (issue #106 / #115).
 
     The shape is a non-empty ordered list of operation ``steps``. v1 supports
-    only ``custom_scripting`` (Groovy, ``language='groovy2'``); any other
-    operation — including the docs-only Search/Replace, Zip/Unzip, Base64,
-    Split/Combine, and character encoding — is rejected
-    ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED`` until it has a byte-accurate
-    live capture. Malformed step config is ``PROCESS_DATAPROCESS_CONFIG_INVALID``.
+    ``custom_scripting`` (Groovy, ``language='groovy2'``) and the two
+    profile-driven cardinality operations ``split_documents`` /
+    ``combine_documents`` (issue #115 M10.2a); any other operation — including the
+    docs-only Search/Replace, Zip/Unzip, Base64, and character encoding — is
+    rejected ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED`` until it has a
+    byte-accurate live capture. Malformed step config is
+    ``PROCESS_DATAPROCESS_CONFIG_INVALID``.
     """
     # Reject unknown top-level transform keys so a typo isn't silently dropped.
     # Mirrors the step-level strictness below and the DataProcessPrimitive's
@@ -1586,8 +1604,9 @@ def _validate_dataprocess_transform(
                 error_code="PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED",
                 field=f"{field}.operation",
                 hint=(
-                    "v1 supports only 'custom_scripting'. Other documented Data "
-                    "Process operations are deferred pending a live capture; see "
+                    "Supported: custom_scripting, split_documents, "
+                    "combine_documents. Other documented Data Process operations "
+                    "are deferred pending a live capture; see "
                     f"supported: {sorted(_DATAPROCESS_OPERATIONS)}."
                 ),
             )
@@ -1625,6 +1644,73 @@ def _validate_dataprocess_transform(
                     field=f"{field}.use_cache",
                     hint="Script compilation caching is required (use_cache=true).",
                 )
+        elif operation in _DATAPROCESS_PROFILE_OPERATIONS:
+            err = _validate_dataprocess_profile_step(step, operation, field)
+            if err is not None:
+                return err
+    return None
+
+
+def _validate_dataprocess_profile_step(
+    step: Dict[str, Any], operation: str, field: str
+) -> Optional[BuilderValidationError]:
+    """Validate one Split/Combine Documents Data Process step (issue #115 M10.2a).
+
+    Both operations bind a JSON/XML profile component plus a link element on it.
+    The profile/link values (``profile_id`` / ``link_element_key`` /
+    ``link_element_name`` and the Combine-only ``combine_into_link_element_key``)
+    are caller-authored opaque tokens captured from the Boomi UI — validated here
+    only as present, non-blank strings (no canned/templated values). The
+    ``profile_id`` $ref's *type* (json vs xml profile component) is checked at plan
+    time in ``integration_builder._check_process_flow_ref_types``.
+    """
+    allowed_keys = (
+        _DATAPROCESS_COMBINE_KEYS
+        if operation == "combine_documents"
+        else _DATAPROCESS_SPLIT_KEYS
+    )
+    extra = set(step) - allowed_keys
+    if extra:
+        return BuilderValidationError(
+            f"{field} has unsupported keys: {sorted(extra)}.",
+            error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+            field=field,
+            hint=f"Allowed keys for {operation}: {sorted(allowed_keys)}.",
+        )
+    if step.get("profile_type") not in _DATAPROCESS_PROFILE_TYPES:
+        return BuilderValidationError(
+            f"{field}.profile_type must be one of "
+            f"{sorted(_DATAPROCESS_PROFILE_TYPES)}.",
+            error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+            field=f"{field}.profile_type",
+            hint="Split/Combine bind a 'json' or 'xml' profile component.",
+        )
+    for key in ("profile_id", "link_element_key", "link_element_name"):
+        value = step.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return BuilderValidationError(
+                f"{field}.{key} is required and must be a non-empty string.",
+                error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+                field=f"{field}.{key}",
+                hint=(
+                    "Provide the caller-authored profile reference / link element "
+                    "captured from the profile (no canned values)."
+                ),
+            )
+    if operation == "combine_documents":
+        # Optional; defaults to the literal 'null' (combine into the document
+        # root). When supplied it must be a non-blank string element key.
+        combine_into = step.get("combine_into_link_element_key", "null")
+        if not isinstance(combine_into, str) or not combine_into.strip():
+            return BuilderValidationError(
+                f"{field}.combine_into_link_element_key must be a non-empty string.",
+                error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+                field=f"{field}.combine_into_link_element_key",
+                hint=(
+                    "Defaults to the literal 'null' (combine into root); set a "
+                    "parent element key to nest."
+                ),
+            )
     return None
 
 
@@ -2384,29 +2470,107 @@ def _emit_dataprocess(
 
 
 def _emit_dataprocess_step(step: Dict[str, Any], index: int) -> str:
-    """Render one Data Process ``<step>`` (issue #106 v1: custom_scripting only).
+    """Render one Data Process ``<step>`` (issue #106 / #115 M10.2a).
 
-    Keeps build() total on the validate_config-bypass path: an operation that is
-    not in the v1 set raises ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED`` rather
-    than emitting a malformed step.
+    Dispatches per operation: ``custom_scripting`` -> <dataprocessscript>,
+    ``split_documents`` -> <documentsplit><SplitOptions>…, ``combine_documents``
+    -> <dataprocesscombine>…. Keeps build() total on the validate_config-bypass
+    path: an operation not in the supported set raises
+    ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED`` rather than emitting a malformed
+    step.
     """
     operation = str(step.get("operation") or "").strip()
     meta = _DATAPROCESS_OPERATIONS.get(operation)
-    if meta is None or operation != "custom_scripting":
+    if meta is None:
         raise BuilderValidationError(
             f"Unsupported Data Process operation {operation!r}.",
             error_code="PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED",
             field="transform.steps[].operation",
-            hint=f"v1 supports only: {sorted(_DATAPROCESS_OPERATIONS)}.",
+            hint=f"Supported: {sorted(_DATAPROCESS_OPERATIONS)}.",
         )
-    script = _escape_xml(str(step.get("script") or ""))
-    return (
+    open_tag = (
         f'<step index="{index}" key="{index}" '
         f'name="{meta["name"]}" processtype="{meta["processtype"]}">'
-        f'<dataprocessscript language="{_DATAPROCESS_SCRIPT_LANGUAGE}" useCache="true">'
-        f'<script>{script}</script>'
-        '</dataprocessscript>'
-        '</step>'
+    )
+    if operation == "custom_scripting":
+        script = _escape_xml(str(step.get("script") or ""))
+        body = (
+            f'<dataprocessscript language="{_DATAPROCESS_SCRIPT_LANGUAGE}" useCache="true">'
+            f'<script>{script}</script>'
+            '</dataprocessscript>'
+        )
+    elif operation == "split_documents":
+        body = _emit_dataprocess_split_body(step)
+    elif operation == "combine_documents":
+        body = _emit_dataprocess_combine_body(step)
+    else:  # pragma: no cover - registry/emitter dispatch kept in lockstep
+        raise BuilderValidationError(
+            f"Unsupported Data Process operation {operation!r}.",
+            error_code="PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED",
+            field="transform.steps[].operation",
+            hint=f"Supported: {sorted(_DATAPROCESS_OPERATIONS)}.",
+        )
+    return f"{open_tag}{body}</step>"
+
+
+def _dataprocess_option_tag(step: Dict[str, Any]) -> str:
+    """Return the option element tag for a Split/Combine profile step (issue #115).
+
+    json -> ``JSONOptions``, xml -> ``XMLOptions`` (the live-observed child of
+    <SplitOptions> / <dataprocesscombine>). Raises so build() stays total on the
+    validate_config-bypass path when an unknown profile_type slips through.
+    """
+    profile_type = str(step.get("profile_type") or "").strip().lower()
+    if profile_type == "json":
+        return "JSONOptions"
+    if profile_type == "xml":
+        return "XMLOptions"
+    raise BuilderValidationError(
+        f"Unsupported Data Process profile_type {profile_type!r}.",
+        error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+        field="transform.steps[].profile_type",
+        hint=f"Allowed: {sorted(_DATAPROCESS_PROFILE_TYPES)}.",
+    )
+
+
+def _emit_dataprocess_split_body(step: Dict[str, Any]) -> str:
+    """Render a Split Documents body (issue #115): <documentsplit><SplitOptions>….
+
+    Attribute order linkElementKey, linkElementName, profileId — byte-exact to the
+    live `work`-account capture (XML split) and the companion reference (JSON split).
+    """
+    tag = _dataprocess_option_tag(step)
+    profile_type = _escape_xml(str(step.get("profile_type") or ""))
+    link_key = _escape_xml(str(step.get("link_element_key") or ""))
+    link_name = _escape_xml(str(step.get("link_element_name") or ""))
+    profile_id = _escape_xml(str(step.get("profile_id") or ""))
+    return (
+        f'<documentsplit profileType="{profile_type}"><SplitOptions>'
+        f'<{tag} linkElementKey="{link_key}" linkElementName="{link_name}" '
+        f'profileId="{profile_id}"/>'
+        '</SplitOptions></documentsplit>'
+    )
+
+
+def _emit_dataprocess_combine_body(step: Dict[str, Any]) -> str:
+    """Render a Combine Documents body (issue #115): <dataprocesscombine>….
+
+    Attribute order combineIntoLinkElementKey, linkElementKey, linkElementName,
+    profileId — per the companion reference. ``combine_into_link_element_key``
+    defaults to the literal 'null' (combine into root).
+    """
+    tag = _dataprocess_option_tag(step)
+    profile_type = _escape_xml(str(step.get("profile_type") or ""))
+    combine_into = _escape_xml(str(step.get("combine_into_link_element_key") or "null"))
+    link_key = _escape_xml(str(step.get("link_element_key") or ""))
+    link_name = _escape_xml(str(step.get("link_element_name") or ""))
+    profile_id = _escape_xml(str(step.get("profile_id") or ""))
+    return (
+        f'<dataprocesscombine profileType="{profile_type}">'
+        f'<{tag} combineIntoLinkElementKey="{combine_into}" '
+        f'linkElementKey="{link_key}" linkElementName="{link_name}" '
+        f'profileId="{profile_id}"/>'
+        '</dataprocesscombine>'
     )
 
 

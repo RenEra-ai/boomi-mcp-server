@@ -184,8 +184,8 @@ def test_template_documents_doccacheremove_surface(template):
 
 
 def test_template_documents_dataprocess_surface(template):
-    # Issue #106 M10.2: dataprocess transform fields + v1 operation set + the
-    # two new structured errors are all documented.
+    # Issue #106 M10.2 / #115 M10.2a: dataprocess transform fields + operation set
+    # (custom_scripting + Split/Combine) + the structured errors are all documented.
     optional = template["optional_fields"]
     for field in (
         "transform.label",
@@ -194,9 +194,19 @@ def test_template_documents_dataprocess_surface(template):
         "transform.steps[].script",
         "transform.steps[].language",
         "transform.steps[].use_cache",
+        # Split/Combine (#115) profile-binding fields.
+        "transform.steps[].profile_type",
+        "transform.steps[].profile_id",
+        "transform.steps[].link_element_key",
+        "transform.steps[].link_element_name",
+        "transform.steps[].combine_into_link_element_key",
     ):
         assert field in optional, field
-    assert template["supported_dataprocess_operations"] == ["custom_scripting"]
+    assert template["supported_dataprocess_operations"] == [
+        "custom_scripting",
+        "split_documents",
+        "combine_documents",
+    ]
     codes = {e["error_code"] for e in template["structured_errors"]}
     assert "PROCESS_DATAPROCESS_CONFIG_INVALID" in codes
     assert "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED" in codes

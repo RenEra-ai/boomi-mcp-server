@@ -305,6 +305,88 @@ def test_inv_dataprocessscript_attrs_groovy2_usecache_true():
     assert script.attrib["useCache"] == "true"
 
 
+def test_inv_dataprocess_split_documents_linear():
+    # Issue #115 M10.2a: a Split Documents step always emits processtype="8" with a
+    # <documentsplit profileType="json|xml"><SplitOptions><JSONOptions|XMLOptions ...>
+    # body whose option attributes are in the live order linkElementKey,
+    # linkElementName, profileId — and a forward dragpoint (linear NON-terminal,
+    # document multiplexing is data-plane, not a control branch). Guaranteed by
+    # construction: _emit_dataprocess_split_body emits exactly this form.
+    xml = ProcessFlowBuilder.build(
+        _process_config(
+            transform={
+                "mode": "dataprocess",
+                "label": "Split orders",
+                "steps": [
+                    {
+                        "operation": "split_documents",
+                        "profile_type": "json",
+                        "profile_id": "PID-1",
+                        "link_element_key": "9",
+                        "link_element_name": "ArrayElement1 (Root/Object/list)",
+                    }
+                ],
+            }
+        ),
+        name="P",
+    )
+    shapes = _parse_process_shapes(xml)
+    dp = next(s for s in shapes if s.attrib["shapetype"] == "dataprocess")
+    step = dp.find("configuration/dataprocess/step")
+    assert step.attrib["name"] == "Split Documents"
+    assert step.attrib["processtype"] == "8"
+    # Live attribute order is load-bearing — assert against the raw string.
+    assert (
+        '<documentsplit profileType="json"><SplitOptions>'
+        '<JSONOptions linkElementKey="9" '
+        'linkElementName="ArrayElement1 (Root/Object/list)" profileId="PID-1"/>'
+        '</SplitOptions></documentsplit>'
+    ) in xml
+    # NON-terminal: exactly one forward dragpoint.
+    dragpoints = dp.find("dragpoints")
+    assert dragpoints is not None and len(list(dragpoints)) == 1
+
+
+def test_inv_dataprocess_combine_documents_linear():
+    # Issue #115 M10.2a: a Combine Documents step always emits processtype="9" with a
+    # <dataprocesscombine profileType="json|xml"><JSONOptions|XMLOptions ...> body
+    # (the option element a DIRECT child — no <SplitOptions> wrapper) whose attributes
+    # are in the live order combineIntoLinkElementKey, linkElementKey, linkElementName,
+    # profileId, and a forward dragpoint (linear NON-terminal). Guaranteed by
+    # construction: _emit_dataprocess_combine_body emits exactly this form.
+    xml = ProcessFlowBuilder.build(
+        _process_config(
+            transform={
+                "mode": "dataprocess",
+                "label": "Combine groups",
+                "steps": [
+                    {
+                        "operation": "combine_documents",
+                        "profile_type": "xml",
+                        "profile_id": "PID-2",
+                        "link_element_key": "4",
+                        "link_element_name": "Group (Envelope/Body/Groups/Group)",
+                    }
+                ],
+            }
+        ),
+        name="P",
+    )
+    shapes = _parse_process_shapes(xml)
+    dp = next(s for s in shapes if s.attrib["shapetype"] == "dataprocess")
+    step = dp.find("configuration/dataprocess/step")
+    assert step.attrib["name"] == "Combine Documents"
+    assert step.attrib["processtype"] == "9"
+    assert (
+        '<dataprocesscombine profileType="xml">'
+        '<XMLOptions combineIntoLinkElementKey="null" linkElementKey="4" '
+        'linkElementName="Group (Envelope/Body/Groups/Group)" profileId="PID-2"/>'
+        '</dataprocesscombine>'
+    ) in xml
+    dragpoints = dp.find("dragpoints")
+    assert dragpoints is not None and len(list(dragpoints)) == 1
+
+
 def test_inv_doccacheretrieve_all_documents_linear():
     # Issue #109 M10.5: the all-document Document Cache Retrieve shape always emits
     # loadAllDoc="true" with an empty <cacheKeyValues/>, the live attribute order
@@ -866,6 +948,20 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "emitter": "process_flow_builder._emit_dataprocess (issue #106 M10.2)",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_dataprocessscript_attrs_groovy2_usecache_true",
+    },
+    {
+        "id": "dataprocess_split_linear",
+        "invariant": 'Split Documents processtype="8" — <documentsplit profileType="json|xml"><SplitOptions><JSONOptions|XMLOptions> option attr order linkElementKey/linkElementName/profileId, linear NON-terminal (one forward dragpoint)',
+        "emitter": "process_flow_builder._emit_dataprocess_split_body (issue #115 M10.2a)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_dataprocess_split_documents_linear",
+    },
+    {
+        "id": "dataprocess_combine_linear",
+        "invariant": 'Combine Documents processtype="9" — <dataprocesscombine profileType="json|xml"><JSONOptions|XMLOptions> (direct child, no SplitOptions) attr order combineIntoLinkElementKey/linkElementKey/linkElementName/profileId, linear NON-terminal (one forward dragpoint)',
+        "emitter": "process_flow_builder._emit_dataprocess_combine_body (issue #115 M10.2a)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_dataprocess_combine_documents_linear",
     },
     {
         "id": "doccacheretrieve_linear",

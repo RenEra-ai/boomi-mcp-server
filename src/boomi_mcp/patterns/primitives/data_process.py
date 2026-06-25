@@ -1,12 +1,12 @@
-"""Issue #106 (M10.2): ``data_process`` transform primitive.
+"""Issue #106 (M10.2) / #115 (M10.2a): ``data_process`` transform primitive.
 
 A fragment-only primitive that declares a process-level Data Process shape — the
 "Swiss army knife" document-manipulation step — as a ``transform.mode='dataprocess'``
-process fragment consumed by ``ProcessFlowBuilder``. v1 supports only the
-live-observed Custom Scripting operation (the dominant real use, captured from a
-live account export); other documented Data Process operations are deferred until
-each has its own byte-accurate live capture (the builder rejects them with
-``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED``).
+process fragment consumed by ``ProcessFlowBuilder``. v1 supports the live-observed
+Custom Scripting operation plus the two profile-driven, cardinality-changing
+operations Split Documents (1->N) and Combine Documents (N->1); other documented
+Data Process operations are deferred until each has its own byte-accurate live
+capture (the builder rejects them with ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED``).
 
 It emits NO standalone components (``emit_components`` -> ``[]``); the operation
 steps live inline on the process shape, so the primitive only contributes a
@@ -15,7 +15,7 @@ steps live inline on the process shape, so the primitive only contributes a
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -60,11 +60,86 @@ class CustomScriptingStep(BaseModel):
         return self
 
 
+class SplitDocumentsStep(BaseModel):
+    """One Split Documents (processtype 8) Data Process step (issue #115 M10.2a).
+
+    Splits one document into N (1->N) on a repeating element of the referenced
+    JSON/XML profile. ``profile_id`` is the profile component ($ref:KEY token in
+    ``depends_on`` or a literal id); ``link_element_key`` / ``link_element_name``
+    are the opaque UI-captured tokens identifying the split element. All
+    caller-authored — no canned/templated values.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["split_documents"] = Field(
+        ..., description="Data Process operation"
+    )
+    profile_type: Literal["json", "xml"] = Field(
+        ..., description="Referenced profile kind (json|xml)"
+    )
+    profile_id: str = Field(..., min_length=1, description="Profile component ($ref:KEY or id)")
+    link_element_key: str = Field(..., min_length=1, description="Split element key from the profile")
+    link_element_name: str = Field(..., min_length=1, description="Human-readable path to the split element")
+
+    @model_validator(mode="after")
+    def _non_blank(self) -> "SplitDocumentsStep":
+        for name in ("profile_id", "link_element_key", "link_element_name"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        return self
+
+
+class CombineDocumentsStep(BaseModel):
+    """One Combine Documents (processtype 9) Data Process step (issue #115 M10.2a).
+
+    Combines N documents into one (N->1) under a repeating element of the
+    referenced JSON/XML profile. ``combine_into_link_element_key`` defaults to the
+    literal ``"null"`` (combine into the document root). All fields are
+    caller-authored — no canned/templated values.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["combine_documents"] = Field(
+        ..., description="Data Process operation"
+    )
+    profile_type: Literal["json", "xml"] = Field(
+        ..., description="Referenced profile kind (json|xml)"
+    )
+    profile_id: str = Field(..., min_length=1, description="Profile component ($ref:KEY or id)")
+    link_element_key: str = Field(..., min_length=1, description="Combine element key from the profile")
+    link_element_name: str = Field(..., min_length=1, description="Human-readable path to the combine element")
+    combine_into_link_element_key: str = Field(
+        default="null", min_length=1, description="Parent element key (literal 'null' = root)"
+    )
+
+    @model_validator(mode="after")
+    def _non_blank(self) -> "CombineDocumentsStep":
+        for name in (
+            "profile_id",
+            "link_element_key",
+            "link_element_name",
+            "combine_into_link_element_key",
+        ):
+            if not getattr(self, name).strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        return self
+
+
+# Discriminated union: ``operation`` selects the step model (matches the builder's
+# per-operation validation and the PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED gate).
+DataProcessStep = Annotated[
+    Union[CustomScriptingStep, SplitDocumentsStep, CombineDocumentsStep],
+    Field(discriminator="operation"),
+]
+
+
 class DataProcessParameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: Optional[str] = Field(default=None, description="Descriptive shape label")
-    steps: List[CustomScriptingStep] = Field(
+    steps: List[DataProcessStep] = Field(
         ..., min_length=1, description="Ordered Data Process operation steps"
     )
 
@@ -83,12 +158,24 @@ class DataProcessPrimitive(PrimitivePattern):
         kind=PatternKind.PRIMITIVE,
         description=(
             "Declare a process-level Data Process shape (document manipulation "
-            "step) as a transform fragment. v1 supports the Custom Scripting "
-            "operation; other Data Process operations are deferred."
+            "step) as a transform fragment. Supports the Custom Scripting "
+            "operation and the native profile-driven cardinality operations "
+            "Split Documents (1->N) and Combine Documents (N->1); other Data "
+            "Process operations are deferred."
         ),
-        tags=["transform", "data-process", "custom-scripting"],
+        tags=[
+            "transform",
+            "data-process",
+            "custom-scripting",
+            "split-documents",
+            "combine-documents",
+        ],
         use_cases=[
             "Tag or transform documents with a small Custom Scripting step",
+            "Split one document into many on a JSON array / XML repeating element "
+            "(native, profile-driven — no throwaway script)",
+            "Combine many documents into one under a JSON array / XML repeating "
+            "element (native, profile-driven)",
             "Manipulate the document stream at the process level (not in a map)",
         ],
         not_for=[

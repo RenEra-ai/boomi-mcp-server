@@ -390,6 +390,57 @@ def test_branch_to_stop_legs_do_not_trigger_control_branch_bare_stop():
     assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["errors"])
 
 
+def _dataprocess_process_xml(step, label="DP") -> str:
+    """Build a real Data Process (Split/Combine) process via ProcessFlowBuilder."""
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "action_type": "Get",
+                   "connection_id": "11111111-1111-1111-1111-111111111111",
+                   "operation_id": "22222222-2222-2222-2222-222222222222"},
+        "transform": {"mode": "dataprocess", "label": label, "steps": [step]},
+        "target": {"connector_type": "rest", "action_type": "POST",
+                   "connection_id": "33333333-3333-3333-3333-333333333333",
+                   "operation_id": "44444444-4444-4444-4444-444444444444"},
+    }
+    return ProcessFlowBuilder.build(cfg, name="DataProcess Flow")
+
+
+def test_dataprocess_split_documents_verifies_clean_and_linear():
+    """Issue #115 M10.2a: a builder-emitted Split Documents shape passes the graph
+    verifier with zero errors AND zero warnings — it is a normal linear NON-terminal
+    processing shape (document 1->N multiplexing is data-plane, not a control branch,
+    so no CONTROL_BRANCH_BARE_STOP / dead-end)."""
+    xml = _dataprocess_process_xml({
+        "operation": "split_documents",
+        "profile_type": "json",
+        "profile_id": "PID-1",
+        "link_element_key": "9",
+        "link_element_name": "ArrayElement1 (Root/Object/list)",
+    })
+    result = verify_process_graph(xml)
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+    # start -> connectoraction -> dataprocess -> connectoraction -> stop
+    assert result["shapes_checked"] == 5
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+
+
+def test_dataprocess_combine_documents_verifies_clean_and_linear():
+    """Issue #115 M10.2a: a builder-emitted Combine Documents shape (N->1) also
+    verifies clean and stays a linear non-terminal/non-branching shape."""
+    xml = _dataprocess_process_xml({
+        "operation": "combine_documents",
+        "profile_type": "xml",
+        "profile_id": "PID-2",
+        "link_element_key": "4",
+        "link_element_name": "Group (Envelope/Body/Groups/Group)",
+    })
+    result = verify_process_graph(xml)
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+    assert result["shapes_checked"] == 5
+
+
 def test_malformed_xml_reported_not_raised():
     result = verify_process_graph("<process><shapes><shape></shapes>")  # unbalanced
     assert "PROCESS_XML_PARSE_FAILED" in _codes(result["errors"])

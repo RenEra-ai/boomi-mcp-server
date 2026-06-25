@@ -1201,23 +1201,29 @@ _ENTRIES: List[Dict[str, Any]] = [
             "do, raising maintenance cost and obscuring intent."
         ),
         "boomi_shape_mapping": (
-            "Prefer native functionality — map functions and "
-            "execution-parameter set-property steps — over custom scripts; "
-            "the design-level companion of the operating doctrine's "
-            "no-throwaway-scripts rule. When a script is genuinely required, "
-            "the process-level Data Process Custom Scripting shape is the "
-            "supported escape hatch, and it is emittable today by the typed "
-            "builder (live-verified against a real account export)."
+            "Prefer native functionality — map functions, execution-parameter "
+            "set-property steps, and the native profile-driven Data Process "
+            "Split Documents / Combine Documents operations for document "
+            "cardinality changes (one-to-many and many-to-one) — over custom "
+            "scripts; the design-level companion of the operating doctrine's "
+            "no-throwaway-scripts rule. A cardinality change in particular is a "
+            "native operation, never a reason to reach for a script. When a "
+            "script is genuinely required, the process-level Data Process Custom "
+            "Scripting shape is the supported escape hatch, and it is emittable "
+            "today by the typed builder (live-verified against a real account "
+            "export)."
         ),
         "when_to_use": (
-            "Whenever a native map function or step expresses the logic — "
-            "choose it over a script."
+            "Whenever a native map function, step, or Data Process operation "
+            "(including profile-driven Split / Combine for cardinality changes) "
+            "expresses the logic — choose it over a script."
         ),
         "when_not_to_use": (
             "Genuinely novel logic with no native equivalent may need a "
-            "script; keep it small and justified. The Data Process Custom "
-            "Scripting shape that carries it is emittable today, so reserve it "
-            "for that case rather than reaching for it by default."
+            "script; keep it small and justified. A split or combine is a "
+            "native operation and never qualifies. The Data Process Custom "
+            "Scripting shape that carries a justified script is emittable today, "
+            "so reserve it for that case rather than reaching for it by default."
         ),
         "verification_status": "live_verified",
         "capability_status": "emittable_today",

@@ -540,6 +540,262 @@ def test_dataprocess_rejects_unknown_step_key():
 
 
 # ---------------------------------------------------------------------------
+# Data Process Split / Combine Documents (issue #115 M10.2a)
+# ---------------------------------------------------------------------------
+
+_GOLDEN_DIR = Path(__file__).resolve().parent / "fixtures" / "golden_xml"
+_DATAPROCESS_SPLIT_JSON_GOLDEN = _GOLDEN_DIR / "dataprocess_split_json_transform.xml"
+_DATAPROCESS_SPLIT_XML_GOLDEN = _GOLDEN_DIR / "dataprocess_split_xml_transform.xml"
+_DATAPROCESS_COMBINE_JSON_GOLDEN = _GOLDEN_DIR / "dataprocess_combine_json_transform.xml"
+_DATAPROCESS_COMBINE_XML_GOLDEN = _GOLDEN_DIR / "dataprocess_combine_xml_transform.xml"
+
+_JSON_PROFILE_ID = "55555555-5555-5555-5555-555555555555"
+_XML_PROFILE_ID = "66666666-6666-6666-6666-666666666666"
+_JSON_LINK_NAME = "ArrayElement1 (Root/Object/samplearray/samplearray/ArrayElement1)"
+_XML_LINK_NAME = "Group (Envelope/Body/Groups/Group)"
+
+
+def _split_step(profile_type="json", profile_id=None, key=None, name=None, **extra):
+    step = {
+        "operation": "split_documents",
+        "profile_type": profile_type,
+        "profile_id": profile_id
+        or (_JSON_PROFILE_ID if profile_type == "json" else _XML_PROFILE_ID),
+        "link_element_key": key or ("9" if profile_type == "json" else "4"),
+        "link_element_name": name
+        or (_JSON_LINK_NAME if profile_type == "json" else _XML_LINK_NAME),
+    }
+    step.update(extra)
+    return step
+
+
+def _combine_step(profile_type="json", profile_id=None, key=None, name=None, **extra):
+    step = {
+        "operation": "combine_documents",
+        "profile_type": profile_type,
+        "profile_id": profile_id
+        or (_JSON_PROFILE_ID if profile_type == "json" else _XML_PROFILE_ID),
+        "link_element_key": key or ("9" if profile_type == "json" else "4"),
+        "link_element_name": name
+        or (_JSON_LINK_NAME if profile_type == "json" else _XML_LINK_NAME),
+    }
+    step.update(extra)
+    return step
+
+
+def _dataprocess_split_shape(xml):
+    _, _, shapes = _parse_process(xml)
+    dp = next(s for s in shapes if s.attrib["shapetype"] == "dataprocess")
+    return dp.find("configuration/dataprocess/step")
+
+
+def test_dataprocess_split_json_inserts_shape():
+    xml = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_split_step("json")], label="Split orders JSON"),
+        name="DataProcess Split JSON Sync",
+    )
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "dataprocess", "connectoraction", "stop",
+    ]
+    step = _dataprocess_split_shape(xml)
+    assert step.attrib["name"] == "Split Documents"
+    assert step.attrib["processtype"] == "8"
+    opts = step.find("documentsplit/SplitOptions/JSONOptions")
+    assert opts is not None
+    assert step.find("documentsplit").attrib["profileType"] == "json"
+    assert opts.attrib["linkElementKey"] == "9"
+    assert opts.attrib["linkElementName"] == _JSON_LINK_NAME
+    assert opts.attrib["profileId"] == _JSON_PROFILE_ID
+
+
+def test_dataprocess_split_xml_inserts_shape():
+    xml = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_split_step("xml")], label="Split groups XML"),
+        name="DataProcess Split XML Sync",
+    )
+    step = _dataprocess_split_shape(xml)
+    assert step.attrib["processtype"] == "8"
+    assert step.find("documentsplit").attrib["profileType"] == "xml"
+    opts = step.find("documentsplit/SplitOptions/XMLOptions")
+    assert opts is not None
+    assert opts.attrib["linkElementKey"] == "4"
+    assert opts.attrib["linkElementName"] == _XML_LINK_NAME
+    assert opts.attrib["profileId"] == _XML_PROFILE_ID
+
+
+def test_dataprocess_combine_json_inserts_shape():
+    xml = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_combine_step("json")], label="Combine orders JSON"),
+        name="DataProcess Combine JSON Sync",
+    )
+    step = _dataprocess_split_shape(xml)
+    assert step.attrib["name"] == "Combine Documents"
+    assert step.attrib["processtype"] == "9"
+    assert step.find("dataprocesscombine").attrib["profileType"] == "json"
+    opts = step.find("dataprocesscombine/JSONOptions")
+    assert opts is not None
+    # combineIntoLinkElementKey defaults to the literal "null" (combine into root).
+    assert opts.attrib["combineIntoLinkElementKey"] == "null"
+    assert opts.attrib["linkElementKey"] == "9"
+    assert opts.attrib["profileId"] == _JSON_PROFILE_ID
+
+
+def test_dataprocess_combine_xml_inserts_shape():
+    xml = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_combine_step("xml")], label="Combine groups XML"),
+        name="DataProcess Combine XML Sync",
+    )
+    step = _dataprocess_split_shape(xml)
+    assert step.attrib["processtype"] == "9"
+    assert step.find("dataprocesscombine").attrib["profileType"] == "xml"
+    opts = step.find("dataprocesscombine/XMLOptions")
+    assert opts is not None
+    assert opts.attrib["combineIntoLinkElementKey"] == "null"
+    assert opts.attrib["linkElementKey"] == "4"
+    assert opts.attrib["profileId"] == _XML_PROFILE_ID
+
+
+def test_dataprocess_split_json_matches_golden_fixture():
+    emitted = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_split_step("json")], label="Split orders JSON"),
+        name="DataProcess Split JSON Sync",
+    )
+    assert emitted == _DATAPROCESS_SPLIT_JSON_GOLDEN.read_text()
+
+
+def test_dataprocess_split_xml_matches_golden_fixture():
+    emitted = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_split_step("xml")], label="Split groups XML"),
+        name="DataProcess Split XML Sync",
+    )
+    assert emitted == _DATAPROCESS_SPLIT_XML_GOLDEN.read_text()
+
+
+def test_dataprocess_combine_json_matches_golden_fixture():
+    emitted = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_combine_step("json")], label="Combine orders JSON"),
+        name="DataProcess Combine JSON Sync",
+    )
+    assert emitted == _DATAPROCESS_COMBINE_JSON_GOLDEN.read_text()
+
+
+def test_dataprocess_combine_xml_matches_golden_fixture():
+    emitted = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_combine_step("xml")], label="Combine groups XML"),
+        name="DataProcess Combine XML Sync",
+    )
+    assert emitted == _DATAPROCESS_COMBINE_XML_GOLDEN.read_text()
+
+
+def test_dataprocess_mixed_chain_emits_sequential_index_and_key():
+    steps = [
+        {"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"},
+        _split_step("json"),
+        _combine_step("xml"),
+    ]
+    xml = ProcessFlowBuilder.build(_dataprocess_config(steps=steps), name="Mixed")
+    _, _, shapes = _parse_process(xml)
+    dp = next(s for s in shapes if s.attrib["shapetype"] == "dataprocess")
+    step_elems = dp.findall("configuration/dataprocess/step")
+    assert [s.attrib["index"] for s in step_elems] == ["1", "2", "3"]
+    assert [s.attrib["key"] for s in step_elems] == ["1", "2", "3"]
+    assert [s.attrib["processtype"] for s in step_elems] == ["12", "8", "9"]
+
+
+def test_dataprocess_combine_custom_parent_key_is_emitted():
+    step = _combine_step("json", combine_into_link_element_key="5")
+    xml = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[step]), name="N"
+    )
+    opts = _dataprocess_split_shape(xml).find("dataprocesscombine/JSONOptions")
+    assert opts.attrib["combineIntoLinkElementKey"] == "5"
+
+
+def test_dataprocess_split_link_name_is_xml_escaped():
+    raw = "A & B <Root/x> \"q\""
+    xml = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[_split_step("json", name=raw)]), name="N"
+    )
+    opts = _dataprocess_split_shape(xml).find("documentsplit/SplitOptions/JSONOptions")
+    assert opts.attrib["linkElementName"] == raw
+
+
+def test_dataprocess_split_rejects_invalid_profile_type():
+    cfg = _dataprocess_config(steps=[_split_step("yaml")])
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0].profile_type"
+
+
+def test_dataprocess_split_rejects_missing_profile_id():
+    step = _split_step("json")
+    del step["profile_id"]
+    err = ProcessFlowBuilder.validate_config(
+        _dataprocess_config(steps=[step]), depends_on=[]
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0].profile_id"
+
+
+def test_dataprocess_split_rejects_blank_link_element_key():
+    err = ProcessFlowBuilder.validate_config(
+        _dataprocess_config(steps=[_split_step("json", key="  ")]), depends_on=[]
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0].link_element_key"
+
+
+def test_dataprocess_split_rejects_unknown_step_key():
+    err = ProcessFlowBuilder.validate_config(
+        _dataprocess_config(steps=[_split_step("json", bogus=1)]), depends_on=[]
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0]"
+
+
+def test_dataprocess_split_rejects_combine_only_key():
+    # combine_into_link_element_key is not allowed on a split step.
+    err = ProcessFlowBuilder.validate_config(
+        _dataprocess_config(steps=[_split_step("json", combine_into_link_element_key="null")]),
+        depends_on=[],
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0]"
+
+
+def test_dataprocess_combine_rejects_blank_combine_into_key():
+    err = ProcessFlowBuilder.validate_config(
+        _dataprocess_config(
+            steps=[_combine_step("json", combine_into_link_element_key="  ")]
+        ),
+        depends_on=[],
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0].combine_into_link_element_key"
+
+
+def test_dataprocess_build_bypass_unknown_profile_type_raises():
+    # build() stays total on the validate_config-bypass path: an unknown
+    # profile_type that reaches the emitter raises rather than emitting a step
+    # with no option element.
+    bypass_step = _split_step("json")
+    bypass_step["profile_type"] = "yaml"
+    cfg = _base_config(
+        transform={"mode": "dataprocess", "label": "x", "steps": [bypass_step]}
+    )
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+
+
+# ---------------------------------------------------------------------------
 # Document Cache Retrieve transform (issue #109 M10.5)
 # ---------------------------------------------------------------------------
 

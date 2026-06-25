@@ -4296,6 +4296,154 @@ class TestBuildPlanProcessFlowBranchRefTypes:
         assert process_step["planned_action"] == "create"
 
 
+class TestBuildPlanDataProcessProfileRefTypes:
+    """Issue #115 M10.2a: typed $ref validation for Split/Combine profile bindings.
+
+    A Data Process split_documents / combine_documents step binds a JSON/XML
+    profile via transform.steps[i].profile_id; the profile_type declares which
+    profile component kind the ref must resolve to. A swapped / wrong-kind ref is
+    rejected PROCESS_REF_TYPE_MISMATCH at plan time; a missing ref is the existing
+    MISSING_PROCESS_DEPENDENCY; a literal UUID is outside-spec and skipped.
+    """
+
+    _DEPS = (
+        "db_connection",
+        "db_query_operation",
+        "target_rest_connection",
+        "target_rest_operation",
+    )
+
+    @staticmethod
+    def _split(profile_type="json", profile_ref="json_profile", **overrides):
+        step = {
+            "operation": "split_documents",
+            "profile_type": profile_type,
+            "profile_id": f"$ref:{profile_ref}",
+            "link_element_key": "9",
+            "link_element_name": "ArrayElement1 (Root/Object/list/list/ArrayElement1)",
+        }
+        step.update(overrides)
+        return step
+
+    @staticmethod
+    def _combine(profile_type="xml", profile_ref="xml_profile", **overrides):
+        step = {
+            "operation": "combine_documents",
+            "profile_type": profile_type,
+            "profile_id": f"$ref:{profile_ref}",
+            "link_element_key": "4",
+            "link_element_name": "row (rows/row)",
+        }
+        step.update(overrides)
+        return step
+
+    def _components(self, step, extra_deps=("json_profile",), profiles=None):
+        proc = _process_flow_comp(
+            depends_on=self._DEPS + tuple(extra_deps),
+            transform={"mode": "dataprocess", "label": "DP", "steps": [step]},
+        )
+        comps = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+        ]
+        comps.extend(profiles if profiles is not None else [_json_profile_comp()])
+        comps.append(proc)
+        return comps
+
+    def _process_step(self, components):
+        plan = _build_plan(MagicMock(), _build_config(components))
+        return next(s for s in plan["steps"] if s["key"] == "main_process")
+
+    @patch(_PATCH_TARGET)
+    def test_split_json_profile_ref_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        step = self._process_step(self._components(self._split("json")))
+        assert step.get("validation_error") is None
+        assert step["planned_action"] == "create"
+
+    @patch(_PATCH_TARGET)
+    def test_combine_xml_profile_ref_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        components = self._components(
+            self._combine("xml", "xml_profile"),
+            extra_deps=("xml_profile",),
+            profiles=[_xml_profile_comp()],
+        )
+        step = self._process_step(components)
+        assert step.get("validation_error") is None
+        assert step["planned_action"] == "create"
+
+    @patch(_PATCH_TARGET)
+    def test_split_json_ref_to_xml_profile_is_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # json-typed split pointing at an xml profile component.
+        components = self._components(
+            self._split("json", "xml_profile"),
+            extra_deps=("xml_profile",),
+            profiles=[_xml_profile_comp()],
+        )
+        ve = self._process_step(components)["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "transform.steps[0].profile_id"
+        assert ve["details"]["expected_role"] == "profile.json"
+
+    @patch(_PATCH_TARGET)
+    def test_split_profile_ref_to_connection_is_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # profile_id points at the DB connection (connector-settings), not a profile.
+        components = self._components(
+            self._split("json", "db_connection"),
+            extra_deps=(),  # db_connection already in _DEPS
+            profiles=[],
+        )
+        ve = self._process_step(components)["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "transform.steps[0].profile_id"
+        assert ve["details"]["expected_role"] == "profile.json"
+
+    @patch(_PATCH_TARGET)
+    def test_split_profile_ref_missing_from_depends_on_errors(self, mock_pag):
+        mock_pag.return_value = []
+        # profile_id refs a key absent from depends_on -> reachability failure.
+        proc = _process_flow_comp(
+            depends_on=self._DEPS,  # omits json_profile
+            transform={"mode": "dataprocess", "label": "DP", "steps": [self._split("json")]},
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _json_profile_comp(),
+            proc,
+        ]
+        ve = self._process_step(components)["validation_error"]
+        assert ve["error_code"] == "MISSING_PROCESS_DEPENDENCY"
+
+    @patch(_PATCH_TARGET)
+    def test_split_literal_uuid_profile_id_skips_type_check(self, mock_pag):
+        mock_pag.return_value = []
+        # A literal UUID profile_id is outside-spec; type check is skipped (clean).
+        step = self._split("json")
+        step["profile_id"] = "77777777-7777-7777-7777-777777777777"
+        proc = _process_flow_comp(
+            depends_on=self._DEPS,
+            transform={"mode": "dataprocess", "label": "DP", "steps": [step]},
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            proc,
+        ]
+        step_res = self._process_step(components)
+        assert step_res.get("validation_error") is None
+        assert step_res["planned_action"] == "create"
+
+
 class TestBuildPlanGeneratedProfileJson:
 
     @patch(_PATCH_TARGET)

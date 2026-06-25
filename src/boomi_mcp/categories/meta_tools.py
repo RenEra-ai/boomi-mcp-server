@@ -5514,16 +5514,23 @@ _PROCESS_FLOW_PROTOCOLS = {
             "transform.mode",
             "transform.message_text",
             "transform.map_ref",
-            # Issue #106 M10.2: process-level Data Process shape
-            # (transform.mode='dataprocess'). v1 ships only the Custom Scripting
-            # operation; the steps list is ordered and each step carries the
-            # operation + its script body.
+            # Issue #106 M10.2 / #115 M10.2a: process-level Data Process shape
+            # (transform.mode='dataprocess'). Supports Custom Scripting plus the
+            # profile-driven cardinality operations Split Documents (1->N) and
+            # Combine Documents (N->1). The steps list is ordered; each step
+            # carries the operation + its operation-specific fields.
             "transform.label",
             "transform.steps",
             "transform.steps[].operation",
             "transform.steps[].script",
             "transform.steps[].language",
             "transform.steps[].use_cache",
+            # Split/Combine (#115): bind a JSON/XML profile component + link element.
+            "transform.steps[].profile_type",
+            "transform.steps[].profile_id",
+            "transform.steps[].link_element_key",
+            "transform.steps[].link_element_name",
+            "transform.steps[].combine_into_link_element_key",
             # Issue #109 M10.5: process-level Document Cache Retrieve shape
             # (transform.mode='doccacheretrieve'). Pulls documents from a Document
             # Cache into the current flow (the read half of Document Cache CRUD,
@@ -5636,7 +5643,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             },
         ],
         "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve", "doccacheremove"],
-        "supported_dataprocess_operations": ["custom_scripting"],
+        "supported_dataprocess_operations": ["custom_scripting", "split_documents", "combine_documents"],
         # Issue #109 M10.5: the only live-verified Document Cache Retrieve
         # "If cache is empty" wire value (Stop document execution, recommended).
         # The backward-compat "fail document with errors" behavior is deferred.
@@ -5790,18 +5797,25 @@ _PROCESS_FLOW_PROTOCOLS = {
             "dlq_writer fragment IS now consumed (above).",
             "Map components are referenced by id or $ref token only; map creation "
             "is tracked by issue #26.",
-            "Issue #106 M10.2: transform.mode='dataprocess' inserts a "
-            "process-level Data Process shape between source and target, carrying "
-            "an ordered transform.steps list. v1 supports ONLY the Custom "
-            "Scripting operation (transform.steps[].operation='custom_scripting', "
-            "language 'groovy2', use_cache true) — the sole live-observed "
-            "operation. Every other documented Data Process operation "
-            "(Search/Replace, Zip, Unzip, Base64 encode/decode, Split/Combine "
-            "Documents, character encoding) is rejected "
+            "Issue #106 M10.2 / #115 M10.2a: transform.mode='dataprocess' inserts "
+            "a process-level Data Process shape between source and target, carrying "
+            "an ordered transform.steps list. Supported operations: Custom "
+            "Scripting (transform.steps[].operation='custom_scripting', language "
+            "'groovy2', use_cache true) and the two native, profile-driven "
+            "cardinality operations split_documents (1->N) and combine_documents "
+            "(N->1). Split/Combine each bind a JSON/XML profile component via "
+            "transform.steps[].profile_id (a literal id or $ref:KEY in depends_on) "
+            "with transform.steps[].profile_type ('json'|'xml') plus the "
+            "link_element_key / link_element_name captured from the profile "
+            "(combine also takes an optional combine_into_link_element_key, default "
+            "'null'); the profile_id $ref is type-checked at plan time "
+            "(PROCESS_REF_TYPE_MISMATCH for a wrong-kind/swapped ref). Every other "
+            "documented Data Process operation (Search/Replace, Zip, Unzip, Base64 "
+            "encode/decode, character encoding) is rejected "
             "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED until it has a "
             "byte-accurate live capture; malformed step config returns "
-            "PROCESS_DATAPROCESS_CONFIG_INVALID. Keep the step body minimal — "
-            "prefer native components over custom scripts.",
+            "PROCESS_DATAPROCESS_CONFIG_INVALID. Prefer native operations "
+            "(including Split/Combine) over custom scripts.",
             "Issue #107 M10.3: return_documents.enabled=true ends the flow in a "
             "Return Documents terminal shape (the subprocess return value — it "
             "returns the current documents to the calling source point: the parent "

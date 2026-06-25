@@ -1027,6 +1027,80 @@ class TestDataProcess:
                 {"steps": [{"operation": "search_replace", "script": "x"}]}
             )
 
+    # --- Split / Combine Documents (issue #115 M10.2a) ---
+
+    @staticmethod
+    def _split_step(**overrides):
+        step = {
+            "operation": "split_documents",
+            "profile_type": "json",
+            "profile_id": "$ref:orders_profile",
+            "link_element_key": "9",
+            "link_element_name": "ArrayElement1 (Root/Object/list/list/ArrayElement1)",
+        }
+        step.update(overrides)
+        return step
+
+    @staticmethod
+    def _combine_step(**overrides):
+        step = {
+            "operation": "combine_documents",
+            "profile_type": "xml",
+            "profile_id": "$ref:groups_profile",
+            "link_element_key": "4",
+            "link_element_name": "Group (Envelope/Body/Groups/Group)",
+        }
+        step.update(overrides)
+        return step
+
+    def test_emit_fragment_split_and_combine_round_trip(self):
+        params = DataProcessPrimitive.validate_parameters(
+            {"steps": [self._split_step(), self._combine_step()]}
+        )
+        fragment = DataProcessPrimitive.emit_fragment(_ctx(), params)
+        transform = fragment["process_config"]["transform"]
+        assert transform["mode"] == "dataprocess"
+        split, combine = transform["steps"]
+        assert split["operation"] == "split_documents"
+        assert split["profile_type"] == "json"
+        assert split["profile_id"] == "$ref:orders_profile"
+        assert combine["operation"] == "combine_documents"
+        assert combine["profile_type"] == "xml"
+        # Default literal "null" parent key is materialized into the fragment.
+        assert combine["combine_into_link_element_key"] == "null"
+        assert fragment["depends_on"] == []
+
+    def test_combine_custom_parent_key_round_trips(self):
+        params = DataProcessPrimitive.validate_parameters(
+            {"steps": [self._combine_step(combine_into_link_element_key="5")]}
+        )
+        transform = DataProcessPrimitive.emit_fragment(_ctx(), params)["process_config"]["transform"]
+        assert transform["steps"][0]["combine_into_link_element_key"] == "5"
+
+    def test_validation_rejects_unknown_step_key(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters(
+                {"steps": [self._split_step(bogus=1)]}
+            )
+
+    def test_validation_rejects_bad_profile_type(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters(
+                {"steps": [self._split_step(profile_type="yaml")]}
+            )
+
+    def test_validation_rejects_blank_profile_id(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters(
+                {"steps": [self._split_step(profile_id="   ")]}
+            )
+
+    def test_validation_rejects_split_with_combine_only_key(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters(
+                {"steps": [self._split_step(combine_into_link_element_key="null")]}
+            )
+
 
 # ===========================================================================
 # document_cache_retrieve (issue #109 M10.5)

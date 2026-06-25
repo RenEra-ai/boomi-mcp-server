@@ -1500,10 +1500,40 @@ def _check_process_flow_ref_types(
     # and doccacheremove bind a Document Cache) so a stray document_cache_id under
     # another mode (never consumed by the emitter) is not surprise-rejected.
     transform = raw_config.get("transform") if isinstance(raw_config.get("transform"), dict) else {}
-    if str(transform.get("mode") or "").strip().lower() in {"doccacheretrieve", "doccacheremove"}:
+    transform_mode = str(transform.get("mode") or "").strip().lower()
+    if transform_mode in {"doccacheretrieve", "doccacheremove"}:
         slot_rules.append(
             ("transform.document_cache_id", transform.get("document_cache_id"), "Document Cache")
         )
+    # Issue #115 M10.2a: a Data Process Split/Combine Documents step binds a
+    # JSON/XML profile component via transform.steps[i].profile_id ($ref-resolvable).
+    # The profile_type (json|xml) declares which profile component kind the ref must
+    # resolve to, so a swapped connector/map/process — or a json-typed split pointing
+    # at a profile.xml component — is rejected at plan time instead of emitting an
+    # invalid <documentsplit>/<dataprocesscombine> that fails only when Boomi loads
+    # the process. The link_element_key/link_element_name are opaque UI-captured
+    # tokens (no structured profile index to cross-check), so only the profile-ref
+    # TYPE is gated here. Gate on the active transform.mode so a stray profile_id
+    # under another mode (never consumed by the emitter) is not surprise-rejected.
+    elif transform_mode == "dataprocess":
+        steps = transform.get("steps")
+        if isinstance(steps, list):
+            for i, step in enumerate(steps):
+                if not isinstance(step, dict):
+                    continue
+                operation = str(step.get("operation") or "").strip()
+                if operation not in {"split_documents", "combine_documents"}:
+                    continue
+                profile_type = str(step.get("profile_type") or "").strip().lower()
+                if profile_type == "json":
+                    expected_role = "profile.json"
+                elif profile_type == "xml":
+                    expected_role = "profile.xml"
+                else:
+                    continue
+                slot_rules.append(
+                    (f"transform.steps[{i}].profile_id", step.get("profile_id"), expected_role)
+                )
     slot_rules = tuple(slot_rules)
 
     target_op_ref_component: Optional[IntegrationComponentSpec] = None
@@ -1544,6 +1574,12 @@ def _check_process_flow_ref_types(
             # resolve to a connection (connector-settings) of any connector
             # family — DB or REST. A map/profile/process is rejected.
             ok = _classify_connector_settings(target_comp) is not None
+        elif expected_role in ("profile.json", "profile.xml"):
+            # Issue #115: a Data Process Split/Combine profile_id must resolve to
+            # a profile component of the kind its profile_type declares (json|xml).
+            # A swapped connector/map/process — or a profile of the wrong kind — is
+            # rejected. _classify_profile returns "profile.json"/"profile.xml"/None.
+            ok = _classify_profile(target_comp) == expected_role
         else:
             ok = True
 
