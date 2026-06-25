@@ -596,16 +596,20 @@ class ProcessFlowBuilder:
         # target, legs 2..N = branch.targets). At this point ``flow`` holds only
         # the shared pre-branch chain (start -> source -> [transform]). build()
         # stays total on a validate_config-bypass by funnelling through the SAME
-        # _validate_branch_config validator validate_config uses (so the two paths
-        # cannot diverge on the structured error): a non-list/empty targets raises
-        # BRANCH_OUTPUT_UNSET (rather than emitting a degenerate 1-leg fan-out),
-        # >25 legs / malformed leg bindings / an unsupported v1 composition
-        # (dynamic_path / Try-Catch / Return Documents alongside Branch) all raise
-        # rather than silently dropping or degrading.
+        # _validate_branch_config validator validate_config uses. Run it
+        # UNCONDITIONALLY (it returns None when ``branch`` is absent or disabled),
+        # NOT behind _branch_enabled(): a malformed branch block that makes
+        # _branch_enabled() false (a non-dict ``branch=1``, or a non-bool
+        # ``enabled``) must still raise PROCESS_BRANCH_CONFIG_INVALID here — exactly
+        # as validate_config does — rather than being silently dropped while build()
+        # emits the linear flow. _branch_enabled() then only picks the emission
+        # path. A non-list/empty targets raises BRANCH_OUTPUT_UNSET (no degenerate
+        # 1-leg fan-out); >25 legs / malformed leg bindings / an unsupported v1
+        # composition (dynamic_path / Try-Catch / Return Documents) all raise too.
+        branch_err = _validate_branch_config(config)
+        if branch_err is not None:
+            raise branch_err
         if _branch_enabled(config):
-            branch_err = _validate_branch_config(config)
-            if branch_err is not None:
-                raise branch_err
             legs: List[List[Tuple[str, Dict[str, Any]]]] = []
             for leg_target in _branch_leg_targets(config):
                 legs.append([

@@ -1810,6 +1810,13 @@ def test_branch_validate_config_and_build_report_identical_errors():
         {"enabled": True, "targets": [_branch_leg(connection_id="")]},
         {"enabled": True, "targets": [_branch_leg() for _ in range(25)]},
         {"enabled": True, "targets": [_branch_leg()], "foo": 1},
+        # A malformed branch block that makes _branch_enabled() return false must
+        # STILL raise the same structured error in build() as validate_config —
+        # build() must not silently emit linear XML and drop the branch.
+        1,                                                   # non-dict branch
+        [],                                                  # non-dict branch
+        {"enabled": "true", "targets": [_branch_leg()]},     # non-bool enabled (string)
+        {"enabled": 1, "targets": [_branch_leg()]},          # non-bool enabled (int)
     ]
     extra_for_combo = [
         # no-targets + an unsupported composition: BRANCH_OUTPUT_UNSET wins (the
