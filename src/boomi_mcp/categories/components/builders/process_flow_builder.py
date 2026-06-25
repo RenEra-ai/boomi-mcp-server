@@ -2228,6 +2228,17 @@ def _emit_catch_leg(
     notify_present = catch_notify is not None
     exception_present = catch_exception is not None
     dlq_present = mode in _TRY_CATCH_DLQ_MODES
+    if exception_present:
+        # Totality on the validate_config-bypass path (mirrors the notify/DLQ
+        # binding checks below): a malformed catch_exception that slipped past
+        # validate_config — including a non-dict reaching here alongside a valid
+        # DLQ mode — must raise PROCESS_EXCEPTION_CONFIG_INVALID rather than emit
+        # broken XML (empty <exMessage>, a bound parameter without {1}) or
+        # AttributeError in _emit_exception. _should_emit_try_catch only requires
+        # catch_exception to be a dict, not a VALID one, so re-validate here.
+        exception_err = _validate_catch_exception(catch_exception)
+        if exception_err is not None:
+            raise exception_err
     if not dlq_present and not exception_present:
         # No DLQ route and no Exception terminal: the leg has no body. build()
         # never reaches here (_should_emit_try_catch requires a DLQ mode or a

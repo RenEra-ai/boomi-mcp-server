@@ -19,9 +19,9 @@ live "fail/halt" shape — and composes with a Notify and/or a DLQ route.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...models.integration_models import IntegrationComponentSpec
 from ..base import (
@@ -62,10 +62,31 @@ class ThrowExceptionParameters(BaseModel):
         default=False,
         description="true fails only the reaching document; false (default) halts the whole process.",
     )
-    parameter_source: str = Field(
+    parameter_source: Literal["caught_error", "current_document", "none"] = Field(
         default="caught_error",
         description="Binds {1}: 'caught_error', 'current_document', or 'none'.",
     )
+
+    # Mirror ProcessFlowBuilder._validate_catch_exception so a primitive that
+    # validates successfully never emits a fragment the builder rejects (a
+    # non-blank message, and the {1} placeholder whenever parameter_source binds a
+    # value). The Literal above already constrains parameter_source.
+    @field_validator("message_template")
+    @classmethod
+    def _message_template_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("message_template must be a non-empty string.")
+        return value
+
+    @model_validator(mode="after")
+    def _require_placeholder_when_bound(self) -> "ThrowExceptionParameters":
+        if self.parameter_source != "none" and "{1}" not in self.message_template:
+            raise ValueError(
+                "message_template must contain the {1} placeholder when "
+                "parameter_source binds a value (caught_error / current_document); "
+                "use parameter_source='none' for a static message."
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------

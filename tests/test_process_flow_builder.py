@@ -1640,3 +1640,28 @@ def test_build_bypass_guard_raises_for_invalid_catch_exception():
     with pytest.raises(BuilderValidationError) as exc:
         ProcessFlowBuilder.build(cfg, name="P")
     assert exc.value.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+
+
+def test_build_bypass_raises_for_malformed_catch_exception_dict():
+    # validate_config-bypass: a malformed catch_exception DICT (e.g. missing
+    # message_template) makes _should_emit_try_catch True (it is a dict), so it
+    # reaches the catch-leg emitter — which must re-validate and raise rather than
+    # emit an empty <exMessage> (totality, mirrors the DLQ/Notify emitter guards).
+    cfg = _base_config(reliability={"catch_exception": {}})
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert exc.value.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+
+
+def test_build_bypass_raises_for_non_dict_catch_exception_with_valid_dlq():
+    # validate_config-bypass: a non-dict catch_exception alongside a VALID DLQ mode
+    # still reaches the catch-leg emitter (dlq makes _should_emit_try_catch True),
+    # where _emit_exception would AttributeError on "str".get(...). The emitter
+    # guard must raise PROCESS_EXCEPTION_CONFIG_INVALID instead.
+    cfg = _base_config(reliability={
+        "dlq": {"mode": "document_cache_ref", "document_cache_id": "CACHE-1"},
+        "catch_exception": "nope",
+    })
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert exc.value.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"

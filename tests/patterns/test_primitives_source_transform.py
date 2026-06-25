@@ -1134,3 +1134,28 @@ class TestThrowException:
     def test_validation_rejects_unknown_parameter(self):
         with pytest.raises(ValidationError):
             ThrowExceptionPrimitive.validate_parameters({"message_template": "x {1}", "bogus": 1})
+
+    def test_validation_rejects_blank_message_template(self):
+        # The primitive mirrors the builder: a non-blank message is required so a
+        # successfully-validated primitive never emits a builder-rejected fragment.
+        for blank in ("", "   "):
+            with pytest.raises(ValidationError):
+                ThrowExceptionPrimitive.validate_parameters({"message_template": blank})
+
+    def test_validation_rejects_bad_parameter_source(self):
+        with pytest.raises(ValidationError):
+            ThrowExceptionPrimitive.validate_parameters(
+                {"message_template": "x {1}", "parameter_source": "bogus"}
+            )
+
+    def test_validation_requires_placeholder_when_source_binds(self):
+        # caught_error/current_document need {1}; none does not (matches the
+        # builder's _validate_catch_exception contract).
+        with pytest.raises(ValidationError):
+            ThrowExceptionPrimitive.validate_parameters(
+                {"message_template": "no placeholder", "parameter_source": "caught_error"}
+            )
+        params = ThrowExceptionPrimitive.validate_parameters(
+            {"message_template": "static halt", "parameter_source": "none"}
+        )
+        assert params.parameter_source == "none"
