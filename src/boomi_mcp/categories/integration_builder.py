@@ -2878,9 +2878,14 @@ def _process_models_error_handling(comp: Any) -> bool:
     shapes = config.get("shapes")
     if isinstance(shapes, list):
         for shape in shapes:
-            if isinstance(shape, dict) and "catch" in str(
-                shape.get("type") or shape.get("shapetype") or ""
-            ).strip().lower():
+            if not isinstance(shape, dict):
+                continue
+            # Issue #108 M10.4: a deliberate Exception (Throw) shape is
+            # error-handling evidence too (consistent with the raw-XML
+            # shapetype="exception" check above), so count it alongside catch
+            # shapes — the predicate stays conservative (any positive signal).
+            stype = str(shape.get("type") or shape.get("shapetype") or "").strip().lower()
+            if "catch" in stype or "exception" in stype:
                 return True
 
     return False

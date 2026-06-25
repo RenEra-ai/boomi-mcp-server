@@ -624,11 +624,12 @@ def test_process_models_error_handling_predicate():
     # Legacy route trusts raw-XML / shape catch evidence.
     assert _process_models_error_handling(comp({"shapes": [{"shapetype": "catcherrors"}]}))
     assert _process_models_error_handling(comp({"xml": "<bns:shape shapetype=\"trycatch\"/>"}))
-    # Issue #108 M10.4: a deliberate Exception (Throw) shape in raw XML is also
-    # error-handling evidence.
+    # Issue #108 M10.4: a deliberate Exception (Throw) shape is error-handling
+    # evidence too — in raw XML AND in a config.shapes list entry.
     assert _process_models_error_handling(
         comp({"xml": '<shape image="exception_icon" shapetype="exception"/>'})
     )
+    assert _process_models_error_handling(comp({"shapes": [{"shapetype": "exception"}]}))
     # Non-dict config does not crash.
     assert not _process_models_error_handling(comp({}))
 
