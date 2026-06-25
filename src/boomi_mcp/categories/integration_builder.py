@@ -2830,14 +2830,17 @@ def _process_models_error_handling(comp: Any) -> bool:
     errors:
       * structured route (process_kind/process_type set): a config that
         ProcessFlowBuilder._should_emit_try_catch accepts — i.e. retry_count
-        0..5 with a supported DLQ mode, the configurations that actually emit a
-        Try/Catch + DLQ wrapper (#51 M3.R1a for retry 0; #88 M4.5.3 for 1..5).
-        Delegating to that classmethod keeps this predicate in exact lockstep
-        with the builder (no duplicated / drifting retry+DLQ logic);
-      * raw evidence: a Try/Catch evident in raw process XML, or a catch-typed
-        entry in a ``config.shapes`` list (defensive — these surfaces no longer
-        reach a successful plan now that process_kind is required, but the
-        predicate stays conservative and is exercised directly by unit tests).
+        0..5 with a supported DLQ mode OR a reliability.catch_exception throw
+        terminal (#108 M10.4), the configurations that actually emit a Try/Catch
+        wrapper (#51 M3.R1a for retry 0; #88 M4.5.3 for 1..5; #108 for a
+        deliberate Exception catch leg). Delegating to that classmethod keeps
+        this predicate in exact lockstep with the builder (no duplicated /
+        drifting retry+DLQ logic);
+      * raw evidence: a Try/Catch or a deliberate Exception (Throw) shape evident
+        in raw process XML, or a catch-typed entry in a ``config.shapes`` list
+        (defensive — these surfaces no longer reach a successful plan now that
+        process_kind is required, but the predicate stays conservative and is
+        exercised directly by unit tests).
 
     The ``config.reliability`` block is only honored when a structured
     process_kind is set; an unknown reliability block on a config without
@@ -2862,7 +2865,14 @@ def _process_models_error_handling(comp: Any) -> bool:
     raw_xml = config.get("xml")
     if isinstance(raw_xml, str):
         lowered = raw_xml.lower()
-        if "catcherrors" in lowered or "trycatch" in lowered:
+        # Issue #108 M10.4: a deliberate Exception (Throw) shape is error-handling
+        # evidence too (the "fail/halt with error content" terminal) — match the
+        # shape token, not a bare "exception" substring that could appear in prose.
+        if (
+            "catcherrors" in lowered
+            or "trycatch" in lowered
+            or 'shapetype="exception"' in lowered
+        ):
             return True
 
     shapes = config.get("shapes")

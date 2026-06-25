@@ -48,6 +48,11 @@ PipelineStageKind = Literal[
     "dataprocess",
     "branch",
     "decision",
+    # M10.4 (issue #108): reserved stage kind for a deliberate Exception (Throw)
+    # terminal — fail/halt a path with a user-defined error. Reserved only (no
+    # PipelineSpec lowering yet, like branch/decision/dataprocess); the M10.4
+    # emitter attaches to the reliability.catch_exception block, not to PipelineSpec.
+    "exception",
 ]
 
 PipelineEdgeKind = Literal[

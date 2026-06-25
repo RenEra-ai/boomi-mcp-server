@@ -33,6 +33,7 @@ from boomi_mcp.patterns.primitives import (
     DbExtractPrimitive,
     FieldMapPrimitive,
     ReturnDocumentsPrimitive,
+    ThrowExceptionPrimitive,
     XmlJsonConvertPrimitive,
 )
 from boomi_mcp.patterns.registry import PatternRegistry
@@ -1075,3 +1076,61 @@ class TestReturnDocuments:
     def test_validation_rejects_non_string_label(self):
         with pytest.raises(ValidationError):
             ReturnDocumentsPrimitive.validate_parameters({"label": 5})
+
+
+class TestThrowException:
+    def test_registry_discovers_throw_exception(self):
+        try:
+            reg = PatternRegistry.from_package("boomi_mcp.patterns")
+        except TypeError as exc:  # pragma: no cover — interpreter-specific
+            # Same Python 3.9.6 inspect.isclass quirk the sibling
+            # test_registry_discovers_data_process documents.
+            pytest.skip(f"registry discovery unavailable on this interpreter: {exc}")
+        cls = reg.get("throw_exception")
+        assert cls is ThrowExceptionPrimitive
+        assert cls.metadata.kind == PatternKind.PRIMITIVE
+
+    def test_describe_includes_contracts_and_no_raw_artifacts(self):
+        described = ThrowExceptionPrimitive.describe()
+        for key in ("metadata", "parameter_schema", "input_contract", "output_contract", "required_builders"):
+            assert key in described
+        assert described["required_builders"] == ["ProcessFlowBuilder"]
+        dumped = json.dumps(described)
+        for forbidden in ("<bns:", "</", "<?xml", "```"):
+            assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
+
+    def test_emit_components_is_empty(self):
+        params = ThrowExceptionPrimitive.validate_parameters({"message_template": "halt {1}"})
+        assert ThrowExceptionPrimitive.emit_components(_ctx(), params) == []
+
+    def test_emit_fragment_returns_catch_exception_block(self):
+        params = ThrowExceptionPrimitive.validate_parameters({
+            "title": "Halt",
+            "message_template": "halt: {1}",
+            "stop_single_document": True,
+            "parameter_source": "current_document",
+        })
+        fragment = ThrowExceptionPrimitive.emit_fragment(_ctx(), params)
+        ce = fragment["process_config"]["reliability"]["catch_exception"]
+        assert ce == {
+            "title": "Halt",
+            "message_template": "halt: {1}",
+            "stop_single_document": True,
+            "parameter_source": "current_document",
+        }
+        assert fragment["depends_on"] == []
+
+    def test_emit_fragment_defaults_and_omits_absent_title(self):
+        params = ThrowExceptionPrimitive.validate_parameters({"message_template": "halt {1}"})
+        ce = ThrowExceptionPrimitive.emit_fragment(_ctx(), params)["process_config"]["reliability"]["catch_exception"]
+        assert "title" not in ce
+        assert ce["stop_single_document"] is False
+        assert ce["parameter_source"] == "caught_error"
+
+    def test_validation_requires_message_template(self):
+        with pytest.raises(ValidationError):
+            ThrowExceptionPrimitive.validate_parameters({})
+
+    def test_validation_rejects_unknown_parameter(self):
+        with pytest.raises(ValidationError):
+            ThrowExceptionPrimitive.validate_parameters({"message_template": "x {1}", "bogus": 1})

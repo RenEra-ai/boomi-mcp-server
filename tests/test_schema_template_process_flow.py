@@ -206,6 +206,22 @@ def test_both_process_protocols_advertise_return_documents_surface():
         assert "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID" in codes, protocol
 
 
+def test_template_documents_catch_exception_surface(template):
+    # Issue #108 M10.4: the deliberate Exception (Throw) catch-leg terminal fields
+    # and the new structured error are documented for database_to_api_sync.
+    optional = template["optional_fields"]
+    for field in (
+        "reliability.catch_exception",
+        "reliability.catch_exception.title",
+        "reliability.catch_exception.message_template",
+        "reliability.catch_exception.stop_single_document",
+        "reliability.catch_exception.parameter_source",
+    ):
+        assert field in optional, field
+    codes = {e["error_code"] for e in template["structured_errors"]}
+    assert "PROCESS_EXCEPTION_CONFIG_INVALID" in codes
+
+
 def test_template_supported_dlq_modes(template):
     assert set(template["supported_dlq_modes"]) == {
         "disabled", "document_cache_ref", "error_subprocess_ref",

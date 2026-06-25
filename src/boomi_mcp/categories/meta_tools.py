@@ -5544,6 +5544,16 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.catch_notify",
             "reliability.catch_notify.message_template",
             "reliability.catch_notify.level",
+            # Issue #108 M10.4: optional deliberate Exception (Throw) terminal on
+            # the catch leg — the leg ends in a thrown user-defined error (fail or
+            # halt) instead of a bare Stop, and needs no DLQ (bare
+            # catch -> [notify ->] exception). Composes with catch_notify / a DLQ
+            # route: [notify ->] [dlq route ->] exception.
+            "reliability.catch_exception",
+            "reliability.catch_exception.title",
+            "reliability.catch_exception.message_template",
+            "reliability.catch_exception.stop_single_document",
+            "reliability.catch_exception.parameter_source",
             # Issue #107 M10.3: optional Return Documents terminal. When
             # return_documents.enabled=true the flow ends in a Return Documents
             # shape (subprocess return value) instead of a Stop; the optional
@@ -5625,6 +5635,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.try_catch_scope"},
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
             {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
+            {"error_code": "PROCESS_EXCEPTION_CONFIG_INVALID", "field": "reliability.catch_exception|reliability.catch_exception.message_template|reliability.catch_exception.title|reliability.catch_exception.stop_single_document|reliability.catch_exception.parameter_source"},
             {"error_code": "PROCESS_PATH_REPLACEMENT_INVALID", "field": "target.dynamic_path|target.dynamic_path.ddp_name|target.dynamic_path.segments"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
@@ -5690,6 +5701,23 @@ _PROCESS_FLOW_PROTOCOLS = {
             "Notify is log-only — email/SMS notification channels and Notify "
             "outside catch paths are out of scope; unsupported config returns "
             "PROCESS_NOTIFY_CONFIG_INVALID.",
+            "Issue #108 M10.4: reliability.catch_exception (optional) ends the "
+            "Try/Catch catch leg in a deliberate Exception (Throw) terminal — a "
+            "user-defined error reported on the Process Reporting page — INSTEAD "
+            "of a bare catch-row Stop (the Boomi docs: a Stop is a successful "
+            "conclusion; an error path uses an Exception). It needs no DLQ (a bare "
+            "catcherrors -> exception is the live 'fail/halt' shape) and composes "
+            "with catch_notify and/or a DLQ route: [notify ->] [dlq route ->] "
+            "exception; it also un-gates retry_count > 0 without a DLQ. "
+            "message_template carries the {1} placeholder bound by parameter_source "
+            "(caught_error = the platform Try/Catch error message; current_document "
+            "= the current document; none = a static message with no parameter). "
+            "stop_single_document=true fails only the reaching document (others "
+            "continue); false (default) halts the whole process. The optional title "
+            "is the alert subject / process-log title. The Exception is terminal — "
+            "no Stop follows it, so the catch leg stays CONTROL_BRANCH_BARE_STOP-"
+            "clean. Malformed config returns PROCESS_EXCEPTION_CONFIG_INVALID. "
+            "Live-verified against a real work-account process export.",
             "Issue #28 primitives schedule_envelope, run_metadata, and "
             "error_classifier PRODUCE execution/reliability fragments that "
             "ProcessFlowBuilder does not yet consume — see deferred_fields. The "

@@ -53,6 +53,8 @@ PINNED_EMITTABLE = frozenset(
         "dataprocess",
         # M10.3 (issue #107): process-level Return Documents terminal shape.
         "returndocuments",
+        # M10.4 (issue #108): deliberate Exception (Throw) catch-leg terminal.
+        "exception",
     }
 )
 
@@ -140,8 +142,9 @@ def _shapetypes_from_parts(parts):
 
 
 def _emit_full_catch_shapetypes():
-    """Drive the real Try/Catch emitter (with notify) and return all shapetypes
-    produced — covers the catch-path-only shapes catcherrors/notify/doccacheload."""
+    """Drive the real Try/Catch emitter (notify + DLQ + Exception throw) and return
+    all shapetypes produced — covers the catch-path-only shapes
+    catcherrors/notify/doccacheload AND the M10.4 exception terminal (issue #108)."""
     parts = pfb._emit_try_catch_shapes(
         _catch_flow(),
         {"mode": "document_cache_ref", "document_cache_id": "CACHE-1"},
@@ -149,6 +152,11 @@ def _emit_full_catch_shapetypes():
         catch_notify={
             "level": "ERROR",
             "message_template": "failed: " + pfb._NOTIFY_CAUGHT_ERROR_TOKEN,
+        },
+        catch_exception={
+            "title": "Halt",
+            "message_template": "halting: {1}",
+            "parameter_source": "caught_error",
         },
     )
     return _shapetypes_from_parts(parts)
@@ -221,7 +229,9 @@ def test_catch_path_shapes_match_registry():
     """catcherrors/notify/doccacheload are emitted by the real catch leg, and for
     these the registry ``emitter_kind`` equals the emitted shapetype token."""
     catch_shapetypes = _emit_full_catch_shapetypes()
-    for shapetype in ("catcherrors", "notify", "doccacheload"):
+    # Issue #108 M10.4: ``exception`` joins the catch-path-only shapes — it is the
+    # catch-leg terminal throw, not a _emit_flow_shape dispatch kind.
+    for shapetype in ("catcherrors", "notify", "doccacheload", "exception"):
         assert shapetype in catch_shapetypes, shapetype
         entry = EMITTABLE_SHAPE_REGISTRY[shapetype]
         assert entry["emittable"] is True

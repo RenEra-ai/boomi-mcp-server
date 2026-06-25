@@ -823,3 +823,101 @@ def test_invalid_try_catch_scope_rejected():
     assert err is not None
     assert err.error_code == "PROCESS_RETRY_UNVERIFIED"
     assert err.field == "reliability.try_catch_scope"
+
+
+# ---------------------------------------------------------------------------
+# Issue #108 M10.4 — Exception (Throw) catch-leg terminal
+# ---------------------------------------------------------------------------
+
+_EXCEPTION_FIXTURE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "exception_catch_path.xml"
+)
+
+
+def _exc_config(catch_exception, dlq=None, catch_notify=None, retry_count=0, scope="process"):
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "database",
+            "connection_id": _DB_CONN_ID,
+            "operation_id": _DB_OP_ID,
+            "action_type": "Get",
+        },
+        "transform": {"mode": "passthrough"},
+        "target": {
+            "connector_type": "rest",
+            "connection_id": _REST_CONN_ID,
+            "operation_id": _REST_OP_ID,
+            "action_type": "POST",
+        },
+        "reliability": {
+            "retry_count": retry_count,
+            "try_catch_scope": scope,
+            "catch_exception": catch_exception,
+        },
+    }
+    if dlq is not None:
+        cfg["reliability"]["dlq"] = dlq
+    if catch_notify is not None:
+        cfg["reliability"]["catch_notify"] = catch_notify
+    return cfg
+
+
+def test_exception_catch_path_matches_golden_fixture():
+    """The canonical bare catch -> exception build must match the committed golden
+    (compared via C14N canonicalization — attribute ordering is not brittle)."""
+    cfg = _exc_config({
+        "title": "Stopping - Throw Uncaught POST Error",
+        "message_template": "Stopping process - uncaught error: {1}",
+        "stop_single_document": False,
+        "parameter_source": "caught_error",
+    })
+    emitted = ProcessFlowBuilder.build(
+        cfg, name="Exception Catch Path", folder_name="Golden/Fixtures"
+    )
+    expected = _EXCEPTION_FIXTURE.read_text()
+    assert ET.canonicalize(emitted) == ET.canonicalize(expected)
+
+
+def test_exception_terminal_after_dlq_route():
+    cfg = _exc_config(
+        {"message_template": "halt {1}", "parameter_source": "current_document"},
+        dlq={"mode": "document_cache_ref", "document_cache_id": _CACHE_ID},
+    )
+    _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="P"))
+    types = _by_type(shapes)
+    # catch leg: doccacheload -> exception (exception is the leg terminal).
+    assert "doccacheload" in types and "exception" in types
+    dlq_shape = next(s for s in shapes if s.attrib["shapetype"] == "doccacheload")
+    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
+    dp = dlq_shape.find("dragpoints/dragpoint")
+    assert dp is not None and dp.attrib["toShape"] == ex.attrib["name"]
+    # Only the normal Try-path Stop remains; the catch leg throws (no catch Stop).
+    assert types.count("stop") == 1
+
+
+def test_exception_connector_scope_throws_on_both_legs():
+    cfg = _exc_config(
+        {"message_template": "boom", "parameter_source": "none"},
+        scope="connector",
+    )
+    _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="P"))
+    types = _by_type(shapes)
+    # Two catcherrors (source + target), each catch leg ends in its own Exception.
+    assert types.count("catcherrors") == 2
+    assert types.count("exception") == 2
+
+
+def test_exception_leg_is_not_a_bare_stop_branch():
+    # The catcherrors Catch dragpoint must target the Exception, never a Stop —
+    # this is what keeps the catch leg CONTROL_BRANCH_BARE_STOP-clean (#108).
+    cfg = _exc_config({"message_template": "halt {1}", "parameter_source": "caught_error"})
+    _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="P"))
+    by_name = {s.attrib["name"]: s for s in shapes}
+    ce = next(s for s in shapes if s.attrib["shapetype"] == "catcherrors")
+    catch_dp = next(d for d in ce.find("dragpoints") if d.attrib.get("identifier") == "error")
+    target = by_name[catch_dp.attrib["toShape"]]
+    assert target.attrib["shapetype"] == "exception"

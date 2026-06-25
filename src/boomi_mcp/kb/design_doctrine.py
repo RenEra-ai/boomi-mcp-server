@@ -124,6 +124,14 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     # return value); the dispatch key is ``returndocuments`` in _emit_flow_shape.
     # Live-captured from work component 64e5397b-3583-42c9-8fe3-08ccefb0da6c.
     "returndocuments": {"emittable": True, "emitter_kind": "returndocuments"},
+    # M10.4 (issue #108): deliberate Exception (Throw) terminal on the Try/Catch
+    # catch leg. Emittable today via the reliability.catch_exception block on
+    # ProcessFlowBuilder (the catcherrors Catch leg ends in a thrown error message
+    # instead of a bare Stop). It is a CATCH-PATH shape (like catcherrors/notify/
+    # doccacheload) — NOT in the _emit_flow_shape dispatch ladder; the catch-leg
+    # emitter _emit_exception produces it. Live-captured from work component
+    # 1139079f-fff5-434c-aedc-d2758cc20525.
+    "exception": {"emittable": True, "emitter_kind": "exception"},
 }
 
 #: JSON-schema-shaped description of one entry, returned alongside the catalog so
@@ -317,11 +325,20 @@ _ENTRIES: List[Dict[str, Any]] = [
             "A catch leg routes failed documents to a dead-letter "
             "destination (a Document Cache as the verified destination, or "
             "a reusable error-handling subprocess for handler reuse) and "
-            "fires notification — never a silent swallow."
+            "fires notification — never a silent swallow. A catch leg may "
+            "also END in a deliberate Exception terminal that throws a "
+            "user-defined error and fails/halts the path (either the single "
+            "reaching document or the whole process), which the builder emits "
+            "today; unlike a plain successful end-of-path, the Exception "
+            "terminal surfaces the failure on the reporting page and keeps the "
+            "catch leg traceable rather than dropping the rejected documents."
         ),
         "when_to_use": (
             "Every process that mutates or forwards data: give failures a "
-            "traceable sink plus an alert so they can be reprocessed."
+            "traceable sink plus an alert so they can be reprocessed. Use the "
+            "Exception terminal when an unrecoverable failure should "
+            "deliberately fail/halt with a custom error message rather than be "
+            "queued for replay."
         ),
         "when_not_to_use": (
             "Do not route to a bare Stop with no record of the failed "

@@ -28,6 +28,7 @@ from boomi_mcp.kb.design_doctrine import (
     CATEGORIES,
     DESIGN_DOCTRINE_ENTRIES,
     DESIGN_DOCTRINE_REQUIRED_FIELDS,
+    EMITTABLE_SHAPE_REGISTRY,
     PROVENANCE_LABELS,
     VERIFICATION_STATUSES,
     get_design_doctrine_catalog,
@@ -246,6 +247,19 @@ def test_notification_logging_is_live_verified_and_emittable():
     assert entry["verification_status"] == "live_verified"
     assert entry["capability_status"] == "emittable_today"
     assert entry["provenance"] == "live_verified"
+
+
+def test_error_routing_covers_exception_terminal():
+    # Issue #108 M10.4: the error-routing capability now describes the deliberate
+    # Exception (Throw) catch-leg terminal as emittable, without leaking mechanic
+    # tokens (the token-lint covers that separately).
+    entry = DESIGN_DOCTRINE_ENTRIES["error_routing_and_dlq"]
+    assert entry["capability_status"] == "emittable_today"
+    blob = (entry["boomi_shape_mapping"] + " " + entry["when_to_use"]).lower()
+    assert "exception terminal" in blob
+    # The exception shape is registered as an emittable catch-path emitter.
+    assert EMITTABLE_SHAPE_REGISTRY["exception"]["emittable"] is True
+    assert EMITTABLE_SHAPE_REGISTRY["exception"]["emitter_kind"] == "exception"
 
 
 def test_wrapper_subprocess_separation_is_emittable():
@@ -596,9 +610,25 @@ def test_process_models_error_handling_predicate():
     assert not _process_models_error_handling(
         comp({"reliability": {"retry_count": 0, "dlq": {"mode": "document_cache_ref"}}})
     )
+    # Issue #108 M10.4: a structured reliability.catch_exception block wires a
+    # Try/Catch (bare catcherrors -> exception, no DLQ) → counts as modeled error
+    # handling, including retry_count > 0 without a DLQ.
+    assert _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
+              "reliability": {"catch_exception": {"message_template": "halt {1}"}}})
+    )
+    assert _process_models_error_handling(
+        comp({"process_kind": "database_to_api_sync",
+              "reliability": {"retry_count": 3, "catch_exception": {"message_template": "halt {1}"}}})
+    )
     # Legacy route trusts raw-XML / shape catch evidence.
     assert _process_models_error_handling(comp({"shapes": [{"shapetype": "catcherrors"}]}))
     assert _process_models_error_handling(comp({"xml": "<bns:shape shapetype=\"trycatch\"/>"}))
+    # Issue #108 M10.4: a deliberate Exception (Throw) shape in raw XML is also
+    # error-handling evidence.
+    assert _process_models_error_handling(
+        comp({"xml": '<shape image="exception_icon" shapetype="exception"/>'})
+    )
     # Non-dict config does not crash.
     assert not _process_models_error_handling(comp({}))
 

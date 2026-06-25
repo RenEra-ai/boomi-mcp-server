@@ -1471,3 +1471,172 @@ def test_validate_config_accepts_ref_connection_id_in_depends_on():
     missing = ProcessFlowBuilder.validate_config(cfg, depends_on=set())
     assert missing is not None
     assert missing.error_code == "MISSING_PROCESS_DEPENDENCY"
+
+
+# ---------------------------------------------------------------------------
+# Issue #108 M10.4 — reliability.catch_exception validation + emission
+# ---------------------------------------------------------------------------
+
+def _exception_reliability(**overrides):
+    catch_exception = {
+        "title": "Halt",
+        "message_template": "boom: {1}",
+        "parameter_source": "caught_error",
+    }
+    catch_exception.update(overrides)
+    return {"reliability": {"catch_exception": catch_exception}}
+
+
+def test_catch_exception_bare_throw_emits_catch_leg_exception():
+    # A catch_exception ALONE (no DLQ, no notify) wires a Try/Catch whose catch
+    # leg throws an Exception — the live "deliberate fail/halt" shape.
+    cfg = _base_config(**_exception_reliability(parameter_source="current_document"))
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    _root, _process, shapes = _parse_process(xml)
+    types = [s.attrib["shapetype"] for s in shapes]
+    assert "catcherrors" in types and "exception" in types
+    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
+    # Terminal: empty dragpoints.
+    assert ex.find("dragpoints") is not None and list(ex.find("dragpoints")) == []
+    assert ex.attrib["image"] == "exception_icon"
+    config = ex.find("configuration/exception")
+    assert config.attrib["stopProcessReturnSingleDoc"] == "false"
+    assert config.attrib["stopsingledoc"] == "false"
+    assert config.attrib["title"] == "Halt" and ex.attrib["userlabel"] == "Halt"
+    assert config.find("exMessage").text == "boom: {1}"
+    # current_document -> self-closing valueType="current", no usesEncryption.
+    pv = config.find("exParameters/parametervalue")
+    assert pv.attrib["valueType"] == "current" and "usesEncryption" not in pv.attrib
+    assert list(pv) == []
+    # The catcherrors Catch dragpoint targets the exception (no bare Stop).
+    ce = next(s for s in shapes if s.attrib["shapetype"] == "catcherrors")
+    catch_dp = next(d for d in ce.find("dragpoints") if d.attrib.get("identifier") == "error")
+    assert catch_dp.attrib["toShape"] == ex.attrib["name"]
+
+
+def test_catch_exception_caught_error_track_binding():
+    cfg = _base_config(**_exception_reliability(parameter_source="caught_error"))
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    _root, _process, shapes = _parse_process(xml)
+    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
+    tp = ex.find("configuration/exception/exParameters/parametervalue/trackparameter")
+    assert tp.attrib["propertyId"] == "meta.base.catcherrorsmessage"
+    assert tp.attrib["propertyName"] == "Base - Try/Catch Message"
+    pv = ex.find("configuration/exception/exParameters/parametervalue")
+    assert pv.attrib["valueType"] == "track" and "usesEncryption" not in pv.attrib
+
+
+def test_catch_exception_none_omits_exparameters():
+    cfg = _base_config(
+        **_exception_reliability(parameter_source="none", message_template="static halt")
+    )
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    _root, _process, shapes = _parse_process(xml)
+    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
+    assert ex.find("configuration/exception/exParameters") is None
+
+
+def test_catch_exception_stop_single_document_true():
+    cfg = _base_config(**_exception_reliability(stop_single_document=True))
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    _root, _process, shapes = _parse_process(xml)
+    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
+    assert ex.find("configuration/exception").attrib["stopsingledoc"] == "true"
+
+
+def test_catch_exception_with_notify_and_dlq_composes():
+    # notify -> dlq route -> exception; retry_count > 0 allowed with the leg.
+    cfg = _base_config(reliability={
+        "retry_count": 2,
+        "dlq": {"mode": "document_cache_ref", "document_cache_id": "CACHE-1"},
+        "catch_notify": {"level": "ERROR", "message_template": "f: meta.base.catcherrorsmessage"},
+        "catch_exception": {"message_template": "halt: {1}", "parameter_source": "caught_error"},
+    })
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    _root, _process, shapes = _parse_process(xml)
+    types = [s.attrib["shapetype"] for s in shapes]
+    # The catch leg ends in exception (no catch-row Stop after the DLQ route).
+    assert types.count("exception") == 1
+    assert "notify" in types and "doccacheload" in types
+    # Exactly one Stop (the normal Try-path terminal); the catch leg throws instead.
+    assert types.count("stop") == 1
+
+
+def test_catch_exception_message_format_escaping():
+    cfg = _base_config(**_exception_reliability(
+        parameter_source="current_document", message_template="it's a halt {1}"
+    ))
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    _root, _process, shapes = _parse_process(xml)
+    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
+    # Single quote doubled by the shared MessageFormat escaper; {1} preserved.
+    assert ex.find("configuration/exception/exMessage").text == "it''s a halt {1}"
+
+
+def test_catch_exception_retry_without_dlq_allowed():
+    cfg = _base_config(reliability={
+        "retry_count": 3,
+        "catch_exception": {"message_template": "halt {1}", "parameter_source": "caught_error"},
+    })
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+
+
+def _exc_err(catch_exception):
+    cfg = _base_config(reliability={"catch_exception": catch_exception})
+    return ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+
+
+def test_catch_exception_rejects_non_dict():
+    err = _exc_err("nope")
+    assert err is not None and err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+    assert err.field == "reliability.catch_exception"
+
+
+def test_catch_exception_rejects_unknown_key():
+    err = _exc_err({"message_template": "x {1}", "bogus": 1})
+    assert err is not None and err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+    assert "unsupported keys" in str(err) and "bogus" in str(err)
+
+
+def test_catch_exception_requires_message_template():
+    for bad in ({}, {"message_template": ""}, {"message_template": "   "}, {"message_template": 5}):
+        err = _exc_err(bad)
+        assert err is not None and err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+        assert err.field == "reliability.catch_exception.message_template"
+
+
+def test_catch_exception_rejects_bad_parameter_source():
+    err = _exc_err({"message_template": "x {1}", "parameter_source": "bogus"})
+    assert err is not None and err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+    assert err.field == "reliability.catch_exception.parameter_source"
+
+
+def test_catch_exception_rejects_non_bool_stop_single_document():
+    err = _exc_err({"message_template": "x {1}", "stop_single_document": "yes"})
+    assert err is not None and err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+    assert err.field == "reliability.catch_exception.stop_single_document"
+
+
+def test_catch_exception_rejects_non_string_title():
+    err = _exc_err({"message_template": "x {1}", "title": 7})
+    assert err is not None and err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+    assert err.field == "reliability.catch_exception.title"
+
+
+def test_catch_exception_requires_placeholder_when_source_binds():
+    # caught_error/current_document need {1}; none does not.
+    err = _exc_err({"message_template": "no placeholder", "parameter_source": "caught_error"})
+    assert err is not None and err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+    assert err.field == "reliability.catch_exception.message_template"
+    assert _exc_err({"message_template": "no placeholder", "parameter_source": "none"}) is None
+
+
+def test_build_bypass_guard_raises_for_invalid_catch_exception():
+    # validate_config-bypass: an invalid (non-dict) catch_exception that does not
+    # wire a Try/Catch must raise rather than silently emit a linear flow.
+    cfg = _base_config(reliability={"catch_exception": "nope"})
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert exc.value.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"

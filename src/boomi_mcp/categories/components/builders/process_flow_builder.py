@@ -128,6 +128,31 @@ _CATCH_NOTIFY_ALLOWED_KEYS = frozenset({"level", "message_template"})
 # token for the {1} placeholder and emits the matching track-parameter binding.
 _NOTIFY_CAUGHT_ERROR_TOKEN = "meta.base.catcherrorsmessage"
 
+# Issue #108 M10.4 — optional Exception (Throw) terminal on the Try/Catch catch
+# leg. A ``reliability.catch_exception`` block makes the catcherrors Catch leg
+# terminate in a deliberate Exception throw (a user-defined error message
+# reported on the Process Reporting page) INSTEAD of a bare catch-row Stop —
+# which also keeps the leg CONTROL_BRANCH_BARE_STOP-clean (a catcherrors ->
+# exception edge is not a catcherrors -> stop edge). The Boomi docs are explicit:
+# a Stop is a *successful* conclusion; an error path uses an Exception instead.
+# Live-captured from the ``work`` account (component
+# 1139079f-fff5-434c-aedc-d2758cc20525 shape10 + the decision-terminal exceptions
+# in b34d3812-...; see .codex/plans/issue-108-live-captures.md). The Exception is
+# TERMINAL (empty <dragpoints/>) and composes optionally with catch_notify and/or
+# a DLQ route: ``[notify ->] [dlq route ->] exception``.
+#
+# parameter_source binds the single ``{1}`` placeholder in the message:
+#   * caught_error     -> a track binding to meta.base.catcherrorsmessage (the
+#                         platform caught-error message — same token Notify uses);
+#   * current_document -> valueType="current" (the live default — the current doc);
+#   * none             -> no <exParameters> (a static message, no {1}).
+_SUPPORTED_EXCEPTION_PARAMETER_SOURCES = frozenset(
+    {"caught_error", "current_document", "none"}
+)
+_CATCH_EXCEPTION_ALLOWED_KEYS = frozenset(
+    {"title", "message_template", "stop_single_document", "parameter_source"}
+)
+
 # Issue #92 M4.5.7 — environment-extension declarations for connection fields.
 # A deployed process exposes a connection/operation field as an environment
 # override point ONLY when the process DECLARES it as an extension. The typed
@@ -413,14 +438,18 @@ class ProcessFlowBuilder:
 
     @classmethod
     def _should_emit_try_catch(cls, reliability: Any) -> bool:
-        """True when the config should emit a verified Try/Catch + DLQ wrapper.
+        """True when the config should emit a verified Try/Catch wrapper.
 
         Issue #51 M3.R1a + #88 M4.5.3: retry_count 0..5 with a supported DLQ
-        mode (document_cache_ref / error_subprocess_ref) is un-gated. Values
-        outside 0..5, the wrong type, or retry_count > 0 without a supported
-        DLQ mode stay gated (PROCESS_RETRY_UNVERIFIED) and never reach this path
-        because validate_config rejects them first. This guard mirrors that
-        boundary so a direct build() call is also total.
+        mode (document_cache_ref / error_subprocess_ref) is un-gated. Issue #108
+        M10.4: a ``catch_exception`` block ALSO wires a Try/Catch — its catch leg
+        throws a deliberate Exception (the live "fail/halt" shape is a bare
+        catcherrors -> exception, no DLQ required), and retry_count > 0 is valid
+        with it too (the catch leg exists). Values outside 0..5, the wrong type,
+        or retry_count > 0 without EITHER a supported DLQ mode or a catch_exception
+        stay gated (PROCESS_RETRY_UNVERIFIED) and never reach this path because
+        validate_config rejects them first. This guard mirrors that boundary so a
+        direct build() call is also total.
         """
         if not isinstance(reliability, dict):
             return False
@@ -432,9 +461,12 @@ class ProcessFlowBuilder:
         ):
             return False
         dlq = reliability.get("dlq")
-        if not isinstance(dlq, dict):
-            return False
-        return str(dlq.get("mode") or "").strip().lower() in _TRY_CATCH_DLQ_MODES
+        dlq_ok = (
+            isinstance(dlq, dict)
+            and str(dlq.get("mode") or "").strip().lower() in _TRY_CATCH_DLQ_MODES
+        )
+        exception_ok = isinstance(reliability.get("catch_exception"), dict)
+        return dlq_ok or exception_ok
 
     # ------------------------------------------------------------------
     # Apply-time XML emission
@@ -577,9 +609,12 @@ class ProcessFlowBuilder:
         # non-DLQ process XML is byte-for-byte identical.
         reliability_cfg = config.get("reliability")
         if cls._should_emit_try_catch(reliability_cfg):
-            # _should_emit_try_catch already proved reliability_cfg["dlq"] is a
-            # non-empty dict and retry_count is a valid int 0..5, so subscript
-            # directly (no dead `or {}` fallback).
+            # _should_emit_try_catch proved retry_count is a valid int 0..5 and
+            # EITHER reliability_cfg["dlq"] is a Try/Catch DLQ mode OR
+            # reliability_cfg["catch_exception"] is a dict (issue #108 M10.4 — a
+            # bare catcherrors -> exception leg needs no DLQ). So dlq may be absent
+            # for a catch_exception-only leg; default it to {} (the emitter skips
+            # the DLQ route when the mode is not a supported DLQ mode).
             #
             # Issue #99 G1: reliability.try_catch_scope selects the wrapper
             # layout. "process" (default — absent key keeps the pre-#99 output
@@ -596,9 +631,10 @@ class ProcessFlowBuilder:
             )
             shape_xml_parts: List[str] = emitter(
                 flow,
-                reliability_cfg["dlq"],
+                reliability_cfg.get("dlq") or {},
                 retry_count=int(reliability_cfg.get("retry_count", 0)),
                 catch_notify=reliability_cfg.get("catch_notify"),
+                catch_exception=reliability_cfg.get("catch_exception"),
             )
         else:
             # build() stays total on the validate_config-bypass path: a present
@@ -615,6 +651,23 @@ class ProcessFlowBuilder:
                         "Notify is emitted only on a catch leg. Set "
                         "reliability.dlq.mode to document_cache_ref or "
                         "error_subprocess_ref."
+                    ),
+                )
+            # Issue #108 M10.4: same totality guard for catch_exception — a present
+            # (but malformed, so _should_emit_try_catch rejected it) catch_exception
+            # cannot be honored without a wired Try/Catch leg. A WELL-FORMED
+            # catch_exception always makes _should_emit_try_catch True, so this only
+            # fires on the bypass path with an invalid block; validate_config
+            # rejects it with PROCESS_EXCEPTION_CONFIG_INVALID on the normal path.
+            if isinstance(reliability_cfg, dict) and reliability_cfg.get("catch_exception") is not None:
+                raise BuilderValidationError(
+                    "reliability.catch_exception requires a wired Try/Catch catch path.",
+                    error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+                    field="reliability.catch_exception",
+                    hint=(
+                        "The Exception throw is emitted only on a catch leg. Provide "
+                        "a well-formed reliability.catch_exception "
+                        '(message_template required).'
                     ),
                 )
             shape_xml_parts = _emit_linear_shapes(flow)
@@ -1358,38 +1411,57 @@ def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
             if binding_err is not None:
                 return binding_err
         # dlq_mode == "disabled" → no Try/Catch; nothing else to validate.
-    if retry_count > 0 and dlq_mode not in _TRY_CATCH_DLQ_MODES:
+    # Issue #108 M10.4: validate the optional Exception (Throw) catch-leg terminal
+    # before the retry/notify gates so its own shape errors surface first. A
+    # catch_exception wires a Try/Catch catch leg even WITHOUT a DLQ (the bare
+    # catcherrors -> exception "fail/halt" shape), so it relaxes both gates below.
+    catch_exception = reliability.get("catch_exception")
+    catch_exception_err = _validate_catch_exception(catch_exception)
+    if catch_exception_err is not None:
+        return catch_exception_err
+    has_catch_exception = isinstance(catch_exception, dict)
+    if (
+        retry_count > 0
+        and dlq_mode not in _TRY_CATCH_DLQ_MODES
+        and not has_catch_exception
+    ):
         return BuilderValidationError(
             "reliability.retry_count > 0 requires a wired Try/Catch catch path.",
             error_code="PROCESS_RETRY_UNVERIFIED",
             field="reliability.retry_count",
             hint=(
                 "Positive retry is emitted only inside a Try/Catch whose catch "
-                "leg routes to a DLQ. Set reliability.dlq.mode to "
-                "document_cache_ref or error_subprocess_ref, or use "
+                "leg routes to a DLQ or throws an Exception. Set "
+                "reliability.dlq.mode to document_cache_ref or "
+                "error_subprocess_ref, add reliability.catch_exception, or use "
                 "retry_count=0."
             ),
         )
     # Issue #89 (M4.5.4): optional Notify on the catch leg. Validated after
     # dlq_mode is finalized (Notify only exists on a wired catch path) and
-    # after the retry gate (retry/DLQ shape errors surface first).
-    notify_err = _validate_catch_notify(reliability.get("catch_notify"), dlq_mode)
+    # after the retry gate (retry/DLQ shape errors surface first). Issue #108
+    # M10.4: a catch_exception also wires the catch leg, so Notify is allowed
+    # without a DLQ when the leg ends in an Exception throw.
+    notify_err = _validate_catch_notify(
+        reliability.get("catch_notify"), dlq_mode, has_catch_exception=has_catch_exception
+    )
     if notify_err is not None:
         return notify_err
     return None
 
 
 def _validate_catch_notify(
-    catch_notify: Any, dlq_mode: str
+    catch_notify: Any, dlq_mode: str, has_catch_exception: bool = False
 ) -> Optional[BuilderValidationError]:
     """Validate the optional ``reliability.catch_notify`` config (issue #89).
 
     Returns ``None`` when absent (Notify is opt-in) or valid; otherwise a
     ``PROCESS_NOTIFY_CONFIG_INVALID`` error. Notify is emitted only at the head
     of a wired Try/Catch catch leg, so it requires ``dlq_mode`` in
-    ``_TRY_CATCH_DLQ_MODES``. The message must reference the caught-error
-    property so the emitted Notify logs the real error. Email/SMS/channel keys
-    are out of scope and rejected (extra keys).
+    ``_TRY_CATCH_DLQ_MODES`` OR a ``catch_exception`` terminal (issue #108 M10.4 —
+    a bare catcherrors -> notify -> exception leg has no DLQ). The message must
+    reference the caught-error property so the emitted Notify logs the real error.
+    Email/SMS/channel keys are out of scope and rejected (extra keys).
     """
     if catch_notify is None:
         return None
@@ -1443,15 +1515,98 @@ def _validate_catch_notify(
             field="reliability.catch_notify.level",
             hint="Boomi Notify message levels are INFO, WARNING, ERROR.",
         )
-    if dlq_mode not in _TRY_CATCH_DLQ_MODES:
+    if dlq_mode not in _TRY_CATCH_DLQ_MODES and not has_catch_exception:
         return BuilderValidationError(
             "reliability.catch_notify requires a wired Try/Catch catch path.",
             error_code="PROCESS_NOTIFY_CONFIG_INVALID",
             field="reliability.catch_notify",
             hint=(
                 "Notify is emitted only on a catch leg. Set reliability.dlq.mode "
-                "to document_cache_ref or error_subprocess_ref."
+                "to document_cache_ref or error_subprocess_ref, or add "
+                "reliability.catch_exception."
             ),
+        )
+    return None
+
+
+def _validate_catch_exception(value: Any) -> Optional[BuilderValidationError]:
+    """Validate the optional ``reliability.catch_exception`` block (issue #108 M10.4).
+
+    ``None``/absent is valid. When present it must be an object whose only keys are
+    in ``_CATCH_EXCEPTION_ALLOWED_KEYS``; a non-empty ``message_template`` string is
+    required; the optional ``title`` is a string; ``stop_single_document`` is a bool
+    (default ``False``); ``parameter_source`` is one of
+    ``_SUPPORTED_EXCEPTION_PARAMETER_SOURCES`` (default ``caught_error``). When the
+    parameter source binds a value (``caught_error`` / ``current_document``) the
+    message must carry the ``{1}`` placeholder so the bound value actually renders
+    (mirrors the catch_notify token requirement); ``none`` carries a static message
+    with no parameters. Unknown keys are rejected so a typo is not silently dropped
+    (matches the dataprocess / return_documents strictness and the
+    ThrowExceptionPrimitive's ``extra='forbid'`` model). A catch_exception is the
+    terminal throw on the catch leg — no Stop follows it.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return BuilderValidationError(
+            "reliability.catch_exception must be a JSON object.",
+            error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+            field="reliability.catch_exception",
+            hint='Use {"message_template": "{1}", "parameter_source": "caught_error"} to end the catch leg in an Exception throw.',
+        )
+    extra = set(value) - _CATCH_EXCEPTION_ALLOWED_KEYS
+    if extra:
+        return BuilderValidationError(
+            f"reliability.catch_exception has unsupported keys: {sorted(extra)}.",
+            error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+            field="reliability.catch_exception",
+            hint=f"Allowed keys: {sorted(_CATCH_EXCEPTION_ALLOWED_KEYS)}.",
+        )
+    template = value.get("message_template")
+    if not isinstance(template, str) or not template.strip():
+        return BuilderValidationError(
+            "reliability.catch_exception.message_template is required and must be "
+            "a non-empty string.",
+            error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+            field="reliability.catch_exception.message_template",
+            hint="Provide the error message; use the {1} placeholder for the bound parameter_source value.",
+        )
+    title = value.get("title")
+    if title is not None and not isinstance(title, str):
+        return BuilderValidationError(
+            "reliability.catch_exception.title must be a string.",
+            error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+            field="reliability.catch_exception.title",
+            hint="The title is the Exception alert subject / process-log title.",
+        )
+    stop_single = value.get("stop_single_document")
+    if stop_single is not None and not isinstance(stop_single, bool):
+        return BuilderValidationError(
+            "reliability.catch_exception.stop_single_document must be a boolean.",
+            error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+            field="reliability.catch_exception.stop_single_document",
+            hint="true fails only the reaching document; false (default) halts the whole process.",
+        )
+    parameter_source = value.get("parameter_source")
+    if parameter_source is not None and (
+        not isinstance(parameter_source, str)
+        or parameter_source not in _SUPPORTED_EXCEPTION_PARAMETER_SOURCES
+    ):
+        return BuilderValidationError(
+            "reliability.catch_exception.parameter_source must be one of "
+            f"{sorted(_SUPPORTED_EXCEPTION_PARAMETER_SOURCES)}.",
+            error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+            field="reliability.catch_exception.parameter_source",
+            hint="caught_error binds the Try/Catch error; current_document binds the current document; none omits parameters.",
+        )
+    source = str(parameter_source or "caught_error")
+    if source != "none" and "{1}" not in template:
+        return BuilderValidationError(
+            "reliability.catch_exception.message_template must contain the {1} "
+            "placeholder when parameter_source binds a value.",
+            error_code="PROCESS_EXCEPTION_CONFIG_INVALID",
+            field="reliability.catch_exception.message_template",
+            hint="Include {1} so the bound parameter_source value renders, or set parameter_source='none'.",
         )
     return None
 
@@ -1974,6 +2129,7 @@ def _emit_try_catch_shapes(
     dlq: Dict[str, Any],
     retry_count: int = 0,
     catch_notify: Optional[Dict[str, Any]] = None,
+    catch_exception: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """Wrap the linear flow in a verified catcherrors Try/Catch + DLQ catch leg.
 
@@ -2005,7 +2161,7 @@ def _emit_try_catch_shapes(
     # target name (catcherrors Catch dragpoint) is the leg's first shape.
     mode = str(dlq.get("mode") or "").strip().lower()
     catch_parts, catch_target_name, _next = _emit_catch_leg(
-        stop_index + 1, dlq, mode, catch_notify
+        stop_index + 1, dlq, mode, catch_notify, catch_exception
     )
 
     parts: List[str] = []
@@ -2032,83 +2188,134 @@ def _emit_catch_leg(
     dlq: Dict[str, Any],
     mode: str,
     catch_notify: Optional[Dict[str, Any]],
+    catch_exception: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[str], str, int]:
     """Emit one Try/Catch catch leg and return ``(parts, first_name, next_index)``.
 
-    The catch leg is ``[notify ->] dlq route [-> catch stop]``: without
-    ``catch_notify`` it is a single terminal ``doccacheload``/``processcall``
-    (the issue #51/#88 shape); with ``catch_notify`` (issue #89) it is
-    ``notify -> dlq route -> catch stop``. ``first_name`` is the shape the
-    catcherrors Catch dragpoint targets; ``next_index`` is the first free shape
-    index after this leg (so a second leg can be laid out without colliding —
-    issue #99 G1 connector scope emits two legs).
+    The catch leg is ``[notify ->] [dlq route ->] terminal``:
+
+      * ``catch_notify`` (issue #89) prepends a Notify at the HEAD of the leg;
+      * a supported ``mode`` (``_TRY_CATCH_DLQ_MODES``) emits the DLQ route
+        (``doccacheload`` / ``processcall``);
+      * ``catch_exception`` (issue #108 M10.4) makes the leg END in a deliberate
+        Exception throw instead of a catch-row Stop; without it the pre-#108
+        notify path ends in a catch-row Stop and the bare DLQ-only leg is itself
+        terminal.
+
+    Supported compositions (all preserve the pre-#108 output byte-for-byte when
+    ``catch_exception`` is absent)::
+
+        dlq                          (pre-#89 — dlq route is terminal)
+        notify -> dlq -> stop        (pre-#108, issue #89)
+        exception                    (#108 — bare throw, no DLQ, no notify)
+        notify -> exception          (#108)
+        dlq -> exception             (#108)
+        notify -> dlq -> exception   (#108)
+
+    ``first_name`` is the shape the catcherrors Catch dragpoint targets;
+    ``next_index`` is the first free shape index after this leg (so a second leg —
+    issue #99 G1 connector scope — lays out without colliding).
 
     Bindings are normally validated by ``_validate_dlq_binding`` /
-    ``_validate_catch_notify``; ids are literals or ``$ref:KEY`` already resolved
-    by integration_builder before ``build()``. This stays total on the
-    validate_config-bypass path: it raises on a missing/invalid binding rather
-    than emitting broken XML (mirrors ``build()``'s empty-name guard).
+    ``_validate_catch_notify`` / ``_validate_catch_exception``; ids are literals or
+    ``$ref:KEY`` already resolved by integration_builder before ``build()``. This
+    stays total on the validate_config-bypass path: it raises on a
+    missing/invalid binding rather than emitting broken XML.
     """
-    # A present-but-empty/invalid catch_notify still counts as "notify intended"
-    # so the validate_config-bypass path rejects it consistently (matches
-    # _validate_catch_notify, which treats only None as "absent").
+    # A present-but-empty/invalid catch_notify/catch_exception still counts as
+    # "intended" so the validate_config-bypass path rejects it consistently
+    # (matches the validators, which treat only None as "absent").
     notify_present = catch_notify is not None
+    exception_present = catch_exception is not None
+    dlq_present = mode in _TRY_CATCH_DLQ_MODES
+    if not dlq_present and not exception_present:
+        # No DLQ route and no Exception terminal: the leg has no body. build()
+        # never reaches here (_should_emit_try_catch requires a DLQ mode or a
+        # catch_exception); only a validate_config-bypass call with an unsupported
+        # mode and no catch_exception can. Raise rather than emit broken XML
+        # (mirrors the pre-#108 unsupported-mode guard).
+        raise BuilderValidationError(
+            f"Unsupported DLQ mode {mode!r} reached the Try/Catch emitter without "
+            "a catch_exception terminal.",
+            error_code="PROCESS_XML_VALIDATION_FAILED",
+            field="reliability.dlq.mode",
+            hint="Set a supported dlq.mode or a reliability.catch_exception terminal.",
+        )
+
+    # Lay out the leg shapes in order, assigning positional indices. The trailing
+    # terminal is an Exception throw (catch_exception) or — for the pre-#108 notify
+    # path without an exception — a catch-row Stop; the bare DLQ-only leg has no
+    # trailing terminal (the DLQ route is itself terminal, pre-#89).
+    idx = start_index
+    notify_index = notify_name = None
     if notify_present:
-        # Catch leg: notify (start_index) -> dlq route (start_index+1)
-        #            -> catch stop (start_index+2).
-        notify_index = start_index
-        notify_name = f"shape{notify_index}"
-        dlq_index = start_index + 1
-        catch_stop_index = start_index + 2
-        catch_stop_name = f"shape{catch_stop_index}"
+        notify_index = idx
+        notify_name = f"shape{idx}"
+        idx += 1
+    dlq_index = dlq_name = None
+    if dlq_present:
+        dlq_index = idx
+        dlq_name = f"shape{idx}"
+        idx += 1
+    terminal_kind: Optional[str] = None
+    if exception_present:
+        terminal_kind = "exception"
+    elif notify_present:
+        terminal_kind = "stop"
+    terminal_index = terminal_name = None
+    if terminal_kind is not None:
+        terminal_index = idx
+        terminal_name = f"shape{idx}"
+        idx += 1
+    next_index = idx
+
+    # The catcherrors Catch dragpoint targets the first shape of the leg.
+    if notify_present:
         first_name = notify_name
-        dlq_next_name: Optional[str] = catch_stop_name
-        next_index = catch_stop_index + 1
-    else:
-        # Catch leg: a single terminal dlq route (unchanged pre-#89 shape).
-        dlq_index = start_index
-        first_name = f"shape{dlq_index}"
-        dlq_next_name = None
-        next_index = dlq_index + 1
-    dlq_name = f"shape{dlq_index}"
+    elif dlq_present:
+        first_name = dlq_name
+    else:  # exception-only leg (bare throw)
+        first_name = terminal_name
 
     parts: List[str] = []
     if notify_present:
-        notify_err = _validate_catch_notify(catch_notify, mode)
+        notify_err = _validate_catch_notify(
+            catch_notify, mode, has_catch_exception=exception_present
+        )
         if notify_err is not None:
             raise notify_err
-        parts.append(_emit_notify(notify_name, catch_notify, dlq_name, notify_index))
-    if mode == "document_cache_ref":
-        cache_id = str(dlq.get("document_cache_id") or "").strip()
-        if not cache_id:
-            raise BuilderValidationError(
-                "reliability.dlq.mode='document_cache_ref' requires a non-empty "
-                "document_cache_id to emit the DLQ catch leg.",
-                error_code="PROCESS_DLQ_BINDING_INVALID",
-                field="reliability.dlq.document_cache_id",
-                hint="Set document_cache_id to a literal id or a resolved $ref:KEY.",
-            )
-        parts.append(_emit_doccacheload(dlq_name, cache_id, dlq_index, next_name=dlq_next_name))
-    elif mode == "error_subprocess_ref":
-        process_id = str(dlq.get("process_id") or "").strip()
-        if not process_id:
-            raise BuilderValidationError(
-                "reliability.dlq.mode='error_subprocess_ref' requires a non-empty "
-                "process_id to emit the DLQ catch leg.",
-                error_code="PROCESS_DLQ_BINDING_INVALID",
-                field="reliability.dlq.process_id",
-                hint="Set process_id to a literal id or a resolved $ref:KEY.",
-            )
-        parts.append(_emit_processcall(dlq_name, process_id, dlq_index, next_name=dlq_next_name))
-    else:  # pragma: no cover — _should_emit_try_catch only admits the two modes
-        raise BuilderValidationError(
-            f"Unsupported DLQ mode {mode!r} reached the Try/Catch emitter.",
-            error_code="PROCESS_XML_VALIDATION_FAILED",
-            field="reliability.dlq.mode",
-            hint="Internal builder bug — please report.",
-        )
-    if notify_present:
-        parts.append(_emit_stop(catch_stop_name, {"continue_": True}, y=_CATCH_SHAPE_Y))
+        notify_next = dlq_name if dlq_present else terminal_name
+        parts.append(_emit_notify(notify_name, catch_notify, notify_next, notify_index))
+    if dlq_present:
+        # The DLQ route points at the trailing terminal (Exception/Stop) when one
+        # exists, else it is itself terminal (next_name=None).
+        dlq_next_name = terminal_name
+        if mode == "document_cache_ref":
+            cache_id = str(dlq.get("document_cache_id") or "").strip()
+            if not cache_id:
+                raise BuilderValidationError(
+                    "reliability.dlq.mode='document_cache_ref' requires a non-empty "
+                    "document_cache_id to emit the DLQ catch leg.",
+                    error_code="PROCESS_DLQ_BINDING_INVALID",
+                    field="reliability.dlq.document_cache_id",
+                    hint="Set document_cache_id to a literal id or a resolved $ref:KEY.",
+                )
+            parts.append(_emit_doccacheload(dlq_name, cache_id, dlq_index, next_name=dlq_next_name))
+        else:  # error_subprocess_ref — the only other _TRY_CATCH_DLQ_MODES member
+            process_id = str(dlq.get("process_id") or "").strip()
+            if not process_id:
+                raise BuilderValidationError(
+                    "reliability.dlq.mode='error_subprocess_ref' requires a non-empty "
+                    "process_id to emit the DLQ catch leg.",
+                    error_code="PROCESS_DLQ_BINDING_INVALID",
+                    field="reliability.dlq.process_id",
+                    hint="Set process_id to a literal id or a resolved $ref:KEY.",
+                )
+            parts.append(_emit_processcall(dlq_name, process_id, dlq_index, next_name=dlq_next_name))
+    if terminal_kind == "exception":
+        parts.append(_emit_exception(terminal_name, catch_exception, terminal_index))
+    elif terminal_kind == "stop":
+        parts.append(_emit_stop(terminal_name, {"continue_": True}, y=_CATCH_SHAPE_Y))
     return parts, first_name, next_index
 
 
@@ -2117,6 +2324,7 @@ def _emit_connector_scoped_try_catch_shapes(
     dlq: Dict[str, Any],
     retry_count: int = 0,
     catch_notify: Optional[Dict[str, Any]] = None,
+    catch_exception: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """Connector-scoped Try/Catch: one Try/Catch per connector (issue #99 G1).
 
@@ -2184,10 +2392,10 @@ def _emit_connector_scoped_try_catch_shapes(
     # Two catch legs laid out after the Try-row stop, source leg first. Both
     # route to the same DLQ + (optional) Notify config.
     src_leg, src_catch_first, after_src = _emit_catch_leg(
-        stop_index + 1, dlq, mode, catch_notify
+        stop_index + 1, dlq, mode, catch_notify, catch_exception
     )
     tgt_leg, tgt_catch_first, _after_tgt = _emit_catch_leg(
-        after_src, dlq, mode, catch_notify
+        after_src, dlq, mode, catch_notify, catch_exception
     )
 
     parts: List[str] = []
@@ -2306,6 +2514,85 @@ def _emit_notify(
         '</notify>'
         '</configuration>'
         f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
+def _emit_exception_parameters(parameter_source: str) -> str:
+    """Emit the ``<exParameters>`` binding for the single ``{1}`` placeholder
+    (issue #108 M10.4).
+
+    ``none`` emits no element (a static message); ``current_document`` binds the
+    current document (the live default); ``caught_error`` binds the platform
+    caught-error message via the same track parameter the Notify catch step uses
+    (``meta.base.catcherrorsmessage`` / "Base - Try/Catch Message"). The
+    ``usesEncryption`` attribute is omitted to match the live captures — every
+    live exception/notify ``parametervalue`` omits it (the companion doc's
+    hand-written ``usesEncryption="false"`` is idealized).
+    """
+    if parameter_source == "none":
+        return ""
+    if parameter_source == "current_document":
+        return '<exParameters><parametervalue key="0" valueType="current"/></exParameters>'
+    # caught_error (default) — track binding to the caught Try/Catch error message.
+    return (
+        '<exParameters>'
+        '<parametervalue key="0" valueType="track">'
+        f'<trackparameter defaultValue="" propertyId="{_escape_xml(_NOTIFY_CAUGHT_ERROR_TOKEN)}" '
+        'propertyName="Base - Try/Catch Message"/>'
+        '</parametervalue>'
+        '</exParameters>'
+    )
+
+
+def _emit_exception(
+    shape_name: str,
+    catch_exception: Dict[str, Any],
+    shape_index: int,
+) -> str:
+    """Emit a deliberate Exception (Throw) terminal on the Try/Catch catch leg
+    (issue #108 M10.4).
+
+    Byte-accurate to the live ``work``-account capture (component
+    1139079f-fff5-434c-aedc-d2758cc20525 shape10 + the decision-terminal
+    exceptions in b34d3812-...; see ``.codex/plans/issue-108-live-captures.md``):
+    ``<shape image="exception_icon" ... shapetype="exception" userlabel="<title>">
+    <configuration><exception stopProcessReturnSingleDoc="false"
+    stopsingledoc="<bool>" title="<title>"><exMessage>...</exMessage>
+    [<exParameters>...</exParameters>]</exception></configuration>
+    <dragpoints/></shape>``.
+
+    The Exception is TERMINAL — it ends the catch leg with a user-defined error
+    (the Process Reporting alert + initial process-log message), so it carries an
+    empty ``<dragpoints/>`` and no Stop follows it (the Boomi docs: a Stop is a
+    *successful* conclusion; an error path uses an Exception instead). ``title``
+    maps to BOTH the shape ``userlabel`` and the inner ``<exception title>``.
+    ``stop_single_document`` -> ``stopsingledoc`` ("Continue executing other
+    documents" = true vs "Stop executing the entire process" = false).
+    ``stopProcessReturnSingleDoc="false"`` is always emitted (observed in every
+    capture; runtime behavior unconfirmed) and not exposed.
+
+    The message uses Java-MessageFormat ``{1}`` placeholder substitution (same as
+    Message/Notify), so route the template through the shared MessageFormat escaper
+    THEN ``_escape_xml`` — the ``{1}`` placeholder is preserved and the bound
+    ``parameter_source`` value renders at runtime.
+    """
+    title_attr = _escape_xml(str(catch_exception.get("title") or ""))
+    stop_single = str(bool(catch_exception.get("stop_single_document", False))).lower()
+    template = str(catch_exception.get("message_template") or "")
+    message = _escape_xml(_escape_message_format_text(template))
+    source = str(catch_exception.get("parameter_source") or "caught_error").strip().lower()
+    return (
+        f'<shape image="exception_icon" name="{shape_name}" shapetype="exception" '
+        f'userlabel="{title_attr}" x="{_shape_x(shape_index)}" y="{_CATCH_SHAPE_Y}">'
+        '<configuration>'
+        f'<exception stopProcessReturnSingleDoc="false" stopsingledoc="{stop_single}" '
+        f'title="{title_attr}">'
+        f'<exMessage>{message}</exMessage>'
+        f'{_emit_exception_parameters(source)}'
+        '</exception>'
+        '</configuration>'
+        '<dragpoints/>'
         '</shape>'
     )
 

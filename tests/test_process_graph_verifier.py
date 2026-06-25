@@ -416,3 +416,101 @@ def test_returndocuments_routing_to_stop_is_rejected():
     )
     result = verify_process_graph(xml)
     assert "RETURN_DOCS_STOP_EXCLUSIVE" in _codes(result["errors"])
+
+
+# ---------------------------------------------------------------------------
+# Issue #108 M10.4 — builder catch-leg Exception (Throw) verifier coverage
+# ---------------------------------------------------------------------------
+
+def _exception_process_config(catch_exception, dlq=None, catch_notify=None, scope="process"):
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "action_type": "Get",
+                   "connection_id": "C1", "operation_id": "O1"},
+        "target": {"connector_type": "rest", "action_type": "POST",
+                   "connection_id": "C2", "operation_id": "O2"},
+        "reliability": {"try_catch_scope": scope, "catch_exception": catch_exception},
+    }
+    if dlq is not None:
+        cfg["reliability"]["dlq"] = dlq
+    if catch_notify is not None:
+        cfg["reliability"]["catch_notify"] = catch_notify
+    return cfg
+
+
+def test_builder_catch_exception_is_clean():
+    """A builder-emitted bare catch -> exception leg verifies clean: exception is a
+    recognized terminal (no NON_TERMINAL_SHAPE_DEAD_END) and the catcherrors Catch
+    routes into it, not a bare Stop (no CONTROL_BRANCH_BARE_STOP)."""
+    from boomi_mcp.categories.components.builders import ProcessFlowBuilder
+    xml = ProcessFlowBuilder.build(
+        _exception_process_config({"message_template": "halt {1}", "parameter_source": "caught_error"}),
+        name="P",
+    )
+    result = verify_process_graph(xml)
+    assert result["errors"] == []
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+
+
+def test_builder_catch_exception_with_dlq_and_notify_is_clean():
+    from boomi_mcp.categories.components.builders import ProcessFlowBuilder
+    xml = ProcessFlowBuilder.build(
+        _exception_process_config(
+            {"message_template": "halt {1}", "parameter_source": "current_document"},
+            dlq={"mode": "document_cache_ref", "document_cache_id": "CACHE-1"},
+            catch_notify={"level": "ERROR", "message_template": "f: meta.base.catcherrorsmessage"},
+        ),
+        name="P",
+    )
+    result = verify_process_graph(xml)
+    assert result["errors"] == []
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+
+
+def test_builder_catch_exception_connector_scope_is_clean():
+    from boomi_mcp.categories.components.builders import ProcessFlowBuilder
+    xml = ProcessFlowBuilder.build(
+        _exception_process_config(
+            {"message_template": "boom", "parameter_source": "none"}, scope="connector"
+        ),
+        name="P",
+    )
+    result = verify_process_graph(xml)
+    assert result["errors"] == []
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+
+
+def test_catcherrors_into_exception_is_not_bare_stop_warning():
+    """A catcherrors branch routed into an Exception is NOT a bare-Stop drop — the
+    Exception terminal records the failure, so CONTROL_BRANCH_BARE_STOP must not
+    fire (it would for a catcherrors -> stop edge)."""
+    # Try path routes through a connector before its Stop (so the catcherrors Try
+    # edge is not itself a bare-Stop drop); the Catch edge targets the Exception.
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="catcherrors_icon" name="shape2" shapetype="catcherrors" x="2" y="1">'
+        '<configuration><catcherrors catchAll="true" retryCount="0"/></configuration>'
+        '<dragpoints>'
+        '<dragpoint identifier="default" name="d2t" text="Try" toShape="shape3" x="3" y="2"/>'
+        '<dragpoint identifier="error" name="d2c" text="Catch" toShape="shape4" x="3" y="3"/>'
+        '</dragpoints></shape>'
+        '<shape image="connectoraction_icon" name="shape3" shapetype="connectoraction" x="3" y="1">'
+        '<configuration/>'
+        '<dragpoints><dragpoint name="d3" toShape="shape5" x="4" y="1"/></dragpoints></shape>'
+        '<shape image="exception_icon" name="shape4" shapetype="exception" x="3" y="3">'
+        '<configuration><exception stopProcessReturnSingleDoc="false" stopsingledoc="false" title="t">'
+        '<exMessage>halt {1}</exMessage>'
+        '<exParameters><parametervalue key="0" valueType="current"/></exParameters>'
+        '</exception></configuration><dragpoints/></shape>'
+        '<shape image="stop_icon" name="shape5" shapetype="stop" x="4" y="1">'
+        '<configuration><stop continue="true"/></configuration><dragpoints/></shape>'
+        '</shapes></process>'
+    )
+    result = verify_process_graph(xml)
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["errors"])
+    # The exception is a recognized terminal — no dead-end error.
+    assert "NON_TERMINAL_SHAPE_DEAD_END" not in _codes(result["errors"])

@@ -28,6 +28,7 @@ from .operational import (
 )
 from .rest_send import RestSendWithRetryPrimitive
 from .return_documents import ReturnDocumentsPrimitive
+from .throw_exception import ThrowExceptionPrimitive
 from .xml_json_convert import XmlJsonConvertPrimitive
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "XmlJsonConvertPrimitive",
     "RestSendWithRetryPrimitive",
     "ReturnDocumentsPrimitive",
+    "ThrowExceptionPrimitive",
     "ScheduleEnvelopePrimitive",
     "WatermarkStatePrimitive",
     "ErrorClassifierPrimitive",

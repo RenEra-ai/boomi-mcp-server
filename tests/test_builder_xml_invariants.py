@@ -326,6 +326,44 @@ def test_inv_returndocuments_terminal_no_stop():
     assert rd.find("configuration/returndocuments").attrib["label"] == "Status"
 
 
+def test_inv_exception_terminal_throws_no_stop():
+    # Issue #108 M10.4: a reliability.catch_exception block ends the Try/Catch
+    # catch leg in an Exception (Throw) terminal — empty <dragpoints/>, the
+    # catcherrors Catch dragpoint targets it (never a bare Stop), and it carries
+    # the live attribute shape (stopProcessReturnSingleDoc="false", stopsingledoc,
+    # title==userlabel, {1} message + parameter binding). Guaranteed by
+    # construction: _emit_catch_leg routes the catch leg into _emit_exception
+    # instead of a catch-row Stop.
+    xml = ProcessFlowBuilder.build(
+        _process_config(reliability={
+            "catch_exception": {
+                "title": "Halt",
+                "message_template": "halt: {1}",
+                "stop_single_document": True,
+                "parameter_source": "caught_error",
+            },
+        }),
+        name="P",
+    )
+    shapes = _parse_process_shapes(xml)
+    ex = next(s for s in shapes if s.attrib["shapetype"] == "exception")
+    assert ex.attrib["image"] == "exception_icon"
+    # Terminal: empty dragpoints (no outgoing edge).
+    dragpoints = ex.find("dragpoints")
+    assert dragpoints is not None and list(dragpoints) == []
+    config = ex.find("configuration/exception")
+    assert config.attrib["stopProcessReturnSingleDoc"] == "false"
+    assert config.attrib["stopsingledoc"] == "true"
+    assert config.attrib["title"] == "Halt" and ex.attrib["userlabel"] == "Halt"
+    assert config.find("exMessage").text == "halt: {1}"
+    pv = config.find("exParameters/parametervalue")
+    assert pv.attrib["valueType"] == "track" and "usesEncryption" not in pv.attrib
+    # The catcherrors Catch dragpoint targets the Exception (not a bare Stop).
+    ce = next(s for s in shapes if s.attrib["shapetype"] == "catcherrors")
+    catch_dp = next(d for d in ce.find("dragpoints") if d.attrib.get("identifier") == "error")
+    assert catch_dp.attrib["toShape"] == ex.attrib["name"]
+
+
 def test_inv_stop_carries_continue_and_no_stopaction():
     xml = ProcessFlowBuilder.build(_process_config(), name="P")
     assert "stopaction" not in xml
@@ -751,6 +789,13 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "emitter": "process_flow_builder._emit_returndocuments (issue #107 M10.3)",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_returndocuments_terminal_no_stop",
+    },
+    {
+        "id": "exception_terminal",
+        "invariant": "Exception (Throw) is terminal on the catch leg — empty <dragpoints/>, the catcherrors Catch targets it (never a bare Stop), stopProcessReturnSingleDoc=false + stopsingledoc + {1} message binding",
+        "emitter": "process_flow_builder._emit_exception (issue #108 M10.4)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_exception_terminal_throws_no_stop",
     },
     {
         "id": "dpp_processparameter_binding",
