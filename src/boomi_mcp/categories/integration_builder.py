@@ -2547,7 +2547,7 @@ def _execute_component(
             "hint": (
                 "Use list_integration_archetypes()/build_from_archetype(), "
                 "or set process_kind to one of "
-                "['database_to_api_sync', 'wrapper_subprocess']. Use "
+                f"{sorted(PROCESS_FLOW_BUILDERS)}. Use "
                 "manage_component with raw XML only as an explicit escape hatch."
             ),
         }
