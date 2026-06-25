@@ -305,8 +305,17 @@ def test_supported_transform_modes_are_dispatch_backed():
 
 
 def test_process_flow_builder_kinds_registered():
-    """The process-kind registry holds exactly the two shipped process kinds."""
-    assert set(PROCESS_FLOW_BUILDERS) == {"database_to_api_sync", "wrapper_subprocess"}
+    """The process-kind registry holds exactly the shipped process kinds.
+
+    sync_pipeline (issue #70 M5.2) is a verified-linear PipelineSpec lowering
+    layer that delegates XML emission to ProcessFlowBuilder — it adds a process
+    KIND but no new emittable SHAPE (PINNED_EMITTABLE below is unchanged).
+    """
+    assert set(PROCESS_FLOW_BUILDERS) == {
+        "database_to_api_sync",
+        "wrapper_subprocess",
+        "sync_pipeline",
+    }
 
 
 def test_registry_not_served_in_doctrine_catalog():

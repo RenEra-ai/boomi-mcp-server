@@ -81,6 +81,14 @@ def test_registry_exposes_database_to_api_sync():
     assert get_process_flow_builder(None) is None
 
 
+def test_registry_exposes_sync_pipeline():
+    # Issue #70 M5.2: the verified-linear sync_pipeline kind is registered.
+    from src.boomi_mcp.categories.components.builders import SyncPipelineBuilder
+
+    assert "sync_pipeline" in PROCESS_FLOW_BUILDERS
+    assert get_process_flow_builder("sync_pipeline") is SyncPipelineBuilder
+
+
 # ---------------------------------------------------------------------------
 # build() — Component XML envelope
 # ---------------------------------------------------------------------------

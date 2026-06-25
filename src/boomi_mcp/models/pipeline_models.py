@@ -32,8 +32,17 @@ As of #69 (M5.1) this contract is attached to the public spec as the optional
 ``IntegrationSpecV1.pipeline`` field, and :class:`StageSpec` carries semantic
 metadata — ``cardinality`` / ``context_effect`` / ``side_effect`` /
 ``failure_behavior`` — which the validator uses to reject invalid side-effect
-ordering and unsupported failure modes. No Boomi XML is emitted from
-``PipelineSpec`` yet; lowering the stage graph to a process-flow builder is M5.2+.
+ordering and unsupported failure modes.
+
+As of #70 (M5.2) there is exactly ONE lowering path from this contract to Boomi
+XML: the ``sync_pipeline`` process builder (``SyncPipelineBuilder`` in
+``process_flow_builder.py``) lowers the verified-linear, all-``ordering`` subset
+— ``read(db_read) -> [map] -> send(rest_send)`` — into the proven
+``database_to_api_sync`` source/transform/target config. Every other stage kind
+(``fetch`` / ``write`` / ``lookup`` / ``combine`` / ``flow_control`` /
+``branch`` / ``decision`` / ``dataprocess`` / ``exception`` /
+``doccacheretrieve``) still has NO PipelineSpec->XML emitter and is rejected by
+that builder with a hint pointing at its owning issue.
 """
 
 from typing import Any, Dict, List, Literal, Optional

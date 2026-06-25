@@ -6395,3 +6395,219 @@ class TestVerifyProcessGraph:
         assert record["verified"] is False
         assert record["error_code"] == "PROCESS_GRAPH_INTEGRITY_FAILED"
         assert record["process_graph"]["errors"]
+
+
+# ===========================================================================
+# Issue #70 M5.2 — sync_pipeline plan-time integration (lowered ref-type checks)
+# ===========================================================================
+
+
+def _sync_pipeline_config(
+    *, source_overrides=None, send_overrides=None, with_map=True, **top
+):
+    """A minimal-valid sync_pipeline config wiring the same stub dep keys the
+    database_to_api_sync process-flow tests use, so _stub_dep_comp roles satisfy
+    the lowered $ref type checks unchanged."""
+    read_cfg = {
+        "primitive": "db_read",
+        "connection_id": "$ref:db_connection",
+        "operation_id": "$ref:db_query_operation",
+    }
+    read_cfg.update(source_overrides or {})
+    send_cfg = {
+        "primitive": "rest_send",
+        "action_type": "POST",
+        "connection_id": "$ref:target_rest_connection",
+        "operation_id": "$ref:target_rest_operation",
+    }
+    send_cfg.update(send_overrides or {})
+    stages = [{"key": "source", "kind": "read", "config": read_cfg}]
+    deps = []
+    if with_map:
+        stages.append({"key": "transform", "kind": "map",
+                       "config": {"primitive": "map", "map_ref": "$ref:field_map"}})
+        deps.append({"from_stage": "source", "to_stage": "transform"})
+        deps.append({"from_stage": "transform", "to_stage": "target"})
+    else:
+        deps.append({"from_stage": "source", "to_stage": "target"})
+    stages.append({"key": "target", "kind": "send", "config": send_cfg})
+    cfg = {"process_kind": "sync_pipeline", "pipeline": {"stages": stages, "dependencies": deps}}
+    cfg.update(top)
+    return cfg
+
+
+def _sync_pipeline_comp(
+    key="main_process",
+    name="Sync Pipeline Process",
+    action="create",
+    depends_on=(
+        "db_connection",
+        "db_query_operation",
+        "field_map",
+        "target_rest_connection",
+        "target_rest_operation",
+    ),
+    **config_overrides,
+):
+    return IntegrationComponentSpec(
+        key=key,
+        type="process",
+        action=action,
+        name=name,
+        config=_sync_pipeline_config(**config_overrides),
+        depends_on=list(depends_on),
+    )
+
+
+def _map_stub(key="field_map"):
+    """A Map component stub (action=update so the builder preflight is skipped)."""
+    return IntegrationComponentSpec(
+        key=key, type="component", action="update",
+        component_id="00000000-0000-0000-0000-stubbed00009",
+        name=key.replace("_", " ").title(),
+        config={"name": key, "type": "transform.map"},
+    )
+
+
+def _sync_deps(map_method="POST"):
+    return [
+        _stub_dep_comp("db_connection"),
+        _stub_dep_comp("db_query_operation"),
+        _map_stub("field_map"),
+        _stub_dep_comp("target_rest_connection"),
+        _stub_dep_comp("target_rest_operation", method=map_method),
+    ]
+
+
+class TestBuildPlanSyncPipeline:
+    """Plan-time validation for the M5.2 sync_pipeline process builder (#70)."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_sync_pipeline_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        components = _sync_deps() + [_sync_pipeline_comp()]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        assert plan["_success"] is True, plan
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "create"
+        assert step["route"] == "process_flow_xml"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_valid_no_map_sync_pipeline_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _sync_pipeline_comp(
+            with_map=False,
+            depends_on=(
+                "db_connection",
+                "db_query_operation",
+                "target_rest_connection",
+                "target_rest_operation",
+            ),
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            comp,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        assert plan["_success"] is True, plan
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_swapped_source_refs_surface_type_mismatch(self, mock_pag):
+        # connection_id at the operation key and vice versa: reachability passes
+        # (both in depends_on), only the lowered-config type check catches it.
+        mock_pag.return_value = []
+        comp = _sync_pipeline_comp(source_overrides={
+            "connection_id": "$ref:db_query_operation",
+            "operation_id": "$ref:db_connection",
+        })
+        components = _sync_deps() + [comp]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "error_process_validation"
+        ve = step["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "source.connection_id"
+        assert ve["details"]["expected_role"] == "database connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_swapped_target_refs_surface_type_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _sync_pipeline_comp(send_overrides={
+            "connection_id": "$ref:target_rest_operation",
+            "operation_id": "$ref:target_rest_connection",
+            "action_type": "POST",
+            "primitive": "rest_send",
+        })
+        components = _sync_deps() + [comp]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "target.connection_id"
+        assert ve["details"]["expected_role"] == "REST Client connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_dependency_precedence_over_type_check(self, mock_pag):
+        # depends_on omits the map key but config still references $ref:field_map:
+        # MISSING_PROCESS_DEPENDENCY must fire (reachability beats the type check).
+        mock_pag.return_value = []
+        comp = _sync_pipeline_comp(depends_on=(
+            "db_connection",
+            "db_query_operation",
+            "target_rest_connection",
+            "target_rest_operation",
+        ))
+        components = _sync_deps() + [comp]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "MISSING_PROCESS_DEPENDENCY"
+
+    @patch(_PATCH_TARGET)
+    def test_rest_method_mismatch_surfaces_type_mismatch(self, mock_pag):
+        # The referenced REST op declares POST; the send stage action_type=PATCH.
+        mock_pag.return_value = []
+        comp = _sync_pipeline_comp(send_overrides={
+            "action_type": "PATCH",
+            "primitive": "rest_send",
+            "connection_id": "$ref:target_rest_connection",
+            "operation_id": "$ref:target_rest_operation",
+        })
+        components = _sync_deps(map_method="POST") + [comp]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "target.action_type"
+        assert ve["details"]["expected_role"] == "POST"
+        assert ve["details"]["actual_role"] == "PATCH"
+
+    @patch(_PATCH_TARGET)
+    def test_reserved_fetch_kind_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        comp = IntegrationComponentSpec(
+            key="main_process", type="process", action="create", name="Bad",
+            config={"process_kind": "sync_pipeline", "pipeline": {
+                "stages": [{"key": "s", "kind": "fetch", "config": {"primitive": "rest_fetch"}}],
+                "dependencies": [],
+            }},
+            depends_on=[],
+        )
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "error_process_validation"
+        assert step["validation_error"]["error_code"] == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
+
+    @patch(_PATCH_TARGET)
+    def test_topo_order_places_sync_pipeline_after_deps(self, mock_pag):
+        mock_pag.return_value = []
+        components = [_sync_pipeline_comp()] + _sync_deps()
+        order = _build_plan(MagicMock(), _build_config(components))["execution_order"]
+        assert order.index("main_process") == len(order) - 1
+        for dep in ("db_connection", "db_query_operation", "field_map",
+                    "target_rest_connection", "target_rest_operation"):
+            assert order.index(dep) < order.index("main_process")

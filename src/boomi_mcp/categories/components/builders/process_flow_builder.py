@@ -45,6 +45,9 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from pydantic import ValidationError
+
+from ....models.pipeline_models import PipelineSpec, StageSpec
 from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import (
     BuilderValidationError,
@@ -3584,12 +3587,441 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
 
 
 # ----------------------------------------------------------------------
+# Issue #70 M5.2 — sync_pipeline (verified-linear PipelineSpec lowering)
+# ----------------------------------------------------------------------
+
+# The ONLY PipelineStageKind values the verified-linear sync_pipeline builder
+# lowers to XML. Every other kind in the M5.1 (#69) vocabulary stays reserved —
+# modeled in the contract, no PipelineSpec->XML lowering yet — and is rejected
+# with a hint pointing at its owning issue. fetch/write are the reserved
+# source/target extension points (M5.4 #72 / M5.6 #32); the rest are
+# combine/lookup/control-flow owned by M10 (#103, e.g. Flow Control M10.7 #111).
+_SYNC_PIPELINE_SUPPORTED_KINDS = frozenset({"read", "map", "send"})
+
+# The primitive discriminator each supported stage must declare in config.
+_SYNC_PIPELINE_STAGE_PRIMITIVE: Dict[str, str] = {
+    "read": "db_read",
+    "map": "map",
+    "send": "rest_send",
+}
+
+# Hints for reserved stage *kinds* (rejected by the kind gate).
+_SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
+    "fetch": "The 'fetch' (rest_fetch) REST source stage is reserved for M5.4 (issue #72).",
+    "write": "The 'write' (db_write) DB target stage is reserved for M5.6 (issue #32).",
+    "lookup": "The 'lookup' stage is reserved (modeled in M5.1 #69, no emitter yet).",
+    "combine": "The 'combine' stage is reserved; combine/control-flow emitters are owned by M10 (issue #103).",
+    "flow_control": "The 'flow_control' stage is reserved; Flow Control is M10.7 (issue #111), owned by M10 (#103).",
+    "branch": "The 'branch' stage kind has no PipelineSpec lowering; the Branch shape is owned by M10.8 (issue #112).",
+    "decision": "The 'decision' stage is reserved; control-flow emitters are owned by M10 (issue #103).",
+    "dataprocess": "The 'dataprocess' stage has no PipelineSpec lowering; the Data Process shape is owned by M10.2 (issue #106).",
+    "exception": "The 'exception' stage has no PipelineSpec lowering; Exception/Throw is owned by M10.4 (issue #108).",
+    "doccacheretrieve": "The 'doccacheretrieve' stage has no PipelineSpec lowering; Document Cache Retrieve is owned by M10.5 (issue #109).",
+    "finalize": "The 'finalize' stage is reserved (no PipelineSpec lowering yet).",
+}
+
+# Hints for reserved *primitives* mis-declared on an otherwise-supported kind.
+_SYNC_PIPELINE_RESERVED_PRIMITIVE_HINTS: Dict[str, str] = {
+    "rest_fetch": "rest_fetch (the REST 'fetch' source) is reserved for M5.4 (issue #72).",
+    "db_write": "db_write (the DB 'write' target) is reserved for M5.6 (issue #32).",
+}
+
+# Config keys allowed on a read/send (connector-binding) stage. Anything else —
+# e.g. a target.dynamic_path or a nested reliability block — is rejected so a
+# gated sub-block can never be silently dropped into the lowered config.
+_SYNC_PIPELINE_BINDING_KEYS = frozenset(
+    {"primitive", "connector_type", "action_type", "connection_id", "operation_id", "label"}
+)
+# Config keys allowed on a map stage.
+_SYNC_PIPELINE_MAP_KEYS = frozenset({"primitive", "map_ref", "map_id", "label"})
+
+# Top-level sync_pipeline config keys that are accepted (lowered or consumed by
+# the integration builder / build() kwargs). Every other top-level key is
+# rejected — gated blocks get a tailored hint, the rest a generic one — so a
+# reliability / branch / return_documents block can never vanish silently.
+_SYNC_PIPELINE_TOP_LEVEL_KEYS = frozenset(
+    {
+        "process_kind",
+        "process_type",
+        "pipeline",
+        "name",
+        "description",
+        "folder_name",
+        "process_extensions",
+    }
+)
+_SYNC_PIPELINE_GATED_TOP_LEVEL: Dict[str, str] = {
+    "reliability": "Try/Catch retry + DLQ (reliability) is gated for sync_pipeline — it is verified-linear only (M5.2). Use process_kind='database_to_api_sync' for the reliability catch path.",
+    "branch": "Branch fan-out is gated for sync_pipeline — it is verified-linear only (M5.2). The Branch shape is owned by M10.8 (issue #112).",
+    "process_calls": "Process Call is gated for sync_pipeline. Use process_kind='wrapper_subprocess' for facade Process Calls.",
+    "return_documents": "Return Documents is gated for sync_pipeline — it is verified-linear (db_read -> [map] -> rest_send -> stop) only (M5.2).",
+    "source": "sync_pipeline takes a 'pipeline' stage graph, not a top-level 'source'. Express the DB source as a read stage (config.primitive='db_read').",
+    "target": "sync_pipeline takes a 'pipeline' stage graph, not a top-level 'target'. Express the REST target as a send stage (config.primitive='rest_send').",
+    "transform": "sync_pipeline takes a 'pipeline' stage graph, not a top-level 'transform'. Express the map as a map stage (config.primitive='map').",
+}
+
+
+class SyncPipelineBuilder(ProcessFlowBuilder):
+    """Verified-linear ``process_kind="sync_pipeline"`` builder (issue #70, M5.2).
+
+    Lowers an M5.1 :class:`PipelineSpec` (issue #69) stage graph into the proven
+    ``database_to_api_sync`` ``source``/``transform``/``target`` config and
+    delegates validation + XML emission to :class:`ProcessFlowBuilder`. It adds
+    **no new shape emitter** — it only accepts the trivial all-``ordering``-edges
+    linear case of the M10.0 (#104) typed-edge contract:
+
+        ``read(db_read) -> [map] -> send(rest_send) -> stop``
+
+    Everything else — non-``ordering`` edges, fan-out/fan-in, reserved stage
+    kinds (fetch/write/lookup/combine/flow_control/branch/decision/dataprocess/
+    exception/doccacheretrieve), and the gated reliability/branch/process_calls/
+    return_documents blocks — is rejected at builder time with a structured error
+    pointing at the owning issue. ``database_to_api_sync`` is unchanged in M5.2;
+    the archetype adapter that emits a sync_pipeline is M5.3 (#71).
+    """
+
+    PROCESS_KIND = "sync_pipeline"
+
+    @classmethod
+    def lower_config(cls, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Lower a sync_pipeline config to an equivalent database_to_api_sync config.
+
+        Raises :class:`BuilderValidationError` on any structural defect so both
+        ``validate_config`` (which returns it) and ``build`` (which lets it
+        propagate) share one source of truth and stay total on a bypass path.
+        """
+        if not isinstance(config, dict):
+            raise BuilderValidationError(
+                "sync_pipeline config must be a JSON object.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field="config",
+                hint="Provide {process_kind: 'sync_pipeline', pipeline: {stages, dependencies}}.",
+            )
+
+        # Top-level key gate — reject gated/unknown keys rather than drop them.
+        for key in config:
+            if key in _SYNC_PIPELINE_TOP_LEVEL_KEYS:
+                continue
+            gated_hint = _SYNC_PIPELINE_GATED_TOP_LEVEL.get(key)
+            raise BuilderValidationError(
+                f"sync_pipeline does not support top-level config key {key!r}.",
+                error_code=(
+                    "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED"
+                    if key in ("branch", "process_calls")
+                    else "SYNC_PIPELINE_CONFIG_INVALID"
+                ),
+                field=key,
+                hint=gated_hint
+                or (
+                    "sync_pipeline is verified-linear (M5.2); supported top-level "
+                    f"keys are {sorted(_SYNC_PIPELINE_TOP_LEVEL_KEYS)}."
+                ),
+            )
+
+        raw_pipeline = config.get("pipeline")
+        if not isinstance(raw_pipeline, dict):
+            raise BuilderValidationError(
+                "sync_pipeline requires a 'pipeline' object (a PipelineSpec stage graph).",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field="pipeline",
+                hint="Shape: {stages: [{key, kind, config}], dependencies: [{from_stage, to_stage}]}.",
+            )
+        try:
+            spec = PipelineSpec(**raw_pipeline)
+        except (ValidationError, TypeError) as exc:
+            raise BuilderValidationError(
+                f"pipeline is not a valid PipelineSpec: {exc}",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field="pipeline",
+                hint="See get_schema_template(resource_type='process', protocol='sync_pipeline').",
+            )
+
+        if not spec.stages:
+            raise BuilderValidationError(
+                "pipeline.stages must be a non-empty list.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field="pipeline.stages",
+                hint="A sync_pipeline is read(db_read) -> [map] -> send(rest_send).",
+            )
+
+        # 1. Every edge must be a plain 'ordering' edge (no branch/decision/loop).
+        for edge in spec.dependencies:
+            if edge.edge_kind != "ordering":
+                raise BuilderValidationError(
+                    f"sync_pipeline supports only 'ordering' edges; got "
+                    f"edge_kind={edge.edge_kind!r} on "
+                    f"{edge.from_stage!r}->{edge.to_stage!r}.",
+                    error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
+                    field="pipeline.dependencies",
+                    hint="Branch/decision/loop edges are owned by M10 (issue #103).",
+                )
+
+        # 2. Every stage kind must be lowerable (read/map/send).
+        stage_by_key: Dict[str, StageSpec] = {}
+        for stage in spec.stages:
+            if stage.kind not in _SYNC_PIPELINE_SUPPORTED_KINDS:
+                raise BuilderValidationError(
+                    f"sync_pipeline stage {stage.key!r} has unsupported kind "
+                    f"{stage.kind!r}; M5.2 lowers only read/map/send.",
+                    error_code="SYNC_PIPELINE_STAGE_UNSUPPORTED",
+                    field=f"pipeline.stages[{stage.key}].kind",
+                    hint=_SYNC_PIPELINE_RESERVED_KIND_HINTS.get(
+                        stage.kind,
+                        "Reserved stage kind (no PipelineSpec lowering in M5.2).",
+                    ),
+                )
+            stage_by_key[stage.key] = stage
+
+        # 3. Single linear chain over the ordering edges, covering every stage.
+        order = cls._linear_stage_order(spec, stage_by_key)
+        kinds = [stage_by_key[k].kind for k in order]
+        if kinds not in (["read", "send"], ["read", "map", "send"]):
+            raise BuilderValidationError(
+                f"sync_pipeline must be read -> [map] -> send; got stage kinds "
+                f"{kinds}.",
+                error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
+                field="pipeline.stages",
+                hint="Exactly one db_read source, an optional map, one rest_send target.",
+            )
+
+        read_stage = stage_by_key[order[0]]
+        send_stage = stage_by_key[order[-1]]
+        map_stage = stage_by_key[order[1]] if len(order) == 3 else None
+
+        lowered: Dict[str, Any] = {
+            "process_kind": ProcessFlowBuilder.PROCESS_KIND,
+            "source": cls._lower_binding_stage(read_stage, default_connector_type="database"),
+            "transform": cls._lower_map_stage(map_stage),
+            "target": cls._lower_binding_stage(send_stage, default_connector_type="rest"),
+        }
+        # Carry non-flow metadata the base builder already supports. name /
+        # folder_name are consumed by the integration builder / build() kwargs,
+        # not by the lowered config, so they are intentionally not copied here.
+        if "description" in config:
+            lowered["description"] = config["description"]
+        if "process_extensions" in config:
+            lowered["process_extensions"] = config["process_extensions"]
+        return lowered
+
+    @classmethod
+    def _linear_stage_order(
+        cls, spec: PipelineSpec, stage_by_key: Dict[str, "StageSpec"]
+    ) -> List[str]:
+        """Return the single linear stage order, or raise on any non-linear shape.
+
+        Requires exactly one source (indegree 0), no fan-out (outdegree <= 1),
+        and full coverage (every stage on the one path). PipelineSpec already
+        rejected cycles, so the walk is acyclic; the in-loop guard is defensive.
+        """
+        out_edges: Dict[str, List[str]] = {k: [] for k in stage_by_key}
+        indeg: Dict[str, int] = {k: 0 for k in stage_by_key}
+        for edge in spec.dependencies:
+            out_edges[edge.from_stage].append(edge.to_stage)
+            indeg[edge.to_stage] += 1
+
+        sources = [k for k in stage_by_key if indeg[k] == 0]
+        if len(sources) != 1:
+            raise BuilderValidationError(
+                f"sync_pipeline must be a single linear chain; found "
+                f"{len(sources)} start stages (expected exactly 1).",
+                error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
+                field="pipeline.dependencies",
+                hint="Wire read -> [map] -> send with one start and no fan-in.",
+            )
+
+        order: List[str] = []
+        seen: set = set()
+        cur: Optional[str] = sources[0]
+        while cur is not None:
+            if cur in seen:  # defensive — PipelineSpec already rejects cycles.
+                raise BuilderValidationError(
+                    "sync_pipeline pipeline contains a cycle.",
+                    error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
+                    field="pipeline.dependencies",
+                    hint="A sync_pipeline is an acyclic read -> [map] -> send chain.",
+                )
+            seen.add(cur)
+            order.append(cur)
+            nxts = out_edges[cur]
+            if len(nxts) > 1:
+                raise BuilderValidationError(
+                    f"sync_pipeline stage {cur!r} fans out to {len(nxts)} stages; "
+                    "it is linear (no fan-out).",
+                    error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
+                    field="pipeline.dependencies",
+                    hint="Branch fan-out is owned by M10.8 (issue #112).",
+                )
+            cur = nxts[0] if nxts else None
+
+        if len(order) != len(stage_by_key):
+            raise BuilderValidationError(
+                "sync_pipeline is not a single connected linear chain "
+                "(unreachable or fanned-in stages).",
+                error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
+                field="pipeline.stages",
+                hint="Every stage must lie on the one read -> [map] -> send path.",
+            )
+        return order
+
+    @classmethod
+    def _check_stage_primitive(cls, stage: "StageSpec") -> None:
+        """Enforce config.primitive matches the stage kind (raises otherwise)."""
+        expected = _SYNC_PIPELINE_STAGE_PRIMITIVE[stage.kind]
+        primitive = stage.config.get("primitive")
+        if primitive == expected:
+            return
+        if primitive is None:
+            raise BuilderValidationError(
+                f"sync_pipeline {stage.kind} stage {stage.key!r} must declare "
+                f"config.primitive={expected!r}.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].config.primitive",
+                hint=f"A {stage.kind!r} stage is backed by the {expected!r} primitive.",
+            )
+        raise BuilderValidationError(
+            f"sync_pipeline {stage.kind} stage {stage.key!r} has primitive "
+            f"{primitive!r}; expected {expected!r}.",
+            error_code="SYNC_PIPELINE_STAGE_UNSUPPORTED",
+            field=f"pipeline.stages[{stage.key}].config.primitive",
+            hint=_SYNC_PIPELINE_RESERVED_PRIMITIVE_HINTS.get(
+                primitive, f"A {stage.kind!r} stage must use primitive {expected!r}."
+            ),
+        )
+
+    @classmethod
+    def _lower_binding_stage(
+        cls, stage: "StageSpec", *, default_connector_type: str
+    ) -> Dict[str, Any]:
+        """Lower a read/send stage to a source/target connector binding dict."""
+        if stage.component_ref is not None:
+            raise BuilderValidationError(
+                f"sync_pipeline stage {stage.key!r} uses component_ref; M5.2 "
+                "supports only config-backed primitive stages.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].component_ref",
+                hint="Provide the connector binding via config (component reuse stages are not lowered in M5.2).",
+            )
+        cls._check_stage_primitive(stage)
+        extra = set(stage.config) - _SYNC_PIPELINE_BINDING_KEYS
+        if extra:
+            raise BuilderValidationError(
+                f"sync_pipeline {stage.kind} stage {stage.key!r} has unsupported "
+                f"config key(s) {sorted(extra)}.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].config",
+                hint=(
+                    "Allowed keys: "
+                    f"{sorted(_SYNC_PIPELINE_BINDING_KEYS)}. Gated sub-blocks "
+                    "(e.g. dynamic_path, reliability) are not lowered in M5.2."
+                ),
+            )
+        binding: Dict[str, Any] = {
+            "connector_type": stage.config.get("connector_type", default_connector_type),
+            # A read (db_read) source is always a Get in M2.5; a send (rest_send)
+            # target carries an explicit HTTP method (no default).
+            "action_type": stage.config.get(
+                "action_type", "Get" if stage.kind == "read" else None
+            ),
+            "connection_id": stage.config.get("connection_id"),
+            "operation_id": stage.config.get("operation_id"),
+        }
+        if "label" in stage.config:
+            binding["label"] = stage.config["label"]
+        return binding
+
+    @classmethod
+    def _lower_map_stage(cls, stage: Optional["StageSpec"]) -> Dict[str, Any]:
+        """Lower an optional map stage to a transform block (passthrough if absent)."""
+        if stage is None:
+            return {"mode": "passthrough"}
+        if stage.component_ref is not None:
+            raise BuilderValidationError(
+                f"sync_pipeline map stage {stage.key!r} uses component_ref; M5.2 "
+                "supports only config-backed primitive stages.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].component_ref",
+                hint="Provide the map reference via config (component reuse stages are not lowered in M5.2).",
+            )
+        cls._check_stage_primitive(stage)
+        extra = set(stage.config) - _SYNC_PIPELINE_MAP_KEYS
+        if extra:
+            raise BuilderValidationError(
+                f"sync_pipeline map stage {stage.key!r} has unsupported config "
+                f"key(s) {sorted(extra)}.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].config",
+                hint=f"Allowed keys: {sorted(_SYNC_PIPELINE_MAP_KEYS)}.",
+            )
+        map_ref = stage.config.get("map_ref") or stage.config.get("map_id")
+        if not isinstance(map_ref, str) or not map_ref.strip():
+            raise BuilderValidationError(
+                f"sync_pipeline map stage {stage.key!r} requires a non-empty "
+                "config.map_ref (or map_id).",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].config.map_ref",
+                hint="Pass the Map component id or a $ref:KEY token (and add KEY to depends_on).",
+            )
+        transform: Dict[str, Any] = {"mode": "map_ref", "map_ref": map_ref}
+        if "label" in stage.config:
+            transform["label"] = stage.config["label"]
+        return transform
+
+    @classmethod
+    def validate_config(
+        cls,
+        config: Dict[str, Any],
+        *,
+        depends_on: Optional[Iterable[str]] = None,
+    ) -> Optional[BuilderValidationError]:
+        """Validate a sync_pipeline config; return a structured error or None.
+
+        Runs the process_kind guard, then lowers the pipeline (surfacing any
+        lowering defect as a structured error) and delegates the lowered config
+        to :meth:`ProcessFlowBuilder.validate_config` so the proven source/target/
+        transform binding + $ref-reachability checks all apply unchanged.
+        """
+        process_kind = str(
+            config.get("process_kind") or config.get("process_type") or ""
+        ).strip()
+        if process_kind != cls.PROCESS_KIND:
+            return BuilderValidationError(
+                f"process_kind {process_kind!r} is not supported.",
+                error_code="PROCESS_KIND_UNSUPPORTED",
+                field="process_kind",
+                hint=f"Use process_kind={cls.PROCESS_KIND!r} for the verified-linear sync pipeline builder.",
+            )
+        try:
+            lowered = cls.lower_config(config)
+        except BuilderValidationError as exc:
+            return exc
+        return ProcessFlowBuilder.validate_config(lowered, depends_on=depends_on)
+
+    @classmethod
+    def build(
+        cls,
+        config: Dict[str, Any],
+        *,
+        name: str,
+        folder_name: Optional[str] = None,
+    ) -> str:
+        """Lower the pipeline and delegate XML emission to ProcessFlowBuilder.
+
+        lower_config raises on any structural defect, so a direct build() that
+        bypasses validate_config still fails cleanly instead of emitting a
+        malformed process.
+        """
+        lowered = cls.lower_config(config)
+        return ProcessFlowBuilder.build(lowered, name=name, folder_name=folder_name)
+
+
+# ----------------------------------------------------------------------
 # Registry (parallel to PROFILE_BUILDERS / CONNECTOR_BUILDERS)
 # ----------------------------------------------------------------------
 
 PROCESS_FLOW_BUILDERS: Dict[str, type] = {
     ProcessFlowBuilder.PROCESS_KIND: ProcessFlowBuilder,
     WrapperSubprocessBuilder.PROCESS_KIND: WrapperSubprocessBuilder,
+    SyncPipelineBuilder.PROCESS_KIND: SyncPipelineBuilder,
 }
 
 
@@ -3610,6 +4042,13 @@ WrapperSubprocessBuilder.PRESERVATION_POLICY = PreservationPolicy(
     owned_paths=(OwnedPath(path="bns:object/process"),),
 )
 
+# The sync_pipeline builder emits the same `<process>` subtree via the delegated
+# ProcessFlowBuilder.build, so it owns the same path (issue #70 M5.2).
+SyncPipelineBuilder.PRESERVATION_POLICY = PreservationPolicy(
+    component_type="process",
+    owned_paths=(OwnedPath(path="bns:object/process"),),
+)
+
 
 def get_process_flow_builder(process_kind: Optional[str]):
     """Return the process-flow builder for process_kind, or None."""
@@ -3621,6 +4060,7 @@ def get_process_flow_builder(process_kind: Optional[str]):
 __all__ = [
     "ProcessFlowBuilder",
     "WrapperSubprocessBuilder",
+    "SyncPipelineBuilder",
     "PROCESS_FLOW_BUILDERS",
     "get_process_flow_builder",
     "DB_CONNECTION_EXTENSION_FIELDS_CREDENTIAL",

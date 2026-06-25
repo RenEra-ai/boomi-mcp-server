@@ -534,8 +534,8 @@ _PROCESS_OVERVIEW = {
         "manage_process is read-only (list/get). Author processes with "
         "build_from_archetype()/build_integration using a typed "
         "config.process_kind; use get_schema_template(resource_type='process', "
-        "protocol='database_to_api_sync'|'wrapper_subprocess') for protocol "
-        "templates."
+        "protocol='database_to_api_sync'|'wrapper_subprocess'|'sync_pipeline') "
+        "for protocol templates."
     ),
 }
 
@@ -558,7 +558,7 @@ _PROCESS_CREATE_REMOVED = {
         ),
         "typed_process_kind": (
             "Set config.process_kind to one of "
-            "['database_to_api_sync', 'wrapper_subprocess'] on a "
+            "['database_to_api_sync', 'wrapper_subprocess', 'sync_pipeline'] on a "
             "build_integration process component. See "
             "get_schema_template(resource_type='process', protocol=...)."
         ),
@@ -567,7 +567,7 @@ _PROCESS_CREATE_REMOVED = {
             "process XML."
         ),
     },
-    "process_protocols": ["database_to_api_sync", "wrapper_subprocess"],
+    "process_protocols": ["database_to_api_sync", "wrapper_subprocess", "sync_pipeline"],
 }
 
 _PROCESS_LIST = {
@@ -6048,6 +6048,139 @@ _PROCESS_FLOW_PROTOCOLS = {
             "process component keyed 'main_logic' in the same spec; the parent "
             "references it via subprocess_ref='$ref:main_logic'."
         ),
+    },
+    "sync_pipeline": {
+        "resource_type": "process",
+        "operation": "create",
+        "protocol": "sync_pipeline",
+        "tool": "build_integration (action='plan' | 'apply')",
+        "process_kind": "sync_pipeline",
+        "description": (
+            "Verified-linear process builder (issue #70 M5.2). Takes a semantic "
+            "M5.1 PipelineSpec (issue #69) stage graph and lowers the all-"
+            "'ordering' linear subset — read(db_read) -> [map] -> send(rest_send) "
+            "-> stop — into the proven database_to_api_sync source/transform/"
+            "target config. It adds NO new shape: the emitted XML is identical to "
+            "the equivalent database_to_api_sync process. Routed via "
+            "build_integration when a type='process' component carries "
+            "config.process_kind='sync_pipeline'."
+        ),
+        "required_fields": [
+            "process_kind",
+            "pipeline",
+            "pipeline.stages",
+            "pipeline.stages[].key",
+            "pipeline.stages[].kind",
+            "pipeline.stages[].config",
+            "pipeline.stages[].config.primitive",
+        ],
+        "optional_fields": [
+            "name",
+            "folder_name",
+            "description",
+            "process_extensions",
+            "pipeline.dependencies",
+            "pipeline.stages[].config.connector_type",
+            "pipeline.stages[].config.action_type",
+            "pipeline.stages[].config.connection_id",
+            "pipeline.stages[].config.operation_id",
+            "pipeline.stages[].config.map_ref",
+            "pipeline.stages[].config.label",
+        ],
+        "supported_stage_kinds": ["read", "map", "send"],
+        "supported_edge_kinds": ["ordering"],
+        "supported_terminal_shapes": ["stop"],
+        "reserved_stage_kinds": {
+            "fetch": "rest_fetch REST source — reserved for M5.4 (issue #72).",
+            "write": "db_write DB target — reserved for M5.6 (issue #32).",
+            "lookup": "reserved (modeled in M5.1 #69, no emitter yet).",
+            "combine": "reserved; combine/control-flow emitters owned by M10 (#103).",
+            "flow_control": "reserved; Flow Control is M10.7 (#111), owned by M10 (#103).",
+            "branch": "no PipelineSpec lowering; Branch shape owned by M10.8 (#112).",
+            "decision": "reserved; control-flow emitters owned by M10 (#103).",
+            "dataprocess": "no PipelineSpec lowering; Data Process owned by M10.2 (#106).",
+            "exception": "no PipelineSpec lowering; Exception/Throw owned by M10.4 (#108).",
+            "doccacheretrieve": "no PipelineSpec lowering; Document Cache Retrieve owned by M10.5 (#109).",
+        },
+        "field_notes": {
+            "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
+            "pipeline.stages[].kind": "One of read/map/send. Every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
+            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'map' for a map stage, 'rest_send' for a send stage. A reserved primitive (rest_fetch/db_write) is rejected with its owning-issue hint.",
+            "pipeline.stages[].config": "read/send carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
+            "pipeline.dependencies": "Typed edges; sync_pipeline requires every edge to be edge_kind='ordering' (the default). The chain must be a single read -> [map] -> send path with no fan-out/fan-in.",
+            "gated_blocks": "reliability (Try/Catch retry+DLQ), branch, process_calls, and return_documents are GATED for sync_pipeline — it is verified-linear only (M5.2). Use database_to_api_sync (reliability/dynamic path) or wrapper_subprocess (Process Calls) instead.",
+        },
+        "structured_errors": [
+            {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
+            {"error_code": "SYNC_PIPELINE_CONFIG_INVALID", "field": "config|pipeline|pipeline.stages|pipeline.stages[KEY].config|pipeline.stages[KEY].config.primitive|pipeline.stages[KEY].config.map_ref|pipeline.stages[KEY].component_ref"},
+            {"error_code": "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED", "field": "pipeline.dependencies|pipeline.stages"},
+            {"error_code": "SYNC_PIPELINE_STAGE_UNSUPPORTED", "field": "pipeline.stages[KEY].kind|pipeline.stages[KEY].config.primitive"},
+            {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source.*|target.*"},
+            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|transform.map_ref|target.connection_id|target.operation_id"},
+            {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "source|transform|target"},
+            {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
+            {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
+        ],
+        "notes": [
+            "sync_pipeline is the M5.2 foundation: it proves the database_to_api_sync "
+            "linear core (DB Get source -> optional map -> REST send target -> stop) "
+            "can be expressed as a semantic stage graph and lowered to the SAME XML. "
+            "The archetype adapter that emits a sync_pipeline directly is M5.3 (#71); "
+            "in M5.2 database_to_api_sync is unchanged.",
+            "Every binding $ref:KEY token (source/target connection_id + operation_id, "
+            "the map map_ref) must be reachable via the component's depends_on, exactly "
+            "as for database_to_api_sync — the lowered config funnels through the same "
+            "ref-type and reachability checks.",
+            "Reserved stage kinds and gated blocks fail at PLAN time before any Boomi "
+            "mutation, each with a hint naming the owning issue (#72/#32 for fetch/"
+            "write, M10/#103 for control flow).",
+        ],
+        "example_component_spec": {
+            "key": "sync_pipeline_process",
+            "type": "process",
+            "action": "create",
+            "name": "<<Sync Pipeline Process Name>>",
+            "depends_on": ["db_conn", "db_op", "field_map", "rest_conn", "rest_op"],
+            "config": {
+                "process_kind": "sync_pipeline",
+                "folder_name": "<<Boomi folder path>>",
+                "pipeline": {
+                    "stages": [
+                        {
+                            "key": "source",
+                            "kind": "read",
+                            "config": {
+                                "primitive": "db_read",
+                                "connection_id": "$ref:db_conn",
+                                "operation_id": "$ref:db_op",
+                            },
+                        },
+                        {
+                            "key": "transform",
+                            "kind": "map",
+                            "config": {
+                                "primitive": "map",
+                                "map_ref": "$ref:field_map",
+                            },
+                        },
+                        {
+                            "key": "target",
+                            "kind": "send",
+                            "config": {
+                                "primitive": "rest_send",
+                                "action_type": "<<HTTP method, e.g. POST>>",
+                                "connection_id": "$ref:rest_conn",
+                                "operation_id": "$ref:rest_op",
+                            },
+                        },
+                    ],
+                    "dependencies": [
+                        {"from_stage": "source", "to_stage": "transform"},
+                        {"from_stage": "transform", "to_stage": "target"},
+                    ],
+                },
+            },
+        },
     },
 }
 

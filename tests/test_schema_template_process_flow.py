@@ -451,6 +451,78 @@ def test_wrapper_subprocess_protocol_documented():
     assert not _UUID_RE.search(serialized)
 
 
+def test_sync_pipeline_protocol_documented():
+    # Issue #70 M5.2: the sync_pipeline structure is documented in get_schema_template.
+    result = get_schema_template_action(
+        resource_type="process",
+        operation="create",
+        protocol="sync_pipeline",
+    )
+    assert result["_success"] is True
+    assert result["process_kind"] == "sync_pipeline"
+    assert result["protocol"] == "sync_pipeline"
+    # Required fields cover the pipeline stage graph + the primitive discriminator.
+    for field in (
+        "process_kind",
+        "pipeline",
+        "pipeline.stages",
+        "pipeline.stages[].key",
+        "pipeline.stages[].kind",
+        "pipeline.stages[].config.primitive",
+    ):
+        assert field in result["required_fields"], field
+    # Only the verified-linear surface is supported.
+    assert result["supported_stage_kinds"] == ["read", "map", "send"]
+    assert result["supported_edge_kinds"] == ["ordering"]
+    assert result["supported_terminal_shapes"] == ["stop"]
+    # Reserved kinds point at their owning issues.
+    reserved = result["reserved_stage_kinds"]
+    assert "#72" in reserved["fetch"]
+    assert "#32" in reserved["write"]
+    assert "#103" in reserved["flow_control"]
+    # The M5.2 structured errors are all advertised.
+    codes = {e["error_code"] for e in result["structured_errors"]}
+    for code in (
+        "PROCESS_KIND_UNSUPPORTED",
+        "SYNC_PIPELINE_CONFIG_INVALID",
+        "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
+        "SYNC_PIPELINE_STAGE_UNSUPPORTED",
+        "PROCESS_CONNECTOR_BINDING_INVALID",
+        "PROCESS_REF_TYPE_MISMATCH",
+        "MISSING_PROCESS_DEPENDENCY",
+    ):
+        assert code in codes, code
+    # The gated blocks (reliability/branch/process_calls/return_documents) must NOT
+    # be advertised as supported optional fields — sync_pipeline is verified-linear.
+    optional = set(result["optional_fields"])
+    for gated in ("reliability", "branch", "process_calls", "return_documents"):
+        assert gated not in optional, gated
+    # sync_pipeline gates Return Documents, so it must NOT be in the #107 loop's
+    # set of return-documents protocols.
+    assert "returndocuments" not in result["supported_terminal_shapes"]
+    # Example obeys the anti-template / no-UUID hygiene.
+    example = result["example_component_spec"]
+    assert example["config"]["process_kind"] == "sync_pipeline"
+    stages = example["config"]["pipeline"]["stages"]
+    assert stages[0]["config"]["primitive"] == "db_read"
+    assert stages[-1]["config"]["primitive"] == "rest_send"
+    serialized = json.dumps(result)
+    assert not _UUID_RE.search(serialized)
+    for pattern in _FORBIDDEN_PATTERNS:
+        assert not re.search(pattern, serialized), pattern
+
+
+def test_sync_pipeline_in_valid_protocols_and_removal_guidance():
+    # Unknown-protocol error lists sync_pipeline among valid protocols.
+    bad = get_schema_template_action(
+        resource_type="process", operation="create", protocol="nope",
+    )
+    assert "sync_pipeline" in bad["valid_protocols"]
+    # The create-removal guidance steers to all three typed kinds.
+    removed = get_schema_template_action(resource_type="process", operation="create")
+    assert "sync_pipeline" in removed["process_protocols"]
+
+
 def test_unknown_protocol_returns_error():
     result = get_schema_template_action(
         resource_type="process",

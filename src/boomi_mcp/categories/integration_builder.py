@@ -136,6 +136,7 @@ from .components.builders import (
     RestClientOperationBuilder,
     ProcessFlowBuilder,
     WrapperSubprocessBuilder,
+    SyncPipelineBuilder,
     PROFILE_BUILDERS,
     PROCESS_FLOW_BUILDERS,
     get_connector_action_builder,
@@ -4294,7 +4295,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     hint=(
                         "Use list_integration_archetypes()/build_from_archetype(), "
                         "or set process_kind to one of "
-                        "['database_to_api_sync', 'wrapper_subprocess']. Use "
+                        f"{sorted(PROCESS_FLOW_BUILDERS)}. Use "
                         "manage_component with raw XML only as an explicit escape hatch."
                     ),
                 )
@@ -4444,6 +4445,24 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     process_flow_err = _check_wrapper_subprocess_ref_types(
                         comp, raw_config, components_by_key
                     )
+                # Issue #70 M5.2: a sync_pipeline config carries a `pipeline` stage
+                # graph, not the source/target/transform blocks _check_process_flow_ref_types
+                # reads. SyncPipelineBuilder is a ProcessFlowBuilder subclass (so the
+                # identity check above is False for it too) — lower the pipeline to the
+                # equivalent database_to_api_sync config first, then run the SAME
+                # ref-type check on the lowered config so every $ref protection (source
+                # DB connection/action, map, target REST connection/action, REST method)
+                # applies unchanged. validate_config already lowered+passed, so this
+                # re-derivation cannot newly fail in practice; the try/except keeps it total.
+                elif process_flow_err is None and builder_cls is SyncPipelineBuilder:
+                    try:
+                        lowered_config = SyncPipelineBuilder.lower_config(raw_config)
+                    except BuilderValidationError as exc:
+                        process_flow_err = exc
+                    else:
+                        process_flow_err = _check_process_flow_ref_types(
+                            comp, lowered_config, components_by_key
+                        )
 
         if process_flow_err is not None:
             planned_action = "error_process_validation"
