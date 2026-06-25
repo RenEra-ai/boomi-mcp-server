@@ -3635,21 +3635,34 @@ _SYNC_PIPELINE_BINDING_KEYS = frozenset(
 # Config keys allowed on a map stage.
 _SYNC_PIPELINE_MAP_KEYS = frozenset({"primitive", "map_ref", "map_id", "label"})
 
-# Top-level sync_pipeline config keys that are accepted (lowered or consumed by
-# the integration builder / build() kwargs). Every other top-level key is
-# rejected — gated blocks get a tailored hint, the rest a generic one — so a
-# reliability / branch / return_documents block can never vanish silently.
-_SYNC_PIPELINE_TOP_LEVEL_KEYS = frozenset(
+# Top-level config keys sync_pipeline accepts. The documented authoring surface
+# (process_kind/pipeline/description/folder_name/process_extensions) PLUS the
+# metadata the integration builder + update/safe-edit paths inject into the build
+# payload (component_type/component_name/name). An unrecognized key — a misspelled
+# block (``reliabilty``) or an unsupported setting (``execution``) — is rejected
+# rather than silently dropped, so the verified-linear surface stays honest while
+# framework-injected metadata is tolerated (the base process builders read only
+# the keys they need and ignore these too). ``folder_id`` is deliberately NOT
+# accepted: the process builder emits only ``folderName`` (never ``folderId``), so
+# a create carrying folder_id would suppress FOLDER_REQUIRED_ON_CREATE yet still
+# land in the account root. Placement goes through folder_name, which is emitted.
+_SYNC_PIPELINE_ALLOWED_TOP_LEVEL = frozenset(
     {
         "process_kind",
         "process_type",
         "pipeline",
-        "name",
         "description",
         "folder_name",
         "process_extensions",
+        "name",
+        "component_type",
+        "component_name",
     }
 )
+# Top-level blocks sync_pipeline does NOT lower. Rejected (not silently dropped)
+# with a tailored hint because dropping them would change behavior. These take
+# precedence over the generic unknown-key rejection so the caller gets the
+# specific "use database_to_api_sync / wrapper_subprocess instead" guidance.
 _SYNC_PIPELINE_GATED_TOP_LEVEL: Dict[str, str] = {
     "reliability": "Try/Catch retry + DLQ (reliability) is gated for sync_pipeline — it is verified-linear only (M5.2). Use process_kind='database_to_api_sync' for the reliability catch path.",
     "branch": "Branch fan-out is gated for sync_pipeline — it is verified-linear only (M5.2). The Branch shape is owned by M10.8 (issue #112).",
@@ -3698,25 +3711,35 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                 hint="Provide {process_kind: 'sync_pipeline', pipeline: {stages, dependencies}}.",
             )
 
-        # Top-level key gate — reject gated/unknown keys rather than drop them.
+        # Top-level key gate. A gated block gets its tailored hint; any other
+        # unrecognized key (a typo or unsupported setting) is rejected too so it
+        # is never silently dropped. Allow-listed keys — including the
+        # component_type/component_name/name metadata the update + safe-edit build
+        # payload injects — pass through (the base process builders ignore them).
         for key in config:
-            if key in _SYNC_PIPELINE_TOP_LEVEL_KEYS:
-                continue
             gated_hint = _SYNC_PIPELINE_GATED_TOP_LEVEL.get(key)
-            raise BuilderValidationError(
-                f"sync_pipeline does not support top-level config key {key!r}.",
-                error_code=(
-                    "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED"
-                    if key in ("branch", "process_calls")
-                    else "SYNC_PIPELINE_CONFIG_INVALID"
-                ),
-                field=key,
-                hint=gated_hint
-                or (
-                    "sync_pipeline is verified-linear (M5.2); supported top-level "
-                    f"keys are {sorted(_SYNC_PIPELINE_TOP_LEVEL_KEYS)}."
-                ),
-            )
+            if gated_hint is not None:
+                raise BuilderValidationError(
+                    f"sync_pipeline does not support top-level config key {key!r}.",
+                    error_code=(
+                        "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED"
+                        if key in ("branch", "process_calls")
+                        else "SYNC_PIPELINE_CONFIG_INVALID"
+                    ),
+                    field=key,
+                    hint=gated_hint,
+                )
+            if key not in _SYNC_PIPELINE_ALLOWED_TOP_LEVEL:
+                raise BuilderValidationError(
+                    f"sync_pipeline does not support top-level config key {key!r}.",
+                    error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                    field=key,
+                    hint=(
+                        "sync_pipeline is verified-linear (M5.2); supported top-level "
+                        f"keys are {sorted(_SYNC_PIPELINE_ALLOWED_TOP_LEVEL)}. Express "
+                        "all flow logic as pipeline.stages."
+                    ),
+                )
 
         raw_pipeline = config.get("pipeline")
         if not isinstance(raw_pipeline, dict):

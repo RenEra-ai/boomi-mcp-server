@@ -192,6 +192,23 @@ def test_build_xml_equals_process_flow_builder_passthrough():
     assert xml_sync.count('shapetype="connectoraction"') == 2
 
 
+def test_injected_update_metadata_keys_are_tolerated():
+    # The structured-update + safe-edit paths call build() with a payload that
+    # carries injected component_type / component_name / name metadata (see
+    # build_structured_update_xml). These must NOT be rejected — the base
+    # process builders ignore unknown top-level keys, and sync_pipeline matches.
+    payload = _linear_with_map()
+    payload["component_type"] = "process"
+    payload["component_name"] = "Sync Pipeline Process"
+    payload["name"] = "Sync Pipeline Process"
+    # lower_config tolerates them and produces the same lowered core config.
+    assert SyncPipelineBuilder.lower_config(payload) == _CORE_CONFIG
+    # build() (the update/safe-edit entry point) succeeds and matches the delegate.
+    xml_sync = SyncPipelineBuilder.build(payload, name="Sync Pipeline Process")
+    xml_core = ProcessFlowBuilder.build(_CORE_CONFIG, name="Sync Pipeline Process")
+    assert xml_sync == xml_core
+
+
 def test_build_carries_description_and_process_extensions():
     cfg = _linear_with_map()
     cfg["description"] = "Nightly order sync"
@@ -386,6 +403,37 @@ def test_gated_top_level_block_rejected(block, value, code):
     cfg = _linear_with_map()
     cfg[block] = value
     assert _code(cfg, _DEPS) == code
+
+
+@pytest.mark.parametrize("bad_key", ["reliabilty", "execution", "retries", "schedule"])
+def test_unknown_top_level_key_rejected(bad_key):
+    # A misspelled gated block (reliabilty) or an unsupported setting (execution)
+    # must NOT be silently dropped — the verified-linear surface stays honest.
+    cfg = _linear_with_map()
+    cfg[bad_key] = {"whatever": True}
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_DEPS)
+    assert err is not None
+    assert err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
+    assert err.field == bad_key
+
+
+def test_folder_id_rejected_steer_to_folder_name():
+    # folder_id is NOT emitted by the process builder (only folderName is), so
+    # accepting it would suppress FOLDER_REQUIRED_ON_CREATE while the component
+    # still lands in root — reject it; placement goes through folder_name.
+    cfg = _linear_with_map()
+    cfg["folder_id"] = "some-folder-id"
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_DEPS)
+    assert err is not None
+    assert err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
+    assert err.field == "folder_id"
+
+
+def test_folder_name_accepted():
+    # folder_name IS emitted (folderName attr) — it stays allow-listed.
+    cfg = _linear_with_map()
+    cfg["folder_name"] = "Process Library/Sync"
+    assert SyncPipelineBuilder.validate_config(cfg, depends_on=_DEPS) is None
 
 
 def test_dynamic_path_in_send_stage_rejected():
