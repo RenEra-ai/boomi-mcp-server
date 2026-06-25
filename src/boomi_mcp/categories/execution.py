@@ -479,6 +479,13 @@ def execute_process_action(
         elif poll_result.get("poll_status") == "TIMEOUT":
             response["_success"] = False
             response["error"] = poll_result["message"]
+            response["note"] = (
+                "Execution did not complete in time; no execution_id is available yet. The "
+                "request_id (executionrecord-...) is an async polling tracking id and is NOT "
+                "valid for monitor_platform execution_logs/execution_artifacts/connector_documents "
+                "or troubleshoot_execution error_details fetch_logs — resolve the execution_id "
+                "later via monitor_platform(action='execution_records')."
+            )
     else:
         # Non-wait: best-effort resolve execution_id (short timeout)
         exec_id, resolve_err = _resolve_execution_id(sdk, request_id, timeout=5)
@@ -496,5 +503,13 @@ def execute_process_action(
                 f"Poll status: monitor_platform(action='execution_records', "
                 f"config='{{\"process_id\": \"{process_id}\", \"start_date\": \"<recent_iso_date>\"}}')"
             )
+
+        response["note"] = (
+            "request_id (executionrecord-...) is an async polling tracking id, NOT a valid "
+            "execution_id. Do not pass it to monitor_platform execution_logs/execution_artifacts/"
+            "connector_documents or troubleshoot_execution error_details fetch_logs. Use "
+            "execution_result.execution_id from a completed wait=true run, or resolve via "
+            "monitor_platform(action='execution_records')."
+        )
 
     return response

@@ -39,6 +39,22 @@ def _extract_api_error_msg(e) -> str:
     return getattr(e, "message", "") or str(e)
 
 
+def _reject_request_id_as_execution_id(execution_id):
+    """Return a structured failure if a request_id was passed where an execution_id is expected.
+
+    The Boomi async tracking id (request_id, 'executionrecord-<uuid>') is rejected by the
+    ExecutionRecord query and ProcessLog APIs. Only the exact 'executionrecord-' prefix is
+    rejected — 'execution' alone prefixes BOTH id forms. Returns None when the id is acceptable.
+    """
+    if isinstance(execution_id, str) and execution_id.startswith("executionrecord-"):
+        return {
+            "_success": False,
+            "error": "execution_id looks like a request_id (executionrecord- prefix). Use the execution_id from execute_process execution_result.execution_id instead.",
+            "hint": "execute_process returns two ids: request_id (executionrecord-..., for polling only) and execution_id (inside execution_result.execution_id, for logs/artifacts). Pass execution_result.execution_id here.",
+        }
+    return None
+
+
 # ============================================================================
 # Helpers
 # ============================================================================
@@ -209,6 +225,12 @@ def handle_error_details(sdk: Boomi, execution_id: str = None,
     log_level = config.get("log_level", "ALL")
 
     if execution_id:
+        # Reject a request_id (executionrecord-<uuid>) before it reaches the server-side
+        # ExecutionRecord query, which rejects it with a raw "Unknown execution id format".
+        rejection = _reject_request_id_as_execution_id(execution_id)
+        if rejection:
+            return rejection
+
         # Single execution lookup
         record = _query_execution_record(sdk, execution_id)
         if not record:
@@ -339,6 +361,13 @@ def _fetch_process_log(sdk: Boomi, execution_id: str, log_level: str = "ALL") ->
         "ALL": LogLevel.ALL,
     }
     level = log_level_map.get(log_level.upper(), LogLevel.ALL)
+
+    # Reject a request_id (executionrecord-<uuid>) passed where an execution_id is
+    # expected — the ProcessLog API rejects it server-side. Backstops the same guard
+    # in handle_error_details for callers that reach _fetch_process_log directly.
+    rejection = _reject_request_id_as_execution_id(execution_id)
+    if rejection:
+        return rejection
 
     try:
         process_log = ProcessLog(execution_id=execution_id, log_level=level)

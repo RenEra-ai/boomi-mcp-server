@@ -60,6 +60,24 @@ def _extract_api_error_msg(e: ApiError) -> str:
     return getattr(e, 'message', '') or str(e)
 
 
+def _reject_request_id_as_execution_id(execution_id):
+    """Return a structured failure if a request_id was passed where an execution_id is expected.
+
+    The Boomi async tracking id (request_id, 'executionrecord-<uuid>') is rejected by the
+    ProcessLog/ExecutionArtifacts/ConnectorDocument platform APIs. Only the exact
+    'executionrecord-' prefix is rejected — 'execution' alone prefixes BOTH id forms, so it
+    must not be tested, and no execution-<uuid>-<date> shape regex is applied (the SDK gives
+    execution_id no format contract). Returns None when the id is acceptable.
+    """
+    if isinstance(execution_id, str) and execution_id.startswith("executionrecord-"):
+        return {
+            "_success": False,
+            "error": "execution_id looks like a request_id (executionrecord- prefix). Use the execution_id from execute_process execution_result.execution_id instead.",
+            "hint": "execute_process returns two ids: request_id (executionrecord-..., for polling only) and execution_id (inside execution_result.execution_id, for logs/artifacts). Pass execution_result.execution_id here.",
+        }
+    return None
+
+
 MAX_ZIP_BYTES = 10 * 1024 * 1024       # 10 MB
 MAX_FILE_CHARS = 50_000                 # per file
 MAX_TOTAL_CHARS = 200_000              # across all files in ZIP
@@ -211,6 +229,10 @@ def handle_execution_logs(boomi_client, config_data: Dict[str, Any], creds=None)
             "hint": "Provide the execution ID to download logs for"
         }
 
+    rejection = _reject_request_id_as_execution_id(execution_id)
+    if rejection:
+        return rejection
+
     # Map log_level string to LogLevel enum (case-insensitive)
     log_level_str = config_data.get("log_level", "ALL").upper()
     log_level_map = {
@@ -289,6 +311,10 @@ def handle_execution_artifacts(boomi_client, config_data: Dict[str, Any], creds=
             "error": "execution_id is required",
             "hint": "Provide the execution ID to download artifacts for"
         }
+
+    rejection = _reject_request_id_as_execution_id(execution_id)
+    if rejection:
+        return rejection
 
     artifacts_request = ExecutionArtifacts(execution_id=execution_id)
     result = boomi_client.execution_artifacts.create_execution_artifacts(
@@ -1060,6 +1086,10 @@ def handle_connector_documents(boomi_client, config_data: Dict[str, Any]) -> Dic
             "error": "execution_id is required",
             "hint": "GenericConnectorRecord queries require an execution_id. Use execution_records action to find one."
         }
+
+    rejection = _reject_request_id_as_execution_id(execution_id)
+    if rejection:
+        return rejection
 
     limit = config_data.get("limit", 100)
     expressions = []
