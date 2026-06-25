@@ -14,6 +14,10 @@ from .pipeline_models import (
     PipelineEdgeSpec,
     PipelineStageKind,
     PipelineEdgeKind,
+    StageCardinality,
+    StageContextEffect,
+    StageSideEffect,
+    StageFailureBehavior,
 )
 
 __all__ = [
@@ -24,4 +28,8 @@ __all__ = [
     'PipelineEdgeSpec',
     'PipelineStageKind',
     'PipelineEdgeKind',
+    'StageCardinality',
+    'StageContextEffect',
+    'StageSideEffect',
+    'StageFailureBehavior',
 ]

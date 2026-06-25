@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from .pipeline_models import PipelineSpec
+
 
 class IntegrationComponentSpec(BaseModel):
     """Canonical description of a component operation in an integration build."""
@@ -69,4 +71,12 @@ class IntegrationSpecV1(BaseModel):
     folders: Dict[str, Any] = Field(default_factory=dict)
     runtime: Dict[str, Any] = Field(default_factory=dict)
     validation_rules: Dict[str, Any] = Field(default_factory=dict)
+    pipeline: Optional[PipelineSpec] = Field(
+        default=None,
+        description=(
+            "Optional semantic stage graph (M5 sync-pipeline contract). When "
+            "present, describes the stage graph; no Boomi XML is emitted from "
+            "this field alone — wiring to process-flow builders is M5.2+."
+        ),
+    )
 

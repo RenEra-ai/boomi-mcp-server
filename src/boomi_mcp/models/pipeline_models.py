@@ -23,10 +23,12 @@ cannot tell a legitimate ``loop_back`` from an accidental cycle. A "back-edge" i
 defined here graph-theoretically (by reachability over the non-loop subgraph),
 not by stage-list order.
 
-This module is deliberately standalone and is **not** wired into
-``IntegrationSpecV1`` yet — #69 (M5.1) attaches it to the public spec and extends
-the stage model with cardinality / context-effect / side-effect / failure
-metadata.
+As of #69 (M5.1) this contract is attached to the public spec as the optional
+``IntegrationSpecV1.pipeline`` field, and :class:`StageSpec` carries semantic
+metadata — ``cardinality`` / ``context_effect`` / ``side_effect`` /
+``failure_behavior`` — which the validator uses to reject invalid side-effect
+ordering and unsupported failure modes. No Boomi XML is emitted from
+``PipelineSpec`` yet; lowering the stage graph to a process-flow builder is M5.2+.
 """
 
 from typing import Any, Dict, List, Literal, Optional
@@ -54,6 +56,20 @@ PipelineEdgeKind = Literal[
     "decision_false",
     "loop_back",
 ]
+
+# Semantic stage metadata vocabularies (M5.1, issue #69). All optional on a
+# StageSpec; the validator uses side_effect / context_effect / failure_behavior
+# to reject invalid side-effect ordering and unsupported failure modes.
+StageCardinality = Literal["1:1", "1:N", "N:1", "N:N"]
+StageContextEffect = Literal[
+    "pass_through",
+    "new_connection",
+    "shape_transform",
+    "fork",
+    "join",
+]
+StageSideEffect = Literal["none", "read", "write", "read_write"]
+StageFailureBehavior = Literal["halt", "skip", "retry", "catch"]
 
 
 class PipelineEdgeSpec(BaseModel):
@@ -86,6 +102,30 @@ class StageSpec(BaseModel):
     kind: PipelineStageKind = Field(..., description="Stage kind (vocabulary includes reserved branch/decision)")
     config: Dict[str, Any] = Field(default_factory=dict, description="Type-specific stage configuration")
     component_ref: Optional[str] = Field(default=None, description="Existing component key this stage reuses")
+    cardinality: Optional[StageCardinality] = Field(
+        default=None, description="Input:output document cardinality"
+    )
+    context_effect: Optional[StageContextEffect] = Field(
+        default=None, description="How the stage changes flow context"
+    )
+    side_effect: Optional[StageSideEffect] = Field(
+        default=None, description="External side-effect class"
+    )
+    failure_behavior: Optional[StageFailureBehavior] = Field(
+        default=None, description="Failure-handling behavior"
+    )
+
+    @model_validator(mode="after")
+    def _validate_config_xor_component_ref(self) -> "StageSpec":
+        # A stage is either primitive-backed (config) OR a reuse of an existing
+        # component (component_ref) — never both. Neither is allowed too (e.g. a
+        # reserved branch/decision stage that carries only metadata).
+        if self.config and self.component_ref is not None:
+            raise ValueError(
+                f"Stage '{self.key}': config and component_ref are mutually "
+                "exclusive; set config={} or component_ref=None"
+            )
+        return self
 
 
 class PipelineSpec(BaseModel):
@@ -110,6 +150,9 @@ class PipelineSpec(BaseModel):
             if key in seen:
                 raise ValueError(f"Duplicate stage key: {key!r}")
             seen.add(key)
+
+        # Stage lookup (keys are now known unique) for the metadata-aware rules.
+        stage_by_key: Dict[str, StageSpec] = {s.key: s for s in self.stages}
 
         # 2. Edge endpoints must be declared stage keys; no self-edges.
         for edge in self.dependencies:
@@ -143,6 +186,40 @@ class PipelineSpec(BaseModel):
                         "loop_back edge does not close a forward path: "
                         f"{edge.to_stage!r} -> {edge.from_stage!r}"
                     )
+
+        # 6. Invalid side-effect ordering: a plain ordering edge must not run a
+        #    writing stage immediately before a reading stage (a read sequenced
+        #    after a write inverts the natural read->...->write data flow). Only
+        #    ordering edges are checked; branch/decision/loop_back control edges
+        #    carry no straight-line data-flow promise.
+        for edge in self.dependencies:
+            if edge.edge_kind != "ordering":
+                continue
+            src = stage_by_key[edge.from_stage]
+            tgt = stage_by_key[edge.to_stage]
+            if src.side_effect in ("write", "read_write") and tgt.side_effect == "read":
+                raise ValueError(
+                    "Invalid side-effect ordering: writing stage "
+                    f"{edge.from_stage!r} (side_effect={src.side_effect!r}) "
+                    f"ordered before reading stage {edge.to_stage!r}"
+                )
+
+        # 7/8. Unsupported failure modes for the declared stage semantics.
+        for stage in self.stages:
+            if stage.failure_behavior == "catch" and stage.context_effect != "new_connection":
+                raise ValueError(
+                    f"Stage '{stage.key}': failure_behavior='catch' requires "
+                    "context_effect='new_connection'"
+                )
+            if stage.failure_behavior == "retry" and stage.side_effect not in (
+                "read",
+                "write",
+                "read_write",
+            ):
+                raise ValueError(
+                    f"Stage '{stage.key}': failure_behavior='retry' requires "
+                    "side_effect read/write/read_write"
+                )
 
         return self
 

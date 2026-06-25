@@ -73,6 +73,7 @@ EXPECTED_SPEC_DICT = {
         "raw_xml_exposed": False,
         "component_count": 0,
     },
+    "pipeline": None,
 }
 
 

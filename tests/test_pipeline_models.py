@@ -11,11 +11,16 @@ import pytest
 from pydantic import ValidationError
 
 from boomi_mcp.models import (
+    IntegrationSpecV1,
     PipelineSpec,
     StageSpec,
     PipelineEdgeSpec,
     PipelineStageKind,
     PipelineEdgeKind,
+    StageCardinality,
+    StageContextEffect,
+    StageSideEffect,
+    StageFailureBehavior,
 )
 
 
@@ -159,3 +164,137 @@ def test_models_init_exports_pipeline_contract():
     ):
         assert name in models.__all__
         assert getattr(models, name) is not None
+
+
+# --- M5.1 (#69): stage metadata + semantic validation ---------------------
+
+
+def test_stage_metadata_fields_are_optional():
+    stage = StageSpec(key="a", kind="read")
+    assert stage.cardinality is None
+    assert stage.context_effect is None
+    assert stage.side_effect is None
+    assert stage.failure_behavior is None
+
+
+def test_stage_metadata_cardinality_valid_values():
+    for value in ("1:1", "1:N", "N:1", "N:N"):
+        stage = StageSpec(key="a", kind="read", cardinality=value)
+        assert stage.cardinality == value
+
+
+def test_stage_metadata_cardinality_invalid_rejected():
+    with pytest.raises(ValidationError):
+        StageSpec(key="a", kind="read", cardinality="7:7")
+
+
+def test_stage_config_and_component_ref_xor_rejected():
+    with pytest.raises(ValidationError) as excinfo:
+        StageSpec(key="a", kind="lookup", config={"x": 1}, component_ref="comp-1")
+    assert "mutually exclusive" in str(excinfo.value)
+
+
+def test_stage_config_empty_with_component_ref_allowed():
+    stage = StageSpec(key="a", kind="lookup", component_ref="comp-1")
+    assert stage.component_ref == "comp-1"
+    assert stage.config == {}
+
+
+def test_stage_config_only_with_no_component_ref_allowed():
+    # The other valid leg of the XOR: primitive-backed config, no component_ref.
+    stage = StageSpec(key="a", kind="map", config={"x": 1})
+    assert stage.config == {"x": 1}
+    assert stage.component_ref is None
+
+
+def test_pipeline_write_before_read_ordering_rejected():
+    with pytest.raises(ValidationError) as excinfo:
+        PipelineSpec(
+            stages=[
+                StageSpec(key="w", kind="write", side_effect="write"),
+                StageSpec(key="r", kind="read", side_effect="read"),
+            ],
+            dependencies=[PipelineEdgeSpec(from_stage="w", to_stage="r")],
+        )
+    message = str(excinfo.value)
+    assert "side-effect ordering" in message
+    assert "'w'" in message and "'r'" in message
+
+
+def test_pipeline_read_before_write_ordering_allowed():
+    # The natural direction (read sequenced before write) must stay valid.
+    spec = PipelineSpec(
+        stages=[
+            StageSpec(key="r", kind="read", side_effect="read"),
+            StageSpec(key="w", kind="write", side_effect="write"),
+        ],
+        dependencies=[PipelineEdgeSpec(from_stage="r", to_stage="w")],
+    )
+    assert len(spec.stages) == 2
+
+
+def test_pipeline_failure_catch_on_non_connector_rejected():
+    with pytest.raises(ValidationError) as excinfo:
+        PipelineSpec(
+            stages=[
+                StageSpec(
+                    key="m",
+                    kind="map",
+                    failure_behavior="catch",
+                    context_effect="shape_transform",
+                ),
+            ],
+        )
+    message = str(excinfo.value)
+    assert "catch" in message and "new_connection" in message
+
+
+def test_pipeline_failure_catch_on_connector_allowed():
+    spec = PipelineSpec(
+        stages=[
+            StageSpec(
+                key="s",
+                kind="send",
+                failure_behavior="catch",
+                context_effect="new_connection",
+                side_effect="write",
+            ),
+        ],
+    )
+    assert spec.stages[0].failure_behavior == "catch"
+
+
+def test_pipeline_failure_retry_on_pure_transform_rejected():
+    with pytest.raises(ValidationError) as excinfo:
+        PipelineSpec(
+            stages=[
+                StageSpec(
+                    key="m",
+                    kind="map",
+                    failure_behavior="retry",
+                    side_effect="none",
+                ),
+            ],
+        )
+    assert "retry" in str(excinfo.value)
+
+
+def test_integration_spec_pipeline_field_optional():
+    spec = IntegrationSpecV1(name="x")
+    assert spec.pipeline is None
+
+
+def test_integration_spec_pipeline_wired():
+    pipeline = PipelineSpec(stages=[StageSpec(key="a", kind="read")])
+    spec = IntegrationSpecV1(name="x", pipeline=pipeline)
+    assert spec.pipeline is not None
+    assert spec.pipeline.stages[0].key == "a"
+
+
+def test_integration_spec_pipeline_coerced_from_dict():
+    spec = IntegrationSpecV1(
+        name="x",
+        pipeline={"stages": [{"key": "a", "kind": "read"}]},
+    )
+    assert isinstance(spec.pipeline, PipelineSpec)
+    assert spec.pipeline.stages[0].kind == "read"
