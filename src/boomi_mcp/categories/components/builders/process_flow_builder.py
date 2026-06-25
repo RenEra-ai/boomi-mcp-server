@@ -84,6 +84,19 @@ _DATAPROCESS_OPERATIONS: Dict[str, Dict[str, str]] = {
 # The only script engine the typed builder accepts/emits for Custom Scripting.
 _DATAPROCESS_SCRIPT_LANGUAGE = "groovy2"
 
+# Issue #107 M10.3: process-level Return Documents terminal shape. Live-captured
+# from the `work` account (component 64e5397b-3583-42c9-8fe3-08ccefb0da6c, see
+# .codex/plans/issue-107-live-captures.md): a Return Documents shape is placed at
+# the END of a document path and returns the current documents to the calling
+# source point (the parent process via a Process Call/Route, or a web-service
+# client). It is TERMINAL (empty <dragpoints/>, no Stop after it — the verifier's
+# RETURN_DOCS_STOP_EXCLUSIVE invariant), so when enabled it REPLACES the trailing
+# Stop. The single optional `label` is the Boomi "custom label" that identifies
+# the returned document type(s) (used for Process Call/Route return-path mapping);
+# it is optional (empty in the live capture) and maps to both the shape userlabel
+# and the inner <returndocuments label="..."> attribute.
+_RETURN_DOCUMENTS_ALLOWED_KEYS = frozenset({"enabled", "label"})
+
 # Issue #51 M3.R1a / #88 M4.5.3: DLQ modes that emit a verified Try/Catch
 # wrapper + DLQ catch-path (every supported mode except "disabled"). The catch
 # leg is structural, so positive retry_count is only emittable WITH one of
@@ -381,6 +394,11 @@ class ProcessFlowBuilder:
         if reliability_err is not None:
             return reliability_err
 
+        # Issue #107 M10.3: validate the optional Return Documents terminal block.
+        return_documents_err = _validate_return_documents(config.get("return_documents"))
+        if return_documents_err is not None:
+            return return_documents_err
+
         # Issue #92 M4.5.7: validate the optional process_extensions declaration
         # shape at plan time. build() calls the same helper (which raises) so a
         # validate_config-bypass path stays total; here we surface the error.
@@ -547,7 +565,10 @@ class ProcessFlowBuilder:
                 "dynamic_path": dynamic_path,
             },
         ))
-        flow.append(("stop", {"continue_": True}))
+        # Issue #107 M10.3: the terminal is normally a Stop, but a
+        # return_documents.enabled=True block swaps it for a Return Documents
+        # shape (subprocess return value) — no Stop is appended after it.
+        flow.append(_terminal_flow_entry(config))
 
         # Issue #51 M3.R1a + #88 M4.5.3: when retry_count is 0..5 and a supported
         # DLQ mode is set, wrap the linear flow in the verified Try/Catch
@@ -1193,6 +1214,71 @@ def _validate_dataprocess_transform(
     return None
 
 
+def _validate_return_documents(value: Any) -> Optional[BuilderValidationError]:
+    """Validate the optional ``return_documents`` terminal block (issue #107 M10.3).
+
+    ``None``/absent is valid (the default terminal stays a Stop). When present it
+    must be an object with a bool ``enabled`` and an optional string ``label``;
+    unknown keys are rejected so a typo is not silently dropped (mirrors the
+    dataprocess strictness and the ReturnDocumentsPrimitive's ``extra='forbid'``
+    model). A Return Documents terminal carries no Stop after it (the verifier's
+    RETURN_DOCS_STOP_EXCLUSIVE invariant); that is structural — build() replaces
+    the Stop rather than appending one after Return Documents.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return BuilderValidationError(
+            "return_documents must be a JSON object.",
+            error_code="PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID",
+            field="return_documents",
+            hint='Use {"enabled": true, "label": "..."} to end the flow in a Return Documents terminal.',
+        )
+    extra = set(value) - _RETURN_DOCUMENTS_ALLOWED_KEYS
+    if extra:
+        return BuilderValidationError(
+            f"return_documents has unsupported keys: {sorted(extra)}.",
+            error_code="PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID",
+            field="return_documents",
+            hint=f"Allowed keys: {sorted(_RETURN_DOCUMENTS_ALLOWED_KEYS)}.",
+        )
+    enabled = value.get("enabled")
+    if not isinstance(enabled, bool):
+        return BuilderValidationError(
+            "return_documents.enabled must be a boolean.",
+            error_code="PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID",
+            field="return_documents.enabled",
+            hint="Set enabled=true to end the flow in a Return Documents terminal.",
+        )
+    label = value.get("label")
+    if label is not None and not isinstance(label, str):
+        return BuilderValidationError(
+            "return_documents.label must be a string.",
+            error_code="PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID",
+            field="return_documents.label",
+            hint="The label is the Return Documents custom label identifying the returned document type(s).",
+        )
+    return None
+
+
+def _terminal_flow_entry(config: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Return the terminal flow shape for a process (issue #107 M10.3).
+
+    Default is a Stop (``continue=true``) — byte-for-byte the pre-#107 output.
+    When ``config['return_documents'].enabled`` is True the terminal is a Return
+    Documents shape instead, and NO Stop is appended after it (the verifier's
+    RETURN_DOCS_STOP_EXCLUSIVE invariant requires a Return Documents path to never
+    reach a Stop). Stays total on the validate_config-bypass path: a malformed or
+    disabled return_documents block falls back to the default Stop (validate_config
+    rejects malformed blocks on the normal path with
+    PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID).
+    """
+    rd = config.get("return_documents")
+    if isinstance(rd, dict) and rd.get("enabled") is True:
+        return ("returndocuments", {"label": str(rd.get("label") or "")})
+    return ("stop", {"continue_": True})
+
+
 def _validate_reliability(reliability: Any) -> Optional[BuilderValidationError]:
     if reliability is None:
         return None
@@ -1661,6 +1747,41 @@ def _emit_dataprocess_step(step: Dict[str, Any], index: int) -> str:
     )
 
 
+def _emit_returndocuments(
+    shape_name: str,
+    params: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit a process-level Return Documents terminal shape (issue #107 M10.3).
+
+    Byte-accurate to the live ``work``-account capture (component
+    64e5397b-3583-42c9-8fe3-08ccefb0da6c; see
+    ``.codex/plans/issue-107-live-captures.md``):
+    ``<shape image="returndocuments_icon" ... shapetype="returndocuments"
+    userlabel=""><configuration><returndocuments label=""/></configuration>
+    <dragpoints/></shape>``. The shape is TERMINAL — it returns the current
+    documents to the calling source point (parent process / web-service client) —
+    so it carries an empty ``<dragpoints/>`` and ``next_name`` is ignored (like
+    ``_emit_stop``). The single optional ``label`` is the Boomi "custom label"
+    identifying the returned document type(s) (used for Process Call/Route
+    return-path mapping); it maps to BOTH the shape ``userlabel`` and the inner
+    ``<returndocuments label="...">`` attribute. Empty in the live capture, so the
+    common subprocess-return case is byte-identical to the export.
+    """
+    label = _escape_xml(str(params.get("label") or ""))
+    return (
+        f'<shape image="returndocuments_icon" name="{shape_name}" '
+        f'shapetype="returndocuments" userlabel="{label}" '
+        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        '<configuration>'
+        f'<returndocuments label="{label}"/>'
+        '</configuration>'
+        '<dragpoints/>'
+        '</shape>'
+    )
+
+
 def _emit_setproperties(
     shape_name: str,
     params: Dict[str, Any],
@@ -1822,6 +1943,10 @@ def _emit_flow_shape(
             dragpoint_y=_DRAGPOINT_Y,
             userlabel=str(params.get("userlabel") or ""),
         )
+    if kind == "returndocuments":
+        # Issue #107 M10.3: terminal Return Documents shape (replaces the Stop
+        # when return_documents.enabled). next_name is ignored — it is terminal.
+        return _emit_returndocuments(shape_name, params, next_name, shape_index)
     if kind == "stop":
         return _emit_stop(shape_name, params)
     raise BuilderValidationError(  # pragma: no cover — defensive
@@ -2523,6 +2648,13 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
         # cross-spec resolution checks (self-reference / not-found / type
         # mismatch) run there. The exact-$ref-token shape is enforced per entry
         # above. depends_on is accepted for interface parity but not required.
+        #
+        # Issue #107 M10.3: a wrapper that is itself a subprocess may end in a
+        # Return Documents terminal instead of a Stop; validate the same shape
+        # ProcessFlowBuilder enforces (build() shares _terminal_flow_entry).
+        return_documents_err = _validate_return_documents(config.get("return_documents"))
+        if return_documents_err is not None:
+            return return_documents_err
         return cls.scan_forbidden_secret_fields(config)
 
     @classmethod
@@ -2565,7 +2697,10 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
                     "userlabel": str(call.get("label") or ""),
                 },
             ))
-        flow.append(("stop", {"continue_": True}))
+        # Issue #107 M10.3: a wrapper/facade that is itself a subprocess may end
+        # in Return Documents to hand its documents back to the caller; default
+        # stays a Stop (byte-for-byte the pre-#107 wrapper output).
+        flow.append(_terminal_flow_entry(config))
         # Issue #99 G3: emit the hoisted/declared connection env-extension
         # override points so the wrapper-deployed package surfaces them through
         # get_extensions. Absent block -> empty <bns:processOverrides> (the

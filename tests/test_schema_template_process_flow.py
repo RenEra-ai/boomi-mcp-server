@@ -170,6 +170,42 @@ def test_template_documents_dataprocess_surface(template):
     assert "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED" in codes
 
 
+def test_template_documents_return_documents_surface(template):
+    # Issue #107 M10.3: the Return Documents terminal fields, the supported
+    # terminal-shape set, and the new structured error are all documented.
+    optional = template["optional_fields"]
+    for field in (
+        "return_documents",
+        "return_documents.enabled",
+        "return_documents.label",
+    ):
+        assert field in optional, field
+    assert template["supported_terminal_shapes"] == ["stop", "returndocuments"]
+    codes = {e["error_code"] for e in template["structured_errors"]}
+    assert "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID" in codes
+
+
+def test_both_process_protocols_advertise_return_documents_surface():
+    # Issue #107 M10.3 (QA Bug #140): BOTH process kinds support a Return
+    # Documents terminal at runtime, so BOTH protocol templates must advertise
+    # the #107 surface — not just database_to_api_sync.
+    for protocol in ("database_to_api_sync", "wrapper_subprocess"):
+        result = get_schema_template_action(
+            resource_type="process", operation="create", protocol=protocol
+        )
+        assert result["_success"] is True, protocol
+        optional = set(result["optional_fields"])
+        for field in (
+            "return_documents",
+            "return_documents.enabled",
+            "return_documents.label",
+        ):
+            assert field in optional, f"{protocol}: {field} missing"
+        assert result["supported_terminal_shapes"] == ["stop", "returndocuments"], protocol
+        codes = {e["error_code"] for e in result["structured_errors"]}
+        assert "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID" in codes, protocol
+
+
 def test_template_supported_dlq_modes(template):
     assert set(template["supported_dlq_modes"]) == {
         "disabled", "document_cache_ref", "error_subprocess_ref",

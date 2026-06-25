@@ -32,6 +32,7 @@ from boomi_mcp.patterns.primitives import (
     DataProcessPrimitive,
     DbExtractPrimitive,
     FieldMapPrimitive,
+    ReturnDocumentsPrimitive,
     XmlJsonConvertPrimitive,
 )
 from boomi_mcp.patterns.registry import PatternRegistry
@@ -1021,3 +1022,56 @@ class TestDataProcess:
             DataProcessPrimitive.validate_parameters(
                 {"steps": [{"operation": "search_replace", "script": "x"}]}
             )
+
+
+# ===========================================================================
+# return_documents (issue #107 M10.3)
+# ===========================================================================
+
+
+class TestReturnDocuments:
+    def test_registry_discovers_return_documents(self):
+        try:
+            reg = PatternRegistry.from_package("boomi_mcp.patterns")
+        except TypeError as exc:  # pragma: no cover — interpreter-specific
+            # Same Python 3.9.6 inspect.isclass quirk the sibling
+            # test_registry_discovers_data_process documents.
+            pytest.skip(f"registry discovery unavailable on this interpreter: {exc}")
+        cls = reg.get("return_documents")
+        assert cls is ReturnDocumentsPrimitive
+        assert cls.metadata.kind == PatternKind.PRIMITIVE
+
+    def test_describe_includes_contracts_and_no_raw_artifacts(self):
+        described = ReturnDocumentsPrimitive.describe()
+        for key in ("metadata", "parameter_schema", "input_contract", "output_contract", "required_builders"):
+            assert key in described
+        assert described["required_builders"] == ["ProcessFlowBuilder"]
+        dumped = json.dumps(described)
+        for forbidden in ("<bns:", "</", "<?xml", "```"):
+            assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
+
+    def test_emit_components_is_empty(self):
+        params = ReturnDocumentsPrimitive.validate_parameters({})
+        assert ReturnDocumentsPrimitive.emit_components(_ctx(), params) == []
+
+    def test_emit_fragment_returns_return_documents_block(self):
+        params = ReturnDocumentsPrimitive.validate_parameters({"label": "Status Updates"})
+        fragment = ReturnDocumentsPrimitive.emit_fragment(_ctx(), params)
+        rd = fragment["process_config"]["return_documents"]
+        assert rd == {"enabled": True, "label": "Status Updates"}
+        assert fragment["depends_on"] == []
+
+    def test_emit_fragment_omits_absent_label(self):
+        params = ReturnDocumentsPrimitive.validate_parameters({})
+        fragment = ReturnDocumentsPrimitive.emit_fragment(_ctx(), params)
+        assert fragment["process_config"]["return_documents"] == {"enabled": True}
+
+    def test_validation_rejects_unknown_parameter(self):
+        # extra="forbid" — 'enabled' is not a caller parameter (the primitive IS
+        # the request for an enabled Return Documents terminal).
+        with pytest.raises(ValidationError):
+            ReturnDocumentsPrimitive.validate_parameters({"enabled": True})
+
+    def test_validation_rejects_non_string_label(self):
+        with pytest.raises(ValidationError):
+            ReturnDocumentsPrimitive.validate_parameters({"label": 5})

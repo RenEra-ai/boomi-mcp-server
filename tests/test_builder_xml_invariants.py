@@ -304,6 +304,28 @@ def test_inv_dataprocessscript_attrs_groovy2_usecache_true():
     assert script.attrib["useCache"] == "true"
 
 
+def test_inv_returndocuments_terminal_no_stop():
+    # Issue #107 M10.3: with return_documents.enabled the flow ends in a Return
+    # Documents terminal — empty <dragpoints/>, the last shape, and NO Stop is
+    # emitted (the verifier's RETURN_DOCS_STOP_EXCLUSIVE invariant is guaranteed
+    # by construction: build() REPLACES the Stop rather than appending after).
+    xml = ProcessFlowBuilder.build(
+        _process_config(return_documents={"enabled": True, "label": "Status"}),
+        name="P",
+    )
+    assert 'shapetype="stop"' not in xml
+    shapes = _parse_process_shapes(xml)
+    rd = shapes[-1]
+    assert rd.attrib["shapetype"] == "returndocuments"
+    assert rd.attrib["image"] == "returndocuments_icon"
+    # Terminal: empty dragpoints (no outgoing edge).
+    dragpoints = rd.find("dragpoints")
+    assert dragpoints is not None and list(dragpoints) == []
+    # Custom label maps to both the userlabel and the inner config attribute.
+    assert rd.attrib["userlabel"] == "Status"
+    assert rd.find("configuration/returndocuments").attrib["label"] == "Status"
+
+
 def test_inv_stop_carries_continue_and_no_stopaction():
     xml = ProcessFlowBuilder.build(_process_config(), name="P")
     assert "stopaction" not in xml
@@ -722,6 +744,13 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "emitter": "process_flow_builder._emit_dataprocess (issue #106 M10.2)",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_dataprocessscript_attrs_groovy2_usecache_true",
+    },
+    {
+        "id": "returndocuments_terminal",
+        "invariant": "Return Documents is terminal — empty <dragpoints/>, no Stop emitted when return_documents.enabled",
+        "emitter": "process_flow_builder._emit_returndocuments (issue #107 M10.3)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_returndocuments_terminal_no_stop",
     },
     {
         "id": "dpp_processparameter_binding",

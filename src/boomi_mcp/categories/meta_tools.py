@@ -5544,6 +5544,14 @@ _PROCESS_FLOW_PROTOCOLS = {
             "reliability.catch_notify",
             "reliability.catch_notify.message_template",
             "reliability.catch_notify.level",
+            # Issue #107 M10.3: optional Return Documents terminal. When
+            # return_documents.enabled=true the flow ends in a Return Documents
+            # shape (subprocess return value) instead of a Stop; the optional
+            # label is the Boomi custom label identifying the returned document
+            # type(s). Default (absent) keeps the trailing Stop.
+            "return_documents",
+            "return_documents.enabled",
+            "return_documents.label",
             # Issue #92 M4.5.7: declare connection fields as per-environment
             # override points on the deployed process (see notes for the
             # CREATE-only behavior and the connection_id / fields shape).
@@ -5586,6 +5594,10 @@ _PROCESS_FLOW_PROTOCOLS = {
         ],
         "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess"],
         "supported_dataprocess_operations": ["custom_scripting"],
+        # Issue #107 M10.3: the flow terminal. "stop" is the default; with
+        # return_documents.enabled=true it is "returndocuments" instead (and no
+        # Stop follows — the verifier's RETURN_DOCS_STOP_EXCLUSIVE invariant).
+        "supported_terminal_shapes": ["stop", "returndocuments"],
         "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
         "supported_notify_levels": ["INFO", "WARNING", "ERROR"],
         "supported_connector_action_bindings": {
@@ -5609,6 +5621,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
             {"error_code": "PROCESS_DATAPROCESS_CONFIG_INVALID", "field": "transform|transform.steps|transform.steps[N].script|transform.steps[N].language|transform.steps[N].use_cache"},
             {"error_code": "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED", "field": "transform.steps[N].operation"},
+            {"error_code": "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID", "field": "return_documents|return_documents.enabled|return_documents.label"},
             {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.try_catch_scope"},
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
             {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
@@ -5695,6 +5708,19 @@ _PROCESS_FLOW_PROTOCOLS = {
             "byte-accurate live capture; malformed step config returns "
             "PROCESS_DATAPROCESS_CONFIG_INVALID. Keep the step body minimal — "
             "prefer native components over custom scripts.",
+            "Issue #107 M10.3: return_documents.enabled=true ends the flow in a "
+            "Return Documents terminal shape (the subprocess return value — it "
+            "returns the current documents to the calling source point: the parent "
+            "process via a Process Call/Route, or a web-service client) INSTEAD of "
+            "the default Stop. No Stop is emitted after Return Documents (the graph "
+            "verifier enforces RETURN_DOCS_STOP_EXCLUSIVE: a Return Documents path "
+            "must never reach a Stop). The optional return_documents.label is the "
+            "Boomi custom label identifying the returned document type(s), used for "
+            "Process Call/Route return-path mapping; it is optional (empty in the "
+            "live capture). Default (return_documents absent) keeps the trailing "
+            "Stop byte-for-byte. Malformed config returns "
+            "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID. Live-verified against a real "
+            "work-account process export.",
             "Issue #92 M4.5.7: process_extensions declares connection fields as "
             "per-environment override points so the DEPLOYED process exposes them "
             "via manage_environments(get_extensions) / update_extensions — without "
@@ -5818,7 +5844,14 @@ _PROCESS_FLOW_PROTOCOLS = {
             # called child's process_extensions; may also be declared directly.
             "process_extensions",
             "process_extensions.connections",
+            # Issue #107 M10.3: a wrapper that is itself a subprocess may end in a
+            # Return Documents terminal (subprocess return value) instead of a
+            # Stop. Same shape as database_to_api_sync.
+            "return_documents",
+            "return_documents.enabled",
+            "return_documents.label",
         ],
+        "supported_terminal_shapes": ["stop", "returndocuments"],
         "field_notes": {
             "process_calls": "Non-empty list; each entry is one standalone Process Call to a child process.",
             "process_calls[].subprocess_ref": "$ref:KEY of an in-spec process component (the child). EXACTLY ONE of subprocess_ref / process_id per entry.",
@@ -5826,9 +5859,11 @@ _PROCESS_FLOW_PROTOCOLS = {
             "process_calls[].wait": "Wait for the child to finish before continuing (default true).",
             "process_calls[].abort_on_error": "Abort the parent if the child fails (default false — the parent continues, matching the live wrapper exemplar).",
             "process_extensions": "Issue #99 G3: same shape as the database_to_api_sync process_extensions (connections[].connection_id + fields[].{id,label,xpath}). The integration builder HOISTS a called child's process_extensions onto the wrapper automatically so a wrapper-deployed package surfaces the child override points via get_extensions; you rarely declare it by hand.",
+            "return_documents": "Issue #107 M10.3: optional {enabled: bool, label?: str}. When enabled=true the wrapper ends in a Return Documents terminal (the subprocess return value) instead of a Stop — use when the wrapper is itself a subprocess that returns documents to its caller. label is the optional Boomi custom label identifying the returned document type(s). Malformed config returns PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID.",
         },
         "structured_errors": [
             {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
+            {"error_code": "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID", "field": "return_documents|return_documents.enabled|return_documents.label"},
             {"error_code": "PROCESS_REF_MISSING", "field": "process_calls|process_calls[N]"},
             {"error_code": "PROCESS_REF_AMBIGUOUS", "field": "process_calls[N]"},
             {"error_code": "PROCESS_REF_SELF_REFERENCE", "field": "process_calls[N].subprocess_ref"},

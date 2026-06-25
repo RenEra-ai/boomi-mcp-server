@@ -354,3 +354,65 @@ def test_dataprocess_zero_outbound_is_dead_end():
     dead = [e for e in result["errors"] if e["code"] == "NON_TERMINAL_SHAPE_DEAD_END"]
     assert dead[0]["shape"] == "shape2"
     assert dead[0]["shape_type"] == "dataprocess"
+
+
+# ---------------------------------------------------------------------------
+# Return Documents terminal classification (issue #107 M10.3)
+#
+# returndocuments is ALREADY terminal in _TERMINAL_SHAPE_TYPES and the verifier
+# already enforces RETURN_DOCS_STOP_EXCLUSIVE (a Return Documents path must never
+# reach a Stop). Per issue #107 this layer is VERIFY + TEST ONLY — no
+# reclassification. These tests pin both behaviors against the typed builder's own
+# emitted Return Documents terminal so a future verifier change can't regress them.
+# ---------------------------------------------------------------------------
+
+
+def test_returndocuments_terminal_is_clean():
+    """A builder-emitted Return Documents terminal verifies clean: it is terminal
+    (no dead end) and there is no RETURN_DOCS_STOP_EXCLUSIVE (no Stop follows it)."""
+    from boomi_mcp.categories.components.builders.process_flow_builder import (
+        ProcessFlowBuilder,
+    )
+
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "database",
+            "connection_id": "11111111-1111-1111-1111-111111111111",
+            "operation_id": "22222222-2222-2222-2222-222222222222",
+            "action_type": "Get",
+        },
+        "target": {
+            "connector_type": "rest",
+            "connection_id": "33333333-3333-3333-3333-333333333333",
+            "operation_id": "44444444-4444-4444-4444-444444444444",
+            "action_type": "POST",
+        },
+        "return_documents": {"enabled": True, "label": "Status Updates"},
+    }
+    xml = ProcessFlowBuilder.build(cfg, name="Return Documents Verify")
+    result = verify_process_graph(xml)
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+    assert "RETURN_DOCS_STOP_EXCLUSIVE" not in _codes(result["errors"])
+
+
+def test_returndocuments_routing_to_stop_is_rejected():
+    """A Return Documents path that reaches a Stop fails RETURN_DOCS_STOP_EXCLUSIVE
+    (the verifier already enforces this — pinned here, not reclassified)."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" userlabel="" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="shape1.dragpoint1" toShape="shape2" x="2" y="2"/></dragpoints>'
+        "</shape>"
+        '<shape image="returndocuments_icon" name="shape2" shapetype="returndocuments" userlabel="" x="3" y="1">'
+        '<configuration><returndocuments label=""/></configuration>'
+        '<dragpoints><dragpoint name="shape2.dragpoint1" toShape="shape3" x="4" y="2"/></dragpoints>'
+        "</shape>"
+        '<shape image="stop_icon" name="shape3" shapetype="stop" x="5" y="1">'
+        '<configuration><stop continue="true"/></configuration><dragpoints/></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    assert "RETURN_DOCS_STOP_EXCLUSIVE" in _codes(result["errors"])

@@ -51,6 +51,8 @@ PINNED_EMITTABLE = frozenset(
         "processcall",
         # M10.2 (issue #106): process-level Data Process Custom Scripting shape.
         "dataprocess",
+        # M10.3 (issue #107): process-level Return Documents terminal shape.
+        "returndocuments",
     }
 )
 
@@ -70,6 +72,9 @@ _FLOW_PARAMS = {
     "dataprocess": {
         "steps": [{"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}],
     },
+    # M10.3 (issue #107): the Return Documents terminal reads only an optional
+    # label via params.get(...), so empty params emit a valid (unlabeled) shape.
+    "returndocuments": {},
     "setproperties": {
         "ddp_name": "path",
         "request_profile_id": "PROF-1",
@@ -176,6 +181,7 @@ def test_flow_dispatch_ladder_keys():
         "message",
         "map",
         "dataprocess",
+        "returndocuments",
         "setproperties",
         "processcall",
         "stop",

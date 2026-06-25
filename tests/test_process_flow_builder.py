@@ -531,6 +531,155 @@ def test_dataprocess_rejects_unknown_step_key():
     assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
 
 
+# ---------------------------------------------------------------------------
+# Return Documents terminal (issue #107 M10.3)
+# ---------------------------------------------------------------------------
+
+_RETURN_DOCUMENTS_GOLDEN = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "return_documents_terminal.xml"
+)
+
+
+def test_return_documents_terminal_replaces_stop():
+    cfg = _base_config(return_documents={"enabled": True})
+    xml = ProcessFlowBuilder.build(cfg, name="Return Documents Subprocess")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "connectoraction", "returndocuments",
+    ]
+    # Return Documents is terminal: no Stop shape and empty dragpoints.
+    assert 'shapetype="stop"' not in xml
+    rd = shapes[-1]
+    assert rd.attrib["image"] == "returndocuments_icon"
+    assert list(rd.find("dragpoints")) == []  # empty <dragpoints/>
+
+
+def test_return_documents_terminal_matches_golden_fixture():
+    """Byte-exact golden (issue #107 g): the live Return Documents structure —
+    empty inner label, empty dragpoints, NO trailing Stop — is load-bearing and
+    must match the live capture byte-for-byte."""
+    cfg = _base_config(return_documents={"enabled": True})
+    emitted = ProcessFlowBuilder.build(cfg, name="Return Documents Subprocess")
+    assert emitted == _RETURN_DOCUMENTS_GOLDEN.read_text()
+
+
+def test_return_documents_label_maps_to_userlabel_and_inner_label():
+    cfg = _base_config(return_documents={"enabled": True, "label": "Status Updates"})
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    rd = next(s for s in shapes if s.attrib["shapetype"] == "returndocuments")
+    # The single public label maps to BOTH the shape userlabel and the inner
+    # <returndocuments label="..."> custom label (live capture shows both equal).
+    assert rd.attrib["userlabel"] == "Status Updates"
+    assert rd.find("configuration/returndocuments").attrib["label"] == "Status Updates"
+
+
+def test_return_documents_label_is_xml_escaped():
+    cfg = _base_config(return_documents={"enabled": True, "label": "a < b & c > d"})
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    rd = next(s for s in shapes if s.attrib["shapetype"] == "returndocuments")
+    # Angle brackets / ampersands round-trip back to raw text in both attributes.
+    assert rd.attrib["userlabel"] == "a < b & c > d"
+    assert rd.find("configuration/returndocuments").attrib["label"] == "a < b & c > d"
+
+
+def test_return_documents_disabled_keeps_default_stop():
+    # enabled=False preserves the trailing Stop byte-for-byte (== no block at all).
+    cfg = _base_config(return_documents={"enabled": False})
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    assert xml == ProcessFlowBuilder.build(_base_config(), name="N")
+    _, _, shapes = _parse_process(xml)
+    assert shapes[-1].attrib["shapetype"] == "stop"
+
+
+def test_return_documents_composes_with_reliability_try_catch():
+    # return_documents + a wired DLQ Try/Catch: the Return Documents terminal sits
+    # at the end of the Try (success) path; the catch leg keeps its own terminal.
+    # Return Documents never reaches the catch Stop, so the graph stays valid.
+    cfg = _base_config(
+        return_documents={"enabled": True},
+        reliability={
+            "retry_count": 2,
+            "dlq": {"mode": "document_cache_ref", "document_cache_id": "CACHE-1"},
+        },
+    )
+    xml = ProcessFlowBuilder.build(cfg, name="RD+DLQ")
+    _, _, shapes = _parse_process(xml)
+    types = [s.attrib["shapetype"] for s in shapes]
+    assert "catcherrors" in types
+    assert "returndocuments" in types
+    rd = next(s for s in shapes if s.attrib["shapetype"] == "returndocuments")
+    assert list(rd.find("dragpoints")) == []  # terminal even inside the Try chain
+
+
+def test_return_documents_rejects_non_object():
+    cfg = _base_config(return_documents="yes")
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID"
+    assert err.field == "return_documents"
+
+
+def test_return_documents_rejects_non_bool_enabled():
+    cfg = _base_config(return_documents={"enabled": "true"})
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID"
+    assert err.field == "return_documents.enabled"
+
+
+def test_return_documents_rejects_non_string_label():
+    cfg = _base_config(return_documents={"enabled": True, "label": 5})
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID"
+    assert err.field == "return_documents.label"
+
+
+def test_return_documents_rejects_unknown_key():
+    cfg = _base_config(return_documents={"enabled": True, "bogus": 1})
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID"
+    assert err.field == "return_documents"
+
+
+def test_wrapper_subprocess_ends_in_return_documents():
+    # A wrapper/facade that is itself a subprocess can end in Return Documents.
+    from src.boomi_mcp.categories.components.builders import WrapperSubprocessBuilder
+
+    cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": "55555555-5555-5555-5555-555555555555"}],
+        "return_documents": {"enabled": True, "label": "Done"},
+    }
+    assert WrapperSubprocessBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = WrapperSubprocessBuilder.build(cfg, name="Wrapper RD")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "processcall", "returndocuments",
+    ]
+    assert 'shapetype="stop"' not in xml
+    assert shapes[-1].attrib["userlabel"] == "Done"
+
+
+def test_wrapper_subprocess_rejects_invalid_return_documents():
+    from src.boomi_mcp.categories.components.builders import WrapperSubprocessBuilder
+
+    cfg = {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"process_id": "55555555-5555-5555-5555-555555555555"}],
+        "return_documents": {"enabled": "yes"},
+    }
+    err = WrapperSubprocessBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID"
+
+
 def test_name_attribute_is_xml_escaped():
     xml = ProcessFlowBuilder.build(_base_config(), name='Quote " & angle <name>')
     root = ET.fromstring(xml)

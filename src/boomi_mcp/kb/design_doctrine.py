@@ -118,6 +118,12 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     # the live-observed Custom Scripting operation via the dataprocess transform
     # mode; the dispatch key is ``dataprocess`` in _emit_flow_shape.
     "dataprocess": {"emittable": True, "emitter_kind": "dataprocess"},
+    # M10.3 (issue #107): process-level Return Documents terminal shape. Emittable
+    # today via the return_documents config block on ProcessFlowBuilder /
+    # WrapperSubprocessBuilder (it replaces the trailing Stop — the subprocess
+    # return value); the dispatch key is ``returndocuments`` in _emit_flow_shape.
+    # Live-captured from work component 64e5397b-3583-42c9-8fe3-08ccefb0da6c.
+    "returndocuments": {"emittable": True, "emitter_kind": "returndocuments"},
 }
 
 #: JSON-schema-shaped description of one entry, returned alongside the catalog so
@@ -182,7 +188,12 @@ _ENTRIES: List[Dict[str, Any]] = [
             "integration spec — the parent references each child by key and "
             "the children are built first. Process Route gives each "
             "subprocess an independent deploy unit with a back-compatible "
-            "interface contract."
+            "interface contract. A subprocess hands its documents back to the "
+            "calling parent through a Return Documents terminal at the end of "
+            "its document path — the subprocess return value, emittable today by "
+            "the typed builder and live-verified — which Process Route maps to "
+            "named return paths; a Return Documents path never routes onward to "
+            "a Stop."
         ),
         "when_to_use": (
             "Any integration with more than one logical operation, or where "

@@ -27,6 +27,7 @@ from .operational import (
     WatermarkStatePrimitive,
 )
 from .rest_send import RestSendWithRetryPrimitive
+from .return_documents import ReturnDocumentsPrimitive
 from .xml_json_convert import XmlJsonConvertPrimitive
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "FieldMapPrimitive",
     "XmlJsonConvertPrimitive",
     "RestSendWithRetryPrimitive",
+    "ReturnDocumentsPrimitive",
     "ScheduleEnvelopePrimitive",
     "WatermarkStatePrimitive",
     "ErrorClassifierPrimitive",
