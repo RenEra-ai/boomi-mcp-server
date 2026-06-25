@@ -672,6 +672,50 @@ def test_doccacheretrieve_build_bypass_empty_cache_id_raises():
     assert exc.value.field == "transform.document_cache_id"
 
 
+def test_doccacheretrieve_build_bypass_unsupported_empty_cache_behavior_raises():
+    # build() (bypassing validate_config) must not serialize an unsupported
+    # emptyCacheBehavior — the emitter re-guards the v1 'stopprocess'-only invariant
+    # so a direct build cannot emit emptyCacheBehavior="returnerror".
+    cfg = _base_config(transform={
+        "mode": "doccacheretrieve",
+        "document_cache_id": "CACHE-1",
+        "empty_cache_behavior": "returnerror",
+    })
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert exc.value.field == "transform.empty_cache_behavior"
+
+
+def test_doccacheretrieve_build_bypass_keyed_retrieval_raises():
+    # build() (bypassing validate_config) must not serialize loadAllDoc="false"
+    # with an empty <cacheKeyValues/> (a broken keyed retrieve); the emitter
+    # re-guards the v1 all-document-only invariant.
+    cfg = _base_config(transform={
+        "mode": "doccacheretrieve",
+        "document_cache_id": "CACHE-1",
+        "load_all_documents": False,
+    })
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert exc.value.field == "transform.load_all_documents"
+
+
+def test_doccacheretrieve_build_bypass_non_bool_load_all_raises():
+    # A non-bool truthy load_all_documents (e.g. the string "true") is NOT True, so
+    # the emitter rejects it rather than emit loadAllDoc from an unvetted value.
+    cfg = _base_config(transform={
+        "mode": "doccacheretrieve",
+        "document_cache_id": "CACHE-1",
+        "load_all_documents": "true",
+    })
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert exc.value.field == "transform.load_all_documents"
+
+
 def test_doccacheretrieve_composes_with_try_catch_wrapper():
     # The retrieve shape sits in the middle-transform slot, so it composes with the
     # verified Try/Catch + DLQ wrapper unchanged (the wrapped chain still contains

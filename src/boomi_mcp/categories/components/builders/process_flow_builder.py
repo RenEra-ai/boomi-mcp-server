@@ -2322,10 +2322,14 @@ def _emit_doccacheretrieve(
     v1 emits only the all-document retrieve form (``loadAllDoc="true"`` with an
     empty ``<cacheKeyValues/>``); the attribute order — docCache,
     emptyCacheBehavior, loadAllDoc — matches the live XML byte-for-byte. build()
-    stays total on a validate_config-bypass: an empty ``document_cache_id`` would
-    emit a semantically broken ``docCache=""`` (well-formed XML the parse-back
-    guard would not catch), so raise rather than emit it — mirrors the
-    _emit_dataprocess empty-steps guard.
+    stays total on a validate_config-bypass: it re-guards the three invariants
+    _validate_doccacheretrieve_transform enforces (non-empty ``document_cache_id``,
+    ``empty_cache_behavior`` in the supported set, ``load_all_documents`` True) and
+    raises rather than serialize a semantically broken / unsupported variant —
+    ``docCache=""``, ``emptyCacheBehavior="returnerror"``, or ``loadAllDoc="false"``
+    with an empty ``<cacheKeyValues/>`` (a broken keyed retrieve). All are
+    well-formed XML the parse-back guard would not catch, so mirror the
+    _emit_dataprocess empty-steps guard and raise here.
     """
     doc_cache_id = _escape_xml(str(params.get("document_cache_id") or "").strip())
     if not doc_cache_id:
@@ -2338,19 +2342,39 @@ def _emit_doccacheretrieve(
                 "token in depends_on) to retrieve documents from."
             ),
         )
+    empty_cache_behavior = str(
+        params.get("empty_cache_behavior") or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR
+    ).strip()
+    if empty_cache_behavior not in _DOCCACHE_RETRIEVE_EMPTY_BEHAVIORS:
+        raise BuilderValidationError(
+            f"transform.empty_cache_behavior {empty_cache_behavior!r} is not supported.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field="transform.empty_cache_behavior",
+            hint=(
+                "v1 supports only 'stopprocess' (Stop document execution); the "
+                "backward-compat 'fail document with errors' behavior is deferred."
+            ),
+        )
+    if params.get("load_all_documents", True) is not True:
+        raise BuilderValidationError(
+            "transform.load_all_documents must be true when mode='doccacheretrieve'.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field="transform.load_all_documents",
+            hint=(
+                "v1 retrieves ALL cached documents (loadAllDoc=true, empty "
+                "cacheKeyValues). Keyed/index retrieval is deferred."
+            ),
+        )
     dragpoints = _emit_dragpoints([next_name], shape_index)
     userlabel = _escape_xml(params.get("userlabel") or "")
-    empty_cache_behavior = _escape_xml(
-        str(params.get("empty_cache_behavior") or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR).strip()
-    )
-    load_all_doc = "true" if params.get("load_all_documents", True) is True else "false"
+    empty_cache_behavior_xml = _escape_xml(empty_cache_behavior)
     return (
         f'<shape image="doccacheretrieve_icon" name="{shape_name}" '
         f'shapetype="doccacheretrieve" userlabel="{userlabel}" '
         f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
         '<configuration>'
         f'<doccacheretrieve docCache="{doc_cache_id}" '
-        f'emptyCacheBehavior="{empty_cache_behavior}" loadAllDoc="{load_all_doc}">'
+        f'emptyCacheBehavior="{empty_cache_behavior_xml}" loadAllDoc="true">'
         '<cacheKeyValues/>'
         '</doccacheretrieve>'
         '</configuration>'
