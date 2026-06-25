@@ -5607,7 +5607,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target"},
             {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type"},
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
-            {"error_code": "PROCESS_DATAPROCESS_CONFIG_INVALID", "field": "transform.steps|transform.steps[N].script|transform.steps[N].language|transform.steps[N].use_cache"},
+            {"error_code": "PROCESS_DATAPROCESS_CONFIG_INVALID", "field": "transform|transform.steps|transform.steps[N].script|transform.steps[N].language|transform.steps[N].use_cache"},
             {"error_code": "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED", "field": "transform.steps[N].operation"},
             {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.try_catch_scope"},
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
