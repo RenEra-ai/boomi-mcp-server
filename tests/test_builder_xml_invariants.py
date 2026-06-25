@@ -273,6 +273,37 @@ def test_inv_setproperties_shapetype_documentproperties():
     assert prop.attrib["propertyId"].startswith("dynamicdocument.")
 
 
+def test_inv_dataprocessscript_attrs_groovy2_usecache_true():
+    # Issue #106 M10.2: a Custom Scripting Data Process step always emits the
+    # mandatory dataprocessscript attributes language="groovy2" / useCache="true"
+    # (a missing language attribute fails the platform at runtime). The shapetype
+    # is dataprocess and the step carries the standard operation name.
+    xml = ProcessFlowBuilder.build(
+        _process_config(
+            transform={
+                "mode": "dataprocess",
+                "label": "Tag documents",
+                "steps": [
+                    {
+                        "operation": "custom_scripting",
+                        "script": "dataContext.storeStream(is, props);",
+                    }
+                ],
+            }
+        ),
+        name="P",
+    )
+    shapes = _parse_process_shapes(xml)
+    dp = next(s for s in shapes if s.attrib["shapetype"] == "dataprocess")
+    step = dp.find("configuration/dataprocess/step")
+    assert step.attrib["name"] == "Custom Scripting"
+    assert step.attrib["processtype"] == "12"
+    assert step.attrib["index"] == "1" and step.attrib["key"] == "1"
+    script = step.find("dataprocessscript")
+    assert script.attrib["language"] == "groovy2"
+    assert script.attrib["useCache"] == "true"
+
+
 def test_inv_stop_carries_continue_and_no_stopaction():
     xml = ProcessFlowBuilder.build(_process_config(), name="P")
     assert "stopaction" not in xml
@@ -688,9 +719,9 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
     {
         "id": "dataprocessscript_attrs",
         "invariant": 'dataprocessscript language="groovy2"/useCache="true"',
-        "emitter": "(no Data Process script builder; mapping script is separate)",
-        "disposition": "not-applicable-yet",
-        "test": "table-only (no script.processing builder yet)",
+        "emitter": "process_flow_builder._emit_dataprocess (issue #106 M10.2)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_dataprocessscript_attrs_groovy2_usecache_true",
     },
     {
         "id": "dpp_processparameter_binding",

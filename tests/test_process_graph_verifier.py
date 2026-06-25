@@ -287,3 +287,70 @@ def test_bare_process_root_is_supported():
     assert result["errors"] == [], result["errors"]
     assert result["warnings"] == [], result["warnings"]
     assert result["shapes_checked"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Data Process shape classification (issue #106 M10.2)
+#
+# dataprocess is a NORMAL LINEAR processing shape — NOT terminal, NOT branching.
+# No new verifier source rule is needed: the existing dead-end pass already
+# treats it correctly (one outbound = clean; zero outbound = dead end). These
+# tests pin that behavior so a future verifier change can't silently regress it.
+# ---------------------------------------------------------------------------
+
+
+def test_dataprocess_single_outbound_is_clean():
+    """A builder-emitted Data Process shape (one forward edge) verifies clean."""
+    from boomi_mcp.categories.components.builders.process_flow_builder import (
+        ProcessFlowBuilder,
+    )
+
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "database",
+            "connection_id": "11111111-1111-1111-1111-111111111111",
+            "operation_id": "22222222-2222-2222-2222-222222222222",
+            "action_type": "Get",
+        },
+        "transform": {
+            "mode": "dataprocess",
+            "label": "Tag documents",
+            "steps": [
+                {"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}
+            ],
+        },
+        "target": {
+            "connector_type": "rest",
+            "connection_id": "33333333-3333-3333-3333-333333333333",
+            "operation_id": "44444444-4444-4444-4444-444444444444",
+            "action_type": "POST",
+        },
+    }
+    xml = ProcessFlowBuilder.build(cfg, name="DataProcess Verify")
+    result = verify_process_graph(xml)
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+
+
+def test_dataprocess_zero_outbound_is_dead_end():
+    """A non-terminal Data Process shape with no outbound edge is a dead end —
+    proving dataprocess is treated as a normal (non-terminal) linear shape."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" userlabel="" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="shape1.dragpoint1" toShape="shape2" x="2" y="2"/></dragpoints>'
+        "</shape>"
+        '<shape image="dataprocess_icon" name="shape2" shapetype="dataprocess" userlabel="" x="3" y="1">'
+        '<configuration><dataprocess><step index="1" key="1" name="Custom Scripting" processtype="12">'
+        '<dataprocessscript language="groovy2" useCache="true"><script>x</script></dataprocessscript>'
+        "</step></dataprocess></configuration><dragpoints/></shape>"
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "NON_TERMINAL_SHAPE_DEAD_END" in codes
+    dead = [e for e in result["errors"] if e["code"] == "NON_TERMINAL_SHAPE_DEAD_END"]
+    assert dead[0]["shape"] == "shape2"
+    assert dead[0]["shape_type"] == "dataprocess"

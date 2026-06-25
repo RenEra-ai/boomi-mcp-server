@@ -5514,6 +5514,14 @@ _PROCESS_FLOW_PROTOCOLS = {
             "transform.mode",
             "transform.message_text",
             "transform.map_ref",
+            # Issue #106 M10.2: process-level Data Process shape
+            # (transform.mode='dataprocess'). v1 ships only the Custom Scripting
+            # operation; the steps list is ordered and each step carries the
+            # operation + its script body.
+            "transform.label",
+            "transform.steps",
+            "transform.steps[].operation",
+            "transform.steps[].script",
             "reliability",
             "reliability.retry_count",
             # Issue #99 G1: Try/Catch placement scope. "process" (default — the
@@ -5574,7 +5582,8 @@ _PROCESS_FLOW_PROTOCOLS = {
                 "tracked_by": "#51 follow-up (catch-path classifier wiring)",
             },
         ],
-        "supported_transform_modes": ["passthrough", "message", "map_ref"],
+        "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess"],
+        "supported_dataprocess_operations": ["custom_scripting"],
         "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
         "supported_notify_levels": ["INFO", "WARNING", "ERROR"],
         "supported_connector_action_bindings": {
@@ -5596,6 +5605,8 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target"},
             {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type"},
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
+            {"error_code": "PROCESS_DATAPROCESS_CONFIG_INVALID", "field": "transform.steps|transform.steps[N].script|transform.steps[N].language|transform.steps[N].use_cache"},
+            {"error_code": "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED", "field": "transform.steps[N].operation"},
             {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.try_catch_scope"},
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
             {"error_code": "PROCESS_NOTIFY_CONFIG_INVALID", "field": "reliability.catch_notify|reliability.catch_notify.message_template|reliability.catch_notify.level"},
@@ -5670,6 +5681,18 @@ _PROCESS_FLOW_PROTOCOLS = {
             "dlq_writer fragment IS now consumed (above).",
             "Map components are referenced by id or $ref token only; map creation "
             "is tracked by issue #26.",
+            "Issue #106 M10.2: transform.mode='dataprocess' inserts a "
+            "process-level Data Process shape between source and target, carrying "
+            "an ordered transform.steps list. v1 supports ONLY the Custom "
+            "Scripting operation (transform.steps[].operation='custom_scripting', "
+            "language 'groovy2', use_cache true) — the sole live-observed "
+            "operation. Every other documented Data Process operation "
+            "(Search/Replace, Zip, Unzip, Base64 encode/decode, Split/Combine "
+            "Documents, character encoding) is rejected "
+            "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED until it has a "
+            "byte-accurate live capture; malformed step config returns "
+            "PROCESS_DATAPROCESS_CONFIG_INVALID. Keep the step body minimal — "
+            "prefer native components over custom scripts.",
             "Issue #92 M4.5.7: process_extensions declares connection fields as "
             "per-environment override points so the DEPLOYED process exposes them "
             "via manage_environments(get_extensions) / update_extensions — without "

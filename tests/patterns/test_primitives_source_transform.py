@@ -29,6 +29,7 @@ from boomi_mcp.categories.components.builders.profile_builder import (
 from boomi_mcp.models.integration_models import IntegrationComponentSpec
 from boomi_mcp.patterns.base import PatternKind, PrimitiveBuildContext
 from boomi_mcp.patterns.primitives import (
+    DataProcessPrimitive,
     DbExtractPrimitive,
     FieldMapPrimitive,
     XmlJsonConvertPrimitive,
@@ -940,3 +941,83 @@ class TestComposition:
             assert step.get("validation_error") is None, step
         map_step = next(s for s in plan["steps"] if s["key"] == "cust_transform_map")
         assert map_step["planned_action"] == "create"
+
+
+# ===========================================================================
+# data_process (issue #106 M10.2)
+# ===========================================================================
+
+
+class TestDataProcess:
+    def test_registry_discovers_data_process(self):
+        try:
+            reg = PatternRegistry.from_package("boomi_mcp.patterns")
+        except TypeError as exc:  # pragma: no cover — interpreter-specific
+            # Python 3.9.6 has inspect.isclass(type[X]) == True, which makes
+            # PatternRegistry.from_package() trip on registry.PatternClass for
+            # EVERY pattern (pre-existing; the sibling
+            # test_registry_discovers_three_primitives fails identically here).
+            # Conformant interpreters (3.9.7+/3.10+/3.11) discover correctly.
+            pytest.skip(f"registry discovery unavailable on this interpreter: {exc}")
+        cls = reg.get("data_process")
+        assert cls is DataProcessPrimitive
+        assert cls.metadata.kind == PatternKind.PRIMITIVE
+
+    def test_describe_includes_contracts_and_no_raw_artifacts(self):
+        described = DataProcessPrimitive.describe()
+        for key in ("metadata", "parameter_schema", "input_contract", "output_contract", "required_builders"):
+            assert key in described
+        assert described["required_builders"] == ["ProcessFlowBuilder"]
+        dumped = json.dumps(described)
+        for forbidden in ("<bns:", "</", "<?xml", "```"):
+            assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
+
+    def test_emit_components_is_empty(self):
+        params = DataProcessPrimitive.validate_parameters(
+            {"steps": [{"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}]}
+        )
+        assert DataProcessPrimitive.emit_components(_ctx(), params) == []
+
+    def test_emit_fragment_returns_dataprocess_transform(self):
+        params = DataProcessPrimitive.validate_parameters(
+            {
+                "label": "Tag",
+                "steps": [{"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}],
+            }
+        )
+        fragment = DataProcessPrimitive.emit_fragment(_ctx(), params)
+        transform = fragment["process_config"]["transform"]
+        assert transform["mode"] == "dataprocess"
+        assert transform["label"] == "Tag"
+        assert transform["steps"][0]["operation"] == "custom_scripting"
+        assert transform["steps"][0]["language"] == "groovy2"
+        assert transform["steps"][0]["use_cache"] is True
+        assert fragment["depends_on"] == []
+
+    def test_validation_rejects_empty_steps(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters({"steps": []})
+
+    def test_validation_rejects_missing_script(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters(
+                {"steps": [{"operation": "custom_scripting"}]}
+            )
+
+    def test_validation_rejects_blank_script(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters(
+                {"steps": [{"operation": "custom_scripting", "script": "   "}]}
+            )
+
+    def test_validation_rejects_non_groovy2_language(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters(
+                {"steps": [{"operation": "custom_scripting", "script": "x", "language": "python"}]}
+            )
+
+    def test_validation_rejects_non_custom_scripting_operation(self):
+        with pytest.raises(ValidationError):
+            DataProcessPrimitive.validate_parameters(
+                {"steps": [{"operation": "search_replace", "script": "x"}]}
+            )

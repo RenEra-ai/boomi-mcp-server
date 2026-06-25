@@ -146,7 +146,26 @@ def test_template_example_does_not_use_deferred_fields(template):
 
 
 def test_template_supported_transform_modes(template):
-    assert set(template["supported_transform_modes"]) == {"passthrough", "message", "map_ref"}
+    assert set(template["supported_transform_modes"]) == {
+        "passthrough", "message", "map_ref", "dataprocess",
+    }
+
+
+def test_template_documents_dataprocess_surface(template):
+    # Issue #106 M10.2: dataprocess transform fields + v1 operation set + the
+    # two new structured errors are all documented.
+    optional = template["optional_fields"]
+    for field in (
+        "transform.label",
+        "transform.steps",
+        "transform.steps[].operation",
+        "transform.steps[].script",
+    ):
+        assert field in optional, field
+    assert template["supported_dataprocess_operations"] == ["custom_scripting"]
+    codes = {e["error_code"] for e in template["structured_errors"]}
+    assert "PROCESS_DATAPROCESS_CONFIG_INVALID" in codes
+    assert "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED" in codes
 
 
 def test_template_supported_dlq_modes(template):

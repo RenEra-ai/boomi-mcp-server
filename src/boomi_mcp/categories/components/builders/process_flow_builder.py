@@ -64,8 +64,25 @@ _REST_ACTION_TYPES = frozenset({
 # process-flow surface area.
 _DB_ACTION_TYPES = frozenset({"Get"})
 
-_SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "message", "map_ref"})
+_SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "message", "map_ref", "dataprocess"})
 _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subprocess_ref"})
+
+# Issue #106 M10.2: process-level Data Process shape. v1 ships ONLY the
+# live-observed Custom Scripting (Groovy) operation (processtype 12) — captured
+# from the live `work` account, see .codex/plans/issue-106-live-captures.md. Every
+# other documented Data Process operation (Search/Replace, Zip, Unzip, Base64
+# encode/decode, Split/Combine Documents, character encoding) is rejected with
+# PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED until each has its own byte-accurate
+# live capture, so we never over-claim the operation union from docs alone.
+# ``processtype``/``name`` are the exact Boomi step attributes (see the companion
+# reference data_process_step.md); ``name`` MUST stay the standard operation name
+# (a custom step name causes GUI display issues), descriptive text goes on the
+# shape ``userlabel``.
+_DATAPROCESS_OPERATIONS: Dict[str, Dict[str, str]] = {
+    "custom_scripting": {"processtype": "12", "name": "Custom Scripting"},
+}
+# The only script engine the typed builder accepts/emits for Custom Scripting.
+_DATAPROCESS_SCRIPT_LANGUAGE = "groovy2"
 
 # Issue #51 M3.R1a / #88 M4.5.3: DLQ modes that emit a verified Try/Catch
 # wrapper + DLQ catch-path (every supported mode except "disabled"). The catch
@@ -479,6 +496,18 @@ class ProcessFlowBuilder:
                     # emission. Padded $ref tokens are already rejected
                     # at validate_config (r7 P2.2). Codex review r8 F3.
                     "map_id": str(transform.get("map_ref") or transform.get("map_id") or "").strip(),
+                    "userlabel": str(transform.get("label") or ""),
+                },
+            ))
+        elif transform_mode == "dataprocess":
+            # Issue #106 M10.2: a process-level Data Process shape carrying one or
+            # more ordered operation steps (v1: Custom Scripting). It sits in the
+            # same middle-transform slot as message/map_ref. validate_config has
+            # already proven the steps list; build() re-reads it total.
+            flow.append((
+                "dataprocess",
+                {
+                    "steps": transform.get("steps") or [],
                     "userlabel": str(transform.get("label") or ""),
                 },
             ))
@@ -1070,6 +1099,86 @@ def _validate_transform(transform: Any) -> Optional[BuilderValidationError]:
                     "(map component creation is issue #26 scope)."
                 ),
             )
+    if mode == "dataprocess":
+        return _validate_dataprocess_transform(transform)
+    return None
+
+
+def _validate_dataprocess_transform(
+    transform: Dict[str, Any],
+) -> Optional[BuilderValidationError]:
+    """Validate a ``transform.mode='dataprocess'`` config (issue #106 M10.2).
+
+    The shape is a non-empty ordered list of operation ``steps``. v1 supports
+    only ``custom_scripting`` (Groovy, ``language='groovy2'``); any other
+    operation — including the docs-only Search/Replace, Zip/Unzip, Base64,
+    Split/Combine, and character encoding — is rejected
+    ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED`` until it has a byte-accurate
+    live capture. Malformed step config is ``PROCESS_DATAPROCESS_CONFIG_INVALID``.
+    """
+    steps = transform.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return BuilderValidationError(
+            "transform.steps must be a non-empty list when mode='dataprocess'.",
+            error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+            field="transform.steps",
+            hint="Provide at least one Data Process operation step.",
+        )
+    for i, step in enumerate(steps):
+        field = f"transform.steps[{i}]"
+        if not isinstance(step, dict):
+            return BuilderValidationError(
+                f"{field} must be a JSON object.",
+                error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+                field=field,
+                hint="Each step is {operation: ..., ...}.",
+            )
+        operation = str(step.get("operation") or "").strip()
+        if operation not in _DATAPROCESS_OPERATIONS:
+            return BuilderValidationError(
+                f"{field}.operation {operation!r} is not supported.",
+                error_code="PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED",
+                field=f"{field}.operation",
+                hint=(
+                    "v1 supports only 'custom_scripting'. Other documented Data "
+                    "Process operations are deferred pending a live capture; see "
+                    f"supported: {sorted(_DATAPROCESS_OPERATIONS)}."
+                ),
+            )
+        if operation == "custom_scripting":
+            allowed_keys = {"operation", "script", "language", "use_cache"}
+            extra = set(step) - allowed_keys
+            if extra:
+                return BuilderValidationError(
+                    f"{field} has unsupported keys: {sorted(extra)}.",
+                    error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+                    field=field,
+                    hint=f"Allowed keys for custom_scripting: {sorted(allowed_keys)}.",
+                )
+            script = step.get("script")
+            if not isinstance(script, str) or not script.strip():
+                return BuilderValidationError(
+                    f"{field}.script is required and must be a non-empty string.",
+                    error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+                    field=f"{field}.script",
+                    hint="Provide the Custom Scripting body.",
+                )
+            language = step.get("language", _DATAPROCESS_SCRIPT_LANGUAGE)
+            if language != _DATAPROCESS_SCRIPT_LANGUAGE:
+                return BuilderValidationError(
+                    f"{field}.language must be '{_DATAPROCESS_SCRIPT_LANGUAGE}'.",
+                    error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+                    field=f"{field}.language",
+                    hint=f"Only '{_DATAPROCESS_SCRIPT_LANGUAGE}' is accepted.",
+                )
+            use_cache = step.get("use_cache", True)
+            if use_cache is not True:
+                return BuilderValidationError(
+                    f"{field}.use_cache must be true.",
+                    error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+                    field=f"{field}.use_cache",
+                    hint="Script compilation caching is required (use_cache=true).",
+                )
     return None
 
 
@@ -1470,6 +1579,65 @@ def _emit_map(
     )
 
 
+def _emit_dataprocess(
+    shape_name: str,
+    params: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit a process-level Data Process shape (issue #106 M10.2).
+
+    Renders the ordered ``steps`` into ``<dataprocess><step .../></dataprocess>``
+    with sequential 1-based ``index``/``key``, dispatching each step to its
+    per-operation renderer. Byte-accurate to the live ``work``-account capture
+    (see ``.codex/plans/issue-106-live-captures.md``): the step ``name`` is the
+    standard Boomi operation name (a custom step name causes GUI display issues)
+    and descriptive text lives on the shape ``userlabel``. Linear shape — one
+    forward dragpoint to ``next_name``.
+    """
+    dragpoints = _emit_dragpoints([next_name], shape_index)
+    userlabel = _escape_xml(params.get("userlabel") or "")
+    steps = params.get("steps") or []
+    step_parts = [_emit_dataprocess_step(step, i) for i, step in enumerate(steps, start=1)]
+    return (
+        f'<shape image="dataprocess_icon" name="{shape_name}" '
+        f'shapetype="dataprocess" userlabel="{userlabel}" '
+        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        '<configuration>'
+        f'<dataprocess>{"".join(step_parts)}</dataprocess>'
+        '</configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
+def _emit_dataprocess_step(step: Dict[str, Any], index: int) -> str:
+    """Render one Data Process ``<step>`` (issue #106 v1: custom_scripting only).
+
+    Keeps build() total on the validate_config-bypass path: an operation that is
+    not in the v1 set raises ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED`` rather
+    than emitting a malformed step.
+    """
+    operation = str(step.get("operation") or "").strip()
+    meta = _DATAPROCESS_OPERATIONS.get(operation)
+    if meta is None or operation != "custom_scripting":
+        raise BuilderValidationError(
+            f"Unsupported Data Process operation {operation!r}.",
+            error_code="PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED",
+            field="transform.steps[].operation",
+            hint=f"v1 supports only: {sorted(_DATAPROCESS_OPERATIONS)}.",
+        )
+    script = _escape_xml(str(step.get("script") or ""))
+    return (
+        f'<step index="{index}" key="{index}" '
+        f'name="{meta["name"]}" processtype="{meta["processtype"]}">'
+        f'<dataprocessscript language="{_DATAPROCESS_SCRIPT_LANGUAGE}" useCache="true">'
+        f'<script>{script}</script>'
+        '</dataprocessscript>'
+        '</step>'
+    )
+
+
 def _emit_setproperties(
     shape_name: str,
     params: Dict[str, Any],
@@ -1611,6 +1779,8 @@ def _emit_flow_shape(
         return _emit_message(shape_name, params, next_name, shape_index)
     if kind == "map":
         return _emit_map(shape_name, params, next_name, shape_index)
+    if kind == "dataprocess":
+        return _emit_dataprocess(shape_name, params, next_name, shape_index)
     if kind == "setproperties":
         return _emit_setproperties(shape_name, params, next_name, shape_index)
     if kind == "processcall":

@@ -45,6 +45,7 @@ PipelineStageKind = Literal[
     "finalize",
     "combine",
     "flow_control",
+    "dataprocess",
     "branch",
     "decision",
 ]

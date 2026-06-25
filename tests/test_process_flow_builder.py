@@ -358,6 +358,158 @@ def test_map_ref_transform_inserts_map_shape_with_map_id():
     assert shapes[2].find("configuration/map").attrib["mapId"] == "map-uuid-9999"
 
 
+# ---------------------------------------------------------------------------
+# Data Process transform (issue #106 M10.2)
+# ---------------------------------------------------------------------------
+
+# The canonical dataContext loop (companion data_process_groovy_step.md). The
+# bare ``<`` exercises the emitter's XML escaping (-> ``&lt;``).
+_DATAPROCESS_GROOVY_SCRIPT = (
+    "import java.util.Properties;\n"
+    "import java.io.InputStream;\n"
+    "\n"
+    "for( int i = 0; i < dataContext.getDataCount(); i++ ) {\n"
+    "    InputStream is = dataContext.getStream(i);\n"
+    "    Properties props = dataContext.getProperties(i);\n"
+    "    dataContext.storeStream(is, props);\n"
+    "}"
+)
+
+_DATAPROCESS_GOLDEN = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "dataprocess_groovy_transform.xml"
+)
+
+
+def _dataprocess_config(steps=None, label="Tag documents", **overrides):
+    transform = {"mode": "dataprocess", "label": label}
+    transform["steps"] = (
+        steps
+        if steps is not None
+        else [{"operation": "custom_scripting", "script": _DATAPROCESS_GROOVY_SCRIPT}]
+    )
+    return _base_config(transform=transform, **overrides)
+
+
+def test_dataprocess_groovy_transform_inserts_shape_between_source_and_target():
+    xml = ProcessFlowBuilder.build(_dataprocess_config(), name="DataProcess Groovy Sync")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "dataprocess", "connectoraction", "stop",
+    ]
+    dp = shapes[2]
+    assert dp.attrib["image"] == "dataprocess_icon"
+    assert dp.attrib["userlabel"] == "Tag documents"
+    step = dp.find("configuration/dataprocess/step")
+    assert step.attrib["index"] == "1"
+    assert step.attrib["key"] == "1"
+    assert step.attrib["name"] == "Custom Scripting"
+    assert step.attrib["processtype"] == "12"
+    script_el = step.find("dataprocessscript")
+    assert script_el.attrib["language"] == "groovy2"
+    assert script_el.attrib["useCache"] == "true"
+    # The bare '<' was emitted entity-escaped and round-trips back through parse.
+    assert "i < dataContext.getDataCount()" in script_el.find("script").text
+
+
+def test_dataprocess_groovy_transform_matches_golden_fixture():
+    """Byte-exact golden (issue #106 g): raw-string equality, not canonicalized —
+    the <script> body escaping (&lt;), literal newlines, and no-CDATA form are
+    load-bearing and must match the live capture byte-for-byte."""
+    emitted = ProcessFlowBuilder.build(_dataprocess_config(), name="DataProcess Groovy Sync")
+    assert emitted == _DATAPROCESS_GOLDEN.read_text()
+
+
+def test_dataprocess_multi_step_chain_emits_sequential_index_and_key():
+    steps = [
+        {"operation": "custom_scripting", "script": "dataContext.storeStream(is, props); // a"},
+        {"operation": "custom_scripting", "script": "dataContext.storeStream(is, props); // b"},
+    ]
+    xml = ProcessFlowBuilder.build(_dataprocess_config(steps=steps), name="Multi")
+    _, _, shapes = _parse_process(xml)
+    dp = next(s for s in shapes if s.attrib["shapetype"] == "dataprocess")
+    step_elems = dp.findall("configuration/dataprocess/step")
+    assert [s.attrib["index"] for s in step_elems] == ["1", "2"]
+    assert [s.attrib["key"] for s in step_elems] == ["1", "2"]
+
+
+def test_dataprocess_script_is_xml_escaped():
+    # Angle brackets / ampersands in the script body must be emitted well-formed
+    # and round-trip back to their raw text through the parser.
+    raw = "if (a < b && c > d) { dataContext.storeStream(is, props); }"
+    xml = ProcessFlowBuilder.build(
+        _dataprocess_config(steps=[{"operation": "custom_scripting", "script": raw}]),
+        name="N",
+    )
+    _, _, shapes = _parse_process(xml)
+    dp = next(s for s in shapes if s.attrib["shapetype"] == "dataprocess")
+    assert dp.find("configuration/dataprocess/step/dataprocessscript/script").text == raw
+
+
+def test_dataprocess_rejects_missing_script():
+    cfg = _dataprocess_config(steps=[{"operation": "custom_scripting"}])
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0].script"
+
+
+def test_dataprocess_rejects_empty_steps():
+    cfg = _dataprocess_config(steps=[])
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps"
+
+
+def test_dataprocess_rejects_unsupported_operation():
+    cfg = _dataprocess_config(
+        steps=[{"operation": "search_replace", "text_to_find": "x"}]
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED"
+    assert err.field == "transform.steps[0].operation"
+
+
+def test_dataprocess_rejects_character_encoding_until_xml_is_verified():
+    cfg = _dataprocess_config(steps=[{"operation": "character_encoding"}])
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED"
+
+
+def test_dataprocess_rejects_non_groovy2_language():
+    cfg = _dataprocess_config(
+        steps=[{"operation": "custom_scripting", "script": "x", "language": "groovy"}]
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0].language"
+
+
+def test_dataprocess_rejects_use_cache_false():
+    cfg = _dataprocess_config(
+        steps=[{"operation": "custom_scripting", "script": "x", "use_cache": False}]
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform.steps[0].use_cache"
+
+
+def test_dataprocess_rejects_unknown_step_key():
+    cfg = _dataprocess_config(
+        steps=[{"operation": "custom_scripting", "script": "x", "bogus": 1}]
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+
+
 def test_name_attribute_is_xml_escaped():
     xml = ProcessFlowBuilder.build(_base_config(), name='Quote " & angle <name>')
     root = ET.fromstring(xml)

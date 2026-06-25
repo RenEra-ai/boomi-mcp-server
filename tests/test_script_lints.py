@@ -314,3 +314,63 @@ def test_apply_plan_does_not_reject_on_lints():
     # never enter the unresolvable_steps gate.
     assert result.get("_success") is True
     assert "unresolvable_steps" not in result
+
+
+# ---------------------------------------------------------------------------
+# Typed Data Process transform scripts (issue #106 M10.2)
+#
+# transform.mode='dataprocess' custom_scripting steps are Data Process scripts,
+# so they get the SAME per-script storeStream + long-body lints as the raw-XML
+# escape hatch — fed from the typed config, no hand-authored XML.
+# ---------------------------------------------------------------------------
+
+
+def _typed_dataprocess_comp(*scripts: str, key: str = "tdp1") -> IntegrationComponentSpec:
+    steps = [{"operation": "custom_scripting", "script": s} for s in scripts]
+    return IntegrationComponentSpec(
+        key=key, type="process", action="create", name="Typed DP",
+        config={
+            "process_kind": "database_to_api_sync",
+            "transform": {"mode": "dataprocess", "label": "DP", "steps": steps},
+        },
+    )
+
+
+def test_typed_dataprocess_missing_storestream_is_flagged():
+    comp = _typed_dataprocess_comp("def x = dataContext.getStream(0)\n// no store back")
+    warnings = _lint_script_bodies(_spec(comp))
+    assert _SCRIPT_LINT_STORE_STREAM_MISSING in _codes(warnings)
+
+
+def test_typed_dataprocess_present_storestream_is_not_flagged():
+    comp = _typed_dataprocess_comp("dataContext.storeStream(is, props);")
+    warnings = _lint_script_bodies(_spec(comp))
+    assert _SCRIPT_LINT_STORE_STREAM_MISSING not in _codes(warnings)
+
+
+def test_typed_dataprocess_storestream_checked_per_step():
+    # Two steps: one stores, one doesn't — the missing one must still flag.
+    comp = _typed_dataprocess_comp(
+        "dataContext.storeStream(is, props);",
+        "def y = dataContext.getStream(0)\n// dropped",
+    )
+    warnings = _lint_script_bodies(_spec(comp))
+    assert _SCRIPT_LINT_STORE_STREAM_MISSING in _codes(warnings)
+
+
+def test_typed_dataprocess_long_body_is_flagged():
+    comp = _typed_dataprocess_comp(
+        "dataContext.storeStream(is, props)\n" + _long_body(_SCRIPT_BODY_MAX_LINES + 5)
+    )
+    codes = _codes(_lint_script_bodies(_spec(comp)))
+    assert _SCRIPT_LINT_BODY_LONG in codes
+    # storeStream IS present, so only the long-body warning fires.
+    assert _SCRIPT_LINT_STORE_STREAM_MISSING not in codes
+
+
+def test_typed_dataprocess_lints_are_warnings_only():
+    # These lints surface as warning strings, never validation errors.
+    comp = _typed_dataprocess_comp("def x = 1 // no store")
+    warnings = _lint_script_bodies(_spec(comp))
+    assert all(isinstance(w, str) for w in warnings)
+    assert _SCRIPT_LINT_STORE_STREAM_MISSING in _codes(warnings)

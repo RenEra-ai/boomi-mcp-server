@@ -16,6 +16,7 @@ Issue #27 added the source/transform primitives (``db_extract``,
 ``dlq_writer``, ``run_metadata``).
 """
 
+from .data_process import DataProcessPrimitive
 from .db_extract import DbExtractPrimitive
 from .field_map import FieldMapPrimitive
 from .operational import (
@@ -29,6 +30,7 @@ from .rest_send import RestSendWithRetryPrimitive
 from .xml_json_convert import XmlJsonConvertPrimitive
 
 __all__ = [
+    "DataProcessPrimitive",
     "DbExtractPrimitive",
     "FieldMapPrimitive",
     "XmlJsonConvertPrimitive",

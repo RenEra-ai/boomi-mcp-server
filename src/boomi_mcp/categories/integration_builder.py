@@ -3575,6 +3575,25 @@ def _collect_script_bodies(
                     # lint (it is the component XML, not a script body).
                     bodies.append(("config.xml", "processing_raw", xml))
 
+    # Issue #106 M10.2: typed process-level Data Process Custom Scripting steps
+    # (transform.mode='dataprocess'). Each step's Groovy body is a Data Process
+    # script, so it gets the same per-script storeStream + long-script lints as
+    # the raw-XML escape hatch above — without the caller hand-authoring XML.
+    transform = config.get("transform")
+    if isinstance(transform, dict) and str(transform.get("mode") or "").strip().lower() == "dataprocess":
+        steps = transform.get("steps")
+        if isinstance(steps, list):
+            for i, step in enumerate(steps):
+                if not isinstance(step, dict):
+                    continue
+                if str(step.get("operation") or "").strip() != "custom_scripting":
+                    continue
+                script_text = step.get("script")
+                if isinstance(script_text, str) and script_text.strip():
+                    bodies.append(
+                        (f"transform.steps[{i}].script", "processing", script_text)
+                    )
+
     return bodies
 
 

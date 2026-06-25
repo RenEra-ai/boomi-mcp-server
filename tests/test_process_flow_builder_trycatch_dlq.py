@@ -746,6 +746,47 @@ def test_connector_scope_target_retry_does_not_re_run_source():
     assert by_name[_forward(tgt_try)].attrib["shapetype"] == "stop"
 
 
+def test_connector_scoped_trycatch_keeps_dataprocess_outside_target_retry():
+    """Issue #106 M10.2: a dataprocess transform is a middle (non-setproperties)
+    shape, so under connector-scope it sits OUTSIDE the target retry unit — as a
+    separator between the two Try/Catch shapes, exactly like map/message. A target
+    retry must not re-run the Data Process step."""
+    cfg = _connector_config(
+        retry_count=2,
+        transform={
+            "mode": "dataprocess",
+            "label": "Tag",
+            "steps": [
+                {"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}
+            ],
+        },
+    )
+    _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))
+    # dataprocess takes the same slot map occupies in the canonical layout.
+    assert _by_type(shapes) == [
+        "start", "catcherrors", "connectoraction", "dataprocess", "catcherrors",
+        "connectoraction", "stop", "doccacheload", "doccacheload",
+    ]
+    by_name = {s.attrib["name"]: s for s in shapes}
+    catcherrors = [s for s in shapes if s.attrib["shapetype"] == "catcherrors"]
+    tgt_ce = catcherrors[1]
+    # The target Try branch enters directly at the target connector — the
+    # dataprocess shape is NOT on the target retry branch.
+    def _drag(shape, identifier):
+        for dp in shape.findall("dragpoints/dragpoint"):
+            if dp.attrib.get("identifier") == identifier:
+                return dp.attrib["toShape"]
+        return None
+
+    tgt_try = by_name[_drag(tgt_ce, "default")]
+    assert tgt_try.attrib["shapetype"] == "connectoraction"
+    # And the dataprocess shape flows forward INTO the target Try/Catch (upstream
+    # of it), so it is outside the retry unit.
+    dp = next(s for s in shapes if s.attrib["shapetype"] == "dataprocess")
+    fwd = dp.findall("dragpoints/dragpoint")[0].attrib["toShape"]
+    assert by_name[fwd].attrib["shapetype"] == "catcherrors"
+
+
 def test_connector_scope_passthrough_no_transform():
     cfg = _connector_config(retry_count=1, transform={"mode": "passthrough"})
     _root, shapes = _parse_shapes(ProcessFlowBuilder.build(cfg, name="N"))

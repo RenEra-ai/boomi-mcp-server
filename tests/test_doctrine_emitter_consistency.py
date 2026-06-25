@@ -49,6 +49,8 @@ PINNED_EMITTABLE = frozenset(
         "notify",
         "doccacheload",
         "processcall",
+        # M10.2 (issue #106): process-level Data Process Custom Scripting shape.
+        "dataprocess",
     }
 )
 
@@ -65,6 +67,9 @@ _FLOW_PARAMS = {
     },
     "message": {"text": "hello"},
     "map": {"map_id": "MAP-1"},
+    "dataprocess": {
+        "steps": [{"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}],
+    },
     "setproperties": {
         "ddp_name": "path",
         "request_profile_id": "PROF-1",
@@ -170,6 +175,7 @@ def test_flow_dispatch_ladder_keys():
         "connectoraction_target",
         "message",
         "map",
+        "dataprocess",
         "setproperties",
         "processcall",
         "stop",
@@ -220,12 +226,14 @@ def test_supported_transform_modes_are_dispatch_backed():
     """Every supported transform mode maps to a dispatch-backed shape, while
     ``passthrough`` intentionally emits no transform shape (issue #105 optional)."""
     assert pfb._SUPPORTED_TRANSFORM_MODES == frozenset(
-        {"passthrough", "message", "map_ref"}
+        {"passthrough", "message", "map_ref", "dataprocess"}
     )
     dispatch = _flow_dispatch_kinds()
-    # message mode -> the "message" shape; map_ref mode -> the "map" shape.
+    # message mode -> the "message" shape; map_ref mode -> the "map" shape;
+    # dataprocess mode -> the "dataprocess" shape (issue #106 M10.2).
     assert EMITTABLE_SHAPE_REGISTRY["message"]["emitter_kind"] in dispatch
     assert EMITTABLE_SHAPE_REGISTRY["map"]["emitter_kind"] in dispatch
+    assert EMITTABLE_SHAPE_REGISTRY["dataprocess"]["emitter_kind"] in dispatch
     # passthrough has no dedicated transform shape/kind.
     assert "passthrough" not in dispatch
 

@@ -46,6 +46,24 @@ def test_branch_and_decision_stage_kinds_are_reserved_and_accepted():
     assert kinds["d"] == "decision"
 
 
+def test_dataprocess_stage_kind_is_accepted():
+    # Issue #106 M10.2: the process-level Data Process stage kind is part of the
+    # vocabulary (a concrete kind, distinct from the reserved 'combine').
+    spec = PipelineSpec(
+        stages=[
+            StageSpec(key="r", kind="read"),
+            StageSpec(key="dp", kind="dataprocess"),
+            StageSpec(key="w", kind="write"),
+        ],
+        dependencies=[
+            PipelineEdgeSpec(from_stage="r", to_stage="dp"),
+            PipelineEdgeSpec(from_stage="dp", to_stage="w"),
+        ],
+    )
+    kinds = {s.key: s.kind for s in spec.stages}
+    assert kinds["dp"] == "dataprocess"
+
+
 def test_invalid_stage_kind_is_rejected():
     # Out-of-Literal value is rejected natively by pydantic before the
     # model_validator runs, so we only assert the exception type.

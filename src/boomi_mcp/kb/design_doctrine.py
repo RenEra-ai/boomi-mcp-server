@@ -114,6 +114,10 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     "notify": {"emittable": True, "emitter_kind": "notify"},
     "doccacheload": {"emittable": True, "emitter_kind": "doccacheload"},
     "processcall": {"emittable": True, "emitter_kind": "processcall"},
+    # M10.2 (issue #106): process-level Data Process shape. Emittable today for
+    # the live-observed Custom Scripting operation via the dataprocess transform
+    # mode; the dispatch key is ``dataprocess`` in _emit_flow_shape.
+    "dataprocess": {"emittable": True, "emitter_kind": "dataprocess"},
 }
 
 #: JSON-schema-shaped description of one entry, returned alongside the catalog so
@@ -1127,7 +1131,10 @@ _ENTRIES: List[Dict[str, Any]] = [
             "Prefer native functionality — map functions and "
             "execution-parameter set-property steps — over custom scripts; "
             "the design-level companion of the operating doctrine's "
-            "no-throwaway-scripts rule."
+            "no-throwaway-scripts rule. When a script is genuinely required, "
+            "the process-level Data Process Custom Scripting shape is the "
+            "supported escape hatch, and it is emittable today by the typed "
+            "builder (live-verified against a real account export)."
         ),
         "when_to_use": (
             "Whenever a native map function or step expresses the logic — "
@@ -1135,14 +1142,16 @@ _ENTRIES: List[Dict[str, Any]] = [
         ),
         "when_not_to_use": (
             "Genuinely novel logic with no native equivalent may need a "
-            "script; keep it small and justified."
+            "script; keep it small and justified. The Data Process Custom "
+            "Scripting shape that carries it is emittable today, so reserve it "
+            "for that case rather than reaching for it by default."
         ),
-        "verification_status": "course_unverified",
-        "capability_status": "guidance_only",
+        "verification_status": "live_verified",
+        "capability_status": "emittable_today",
         "category": "process_tuning",
         "mutual_exclusion": [],
         "cross_refs": ["wrapper_subprocess_separation"],
-        "provenance": "course_unverified",
+        "provenance": "live_verified",
     },
     {
         "name": "migration_pattern_templating",
