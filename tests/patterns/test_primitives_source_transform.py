@@ -1218,7 +1218,25 @@ class TestBranch:
                 "label": "audit",
             },
         ]
+        # Literal-id legs reference no in-spec component keys.
         assert fragment["depends_on"] == []
+
+    def test_emit_fragment_collects_ref_keys_into_depends_on(self):
+        # A leg may bind via $ref:KEY (the documented form). The fragment must list
+        # those keys in depends_on (base.PrimitivePattern contract) so the merged
+        # process does not fail ProcessFlowBuilder.validate_config with
+        # MISSING_PROCESS_DEPENDENCY. Deduped, connection then operation order.
+        params = BranchPrimitive.validate_parameters({"targets": [
+            {"connector_type": "rest", "action_type": "PUT",
+             "connection_id": "$ref:leg1_conn", "operation_id": "$ref:leg1_op"},
+            {"connector_type": "rest", "action_type": "GET",
+             "connection_id": "$ref:leg1_conn",  # shared conn — deduped
+             "operation_id": "77777777-7777-7777-7777-777777777777"},  # literal — not a dep
+        ]})
+        fragment = BranchPrimitive.emit_fragment(_ctx(), params)
+        assert fragment["depends_on"] == ["leg1_conn", "leg1_op"]
+        # The $ref tokens are preserved verbatim for apply-time substitution.
+        assert fragment["process_config"]["branch"]["targets"][0]["connection_id"] == "$ref:leg1_conn"
 
     def test_emit_fragment_omits_absent_label(self):
         params = BranchPrimitive.validate_parameters({"targets": [dict(_BRANCH_LEG)]})

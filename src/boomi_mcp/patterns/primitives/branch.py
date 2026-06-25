@@ -152,6 +152,13 @@ class BranchPrimitive(PrimitivePattern):
     ) -> Dict[str, Any]:
         params: BranchParameters = parameters  # type: ignore[assignment]
         targets: List[Dict[str, Any]] = []
+        # A leg binding may be a literal component id OR a "$ref:KEY" token. Per the
+        # emit_fragment contract (see base.PrimitivePattern), depends_on must list
+        # every component key the process_config references — otherwise the merged
+        # process component would fail ProcessFlowBuilder.validate_config with
+        # MISSING_PROCESS_DEPENDENCY on the unreachable ref. Collect the $ref keys
+        # here (mirrors RestSendWithRetryPrimitive, which lists its conn/op keys).
+        depends_on: List[str] = []
         for leg in params.targets:
             target: Dict[str, Any] = {
                 "connector_type": leg.connector_type,
@@ -162,7 +169,12 @@ class BranchPrimitive(PrimitivePattern):
             if leg.label:
                 target["label"] = leg.label
             targets.append(target)
+            for binding in (leg.connection_id, leg.operation_id):
+                if binding.startswith("$ref:"):
+                    key = binding[len("$ref:"):]
+                    if key and key not in depends_on:
+                        depends_on.append(key)
         return {
             "process_config": {"branch": {"enabled": True, "targets": targets}},
-            "depends_on": [],
+            "depends_on": depends_on,
         }
