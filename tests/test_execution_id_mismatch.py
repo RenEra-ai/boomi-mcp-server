@@ -42,16 +42,27 @@ _REQUEST_ID = "executionrecord-8e811200-fb2f-44f0-a6d9-ca4211b67c0c"
 _EXECUTION_ID = "execution-8e811200-fb2f-44f0-a6d9-ca4211b67c0c-2026.06.06"
 
 
+_EXPECTED_ERROR = (
+    "execution_id looks like a request_id (executionrecord- prefix). "
+    "Use the execution_id from execute_process execution_result.execution_id instead."
+)
+_EXPECTED_HINT = (
+    "execute_process returns two ids: request_id (executionrecord-..., for polling only) "
+    "and execution_id (inside execution_result.execution_id, for logs/artifacts). "
+    "Pass execution_result.execution_id here."
+)
+
+
 def _assert_request_id_rejection(result):
-    """Common assertions for the structured request_id-as-execution_id failure."""
+    """Common assertions for the structured request_id-as-execution_id failure.
+
+    Pins the full user-facing contract (exact error AND hint) — the hint literal is
+    duplicated across the monitoring.py and troubleshooting.py helpers, so exact equality
+    also guards against the two copies drifting apart.
+    """
     assert result["_success"] is False
-    assert result["error"] == (
-        "execution_id looks like a request_id (executionrecord- prefix). "
-        "Use the execution_id from execute_process execution_result.execution_id instead."
-    )
-    assert "hint" in result
-    assert "request_id" in result["hint"]
-    assert "execution_result.execution_id" in result["hint"]
+    assert result["error"] == _EXPECTED_ERROR
+    assert result["hint"] == _EXPECTED_HINT
 
 
 # ---------------------------------------------------------------------------
