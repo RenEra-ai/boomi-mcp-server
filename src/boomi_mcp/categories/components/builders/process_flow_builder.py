@@ -64,7 +64,9 @@ _REST_ACTION_TYPES = frozenset({
 # process-flow surface area.
 _DB_ACTION_TYPES = frozenset({"Get"})
 
-_SUPPORTED_TRANSFORM_MODES = frozenset({"passthrough", "message", "map_ref", "dataprocess"})
+_SUPPORTED_TRANSFORM_MODES = frozenset(
+    {"passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve"}
+)
 _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subprocess_ref"})
 
 # Issue #112 M10.8: Branch (N-way forward fan-out) shape. The optional ``branch``
@@ -107,6 +109,29 @@ _DATAPROCESS_SCRIPT_LANGUAGE = "groovy2"
 # it is optional (empty in the live capture) and maps to both the shape userlabel
 # and the inner <returndocuments label="..."> attribute.
 _RETURN_DOCUMENTS_ALLOWED_KEYS = frozenset({"enabled", "label"})
+
+# Issue #109 M10.5: process-level Document Cache Retrieve shape
+# (transform.mode='doccacheretrieve'). Live-captured from the `work` account
+# (component 64e5397b-3583-42c9-8fe3-08ccefb0da6c shape2; see
+# .codex/plans/issue-109-live-captures.md): a linear NON-terminal shape placed
+# between source and target that pulls documents from a Document Cache into the
+# current flow — the read counterpart of the already-shipped doccacheload (Add
+# to Cache, DLQ catch leg), completing Document Cache CRUD. v1 ships ONLY the
+# live-observed all-document retrieve: loadAllDoc="true" with an empty
+# <cacheKeyValues/> and the recommended "Stop document execution" empty-cache
+# behavior (emptyCacheBehavior="stopprocess"). Keyed/index retrieval (a
+# docCacheIndex + populated cacheKeyValues) and the backward-compat "Fail
+# document with errors" behavior have no byte-accurate live capture, so each is
+# rejected PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID until one — never
+# over-claiming the wire shape from docs alone (mirrors the dataprocess
+# operation gate). document_cache_id binds the Document Cache component id (a
+# literal id or a $ref:KEY token in depends_on).
+_DOCCACHE_RETRIEVE_ALLOWED_KEYS = frozenset(
+    {"mode", "label", "document_cache_id", "empty_cache_behavior", "load_all_documents"}
+)
+# Only the live-verified "Stop document execution (recommended)" wire value.
+_DOCCACHE_RETRIEVE_EMPTY_BEHAVIORS = frozenset({"stopprocess"})
+_DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR = "stopprocess"
 
 # Issue #51 M3.R1a / #88 M4.5.3: DLQ modes that emit a verified Try/Catch
 # wrapper + DLQ catch-path (every supported mode except "disabled"). The catch
@@ -587,6 +612,24 @@ class ProcessFlowBuilder:
                 "dataprocess",
                 {
                     "steps": transform.get("steps") or [],
+                    "userlabel": str(transform.get("label") or ""),
+                },
+            ))
+        elif transform_mode == "doccacheretrieve":
+            # Issue #109 M10.5: a process-level Document Cache Retrieve shape that
+            # pulls documents from a Document Cache into the current flow (the read
+            # half of Document Cache CRUD). It sits in the same middle-transform
+            # slot as message/map_ref/dataprocess. validate_config has already
+            # proven the config; build() re-reads it total.
+            flow.append((
+                "doccacheretrieve",
+                {
+                    "document_cache_id": str(transform.get("document_cache_id") or "").strip(),
+                    "empty_cache_behavior": str(
+                        transform.get("empty_cache_behavior")
+                        or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR
+                    ).strip(),
+                    "load_all_documents": transform.get("load_all_documents", True),
                     "userlabel": str(transform.get("label") or ""),
                 },
             ))
@@ -1447,6 +1490,8 @@ def _validate_transform(transform: Any) -> Optional[BuilderValidationError]:
             )
     if mode == "dataprocess":
         return _validate_dataprocess_transform(transform)
+    if mode == "doccacheretrieve":
+        return _validate_doccacheretrieve_transform(transform)
     return None
 
 
@@ -1536,6 +1581,87 @@ def _validate_dataprocess_transform(
                     field=f"{field}.use_cache",
                     hint="Script compilation caching is required (use_cache=true).",
                 )
+    return None
+
+
+def _validate_doccacheretrieve_transform(
+    transform: Dict[str, Any],
+) -> Optional[BuilderValidationError]:
+    """Validate a ``transform.mode='doccacheretrieve'`` config (issue #109 M10.5).
+
+    The Document Cache Retrieve shape pulls documents from a Document Cache into
+    the current flow — the read half of Document Cache CRUD (the write half,
+    Add to Cache / ``doccacheload``, already ships on the DLQ catch leg). v1
+    accepts ONLY the live-observed all-document retrieve:
+
+      * ``document_cache_id`` (required) — the Document Cache component id, a
+        literal id or a ``$ref:KEY`` token (reachability is enforced generically
+        by ``_validate_ref_reachability``).
+      * ``empty_cache_behavior`` (optional, default ``stopprocess``) — the only
+        live-verified "If cache is empty" wire value (Stop document execution).
+        The docs-listed backward-compat "Fail document with errors" option has
+        no live capture and is deferred.
+      * ``load_all_documents`` (optional, default ``True``) — must be ``True``;
+        keyed/index retrieval (a docCacheIndex + populated cacheKeyValues) is
+        deferred pending a byte-accurate live capture.
+      * ``label`` (optional) — the shape display label.
+
+    Unknown keys and unsupported values all return
+    ``PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID`` (mirrors the dataprocess gate).
+    """
+    extra = set(transform) - _DOCCACHE_RETRIEVE_ALLOWED_KEYS
+    if extra:
+        return BuilderValidationError(
+            f"transform has unsupported keys for mode='doccacheretrieve': {sorted(extra)}.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field="transform",
+            hint=f"Allowed keys: {sorted(_DOCCACHE_RETRIEVE_ALLOWED_KEYS)}.",
+        )
+    doc_cache_id = transform.get("document_cache_id")
+    if not isinstance(doc_cache_id, str) or not doc_cache_id.strip():
+        return BuilderValidationError(
+            "transform.document_cache_id is required when mode='doccacheretrieve'.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field="transform.document_cache_id",
+            hint=(
+                "Pass the Document Cache component id (a literal id or a $ref:KEY "
+                "token in depends_on) to retrieve documents from."
+            ),
+        )
+    behavior = transform.get(
+        "empty_cache_behavior", _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR
+    )
+    if behavior not in _DOCCACHE_RETRIEVE_EMPTY_BEHAVIORS:
+        return BuilderValidationError(
+            f"transform.empty_cache_behavior {behavior!r} is not supported.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field="transform.empty_cache_behavior",
+            hint=(
+                "v1 supports only 'stopprocess' (Stop document execution, the "
+                "recommended default); the backward-compat 'fail document with "
+                "errors' behavior is deferred pending a live capture."
+            ),
+        )
+    load_all = transform.get("load_all_documents", True)
+    if load_all is not True:
+        return BuilderValidationError(
+            "transform.load_all_documents must be true when mode='doccacheretrieve'.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field="transform.load_all_documents",
+            hint=(
+                "v1 retrieves ALL cached documents (loadAllDoc=true, empty "
+                "cacheKeyValues). Keyed/index retrieval is deferred pending a "
+                "byte-accurate live capture."
+            ),
+        )
+    label = transform.get("label")
+    if label is not None and not isinstance(label, str):
+        return BuilderValidationError(
+            "transform.label must be a string.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field="transform.label",
+            hint="Use a string display label for the Document Cache Retrieve shape.",
+        )
     return None
 
 
@@ -2174,6 +2300,65 @@ def _emit_dataprocess_step(step: Dict[str, Any], index: int) -> str:
     )
 
 
+def _emit_doccacheretrieve(
+    shape_name: str,
+    params: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit a process-level Document Cache Retrieve shape (issue #109 M10.5).
+
+    Byte-accurate to the live ``work``-account capture (component
+    64e5397b-3583-42c9-8fe3-08ccefb0da6c shape2; see
+    ``.codex/plans/issue-109-live-captures.md``):
+    ``<shape image="doccacheretrieve_icon" ... shapetype="doccacheretrieve"
+    userlabel="..."><configuration><doccacheretrieve docCache="..."
+    emptyCacheBehavior="stopprocess" loadAllDoc="true"><cacheKeyValues/>
+    </doccacheretrieve></configuration><dragpoints>...</dragpoints></shape>``.
+
+    The shape pulls documents from a Document Cache into the current flow — the
+    read counterpart of the already-shipped ``doccacheload`` (Add to Cache). It
+    is a normal linear NON-terminal step: one forward dragpoint to ``next_name``.
+    v1 emits only the all-document retrieve form (``loadAllDoc="true"`` with an
+    empty ``<cacheKeyValues/>``); the attribute order — docCache,
+    emptyCacheBehavior, loadAllDoc — matches the live XML byte-for-byte. build()
+    stays total on a validate_config-bypass: an empty ``document_cache_id`` would
+    emit a semantically broken ``docCache=""`` (well-formed XML the parse-back
+    guard would not catch), so raise rather than emit it — mirrors the
+    _emit_dataprocess empty-steps guard.
+    """
+    doc_cache_id = _escape_xml(str(params.get("document_cache_id") or "").strip())
+    if not doc_cache_id:
+        raise BuilderValidationError(
+            "transform.document_cache_id is required when mode='doccacheretrieve'.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field="transform.document_cache_id",
+            hint=(
+                "Pass the Document Cache component id (a literal id or a $ref:KEY "
+                "token in depends_on) to retrieve documents from."
+            ),
+        )
+    dragpoints = _emit_dragpoints([next_name], shape_index)
+    userlabel = _escape_xml(params.get("userlabel") or "")
+    empty_cache_behavior = _escape_xml(
+        str(params.get("empty_cache_behavior") or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR).strip()
+    )
+    load_all_doc = "true" if params.get("load_all_documents", True) is True else "false"
+    return (
+        f'<shape image="doccacheretrieve_icon" name="{shape_name}" '
+        f'shapetype="doccacheretrieve" userlabel="{userlabel}" '
+        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        '<configuration>'
+        f'<doccacheretrieve docCache="{doc_cache_id}" '
+        f'emptyCacheBehavior="{empty_cache_behavior}" loadAllDoc="{load_all_doc}">'
+        '<cacheKeyValues/>'
+        '</doccacheretrieve>'
+        '</configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
 def _emit_returndocuments(
     shape_name: str,
     params: Dict[str, Any],
@@ -2352,6 +2537,8 @@ def _emit_flow_shape(
         return _emit_map(shape_name, params, next_name, shape_index)
     if kind == "dataprocess":
         return _emit_dataprocess(shape_name, params, next_name, shape_index)
+    if kind == "doccacheretrieve":
+        return _emit_doccacheretrieve(shape_name, params, next_name, shape_index)
     if kind == "setproperties":
         return _emit_setproperties(shape_name, params, next_name, shape_index)
     if kind == "processcall":

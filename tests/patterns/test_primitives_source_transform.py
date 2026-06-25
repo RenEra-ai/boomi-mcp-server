@@ -32,6 +32,7 @@ from boomi_mcp.patterns.primitives import (
     BranchPrimitive,
     DataProcessPrimitive,
     DbExtractPrimitive,
+    DocumentCacheRetrievePrimitive,
     FieldMapPrimitive,
     ReturnDocumentsPrimitive,
     ThrowExceptionPrimitive,
@@ -1023,6 +1024,96 @@ class TestDataProcess:
         with pytest.raises(ValidationError):
             DataProcessPrimitive.validate_parameters(
                 {"steps": [{"operation": "search_replace", "script": "x"}]}
+            )
+
+
+# ===========================================================================
+# document_cache_retrieve (issue #109 M10.5)
+# ===========================================================================
+
+
+class TestDocumentCacheRetrieve:
+    def test_registry_discovers_document_cache_retrieve(self):
+        try:
+            reg = PatternRegistry.from_package("boomi_mcp.patterns")
+        except TypeError as exc:  # pragma: no cover — interpreter-specific
+            # Same Python 3.9.6 inspect.isclass quirk the sibling
+            # test_registry_discovers_data_process documents.
+            pytest.skip(f"registry discovery unavailable on this interpreter: {exc}")
+        cls = reg.get("document_cache_retrieve")
+        assert cls is DocumentCacheRetrievePrimitive
+        assert cls.metadata.kind == PatternKind.PRIMITIVE
+
+    def test_describe_includes_contracts_and_no_raw_artifacts(self):
+        described = DocumentCacheRetrievePrimitive.describe()
+        for key in ("metadata", "parameter_schema", "input_contract", "output_contract", "required_builders"):
+            assert key in described
+        assert described["required_builders"] == ["ProcessFlowBuilder"]
+        dumped = json.dumps(described)
+        for forbidden in ("<bns:", "</", "<?xml", "```"):
+            assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
+
+    def test_emit_components_is_empty(self):
+        params = DocumentCacheRetrievePrimitive.validate_parameters(
+            {"document_cache_id": "CACHE-1"}
+        )
+        assert DocumentCacheRetrievePrimitive.emit_components(_ctx(), params) == []
+
+    def test_emit_fragment_returns_doccacheretrieve_transform(self):
+        params = DocumentCacheRetrievePrimitive.validate_parameters(
+            {"document_cache_id": "CACHE-1", "label": "Get From Cache"}
+        )
+        fragment = DocumentCacheRetrievePrimitive.emit_fragment(_ctx(), params)
+        transform = fragment["process_config"]["transform"]
+        assert transform["mode"] == "doccacheretrieve"
+        assert transform["document_cache_id"] == "CACHE-1"
+        assert transform["empty_cache_behavior"] == "stopprocess"
+        assert transform["load_all_documents"] is True
+        assert transform["label"] == "Get From Cache"
+        # A literal cache id has no in-spec dependency.
+        assert fragment["depends_on"] == []
+
+    def test_emit_fragment_collects_ref_dependency(self):
+        params = DocumentCacheRetrievePrimitive.validate_parameters(
+            {"document_cache_id": "$ref:MyCache"}
+        )
+        fragment = DocumentCacheRetrievePrimitive.emit_fragment(_ctx(), params)
+        # The $ref key must be declared so the merged process passes
+        # MISSING_PROCESS_DEPENDENCY (mirrors BranchPrimitive's $ref collection).
+        assert fragment["depends_on"] == ["MyCache"]
+        assert fragment["process_config"]["transform"]["document_cache_id"] == "$ref:MyCache"
+
+    def test_emit_fragment_omits_absent_label(self):
+        params = DocumentCacheRetrievePrimitive.validate_parameters(
+            {"document_cache_id": "CACHE-1"}
+        )
+        fragment = DocumentCacheRetrievePrimitive.emit_fragment(_ctx(), params)
+        assert "label" not in fragment["process_config"]["transform"]
+
+    def test_validation_requires_document_cache_id(self):
+        with pytest.raises(ValidationError):
+            DocumentCacheRetrievePrimitive.validate_parameters({})
+
+    def test_validation_rejects_blank_document_cache_id(self):
+        with pytest.raises(ValidationError):
+            DocumentCacheRetrievePrimitive.validate_parameters({"document_cache_id": "   "})
+
+    def test_validation_rejects_unsupported_empty_cache_behavior(self):
+        with pytest.raises(ValidationError):
+            DocumentCacheRetrievePrimitive.validate_parameters(
+                {"document_cache_id": "CACHE-1", "empty_cache_behavior": "returnerror"}
+            )
+
+    def test_validation_rejects_keyed_retrieval(self):
+        with pytest.raises(ValidationError):
+            DocumentCacheRetrievePrimitive.validate_parameters(
+                {"document_cache_id": "CACHE-1", "load_all_documents": False}
+            )
+
+    def test_validation_rejects_unknown_key(self):
+        with pytest.raises(ValidationError):
+            DocumentCacheRetrievePrimitive.validate_parameters(
+                {"document_cache_id": "CACHE-1", "bogus": 1}
             )
 
 

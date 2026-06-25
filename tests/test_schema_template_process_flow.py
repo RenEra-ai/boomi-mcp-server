@@ -147,8 +147,24 @@ def test_template_example_does_not_use_deferred_fields(template):
 
 def test_template_supported_transform_modes(template):
     assert set(template["supported_transform_modes"]) == {
-        "passthrough", "message", "map_ref", "dataprocess",
+        "passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve",
     }
+
+
+def test_template_documents_doccacheretrieve_surface(template):
+    # Issue #109 M10.5: the Document Cache Retrieve transform fields, the
+    # live-verified empty-cache behavior set, and the new structured error are all
+    # documented.
+    optional = template["optional_fields"]
+    for field in (
+        "transform.document_cache_id",
+        "transform.empty_cache_behavior",
+        "transform.load_all_documents",
+    ):
+        assert field in optional, field
+    assert template["supported_doccache_retrieve_empty_behaviors"] == ["stopprocess"]
+    codes = {e["error_code"] for e in template["structured_errors"]}
+    assert "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID" in codes
 
 
 def test_template_documents_dataprocess_surface(template):

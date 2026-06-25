@@ -59,6 +59,9 @@ PINNED_EMITTABLE = frozenset(
         # emitter (_emit_branch / _emit_branch_shapes), neither a _emit_flow_shape
         # dispatch kind nor a catch-path shape.
         "branch",
+        # M10.5 (issue #109): process-level Document Cache Retrieve shape — the
+        # doccacheretrieve transform mode / _emit_flow_shape dispatch kind.
+        "doccacheretrieve",
     }
 )
 
@@ -78,6 +81,9 @@ _FLOW_PARAMS = {
     "dataprocess": {
         "steps": [{"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}],
     },
+    # M10.5 (issue #109): the Document Cache Retrieve shape needs only the required
+    # document_cache_id (empty_cache_behavior / load_all_documents default).
+    "doccacheretrieve": {"document_cache_id": "CACHE-1"},
     # M10.3 (issue #107): the Return Documents terminal reads only an optional
     # label via params.get(...), so empty params emit a valid (unlabeled) shape.
     "returndocuments": {},
@@ -213,6 +219,7 @@ def test_flow_dispatch_ladder_keys():
         "message",
         "map",
         "dataprocess",
+        "doccacheretrieve",
         "returndocuments",
         "setproperties",
         "processcall",
@@ -283,14 +290,16 @@ def test_supported_transform_modes_are_dispatch_backed():
     """Every supported transform mode maps to a dispatch-backed shape, while
     ``passthrough`` intentionally emits no transform shape (issue #105 optional)."""
     assert pfb._SUPPORTED_TRANSFORM_MODES == frozenset(
-        {"passthrough", "message", "map_ref", "dataprocess"}
+        {"passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve"}
     )
     dispatch = _flow_dispatch_kinds()
     # message mode -> the "message" shape; map_ref mode -> the "map" shape;
-    # dataprocess mode -> the "dataprocess" shape (issue #106 M10.2).
+    # dataprocess mode -> the "dataprocess" shape (issue #106 M10.2);
+    # doccacheretrieve mode -> the "doccacheretrieve" shape (issue #109 M10.5).
     assert EMITTABLE_SHAPE_REGISTRY["message"]["emitter_kind"] in dispatch
     assert EMITTABLE_SHAPE_REGISTRY["map"]["emitter_kind"] in dispatch
     assert EMITTABLE_SHAPE_REGISTRY["dataprocess"]["emitter_kind"] in dispatch
+    assert EMITTABLE_SHAPE_REGISTRY["doccacheretrieve"]["emitter_kind"] in dispatch
     # passthrough has no dedicated transform shape/kind.
     assert "passthrough" not in dispatch
 

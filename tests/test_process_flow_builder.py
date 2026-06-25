@@ -532,6 +532,168 @@ def test_dataprocess_rejects_unknown_step_key():
 
 
 # ---------------------------------------------------------------------------
+# Document Cache Retrieve transform (issue #109 M10.5)
+# ---------------------------------------------------------------------------
+
+_DOCCACHE_RETRIEVE_GOLDEN = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "document_cache_retrieve.xml"
+)
+
+# The live-captured Document Cache component id (work component
+# 64e5397b-... shape2; see .codex/plans/issue-109-live-captures.md).
+_DOCCACHE_ID = "8540619c-9f1e-4832-9b1a-5128c399aa52"
+
+
+def _doccacheretrieve_config(label="Get Status Updates From Cache", **overrides):
+    transform = {"mode": "doccacheretrieve", "document_cache_id": _DOCCACHE_ID}
+    if label is not None:
+        transform["label"] = label
+    transform.update(overrides.pop("transform_extra", {}))
+    return _base_config(transform=transform, **overrides)
+
+
+def test_doccacheretrieve_inserts_linear_shape_between_source_and_target():
+    xml = ProcessFlowBuilder.build(_doccacheretrieve_config(), name="Cache Retrieve Sync")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "doccacheretrieve", "connectoraction", "stop",
+    ]
+    dcr = shapes[2]
+    assert dcr.attrib["image"] == "doccacheretrieve_icon"
+    assert dcr.attrib["userlabel"] == "Get Status Updates From Cache"
+    cfg = dcr.find("configuration/doccacheretrieve")
+    assert cfg.attrib["docCache"] == _DOCCACHE_ID
+    assert cfg.attrib["emptyCacheBehavior"] == "stopprocess"
+    assert cfg.attrib["loadAllDoc"] == "true"
+    # All-document retrieve emits an empty <cacheKeyValues/> (keyed retrieval deferred).
+    key_values = cfg.find("cacheKeyValues")
+    assert key_values is not None and list(key_values) == []
+    # Linear, non-terminal: exactly one forward dragpoint to the next shape.
+    dragpoints = dcr.find("dragpoints")
+    assert [dp.attrib["toShape"] for dp in dragpoints] == ["shape4"]
+
+
+def test_doccacheretrieve_matches_golden_fixture():
+    """Byte-exact golden (issue #109 g): the docCache/emptyCacheBehavior/loadAllDoc
+    attribute order and the empty <cacheKeyValues/> child are load-bearing and must
+    match the live capture byte-for-byte."""
+    emitted = ProcessFlowBuilder.build(
+        _doccacheretrieve_config(), name="DocumentCacheRetrieve Sync"
+    )
+    assert emitted == _DOCCACHE_RETRIEVE_GOLDEN.read_text()
+
+
+def test_doccacheretrieve_accepts_ref_document_cache_id():
+    cfg = _doccacheretrieve_config()
+    cfg["transform"]["document_cache_id"] = "$ref:MyCache"
+    # Reachable when declared in depends_on...
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=["MyCache"]) is None
+    # ...and MISSING_PROCESS_DEPENDENCY when not (generic ref-reachability walk).
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
+
+
+def test_doccacheretrieve_rejects_missing_document_cache_id():
+    cfg = _base_config(transform={"mode": "doccacheretrieve", "label": "x"})
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert err.field == "transform.document_cache_id"
+
+
+def test_doccacheretrieve_rejects_blank_document_cache_id():
+    cfg = _base_config(
+        transform={"mode": "doccacheretrieve", "document_cache_id": "   "}
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert err.field == "transform.document_cache_id"
+
+
+def test_doccacheretrieve_rejects_unsupported_empty_cache_behavior():
+    # The backward-compat "fail document with errors" wire value has no live
+    # capture — only the recommended 'stopprocess' is accepted in v1.
+    cfg = _doccacheretrieve_config()
+    cfg["transform"]["empty_cache_behavior"] = "returnerror"
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert err.field == "transform.empty_cache_behavior"
+
+
+def test_doccacheretrieve_rejects_keyed_retrieval_load_all_false():
+    # Keyed/index retrieval (loadAllDoc=false) is deferred pending a live capture.
+    cfg = _doccacheretrieve_config()
+    cfg["transform"]["load_all_documents"] = False
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert err.field == "transform.load_all_documents"
+
+
+def test_doccacheretrieve_rejects_unknown_transform_key():
+    cfg = _doccacheretrieve_config()
+    cfg["transform"]["bogus"] = 1
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert err.field == "transform"
+
+
+def test_doccacheretrieve_xml_escapes_label_and_cache_id():
+    cfg = _base_config(
+        transform={
+            "mode": "doccacheretrieve",
+            "label": "A & B <retrieve>",
+            "document_cache_id": "CACHE&<1>",
+        }
+    )
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    dcr = next(s for s in shapes if s.attrib["shapetype"] == "doccacheretrieve")
+    # Round-trips back through the parser to the raw text (well-formed escaping).
+    assert dcr.attrib["userlabel"] == "A & B <retrieve>"
+    assert dcr.find("configuration/doccacheretrieve").attrib["docCache"] == "CACHE&<1>"
+
+
+def test_doccacheretrieve_build_bypass_empty_cache_id_raises():
+    # build() stays total on the validate_config-bypass path: an empty docCache
+    # would emit a semantically broken docCache="" (well-formed XML the parse-back
+    # guard would not catch), so raise rather than emit it.
+    cfg = _base_config(transform={"mode": "doccacheretrieve", "document_cache_id": "   "})
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID"
+    assert exc.value.field == "transform.document_cache_id"
+
+
+def test_doccacheretrieve_composes_with_try_catch_wrapper():
+    # The retrieve shape sits in the middle-transform slot, so it composes with the
+    # verified Try/Catch + DLQ wrapper unchanged (the wrapped chain still contains
+    # exactly one doccacheretrieve, non-terminal, between source and target).
+    cfg = _doccacheretrieve_config(
+        reliability={
+            "retry_count": 1,
+            "dlq": {"mode": "document_cache_ref", "document_cache_id": "$ref:DLQ"},
+        }
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=["DLQ"])
+    assert err is None
+    xml = ProcessFlowBuilder.build(cfg, name="Wrapped Retrieve")
+    _, _, shapes = _parse_process(xml)
+    retrieves = [s for s in shapes if s.attrib["shapetype"] == "doccacheretrieve"]
+    assert len(retrieves) == 1
+    # Wrapped in a Try/Catch (catcherrors present) and the retrieve still forwards.
+    assert any(s.attrib["shapetype"] == "catcherrors" for s in shapes)
+    assert list(retrieves[0].find("dragpoints")) != []
+
+
+# ---------------------------------------------------------------------------
 # Return Documents terminal (issue #107 M10.3)
 # ---------------------------------------------------------------------------
 

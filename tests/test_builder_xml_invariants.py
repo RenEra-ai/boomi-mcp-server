@@ -305,6 +305,38 @@ def test_inv_dataprocessscript_attrs_groovy2_usecache_true():
     assert script.attrib["useCache"] == "true"
 
 
+def test_inv_doccacheretrieve_all_documents_linear():
+    # Issue #109 M10.5: the all-document Document Cache Retrieve shape always emits
+    # loadAllDoc="true" with an empty <cacheKeyValues/>, the live attribute order
+    # (docCache, emptyCacheBehavior, loadAllDoc), image="doccacheretrieve_icon",
+    # and a forward (non-empty) dragpoint — it is a normal linear NON-terminal
+    # step. Guaranteed by construction: _emit_doccacheretrieve emits exactly this
+    # form and never a keyed/index retrieval (deferred).
+    xml = ProcessFlowBuilder.build(
+        _process_config(
+            transform={
+                "mode": "doccacheretrieve",
+                "label": "Get From Cache",
+                "document_cache_id": "CACHE-1",
+            }
+        ),
+        name="P",
+    )
+    shapes = _parse_process_shapes(xml)
+    dcr = next(s for s in shapes if s.attrib["shapetype"] == "doccacheretrieve")
+    assert dcr.attrib["image"] == "doccacheretrieve_icon"
+    cfg = dcr.find("configuration/doccacheretrieve")
+    assert cfg.attrib["loadAllDoc"] == "true"
+    assert cfg.attrib["emptyCacheBehavior"] == "stopprocess"
+    assert cfg.attrib["docCache"] == "CACHE-1"
+    # Empty cache-key set (all-document retrieve; keyed retrieval deferred).
+    key_values = cfg.find("cacheKeyValues")
+    assert key_values is not None and list(key_values) == []
+    # NON-terminal: exactly one forward dragpoint.
+    dragpoints = dcr.find("dragpoints")
+    assert dragpoints is not None and len(list(dragpoints)) == 1
+
+
 def test_inv_returndocuments_terminal_no_stop():
     # Issue #107 M10.3: with return_documents.enabled the flow ends in a Return
     # Documents terminal — empty <dragpoints/>, the last shape, and NO Stop is
@@ -799,6 +831,13 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "emitter": "process_flow_builder._emit_dataprocess (issue #106 M10.2)",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_dataprocessscript_attrs_groovy2_usecache_true",
+    },
+    {
+        "id": "doccacheretrieve_linear",
+        "invariant": 'Document Cache Retrieve all-documents form — loadAllDoc="true", empty <cacheKeyValues/>, attribute order docCache/emptyCacheBehavior/loadAllDoc, image="doccacheretrieve_icon", linear NON-terminal (one forward dragpoint)',
+        "emitter": "process_flow_builder._emit_doccacheretrieve (issue #109 M10.5)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_doccacheretrieve_all_documents_linear",
     },
     {
         "id": "returndocuments_terminal",

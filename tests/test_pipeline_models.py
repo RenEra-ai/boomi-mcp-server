@@ -85,6 +85,25 @@ def test_exception_stage_kind_is_reserved_and_accepted():
     assert kinds["x"] == "exception"
 
 
+def test_doccacheretrieve_stage_kind_is_reserved_and_accepted():
+    # Issue #109 M10.5: the Document Cache Retrieve stage kind is reserved in the
+    # vocabulary (no PipelineSpec lowering yet, like branch/decision/dataprocess);
+    # the emitter attaches to the transform.mode='doccacheretrieve' block.
+    spec = PipelineSpec(
+        stages=[
+            StageSpec(key="r", kind="read"),
+            StageSpec(key="c", kind="doccacheretrieve"),
+            StageSpec(key="w", kind="write"),
+        ],
+        dependencies=[
+            PipelineEdgeSpec(from_stage="r", to_stage="c"),
+            PipelineEdgeSpec(from_stage="c", to_stage="w"),
+        ],
+    )
+    kinds = {s.key: s.kind for s in spec.stages}
+    assert kinds["c"] == "doccacheretrieve"
+
+
 def test_invalid_stage_kind_is_rejected():
     # Out-of-Literal value is rejected natively by pydantic before the
     # model_validator runs, so we only assert the exception type.

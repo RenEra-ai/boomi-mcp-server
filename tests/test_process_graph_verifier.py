@@ -134,6 +134,57 @@ def test_exception_terminal_is_clean():
     assert result["shapes_checked"] == 3
 
 
+def _doccacheretrieve_process_xml() -> str:
+    """Build a real linear Document Cache Retrieve process via ProcessFlowBuilder
+    (issue #109 M10.5): start -> source -> doccacheretrieve -> target -> stop."""
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "action_type": "Get",
+                   "connection_id": "11111111-1111-1111-1111-111111111111",
+                   "operation_id": "22222222-2222-2222-2222-222222222222"},
+        "transform": {"mode": "doccacheretrieve",
+                      "document_cache_id": "8540619c-9f1e-4832-9b1a-5128c399aa52",
+                      "label": "Get From Cache"},
+        "target": {"connector_type": "rest", "action_type": "POST",
+                   "connection_id": "33333333-3333-3333-3333-333333333333",
+                   "operation_id": "44444444-4444-4444-4444-444444444444"},
+    }
+    return ProcessFlowBuilder.build(cfg, name="Cache Retrieve Sync")
+
+
+def test_doccacheretrieve_wired_is_clean():
+    """Issue #109 M10.5: a wired Document Cache Retrieve (a forward edge to the
+    next shape) is a normal linear NON-terminal step and must verify fully
+    clean — it is not classified terminal/branching, so its forward edge passes."""
+    result = verify_process_graph(_doccacheretrieve_process_xml())
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+    # start, source connectoraction, doccacheretrieve, target connectoraction, stop
+    assert result["shapes_checked"] == 5
+
+
+def test_doccacheretrieve_zero_outbound_is_dead_end():
+    """Issue #109 M10.5: a Document Cache Retrieve with no outbound edge is a
+    NON_TERMINAL_SHAPE_DEAD_END — it is NOT a terminal shape (unlike
+    doccacheload/returndocuments/exception, which are clean with empty
+    <dragpoints/>), so an unwired retrieve must be flagged."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="doccacheretrieve_icon" name="shape2" shapetype="doccacheretrieve" x="2" y="1">'
+        '<configuration><doccacheretrieve docCache="CACHE-1" emptyCacheBehavior="stopprocess" loadAllDoc="true"><cacheKeyValues/></doccacheretrieve></configuration>'
+        '<dragpoints/></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "NON_TERMINAL_SHAPE_DEAD_END" in codes
+    dead = [e for e in result["errors"] if e["code"] == "NON_TERMINAL_SHAPE_DEAD_END"]
+    assert dead[0]["shape"] == "shape2"
+
+
 def test_duplicate_shape_name_is_error():
     """Two shapes sharing a name make the graph ambiguous and must not pass
     clean — the index would otherwise collapse them and mask wiring problems."""

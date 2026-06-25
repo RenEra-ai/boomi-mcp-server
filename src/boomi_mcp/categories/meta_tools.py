@@ -5524,6 +5524,15 @@ _PROCESS_FLOW_PROTOCOLS = {
             "transform.steps[].script",
             "transform.steps[].language",
             "transform.steps[].use_cache",
+            # Issue #109 M10.5: process-level Document Cache Retrieve shape
+            # (transform.mode='doccacheretrieve'). Pulls documents from a Document
+            # Cache into the current flow (the read half of Document Cache CRUD,
+            # pairing the already-shipped Add to Cache / doccacheload). v1 ships
+            # only the all-document retrieve (load_all_documents=true) with the
+            # recommended 'stopprocess' empty-cache behavior.
+            "transform.document_cache_id",
+            "transform.empty_cache_behavior",
+            "transform.load_all_documents",
             "reliability",
             "reliability.retry_count",
             # Issue #99 G1: Try/Catch placement scope. "process" (default — the
@@ -5618,8 +5627,12 @@ _PROCESS_FLOW_PROTOCOLS = {
                 "tracked_by": "#51 follow-up (catch-path classifier wiring)",
             },
         ],
-        "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess"],
+        "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve"],
         "supported_dataprocess_operations": ["custom_scripting"],
+        # Issue #109 M10.5: the only live-verified Document Cache Retrieve
+        # "If cache is empty" wire value (Stop document execution, recommended).
+        # The backward-compat "fail document with errors" behavior is deferred.
+        "supported_doccache_retrieve_empty_behaviors": ["stopprocess"],
         # Issue #107 M10.3: the flow terminal. "stop" is the default; with
         # return_documents.enabled=true it is "returndocuments" instead (and no
         # Stop follows — the verifier's RETURN_DOCS_STOP_EXCLUSIVE invariant).
@@ -5651,6 +5664,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
             {"error_code": "PROCESS_DATAPROCESS_CONFIG_INVALID", "field": "transform|transform.steps|transform.steps[N].script|transform.steps[N].language|transform.steps[N].use_cache"},
             {"error_code": "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED", "field": "transform.steps[N].operation"},
+            {"error_code": "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID", "field": "transform|transform.document_cache_id|transform.empty_cache_behavior|transform.load_all_documents|transform.label"},
             {"error_code": "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID", "field": "return_documents|return_documents.enabled|return_documents.label"},
             {"error_code": "PROCESS_RETRY_UNVERIFIED", "field": "reliability.retry_count|reliability.try_catch_scope"},
             {"error_code": "PROCESS_DLQ_BINDING_INVALID", "field": "reliability.dlq|reliability.dlq.mode|reliability.dlq.document_cache_id|reliability.dlq.process_id"},
@@ -5788,6 +5802,27 @@ _PROCESS_FLOW_PROTOCOLS = {
             "Stop byte-for-byte. Malformed config returns "
             "PROCESS_RETURN_DOCUMENTS_CONFIG_INVALID. Live-verified against a real "
             "work-account process export.",
+            "Issue #109 M10.5: transform.mode='doccacheretrieve' inserts a "
+            "process-level Document Cache Retrieve shape between source and target "
+            "that pulls documents from a Document Cache into the current flow — the "
+            "READ half of Document Cache CRUD, pairing the already-shipped Add to "
+            "Cache (doccacheload) on the DLQ catch leg. It is a normal linear "
+            "non-terminal step. Required transform.document_cache_id binds the "
+            "Document Cache component (a literal id or a $ref:KEY token in "
+            "depends_on). v1 ships ONLY the live-observed all-document retrieve: "
+            "transform.load_all_documents must be true (keyed/index retrieval is "
+            "deferred pending a byte-accurate live capture) and "
+            "transform.empty_cache_behavior defaults to 'stopprocess' (Stop "
+            "document execution — the recommended, sole live-verified value; the "
+            "backward-compat 'fail document with errors' option is deferred). "
+            "Malformed config returns PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID. "
+            "Runtime note (live-verified): all-document retrieve initializes only "
+            "when the bound Document Cache enforces one index entry per document; "
+            "against a cache without that setting the process fails at graph init "
+            "('Retrieve all is only supported for document caches which are set to "
+            "enforce single document') — a cache-configuration requirement, not a "
+            "builder/XML defect. Live-verified against a real work-account process "
+            "export and a renera deploy+execute round-trip.",
             "Issue #112 M10.8: an optional branch block fans the post-source "
             "document out to N independent forward legs (an unconditional Branch — "
             "use a Decision/Route for value-comparing selection). Leg 1 is the "

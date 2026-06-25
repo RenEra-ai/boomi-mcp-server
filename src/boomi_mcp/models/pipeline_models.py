@@ -58,6 +58,11 @@ PipelineStageKind = Literal[
     # PipelineSpec lowering yet, like branch/decision/dataprocess); the M10.4
     # emitter attaches to the reliability.catch_exception block, not to PipelineSpec.
     "exception",
+    # M10.5 (issue #109): reserved stage kind for the Document Cache Retrieve
+    # shape (the read half of Document Cache CRUD). Reserved only (no PipelineSpec
+    # lowering yet, like branch/decision/dataprocess); the M10.5 emitter attaches
+    # to the transform.mode='doccacheretrieve' block, not to PipelineSpec.
+    "doccacheretrieve",
 ]
 
 PipelineEdgeKind = Literal[

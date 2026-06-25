@@ -141,6 +141,14 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     # _emit_branch (driven by _emit_branch_shapes) produces it. Live-captured from
     # work component b34d3812-900d-41b6-b44c-c812fb9b04aa (shape53).
     "branch": {"emittable": True, "emitter_kind": "branch"},
+    # M10.5 (issue #109): process-level Document Cache Retrieve shape. Emittable
+    # today via the transform.mode='doccacheretrieve' block on ProcessFlowBuilder
+    # (a linear non-terminal step that pulls documents from a Document Cache into
+    # the current flow — the read half of Document Cache CRUD, pairing the Add to
+    # Cache / doccacheload shape); the dispatch key is ``doccacheretrieve`` in
+    # _emit_flow_shape. Live-captured from work component
+    # 64e5397b-3583-42c9-8fe3-08ccefb0da6c (shape2).
+    "doccacheretrieve": {"emittable": True, "emitter_kind": "doccacheretrieve"},
 }
 
 #: JSON-schema-shaped description of one entry, returned alongside the catalog so
@@ -497,7 +505,10 @@ _ENTRIES: List[Dict[str, Any]] = [
             "destination set; shared across parent and subprocesses; a "
             "multi-row join uses a richer cached profile, a single-row "
             "lookup a scalar one. Acts as a cross-branch aggregator keyed by "
-            "id rather than process properties."
+            "id rather than process properties. Retrieving the cached set back "
+            "into a process is builder-emittable today; populating the cache, "
+            "indexed lookups, and map-based joins remain design guidance, not "
+            "yet builder-emitted."
         ),
         "when_to_use": (
             "When the same reference data is read many times in a run, or to "
@@ -510,12 +521,17 @@ _ENTRIES: List[Dict[str, Any]] = [
             "state across runs. Very large reference sets may not fit; "
             "re-query selectively instead."
         ),
-        "verification_status": "companion_unverified",
-        "capability_status": "guidance_only",
+        # Issue #109 M10.5: the Document Cache Retrieve (read) step is now
+        # builder-emittable and live-verified against work component
+        # 64e5397b-3583-42c9-8fe3-08ccefb0da6c, so the capability/verification flip
+        # from guidance_only/companion_unverified — the rest of the pattern
+        # (populate, indexed lookups, map joins) stays guidance, per the prose.
+        "verification_status": "live_verified",
+        "capability_status": "emittable_today",
         "category": "decomposition",
         "mutual_exclusion": [],
         "cross_refs": ["error_routing_and_dlq", "idempotency_and_duplicates"],
-        "provenance": "companion_unverified",
+        "provenance": "live_verified",
     },
     {
         "name": "content_based_routing",
