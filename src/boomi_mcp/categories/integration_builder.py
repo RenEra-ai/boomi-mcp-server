@@ -2884,8 +2884,16 @@ def _process_models_error_handling(comp: Any) -> bool:
             # error-handling evidence too (consistent with the raw-XML
             # shapetype="exception" check above), so count it alongside catch
             # shapes — the predicate stays conservative (any positive signal).
-            stype = str(shape.get("type") or shape.get("shapetype") or "").strip().lower()
-            if "catch" in stype or "exception" in stype:
+            # Check ``type`` and ``shapetype`` INDEPENDENTLY (a non-empty ``type``
+            # must not shadow a ``shapetype="exception"``), and match the Exception
+            # token EXACTLY (so a hypothetical "nonexception" does not false-fire),
+            # mirroring the raw-XML exact-token check. ``catcherrors`` is matched by
+            # substring since the shape token itself contains "catch".
+            tokens = (
+                str(shape.get("type") or "").strip().lower(),
+                str(shape.get("shapetype") or "").strip().lower(),
+            )
+            if any("catch" in t or t == "exception" for t in tokens):
                 return True
 
     return False

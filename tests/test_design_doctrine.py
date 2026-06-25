@@ -625,11 +625,21 @@ def test_process_models_error_handling_predicate():
     assert _process_models_error_handling(comp({"shapes": [{"shapetype": "catcherrors"}]}))
     assert _process_models_error_handling(comp({"xml": "<bns:shape shapetype=\"trycatch\"/>"}))
     # Issue #108 M10.4: a deliberate Exception (Throw) shape is error-handling
-    # evidence too — in raw XML AND in a config.shapes list entry.
+    # evidence too — in raw XML AND in a config.shapes list entry. The shapes-list
+    # check inspects ``type`` and ``shapetype`` independently (a non-empty ``type``
+    # must not shadow ``shapetype="exception"``) and matches the Exception token
+    # EXACTLY (no false-fire on a "nonexception" substring).
     assert _process_models_error_handling(
         comp({"xml": '<shape image="exception_icon" shapetype="exception"/>'})
     )
     assert _process_models_error_handling(comp({"shapes": [{"shapetype": "exception"}]}))
+    assert _process_models_error_handling(comp({"shapes": [{"type": "exception"}]}))
+    # shapetype="exception" must be honored even when a non-empty type is present.
+    assert _process_models_error_handling(
+        comp({"shapes": [{"type": "documentproperties", "shapetype": "exception"}]})
+    )
+    # Exact-token: a "nonexception" substring is NOT error-handling evidence.
+    assert not _process_models_error_handling(comp({"shapes": [{"shapetype": "nonexception"}]}))
     # Non-dict config does not crash.
     assert not _process_models_error_handling(comp({}))
 
