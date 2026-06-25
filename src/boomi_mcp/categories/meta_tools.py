@@ -5522,6 +5522,8 @@ _PROCESS_FLOW_PROTOCOLS = {
             "transform.steps",
             "transform.steps[].operation",
             "transform.steps[].script",
+            "transform.steps[].language",
+            "transform.steps[].use_cache",
             "reliability",
             "reliability.retry_count",
             # Issue #99 G1: Try/Catch placement scope. "process" (default — the

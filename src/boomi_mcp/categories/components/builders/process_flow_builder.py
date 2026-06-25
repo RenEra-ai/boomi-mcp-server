@@ -1116,6 +1116,17 @@ def _validate_dataprocess_transform(
     ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED`` until it has a byte-accurate
     live capture. Malformed step config is ``PROCESS_DATAPROCESS_CONFIG_INVALID``.
     """
+    # Reject unknown top-level transform keys so a typo isn't silently dropped.
+    # Mirrors the step-level strictness below and the DataProcessPrimitive's
+    # extra="forbid" parameter model. (mode is the discriminator.)
+    extra = set(transform) - {"mode", "label", "steps"}
+    if extra:
+        return BuilderValidationError(
+            f"transform has unsupported keys for mode='dataprocess': {sorted(extra)}.",
+            error_code="PROCESS_DATAPROCESS_CONFIG_INVALID",
+            field="transform",
+            hint="Allowed keys: mode, label, steps.",
+        )
     steps = transform.get("steps")
     if not isinstance(steps, list) or not steps:
         return BuilderValidationError(

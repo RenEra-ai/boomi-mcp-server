@@ -501,6 +501,17 @@ def test_dataprocess_rejects_use_cache_false():
     assert err.field == "transform.steps[0].use_cache"
 
 
+def test_dataprocess_rejects_unknown_transform_key():
+    # A typo'd top-level transform key must not be silently dropped (mirrors the
+    # step-level strictness and the DataProcessPrimitive's extra="forbid").
+    cfg = _dataprocess_config()
+    cfg["transform"]["bogus"] = 1
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+    assert err.field == "transform"
+
+
 def test_dataprocess_build_bypass_empty_steps_raises():
     # build() stays total on the validate_config-bypass path: empty steps must
     # raise rather than emit a semantically broken <dataprocess/> with no <step>.

@@ -160,6 +160,8 @@ def test_template_documents_dataprocess_surface(template):
         "transform.steps",
         "transform.steps[].operation",
         "transform.steps[].script",
+        "transform.steps[].language",
+        "transform.steps[].use_cache",
     ):
         assert field in optional, field
     assert template["supported_dataprocess_operations"] == ["custom_scripting"]
