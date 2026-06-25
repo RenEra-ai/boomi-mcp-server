@@ -86,6 +86,36 @@ CATEGORIES = frozenset(
     }
 )
 
+#: Structured source of truth (M10.1, issue #105) for which process *shapetypes*
+#: the typed builders can emit today. This is deliberately a discrete
+#: ``{shapetype -> {emittable, emitter_kind}}`` table — the rest of this module
+#: is pattern-keyed free-text prose with per-pattern ``capability_status``, which
+#: cannot be iterated to prove emitter coverage. ``emitter_kind`` is the INTERNAL
+#: process-flow dispatch key consumed by ``_emit_flow_shape`` in
+#: ``process_flow_builder.py`` (e.g. ``setproperties`` realizes the
+#: ``documentproperties`` shape); for catch-path-only shapes
+#: (``catcherrors``/``notify``/``doccacheload``) it is the catch-leg emission
+#: token verified through the Try/Catch wrapper. It is NOT a method name and NOT
+#: a doctrine pattern name. ``tests/test_doctrine_emitter_consistency.py`` asserts
+#: every emittable entry is backed by a real dispatch/emission branch (keyed off
+#: the actual dispatch mechanism, not method-name coincidence). This constant is
+#: intentionally NOT served via ``get_design_doctrine_catalog()`` — it carries
+#: mechanic tokens (``catcherrors`` etc.) that the served-prose token-lint bans.
+#: Each later M10 shape issue flips/adds an entry here as part of making its shape
+#: emittable, updating the consistency test in lockstep.
+EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "start": {"emittable": True, "emitter_kind": "start_noaction"},
+    "connectoraction": {"emittable": True, "emitter_kind": "connectoraction_source"},
+    "message": {"emittable": True, "emitter_kind": "message"},
+    "map": {"emittable": True, "emitter_kind": "map"},
+    "documentproperties": {"emittable": True, "emitter_kind": "setproperties"},
+    "stop": {"emittable": True, "emitter_kind": "stop"},
+    "catcherrors": {"emittable": True, "emitter_kind": "catcherrors"},
+    "notify": {"emittable": True, "emitter_kind": "notify"},
+    "doccacheload": {"emittable": True, "emitter_kind": "doccacheload"},
+    "processcall": {"emittable": True, "emitter_kind": "processcall"},
+}
+
 #: JSON-schema-shaped description of one entry, returned alongside the catalog so
 #: callers (and tests) share one schema source.
 DESIGN_DOCTRINE_ENTRY_SCHEMA: Dict[str, Any] = {
