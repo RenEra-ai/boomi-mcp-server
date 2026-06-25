@@ -68,7 +68,7 @@ _REST_ACTION_TYPES = frozenset({
 _DB_ACTION_TYPES = frozenset({"Get"})
 
 _SUPPORTED_TRANSFORM_MODES = frozenset(
-    {"passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve"}
+    {"passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve", "doccacheremove"}
 )
 _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subprocess_ref"})
 
@@ -135,6 +135,31 @@ _DOCCACHE_RETRIEVE_ALLOWED_KEYS = frozenset(
 # Only the live-verified "Stop document execution (recommended)" wire value.
 _DOCCACHE_RETRIEVE_EMPTY_BEHAVIORS = frozenset({"stopprocess"})
 _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR = "stopprocess"
+
+# Issue #110 M10.6: process-level Document Cache Remove shape
+# (transform.mode='doccacheremove'). Live-captured from the `work` account
+# (component 6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 "[Intapp CDS] Initialize
+# Caches" shapes 3-7; see .codex/plans/issue-110-live-captures.md): a Document
+# Cache Remove shape clears documents from a Document Cache — the DELETE half of
+# Document Cache CRUD, completing the set alongside Add to Cache (doccacheload,
+# write) and Document Cache Retrieve (doccacheretrieve, read, #109). v1 ships
+# ONLY the live-observed all-document remove: removeAllDocuments="true" with an
+# empty <cacheKeyValues/>. The inner config element <doccacheremove> carries
+# attribute order docCache, removeAllDocuments (NO emptyCacheBehavior, NO
+# loadAllDoc — those are retrieve-only); the live capture shows two wire variants
+# (self-closing and child-bearing <cacheKeyValues/>) — we emit the child-bearing
+# form for byte-consistency with the #109 retrieve emitter. Keyed/index removal
+# (a docCacheIndex + populated cacheKeyValues) has no byte-accurate live capture,
+# so removeAllDocuments=False (and any keyed variant) is rejected
+# PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID until one — never over-claiming the wire
+# shape from docs alone (mirrors the #109 retrieve / dataprocess gates). The live
+# remove shapes sit at branch-leg ends (empty <dragpoints/>); per #110 the
+# builder shape is locked as a linear NON-terminal cache op (one forward
+# dragpoint), mirroring doccacheretrieve. document_cache_id binds the Document
+# Cache component id (a literal id or a $ref:KEY token in depends_on).
+_DOCCACHE_REMOVE_ALLOWED_KEYS = frozenset(
+    {"mode", "label", "document_cache_id", "remove_all_documents"}
+)
 
 # Issue #51 M3.R1a / #88 M4.5.3: DLQ modes that emit a verified Try/Catch
 # wrapper + DLQ catch-path (every supported mode except "disabled"). The catch
@@ -633,6 +658,20 @@ class ProcessFlowBuilder:
                         or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR
                     ).strip(),
                     "load_all_documents": transform.get("load_all_documents", True),
+                    "userlabel": str(transform.get("label") or ""),
+                },
+            ))
+        elif transform_mode == "doccacheremove":
+            # Issue #110 M10.6: a process-level Document Cache Remove shape that
+            # clears documents from a Document Cache (the delete half of Document
+            # Cache CRUD). It sits in the same middle-transform slot as
+            # message/map_ref/dataprocess/doccacheretrieve. validate_config has
+            # already proven the config; build() re-reads it total.
+            flow.append((
+                "doccacheremove",
+                {
+                    "document_cache_id": str(transform.get("document_cache_id") or "").strip(),
+                    "remove_all_documents": transform.get("remove_all_documents", True),
                     "userlabel": str(transform.get("label") or ""),
                 },
             ))
@@ -1495,6 +1534,8 @@ def _validate_transform(transform: Any) -> Optional[BuilderValidationError]:
         return _validate_dataprocess_transform(transform)
     if mode == "doccacheretrieve":
         return _validate_doccacheretrieve_transform(transform)
+    if mode == "doccacheremove":
+        return _validate_doccacheremove_transform(transform)
     return None
 
 
@@ -1664,6 +1705,72 @@ def _validate_doccacheretrieve_transform(
             error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
             field="transform.label",
             hint="Use a string display label for the Document Cache Retrieve shape.",
+        )
+    return None
+
+
+def _validate_doccacheremove_transform(
+    transform: Dict[str, Any],
+) -> Optional[BuilderValidationError]:
+    """Validate a ``transform.mode='doccacheremove'`` config (issue #110 M10.6).
+
+    The Document Cache Remove shape clears documents from a Document Cache — the
+    DELETE half of Document Cache CRUD (the read half, Document Cache Retrieve /
+    ``doccacheretrieve``, ships in #109; the write half, Add to Cache /
+    ``doccacheload``, ships on the DLQ catch leg). v1 accepts ONLY the
+    live-observed all-document remove:
+
+      * ``document_cache_id`` (required) — the Document Cache component id, a
+        literal id or a ``$ref:KEY`` token (reachability is enforced generically
+        by ``_validate_ref_reachability``).
+      * ``remove_all_documents`` (optional, default ``True``) — must be ``True``;
+        keyed/index removal (a docCacheIndex + populated cacheKeyValues) is
+        deferred pending a byte-accurate live capture.
+      * ``label`` (optional) — the shape display label.
+
+    Unlike retrieve, the remove shape carries NO ``empty_cache_behavior`` /
+    ``load_all_documents`` (those are retrieve-only wire attributes). Unknown
+    keys and unsupported values all return
+    ``PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID`` (mirrors the #109 retrieve gate).
+    """
+    extra = set(transform) - _DOCCACHE_REMOVE_ALLOWED_KEYS
+    if extra:
+        return BuilderValidationError(
+            f"transform has unsupported keys for mode='doccacheremove': {sorted(extra)}.",
+            error_code="PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID",
+            field="transform",
+            hint=f"Allowed keys: {sorted(_DOCCACHE_REMOVE_ALLOWED_KEYS)}.",
+        )
+    doc_cache_id = transform.get("document_cache_id")
+    if not isinstance(doc_cache_id, str) or not doc_cache_id.strip():
+        return BuilderValidationError(
+            "transform.document_cache_id is required when mode='doccacheremove'.",
+            error_code="PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID",
+            field="transform.document_cache_id",
+            hint=(
+                "Pass the Document Cache component id (a literal id or a $ref:KEY "
+                "token in depends_on) to remove documents from."
+            ),
+        )
+    remove_all = transform.get("remove_all_documents", True)
+    if remove_all is not True:
+        return BuilderValidationError(
+            "transform.remove_all_documents must be true when mode='doccacheremove'.",
+            error_code="PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID",
+            field="transform.remove_all_documents",
+            hint=(
+                "v1 removes ALL cached documents (removeAllDocuments=true, empty "
+                "cacheKeyValues). Keyed/index removal is deferred pending a "
+                "byte-accurate live capture."
+            ),
+        )
+    label = transform.get("label")
+    if label is not None and not isinstance(label, str):
+        return BuilderValidationError(
+            "transform.label must be a string.",
+            error_code="PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID",
+            field="transform.label",
+            hint="Use a string display label for the Document Cache Remove shape.",
         )
     return None
 
@@ -2386,6 +2493,78 @@ def _emit_doccacheretrieve(
     )
 
 
+def _emit_doccacheremove(
+    shape_name: str,
+    params: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit a process-level Document Cache Remove shape (issue #110 M10.6).
+
+    Byte-accurate to the live ``work``-account capture (component
+    6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 "[Intapp CDS] Initialize Caches" shapes
+    3-7; see ``.codex/plans/issue-110-live-captures.md``):
+    ``<shape image="doccacheremove_icon" ... shapetype="doccacheremove"
+    userlabel="..."><configuration><doccacheremove docCache="..."
+    removeAllDocuments="true"><cacheKeyValues/></doccacheremove></configuration>
+    <dragpoints>...</dragpoints></shape>``.
+
+    The shape clears documents from a Document Cache — the DELETE counterpart of
+    the already-shipped ``doccacheload`` (Add to Cache, write) and ``doccacheretrieve``
+    (Document Cache Retrieve, read, #109), completing Document Cache CRUD. The live
+    remove shapes sit at branch-leg ends (empty ``<dragpoints/>``); per #110 the
+    builder shape is a normal linear NON-terminal step: one forward dragpoint to
+    ``next_name`` (mirroring doccacheretrieve). v1 emits only the all-document
+    remove form (``removeAllDocuments="true"`` with an empty ``<cacheKeyValues/>``);
+    the attribute order — docCache, removeAllDocuments — matches the live XML
+    byte-for-byte (there is no emptyCacheBehavior/loadAllDoc on a remove). The live
+    capture shows two wire variants (self-closing and child-bearing); we emit the
+    child-bearing ``<cacheKeyValues/>`` form for byte-consistency with the #109
+    retrieve emitter. build() stays total on a validate_config-bypass: it re-guards
+    the two invariants _validate_doccacheremove_transform enforces (non-empty
+    ``document_cache_id``, ``remove_all_documents`` True) and raises rather than
+    serialize a semantically broken / unsupported variant — ``docCache=""`` or
+    ``removeAllDocuments="false"`` with an empty ``<cacheKeyValues/>`` (a broken
+    keyed remove). Both are well-formed XML the parse-back guard would not catch,
+    so mirror the _emit_doccacheretrieve guards and raise here.
+    """
+    doc_cache_id = _escape_xml(str(params.get("document_cache_id") or "").strip())
+    if not doc_cache_id:
+        raise BuilderValidationError(
+            "transform.document_cache_id is required when mode='doccacheremove'.",
+            error_code="PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID",
+            field="transform.document_cache_id",
+            hint=(
+                "Pass the Document Cache component id (a literal id or a $ref:KEY "
+                "token in depends_on) to remove documents from."
+            ),
+        )
+    if params.get("remove_all_documents", True) is not True:
+        raise BuilderValidationError(
+            "transform.remove_all_documents must be true when mode='doccacheremove'.",
+            error_code="PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID",
+            field="transform.remove_all_documents",
+            hint=(
+                "v1 removes ALL cached documents (removeAllDocuments=true, empty "
+                "cacheKeyValues). Keyed/index removal is deferred."
+            ),
+        )
+    dragpoints = _emit_dragpoints([next_name], shape_index)
+    userlabel = _escape_xml(params.get("userlabel") or "")
+    return (
+        f'<shape image="doccacheremove_icon" name="{shape_name}" '
+        f'shapetype="doccacheremove" userlabel="{userlabel}" '
+        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        '<configuration>'
+        f'<doccacheremove docCache="{doc_cache_id}" removeAllDocuments="true">'
+        '<cacheKeyValues/>'
+        '</doccacheremove>'
+        '</configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
 def _emit_returndocuments(
     shape_name: str,
     params: Dict[str, Any],
@@ -2566,6 +2745,8 @@ def _emit_flow_shape(
         return _emit_dataprocess(shape_name, params, next_name, shape_index)
     if kind == "doccacheretrieve":
         return _emit_doccacheretrieve(shape_name, params, next_name, shape_index)
+    if kind == "doccacheremove":
+        return _emit_doccacheremove(shape_name, params, next_name, shape_index)
     if kind == "setproperties":
         return _emit_setproperties(shape_name, params, next_name, shape_index)
     if kind == "processcall":
@@ -3617,6 +3798,7 @@ _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
     "dataprocess": "The 'dataprocess' stage has no PipelineSpec lowering; the Data Process shape is owned by M10.2 (issue #106).",
     "exception": "The 'exception' stage has no PipelineSpec lowering; Exception/Throw is owned by M10.4 (issue #108).",
     "doccacheretrieve": "The 'doccacheretrieve' stage has no PipelineSpec lowering; Document Cache Retrieve is owned by M10.5 (issue #109).",
+    "doccacheremove": "The 'doccacheremove' stage has no PipelineSpec lowering; Document Cache Remove is owned by M10.6 (issue #110).",
     "finalize": "The 'finalize' stage is reserved (no PipelineSpec lowering yet).",
 }
 

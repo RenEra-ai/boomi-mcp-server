@@ -337,6 +337,41 @@ def test_inv_doccacheretrieve_all_documents_linear():
     assert dragpoints is not None and len(list(dragpoints)) == 1
 
 
+def test_inv_doccacheremove_all_documents_linear():
+    # Issue #110 M10.6: the all-document Document Cache Remove shape always emits
+    # removeAllDocuments="true" with an empty <cacheKeyValues/>, the live attribute
+    # order (docCache, removeAllDocuments — no emptyCacheBehavior/loadAllDoc),
+    # image="doccacheremove_icon", and a forward (non-empty) dragpoint — it is a
+    # normal linear NON-terminal step. Guaranteed by construction:
+    # _emit_doccacheremove emits exactly this form and never a keyed/index removal
+    # (deferred).
+    xml = ProcessFlowBuilder.build(
+        _process_config(
+            transform={
+                "mode": "doccacheremove",
+                "label": "Clear Cache",
+                "document_cache_id": "CACHE-1",
+            }
+        ),
+        name="P",
+    )
+    shapes = _parse_process_shapes(xml)
+    dcr = next(s for s in shapes if s.attrib["shapetype"] == "doccacheremove")
+    assert dcr.attrib["image"] == "doccacheremove_icon"
+    cfg = dcr.find("configuration/doccacheremove")
+    assert cfg.attrib["removeAllDocuments"] == "true"
+    assert cfg.attrib["docCache"] == "CACHE-1"
+    # Remove carries NO emptyCacheBehavior / loadAllDoc (those are retrieve-only).
+    assert "emptyCacheBehavior" not in cfg.attrib
+    assert "loadAllDoc" not in cfg.attrib
+    # Empty cache-key set (all-document remove; keyed removal deferred).
+    key_values = cfg.find("cacheKeyValues")
+    assert key_values is not None and list(key_values) == []
+    # NON-terminal: exactly one forward dragpoint.
+    dragpoints = dcr.find("dragpoints")
+    assert dragpoints is not None and len(list(dragpoints)) == 1
+
+
 def test_inv_returndocuments_terminal_no_stop():
     # Issue #107 M10.3: with return_documents.enabled the flow ends in a Return
     # Documents terminal — empty <dragpoints/>, the last shape, and NO Stop is
@@ -838,6 +873,13 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "emitter": "process_flow_builder._emit_doccacheretrieve (issue #109 M10.5)",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_doccacheretrieve_all_documents_linear",
+    },
+    {
+        "id": "doccacheremove_linear",
+        "invariant": 'Document Cache Remove all-documents form — removeAllDocuments="true", empty <cacheKeyValues/>, attribute order docCache/removeAllDocuments (no emptyCacheBehavior/loadAllDoc), image="doccacheremove_icon", linear NON-terminal (one forward dragpoint)',
+        "emitter": "process_flow_builder._emit_doccacheremove (issue #110 M10.6)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_doccacheremove_all_documents_linear",
     },
     {
         "id": "returndocuments_terminal",

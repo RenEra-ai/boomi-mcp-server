@@ -1491,15 +1491,16 @@ def _check_process_flow_ref_types(
                 pe_conn.get("connection_id"),
                 "connector-settings",
             ))
-    # Issue #109 M10.5: the Document Cache Retrieve binding (transform.document_cache_id)
-    # is $ref-resolvable too. It must resolve to a Document Cache component — the same
-    # discipline as the DLQ document_cache_id catch-leg binding — so a swapped
-    # connector/profile/process ref is rejected at plan time instead of emitting an
-    # invalid docCache that fails only when Boomi loads the process. Gate it on the
-    # active transform.mode so a stray document_cache_id under another mode (never
-    # consumed by the emitter) is not surprise-rejected.
+    # Issue #109 M10.5 / #110 M10.6: the Document Cache Retrieve/Remove binding
+    # (transform.document_cache_id) is $ref-resolvable too. It must resolve to a
+    # Document Cache component — the same discipline as the DLQ document_cache_id
+    # catch-leg binding — so a swapped connector/profile/process ref is rejected at
+    # plan time instead of emitting an invalid docCache that fails only when Boomi
+    # loads the process. Gate it on the active transform.mode (both doccacheretrieve
+    # and doccacheremove bind a Document Cache) so a stray document_cache_id under
+    # another mode (never consumed by the emitter) is not surprise-rejected.
     transform = raw_config.get("transform") if isinstance(raw_config.get("transform"), dict) else {}
-    if str(transform.get("mode") or "").strip().lower() == "doccacheretrieve":
+    if str(transform.get("mode") or "").strip().lower() in {"doccacheretrieve", "doccacheremove"}:
         slot_rules.append(
             ("transform.document_cache_id", transform.get("document_cache_id"), "Document Cache")
         )

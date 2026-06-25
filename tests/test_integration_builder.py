@@ -4026,6 +4026,56 @@ class TestBuildPlanProcessFlowRefTypes:
         assert process_step["planned_action"] == "create"
 
     @patch(_PATCH_TARGET)
+    def test_doccacheremove_ref_wrong_type_errors(self, mock_pag):
+        # Issue #110 M10.6: transform.document_cache_id $ref pointing at a REST
+        # connector-settings (not a Document Cache) is caught at plan time — the
+        # same generalized slot rule as the #109 retrieve binding (both
+        # doccacheretrieve and doccacheremove require a Document Cache target).
+        mock_pag.return_value = []
+        bad = _process_flow_comp(transform={
+            "mode": "doccacheremove",
+            "document_cache_id": "$ref:target_rest_connection",
+        })
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        ve = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
+                  if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "transform.document_cache_id"
+        assert ve["details"]["expected_role"] == "Document Cache"
+        assert ve["details"]["actual_role"] == "REST Client connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_doccacheremove_ref_correct_type_plans_clean(self, mock_pag):
+        # Issue #110 M10.6: transform.document_cache_id $ref pointing at a real
+        # Document Cache passes the type check and plans cleanly.
+        mock_pag.return_value = []
+        good = _process_flow_comp(
+            depends_on=("db_connection", "db_query_operation",
+                        "target_rest_connection", "target_rest_operation",
+                        "remove_document_cache"),
+            transform={"mode": "doccacheremove",
+                       "document_cache_id": "$ref:remove_document_cache"},
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _stub_dep_comp("remove_document_cache", role="Document Cache"),
+            good,
+        ]
+        process_step = next(s for s in _build_plan(MagicMock(), _build_config(components))["steps"]
+                            if s["key"] == "main_process")
+        assert process_step.get("validation_error") is None
+        assert process_step["planned_action"] == "create"
+
+    @patch(_PATCH_TARGET)
     def test_dlq_error_subprocess_ref_correct_type_plans_clean(self, mock_pag):
         mock_pag.return_value = []
         good = _process_flow_comp(

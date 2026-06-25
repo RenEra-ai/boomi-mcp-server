@@ -41,8 +41,8 @@ XML: the ``sync_pipeline`` process builder (``SyncPipelineBuilder`` in
 ``database_to_api_sync`` source/transform/target config. Every other stage kind
 (``fetch`` / ``write`` / ``lookup`` / ``combine`` / ``flow_control`` /
 ``branch`` / ``decision`` / ``dataprocess`` / ``exception`` /
-``doccacheretrieve``) still has NO PipelineSpec->XML emitter and is rejected by
-that builder with a hint pointing at its owning issue.
+``doccacheretrieve`` / ``doccacheremove``) still has NO PipelineSpec->XML emitter
+and is rejected by that builder with a hint pointing at its owning issue.
 """
 
 from typing import Any, Dict, List, Literal, Optional
@@ -72,6 +72,11 @@ PipelineStageKind = Literal[
     # lowering yet, like branch/decision/dataprocess); the M10.5 emitter attaches
     # to the transform.mode='doccacheretrieve' block, not to PipelineSpec.
     "doccacheretrieve",
+    # M10.6 (issue #110): reserved stage kind for the Document Cache Remove shape
+    # (the delete half of Document Cache CRUD). Reserved only (no PipelineSpec
+    # lowering yet, like branch/decision/dataprocess); the M10.6 emitter attaches
+    # to the transform.mode='doccacheremove' block, not to PipelineSpec.
+    "doccacheremove",
 ]
 
 PipelineEdgeKind = Literal[

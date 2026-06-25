@@ -185,6 +185,58 @@ def test_doccacheretrieve_zero_outbound_is_dead_end():
     assert dead[0]["shape"] == "shape2"
 
 
+def _doccacheremove_process_xml() -> str:
+    """Build a real linear Document Cache Remove process via ProcessFlowBuilder
+    (issue #110 M10.6): start -> source -> doccacheremove -> target -> stop."""
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "action_type": "Get",
+                   "connection_id": "11111111-1111-1111-1111-111111111111",
+                   "operation_id": "22222222-2222-2222-2222-222222222222"},
+        "transform": {"mode": "doccacheremove",
+                      "document_cache_id": "8540619c-9f1e-4832-9b1a-5128c399aa52",
+                      "label": "Clear Cache"},
+        "target": {"connector_type": "rest", "action_type": "POST",
+                   "connection_id": "33333333-3333-3333-3333-333333333333",
+                   "operation_id": "44444444-4444-4444-4444-444444444444"},
+    }
+    return ProcessFlowBuilder.build(cfg, name="Cache Remove Sync")
+
+
+def test_doccacheremove_wired_is_clean():
+    """Issue #110 M10.6: a wired Document Cache Remove (a forward edge to the next
+    shape) is a normal linear NON-terminal step and must verify fully clean — it is
+    not classified terminal/branching, so its forward edge passes (mirrors the #109
+    retrieve verifier behavior; the issue locks the verifier as a linear cache op)."""
+    result = verify_process_graph(_doccacheremove_process_xml())
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+    # start, source connectoraction, doccacheremove, target connectoraction, stop
+    assert result["shapes_checked"] == 5
+
+
+def test_doccacheremove_zero_outbound_is_dead_end():
+    """Issue #110 M10.6: a Document Cache Remove with no outbound edge is a
+    NON_TERMINAL_SHAPE_DEAD_END — per #110 the builder shape is a linear
+    non-terminal (NOT classified terminal like doccacheload/returndocuments/
+    exception), so an unwired remove must be flagged."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="doccacheremove_icon" name="shape2" shapetype="doccacheremove" x="2" y="1">'
+        '<configuration><doccacheremove docCache="CACHE-1" removeAllDocuments="true"><cacheKeyValues/></doccacheremove></configuration>'
+        '<dragpoints/></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "NON_TERMINAL_SHAPE_DEAD_END" in codes
+    dead = [e for e in result["errors"] if e["code"] == "NON_TERMINAL_SHAPE_DEAD_END"]
+    assert dead[0]["shape"] == "shape2"
+
+
 def test_duplicate_shape_name_is_error():
     """Two shapes sharing a name make the graph ambiguous and must not pass
     clean — the index would otherwise collapse them and mask wiring problems."""

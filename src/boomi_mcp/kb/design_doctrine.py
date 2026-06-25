@@ -149,6 +149,14 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     # _emit_flow_shape. Live-captured from work component
     # 64e5397b-3583-42c9-8fe3-08ccefb0da6c (shape2).
     "doccacheretrieve": {"emittable": True, "emitter_kind": "doccacheretrieve"},
+    # M10.6 (issue #110): process-level Document Cache Remove shape. Emittable
+    # today via the transform.mode='doccacheremove' block on ProcessFlowBuilder
+    # (a linear non-terminal step that clears documents from a Document Cache —
+    # the delete half of Document Cache CRUD, completing the set alongside Add to
+    # Cache / doccacheload and Document Cache Retrieve / doccacheretrieve); the
+    # dispatch key is ``doccacheremove`` in _emit_flow_shape. Live-captured from
+    # work component 6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 (shapes 3-7).
+    "doccacheremove": {"emittable": True, "emitter_kind": "doccacheremove"},
 }
 
 #: JSON-schema-shaped description of one entry, returned alongside the catalog so
@@ -506,9 +514,10 @@ _ENTRIES: List[Dict[str, Any]] = [
             "multi-row join uses a richer cached profile, a single-row "
             "lookup a scalar one. Acts as a cross-branch aggregator keyed by "
             "id rather than process properties. Retrieving the cached set back "
-            "into a process is builder-emittable today; populating the cache, "
-            "indexed lookups, and map-based joins remain design guidance, not "
-            "yet builder-emitted."
+            "into a process (all-document) and removing the cached set "
+            "(all-document) are builder-emittable today; populating the cache, "
+            "indexed lookups/removes, and map-based joins remain design "
+            "guidance, not yet builder-emitted."
         ),
         "when_to_use": (
             "When the same reference data is read many times in a run, or to "
@@ -524,8 +533,10 @@ _ENTRIES: List[Dict[str, Any]] = [
         # Issue #109 M10.5: the Document Cache Retrieve (read) step is now
         # builder-emittable and live-verified against work component
         # 64e5397b-3583-42c9-8fe3-08ccefb0da6c, so the capability/verification flip
-        # from guidance_only/companion_unverified — the rest of the pattern
-        # (populate, indexed lookups, map joins) stays guidance, per the prose.
+        # from guidance_only/companion_unverified. Issue #110 M10.6 adds the
+        # Document Cache Remove (delete) step, live-verified against work component
+        # 6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 — the rest of the pattern (populate,
+        # indexed lookups/removes, map joins) stays guidance, per the prose.
         "verification_status": "live_verified",
         "capability_status": "emittable_today",
         "category": "decomposition",

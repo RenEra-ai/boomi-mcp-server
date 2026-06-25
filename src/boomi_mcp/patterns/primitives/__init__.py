@@ -19,6 +19,7 @@ Issue #27 added the source/transform primitives (``db_extract``,
 from .branch import BranchPrimitive
 from .data_process import DataProcessPrimitive
 from .db_extract import DbExtractPrimitive
+from .document_cache_remove import DocumentCacheRemovePrimitive
 from .document_cache_retrieve import DocumentCacheRetrievePrimitive
 from .field_map import FieldMapPrimitive
 from .operational import (
@@ -37,6 +38,7 @@ __all__ = [
     "BranchPrimitive",
     "DataProcessPrimitive",
     "DbExtractPrimitive",
+    "DocumentCacheRemovePrimitive",
     "DocumentCacheRetrievePrimitive",
     "FieldMapPrimitive",
     "XmlJsonConvertPrimitive",

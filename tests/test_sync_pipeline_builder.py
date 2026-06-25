@@ -252,6 +252,7 @@ def test_valid_no_map_validates_clean():
         ("dataprocess", "dataprocess", "#106"),
         ("exception", "exception", "#108"),
         ("doccacheretrieve", "doccacheretrieve", "#109"),
+        ("doccacheremove", "doccacheremove", "#110"),
         ("branch", "branch", "#112"),
     ],
 )

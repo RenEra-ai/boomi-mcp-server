@@ -746,6 +746,195 @@ def test_doccacheretrieve_composes_with_try_catch_wrapper():
 
 
 # ---------------------------------------------------------------------------
+# Document Cache Remove transform (issue #110 M10.6)
+# ---------------------------------------------------------------------------
+
+_DOCCACHE_REMOVE_GOLDEN = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "document_cache_remove.xml"
+)
+
+
+def _doccacheremove_config(label="Clear Status Cache", **overrides):
+    transform = {"mode": "doccacheremove", "document_cache_id": _DOCCACHE_ID}
+    if label is not None:
+        transform["label"] = label
+    transform.update(overrides.pop("transform_extra", {}))
+    return _base_config(transform=transform, **overrides)
+
+
+def test_doccacheremove_inserts_linear_shape_between_source_and_target():
+    xml = ProcessFlowBuilder.build(_doccacheremove_config(), name="Cache Remove Sync")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "doccacheremove", "connectoraction", "stop",
+    ]
+    dcr = shapes[2]
+    assert dcr.attrib["image"] == "doccacheremove_icon"
+    assert dcr.attrib["userlabel"] == "Clear Status Cache"
+    cfg = dcr.find("configuration/doccacheremove")
+    assert cfg.attrib["docCache"] == _DOCCACHE_ID
+    assert cfg.attrib["removeAllDocuments"] == "true"
+    # Remove carries NO emptyCacheBehavior / loadAllDoc (those are retrieve-only).
+    assert "emptyCacheBehavior" not in cfg.attrib
+    assert "loadAllDoc" not in cfg.attrib
+    # All-document remove emits an empty <cacheKeyValues/> (keyed removal deferred).
+    key_values = cfg.find("cacheKeyValues")
+    assert key_values is not None and list(key_values) == []
+    # Linear, non-terminal: exactly one forward dragpoint to the next shape.
+    dragpoints = dcr.find("dragpoints")
+    assert [dp.attrib["toShape"] for dp in dragpoints] == ["shape4"]
+
+
+def test_doccacheremove_matches_golden_fixture():
+    """Byte-exact golden (issue #110 g): the docCache/removeAllDocuments attribute
+    order and the empty <cacheKeyValues/> child are load-bearing and must match the
+    live capture byte-for-byte."""
+    emitted = ProcessFlowBuilder.build(
+        _doccacheremove_config(), name="DocumentCacheRemove Sync"
+    )
+    assert emitted == _DOCCACHE_REMOVE_GOLDEN.read_text()
+
+
+def test_doccacheremove_accepts_ref_document_cache_id():
+    cfg = _doccacheremove_config()
+    cfg["transform"]["document_cache_id"] = "$ref:MyCache"
+    # Reachable when declared in depends_on...
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=["MyCache"]) is None
+    # ...and MISSING_PROCESS_DEPENDENCY when not (generic ref-reachability walk).
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "MISSING_PROCESS_DEPENDENCY"
+
+
+def test_doccacheremove_rejects_missing_document_cache_id():
+    cfg = _base_config(transform={"mode": "doccacheremove", "label": "x"})
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+    assert err.field == "transform.document_cache_id"
+
+
+def test_doccacheremove_rejects_blank_document_cache_id():
+    cfg = _base_config(
+        transform={"mode": "doccacheremove", "document_cache_id": "   "}
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+    assert err.field == "transform.document_cache_id"
+
+
+def test_doccacheremove_rejects_keyed_removal_remove_all_false():
+    # Keyed/index removal (removeAllDocuments=false) is deferred pending a live capture.
+    cfg = _doccacheremove_config()
+    cfg["transform"]["remove_all_documents"] = False
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+    assert err.field == "transform.remove_all_documents"
+
+
+def test_doccacheremove_rejects_unknown_transform_key():
+    cfg = _doccacheremove_config()
+    cfg["transform"]["bogus"] = 1
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+    assert err.field == "transform"
+
+
+def test_doccacheremove_rejects_retrieve_only_keys():
+    # empty_cache_behavior / load_all_documents are retrieve-only — on a remove they
+    # are unknown keys and rejected (never silently dropped).
+    cfg = _doccacheremove_config()
+    cfg["transform"]["empty_cache_behavior"] = "stopprocess"
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+    assert err.field == "transform"
+
+
+def test_doccacheremove_xml_escapes_label_and_cache_id():
+    cfg = _base_config(
+        transform={
+            "mode": "doccacheremove",
+            "label": "A & B <remove>",
+            "document_cache_id": "CACHE&<1>",
+        }
+    )
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    dcr = next(s for s in shapes if s.attrib["shapetype"] == "doccacheremove")
+    # Round-trips back through the parser to the raw text (well-formed escaping).
+    assert dcr.attrib["userlabel"] == "A & B <remove>"
+    assert dcr.find("configuration/doccacheremove").attrib["docCache"] == "CACHE&<1>"
+
+
+def test_doccacheremove_build_bypass_empty_cache_id_raises():
+    # build() stays total on the validate_config-bypass path: an empty docCache
+    # would emit a semantically broken docCache="" (well-formed XML the parse-back
+    # guard would not catch), so raise rather than emit it.
+    cfg = _base_config(transform={"mode": "doccacheremove", "document_cache_id": "   "})
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+    assert exc.value.field == "transform.document_cache_id"
+
+
+def test_doccacheremove_build_bypass_keyed_removal_raises():
+    # build() (bypassing validate_config) must not serialize removeAllDocuments="false"
+    # with an empty <cacheKeyValues/> (a broken keyed remove); the emitter re-guards
+    # the v1 all-document-only invariant.
+    cfg = _base_config(transform={
+        "mode": "doccacheremove",
+        "document_cache_id": "CACHE-1",
+        "remove_all_documents": False,
+    })
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+    assert exc.value.field == "transform.remove_all_documents"
+
+
+def test_doccacheremove_build_bypass_non_bool_remove_all_raises():
+    # A non-bool truthy remove_all_documents (e.g. the string "true") is NOT True, so
+    # the emitter rejects it rather than emit removeAllDocuments from an unvetted value.
+    cfg = _base_config(transform={
+        "mode": "doccacheremove",
+        "document_cache_id": "CACHE-1",
+        "remove_all_documents": "true",
+    })
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID"
+    assert exc.value.field == "transform.remove_all_documents"
+
+
+def test_doccacheremove_composes_with_try_catch_wrapper():
+    # The remove shape sits in the middle-transform slot, so it composes with the
+    # verified Try/Catch + DLQ wrapper unchanged (the wrapped chain still contains
+    # exactly one doccacheremove, non-terminal, between source and target).
+    cfg = _doccacheremove_config(
+        reliability={
+            "retry_count": 1,
+            "dlq": {"mode": "document_cache_ref", "document_cache_id": "$ref:DLQ"},
+        }
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=["DLQ"])
+    assert err is None
+    xml = ProcessFlowBuilder.build(cfg, name="Wrapped Remove")
+    _, _, shapes = _parse_process(xml)
+    removes = [s for s in shapes if s.attrib["shapetype"] == "doccacheremove"]
+    assert len(removes) == 1
+    # Wrapped in a Try/Catch (catcherrors present) and the remove still forwards.
+    assert any(s.attrib["shapetype"] == "catcherrors" for s in shapes)
+    assert list(removes[0].find("dragpoints")) != []
+
+
+# ---------------------------------------------------------------------------
 # Return Documents terminal (issue #107 M10.3)
 # ---------------------------------------------------------------------------
 
