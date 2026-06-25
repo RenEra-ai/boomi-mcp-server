@@ -640,6 +640,12 @@ def test_process_models_error_handling_predicate():
     )
     # Exact-token: a "nonexception" substring is NOT error-handling evidence.
     assert not _process_models_error_handling(comp({"shapes": [{"shapetype": "nonexception"}]}))
+    # Non-dict shapes-list entries are skipped (the guard), not crashed on, and a
+    # mixed list still evaluates its dict entries (the exception entry is detected).
+    assert not _process_models_error_handling(comp({"shapes": ["ignored", 5, None]}))
+    assert _process_models_error_handling(
+        comp({"shapes": ["ignored", {"shapetype": "exception"}]})
+    )
     # Non-dict config does not crash.
     assert not _process_models_error_handling(comp({}))
 
