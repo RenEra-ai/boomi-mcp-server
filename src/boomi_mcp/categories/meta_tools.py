@@ -5743,7 +5743,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             # PROCESS_DECISION_CONFIG_INVALID. A bare false-leg Stop (no false_notify,
             # no false_next) is the verifier's CONTROL_BRANCH_BARE_STOP advisory
             # warning — not a builder error.
-            {"error_code": "PROCESS_DECISION_CONFIG_INVALID", "field": "decision|decision.enabled|decision.comparison|decision.left|decision.right|decision.left.value_type|decision.right.value_type|decision.left.property_id|decision.right.static_value|decision.false_notify|decision.false_next|branch|reliability|return_documents|target.dynamic_path"},
+            {"error_code": "PROCESS_DECISION_CONFIG_INVALID", "field": "decision|decision.enabled|decision.comparison|decision.left|decision.right|decision.left.value_type|decision.right.value_type|decision.left.property_id|decision.left.static_value|decision.right.property_id|decision.right.static_value|decision.false_notify|decision.false_next|branch|reliability|return_documents|target.dynamic_path"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},

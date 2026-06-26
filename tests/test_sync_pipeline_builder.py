@@ -248,7 +248,7 @@ def test_valid_no_map_validates_clean():
         ("lookup", "lookup", None),
         ("combine", "combine", "#103"),
         ("flow_control", "flow_control", "#111"),
-        ("decision", "decision", "#103"),
+        ("decision", "decision", "#113"),
         ("dataprocess", "dataprocess", "#106"),
         ("exception", "exception", "#108"),
         ("doccacheretrieve", "doccacheretrieve", "#109"),

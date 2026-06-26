@@ -2900,3 +2900,26 @@ def test_decision_false_next_with_malformed_transform_stays_total():
     cfg = _base_config(transform=1, decision=_decision_block(false_notify=None, false_next="shape2"))
     err = ProcessFlowBuilder.validate_config(cfg)
     assert err is not None and err.error_code == "PROCESS_SHAPE_UNSUPPORTED"
+
+
+def test_decision_operands_validated_symmetrically_swapped_orientation():
+    # Architect-review #113 (finding 1): operands are validated symmetrically — a
+    # static LEFT missing static_value and a track RIGHT missing property_id are
+    # both reachable PROCESS_DECISION_CONFIG_INVALID field paths (the swapped
+    # orientation the structured_errors row documents).
+    left_static_missing = ProcessFlowBuilder.validate_config(_decision_config({
+        "comparison": "equals",
+        "left": {"value_type": "static"},
+        "right": {"value_type": "track", "property_id": "dynamicdocument.DDP_X"},
+    }))
+    assert left_static_missing is not None
+    assert left_static_missing.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert left_static_missing.field == "decision.left.static_value"
+    right_track_missing = ProcessFlowBuilder.validate_config(_decision_config({
+        "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "x"},
+        "right": {"value_type": "track"},
+    }))
+    assert right_track_missing is not None
+    assert right_track_missing.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert right_track_missing.field == "decision.right.property_id"

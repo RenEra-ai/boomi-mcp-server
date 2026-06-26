@@ -4445,7 +4445,7 @@ _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
     "combine": "The 'combine' stage is reserved; combine/control-flow emitters are owned by M10 (issue #103).",
     "flow_control": "The 'flow_control' stage is reserved; Flow Control is M10.7 (issue #111), owned by M10 (#103).",
     "branch": "The 'branch' stage kind has no PipelineSpec lowering; the Branch shape is owned by M10.8 (issue #112).",
-    "decision": "The 'decision' stage is reserved; control-flow emitters are owned by M10 (issue #103).",
+    "decision": "The 'decision' stage kind has no PipelineSpec lowering; the Decision shape is emittable via the process_config.decision block (M10.9, issue #113).",
     "dataprocess": "The 'dataprocess' stage has no PipelineSpec lowering; the Data Process shape is owned by M10.2 (issue #106).",
     "exception": "The 'exception' stage has no PipelineSpec lowering; Exception/Throw is owned by M10.4 (issue #108).",
     "doccacheretrieve": "The 'doccacheretrieve' stage has no PipelineSpec lowering; Document Cache Retrieve is owned by M10.5 (issue #109).",

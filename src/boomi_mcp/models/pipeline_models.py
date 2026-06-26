@@ -8,14 +8,14 @@ depend on. It models a semantic stage graph where connectivity is carried by a
 - ``dependencies`` is a list of :class:`PipelineEdgeSpec`. Each edge has an
   ``edge_kind``; the default ``"ordering"`` reproduces plain linear wiring, so a
   linear pipeline expressed with edge_kind omitted is fully back-compatible.
-- ``decision`` is a **reserved** stage kind: named in the vocabulary so the
-  contract designs it in, but with **no emitter** yet (the same
-  reserved-without-emitter treatment as ``combine`` / ``flow_control``).
-  ``branch`` is reserved *as a PipelineSpec stage kind* — there is no
-  PipelineSpec→XML lowering for it yet — but the Branch **shape** itself is now
-  emittable directly through :class:`ProcessFlowBuilder` via the ``branch``
-  process-config block (M10.8, issue #112): an N-way forward fan-out to N
-  independent target legs.
+- ``branch`` and ``decision`` are both reserved *as PipelineSpec stage kinds* —
+  there is no PipelineSpec→XML lowering for either yet (the same
+  reserved-without-lowering treatment as ``combine`` / ``flow_control``) — but the
+  Branch and Decision **shapes** themselves are now emittable directly through
+  :class:`ProcessFlowBuilder` via process-config blocks: the ``branch`` block
+  (M10.8, issue #112) emits an N-way forward fan-out to N independent target legs,
+  and the ``decision`` block (M10.9, issue #113) emits a conditional two-path
+  (true/false) router with optional false-path notify and loop-back.
 - Cycle handling is **classification, not blanket rejection**. A back-edge is
   permitted only when it is explicitly typed ``loop_back``; any other back-edge
   (including an omitted/``ordering`` edge that happens to close a cycle) is

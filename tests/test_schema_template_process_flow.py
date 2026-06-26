@@ -306,6 +306,16 @@ def test_template_documents_decision_surface(template):
     decision_cfg_fields = errors_by_code["PROCESS_DECISION_CONFIG_INVALID"]
     assert "decision.comparison" in decision_cfg_fields
     assert "decision.false_next" in decision_cfg_fields
+    # Operands are validated symmetrically (either side may be track or static), so
+    # all four operand field paths are reachable and documented — including the
+    # swapped left-static / right-track orientation.
+    for operand_field in (
+        "decision.left.property_id",
+        "decision.left.static_value",
+        "decision.right.property_id",
+        "decision.right.static_value",
+    ):
+        assert operand_field in decision_cfg_fields, operand_field
     # CONTROL_BRANCH_BARE_STOP is a graph-verifier WARNING, not a builder structured
     # error — documented in notes, never in structured_errors.
     assert "CONTROL_BRANCH_BARE_STOP" not in errors_by_code
