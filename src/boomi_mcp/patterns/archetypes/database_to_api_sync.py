@@ -49,6 +49,7 @@ from ...categories.components.builders.connector_builder import (
     BuilderValidationError,
 )
 from ...categories.components.builders.process_flow_builder import (
+    SyncPipelineBuilder,
     _NOTIFY_CAUGHT_ERROR_TOKEN,
     _SUPPORTED_NOTIFY_LEVELS,
 )
@@ -2784,11 +2785,74 @@ def _build_dynamic_path(
     }
 
 
+def _build_sync_pipeline_adapter_config(
+    parameters: "DatabaseToApiSyncParameters",
+    *,
+    db_conn_key: str,
+    db_op_key: str,
+    map_key: str,
+    rest_conn_key: str,
+    rest_op_key: str,
+) -> Dict[str, Any]:
+    """Build the M5.3 (#71) semantic ``sync_pipeline`` stage graph whose lowering
+    reproduces the legacy ``database_to_api_sync`` linear core.
+
+    The graph is the verified-linear ``read(db_read) -> map -> send(rest_send)``
+    chain :class:`SyncPipelineBuilder` accepts. It is fed to
+    ``SyncPipelineBuilder.lower_config`` to derive ``source``/``transform``/
+    ``target`` from the pipeline foundation rather than hand-assembling them.
+
+    Internal only: this config is NEVER populated onto ``IntegrationSpecV1.pipeline``
+    (the returned spec keeps ``pipeline=None``) and the emitted process keeps its
+    public ``process_kind="database_to_api_sync"``. Legacy-only blocks (reliability,
+    dynamic_path, folder_name, process_extensions) are deliberately omitted here —
+    ``lower_config`` does not carry them; the caller reattaches them post-lowering.
+    """
+    send = parameters.target.send_request
+    return {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+            "stages": [
+                {
+                    "key": "source",
+                    "kind": "read",
+                    "config": {
+                        "primitive": "db_read",
+                        "connection_id": f"$ref:{db_conn_key}",
+                        "operation_id": f"$ref:{db_op_key}",
+                    },
+                },
+                {
+                    "key": "transform",
+                    "kind": "map",
+                    "config": {
+                        "primitive": "map",
+                        "map_ref": f"$ref:{map_key}",
+                    },
+                },
+                {
+                    "key": "target",
+                    "kind": "send",
+                    "config": {
+                        "primitive": "rest_send",
+                        "action_type": send.method,
+                        "connection_id": f"$ref:{rest_conn_key}",
+                        "operation_id": f"$ref:{rest_op_key}",
+                    },
+                },
+            ],
+            "dependencies": [
+                {"from_stage": "source", "to_stage": "transform"},
+                {"from_stage": "transform", "to_stage": "target"},
+            ],
+        },
+    }
+
+
 def _build_main_process(
     parameters: "DatabaseToApiSyncParameters", overrides: Dict[str, str]
 ) -> IntegrationComponentSpec:
     naming = parameters.naming
-    send = parameters.target.send_request
     reliability_block, dlq_dep_key = _derive_process_reliability(parameters.reliability)
 
     db_conn_key = primitive_component_key(_SOURCE_PREFIX, ROLE_DB_CONNECTION)
@@ -2802,28 +2866,28 @@ def _build_main_process(
         or f"{naming.component_prefix} DB to API Sync"
     )
 
-    config: Dict[str, Any] = {
-        "process_kind": "database_to_api_sync",
-        "source": {
-            "connector_type": "database",
-            "connection_id": f"$ref:{db_conn_key}",
-            "operation_id": f"$ref:{db_op_key}",
-            "action_type": "Get",
-        },
-        "transform": {"mode": "map_ref", "map_ref": f"$ref:{map_key}"},
-        "target": {
-            "connector_type": "rest",
-            "connection_id": f"$ref:{rest_conn_key}",
-            "operation_id": f"$ref:{rest_op_key}",
-            "action_type": send.method,
-        },
-        # Reliability derived from the caller's policy: a verified DLQ mode
-        # (document_cache_ref / error_subprocess_ref) emits the live Try/Catch +
-        # DLQ catch path via ProcessFlowBuilder, with retry_count = max_attempts
-        # - 1 (0..5, platform-timed) wired through (#51 M3.R1a / #88 M4.5.3).
-        # disabled / guidance_only emit no Try/Catch (retry stays 0).
-        "reliability": reliability_block,
-    }
+    # Issue #71 (M5.3): derive the linear source/transform/target core through the
+    # verified-linear sync_pipeline foundation instead of hand-assembling it. The
+    # lowered config is byte-equivalent to the pre-M5.3 hand-built core (process_kind
+    # stays "database_to_api_sync"); the semantic pipeline is internal-only and is
+    # never populated onto the returned IntegrationSpecV1 (pipeline stays None).
+    config: Dict[str, Any] = SyncPipelineBuilder.lower_config(
+        _build_sync_pipeline_adapter_config(
+            parameters,
+            db_conn_key=db_conn_key,
+            db_op_key=db_op_key,
+            map_key=map_key,
+            rest_conn_key=rest_conn_key,
+            rest_op_key=rest_op_key,
+        )
+    )
+    # Reattach the legacy-only reliability block lower_config does not carry.
+    # Reliability derived from the caller's policy: a verified DLQ mode
+    # (document_cache_ref / error_subprocess_ref) emits the live Try/Catch +
+    # DLQ catch path via ProcessFlowBuilder, with retry_count = max_attempts
+    # - 1 (0..5, platform-timed) wired through (#51 M3.R1a / #88 M4.5.3).
+    # disabled / guidance_only emit no Try/Catch (retry stays 0).
+    config["reliability"] = reliability_block
     # Issue #100 G2: per-document dynamic REST path. When path_replacements are
     # configured, emit a dynamic_path block the ProcessFlowBuilder lowers into a
     # Set Properties shape + the connector step's "Path" dynamic operation

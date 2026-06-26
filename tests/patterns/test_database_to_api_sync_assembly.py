@@ -20,9 +20,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from boomi_mcp.categories.components.builders.process_flow_builder import (
+    SyncPipelineBuilder,
+)
 from boomi_mcp.categories.integration_authoring import build_from_archetype_action
 from boomi_mcp.categories.integration_builder import _build_plan
 from boomi_mcp.categories.transformation_review import review_transformation_action
+from boomi_mcp.patterns.archetypes.database_to_api_sync import (
+    DatabaseToApiSyncParameters,
+    _build_sync_pipeline_adapter_config,
+)
 
 _PAGINATE_TARGET = "boomi_mcp.categories.integration_builder.paginate_metadata"
 
@@ -276,6 +283,91 @@ class TestAssembly:
         by_key = _by_key(_spec(payload))
         assert by_key["source_db_connection"]["name"] == "Emitted-Key DB Conn"
         assert by_key["main_process"]["name"] == "Emitted-Key Process"
+
+
+# ---------------------------------------------------------------------------
+# M5.3 (#71): database_to_api_sync as an adapter over sync_pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestM53SyncPipelineAdapter:
+    """The archetype derives its linear core through SyncPipelineBuilder.lower_config
+    (M5.3 #71) while keeping legacy output: process_kind stays database_to_api_sync,
+    the returned spec keeps pipeline=null, and no audit/reliability shell is added."""
+
+    # The deterministic component keys the minimal payload emits (see
+    # test_minimal_emits_expected_component_graph above).
+    _KEYS = dict(
+        db_conn_key="source_db_connection",
+        db_op_key="source_db_get_operation",
+        map_key="transform_transform_map",
+        rest_conn_key="target_rest_connection",
+        rest_op_key="target_rest_operation",
+    )
+
+    def _adapter_config(self) -> Dict[str, Any]:
+        params = DatabaseToApiSyncParameters.model_validate(_minimal())
+        return _build_sync_pipeline_adapter_config(params, **self._KEYS)
+
+    def test_adapter_config_is_read_map_send_stage_graph(self):
+        cfg = self._adapter_config()
+        assert cfg["process_kind"] == "sync_pipeline"
+        stages = cfg["pipeline"]["stages"]
+        assert [s["kind"] for s in stages] == ["read", "map", "send"]
+        assert [s["key"] for s in stages] == ["source", "transform", "target"]
+        assert stages[0]["config"]["primitive"] == "db_read"
+        assert stages[1]["config"]["primitive"] == "map"
+        assert stages[2]["config"]["primitive"] == "rest_send"
+        # Exactly the two ordering edges that wire source -> transform -> target.
+        assert cfg["pipeline"]["dependencies"] == [
+            {"from_stage": "source", "to_stage": "transform"},
+            {"from_stage": "transform", "to_stage": "target"},
+        ]
+        # No legacy-only block leaks into the semantic config (lower_config rejects
+        # them); they are reattached only after lowering.
+        for stage in stages:
+            assert "reliability" not in stage["config"]
+            assert "dynamic_path" not in stage["config"]
+        assert "reliability" not in cfg
+        assert "folder_name" not in cfg
+        assert "process_extensions" not in cfg
+
+    def test_lower_config_reproduces_legacy_core(self):
+        lowered = SyncPipelineBuilder.lower_config(self._adapter_config())
+        assert lowered == {
+            "process_kind": "database_to_api_sync",
+            "source": {
+                "connector_type": "database",
+                "action_type": "Get",
+                "connection_id": "$ref:source_db_connection",
+                "operation_id": "$ref:source_db_get_operation",
+            },
+            "transform": {"mode": "map_ref", "map_ref": "$ref:transform_transform_map"},
+            "target": {
+                "connector_type": "rest",
+                "action_type": "POST",
+                "connection_id": "$ref:target_rest_connection",
+                "operation_id": "$ref:target_rest_operation",
+            },
+        }
+
+    def test_emitted_spec_preserves_legacy_output(self):
+        spec = _spec(_minimal())
+        # The semantic pipeline is internal-only — never populated onto the spec.
+        assert spec.get("pipeline") is None
+        proc = _by_key(spec)["main_process"]
+        cfg = proc["config"]
+        # Public process kind is unchanged; the lowered core matches the legacy dict.
+        assert cfg["process_kind"] == "database_to_api_sync"
+        assert cfg["source"]["connection_id"] == "$ref:source_db_connection"
+        assert cfg["source"]["action_type"] == "Get"
+        assert cfg["transform"] == {"mode": "map_ref", "map_ref": "$ref:transform_transform_map"}
+        assert cfg["target"]["action_type"] == "POST"
+        # No new reliability shell / audit sink injected into legacy output.
+        assert cfg["reliability"] == {"retry_count": 0, "dlq": {"mode": "disabled"}}
+        assert "audit" not in cfg
+        # Component count is unchanged (the 8-component minimal graph).
+        assert len(spec["components"]) == 8
 
 
 # ---------------------------------------------------------------------------

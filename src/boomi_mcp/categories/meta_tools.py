@@ -6230,8 +6230,13 @@ _PROCESS_FLOW_PROTOCOLS = {
             "sync_pipeline is the M5.2 foundation: it proves the database_to_api_sync "
             "linear core (DB Get source -> optional map -> REST send target -> stop) "
             "can be expressed as a semantic stage graph and lowered to the SAME XML. "
-            "The archetype adapter that emits a sync_pipeline directly is M5.3 (#71); "
-            "in M5.2 database_to_api_sync is unchanged.",
+            "As of M5.3 (#71) the database_to_api_sync archetype derives its linear "
+            "core through this sync_pipeline lowering internally while preserving its "
+            "legacy process output (process_kind stays 'database_to_api_sync', the "
+            "returned spec keeps pipeline=null, and no audit sink or reliability shell "
+            "is injected); standalone sync_pipeline remains verified-linear and still "
+            "gates reliability/dynamic path — database_to_api_sync stays the public "
+            "archetype for those legacy features.",
             "Every binding $ref:KEY token (source/target connection_id + operation_id, "
             "the map map_ref) must be reachable via the component's depends_on, exactly "
             "as for database_to_api_sync — the lowered config funnels through the same "

@@ -4522,8 +4522,13 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
     kinds (fetch/write/lookup/combine/flow_control/branch/decision/dataprocess/
     exception/doccacheretrieve), and the gated reliability/branch/process_calls/
     return_documents blocks — is rejected at builder time with a structured error
-    pointing at the owning issue. ``database_to_api_sync`` is unchanged in M5.2;
-    the archetype adapter that emits a sync_pipeline is M5.3 (#71).
+    pointing at the owning issue. As of M5.3 (#71) the ``database_to_api_sync``
+    archetype derives its linear process core through
+    :meth:`lower_config` (this lowering path) while preserving its legacy process
+    output — ``process_kind`` stays ``database_to_api_sync`` and the returned
+    spec keeps ``pipeline=null``; it does NOT emit a ``sync_pipeline`` process
+    directly, and no audit sink or reliability shell is injected into that legacy
+    output.
     """
 
     PROCESS_KIND = "sync_pipeline"
