@@ -714,3 +714,73 @@ def test_catcherrors_into_exception_is_not_bare_stop_warning():
     assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["errors"])
     # The exception is a recognized terminal — no dead-end error.
     assert "NON_TERMINAL_SHAPE_DEAD_END" not in _codes(result["errors"])
+
+
+# ---------------------------------------------------------------------------
+# Issue #113 M10.9 — Decision (conditional two-path routing) + loops
+# ---------------------------------------------------------------------------
+
+_DECISION_BASE = {
+    "process_kind": "database_to_api_sync",
+    "source": {"connector_type": "database", "action_type": "Get",
+               "connection_id": "11111111-1111-1111-1111-111111111111",
+               "operation_id": "22222222-2222-2222-2222-222222222222"},
+    "target": {"connector_type": "rest", "action_type": "POST",
+               "connection_id": "33333333-3333-3333-3333-333333333333",
+               "operation_id": "44444444-4444-4444-4444-444444444444"},
+}
+
+
+def _decision_process_xml(**decision_overrides) -> str:
+    """Build a real Decision process via ProcessFlowBuilder (issue #113)."""
+    decision = {
+        "comparison": "equals",
+        "label": "Check Status",
+        "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_STATUS"},
+        "right": {"value_type": "static", "static_value": "active"},
+        "false_notify": "status was not active",
+    }
+    decision.update(decision_overrides)
+    return ProcessFlowBuilder.build({**_DECISION_BASE, "decision": decision}, name="Decision Process")
+
+
+def test_decision_is_classified_as_branching_and_control_branch():
+    from boomi_mcp.categories.components.process_graph_verifier import (
+        _BRANCHING_SHAPE_TYPES, _CONTROL_BRANCH_SHAPE_TYPES,
+    )
+    assert "decision" in _BRANCHING_SHAPE_TYPES
+    assert "decision" in _CONTROL_BRANCH_SHAPE_TYPES
+
+
+def test_builder_decision_true_false_verifies_clean():
+    # A builder-emitted decision with the false leg routed through a Message is
+    # clean: no errors AND no CONTROL_BRANCH_BARE_STOP warning.
+    result = verify_process_graph(_decision_process_xml())
+    assert result["errors"] == []
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+
+
+def test_decision_bare_false_stop_fires_control_branch_bare_stop_warning():
+    # No false_notify, no loop: the false dragpoint goes straight to a Stop, which
+    # is the advisory CONTROL_BRANCH_BARE_STOP warning (not an error).
+    result = verify_process_graph(_decision_process_xml(false_notify=None))
+    assert result["errors"] == []
+    assert "CONTROL_BRANCH_BARE_STOP" in _codes(result["warnings"])
+
+
+def test_decision_loop_back_verifies_clean():
+    # The false dragpoint loops back to the source (shape2): the reachability BFS
+    # tolerates the back-edge (visited set), so there are no errors and no bare-stop
+    # warning (the false output targets a connector, not a Stop).
+    result = verify_process_graph(_decision_process_xml(false_notify=None, false_next="shape2"))
+    assert result["errors"] == []
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+    assert "SHAPE_UNREACHABLE" not in _codes(result["errors"])
+
+
+def test_decision_loop_back_through_message_verifies_clean():
+    # false_notify + false_next: the false leg runs a Message that loops back to an
+    # earlier shape (the live shape31 false->shape32->shape27 pattern); clean.
+    result = verify_process_graph(_decision_process_xml(false_notify="retry", false_next="shape2"))
+    assert result["errors"] == []
+    assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])

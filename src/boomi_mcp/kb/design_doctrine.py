@@ -141,6 +141,16 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     # _emit_branch (driven by _emit_branch_shapes) produces it. Live-captured from
     # work component b34d3812-900d-41b6-b44c-c812fb9b04aa (shape53).
     "branch": {"emittable": True, "emitter_kind": "branch"},
+    # M10.9 (issue #113): Decision (conditional two-path routing) shape. Emittable
+    # today via the decision config block on ProcessFlowBuilder (the post-source
+    # document routes down a labelled true/false dragpoint by a value comparison —
+    # true = top-level target -> Stop, false = optional notify Message -> Stop or a
+    # backward loop to an earlier shape). Like branch, it is NOT in the
+    # _emit_flow_shape single-edge dispatch ladder (two labelled outgoing edges);
+    # the dedicated emitter _emit_decision (driven by _emit_decision_shapes)
+    # produces it. Live-verified via companion decision_step.md + a work-profile
+    # decision export.
+    "decision": {"emittable": True, "emitter_kind": "decision"},
     # M10.5 (issue #109): process-level Document Cache Retrieve shape. Emittable
     # today via the transform.mode='doccacheretrieve' block on ProcessFlowBuilder
     # (a linear non-terminal step that pulls documents from a Document Cache into
@@ -553,17 +563,21 @@ _ENTRIES: List[Dict[str, Any]] = [
         ),
         "boomi_shape_mapping": (
             "Unconditional fan-out (the same document down every path) uses "
-            "a Branch; value-comparing selection uses Decision, Route, or "
-            "Business Rules; per-type dispatch uses Process Route. The "
-            "unconditional Branch fan-out is builder-emittable today: the same "
-            "document fans to N independent target paths, each one run in "
-            "sequence to its own end, with no rejoin. Value-comparing "
-            "selection (Decision, Route, Business Rules) and per-type dispatch "
-            "(Process Route) remain design guidance, not yet builder-emitted. "
-            "Transformation can live in a Map, Data Process, Business Rules, "
-            "Route, or Process Route — not the Map alone. Publish/subscribe "
-            "fan-out routes to per-subscriber subprocesses backed by a "
-            "queue."
+            "a Branch; value-comparing two-way selection uses a Decision; "
+            "multi-condition or per-record selection uses Route or Business "
+            "Rules; per-type dispatch uses Process Route. The unconditional "
+            "Branch fan-out AND the value-comparing Decision are both "
+            "builder-emittable today: Branch fans the same document to N "
+            "independent target paths (each run in sequence to its own end, no "
+            "rejoin); Decision routes the document down a true or false path by "
+            "a value comparison (true = the top-level target, false = an "
+            "optional notify Message before Stop, or a backward loop to an "
+            "earlier shape). Multi-condition Route, Business Rules, and "
+            "per-type Process Route remain design guidance, not yet "
+            "builder-emitted. Transformation can live in a Map, Data Process, "
+            "Business Rules, Route, or Process Route — not the Map alone. "
+            "Publish/subscribe fan-out routes to per-subscriber subprocesses "
+            "backed by a queue."
         ),
         "when_to_use": (
             "When document type or field values determine downstream "
@@ -571,13 +585,17 @@ _ENTRIES: List[Dict[str, Any]] = [
             "different paths; in the map when only field shaping differs. "
             "Reach for the emittable Branch fan-out when every path should "
             "receive the same document (for example one path sends to a "
-            "target while another logs an audit copy)."
+            "target while another logs an audit copy); reach for the emittable "
+            "Decision when a value comparison chooses between two paths (for "
+            "example send active records, notify on the rest), including a "
+            "loop-back retry edge."
         ),
         "when_not_to_use": (
             "Do not scatter routing logic across both process and map for "
             "the same decision — pick one home. Branch is for same-document "
-            "fan-out, not value selection — do not use it where one path is "
-            "chosen by a value comparison."
+            "fan-out, not value selection — use a Decision where one path is "
+            "chosen by a value comparison. A Decision inspects only the first "
+            "record of a batch — use Business Rules to evaluate every record."
         ),
         "verification_status": "live_verified",
         "capability_status": "emittable_today",
@@ -842,23 +860,27 @@ _ENTRIES: List[Dict[str, Any]] = [
         "boomi_shape_mapping": (
             "Business Rules evaluates every record; a Decision evaluates only "
             "the first. Consolidate multi-condition logic in one Business "
-            "Rules step."
+            "Rules step. The Decision shape is builder-emittable today "
+            "(value-comparing true/false routing with an optional false-path "
+            "notify and a backward loop edge); Business Rules remains design "
+            "guidance."
         ),
         "when_to_use": (
             "Use Business Rules when each record must be evaluated; use a "
-            "Decision only for a single per-document branch."
+            "Decision only for a single per-document branch (one value "
+            "comparison choosing the true or false path)."
         ),
         "when_not_to_use": (
             "Do not use a Decision to filter or classify a multi-record "
             "batch — it inspects only the first record and silently passes "
             "the rest."
         ),
-        "verification_status": "course_unverified",
-        "capability_status": "guidance_only",
+        "verification_status": "live_verified",
+        "capability_status": "emittable_today",
         "category": "routing",
         "mutual_exclusion": [],
         "cross_refs": ["content_based_routing"],
-        "provenance": "course_unverified",
+        "provenance": "live_verified",
     },
     {
         "name": "async_queue_decoupling",

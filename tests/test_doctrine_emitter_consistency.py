@@ -59,6 +59,11 @@ PINNED_EMITTABLE = frozenset(
         # emitter (_emit_branch / _emit_branch_shapes), neither a _emit_flow_shape
         # dispatch kind nor a catch-path shape.
         "branch",
+        # M10.9 (issue #113): Decision (conditional two-path routing) shape — its
+        # own emitter (_emit_decision / _emit_decision_shapes); a Decision carries
+        # two labelled (true/false) edges, so it is NOT a _emit_flow_shape dispatch
+        # kind.
+        "decision",
         # M10.5 (issue #109): process-level Document Cache Retrieve shape — the
         # doccacheretrieve transform mode / _emit_flow_shape dispatch kind.
         "doccacheretrieve",
@@ -198,6 +203,30 @@ def _emit_branch_shapetypes():
     return _shapetypes_from_parts(parts)
 
 
+def _emit_decision_shapetypes():
+    """Drive the real Decision emitter and return all shapetypes produced.
+
+    Decision (issue #113 M10.9) is neither a ``_emit_flow_shape`` dispatch kind nor
+    a catch-path shape: it has its own ``_emit_decision`` / ``_emit_decision_shapes``
+    emitter (a Decision carries two labelled true/false edges). This is the same
+    non-dispatch emission category as Branch.
+    """
+    pre_decision = [
+        ("start_noaction", {}),
+        ("connectoraction_source", dict(_CONN_PARAMS)),
+    ]
+    decision_config = {
+        "comparison": "equals",
+        "label": "Check",
+        "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_X"},
+        "right": {"value_type": "static", "static_value": "y"},
+    }
+    true_leg = [("connectoraction_target", dict(_CONN_PARAMS)), ("stop", {"continue_": True})]
+    false_leg = [("message", {"text": "rejected"}), ("stop", {"continue_": True})]
+    parts = pfb._emit_decision_shapes(pre_decision, decision_config, true_leg, false_leg, None)
+    return _shapetypes_from_parts(parts)
+
+
 def test_registry_entry_shape():
     """Every registry value is exactly ``{"emittable": bool, "emitter_kind": str}``."""
     assert EMITTABLE_SHAPE_REGISTRY, "registry must not be empty"
@@ -245,8 +274,13 @@ def test_every_emittable_entry_is_backed_by_a_real_emitter():
     """
     dispatch = _flow_dispatch_kinds()
     # Non-dispatch emission categories: catch-path-only shapes (catcherrors /
-    # notify / doccacheload / exception) and the Branch fan-out shape.
-    non_dispatch_shapetypes = _emit_full_catch_shapetypes() | _emit_branch_shapetypes()
+    # notify / doccacheload / exception), the Branch fan-out shape, and the
+    # Decision two-path shape.
+    non_dispatch_shapetypes = (
+        _emit_full_catch_shapetypes()
+        | _emit_branch_shapetypes()
+        | _emit_decision_shapetypes()
+    )
     for shapetype, entry in EMITTABLE_SHAPE_REGISTRY.items():
         if not entry["emittable"]:
             continue
@@ -291,6 +325,20 @@ def test_branch_shape_matches_registry():
     assert entry["emitter_kind"] == "branch"
     # Branch is deliberately NOT a single-edge flow-dispatch kind.
     assert "branch" not in _flow_dispatch_kinds()
+
+
+def test_decision_shape_matches_registry():
+    """Issue #113 M10.9: the Decision two-path router is emitted by its own
+    ``_emit_decision_shapes`` (NOT a ``_emit_flow_shape`` dispatch kind — a Decision
+    carries two labelled true/false edges). Its registry entry is consistent and the
+    emitter really produces a ``shapetype="decision"`` shape."""
+    decision_shapetypes = _emit_decision_shapetypes()
+    assert "decision" in decision_shapetypes
+    entry = EMITTABLE_SHAPE_REGISTRY["decision"]
+    assert entry["emittable"] is True
+    assert entry["emitter_kind"] == "decision"
+    # Decision is deliberately NOT a single-edge flow-dispatch kind.
+    assert "decision" not in _flow_dispatch_kinds()
 
 
 def test_supported_transform_modes_are_dispatch_backed():

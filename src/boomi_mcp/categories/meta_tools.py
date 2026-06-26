@@ -5602,6 +5602,34 @@ _PROCESS_FLOW_PROTOCOLS = {
             "branch.targets[].operation_id",
             "branch.targets[].action_type",
             "branch.targets[].label",
+            # Issue #113 M10.9: optional Decision (conditional two-path routing).
+            # When decision.enabled is true (default when the block is present), the
+            # post-source document routes down a labelled true/false dragpoint based
+            # on a value comparison. The TRUE leg is the forward success path (the
+            # top-level target -> Stop). The FALSE leg is forward (an optional
+            # false_notify Message -> Stop) or a backward loop (false_next names an
+            # earlier shape; the Message tail — or the false dragpoint when there is
+            # no false_notify — wires back to it). v1 operands: track (DDP/DPP) and
+            # static (literal). Default (decision absent or enabled=false) keeps the
+            # single-target flow. Mutually exclusive with branch in v1.
+            "decision",
+            "decision.enabled",
+            "decision.comparison",
+            "decision.label",
+            "decision.left",
+            "decision.left.value_type",
+            "decision.left.property_id",
+            "decision.left.default_value",
+            "decision.left.property_name",
+            "decision.left.static_value",
+            "decision.right",
+            "decision.right.value_type",
+            "decision.right.property_id",
+            "decision.right.default_value",
+            "decision.right.property_name",
+            "decision.right.static_value",
+            "decision.false_notify",
+            "decision.false_next",
             # Issue #92 M4.5.7: declare connection fields as per-environment
             # override points on the deployed process (see notes for the
             # CREATE-only behavior and the connection_id / fields shape).
@@ -5656,10 +5684,11 @@ _PROCESS_FLOW_PROTOCOLS = {
         # return_documents.enabled=true it is "returndocuments" instead (and no
         # Stop follows — the verifier's RETURN_DOCS_STOP_EXCLUSIVE invariant).
         "supported_terminal_shapes": ["stop", "returndocuments"],
-        # Issue #112 M10.8: control-flow shapes the builder can emit. Branch is the
-        # N-way forward fan-out (the only emittable control shape today); Decision /
-        # Route remain design guidance (not yet builder-emitted).
-        "supported_control_shapes": ["branch"],
+        # Issue #112 M10.8 / #113 M10.9: control-flow shapes the builder can emit.
+        # Branch is the N-way forward fan-out; Decision is the conditional two-path
+        # (true/false) router with loop-back. Route remains design guidance (not yet
+        # builder-emitted).
+        "supported_control_shapes": ["branch", "decision"],
         "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
         "supported_notify_levels": ["INFO", "WARNING", "ERROR"],
         "supported_connector_action_bindings": {
@@ -5705,6 +5734,16 @@ _PROCESS_FLOW_PROTOCOLS = {
             # produced by the builder, which derives numBranches from the leg count.
             {"error_code": "BRANCH_OUTPUT_UNSET", "field": "branch.targets"},
             {"error_code": "PROCESS_BRANCH_CONFIG_INVALID", "field": "branch|branch.enabled|branch.targets|branch.targets[N].dynamic_path|reliability|return_documents|target.dynamic_path"},
+            # Issue #113 M10.9: Decision (conditional two-path routing). A malformed
+            # decision block (non-dict / non-bool enabled / unknown key), an invalid
+            # comparison or operand (value_type / missing track property_id / missing
+            # static static_value), a false_next that does not name an earlier shape,
+            # or an unsupported v1 composition (branch / Try-Catch reliability /
+            # dynamic_path / return_documents alongside decision) all return
+            # PROCESS_DECISION_CONFIG_INVALID. A bare false-leg Stop (no false_notify,
+            # no false_next) is the verifier's CONTROL_BRANCH_BARE_STOP advisory
+            # warning — not a builder error.
+            {"error_code": "PROCESS_DECISION_CONFIG_INVALID", "field": "decision|decision.enabled|decision.comparison|decision.left|decision.right|decision.left.value_type|decision.right.value_type|decision.left.property_id|decision.right.static_value|decision.false_notify|decision.false_next|branch|reliability|return_documents|target.dynamic_path"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
@@ -5881,6 +5920,28 @@ _PROCESS_FLOW_PROTOCOLS = {
             "from the leg count, so it never emits a mismatch. Default (branch absent "
             "or enabled=false) keeps the single-target flow byte-for-byte. "
             "Live-verified against a real work-account process export.",
+            "Issue #113 M10.9: an optional decision block emits a Decision shape — "
+            "Boomi's if/then — that routes the post-source document down a labelled "
+            "true or false dragpoint based on a value comparison (binary, both "
+            "outcomes explicit; no fall-through). comparison is one of equals / "
+            "greaterthaneq / lessthaneq / greaterthan / lessthan / regex / wildcard; "
+            "left and right are operands, each track (a DDP/DPP via property_id) or "
+            "static (a literal static_value, which may be empty for the 'is empty' "
+            "check) in v1. The TRUE leg is the forward success path (the top-level "
+            "target -> Stop). The FALSE leg is forward — an optional false_notify "
+            "Message before its own Stop — or a backward loop: false_next names an "
+            "earlier shape (start/source/[transform], e.g. 'shape2') and the false "
+            "dragpoint (or the false_notify Message's tail) wires back to it, the "
+            "live shape31 false->shape32->shape27 loop pattern; the verifier's "
+            "reachability pass tolerates the back-edge. A false leg wired straight to "
+            "a bare Stop (no false_notify, no false_next) fires the verifier's "
+            "CONTROL_BRANCH_BARE_STOP advisory WARNING — not a builder error; add "
+            "false_notify to keep it traceable. Decision is mutually exclusive with "
+            "branch in v1, and does not compose with Try/Catch reliability, "
+            "target.dynamic_path, or return_documents — each returns "
+            "PROCESS_DECISION_CONFIG_INVALID. Default (decision absent or "
+            "enabled=false) keeps the single-target flow byte-for-byte. Live-verified "
+            "via companion decision_step.md + a work-profile decision export.",
             "Issue #92 M4.5.7: process_extensions declares connection fields as "
             "per-environment override points so the DEPLOYED process exposes them "
             "via manage_environments(get_extensions) / update_extensions — without "
@@ -6139,7 +6200,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "combine": "reserved; combine/control-flow emitters owned by M10 (#103).",
             "flow_control": "reserved; Flow Control is M10.7 (#111), owned by M10 (#103).",
             "branch": "no PipelineSpec lowering; Branch shape owned by M10.8 (#112).",
-            "decision": "reserved; control-flow emitters owned by M10 (#103).",
+            "decision": "no PipelineSpec lowering; Decision shape emittable via process_config.decision block (M10.9, issue #113).",
             "dataprocess": "no PipelineSpec lowering; Data Process owned by M10.2 (#106).",
             "exception": "no PipelineSpec lowering; Exception/Throw owned by M10.4 (#108).",
             "doccacheretrieve": "no PipelineSpec lowering; Document Cache Retrieve owned by M10.5 (#109).",

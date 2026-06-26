@@ -698,6 +698,36 @@ def test_inv_branch_numbranches_matches_dragpoints():
         assert [d.attrib["text"] for d in dragpoints] == labels
 
 
+def test_inv_decision_dragpoints_labeled_true_false():
+    # Issue #113 M10.9: a builder-emitted Decision shape always carries exactly two
+    # dragpoints — identifier=true (dragpoint1, text="True") and identifier=false
+    # (dragpoint2, text="False") — plus a <decision comparison=> with two
+    # <decisionvalue> operands. _emit_decision derives all of this by construction,
+    # so the labels cannot drift.
+    cfg = _process_config(decision={
+        "comparison": "equals",
+        "label": "Check Status",
+        "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_STATUS"},
+        "right": {"value_type": "static", "static_value": "active"},
+        "false_notify": "status was not active",
+    })
+    shapes = _parse_process_shapes(ProcessFlowBuilder.build(cfg, name="P"))
+    decision_shapes = [s for s in shapes if s.attrib["shapetype"] == "decision"]
+    assert len(decision_shapes) == 1
+    decision = decision_shapes[0]
+    inner = decision.find("configuration/decision")
+    assert inner.attrib["comparison"] == "equals"
+    operands = inner.findall("decisionvalue")
+    assert len(operands) == 2
+    dragpoints = decision.findall("dragpoints/dragpoint")
+    assert len(dragpoints) == 2
+    assert [d.attrib["identifier"] for d in dragpoints] == ["true", "false"]
+    assert [d.attrib["text"] for d in dragpoints] == ["True", "False"]
+    assert dragpoints[0].attrib["name"].endswith(".dragpoint1")
+    assert dragpoints[1].attrib["name"].endswith(".dragpoint2")
+    assert all(d.attrib.get("toShape") for d in dragpoints)
+
+
 # ---------------------------------------------------------------------------
 # Invariant assertions — Profiles
 # ---------------------------------------------------------------------------
@@ -936,6 +966,17 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "test": "test_inv_branch_numbranches_matches_dragpoints",
     },
     {
+        "id": "decision_dragpoints_labeled",
+        "invariant": (
+            "Decision shape has exactly two dragpoints (identifier=true/dragpoint1, "
+            "identifier=false/dragpoint2) plus a <decision comparison=> with two "
+            "<decisionvalue> operands"
+        ),
+        "emitter": "process_flow_builder._emit_decision (issue #113 M10.9)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_decision_dragpoints_labeled_true_false",
+    },
+    {
         "id": "listener_shapes",
         "invariant": 'Listener start actionType="Listen"; allowSimultaneous=true/updateRunDates=false process options',
         "emitter": "(M6 owns listener work)",
@@ -1060,4 +1101,4 @@ def test_disposition_table_covers_every_catalog_item():
     dispositions = [e["disposition"] for e in INVARIANT_DISPOSITIONS]
     assert dispositions.count("disputed-owned-elsewhere") == 1  # REST profile-type → #50
     assert dispositions.count("fixed-here") == 2  # the two script lints
-    assert dispositions.count("guaranteed-by-construction") >= 14
+    assert dispositions.count("guaranteed-by-construction") >= 15

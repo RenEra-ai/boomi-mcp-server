@@ -23,6 +23,9 @@ from boomi_mcp.categories.components.builders.connector_builder import (
 from boomi_mcp.categories.components.builders.json_profile_builder import (
     JSONGeneratedProfileBuilder,
 )
+from boomi_mcp.categories.components.builders.process_flow_builder import (
+    ProcessFlowBuilder,
+)
 from boomi_mcp.categories.components.builders.profile_builder import (
     DatabaseReadProfileBuilder,
 )
@@ -32,6 +35,7 @@ from boomi_mcp.patterns.primitives import (
     BranchPrimitive,
     DataProcessPrimitive,
     DbExtractPrimitive,
+    DecisionPrimitive,
     DocumentCacheRemovePrimitive,
     DocumentCacheRetrievePrimitive,
     FieldMapPrimitive,
@@ -1545,3 +1549,118 @@ class TestBranch:
         # non-blank so a validated primitive never emits a builder-rejected fragment.
         with pytest.raises(ValidationError):
             BranchPrimitive.validate_parameters({"targets": [{**_BRANCH_LEG, "connection_id": "   "}]})
+
+
+_DECISION_PARAMS = {
+    "comparison": "equals",
+    "label": "Check Status",
+    "left": {
+        "value_type": "track",
+        "property_id": "dynamicdocument.DDP_STATUS",
+        "default_value": "",
+        "property_name": "Dynamic Document Property - DDP_STATUS",
+    },
+    "right": {"value_type": "static", "static_value": "active"},
+    "false_notify": "status was not active",
+}
+
+
+class TestDecision:
+    def test_registry_discovers_decision(self):
+        try:
+            reg = PatternRegistry.from_package("boomi_mcp.patterns")
+        except TypeError as exc:  # pragma: no cover — interpreter-specific
+            pytest.skip(f"registry discovery unavailable on this interpreter: {exc}")
+        cls = reg.get("decision_route")
+        assert cls is DecisionPrimitive
+        assert cls.metadata.kind == PatternKind.PRIMITIVE
+
+    def test_describe_includes_contracts_and_no_raw_artifacts(self):
+        described = DecisionPrimitive.describe()
+        for key in ("metadata", "parameter_schema", "input_contract", "output_contract", "required_builders"):
+            assert key in described
+        assert described["required_builders"] == ["ProcessFlowBuilder"]
+        dumped = json.dumps(described)
+        for forbidden in ("<bns:", "</", "<?xml", "```"):
+            assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
+
+    def test_emit_components_is_empty(self):
+        params = DecisionPrimitive.validate_parameters(dict(_DECISION_PARAMS))
+        assert DecisionPrimitive.emit_components(_ctx(), params) == []
+
+    def test_emit_fragment_returns_decision_block(self):
+        params = DecisionPrimitive.validate_parameters(dict(_DECISION_PARAMS))
+        fragment = DecisionPrimitive.emit_fragment(_ctx(), params)
+        decision = fragment["process_config"]["decision"]
+        assert decision["enabled"] is True
+        assert decision["comparison"] == "equals"
+        assert decision["label"] == "Check Status"
+        assert decision["left"] == {
+            "value_type": "track",
+            "property_id": "dynamicdocument.DDP_STATUS",
+            "default_value": "",
+            "property_name": "Dynamic Document Property - DDP_STATUS",
+        }
+        assert decision["right"] == {"value_type": "static", "static_value": "active"}
+        assert decision["false_notify"] == "status was not active"
+        # v1 operands carry no component refs.
+        assert fragment["depends_on"] == []
+
+    def test_emit_fragment_feeds_builder_clean(self):
+        # A validated primitive must emit a fragment the builder accepts (so the two
+        # layers never diverge on the decision contract).
+        params = DecisionPrimitive.validate_parameters(dict(_DECISION_PARAMS))
+        fragment = DecisionPrimitive.emit_fragment(_ctx(), params)
+        cfg = {
+            "process_kind": "database_to_api_sync",
+            "source": {"connector_type": "database", "action_type": "Get",
+                       "connection_id": "11111111-1111-1111-1111-111111111111",
+                       "operation_id": "22222222-2222-2222-2222-222222222222"},
+            "target": {"connector_type": "rest", "action_type": "POST",
+                       "connection_id": "33333333-3333-3333-3333-333333333333",
+                       "operation_id": "44444444-4444-4444-4444-444444444444"},
+            **fragment["process_config"],
+        }
+        assert ProcessFlowBuilder.validate_config(cfg) is None
+
+    def test_emit_fragment_omits_absent_optionals(self):
+        params = DecisionPrimitive.validate_parameters({
+            "comparison": "equals",
+            "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_X"},
+            "right": {"value_type": "static", "static_value": "y"},
+        })
+        decision = DecisionPrimitive.emit_fragment(_ctx(), params)["process_config"]["decision"]
+        assert "label" not in decision
+        assert "false_notify" not in decision
+        # An absent track default/name is dropped (not emitted as None).
+        assert decision["left"] == {"value_type": "track", "property_id": "dynamicdocument.DDP_X"}
+
+    def test_validation_rejects_invalid_comparison(self):
+        with pytest.raises(ValidationError):
+            DecisionPrimitive.validate_parameters({**_DECISION_PARAMS, "comparison": "nope"})
+
+    def test_validation_rejects_unknown_parameter(self):
+        with pytest.raises(ValidationError):
+            DecisionPrimitive.validate_parameters({**_DECISION_PARAMS, "bogus": 1})
+
+    def test_validation_rejects_unknown_operand_field(self):
+        with pytest.raises(ValidationError):
+            DecisionPrimitive.validate_parameters({
+                **_DECISION_PARAMS,
+                "left": {"value_type": "track", "property_id": "x", "bogus": 1},
+            })
+
+    def test_validation_rejects_track_without_property_id(self):
+        with pytest.raises(ValidationError):
+            DecisionPrimitive.validate_parameters({**_DECISION_PARAMS, "left": {"value_type": "track"}})
+
+    def test_validation_rejects_static_without_static_value(self):
+        with pytest.raises(ValidationError):
+            DecisionPrimitive.validate_parameters({**_DECISION_PARAMS, "right": {"value_type": "static"}})
+
+    def test_validation_rejects_bad_operand_value_type(self):
+        with pytest.raises(ValidationError):
+            DecisionPrimitive.validate_parameters({
+                **_DECISION_PARAMS,
+                "left": {"value_type": "profile", "property_id": "x"},
+            })

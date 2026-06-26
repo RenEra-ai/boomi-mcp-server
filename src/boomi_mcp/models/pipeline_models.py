@@ -42,7 +42,11 @@ XML: the ``sync_pipeline`` process builder (``SyncPipelineBuilder`` in
 (``fetch`` / ``write`` / ``lookup`` / ``combine`` / ``flow_control`` /
 ``branch`` / ``decision`` / ``dataprocess`` / ``exception`` /
 ``doccacheretrieve`` / ``doccacheremove``) still has NO PipelineSpec->XML emitter
-and is rejected by that builder with a hint pointing at its owning issue.
+and is rejected by that builder with a hint pointing at its owning issue. (Several
+of those — ``branch`` (M10.8), ``decision`` (M10.9), ``dataprocess`` (M10.2),
+``exception`` (M10.4), ``doccacheretrieve`` (M10.5), ``doccacheremove`` (M10.6) —
+ARE emittable shapes today, but via dedicated ``database_to_api_sync`` process-config
+blocks on ``ProcessFlowBuilder``, NOT through PipelineSpec lowering.)
 """
 
 from typing import Any, Dict, List, Literal, Optional
@@ -124,8 +128,11 @@ class StageSpec(BaseModel):
     """A single pipeline stage.
 
     ``kind`` is drawn from :data:`PipelineStageKind`. ``branch`` and ``decision``
-    are reserved (no emitter yet). ``config`` is a type-specific payload and
-    ``component_ref`` references an existing component key for reuse stages.
+    are reserved as PipelineSpec stage kinds (no PipelineSpec lowering yet) — the
+    Branch (M10.8) and Decision (M10.9) shapes ARE emittable today, but through
+    dedicated ``ProcessFlowBuilder`` process-config blocks, not from PipelineSpec.
+    ``config`` is a type-specific payload and ``component_ref`` references an
+    existing component key for reuse stages.
     """
 
     key: str = Field(..., description="Unique stage key")

@@ -257,7 +257,7 @@ def test_template_documents_branch_surface(template):
         "branch.targets[].label",
     ):
         assert field in optional, field
-    assert template["supported_control_shapes"] == ["branch"]
+    assert template["supported_control_shapes"] == ["branch", "decision"]
     errors_by_code = {e["error_code"]: e["field"] for e in template["structured_errors"]}
     assert "BRANCH_OUTPUT_UNSET" in errors_by_code
     assert "PROCESS_BRANCH_CONFIG_INVALID" in errors_by_code
@@ -278,6 +278,53 @@ def test_template_documents_branch_surface(template):
     notes_blob = " ".join(template["notes"])
     assert "BRANCH_NUM_BRANCHES_MISMATCH" in notes_blob
     assert "warning" in notes_blob.lower()
+
+
+def test_template_documents_decision_surface(template):
+    # Issue #113 M10.9: the Decision conditional-routing fields, the supported
+    # control-shape set, the PROCESS_DECISION_CONFIG_INVALID structured error, and
+    # the CONTROL_BRANCH_BARE_STOP advisory-warning note are all documented.
+    optional = template["optional_fields"]
+    for field in (
+        "decision",
+        "decision.enabled",
+        "decision.comparison",
+        "decision.label",
+        "decision.left",
+        "decision.left.value_type",
+        "decision.left.property_id",
+        "decision.right",
+        "decision.right.value_type",
+        "decision.right.static_value",
+        "decision.false_notify",
+        "decision.false_next",
+    ):
+        assert field in optional, field
+    assert "decision" in template["supported_control_shapes"]
+    errors_by_code = {e["error_code"]: e["field"] for e in template["structured_errors"]}
+    assert "PROCESS_DECISION_CONFIG_INVALID" in errors_by_code
+    decision_cfg_fields = errors_by_code["PROCESS_DECISION_CONFIG_INVALID"]
+    assert "decision.comparison" in decision_cfg_fields
+    assert "decision.false_next" in decision_cfg_fields
+    # CONTROL_BRANCH_BARE_STOP is a graph-verifier WARNING, not a builder structured
+    # error — documented in notes, never in structured_errors.
+    assert "CONTROL_BRANCH_BARE_STOP" not in errors_by_code
+    notes_blob = " ".join(template["notes"])
+    assert "CONTROL_BRANCH_BARE_STOP" in notes_blob
+    assert "M10.9" in notes_blob
+
+
+def test_template_reserved_decision_stage_kind_flipped_in_sync_pipeline():
+    # Issue #113 M10.9: the sync_pipeline protocol's reserved_stage_kinds[decision]
+    # is flipped from "reserved; control-flow emitters owned by M10" to the
+    # emittable-via-process_config wording.
+    result = get_schema_template_action(
+        resource_type="process", operation="create", protocol="sync_pipeline"
+    )
+    assert result["_success"] is True
+    reserved = result["reserved_stage_kinds"]["decision"]
+    assert "process_config.decision" in reserved
+    assert "M10.9" in reserved
 
 
 def test_both_process_protocols_advertise_return_documents_surface():

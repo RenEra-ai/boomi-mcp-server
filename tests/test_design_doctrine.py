@@ -296,6 +296,26 @@ def test_content_based_routing_branch_fanout_is_emittable():
     # The Branch shape is registered as an emittable (non-flow-dispatch) emitter.
     assert EMITTABLE_SHAPE_REGISTRY["branch"]["emittable"] is True
     assert EMITTABLE_SHAPE_REGISTRY["branch"]["emitter_kind"] == "branch"
+    # Issue #113 M10.9: the value-comparing Decision is now emittable too — the
+    # routing prose should name it alongside Branch.
+    assert "decision" in (entry["boomi_shape_mapping"] + " " + entry["when_to_use"]).lower()
+
+
+def test_business_rules_vs_decision_is_emittable():
+    # Issue #113 M10.9: the Decision shape is builder-emittable, so the
+    # business_rules_vs_decision doctrine flips to emittable_today / live_verified
+    # (the "Decision inspects only the first record" caveat stays).
+    entry = DESIGN_DOCTRINE_ENTRIES["business_rules_vs_decision"]
+    assert entry["capability_status"] == "emittable_today"
+    assert entry["verification_status"] == "live_verified"
+    assert entry["provenance"] == "live_verified"
+    blob = entry["boomi_shape_mapping"].lower()
+    assert "decision" in blob and "emittable" in blob
+    # The first-record caveat must survive the capability flip.
+    assert "first" in blob
+    # The Decision shape is registered as an emittable (non-flow-dispatch) emitter.
+    assert EMITTABLE_SHAPE_REGISTRY["decision"]["emittable"] is True
+    assert EMITTABLE_SHAPE_REGISTRY["decision"]["emitter_kind"] == "decision"
 
 
 def test_fifo_parallel_mutual_exclusion_is_symmetric():

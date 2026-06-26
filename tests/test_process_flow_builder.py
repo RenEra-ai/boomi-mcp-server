@@ -2603,3 +2603,279 @@ def test_branch_build_bypass_raises_for_unsupported_combo():
     with pytest.raises(BuilderValidationError) as exc:
         ProcessFlowBuilder.build(cfg, name="P")
     assert exc.value.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+
+
+# ---------------------------------------------------------------------------
+# Issue #113 M10.9 — Decision (conditional two-path routing) + loops
+# ---------------------------------------------------------------------------
+
+_DECISION_CONDITIONAL_GOLDEN = (
+    Path(__file__).resolve().parent / "fixtures" / "golden_xml" / "decision_conditional.xml"
+)
+
+
+def _decision_block(**overrides):
+    decision = {
+        "comparison": "equals",
+        "label": "Check Status",
+        "left": {
+            "value_type": "track",
+            "property_id": "dynamicdocument.DDP_STATUS",
+            "default_value": "",
+            "property_name": "Dynamic Document Property - DDP_STATUS",
+        },
+        "right": {"value_type": "static", "static_value": "active"},
+        "false_notify": "Decision false path: status was not active",
+    }
+    decision.update(overrides)
+    return decision
+
+
+def _decision_config(decision=None, **overrides):
+    return _base_config(decision=decision if decision is not None else _decision_block(), **overrides)
+
+
+def test_decision_inserts_decision_after_source_with_true_false_legs():
+    xml = ProcessFlowBuilder.build(_decision_config(), name="Decision Process")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "decision",
+        "connectoraction", "stop",   # true leg (top-level target -> stop)
+        "message", "stop",           # false leg (false_notify message -> stop)
+    ]
+
+
+def test_decision_shape_attributes_and_comparison():
+    xml = ProcessFlowBuilder.build(_decision_config(), name="Decision Process")
+    _, _, shapes = _parse_process(xml)
+    decision = next(s for s in shapes if s.attrib["shapetype"] == "decision")
+    assert decision.attrib["image"] == "decision_icon"
+    # Both userlabel (shape) and name (decision) carry the same display value.
+    assert decision.attrib["userlabel"] == "Check Status"
+    inner = decision.find("configuration/decision")
+    assert inner is not None
+    assert inner.attrib["comparison"] == "equals"
+    assert inner.attrib["name"] == "Check Status"
+
+
+def test_decision_dragpoints_are_labeled_true_false():
+    xml = ProcessFlowBuilder.build(_decision_config(), name="Decision Process")
+    _, _, shapes = _parse_process(xml)
+    decision = next(s for s in shapes if s.attrib["shapetype"] == "decision")
+    dragpoints = decision.findall("dragpoints/dragpoint")
+    assert len(dragpoints) == 2
+    assert [d.attrib["identifier"] for d in dragpoints] == ["true", "false"]
+    assert [d.attrib["text"] for d in dragpoints] == ["True", "False"]
+    assert [d.attrib["name"] for d in dragpoints] == ["shape3.dragpoint1", "shape3.dragpoint2"]
+    # True leg first shape is shape4 (target); false leg first shape is shape6 (message).
+    assert [d.attrib["toShape"] for d in dragpoints] == ["shape4", "shape6"]
+    shape_names = {s.attrib["name"] for s in shapes}
+    assert all(d.attrib["toShape"] in shape_names for d in dragpoints)
+
+
+def test_decision_operands_emit_track_and_static():
+    xml = ProcessFlowBuilder.build(_decision_config(), name="Decision Process")
+    _, _, shapes = _parse_process(xml)
+    decision = next(s for s in shapes if s.attrib["shapetype"] == "decision")
+    values = decision.findall("configuration/decision/decisionvalue")
+    assert [v.attrib["valueType"] for v in values] == ["track", "static"]
+    track = values[0].find("trackparameter")
+    assert track.attrib["propertyId"] == "dynamicdocument.DDP_STATUS"
+    assert track.attrib["defaultValue"] == ""
+    assert track.attrib["propertyName"] == "Dynamic Document Property - DDP_STATUS"
+    static = values[1].find("staticparameter")
+    assert static.attrib["staticproperty"] == "active"
+
+
+def test_decision_true_leg_carries_top_level_target_binding():
+    xml = ProcessFlowBuilder.build(_decision_config(), name="Decision Process")
+    _, _, shapes = _parse_process(xml)
+    # True leg target is the connectoraction right after the decision (shape4).
+    true_target = next(s for s in shapes if s.attrib["name"] == "shape4")
+    ca = true_target.find("configuration/connectoraction")
+    assert ca.attrib["actionType"] == "POST"
+    assert ca.attrib["connectionId"] == _REST_CONN_ID
+    assert ca.attrib["operationId"] == _REST_OP_ID
+
+
+def test_decision_false_notify_routes_through_message_before_stop():
+    xml = ProcessFlowBuilder.build(_decision_config(), name="Decision Process")
+    _, _, shapes = _parse_process(xml)
+    # The false dragpoint targets a Message (shape6), which forwards to a Stop.
+    message = next(s for s in shapes if s.attrib["name"] == "shape6")
+    assert message.attrib["shapetype"] == "message"
+    nxt = message.find("dragpoints/dragpoint")
+    assert nxt is not None and nxt.attrib["toShape"] == "shape7"
+    stop = next(s for s in shapes if s.attrib["name"] == "shape7")
+    assert stop.attrib["shapetype"] == "stop"
+
+
+def test_decision_empty_static_is_is_empty_check():
+    # comparison=equals against an empty static value is the live "is empty" check.
+    cfg = _decision_config(_decision_block(
+        right={"value_type": "static", "static_value": ""}, false_notify=None,
+    ))
+    assert ProcessFlowBuilder.validate_config(cfg) is None
+    xml = ProcessFlowBuilder.build(cfg, name="Is Empty")
+    _, _, shapes = _parse_process(xml)
+    decision = next(s for s in shapes if s.attrib["shapetype"] == "decision")
+    static = decision.findall("configuration/decision/decisionvalue")[1].find("staticparameter")
+    assert static.attrib["staticproperty"] == ""
+
+
+def test_decision_loop_back_sets_false_dragpoint_backward():
+    # false_next names an earlier shape (the source, shape2) -> the false dragpoint
+    # loops backward (no false-leg Stop). With no false_notify it points directly.
+    cfg = _decision_config(_decision_block(false_notify=None, false_next="shape2"))
+    xml = ProcessFlowBuilder.build(cfg, name="Decision Loop")
+    _, _, shapes = _parse_process(xml)
+    decision = next(s for s in shapes if s.attrib["shapetype"] == "decision")
+    dragpoints = decision.findall("dragpoints/dragpoint")
+    assert dragpoints[1].attrib["identifier"] == "false"
+    assert dragpoints[1].attrib["toShape"] == "shape2"
+    # The true leg still terminates forward at its own Stop; no false-leg message/stop.
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "decision", "connectoraction", "stop",
+    ]
+
+
+def test_decision_loop_back_through_message_then_backward():
+    # false_notify + false_next: the false leg runs a Message that loops backward
+    # (the live shape31 false->shape32->shape27 pattern).
+    cfg = _decision_config(_decision_block(false_notify="retrying", false_next="shape2"))
+    xml = ProcessFlowBuilder.build(cfg, name="Decision Loop Msg")
+    _, _, shapes = _parse_process(xml)
+    decision = next(s for s in shapes if s.attrib["shapetype"] == "decision")
+    false_dp = decision.findall("dragpoints/dragpoint")[1]
+    message = next(s for s in shapes if s.attrib["name"] == false_dp.attrib["toShape"])
+    assert message.attrib["shapetype"] == "message"
+    assert message.find("dragpoints/dragpoint").attrib["toShape"] == "shape2"
+    # No false-leg Stop is emitted (the Message loops back instead).
+    assert [s.attrib["shapetype"] for s in shapes].count("stop") == 1
+
+
+def test_decision_matches_golden_fixture():
+    """Byte-exact golden (issue #113 g): the Decision shape, its comparison + two
+    decisionvalue operands, the labelled true/false dragpoints, and the per-leg
+    target/notify layout are load-bearing and must match byte-for-byte."""
+    emitted = ProcessFlowBuilder.build(
+        _decision_config(), name="Decision Conditional", folder_name="Golden/Fixtures"
+    )
+    assert emitted == _DECISION_CONDITIONAL_GOLDEN.read_text()
+
+
+def test_decision_disabled_is_byte_identical_to_no_decision():
+    no_decision = ProcessFlowBuilder.build(_base_config(), name="P")
+    disabled = ProcessFlowBuilder.build(
+        _base_config(decision=_decision_block(enabled=False)), name="P"
+    )
+    assert no_decision == disabled
+
+
+def test_decision_comparison_invalid_raises():
+    err = ProcessFlowBuilder.validate_config(_decision_config(_decision_block(comparison="nope")))
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "decision.comparison"
+
+
+def test_decision_missing_left_operand_raises():
+    err = ProcessFlowBuilder.validate_config(
+        _decision_config({"comparison": "equals", "right": {"value_type": "static", "static_value": "y"}})
+    )
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "decision.left"
+
+
+def test_decision_track_missing_property_id_raises():
+    err = ProcessFlowBuilder.validate_config(
+        _decision_config(_decision_block(left={"value_type": "track"}))
+    )
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "decision.left.property_id"
+
+
+def test_decision_static_missing_static_value_raises():
+    err = ProcessFlowBuilder.validate_config(
+        _decision_config(_decision_block(right={"value_type": "static"}))
+    )
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "decision.right.static_value"
+
+
+def test_decision_operand_unknown_value_type_raises():
+    err = ProcessFlowBuilder.validate_config(
+        _decision_config(_decision_block(left={"value_type": "profile", "property_id": "x"}))
+    )
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "decision.left.value_type"
+
+
+def test_decision_unknown_key_rejected():
+    err = ProcessFlowBuilder.validate_config(_decision_config(_decision_block(foo=1)))
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "decision"
+
+
+def test_decision_false_next_non_earlier_shape_rejected():
+    err = ProcessFlowBuilder.validate_config(_decision_config(_decision_block(false_next="shape9")))
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "decision.false_next"
+
+
+def test_decision_does_not_compose_with_branch_in_v1():
+    err = ProcessFlowBuilder.validate_config(_base_config(
+        decision=_decision_block(),
+        branch={"enabled": True, "targets": [_branch_leg()]},
+    ))
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "branch"
+
+
+def test_decision_does_not_compose_with_reliability_in_v1():
+    err = ProcessFlowBuilder.validate_config(_base_config(
+        decision=_decision_block(),
+        reliability={"retry_count": 0, "dlq": {"mode": "document_cache_ref", "document_cache_id": "C"}},
+    ))
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "reliability"
+
+
+def test_decision_does_not_compose_with_return_documents_in_v1():
+    err = ProcessFlowBuilder.validate_config(_base_config(
+        decision=_decision_block(), return_documents={"enabled": True},
+    ))
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "return_documents"
+
+
+def test_decision_validate_config_and_build_report_identical_errors():
+    # validate_config and build() funnel through ONE decision validator, so for
+    # every malformed decision config they MUST report the same (error_code, field).
+    malformed = [
+        1,                                                       # non-dict decision
+        [],                                                      # non-dict decision
+        {"enabled": "true", **_decision_block()},                # non-bool enabled
+        _decision_block(comparison="nope"),                      # bad comparison
+        {"comparison": "equals", "right": {"value_type": "static", "static_value": "y"}},  # missing left
+        _decision_block(left={"value_type": "track"}),           # track no property_id
+        _decision_block(right={"value_type": "static"}),         # static no static_value
+        _decision_block(left={"value_type": "profile", "property_id": "x"}),  # bad value_type
+        _decision_block(foo=1),                                  # unknown key
+        _decision_block(false_next="shape9"),                    # non-earlier loop target
+    ]
+
+    def _vc_err(cfg):
+        return ProcessFlowBuilder.validate_config(cfg)
+
+    def _build_err(cfg):
+        try:
+            ProcessFlowBuilder.build(cfg, name="P")
+            return None
+        except BuilderValidationError as exc:
+            return exc
+
+    for decision in malformed:
+        cfg = _base_config(decision=decision)
+        v, b = _vc_err(cfg), _build_err(cfg)
+        assert v is not None and b is not None, decision
+        assert (v.error_code, v.field) == (b.error_code, b.field), (decision, v.error_code, b.error_code)

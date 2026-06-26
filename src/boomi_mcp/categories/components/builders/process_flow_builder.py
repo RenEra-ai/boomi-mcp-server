@@ -83,6 +83,37 @@ _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subpr
 _BRANCH_ALLOWED_KEYS = frozenset({"enabled", "targets"})
 _BRANCH_MAX_LEGS = 25
 
+# Issue #113 M10.9: Decision (conditional two-path routing) shape. The optional
+# ``decision`` block emits a Decision shape — Boomi's if/then — that routes the
+# document down a labelled ``true`` or ``false`` dragpoint based on a value
+# comparison (binary, both outcomes explicit — no fall-through). v1 ships the 7
+# live comparison operators and the two most common operand sources (``track``
+# DDP/DPP and ``static`` literal). The TRUE leg is the forward success path (the
+# top-level ``target`` -> Stop). The FALSE leg is either forward (an optional
+# ``false_notify`` Message before its own Stop, keeping the leg
+# CONTROL_BRANCH_BARE_STOP-clean) OR a backward loop: ``false_next`` names an
+# earlier shape, and the false dragpoint (or the false_notify Message's tail)
+# wires back to it — the live ``shape31 false->shape32->shape27`` loop pattern.
+# Transcribed from live work-profile decision XML (boomi_companion
+# .../references/steps/decision_step.md; see .codex/plans/issue-113-live-captures.md).
+_DECISION_COMPARISONS = frozenset(
+    {"equals", "greaterthaneq", "lessthaneq", "greaterthan", "lessthan", "regex", "wildcard"}
+)
+_DECISION_VALUE_TYPES = frozenset({"track", "static"})  # v1 operand sources
+_DECISION_ALLOWED_KEYS = frozenset(
+    {"enabled", "comparison", "label", "left", "right", "false_notify", "false_next"}
+)
+_DECISION_OPERAND_ALLOWED_KEYS = frozenset(
+    {"value_type", "property_id", "default_value", "property_name", "static_value"}
+)
+# Transform modes that insert a middle shape between the source and the Decision
+# (so the pre-Decision chain is start -> source -> transform, length 3). A
+# passthrough transform adds no shape (length 2). Used to derive the valid
+# ``false_next`` loop-back targets identically in validate_config and build().
+_DECISION_PRE_TRANSFORM_MODES = frozenset(
+    {"message", "map_ref", "dataprocess", "doccacheretrieve", "doccacheremove"}
+)
+
 # Issue #106 M10.2 / #115 M10.2a: process-level Data Process shape. v1 ships the
 # live-observed Custom Scripting (Groovy, processtype 12) operation plus the two
 # profile-driven, cardinality-changing operations Split Documents (1->N,
@@ -505,6 +536,16 @@ class ProcessFlowBuilder:
         if branch_err is not None:
             return branch_err
 
+        # Issue #113 M10.9: validate the optional Decision (conditional two-path
+        # routing) block alongside Branch, BEFORE the top-level target binding —
+        # _validate_decision_config owns a single fixed precedence (block structure
+        # -> unsupported v1 composition -> comparison -> operands -> false_notify ->
+        # false_next loop target). build() funnels through the SAME validator, so
+        # the two paths cannot diverge. A non-decision config returns immediately.
+        decision_err = _validate_decision_config(config)
+        if decision_err is not None:
+            return decision_err
+
         target_err = _validate_target_binding(config.get("target"))
         if target_err is not None:
             return target_err
@@ -710,6 +751,13 @@ class ProcessFlowBuilder:
         branch_err = _validate_branch_config(config)
         if branch_err is not None:
             raise branch_err
+        # Issue #113 M10.9: same totality contract for the Decision block — run the
+        # SAME validator validate_config uses, unconditionally, so a malformed
+        # decision raises here too (the composition guard also rejects branch +
+        # decision together, so at most one of the two emission paths below fires).
+        decision_err = _validate_decision_config(config)
+        if decision_err is not None:
+            raise decision_err
         if _branch_enabled(config):
             legs: List[List[Tuple[str, Dict[str, Any]]]] = []
             for leg_target in _branch_leg_targets(config):
@@ -718,6 +766,43 @@ class ProcessFlowBuilder:
                     ("stop", {"continue_": True}),
                 ])
             shape_xml_parts: List[str] = _emit_branch_shapes(flow, legs)
+        elif _decision_enabled(config):
+            # The TRUE leg is the forward success path: the top-level target then a
+            # Stop. The FALSE leg is forward (an optional false_notify Message then
+            # its own Stop) or a backward loop (false_next names an earlier shape;
+            # the Message tail — or, with no false_notify, the false dragpoint —
+            # wires back to it). Decision rejects dynamic_path (composition guard),
+            # so the true target carries dynamic_path=None.
+            decision = config.get("decision") or {}
+            true_leg: List[Tuple[str, Dict[str, Any]]] = [
+                (
+                    "connectoraction_target",
+                    {
+                        "connector_type": _canonical_connector_type(target.get("connector_type")),
+                        "action_type": str(target.get("action_type") or "").strip().upper(),
+                        "connection_id": str(target.get("connection_id") or "").strip(),
+                        "operation_id": str(target.get("operation_id") or "").strip(),
+                        "userlabel": str(target.get("label") or ""),
+                        "dynamic_path": None,
+                    },
+                ),
+                ("stop", {"continue_": True}),
+            ]
+            false_next = decision.get("false_next")
+            false_loop_to = (
+                false_next.strip()
+                if isinstance(false_next, str) and false_next.strip()
+                else None
+            )
+            false_leg: List[Tuple[str, Dict[str, Any]]] = []
+            false_notify = decision.get("false_notify")
+            if false_notify:
+                false_leg.append(("message", {"text": str(false_notify), "userlabel": ""}))
+            if false_loop_to is None:
+                false_leg.append(("stop", {"continue_": True}))
+            shape_xml_parts = _emit_decision_shapes(
+                flow, decision, true_leg, false_leg, false_loop_to
+            )
         else:
             # Issue #100 G2: when the target carries a dynamic_path block, insert a
             # Set Properties (documentproperties) shape AFTER the transform and
@@ -1505,6 +1590,232 @@ def _branch_target_params(leg_target: Dict[str, Any]) -> Dict[str, Any]:
         "userlabel": str(leg_target.get("label") or ""),
         "dynamic_path": None,
     }
+
+
+# ----------------------------------------------------------------------
+# Issue #113 M10.9 — Decision (conditional two-path routing) + loop-back
+# ----------------------------------------------------------------------
+
+
+def _decision_enabled(config: Dict[str, Any]) -> bool:
+    """True when the config carries an enabled ``decision`` block.
+
+    Absent block, a non-dict block, or ``enabled: False`` all keep the process on
+    the single-target linear/Try-Catch path (byte-for-byte the pre-#113 output).
+    """
+    decision = config.get("decision")
+    if not isinstance(decision, dict):
+        return False
+    return decision.get("enabled", True) is True
+
+
+def _decision_pre_shape_names(config: Dict[str, Any]) -> List[str]:
+    """Shape names of the shared pre-Decision chain (``start -> source ->
+    [transform]``), in order — the valid backward targets for a ``false_next``
+    loop edge (issue #113 M10.9).
+
+    The Decision sits after this chain, so a loop-back must point at one of these
+    earlier shapes. Both ``validate_config`` (via ``_validate_decision_config``)
+    and ``build()`` derive the set the SAME way, so a ``false_next`` that names a
+    non-existent / non-earlier shape is rejected identically on both paths.
+    """
+    transform = config.get("transform") or {"mode": "passthrough"}
+    mode = str(transform.get("mode") or "passthrough").strip().lower()
+    has_transform = mode in _DECISION_PRE_TRANSFORM_MODES
+    count = 2 + (1 if has_transform else 0)  # start(1) + source(2) + [transform(3)]
+    return [f"shape{i}" for i in range(1, count + 1)]
+
+
+def _validate_decision_operand(
+    operand: Any, field: str
+) -> Optional[BuilderValidationError]:
+    """Validate one Decision operand (``left`` / ``right``) — issue #113 M10.9.
+
+    v1 supports two operand sources: ``track`` (a DDP/DPP, requiring a non-blank
+    ``property_id``) and ``static`` (a literal, requiring a string ``static_value``
+    which MAY be empty — the live "is empty" check compares a track value against
+    an empty static).
+    """
+    if not isinstance(operand, dict):
+        return BuilderValidationError(
+            f"{field} must be a JSON object with a 'value_type' and its operand fields.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field=field,
+            hint='Shape: {"value_type": "track", "property_id": "dynamicdocument.DDP_X"} '
+            'or {"value_type": "static", "static_value": "..."}.',
+        )
+    unknown = set(operand) - _DECISION_OPERAND_ALLOWED_KEYS
+    if unknown:
+        return BuilderValidationError(
+            f"{field} has unsupported key(s): {sorted(unknown)}.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field=field,
+            hint=f"Supported operand keys: {sorted(_DECISION_OPERAND_ALLOWED_KEYS)}.",
+        )
+    value_type = operand.get("value_type")
+    if not isinstance(value_type, str) or value_type.strip() not in _DECISION_VALUE_TYPES:
+        return BuilderValidationError(
+            f"{field}.value_type must be one of {sorted(_DECISION_VALUE_TYPES)}.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field=f"{field}.value_type",
+            hint="v1 supports 'track' (a DDP/DPP) and 'static' (a literal value).",
+        )
+    vtype = value_type.strip()
+    if vtype == "track":
+        property_id = operand.get("property_id")
+        if not isinstance(property_id, str) or not property_id.strip():
+            return BuilderValidationError(
+                f"{field}.property_id is required (non-blank) for a track operand.",
+                error_code="PROCESS_DECISION_CONFIG_INVALID",
+                field=f"{field}.property_id",
+                hint="Provide the tracked property id, e.g. 'dynamicdocument.DDP_STATUS'.",
+            )
+    else:  # static
+        static_value = operand.get("static_value")
+        if not isinstance(static_value, str):
+            return BuilderValidationError(
+                f"{field}.static_value is required (a string, may be empty) for a static operand.",
+                error_code="PROCESS_DECISION_CONFIG_INVALID",
+                field=f"{field}.static_value",
+                hint="Use an empty string to compare against an empty value (the 'is empty' check).",
+            )
+    return None
+
+
+def _decision_unsupported_combo_error(
+    config: Dict[str, Any]
+) -> Optional[BuilderValidationError]:
+    """v1 Decision composition guard (issue #113 M10.9).
+
+    Decision v1 emits a forward ``target -> Stop`` true leg plus a forward/looping
+    false leg. It does not yet compose with a Branch fan-out, a Try/Catch
+    reliability wrapper, a dynamic REST path, or a Return Documents terminal — each
+    would change the emitted shape graph and needs its own live capture + tests.
+    Returning a structured error here (rather than silently dropping the
+    combination, or silently taking the Branch path in ``build()``) is shared by
+    ``validate_config`` and ``build()`` so the two cannot diverge.
+    """
+    if _branch_enabled(config):
+        return BuilderValidationError(
+            "a branch fan-out is not supported together with a decision in v1.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="branch",
+            hint="Drop the branch block to use a Decision, or drop the decision block to fan out.",
+        )
+    target = config.get("target")
+    if isinstance(target, dict) and target.get("dynamic_path") is not None:
+        return BuilderValidationError(
+            "target.dynamic_path is not supported together with a decision in v1.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="target.dynamic_path",
+            hint="Remove dynamic_path, or drop the decision block to keep the dynamic-path single target.",
+        )
+    reliability = config.get("reliability")
+    if isinstance(reliability, dict) and _reliability_requests_try_catch(reliability):
+        return BuilderValidationError(
+            "reliability (Try/Catch retry/DLQ/notify/exception) is not supported "
+            "together with a decision in v1.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="reliability",
+            hint="Drop the decision block to use a Try/Catch, or drop reliability to route.",
+        )
+    rd = config.get("return_documents")
+    if isinstance(rd, dict) and rd.get("enabled") is True:
+        return BuilderValidationError(
+            "return_documents is not supported together with a decision in v1.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="return_documents",
+            hint="The decision true leg ends in its own Stop; a Return Documents terminal is a follow-up.",
+        )
+    return None
+
+
+def _validate_decision_config(config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+    """Validate the optional ``decision`` conditional-routing block (issue #113 M10.9).
+
+    Absent, or ``enabled: False``, is valid — the process stays single-target. When
+    enabled the precedence (mirroring Branch) is: block structure -> unknown key ->
+    non-bool ``enabled`` -> unsupported v1 composition (branch / Try-Catch
+    reliability / dynamic_path / return_documents) -> ``comparison`` enum ->
+    ``left``/``right`` operands -> ``false_notify`` -> ``false_next`` loop target.
+    ``build()`` funnels through this SAME validator, so the two paths cannot diverge
+    on which structured error a malformed decision yields.
+    """
+    decision = config.get("decision")
+    if decision is None:
+        return None
+    if not isinstance(decision, dict):
+        return BuilderValidationError(
+            "decision must be a JSON object with a comparison and two operands.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="decision",
+            hint='Shape: {"comparison": "equals", "left": {...}, "right": {...}, '
+            '"false_notify"?: "...", "false_next"?: "shapeN"}.',
+        )
+    unknown = set(decision) - _DECISION_ALLOWED_KEYS
+    if unknown:
+        return BuilderValidationError(
+            f"decision has unsupported key(s): {sorted(unknown)}.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="decision",
+            hint=f"Supported decision keys: {sorted(_DECISION_ALLOWED_KEYS)}.",
+        )
+    enabled = decision.get("enabled", True)
+    if not isinstance(enabled, bool):
+        return BuilderValidationError(
+            "decision.enabled must be a boolean.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="decision.enabled",
+            hint="Use true to route, or omit/false to keep the single-target flow.",
+        )
+    if not enabled:
+        return None
+    combo_err = _decision_unsupported_combo_error(config)
+    if combo_err is not None:
+        return combo_err
+    comparison = decision.get("comparison")
+    if not isinstance(comparison, str) or comparison.strip() not in _DECISION_COMPARISONS:
+        return BuilderValidationError(
+            f"decision.comparison must be one of {sorted(_DECISION_COMPARISONS)}.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="decision.comparison",
+            hint="Boomi Decision operators: equals / greaterthaneq / lessthaneq / "
+            "greaterthan / lessthan / regex / wildcard.",
+        )
+    for side in ("left", "right"):
+        operand_err = _validate_decision_operand(decision.get(side), f"decision.{side}")
+        if operand_err is not None:
+            return operand_err
+    false_notify = decision.get("false_notify")
+    if false_notify is not None and (
+        not isinstance(false_notify, str) or not false_notify.strip()
+    ):
+        return BuilderValidationError(
+            "decision.false_notify must be a non-empty string when present.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field="decision.false_notify",
+            hint="false_notify is the Message text shown on the false path before its Stop/loop.",
+        )
+    false_next = decision.get("false_next")
+    if false_next is not None:
+        if not isinstance(false_next, str) or not false_next.strip():
+            return BuilderValidationError(
+                "decision.false_next must be a non-empty earlier-shape name when present.",
+                error_code="PROCESS_DECISION_CONFIG_INVALID",
+                field="decision.false_next",
+                hint="Name an earlier shape (e.g. 'shape2') so the false path loops back to it.",
+            )
+        valid_targets = _decision_pre_shape_names(config)
+        if false_next.strip() not in valid_targets:
+            return BuilderValidationError(
+                f"decision.false_next must reference an earlier shape; got "
+                f"{false_next.strip()!r}, expected one of {valid_targets}.",
+                error_code="PROCESS_DECISION_CONFIG_INVALID",
+                field="decision.false_next",
+                hint="A loop-back edge points at a shape BEFORE the Decision "
+                "(start/source/[transform]).",
+            )
+    return None
 
 
 def _validate_transform(transform: Any) -> Optional[BuilderValidationError]:
@@ -3035,6 +3346,171 @@ def _emit_branch_shapes(
             shape_name = f"shape{shape_index}"
             next_name = None if j == m - 1 else f"shape{shape_index + 1}"
             parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
+    return parts
+
+
+def _emit_decisionvalue(operand: Dict[str, Any], field: str) -> str:
+    """Emit one ``<decisionvalue>`` operand (issue #113 M10.9).
+
+    Transcribed from live work-profile decision XML (boomi_companion
+    .../references/steps/decision_step.md): a ``track`` operand emits a
+    ``<trackparameter defaultValue=.. propertyId=.. propertyName=..>`` (attributes
+    in the live alphabetical order), a ``static`` operand a
+    ``<staticparameter staticproperty=..>``. Re-guards the operand (raising
+    ``PROCESS_DECISION_CONFIG_INVALID``) so a ``build()`` call that bypassed
+    ``validate_config`` stays total — the same pattern as ``_emit_dataprocess``.
+    """
+    value_type = str(operand.get("value_type") or "").strip()
+    if value_type == "track":
+        property_id = str(operand.get("property_id") or "").strip()
+        if not property_id:
+            raise BuilderValidationError(
+                f"{field}.property_id is required (non-blank) for a track operand.",
+                error_code="PROCESS_DECISION_CONFIG_INVALID",
+                field=f"{field}.property_id",
+                hint="Provide the tracked property id, e.g. 'dynamicdocument.DDP_STATUS'.",
+            )
+        default_value = _escape_xml(str(operand.get("default_value") or ""))
+        property_name = _escape_xml(str(operand.get("property_name") or ""))
+        return (
+            '<decisionvalue valueType="track">'
+            f'<trackparameter defaultValue="{default_value}" '
+            f'propertyId="{_escape_xml(property_id)}" '
+            f'propertyName="{property_name}"/>'
+            '</decisionvalue>'
+        )
+    if value_type == "static":
+        static_value = operand.get("static_value")
+        if not isinstance(static_value, str):
+            raise BuilderValidationError(
+                f"{field}.static_value is required (a string, may be empty) for a static operand.",
+                error_code="PROCESS_DECISION_CONFIG_INVALID",
+                field=f"{field}.static_value",
+                hint="Use an empty string to compare against an empty value (the 'is empty' check).",
+            )
+        return (
+            '<decisionvalue valueType="static">'
+            f'<staticparameter staticproperty="{_escape_xml(static_value)}"/>'
+            '</decisionvalue>'
+        )
+    raise BuilderValidationError(
+        f"{field}.value_type must be one of {sorted(_DECISION_VALUE_TYPES)}.",
+        error_code="PROCESS_DECISION_CONFIG_INVALID",
+        field=f"{field}.value_type",
+        hint="v1 supports 'track' (a DDP/DPP) and 'static' (a literal value).",
+    )
+
+
+def _emit_decision(
+    shape_name: str,
+    decision_config: Dict[str, Any],
+    true_to: str,
+    false_to: str,
+    shape_index: int,
+) -> str:
+    """Emit a Decision (conditional two-path routing) shape (issue #113 M10.9).
+
+    Transcribed from a live ``work``-profile export (see
+    boomi_companion .../references/steps/decision_step.md and
+    .codex/plans/issue-113-live-captures.md): a ``<decision comparison=..>``
+    configuration with two ``<decisionvalue>`` operands plus exactly two
+    dragpoints — ``identifier="true"`` (dragpoint1, ``text="True"``) and
+    ``identifier="false"`` (dragpoint2, ``text="False"``) — each wiring to a leg's
+    first shape (or, for the false leg, backward to an earlier shape for a loop).
+    Both ``userlabel`` (on ``<shape>``) and ``name`` (on ``<decision>``) carry the
+    same label so the display name renders. Dragpoints are built inline (like
+    ``_emit_branch``) because they carry ``identifier``/``text`` labels the plain
+    ``_emit_dragpoints`` helper does not emit.
+    """
+    label = _escape_xml(str(decision_config.get("label") or ""))
+    comparison = _escape_xml(str(decision_config.get("comparison") or ""))
+    left = _emit_decisionvalue(decision_config.get("left") or {}, "decision.left")
+    right = _emit_decisionvalue(decision_config.get("right") or {}, "decision.right")
+    return (
+        f'<shape image="decision_icon" name="{shape_name}" shapetype="decision" '
+        f'userlabel="{label}" x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        f'<configuration><decision comparison="{comparison}" name="{label}">'
+        f'{left}{right}</decision></configuration>'
+        '<dragpoints>'
+        f'<dragpoint identifier="true" name="{shape_name}.dragpoint1" text="True" '
+        f'toShape="{_escape_xml(true_to)}" x="{_dragpoint_x(shape_index)}" y="{_DRAGPOINT_Y}"/>'
+        f'<dragpoint identifier="false" name="{shape_name}.dragpoint2" text="False" '
+        f'toShape="{_escape_xml(false_to)}" x="{_dragpoint_x(shape_index)}" y="{_CATCH_DRAGPOINT_Y}"/>'
+        '</dragpoints>'
+        '</shape>'
+    )
+
+
+def _emit_decision_leg(
+    leg: List[Tuple[str, Dict[str, Any]]], start_index: int, tail_to: Optional[str]
+) -> List[str]:
+    """Emit one Decision leg as a forward shape chain (issue #113 M10.9).
+
+    Each shape forwards to the next; the LAST shape forwards to ``tail_to`` — a
+    backward shape name for a loop leg, or ``None`` when the leg already ends in a
+    terminal Stop (whose own dragpoints are empty). The same index walk
+    ``_emit_branch_shapes`` uses for fan-out legs.
+    """
+    parts: List[str] = []
+    m = len(leg)
+    for j, (kind, params) in enumerate(leg):
+        shape_index = start_index + j
+        shape_name = f"shape{shape_index}"
+        next_name = tail_to if j == m - 1 else f"shape{shape_index + 1}"
+        parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
+    return parts
+
+
+def _emit_decision_shapes(
+    pre_decision: List[Tuple[str, Dict[str, Any]]],
+    decision_config: Dict[str, Any],
+    true_leg: List[Tuple[str, Dict[str, Any]]],
+    false_leg: List[Tuple[str, Dict[str, Any]]],
+    false_loop_to: Optional[str],
+) -> List[str]:
+    """Emit ``start -> ... -> decision -> {true leg, false leg}`` (issue #113 M10.9).
+
+    ``pre_decision`` is the shared chain before the Decision (start -> source ->
+    [transform]); its last shape forwards to the Decision. The TRUE leg is the
+    forward success path (``target -> Stop``). The FALSE leg is either forward (an
+    optional Message then its own Stop) or a backward loop: when ``false_loop_to``
+    is set, the false leg's last processing shape wires back to that earlier shape
+    (or, when ``false_leg`` is empty, the Decision's false dragpoint targets it
+    directly). Shape indices are positional (pre-decision 1..p, decision p+1, then
+    the true leg, then the false leg) so names never collide — the same index-walk
+    ``_emit_branch_shapes`` uses.
+    """
+    parts: List[str] = []
+    p = len(pre_decision)
+    decision_index = p + 1
+    decision_name = f"shape{decision_index}"
+
+    # Pre-decision chain: forward each shape to the next; the last pre-decision
+    # shape forwards to the Decision shape (index p+1).
+    for i, (kind, params) in enumerate(pre_decision):
+        shape_index = i + 1
+        shape_name = f"shape{shape_index}"
+        next_name = f"shape{shape_index + 1}"  # i == p-1 -> decision_name
+        parts.append(_emit_flow_shape(kind, params, shape_name, next_name, shape_index))
+
+    # Lay out the true leg right after the Decision, then the false leg.
+    true_start = decision_index + 1
+    false_start = true_start + len(true_leg)
+
+    true_to = f"shape{true_start}"
+    if false_leg:
+        false_to = f"shape{false_start}"
+    else:
+        # An empty false leg only happens on a bare loop (no false_notify); the
+        # false dragpoint then targets the backward shape directly.
+        false_to = false_loop_to if false_loop_to is not None else f"shape{false_start}"
+
+    parts.append(_emit_decision(decision_name, decision_config, true_to, false_to, decision_index))
+
+    # True leg: forward chain ending in its own terminal Stop (tail None).
+    parts.extend(_emit_decision_leg(true_leg, true_start, tail_to=None))
+    # False leg: forward (tail None -> own Stop) or looping (tail -> earlier shape).
+    parts.extend(_emit_decision_leg(false_leg, false_start, tail_to=false_loop_to))
     return parts
 
 
