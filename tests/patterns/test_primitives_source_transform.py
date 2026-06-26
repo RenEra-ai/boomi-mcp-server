@@ -977,6 +977,42 @@ class TestComposition:
         map_step = next(s for s in plan["steps"] if s["key"] == "cust_transform_map")
         assert map_step["planned_action"] == "create"
 
+    def test_rest_fetch_plus_rest_send_same_prefix_passes_name_governance(self):
+        """Issue #72 M5.4: a same-prefix api_to_api_sync assembly (rest_fetch
+        source + rest_send target) must pass name governance — distinct component
+        keys AND distinct default display names, else _lint_component_names rejects
+        the create connections with COMPONENT_NAME_NOT_UNIQUE."""
+        from boomi_mcp.models.integration_models import IntegrationSpecV1
+        from boomi_mcp.patterns.primitives import RestSendWithRetryPrimitive
+
+        fetch_comps = _emit(
+            RestFetchPrimitive,
+            {
+                "key_prefix": "cust",
+                "connection": {"mode": "create", "base_url": "https://api.example.com", "auth": "NONE"},
+                "operation": {"path": "/v1/items"},
+                "response": {
+                    "profile_id": "$ref:resp",
+                    "profile_type": "profile.json",
+                    "field_index": {"Root/id": {"data_type": "character"}},
+                },
+            },
+        )
+        send_comps = _emit(
+            RestSendWithRetryPrimitive,
+            {
+                "key_prefix": "cust",
+                "connection": {"mode": "create", "base_url": "https://api.example.com", "auth": "NONE"},
+                "operation": {"method": "POST", "path": "/v1/items"},
+            },
+        )
+        spec = IntegrationSpecV1(
+            version="1.0", name="t",
+            components=[c.model_dump() for c in (*fetch_comps, *send_comps)],
+        )
+        lint = ib._lint_component_names(spec)
+        assert lint["errors"] == {}, lint["errors"]
+
 
 # ===========================================================================
 # data_process (issue #106 M10.2)

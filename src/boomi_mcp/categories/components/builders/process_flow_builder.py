@@ -4794,6 +4794,40 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         )
 
     @classmethod
+    def _check_source_connector_family(cls, stage: "StageSpec") -> None:
+        """Reject an explicit source connector_type that contradicts the kind.
+
+        Only source stages (read/fetch) are guarded — a read stage is a DB source
+        and a fetch stage is a REST source; an explicit connector_type may restate
+        that family but must not flip it. Absent connector_type is fine (the
+        kind-derived default applies). The send target family is enforced by
+        _validate_target_binding, so this is a no-op for non-source kinds.
+        """
+        if stage.kind not in ("read", "fetch"):
+            return
+        explicit = stage.config.get("connector_type")
+        if explicit is None:
+            return
+        is_rest = _resolve_rest_connector_type(explicit) is not None
+        is_database = isinstance(explicit, str) and explicit.strip().lower() == "database"
+        if stage.kind == "read" and not is_database:
+            raise BuilderValidationError(
+                f"sync_pipeline read stage {stage.key!r} connector_type must be "
+                f"'database' (a read stage is a db_read source); got {explicit!r}.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].config.connector_type",
+                hint="Use a 'fetch' stage (rest_fetch) for a REST source; a read stage is DB-only.",
+            )
+        if stage.kind == "fetch" and not is_rest:
+            raise BuilderValidationError(
+                f"sync_pipeline fetch stage {stage.key!r} connector_type must be a "
+                f"REST Client connector (a fetch stage is a rest_fetch source); got {explicit!r}.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].config.connector_type",
+                hint="Use a 'read' stage (db_read) for a database source; a fetch stage is REST-only.",
+            )
+
+    @classmethod
     def _lower_binding_stage(
         cls, stage: "StageSpec", *, default_connector_type: str
     ) -> Dict[str, Any]:
@@ -4829,6 +4863,15 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             default_action_type = "GET"
         else:
             default_action_type = None
+        # An explicit connector_type on a SOURCE stage must agree with the stage
+        # kind's connector family — otherwise the read↔fetch split is bypassable:
+        # now that the delegate accepts both DB and REST sources, a read stage with
+        # connector_type='rest' (or a fetch stage with connector_type='database')
+        # would silently build the wrong source. Reject the contradiction here so a
+        # read stays a DB source and a fetch stays a REST source (the kind, not a
+        # config override, decides the source family). The send target's family is
+        # enforced separately by _validate_target_binding.
+        cls._check_source_connector_family(stage)
         binding: Dict[str, Any] = {
             "connector_type": stage.config.get("connector_type", default_connector_type),
             "action_type": stage.config.get("action_type", default_action_type),

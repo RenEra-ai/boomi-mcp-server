@@ -40,6 +40,14 @@ ROLE_SCRIPT = "script"
 ROLE_REST_CONNECTION = "rest_connection"
 ROLE_REST_OPERATION = "rest_operation"
 
+# Issue #72 — REST *source* component roles (rest_fetch). Distinct from the
+# target roles above so an API-to-API flow that emits both a rest_fetch source
+# and a rest_send target under the SAME key_prefix produces unique component
+# keys (the db_extract + rest_send pairing already stays collision-free because
+# DB and REST target roles differ; rest_fetch keeps that invariant for REST↔REST).
+ROLE_REST_SOURCE_CONNECTION = "rest_source_connection"
+ROLE_REST_SOURCE_OPERATION = "rest_source_operation"
+
 
 # Error code raised when a source field data type has no script.mapping input
 # equivalent. Lives here (not in profile_generation) because the bridge is a

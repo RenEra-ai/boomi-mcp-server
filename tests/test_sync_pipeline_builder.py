@@ -328,6 +328,38 @@ def test_non_get_fetch_action_type_rejected_by_delegate():
     assert _code(cfg, _FETCH_DEPS) == "PROCESS_CONNECTOR_BINDING_INVALID"
 
 
+def test_read_stage_connector_type_rest_rejected():
+    # The read↔fetch split is not bypassable via a connector_type override: a read
+    # stage forced to connector_type='rest' is rejected (use a fetch stage).
+    cfg = _sync_config(
+        [_read_stage("s", connector_type="rest", action_type="GET"), _send_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_DEPS)
+    assert err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
+    assert err.field == "pipeline.stages[s].config.connector_type"
+
+
+def test_fetch_stage_connector_type_database_rejected():
+    # Symmetric guard: a fetch stage forced to connector_type='database' is rejected.
+    cfg = _sync_config(
+        [_fetch_stage("s", connector_type="database", action_type="Get"), _send_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_FETCH_DEPS)
+    assert err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
+    assert err.field == "pipeline.stages[s].config.connector_type"
+
+
+def test_read_stage_explicit_database_connector_type_still_accepted():
+    # The legitimate explicit-but-matching case stays valid (read + 'database').
+    cfg = _sync_config(
+        [_read_stage("s", connector_type="database"), _send_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    assert SyncPipelineBuilder.validate_config(cfg, depends_on=_DEPS) is None
+
+
 # ---------------------------------------------------------------------------
 # Reserved stage kinds / primitives  -> SYNC_PIPELINE_STAGE_UNSUPPORTED
 # ---------------------------------------------------------------------------

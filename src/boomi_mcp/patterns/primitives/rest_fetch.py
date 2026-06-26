@@ -59,8 +59,8 @@ from ..base import (
     PrimitivePattern,
 )
 from ._helpers import (
-    ROLE_REST_CONNECTION,
-    ROLE_REST_OPERATION,
+    ROLE_REST_SOURCE_CONNECTION,
+    ROLE_REST_SOURCE_OPERATION,
     _key_looks_secret,
     primitive_component_key,
     raise_for_builder_error,
@@ -477,8 +477,8 @@ class RestFetchPrimitive(PrimitivePattern):
     ) -> List[IntegrationComponentSpec]:
         params: RestFetchParameters = parameters  # type: ignore[assignment]
 
-        conn_key = primitive_component_key(params.key_prefix, ROLE_REST_CONNECTION)
-        op_key = primitive_component_key(params.key_prefix, ROLE_REST_OPERATION)
+        conn_key = primitive_component_key(params.key_prefix, ROLE_REST_SOURCE_CONNECTION)
+        op_key = primitive_component_key(params.key_prefix, ROLE_REST_SOURCE_OPERATION)
         folder = context.folder_path
 
         connection = cls._emit_connection(context, params, conn_key, folder)
@@ -495,8 +495,8 @@ class RestFetchPrimitive(PrimitivePattern):
     ) -> Dict[str, Any]:
         params: RestFetchParameters = parameters  # type: ignore[assignment]
 
-        conn_key = primitive_component_key(params.key_prefix, ROLE_REST_CONNECTION)
-        op_key = primitive_component_key(params.key_prefix, ROLE_REST_OPERATION)
+        conn_key = primitive_component_key(params.key_prefix, ROLE_REST_SOURCE_CONNECTION)
+        op_key = primitive_component_key(params.key_prefix, ROLE_REST_SOURCE_OPERATION)
 
         source: Dict[str, Any] = {
             "connector_type": "rest",
@@ -545,9 +545,16 @@ class RestFetchPrimitive(PrimitivePattern):
         connection = params.connection
 
         if connection.mode == "create":
+            # Distinct default display name from rest_send's "<prefix> REST
+            # Connection" so a same-prefix api_to_api_sync assembly that creates
+            # BOTH a rest_fetch source connection and a rest_send target connection
+            # does not trip the COMPONENT_NAME_NOT_UNIQUE name-governance lint
+            # (the source-specific component key alone is not enough — the emitted
+            # display name must differ too). The operation default ("REST Fetch")
+            # already differs from rest_send's ("REST Send").
             conn_name = (
                 params.component_names.connection
-                or f"{context.component_prefix} REST Connection"
+                or f"{context.component_prefix} REST Source Connection"
             )
             config: Dict[str, Any] = {
                 "connector_type": "rest",

@@ -108,13 +108,13 @@ class TestEmission:
     def test_create_mode_emits_connection_then_operation(self):
         comps = _emit(_params())
         assert [c.type for c in comps] == ["connector-settings", "connector-action"]
-        assert [c.key for c in comps] == ["cust_rest_connection", "cust_rest_operation"]
+        assert [c.key for c in comps] == ["cust_rest_source_connection", "cust_rest_source_operation"]
 
     def test_operation_is_get_only_with_response_shape(self):
         op = _emit(_params())[1].config
         assert op["method"] == "GET"
         assert op["operation_mode"] == "execute"
-        assert op["connection_ref_key"] == "cust_rest_connection"
+        assert op["connection_ref_key"] == "cust_rest_source_connection"
         assert op["response_profile_id"] == "$ref:cust_resp_profile"
         assert op["response_profile_type"] == "json"
         # No request profile fields (#50 freeze + #72 empty-request guarantee).
@@ -133,7 +133,7 @@ class TestEmission:
 
     def test_ref_response_profile_in_depends_on(self):
         op = _emit(_params())[1]
-        assert set(op.depends_on) == {"cust_rest_connection", "cust_resp_profile"}
+        assert set(op.depends_on) == {"cust_rest_source_connection", "cust_resp_profile"}
 
     def test_literal_response_profile_not_in_depends_on(self):
         op = _emit(
@@ -143,7 +143,7 @@ class TestEmission:
                 "field_index": {"Root/id": {"data_type": "character"}},
             })
         )[1]
-        assert op.depends_on == ["cust_rest_connection"]
+        assert op.depends_on == ["cust_rest_source_connection"]
 
     def test_reuse_by_id_is_reference_only(self):
         conn = _emit(_params(connection={"mode": "reuse", "component_id": "conn-1"}))[0]
@@ -395,9 +395,9 @@ class TestFragment:
         source = frag["process_config"]["source"]
         assert source["connector_type"] == "rest"
         assert source["action_type"] == "GET"
-        assert source["connection_id"] == "$ref:cust_rest_connection"
-        assert source["operation_id"] == "$ref:cust_rest_operation"
-        assert frag["depends_on"] == ["cust_rest_connection", "cust_rest_operation"]
+        assert source["connection_id"] == "$ref:cust_rest_source_connection"
+        assert source["operation_id"] == "$ref:cust_rest_source_operation"
+        assert frag["depends_on"] == ["cust_rest_source_connection", "cust_rest_source_operation"]
 
     def test_fragment_metadata_output_shape_and_guarantees(self):
         meta = _fragment(_params())["metadata"]["rest_fetch"]
@@ -414,3 +414,44 @@ class TestFragment:
         ))
         assert "dynamicProperties" not in dumped
         assert "dynamic_path" not in dumped
+
+
+# ---------------------------------------------------------------------------
+# Component-key disambiguation vs rest_send (api_to_api_sync, same key_prefix)
+# ---------------------------------------------------------------------------
+
+
+class TestKeyDisambiguation:
+    def test_rest_fetch_and_rest_send_keys_do_not_collide(self):
+        # An api_to_api_sync flow emits a rest_fetch SOURCE and a rest_send TARGET
+        # under the SAME key_prefix; their component keys must be distinct so the
+        # integration spec does not fail duplicate-key validation (rest_fetch uses
+        # source-specific roles, mirroring how db_extract + rest_send stay distinct).
+        from boomi_mcp.patterns.primitives import RestSendWithRetryPrimitive
+
+        fetch_comps = _emit(_params())
+        send_params = {
+            "key_prefix": "cust",
+            "connection": {"mode": "create", "base_url": "https://api.example.com", "auth": "NONE"},
+            "operation": {"method": "POST", "path": "/v1/items"},
+        }
+        send_comps = RestSendWithRetryPrimitive.emit_components(
+            _ctx(), RestSendWithRetryPrimitive.validate_parameters(send_params)
+        )
+        fetch_keys = {c.key for c in fetch_comps}
+        send_keys = {c.key for c in send_comps}
+        assert fetch_keys.isdisjoint(send_keys), (fetch_keys, send_keys)
+        assert fetch_keys == {"cust_rest_source_connection", "cust_rest_source_operation"}
+        assert send_keys == {"cust_rest_connection", "cust_rest_operation"}
+
+        # The emitted CREATE display names must also be unique (case-insensitive) —
+        # _lint_component_names hard-rejects duplicate create names
+        # (COMPONENT_NAME_NOT_UNIQUE), so distinct keys alone are not enough for a
+        # same-prefix api_to_api_sync assembly to plan.
+        names = [c.config["component_name"] for c in (*fetch_comps, *send_comps)]
+        lowered = [n.lower() for n in names]
+        assert len(set(lowered)) == len(lowered), names
+        # The source connection name differs from the target connection name.
+        fetch_conn = next(c for c in fetch_comps if c.type == "connector-settings")
+        send_conn = next(c for c in send_comps if c.type == "connector-settings")
+        assert fetch_conn.config["component_name"] != send_conn.config["component_name"]
