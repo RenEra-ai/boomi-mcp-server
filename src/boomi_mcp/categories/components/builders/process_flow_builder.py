@@ -4872,9 +4872,16 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         # config override, decides the source family). The send target's family is
         # enforced separately by _validate_target_binding.
         cls._check_source_connector_family(stage)
+        # Resolve the binding action_type. For a fetch (rest_fetch) source an
+        # explicit ``action_type: null`` (the key present with value None) means
+        # "the default verb" — identical to omitting the key — so it resolves to
+        # GET rather than leaking a None that build() would emit as actionType="".
+        action_type = stage.config.get("action_type", default_action_type)
+        if stage.kind == "fetch" and action_type is None:
+            action_type = default_action_type  # "GET"
         binding: Dict[str, Any] = {
             "connector_type": stage.config.get("connector_type", default_connector_type),
-            "action_type": stage.config.get("action_type", default_action_type),
+            "action_type": action_type,
             "connection_id": stage.config.get("connection_id"),
             "operation_id": stage.config.get("operation_id"),
         }
@@ -4884,10 +4891,11 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         # binding validators, so a non-GET fetch caught only by _validate_source_
         # binding would still emit on the validate_config-bypass path. Raise the same
         # PROCESS_CONNECTOR_BINDING_INVALID code the delegate uses so the validate
-        # path's error is unchanged (just surfaced one step earlier).
+        # path's error is unchanged (just surfaced one step earlier). The None check
+        # is defensive — null already resolved to GET above.
         if stage.kind == "fetch":
             action_value = binding["action_type"]
-            if action_value is not None and str(action_value).strip().upper() != "GET":
+            if action_value is None or str(action_value).strip().upper() != "GET":
                 raise BuilderValidationError(
                     f"sync_pipeline fetch stage {stage.key!r} action_type must be "
                     f"'GET' (rest_fetch is GET-only, M5.4 #72); got {action_value!r}.",

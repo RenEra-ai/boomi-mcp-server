@@ -344,6 +344,21 @@ def test_build_raises_on_non_get_fetch_bypass():
     assert exc.value.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
 
 
+def test_explicit_null_fetch_action_type_resolves_to_get():
+    # An explicit `action_type: null` on a fetch stage means "the default verb"
+    # (GET) — identical to omitting it — so lowering yields GET and build() never
+    # emits an empty actionType="" on the validate_config-bypass path.
+    cfg = _sync_config(
+        [_fetch_stage("s", action_type=None), _send_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    assert SyncPipelineBuilder.lower_config(cfg)["source"]["action_type"] == "GET"
+    assert SyncPipelineBuilder.validate_config(cfg, depends_on=_FETCH_DEPS) is None
+    xml = SyncPipelineBuilder.build(cfg, name="X")
+    assert 'actionType=""' not in xml
+    assert 'actionType="GET"' in xml
+
+
 def test_read_stage_connector_type_rest_rejected():
     # The read↔fetch split is not bypassable via a connector_type override: a read
     # stage forced to connector_type='rest' is rejected (use a fetch stage).
