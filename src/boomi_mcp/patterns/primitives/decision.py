@@ -125,6 +125,16 @@ class DecisionParameters(BaseModel):
             raise ValueError(f"comparison must be one of {list(_DECISION_COMPARISONS)}.")
         return value
 
+    @field_validator("false_notify")
+    @classmethod
+    def _nonblank_false_notify(cls, value: Optional[str]) -> Optional[str]:
+        # Mirror the builder: ``decision.false_notify`` must be non-empty after
+        # stripping, so a validated primitive never emits a builder-rejected
+        # fragment (the BranchPrimitive._nonblank precedent).
+        if value is not None and not value.strip():
+            raise ValueError("false_notify, when provided, must be a non-empty string.")
+        return value
+
 
 # ---------------------------------------------------------------------------
 # Primitive

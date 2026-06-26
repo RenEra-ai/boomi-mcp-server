@@ -1664,3 +1664,10 @@ class TestDecision:
                 **_DECISION_PARAMS,
                 "left": {"value_type": "profile", "property_id": "x"},
             })
+
+    def test_validation_rejects_blank_false_notify(self):
+        # Codex #113 review P3: the builder rejects a whitespace-only false_notify,
+        # so the primitive must too — a validated primitive never emits a
+        # builder-rejected fragment (the BranchPrimitive blank-binding precedent).
+        with pytest.raises(ValidationError):
+            DecisionPrimitive.validate_parameters({**_DECISION_PARAMS, "false_notify": "   "})

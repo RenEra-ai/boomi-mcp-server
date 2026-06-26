@@ -1619,8 +1619,15 @@ def _decision_pre_shape_names(config: Dict[str, Any]) -> List[str]:
     and ``build()`` derive the set the SAME way, so a ``false_next`` that names a
     non-existent / non-earlier shape is rejected identically on both paths.
     """
-    transform = config.get("transform") or {"mode": "passthrough"}
-    mode = str(transform.get("mode") or "passthrough").strip().lower()
+    transform = config.get("transform")
+    if isinstance(transform, dict):
+        mode = str(transform.get("mode") or "passthrough").strip().lower()
+    else:
+        # A non-dict transform (e.g. ``transform: 1``) is rejected later by
+        # _validate_transform; stay total here (the branch validators' "stay total
+        # on malformed input" doctrine) rather than raising AttributeError on
+        # ``.get`` — treat it as no pre-Decision transform shape.
+        mode = "passthrough"
     has_transform = mode in _DECISION_PRE_TRANSFORM_MODES
     count = 2 + (1 if has_transform else 0)  # start(1) + source(2) + [transform(3)]
     return [f"shape{i}" for i in range(1, count + 1)]
@@ -3423,7 +3430,11 @@ def _emit_decision(
     ``_emit_dragpoints`` helper does not emit.
     """
     label = _escape_xml(str(decision_config.get("label") or ""))
-    comparison = _escape_xml(str(decision_config.get("comparison") or ""))
+    # Strip the comparison to the canonical operator token: _validate_decision_config
+    # accepts it via comparison.strip() membership, so emit the trimmed form too —
+    # a padded " equals " must serialize as the supported "equals" token, never the
+    # whitespaced value (mirrors _emit_decisionvalue stripping property_id).
+    comparison = _escape_xml(str(decision_config.get("comparison") or "").strip())
     left = _emit_decisionvalue(decision_config.get("left") or {}, "decision.left")
     right = _emit_decisionvalue(decision_config.get("right") or {}, "decision.right")
     return (

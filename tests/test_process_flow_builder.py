@@ -2879,3 +2879,24 @@ def test_decision_validate_config_and_build_report_identical_errors():
         v, b = _vc_err(cfg), _build_err(cfg)
         assert v is not None and b is not None, decision
         assert (v.error_code, v.field) == (b.error_code, b.field), (decision, v.error_code, b.error_code)
+
+
+def test_decision_padded_comparison_emits_canonical_token():
+    # Codex #113 review P2: validate_config accepts a padded comparison via
+    # comparison.strip() membership, so the emitter must serialize the canonical
+    # operator token (no leading/trailing whitespace), never the padded value.
+    cfg = _decision_config(_decision_block(comparison=" equals "))
+    assert ProcessFlowBuilder.validate_config(cfg) is None
+    xml = ProcessFlowBuilder.build(cfg, name="Padded Comparison")
+    _, _, shapes = _parse_process(xml)
+    decision = next(s for s in shapes if s.attrib["shapetype"] == "decision")
+    assert decision.find("configuration/decision").attrib["comparison"] == "equals"
+
+
+def test_decision_false_next_with_malformed_transform_stays_total():
+    # Codex #113 review P2: a decision.false_next alongside a malformed (non-dict)
+    # transform must NOT raise AttributeError in _decision_pre_shape_names —
+    # validate_config stays total and surfaces the transform's structured error.
+    cfg = _base_config(transform=1, decision=_decision_block(false_notify=None, false_next="shape2"))
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None and err.error_code == "PROCESS_SHAPE_UNSUPPORTED"
