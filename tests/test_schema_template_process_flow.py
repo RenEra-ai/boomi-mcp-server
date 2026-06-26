@@ -207,9 +207,23 @@ def test_template_documents_dataprocess_surface(template):
         "split_documents",
         "combine_documents",
     ]
-    codes = {e["error_code"] for e in template["structured_errors"]}
-    assert "PROCESS_DATAPROCESS_CONFIG_INVALID" in codes
-    assert "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED" in codes
+    errors_by_code = {e["error_code"]: e for e in template["structured_errors"]}
+    assert "PROCESS_DATAPROCESS_CONFIG_INVALID" in errors_by_code
+    assert "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED" in errors_by_code
+    # The split/combine config fields that can trip PROCESS_DATAPROCESS_CONFIG_INVALID
+    # are documented on its structured-error row (#115 review).
+    config_fields = errors_by_code["PROCESS_DATAPROCESS_CONFIG_INVALID"]["field"]
+    for field in (
+        "transform.steps[N].profile_type",
+        "transform.steps[N].profile_id",
+        "transform.steps[N].link_element_key",
+        "transform.steps[N].link_element_name",
+        "transform.steps[N].combine_into_link_element_key",
+    ):
+        assert field in config_fields, field
+    # The split/combine profile_id $ref reuses PROCESS_REF_TYPE_MISMATCH, documented
+    # on that row's field list (#115 review).
+    assert "transform.steps[N].profile_id" in errors_by_code["PROCESS_REF_TYPE_MISMATCH"]["field"]
 
 
 def test_template_documents_return_documents_surface(template):
