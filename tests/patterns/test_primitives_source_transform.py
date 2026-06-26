@@ -1068,6 +1068,34 @@ class TestDataProcess:
         assert combine["profile_type"] == "xml"
         # Default literal "null" parent key is materialized into the fragment.
         assert combine["combine_into_link_element_key"] == "null"
+        # $ref profile_ids surface as process dependencies (so the merged process
+        # component passes ProcessFlowBuilder.validate_config reachability).
+        assert fragment["depends_on"] == ["orders_profile", "groups_profile"]
+
+    def test_emit_fragment_collects_profile_ref_dependencies_deduped(self):
+        # Two steps sharing one $ref profile yield a single, de-duplicated dep.
+        params = DataProcessPrimitive.validate_parameters(
+            {"steps": [
+                self._split_step(profile_id="$ref:shared_profile"),
+                self._combine_step(profile_type="json", profile_id="$ref:shared_profile"),
+            ]}
+        )
+        fragment = DataProcessPrimitive.emit_fragment(_ctx(), params)
+        assert fragment["depends_on"] == ["shared_profile"]
+
+    def test_emit_fragment_literal_profile_id_adds_no_dependency(self):
+        # A literal (non-$ref) profile_id is outside-spec — no dependency declared.
+        params = DataProcessPrimitive.validate_parameters(
+            {"steps": [self._split_step(profile_id="77777777-7777-7777-7777-777777777777")]}
+        )
+        fragment = DataProcessPrimitive.emit_fragment(_ctx(), params)
+        assert fragment["depends_on"] == []
+
+    def test_emit_fragment_custom_scripting_only_has_no_dependency(self):
+        params = DataProcessPrimitive.validate_parameters(
+            {"steps": [{"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}]}
+        )
+        fragment = DataProcessPrimitive.emit_fragment(_ctx(), params)
         assert fragment["depends_on"] == []
 
     def test_combine_custom_parent_key_round_trips(self):

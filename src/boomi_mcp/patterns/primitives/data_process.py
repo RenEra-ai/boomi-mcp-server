@@ -10,7 +10,8 @@ capture (the builder rejects them with ``PROCESS_DATAPROCESS_OPERATION_UNSUPPORT
 
 It emits NO standalone components (``emit_components`` -> ``[]``); the operation
 steps live inline on the process shape, so the primitive only contributes a
-``process_config`` fragment plus an empty ``depends_on``.
+``process_config`` fragment plus the ``depends_on`` keys any Split/Combine step's
+``$ref:`` ``profile_id`` references (custom-scripting-only fragments declare none).
 """
 
 from __future__ import annotations
@@ -213,10 +214,25 @@ class DataProcessPrimitive(PrimitivePattern):
         parameters: BaseModel,
     ) -> Dict[str, Any]:
         params: DataProcessParameters = parameters  # type: ignore[assignment]
+        steps = [step.model_dump() for step in params.steps]
         transform: Dict[str, Any] = {
             "mode": "dataprocess",
-            "steps": [step.model_dump() for step in params.steps],
+            "steps": steps,
         }
         if params.label:
             transform["label"] = params.label
-        return {"process_config": {"transform": transform}, "depends_on": []}
+        # A split/combine step's profile_id may be a literal component id OR a
+        # "$ref:KEY" token. Per the emit_fragment contract (see
+        # base.PrimitivePattern), depends_on must list every component key the
+        # process_config references — otherwise the merged process component fails
+        # ProcessFlowBuilder.validate_config with MISSING_PROCESS_DEPENDENCY on the
+        # unreachable ref (mirrors the document_cache_retrieve / branch primitives'
+        # $ref collection). custom_scripting steps carry no profile_id and add none.
+        depends_on: List[str] = []
+        for step in steps:
+            profile_id = step.get("profile_id")
+            if isinstance(profile_id, str) and profile_id.startswith("$ref:"):
+                key = profile_id[len("$ref:"):]
+                if key and key not in depends_on:
+                    depends_on.append(key)
+        return {"process_config": {"transform": transform}, "depends_on": depends_on}
