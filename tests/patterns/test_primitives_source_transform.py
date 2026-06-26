@@ -1811,6 +1811,14 @@ class TestFlowControl:
             with pytest.raises(ValidationError):
                 FlowControlPrimitive.validate_parameters({"for_each_count": bad})
 
+    def test_validation_rejects_non_strict_int_for_each_count(self):
+        # StrictInt mirrors the builder's isinstance(int)/reject-bool contract: a
+        # bool, float, or numeric string must NOT be coerced into a silent batch
+        # size (else the primitive would diverge from _validate_flow_control_config).
+        for bad in (True, 10.0, "10"):
+            with pytest.raises(ValidationError):
+                FlowControlPrimitive.validate_parameters({"for_each_count": bad})
+
     def test_validation_rejects_unknown_key(self):
         with pytest.raises(ValidationError):
             FlowControlPrimitive.validate_parameters({"for_each_count": 10, "bogus": 1})

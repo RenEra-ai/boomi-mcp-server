@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from ...models.integration_models import IntegrationComponentSpec
 from ..base import (
@@ -49,7 +49,7 @@ class FlowControlParameters(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    for_each_count: int = Field(
+    for_each_count: StrictInt = Field(
         gt=0,
         description="Batch size — documents processed per batch (positive integer).",
     )
