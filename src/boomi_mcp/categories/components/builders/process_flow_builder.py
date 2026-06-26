@@ -486,8 +486,14 @@ class ProcessFlowBuilder:
         config: Dict[str, Any],
         *,
         depends_on: Optional[Iterable[str]] = None,
+        allow_rest_source: bool = False,
     ) -> Optional[BuilderValidationError]:
         """Validate structured process config; return error or None.
+
+        ``allow_rest_source`` is False for the base database_to_api_sync protocol
+        (DB source only); SyncPipelineBuilder passes True so a lowered rest_fetch
+        fetch stage's REST GET source is accepted (M5.4 #72). A hand-authored
+        database_to_api_sync with a REST source therefore stays rejected.
 
         Validation order is intentional — surface the most-specific
         actionable error first:
@@ -514,7 +520,9 @@ class ProcessFlowBuilder:
                 ),
             )
 
-        source_err = _validate_source_binding(config.get("source"))
+        source_err = _validate_source_binding(
+            config.get("source"), allow_rest_source=allow_rest_source
+        )
         if source_err is not None:
             return source_err
 
@@ -1243,7 +1251,9 @@ def _assemble_process_component_xml(
 # Field-level validators (split out so error messages can be specific)
 # ----------------------------------------------------------------------
 
-def _validate_source_binding(source: Any) -> Optional[BuilderValidationError]:
+def _validate_source_binding(
+    source: Any, *, allow_rest_source: bool = False
+) -> Optional[BuilderValidationError]:
     if not isinstance(source, dict):
         return BuilderValidationError(
             "source binding must be a JSON object with connector_type, "
@@ -1252,21 +1262,29 @@ def _validate_source_binding(source: Any) -> Optional[BuilderValidationError]:
             field="source",
             hint="See get_schema_template(resource_type='process', operation='create', protocol='database_to_api_sync').",
         )
-    # The source connector is a database (db_read, action_type='Get') OR — for an
-    # API-sourced sync_pipeline fetch stage (M5.4 #72) — a REST Client GET. The
-    # database_to_api_sync archetype only ever emits a database source, so it is
-    # structurally unaffected by also accepting REST here (only the lowered
-    # rest_fetch path reaches the REST branch).
+    # The source connector is always a database (db_read, action_type='Get') for the
+    # base database_to_api_sync protocol. A REST Client GET source is ONLY valid
+    # through the sync_pipeline fetch lowering (M5.4 #72), which passes
+    # allow_rest_source=True — so a hand-authored database_to_api_sync stays
+    # DB-source-only, exactly as the #72 plan intends.
     raw_connector_type = source.get("connector_type")
     connector_type = str(raw_connector_type or "").strip().lower()
-    rest_source = _resolve_rest_connector_type(raw_connector_type) is not None
+    rest_source = allow_rest_source and _resolve_rest_connector_type(raw_connector_type) is not None
     if connector_type != "database" and not rest_source:
+        if allow_rest_source:
+            return BuilderValidationError(
+                f"source.connector_type must be 'database' (db_read) or a REST Client "
+                f"connector (rest_fetch); got {connector_type!r}.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field="source.connector_type",
+                hint="Database (db_read Get) and REST Client (rest_fetch GET) are the supported source connectors.",
+            )
         return BuilderValidationError(
-            f"source.connector_type must be 'database' (db_read) or a REST Client "
-            f"connector (rest_fetch); got {connector_type!r}.",
+            f"source.connector_type must be 'database' for "
+            f"database_to_api_sync; got {connector_type!r}.",
             error_code="PROCESS_CONNECTOR_BINDING_INVALID",
             field="source.connector_type",
-            hint="Database (db_read Get) and REST Client (rest_fetch GET) are the supported source connectors.",
+            hint="Database is the only source connector for database_to_api_sync; a REST source is expressed via a sync_pipeline fetch stage (rest_fetch).",
         )
     action_type = str(source.get("action_type") or "").strip()
     if rest_source:
@@ -4972,7 +4990,12 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             lowered = cls.lower_config(config)
         except BuilderValidationError as exc:
             return exc
-        return ProcessFlowBuilder.validate_config(lowered, depends_on=depends_on)
+        # A lowered fetch stage carries a REST GET source; allow it here (only the
+        # sync_pipeline path does). The base database_to_api_sync validation stays
+        # DB-source-only.
+        return ProcessFlowBuilder.validate_config(
+            lowered, depends_on=depends_on, allow_rest_source=True
+        )
 
     @classmethod
     def build(

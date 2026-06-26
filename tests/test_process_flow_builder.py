@@ -1405,27 +1405,43 @@ class TestValidateConfig:
         assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
         assert err.field == "source.connector_type"
 
-    def test_accepts_rest_get_source_connector_type(self):
-        # Issue #72 M5.4: a REST fetch source (GET) is now an accepted source
-        # binding (this is how a sync_pipeline fetch stage lowers).
+    def test_rejects_rest_source_for_database_to_api_sync(self):
+        # Issue #72 M5.4: the base database_to_api_sync protocol stays DB-source-only.
+        # A REST source is valid ONLY through the sync_pipeline fetch lowering (which
+        # passes allow_rest_source=True); a hand-authored database_to_api_sync with a
+        # REST source is rejected here.
         cfg = _base_config()
         cfg["source"]["connector_type"] = "rest"
         cfg["source"]["action_type"] = "GET"
-        assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+        assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+        assert err.field == "source.connector_type"
+
+    def test_accepts_rest_get_source_when_allow_rest_source(self):
+        # With allow_rest_source=True (the sync_pipeline delegate path), a REST GET
+        # source binding validates clean.
+        cfg = _base_config()
+        cfg["source"]["connector_type"] = "rest"
+        cfg["source"]["action_type"] = "GET"
+        assert ProcessFlowBuilder.validate_config(
+            cfg, depends_on=[], allow_rest_source=True
+        ) is None
+
+    def test_rejects_non_get_rest_source_when_allow_rest_source(self):
+        # Under allow_rest_source=True a REST source is GET-only — POST/PATCH/etc.
+        # are rejected on source.action_type so a source-side write is never modeled.
+        cfg = _base_config()
+        cfg["source"]["connector_type"] = "rest"
+        cfg["source"]["action_type"] = "POST"
+        err = ProcessFlowBuilder.validate_config(
+            cfg, depends_on=[], allow_rest_source=True
+        )
+        assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+        assert err.field == "source.action_type"
 
     def test_rejects_non_get_source_action_type(self):
         cfg = _base_config()
         cfg["source"]["action_type"] = "Send"
-        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
-        assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
-        assert err.field == "source.action_type"
-
-    def test_rejects_non_get_rest_source_action_type(self):
-        # Issue #72 M5.4: a REST source is GET-only — POST/PATCH/etc. are rejected
-        # so a source-side write can never be modeled.
-        cfg = _base_config()
-        cfg["source"]["connector_type"] = "rest"
-        cfg["source"]["action_type"] = "POST"
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
         assert err.field == "source.action_type"

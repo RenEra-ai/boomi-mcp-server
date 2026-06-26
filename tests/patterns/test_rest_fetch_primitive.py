@@ -357,6 +357,27 @@ class TestPagination:
                 _params(pagination={"mode": "page", "page_parameter": "p", "offset_parameter": "o"})
             )
 
+    def test_none_mode_blank_pagination_field_not_leaked(self):
+        # A blank pagination-specific field under mode='none' normalizes to unset —
+        # it is neither rejected as present nor leaked into the emitted fragment.
+        frag = _fragment(_params(pagination={"mode": "none", "header_name": ""}))
+        assert frag["metadata"]["rest_fetch"]["pagination"] == {"mode": "none"}
+
+    def test_link_header_blank_header_name_defaults_to_link(self):
+        # A blank header_name under link_header normalizes to unset, so the Link
+        # default is materialized (not emitted as an empty string).
+        frag = _fragment(_params(pagination={"mode": "link_header", "header_name": "  "}))
+        pg = frag["metadata"]["rest_fetch"]["pagination"]
+        assert pg["header_name"] == "Link"
+        assert pg["relation"] == "next"
+
+    def test_page_mode_blank_required_param_rejected(self):
+        # A blank page_parameter normalizes to None -> the required-field check fires.
+        with pytest.raises(ValidationError):
+            RestFetchPrimitive.validate_parameters(
+                _params(pagination={"mode": "page", "page_parameter": "   "})
+            )
+
 
 # ---------------------------------------------------------------------------
 # Conditional-request metadata

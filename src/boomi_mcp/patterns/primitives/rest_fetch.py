@@ -42,6 +42,7 @@ from pydantic import (
     Field,
     StrictBool,
     StrictInt,
+    field_validator,
     model_validator,
 )
 
@@ -237,6 +238,22 @@ class PaginationMeta(BaseModel):
     relation: Optional[str] = None
     # shared bound
     max_pages: Optional[StrictInt] = Field(default=None, ge=1)
+
+    @field_validator(
+        "page_parameter", "page_size_parameter", "offset_parameter", "limit_parameter",
+        "cursor_parameter", "next_cursor_path", "initial_cursor", "header_name", "relation",
+        mode="before",
+    )
+    @classmethod
+    def _blank_str_field_to_none(cls, value: Any) -> Any:
+        # Normalize a blank/whitespace-only string to None so a blank pagination
+        # field is consistently "unset" — not silently kept out of cross-mode
+        # rejection by _set_field() yet still emitted into the fragment (e.g. a
+        # blank header_name under mode='none' would otherwise leak through). A
+        # blank required driver field then correctly fails its required check.
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
     @model_validator(mode="after")
     def _validate_mode_fields(self) -> "PaginationMeta":
