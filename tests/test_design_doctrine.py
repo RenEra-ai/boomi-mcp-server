@@ -301,6 +301,24 @@ def test_content_based_routing_branch_fanout_is_emittable():
     assert "decision" in (entry["boomi_shape_mapping"] + " " + entry["when_to_use"]).lower()
 
 
+def test_combine_split_flow_control_is_emittable():
+    # Issue #111 M10.7: per-document batching via Flow Control is now
+    # builder-emittable, so the combine_split_flow_control doctrine flips to
+    # emittable_today / live_verified while true parallel chunk fan-out stays
+    # design guidance.
+    entry = DESIGN_DOCTRINE_ENTRIES["combine_split_flow_control"]
+    assert entry["capability_status"] == "emittable_today"
+    assert entry["verification_status"] == "live_verified"
+    assert entry["provenance"] == "live_verified"
+    blob = (entry["boomi_shape_mapping"] + " " + entry["when_to_use"]).lower()
+    assert "batch" in blob and "emittable" in blob
+    # Parallel fan-out stays guidance, not over-claimed as emittable.
+    assert "design guidance" in blob
+    # The Flow Control shape is registered as an emittable (flow-dispatch) emitter.
+    assert EMITTABLE_SHAPE_REGISTRY["flowcontrol"]["emittable"] is True
+    assert EMITTABLE_SHAPE_REGISTRY["flowcontrol"]["emitter_kind"] == "flowcontrol"
+
+
 def test_business_rules_vs_decision_is_emittable():
     # Issue #113 M10.9: the Decision shape is builder-emittable, so the
     # business_rules_vs_decision doctrine flips to emittable_today / live_verified

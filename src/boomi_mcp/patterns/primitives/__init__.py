@@ -24,6 +24,7 @@ from .decision import DecisionPrimitive
 from .document_cache_remove import DocumentCacheRemovePrimitive
 from .document_cache_retrieve import DocumentCacheRetrievePrimitive
 from .field_map import FieldMapPrimitive
+from .flow_control import FlowControlPrimitive
 from .operational import (
     DlqWriterPrimitive,
     ErrorClassifierPrimitive,
@@ -45,6 +46,7 @@ __all__ = [
     "DocumentCacheRemovePrimitive",
     "DocumentCacheRetrievePrimitive",
     "FieldMapPrimitive",
+    "FlowControlPrimitive",
     "XmlJsonConvertPrimitive",
     "RestFetchPrimitive",
     "RestSendWithRetryPrimitive",

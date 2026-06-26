@@ -237,6 +237,56 @@ def test_doccacheremove_zero_outbound_is_dead_end():
     assert dead[0]["shape"] == "shape2"
 
 
+def _flow_control_process_xml() -> str:
+    """Build a real linear Flow Control process via ProcessFlowBuilder
+    (issue #111 M10.7): start -> source -> flowcontrol -> target -> stop."""
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {"connector_type": "database", "action_type": "Get",
+                   "connection_id": "11111111-1111-1111-1111-111111111111",
+                   "operation_id": "22222222-2222-2222-2222-222222222222"},
+        "flow_control": {"enabled": True, "for_each_count": 10, "label": "Batch by 10"},
+        "target": {"connector_type": "rest", "action_type": "POST",
+                   "connection_id": "33333333-3333-3333-3333-333333333333",
+                   "operation_id": "44444444-4444-4444-4444-444444444444"},
+    }
+    return ProcessFlowBuilder.build(cfg, name="Flow Control Sync")
+
+
+def test_flow_control_wired_is_clean():
+    """Issue #111 M10.7: a wired Flow Control shape (a forward edge to the next
+    shape) is a normal linear NON-terminal step and must verify fully clean — it is
+    not classified terminal/branching/control-branch, so its single forward edge
+    passes (mirrors the #109/#110 cache-op verifier behavior)."""
+    result = verify_process_graph(_flow_control_process_xml())
+    assert result["errors"] == [], result["errors"]
+    assert result["warnings"] == [], result["warnings"]
+    # start, source connectoraction, flowcontrol, target connectoraction, stop
+    assert result["shapes_checked"] == 5
+
+
+def test_flow_control_zero_outbound_is_dead_end():
+    """Issue #111 M10.7: a Flow Control with no outbound edge is a
+    NON_TERMINAL_SHAPE_DEAD_END — the builder shape is a linear non-terminal (NOT
+    classified terminal like doccacheload/returndocuments/exception), so an unwired
+    Flow Control must be flagged."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="flowcontrol_icon" name="shape2" shapetype="flowcontrol" x="2" y="1">'
+        '<configuration><flowcontrol chunkStyle="threadOnly" chunks="0" forEachCount="10"/></configuration>'
+        '<dragpoints/></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "NON_TERMINAL_SHAPE_DEAD_END" in codes
+    dead = [e for e in result["errors"] if e["code"] == "NON_TERMINAL_SHAPE_DEAD_END"]
+    assert dead[0]["shape"] == "shape2"
+
+
 def test_duplicate_shape_name_is_error():
     """Two shapes sharing a name make the graph ambiguous and must not pass
     clean — the index would otherwise collapse them and mask wiring problems."""

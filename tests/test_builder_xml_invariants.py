@@ -454,6 +454,34 @@ def test_inv_doccacheremove_all_documents_linear():
     assert dragpoints is not None and len(list(dragpoints)) == 1
 
 
+def test_inv_flowcontrol_batching_thread_only_linear():
+    # Issue #111 M10.7: the per-document batching Flow Control shape always emits
+    # chunkStyle="threadOnly", chunks="0", and a positive forEachCount (the live
+    # attribute order chunkStyle/chunks/forEachCount), image="flowcontrol_icon", no
+    # userdefoptions, and a forward (non-empty) dragpoint — it is a normal linear
+    # NON-terminal step. Guaranteed by construction: _emit_flowcontrol emits exactly
+    # this form and never a parallel chunks>0 / multiProcess / combine variant
+    # (deferred).
+    xml = ProcessFlowBuilder.build(
+        _process_config(
+            flow_control={"enabled": True, "for_each_count": 10, "label": "Batch by 10"}
+        ),
+        name="P",
+    )
+    shapes = _parse_process_shapes(xml)
+    fc = next(s for s in shapes if s.attrib["shapetype"] == "flowcontrol")
+    assert fc.attrib["image"] == "flowcontrol_icon"
+    cfg = fc.find("configuration/flowcontrol")
+    assert cfg.attrib["chunkStyle"] == "threadOnly"
+    assert cfg.attrib["chunks"] == "0"
+    assert cfg.attrib["forEachCount"] == "10"
+    # No userdefoptions in the batching mode (parallel/multiProcess variants deferred).
+    assert cfg.find("userdefoptions") is None
+    # NON-terminal: exactly one forward dragpoint.
+    dragpoints = fc.find("dragpoints")
+    assert dragpoints is not None and len(list(dragpoints)) == 1
+
+
 def test_inv_returndocuments_terminal_no_stop():
     # Issue #107 M10.3: with return_documents.enabled the flow ends in a Return
     # Documents terminal — empty <dragpoints/>, the last shape, and NO Stop is
@@ -1017,6 +1045,13 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "emitter": "process_flow_builder._emit_doccacheremove (issue #110 M10.6)",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_doccacheremove_all_documents_linear",
+    },
+    {
+        "id": "flowcontrol_batching",
+        "invariant": 'Flow Control per-document batching form — chunkStyle="threadOnly", chunks="0", positive forEachCount, attribute order chunkStyle/chunks/forEachCount, no userdefoptions, image="flowcontrol_icon", linear NON-terminal (one forward dragpoint)',
+        "emitter": "process_flow_builder._emit_flowcontrol (issue #111 M10.7)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_flowcontrol_batching_thread_only_linear",
     },
     {
         "id": "returndocuments_terminal",

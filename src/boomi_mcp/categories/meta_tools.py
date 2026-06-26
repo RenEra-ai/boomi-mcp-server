@@ -5630,6 +5630,19 @@ _PROCESS_FLOW_PROTOCOLS = {
             "decision.right.static_value",
             "decision.false_notify",
             "decision.false_next",
+            # Issue #111 M10.7: optional Flow Control (per-document batching). When
+            # flow_control.enabled is true (default when the block is present), a
+            # Flow Control shape is inserted right after the source (before any
+            # transform) so the whole downstream chain runs in batches of
+            # for_each_count documents. v1 ships ONLY the live-verified per-document
+            # batching mode (chunkStyle=threadOnly, chunks=0, forEachCount=N); true
+            # parallel chunks / multiProcess / combine stay design guidance. Default
+            # (flow_control absent or enabled=false) keeps the unbatched flow.
+            # Mutually exclusive with branch and decision in v1.
+            "flow_control",
+            "flow_control.enabled",
+            "flow_control.for_each_count",
+            "flow_control.label",
             # Issue #92 M4.5.7: declare connection fields as per-environment
             # override points on the deployed process (see notes for the
             # CREATE-only behavior and the connection_id / fields shape).
@@ -5684,11 +5697,17 @@ _PROCESS_FLOW_PROTOCOLS = {
         # return_documents.enabled=true it is "returndocuments" instead (and no
         # Stop follows — the verifier's RETURN_DOCS_STOP_EXCLUSIVE invariant).
         "supported_terminal_shapes": ["stop", "returndocuments"],
-        # Issue #112 M10.8 / #113 M10.9: control-flow shapes the builder can emit.
-        # Branch is the N-way forward fan-out; Decision is the conditional two-path
-        # (true/false) router with loop-back. Route remains design guidance (not yet
+        # Issue #112 M10.8 / #113 M10.9 / #111 M10.7: control-flow shapes the
+        # builder can emit. Branch is the N-way forward fan-out; Decision is the
+        # conditional two-path (true/false) router with loop-back; Flow Control is
+        # the per-document batching shape. Route remains design guidance (not yet
         # builder-emitted).
-        "supported_control_shapes": ["branch", "decision"],
+        "supported_control_shapes": ["branch", "decision", "flow_control"],
+        # Issue #111 M10.7: the only live-verified Flow Control mode the builder
+        # emits — per-document batching (chunkStyle=threadOnly, chunks=0,
+        # forEachCount=N). True parallel chunks (chunks>0), multiProcess, and the
+        # combine variant stay design guidance.
+        "supported_flow_control_modes": ["batching_thread_only"],
         "supported_dlq_modes": ["disabled", "document_cache_ref", "error_subprocess_ref"],
         "supported_notify_levels": ["INFO", "WARNING", "ERROR"],
         "supported_connector_action_bindings": {
@@ -5744,6 +5763,12 @@ _PROCESS_FLOW_PROTOCOLS = {
             # no false_next) is the verifier's CONTROL_BRANCH_BARE_STOP advisory
             # warning — not a builder error.
             {"error_code": "PROCESS_DECISION_CONFIG_INVALID", "field": "decision|decision.enabled|decision.comparison|decision.left|decision.right|decision.left.value_type|decision.right.value_type|decision.left.property_id|decision.left.static_value|decision.right.property_id|decision.right.static_value|decision.false_notify|decision.false_next|branch|reliability|return_documents|target.dynamic_path"},
+            # Issue #111 M10.7: Flow Control (per-document batching). A malformed
+            # flow_control block (non-dict / non-bool enabled / unknown key), a
+            # non-positive / non-int for_each_count, a non-string label, or an
+            # unsupported v1 composition (branch / decision alongside flow_control)
+            # all return PROCESS_FLOW_CONTROL_CONFIG_INVALID.
+            {"error_code": "PROCESS_FLOW_CONTROL_CONFIG_INVALID", "field": "flow_control|flow_control.enabled|flow_control.for_each_count|flow_control.label|branch|decision"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
@@ -6198,7 +6223,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "write": "db_write DB target — reserved for M5.6 (issue #32).",
             "lookup": "reserved (modeled in M5.1 #69, no emitter yet).",
             "combine": "reserved; combine/control-flow emitters owned by M10 (#103).",
-            "flow_control": "reserved; Flow Control is M10.7 (#111), owned by M10 (#103).",
+            "flow_control": "no PipelineSpec lowering; Flow Control shape emittable via process_config.flow_control block (M10.7, issue #111).",
             "branch": "no PipelineSpec lowering; Branch shape owned by M10.8 (#112).",
             "decision": "no PipelineSpec lowering; Decision shape emittable via process_config.decision block (M10.9, issue #113).",
             "dataprocess": "no PipelineSpec lowering; Data Process owned by M10.2 (#106).",

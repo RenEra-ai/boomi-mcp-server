@@ -167,6 +167,13 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     # dispatch key is ``doccacheremove`` in _emit_flow_shape. Live-captured from
     # work component 6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 (shapes 3-7).
     "doccacheremove": {"emittable": True, "emitter_kind": "doccacheremove"},
+    # M10.7 (issue #111): process-level Flow Control shape. Emittable today via the
+    # flow_control config block on ProcessFlowBuilder (a linear non-terminal step
+    # inserted right after the source that batches the document stream — only the
+    # live-verified per-document batching mode; true parallel chunks / combine stay
+    # design guidance); the dispatch key is ``flowcontrol`` in _emit_flow_shape.
+    # Live-captured from work component 7ce0d74d-e71a-408b-9d59-a6f4498c64e2.
+    "flowcontrol": {"emittable": True, "emitter_kind": "flowcontrol"},
 }
 
 #: JSON-schema-shaped description of one entry, returned alongside the catalog so
@@ -616,23 +623,27 @@ _ENTRIES: List[Dict[str, Any]] = [
             "deliberate design levers, not defaults."
         ),
         "boomi_shape_mapping": (
-            "Combine documents with a Data Process or a combined Message; "
-            "split or batch per-document execution and run parallel chunks "
-            "via Flow Control. A scheduled extract delegates large documents "
-            "to a dedicated fetch subprocess."
+            "Combine documents with a Data Process combine step or a combined "
+            "Message; split per-document execution with a Data Process split "
+            "step; batch per-document execution with a Flow Control shape. The "
+            "combine, split, and per-document batching levers are builder-emittable "
+            "today; true parallel chunk fan-out remains design guidance. A "
+            "scheduled extract delegates large documents to a dedicated fetch "
+            "subprocess."
         ),
         "when_to_use": (
             "High-volume flows where batching or bounded parallelism "
-            "improves throughput. Tune the Flow Control thread count to a "
-            "modest level (roughly three to five), not the maximum."
+            "improves throughput. The builder emits per-document batching today; "
+            "tune the batch size to a modest level, not the maximum, and keep "
+            "true parallel execution as a deliberate design choice."
         ),
         "when_not_to_use": (
             "Disable simultaneous execution for stateful or large batches "
             "where ordering or shared state matters. Parallel fan-out is "
             "incompatible with strict ordering."
         ),
-        "verification_status": "companion_unverified",
-        "capability_status": "guidance_only",
+        "verification_status": "live_verified",
+        "capability_status": "emittable_today",
         "category": "process_tuning",
         "mutual_exclusion": [
             "Parallel Flow Control fan-out is incompatible with the strict "
@@ -644,7 +655,7 @@ _ENTRIES: List[Dict[str, Any]] = [
             "process_mode_and_options_selection",
             "content_based_routing",
         ],
-        "provenance": "companion_unverified",
+        "provenance": "live_verified",
     },
     {
         "name": "config_externalization",

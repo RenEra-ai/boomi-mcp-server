@@ -124,6 +124,25 @@ def test_doccacheremove_stage_kind_is_reserved_and_accepted():
     assert kinds["c"] == "doccacheremove"
 
 
+def test_flow_control_stage_kind_is_reserved_and_accepted():
+    # Issue #111 M10.7: the Flow Control stage kind stays reserved in the
+    # vocabulary (no PipelineSpec lowering yet, like branch/decision/dataprocess);
+    # the emitter attaches to the process_config flow_control block instead.
+    spec = PipelineSpec(
+        stages=[
+            StageSpec(key="r", kind="read"),
+            StageSpec(key="c", kind="flow_control"),
+            StageSpec(key="w", kind="write"),
+        ],
+        dependencies=[
+            PipelineEdgeSpec(from_stage="r", to_stage="c"),
+            PipelineEdgeSpec(from_stage="c", to_stage="w"),
+        ],
+    )
+    kinds = {s.key: s.kind for s in spec.stages}
+    assert kinds["c"] == "flow_control"
+
+
 def test_invalid_stage_kind_is_rejected():
     # Out-of-Literal value is rejected natively by pydantic before the
     # model_validator runs, so we only assert the exception type.

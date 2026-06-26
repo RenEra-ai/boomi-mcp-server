@@ -39,6 +39,7 @@ from boomi_mcp.patterns.primitives import (
     DocumentCacheRemovePrimitive,
     DocumentCacheRetrievePrimitive,
     FieldMapPrimitive,
+    FlowControlPrimitive,
     RestFetchPrimitive,
     ReturnDocumentsPrimitive,
     ThrowExceptionPrimitive,
@@ -1735,3 +1736,81 @@ class TestDecision:
         # builder-rejected fragment (the BranchPrimitive blank-binding precedent).
         with pytest.raises(ValidationError):
             DecisionPrimitive.validate_parameters({**_DECISION_PARAMS, "false_notify": "   "})
+
+
+# ===========================================================================
+# flow_control (issue #111 M10.7)
+# ===========================================================================
+
+
+class TestFlowControl:
+    def test_registry_discovers_flow_control(self):
+        try:
+            reg = PatternRegistry.from_package("boomi_mcp.patterns")
+        except TypeError as exc:  # pragma: no cover — interpreter-specific
+            # Same Python 3.9.6 inspect.isclass quirk the sibling
+            # test_registry_discovers_data_process documents.
+            pytest.skip(f"registry discovery unavailable on this interpreter: {exc}")
+        cls = reg.get("flow_control_batching")
+        assert cls is FlowControlPrimitive
+        assert cls.metadata.kind == PatternKind.PRIMITIVE
+
+    def test_describe_includes_contracts_and_no_raw_artifacts(self):
+        described = FlowControlPrimitive.describe()
+        for key in ("metadata", "parameter_schema", "input_contract", "output_contract", "required_builders"):
+            assert key in described
+        assert described["required_builders"] == ["ProcessFlowBuilder"]
+        dumped = json.dumps(described)
+        for forbidden in ("<bns:", "</", "<?xml", "```"):
+            assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
+
+    def test_emit_components_is_empty(self):
+        params = FlowControlPrimitive.validate_parameters({"for_each_count": 10})
+        assert FlowControlPrimitive.emit_components(_ctx(), params) == []
+
+    def test_emit_fragment_returns_flow_control_block(self):
+        params = FlowControlPrimitive.validate_parameters(
+            {"for_each_count": 10, "label": "Batch by 10"}
+        )
+        fragment = FlowControlPrimitive.emit_fragment(_ctx(), params)
+        flow_control = fragment["process_config"]["flow_control"]
+        assert flow_control["enabled"] is True
+        assert flow_control["for_each_count"] == 10
+        assert flow_control["label"] == "Batch by 10"
+        # Flow Control references no component ids.
+        assert fragment["depends_on"] == []
+
+    def test_emit_fragment_feeds_builder_clean(self):
+        # A validated primitive must emit a fragment the builder accepts (so the two
+        # layers never diverge on the flow_control contract).
+        params = FlowControlPrimitive.validate_parameters({"for_each_count": 5})
+        fragment = FlowControlPrimitive.emit_fragment(_ctx(), params)
+        cfg = {
+            "process_kind": "database_to_api_sync",
+            "source": {"connector_type": "database", "action_type": "Get",
+                       "connection_id": "11111111-1111-1111-1111-111111111111",
+                       "operation_id": "22222222-2222-2222-2222-222222222222"},
+            "target": {"connector_type": "rest", "action_type": "POST",
+                       "connection_id": "33333333-3333-3333-3333-333333333333",
+                       "operation_id": "44444444-4444-4444-4444-444444444444"},
+            **fragment["process_config"],
+        }
+        assert ProcessFlowBuilder.validate_config(cfg) is None
+
+    def test_emit_fragment_omits_absent_label(self):
+        params = FlowControlPrimitive.validate_parameters({"for_each_count": 10})
+        fragment = FlowControlPrimitive.emit_fragment(_ctx(), params)
+        assert "label" not in fragment["process_config"]["flow_control"]
+
+    def test_validation_requires_for_each_count(self):
+        with pytest.raises(ValidationError):
+            FlowControlPrimitive.validate_parameters({})
+
+    def test_validation_rejects_non_positive_for_each_count(self):
+        for bad in (0, -1):
+            with pytest.raises(ValidationError):
+                FlowControlPrimitive.validate_parameters({"for_each_count": bad})
+
+    def test_validation_rejects_unknown_key(self):
+        with pytest.raises(ValidationError):
+            FlowControlPrimitive.validate_parameters({"for_each_count": 10, "bogus": 1})

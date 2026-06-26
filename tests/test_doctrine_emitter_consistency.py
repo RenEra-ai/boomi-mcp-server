@@ -70,6 +70,9 @@ PINNED_EMITTABLE = frozenset(
         # M10.6 (issue #110): process-level Document Cache Remove shape — the
         # doccacheremove transform mode / _emit_flow_shape dispatch kind.
         "doccacheremove",
+        # M10.7 (issue #111): process-level Flow Control (per-document batching)
+        # shape — the flow_control config block / _emit_flow_shape dispatch kind.
+        "flowcontrol",
     }
 )
 
@@ -95,6 +98,9 @@ _FLOW_PARAMS = {
     # M10.6 (issue #110): the Document Cache Remove shape needs only the required
     # document_cache_id (remove_all_documents defaults to True).
     "doccacheremove": {"document_cache_id": "CACHE-1"},
+    # M10.7 (issue #111): the Flow Control shape needs only a positive
+    # for_each_count (the batch size); the userlabel reads via params.get(...).
+    "flowcontrol": {"for_each_count": 10},
     # M10.3 (issue #107): the Return Documents terminal reads only an optional
     # label via params.get(...), so empty params emit a valid (unlabeled) shape.
     "returndocuments": {},
@@ -253,6 +259,7 @@ def test_flow_dispatch_ladder_keys():
         "connectoraction_target",
         "message",
         "map",
+        "flowcontrol",
         "dataprocess",
         "doccacheretrieve",
         "doccacheremove",

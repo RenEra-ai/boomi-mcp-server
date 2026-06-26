@@ -2987,3 +2987,235 @@ def test_decision_operands_validated_symmetrically_swapped_orientation():
     assert right_track_missing is not None
     assert right_track_missing.error_code == "PROCESS_DECISION_CONFIG_INVALID"
     assert right_track_missing.field == "decision.right.property_id"
+
+
+# ---------------------------------------------------------------------------
+# Flow Control (per-document batching) shape (issue #111 M10.7)
+# ---------------------------------------------------------------------------
+
+_FLOW_CONTROL_GOLDEN = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "golden_xml"
+    / "flow_control_batching.xml"
+)
+
+
+def _flow_control_config(label="Batch by 10", for_each_count=10, **overrides):
+    flow_control = {"enabled": True, "for_each_count": for_each_count}
+    if label is not None:
+        flow_control["label"] = label
+    flow_control.update(overrides.pop("flow_control_extra", {}))
+    return _base_config(flow_control=flow_control, **overrides)
+
+
+def test_flow_control_inserts_linear_shape_between_source_and_transform():
+    xml = ProcessFlowBuilder.build(_flow_control_config(), name="FlowControl Sync")
+    _, _, shapes = _parse_process(xml)
+    # The Flow Control shape sits right after the source (before the target), so the
+    # whole downstream chain runs per batch. passthrough transform adds no shape.
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "flowcontrol", "connectoraction", "stop",
+    ]
+    fc = shapes[2]
+    assert fc.attrib["image"] == "flowcontrol_icon"
+    assert fc.attrib["userlabel"] == "Batch by 10"
+    cfg = fc.find("configuration/flowcontrol")
+    # Byte-exact attribute model from the live capture: per-document batching.
+    assert cfg.attrib["chunkStyle"] == "threadOnly"
+    assert cfg.attrib["chunks"] == "0"
+    assert cfg.attrib["forEachCount"] == "10"
+    # No userdefoptions in the batching mode.
+    assert cfg.find("userdefoptions") is None
+    # Linear, non-terminal: exactly one forward dragpoint to the next shape.
+    dragpoints = fc.find("dragpoints")
+    assert [dp.attrib["toShape"] for dp in dragpoints] == ["shape4"]
+
+
+def test_flow_control_sits_before_transform_shape():
+    # With a message transform, the order is start -> source -> flowcontrol ->
+    # message -> target -> stop (batch boundary fans the whole downstream chain).
+    cfg = _flow_control_config(transform={"mode": "message", "message_text": "hi"})
+    xml = ProcessFlowBuilder.build(cfg, name="FlowControl Transform Sync")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "flowcontrol", "message", "connectoraction", "stop",
+    ]
+
+
+def test_flow_control_matches_golden_fixture():
+    """Byte-exact golden (issue #111 g): the chunkStyle/chunks/forEachCount attribute
+    order is load-bearing and must match the live capture byte-for-byte."""
+    emitted = ProcessFlowBuilder.build(
+        _flow_control_config(), name="FlowControl Batching Sync"
+    )
+    assert emitted == _FLOW_CONTROL_GOLDEN.read_text()
+
+
+def test_flow_control_absent_is_byte_identical_to_base():
+    # Default (no flow_control block) keeps the pre-#111 flow byte-for-byte.
+    base = ProcessFlowBuilder.build(_base_config(), name="N")
+    absent = ProcessFlowBuilder.build(_base_config(flow_control=None), name="N")
+    assert absent == base
+
+
+def test_flow_control_disabled_is_byte_identical_to_base():
+    base = ProcessFlowBuilder.build(_base_config(), name="N")
+    disabled = ProcessFlowBuilder.build(
+        _base_config(flow_control={"enabled": False, "for_each_count": 10}), name="N"
+    )
+    assert disabled == base
+
+
+def test_flow_control_rejects_missing_for_each_count():
+    cfg = _base_config(flow_control={"enabled": True})
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control.for_each_count"
+
+
+def test_flow_control_rejects_non_positive_for_each_count():
+    for bad in (0, -1):
+        cfg = _base_config(flow_control={"enabled": True, "for_each_count": bad})
+        err = ProcessFlowBuilder.validate_config(cfg)
+        assert err is not None
+        assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+        assert err.field == "flow_control.for_each_count"
+
+
+def test_flow_control_rejects_bool_for_each_count():
+    # A bool is an int subclass; reject it so flow_control={"for_each_count": True}
+    # is not silently treated as forEachCount=1.
+    cfg = _base_config(flow_control={"enabled": True, "for_each_count": True})
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control.for_each_count"
+
+
+def test_flow_control_rejects_non_int_for_each_count():
+    cfg = _base_config(flow_control={"enabled": True, "for_each_count": "10"})
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control.for_each_count"
+
+
+def test_flow_control_rejects_non_bool_enabled():
+    cfg = _base_config(flow_control={"enabled": 1, "for_each_count": 10})
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control.enabled"
+
+
+def test_flow_control_rejects_unknown_key():
+    cfg = _base_config(flow_control={"enabled": True, "for_each_count": 10, "bogus": 1})
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control"
+
+
+def test_flow_control_rejects_non_dict_block():
+    cfg = _base_config(flow_control=1)
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control"
+
+
+def test_flow_control_rejects_non_string_label():
+    cfg = _base_config(flow_control={"enabled": True, "for_each_count": 10, "label": 1})
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control.label"
+
+
+def test_flow_control_rejects_branch_composition():
+    # v1 Flow Control does not compose with a Branch fan-out (topology-changing).
+    cfg = _flow_control_config()
+    cfg["branch"] = {
+        "enabled": True,
+        "targets": [{
+            "connector_type": "rest",
+            "connection_id": _REST_CONN_ID,
+            "operation_id": _REST_OP_ID,
+            "action_type": "POST",
+        }],
+    }
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control"
+
+
+def test_flow_control_rejects_decision_composition():
+    # v1 Flow Control does not compose with a Decision route (topology-changing).
+    cfg = _flow_control_config()
+    cfg["decision"] = {
+        "enabled": True,
+        "comparison": "equals",
+        "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_X"},
+        "right": {"value_type": "static", "static_value": "y"},
+    }
+    err = ProcessFlowBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert err.field == "flow_control"
+
+
+def test_flow_control_xml_escapes_label():
+    cfg = _base_config(
+        flow_control={"enabled": True, "for_each_count": 5, "label": "A & B <batch>"}
+    )
+    xml = ProcessFlowBuilder.build(cfg, name="N")
+    _, _, shapes = _parse_process(xml)
+    fc = next(s for s in shapes if s.attrib["shapetype"] == "flowcontrol")
+    assert fc.attrib["userlabel"] == "A & B <batch>"
+    assert fc.find("configuration/flowcontrol").attrib["forEachCount"] == "5"
+
+
+def test_flow_control_build_bypass_invalid_for_each_count_raises():
+    # build() stays total on the validate_config-bypass path: a non-positive
+    # forEachCount would emit a semantically broken batch size, so raise.
+    cfg = _base_config(flow_control={"enabled": True, "for_each_count": 0})
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+    assert exc.value.field == "flow_control.for_each_count"
+
+
+def test_flow_control_build_bypass_branch_composition_raises():
+    # build() funnels through the same validator: a flow_control + branch combo
+    # raises before any branch emission path is taken (totality).
+    cfg = _flow_control_config()
+    cfg["branch"] = {
+        "enabled": True,
+        "targets": [{
+            "connector_type": "rest",
+            "connection_id": _REST_CONN_ID,
+            "operation_id": _REST_OP_ID,
+            "action_type": "POST",
+        }],
+    }
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="N")
+    assert exc.value.error_code == "PROCESS_FLOW_CONTROL_CONFIG_INVALID"
+
+
+def test_flow_control_composes_with_reliability_try_catch():
+    # Flow Control is a plain linear shape; it sits inside the Try/Catch wrapper just
+    # like the transform shapes do (same mechanism), so the combo emits cleanly.
+    cfg = _flow_control_config(
+        reliability={"retry_count": 1, "dlq": {"mode": "error_subprocess_ref", "process_id": "PROC-1"}},
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, depends_on=["PROC-1"])
+    assert err is None
+    xml = ProcessFlowBuilder.build(cfg, name="FlowControl Reliable Sync")
+    _, _, shapes = _parse_process(xml)
+    shapetypes = [s.attrib["shapetype"] for s in shapes]
+    assert "flowcontrol" in shapetypes
+    assert "catcherrors" in shapetypes

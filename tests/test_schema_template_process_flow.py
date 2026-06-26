@@ -257,7 +257,7 @@ def test_template_documents_branch_surface(template):
         "branch.targets[].label",
     ):
         assert field in optional, field
-    assert template["supported_control_shapes"] == ["branch", "decision"]
+    assert template["supported_control_shapes"] == ["branch", "decision", "flow_control"]
     errors_by_code = {e["error_code"]: e["field"] for e in template["structured_errors"]}
     assert "BRANCH_OUTPUT_UNSET" in errors_by_code
     assert "PROCESS_BRANCH_CONFIG_INVALID" in errors_by_code
@@ -335,6 +335,44 @@ def test_template_reserved_decision_stage_kind_flipped_in_sync_pipeline():
     reserved = result["reserved_stage_kinds"]["decision"]
     assert "process_config.decision" in reserved
     assert "M10.9" in reserved
+
+
+def test_template_documents_flow_control_surface(template):
+    # Issue #111 M10.7: the Flow Control per-document batching fields, the supported
+    # control-shape set, the supported batching mode, and the
+    # PROCESS_FLOW_CONTROL_CONFIG_INVALID structured error are all documented.
+    optional = template["optional_fields"]
+    for field in (
+        "flow_control",
+        "flow_control.enabled",
+        "flow_control.for_each_count",
+        "flow_control.label",
+    ):
+        assert field in optional, field
+    assert "flow_control" in template["supported_control_shapes"]
+    assert template["supported_flow_control_modes"] == ["batching_thread_only"]
+    errors_by_code = {e["error_code"]: e["field"] for e in template["structured_errors"]}
+    assert "PROCESS_FLOW_CONTROL_CONFIG_INVALID" in errors_by_code
+    fc_fields = errors_by_code["PROCESS_FLOW_CONTROL_CONFIG_INVALID"]
+    assert "flow_control.for_each_count" in fc_fields
+    assert "flow_control.enabled" in fc_fields
+    # The composition guard rejects flow_control + branch/decision, so both appear
+    # on the structured error's field list.
+    assert "branch" in fc_fields
+    assert "decision" in fc_fields
+
+
+def test_template_reserved_flow_control_stage_kind_flipped_in_sync_pipeline():
+    # Issue #111 M10.7: the sync_pipeline protocol's reserved_stage_kinds[flow_control]
+    # is flipped from "reserved; ... owned by M10 (#103)" to the
+    # emittable-via-process_config wording (mirrors the decision flip).
+    result = get_schema_template_action(
+        resource_type="process", operation="create", protocol="sync_pipeline"
+    )
+    assert result["_success"] is True
+    reserved = result["reserved_stage_kinds"]["flow_control"]
+    assert "process_config.flow_control" in reserved
+    assert "M10.7" in reserved
 
 
 def test_both_process_protocols_advertise_return_documents_surface():
@@ -578,7 +616,10 @@ def test_sync_pipeline_protocol_documented():
     reserved = result["reserved_stage_kinds"]
     assert "fetch" not in reserved
     assert "#32" in reserved["write"]
-    assert "#103" in reserved["flow_control"]
+    # Issue #111 M10.7: flow_control's reserved wording flipped to the
+    # emittable-via-process_config form (mirrors the decision flip).
+    assert "process_config.flow_control" in reserved["flow_control"]
+    assert "#111" in reserved["flow_control"]
     # The fetch source documents the #96 (M5.4a) runtime dynamicProperties boundary.
     serialized_notes = json.dumps(result["field_notes"]) + json.dumps(result["notes"])
     assert "#96" in serialized_notes

@@ -83,6 +83,19 @@ _SUPPORTED_DLQ_MODES = frozenset({"disabled", "document_cache_ref", "error_subpr
 _BRANCH_ALLOWED_KEYS = frozenset({"enabled", "targets"})
 _BRANCH_MAX_LEGS = 25
 
+# Issue #111 M10.7: Flow Control (per-document batching) shape. The optional
+# top-level ``flow_control`` block emits a Boomi Flow Control shape configured for
+# the live-verified per-document batching mode (chunkStyle="threadOnly", chunks=0,
+# forEachCount=N) — the document stream is processed in batches of N through the
+# rest of the flow. Byte-exact to a live ``work``-profile capture (component
+# 7ce0d74d-e71a-408b-9d59-a6f4498c64e2; see .codex/plans/issue-111.md). v1 ships
+# ONLY this batching mode — true parallel chunks (chunks>0), multiProcess, and the
+# combine variant stay design guidance. The shape sits right after the source
+# (before any transform) so the whole downstream chain runs per batch; it does NOT
+# compose with a Branch fan-out or a Decision route in v1 (each rejected by the
+# composition guard — topology-changing follow-ups).
+_FLOW_CONTROL_ALLOWED_KEYS = frozenset({"enabled", "for_each_count", "label"})
+
 # Issue #113 M10.9: Decision (conditional two-path routing) shape. The optional
 # ``decision`` block emits a Decision shape — Boomi's if/then — that routes the
 # document down a labelled ``true`` or ``false`` dragpoint based on a value
@@ -526,6 +539,18 @@ class ProcessFlowBuilder:
         if source_err is not None:
             return source_err
 
+        # Issue #111 M10.7: validate the optional Flow Control (per-document
+        # batching) block AFTER the source binding and BEFORE Branch/Decision.
+        # _validate_flow_control_config owns a single fixed precedence (block
+        # structure -> unknown key -> non-bool enabled -> unsupported v1
+        # composition (branch/decision) -> for_each_count -> label). build()
+        # funnels through the SAME validator, so the two paths cannot diverge. A
+        # non-flow_control config returns immediately, keeping the existing
+        # validation order byte-for-byte unchanged.
+        flow_control_err = _validate_flow_control_config(config)
+        if flow_control_err is not None:
+            return flow_control_err
+
         # Issue #112 M10.8 (review): validate the optional Branch (N-way fan-out)
         # block BEFORE the top-level target binding. _validate_branch_config owns a
         # single fixed precedence — branch-block structure -> BRANCH_OUTPUT_UNSET
@@ -687,6 +712,26 @@ class ProcessFlowBuilder:
                 "userlabel": str(source.get("label") or ""),
             },
         ))
+        # Issue #111 M10.7: Flow Control (per-document batching) shape. Run the
+        # SAME validator validate_config uses, UNCONDITIONALLY (it returns None
+        # when flow_control is absent or disabled), so a malformed flow_control —
+        # or an unsupported branch/decision composition — raises here too
+        # (totality on a validate_config bypass), BEFORE any branch/decision
+        # emission path is taken. When enabled, insert the batching shape right
+        # after the source and before the transform so the whole downstream chain
+        # runs per batch. _flow_control_enabled() then only picks the emission.
+        flow_control_err = _validate_flow_control_config(config)
+        if flow_control_err is not None:
+            raise flow_control_err
+        if _flow_control_enabled(config):
+            flow_control_cfg = config.get("flow_control") or {}
+            flow.append((
+                "flowcontrol",
+                {
+                    "for_each_count": flow_control_cfg.get("for_each_count"),
+                    "userlabel": str(flow_control_cfg.get("label") or ""),
+                },
+            ))
         if transform_mode == "message":
             flow.append((
                 "message",
@@ -1439,6 +1484,116 @@ def _validate_dynamic_path(
 # ----------------------------------------------------------------------
 # Issue #112 M10.8 — Branch (N-way forward fan-out)
 # ----------------------------------------------------------------------
+
+
+def _flow_control_enabled(config: Dict[str, Any]) -> bool:
+    """True when the config carries an enabled ``flow_control`` batching block.
+
+    Absent block, a non-dict block, or ``enabled: False`` all keep the process on
+    the pre-#111 chain (byte-for-byte) with no Flow Control shape.
+    """
+    flow_control = config.get("flow_control")
+    if not isinstance(flow_control, dict):
+        return False
+    return flow_control.get("enabled", True) is True
+
+
+def _flow_control_unsupported_combo_error(
+    config: Dict[str, Any]
+) -> Optional[BuilderValidationError]:
+    """v1 Flow Control composition guard (issue #111 M10.7).
+
+    Flow Control v1 is a single per-document batching shape inserted into the
+    linear (optionally Try/Catch-wrapped) chain right after the source. It does
+    NOT yet compose with a Branch fan-out or a Decision route — both change the
+    shape graph's topology (and the Decision shifts the index-dependent
+    pre-Decision chain), so each is a clean ``PROCESS_FLOW_CONTROL_CONFIG_INVALID``
+    rejection (follow-up work), never a silent drop. Shared by ``validate_config``
+    (surfaces it) and ``build()`` (raises it for totality on a validate_config
+    bypass), so the two paths cannot diverge.
+    """
+    if _branch_enabled(config):
+        return BuilderValidationError(
+            "flow_control is not supported together with a branch fan-out in v1.",
+            error_code="PROCESS_FLOW_CONTROL_CONFIG_INVALID",
+            field="flow_control",
+            hint="Drop the branch block to batch, or drop flow_control to fan out.",
+        )
+    if _decision_enabled(config):
+        return BuilderValidationError(
+            "flow_control is not supported together with a decision in v1.",
+            error_code="PROCESS_FLOW_CONTROL_CONFIG_INVALID",
+            field="flow_control",
+            hint="Drop the decision block to batch, or drop flow_control to route.",
+        )
+    return None
+
+
+def _validate_flow_control_config(
+    config: Dict[str, Any]
+) -> Optional[BuilderValidationError]:
+    """Validate the optional ``flow_control`` per-document batching block (issue #111 M10.7).
+
+    Absent, or ``enabled: False``, is valid — no Flow Control shape is emitted.
+    When enabled the precedence (mirroring Branch/Decision) is: block structure ->
+    unknown key -> non-bool ``enabled`` -> unsupported v1 composition
+    (branch / decision) -> ``for_each_count`` (a positive int) -> optional
+    ``label`` (a string). ``build()`` funnels through this SAME validator, so the
+    two paths cannot diverge on which structured error a malformed flow_control
+    yields.
+    """
+    flow_control = config.get("flow_control")
+    if flow_control is None:
+        return None
+    if not isinstance(flow_control, dict):
+        return BuilderValidationError(
+            "flow_control must be a JSON object with an optional 'enabled' flag and a 'for_each_count'.",
+            error_code="PROCESS_FLOW_CONTROL_CONFIG_INVALID",
+            field="flow_control",
+            hint='Shape: {"enabled": true, "for_each_count": 10, "label": "optional"}.',
+        )
+    unknown = set(flow_control) - _FLOW_CONTROL_ALLOWED_KEYS
+    if unknown:
+        return BuilderValidationError(
+            f"flow_control has unsupported key(s): {sorted(unknown)}.",
+            error_code="PROCESS_FLOW_CONTROL_CONFIG_INVALID",
+            field="flow_control",
+            hint=f"Supported flow_control keys: {sorted(_FLOW_CONTROL_ALLOWED_KEYS)}.",
+        )
+    enabled = flow_control.get("enabled", True)
+    if not isinstance(enabled, bool):
+        return BuilderValidationError(
+            "flow_control.enabled must be a boolean.",
+            error_code="PROCESS_FLOW_CONTROL_CONFIG_INVALID",
+            field="flow_control.enabled",
+            hint="Use true to batch, or omit/false to keep the unbatched flow.",
+        )
+    if not enabled:
+        return None
+    combo_err = _flow_control_unsupported_combo_error(config)
+    if combo_err is not None:
+        return combo_err
+    for_each_count = flow_control.get("for_each_count")
+    if (
+        not isinstance(for_each_count, int)
+        or isinstance(for_each_count, bool)
+        or for_each_count <= 0
+    ):
+        return BuilderValidationError(
+            "flow_control.for_each_count must be a positive integer (documents per batch).",
+            error_code="PROCESS_FLOW_CONTROL_CONFIG_INVALID",
+            field="flow_control.for_each_count",
+            hint="v1 supports per-document batching: set for_each_count to the batch size, e.g. 10.",
+        )
+    label = flow_control.get("label")
+    if label is not None and not isinstance(label, str):
+        return BuilderValidationError(
+            "flow_control.label must be a string when provided.",
+            error_code="PROCESS_FLOW_CONTROL_CONFIG_INVALID",
+            field="flow_control.label",
+            hint="Use a short display label, or omit it.",
+        )
+    return None
 
 
 def _branch_enabled(config: Dict[str, Any]) -> bool:
@@ -2790,6 +2945,51 @@ def _emit_map(
     )
 
 
+def _emit_flowcontrol(
+    shape_name: str,
+    params: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit a process-level Flow Control (per-document batching) shape (issue #111 M10.7).
+
+    Byte-accurate to the live ``work``-account capture (component
+    7ce0d74d-e71a-408b-9d59-a6f4498c64e2; see .codex/plans/issue-111.md): the
+    supported v1 mode is per-document batching —
+    ``<flowcontrol chunkStyle="threadOnly" chunks="0" forEachCount="N"/>`` with no
+    userdefoptions. Linear shape — one forward dragpoint to ``next_name``.
+    """
+    for_each_count = params.get("for_each_count")
+    if (
+        not isinstance(for_each_count, int)
+        or isinstance(for_each_count, bool)
+        or for_each_count <= 0
+    ):
+        # build() stays total on the validate_config-bypass path: a non-positive
+        # forEachCount would emit a semantically broken batch size (well-formed
+        # XML, so the parse-back guard would not catch it), so raise rather than
+        # emit it — mirrors the _emit_dataprocess empty-steps guard. validate_config
+        # already rejects this on the normal path.
+        raise BuilderValidationError(
+            "flow_control.for_each_count must be a positive integer (documents per batch).",
+            error_code="PROCESS_FLOW_CONTROL_CONFIG_INVALID",
+            field="flow_control.for_each_count",
+            hint="v1 supports per-document batching: set for_each_count to the batch size, e.g. 10.",
+        )
+    userlabel = _escape_xml(params.get("userlabel") or "")
+    dragpoints = _emit_dragpoints([next_name], shape_index)
+    return (
+        f'<shape image="flowcontrol_icon" name="{shape_name}" '
+        f'shapetype="flowcontrol" userlabel="{userlabel}" '
+        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        '<configuration>'
+        f'<flowcontrol chunkStyle="threadOnly" chunks="0" forEachCount="{for_each_count}"/>'
+        '</configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
 def _emit_dataprocess(
     shape_name: str,
     params: Dict[str, Any],
@@ -3270,6 +3470,8 @@ def _emit_flow_shape(
         return _emit_message(shape_name, params, next_name, shape_index)
     if kind == "map":
         return _emit_map(shape_name, params, next_name, shape_index)
+    if kind == "flowcontrol":
+        return _emit_flowcontrol(shape_name, params, next_name, shape_index)
     if kind == "dataprocess":
         return _emit_dataprocess(shape_name, params, next_name, shape_index)
     if kind == "doccacheretrieve":
@@ -4492,7 +4694,7 @@ _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
     "write": "The 'write' (db_write) DB target stage is reserved for M5.6 (issue #32).",
     "lookup": "The 'lookup' stage is reserved (modeled in M5.1 #69, no emitter yet).",
     "combine": "The 'combine' stage is reserved; combine/control-flow emitters are owned by M10 (issue #103).",
-    "flow_control": "The 'flow_control' stage is reserved; Flow Control is M10.7 (issue #111), owned by M10 (#103).",
+    "flow_control": "The 'flow_control' stage kind has no PipelineSpec lowering; the Flow Control shape is emittable via the process_config.flow_control block (M10.7, issue #111).",
     "branch": "The 'branch' stage kind has no PipelineSpec lowering; the Branch shape is owned by M10.8 (issue #112).",
     "decision": "The 'decision' stage kind has no PipelineSpec lowering; the Decision shape is emittable via the process_config.decision block (M10.9, issue #113).",
     "dataprocess": "The 'dataprocess' stage has no PipelineSpec lowering; the Data Process shape is owned by M10.2 (issue #106).",

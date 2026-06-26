@@ -8,14 +8,16 @@ depend on. It models a semantic stage graph where connectivity is carried by a
 - ``dependencies`` is a list of :class:`PipelineEdgeSpec`. Each edge has an
   ``edge_kind``; the default ``"ordering"`` reproduces plain linear wiring, so a
   linear pipeline expressed with edge_kind omitted is fully back-compatible.
-- ``branch`` and ``decision`` are both reserved *as PipelineSpec stage kinds* —
-  there is no PipelineSpec→XML lowering for either yet (the same
-  reserved-without-lowering treatment as ``combine`` / ``flow_control``) — but the
-  Branch and Decision **shapes** themselves are now emittable directly through
-  :class:`ProcessFlowBuilder` via process-config blocks: the ``branch`` block
-  (M10.8, issue #112) emits an N-way forward fan-out to N independent target legs,
-  and the ``decision`` block (M10.9, issue #113) emits a conditional two-path
-  (true/false) router with optional false-path notify and loop-back.
+- ``branch``, ``decision``, and ``flow_control`` are all reserved *as PipelineSpec
+  stage kinds* — there is no PipelineSpec→XML lowering for any of them yet (the
+  same reserved-without-lowering treatment as ``combine``) — but the Branch,
+  Decision, and Flow Control **shapes** themselves are now emittable directly
+  through :class:`ProcessFlowBuilder` via process-config blocks: the ``branch``
+  block (M10.8, issue #112) emits an N-way forward fan-out to N independent target
+  legs, the ``decision`` block (M10.9, issue #113) emits a conditional two-path
+  (true/false) router with optional false-path notify and loop-back, and the
+  ``flow_control`` block (M10.7, issue #111) emits a per-document batching Flow
+  Control shape.
 - Cycle handling is **classification, not blanket rejection**. A back-edge is
   permitted only when it is explicitly typed ``loop_back``; any other back-edge
   (including an omitted/``ordering`` edge that happens to close a cycle) is
@@ -46,10 +48,11 @@ stage kind (``write`` / ``lookup`` / ``combine`` / ``flow_control`` /
 ``branch`` / ``decision`` / ``dataprocess`` / ``exception`` /
 ``doccacheretrieve`` / ``doccacheremove``) still has NO PipelineSpec->XML emitter
 and is rejected by that builder with a hint pointing at its owning issue. (Several
-of those — ``branch`` (M10.8), ``decision`` (M10.9), ``dataprocess`` (M10.2),
-``exception`` (M10.4), ``doccacheretrieve`` (M10.5), ``doccacheremove`` (M10.6) —
-ARE emittable shapes today, but via dedicated ``database_to_api_sync`` process-config
-blocks on ``ProcessFlowBuilder``, NOT through PipelineSpec lowering.)
+of those — ``flow_control`` (M10.7), ``branch`` (M10.8), ``decision`` (M10.9),
+``dataprocess`` (M10.2), ``exception`` (M10.4), ``doccacheretrieve`` (M10.5),
+``doccacheremove`` (M10.6) — ARE emittable shapes today, but via dedicated
+``database_to_api_sync`` process-config blocks on ``ProcessFlowBuilder``, NOT
+through PipelineSpec lowering.)
 """
 
 from typing import Any, Dict, List, Literal, Optional
@@ -65,6 +68,10 @@ PipelineStageKind = Literal[
     "write",
     "finalize",
     "combine",
+    # M10.7 (issue #111): reserved stage kind for the Flow Control shape
+    # (per-document batching). Reserved only (no PipelineSpec lowering yet, like
+    # branch/decision/dataprocess); the M10.7 emitter attaches to the
+    # process-config flow_control block, not to PipelineSpec.
     "flow_control",
     "dataprocess",
     "branch",
