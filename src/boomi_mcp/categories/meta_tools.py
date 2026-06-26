@@ -6161,10 +6161,11 @@ _PROCESS_FLOW_PROTOCOLS = {
         "description": (
             "Verified-linear process builder (issue #70 M5.2). Takes a semantic "
             "M5.1 PipelineSpec (issue #69) stage graph and lowers the all-"
-            "'ordering' linear subset — read(db_read) -> [map] -> send(rest_send) "
-            "-> stop — into the proven database_to_api_sync source/transform/"
-            "target config. It adds NO new shape: the emitted XML is identical to "
-            "the equivalent database_to_api_sync process. Routed via "
+            "'ordering' linear subset — read(db_read) | fetch(rest_fetch) -> [map] "
+            "-> send(rest_send) -> stop — into the proven database_to_api_sync "
+            "source/transform/target config. The source is a DB Get (read) or a "
+            "REST GET (fetch, M5.4 #72); it adds NO new shape: the emitted XML is "
+            "identical to the equivalent database_to_api_sync process. Routed via "
             "build_integration when a type='process' component carries "
             "config.process_kind='sync_pipeline'."
         ),
@@ -6190,11 +6191,10 @@ _PROCESS_FLOW_PROTOCOLS = {
             "pipeline.stages[].config.map_ref",
             "pipeline.stages[].config.label",
         ],
-        "supported_stage_kinds": ["read", "map", "send"],
+        "supported_stage_kinds": ["read", "fetch", "map", "send"],
         "supported_edge_kinds": ["ordering"],
         "supported_terminal_shapes": ["stop"],
         "reserved_stage_kinds": {
-            "fetch": "rest_fetch REST source — reserved for M5.4 (issue #72).",
             "write": "db_write DB target — reserved for M5.6 (issue #32).",
             "lookup": "reserved (modeled in M5.1 #69, no emitter yet).",
             "combine": "reserved; combine/control-flow emitters owned by M10 (#103).",
@@ -6208,9 +6208,10 @@ _PROCESS_FLOW_PROTOCOLS = {
         },
         "field_notes": {
             "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
-            "pipeline.stages[].kind": "One of read/map/send. Every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
-            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'map' for a map stage, 'rest_send' for a send stage. A reserved primitive (rest_fetch/db_write) is rejected with its owning-issue hint.",
-            "pipeline.stages[].config": "read/send carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
+            "pipeline.stages[].kind": "One of read/fetch/map/send. The source is exactly one of read (DB Get) or fetch (REST GET); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
+            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' for a fetch stage, 'map' for a map stage, 'rest_send' for a send stage. The reserved 'db_write' primitive is rejected with its owning-issue hint; 'rest_fetch' on a non-fetch stage is rejected with a hint to use a fetch stage.",
+            "pipeline.stages[].config": "read/fetch/send carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
+            "fetch": "A fetch stage (config.primitive='rest_fetch') is a static REST GET source (M5.4 #72). It carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body). The operation's param/header/path SLOTS are modeled on the rest_fetch primitive; the runtime binding that fills those slots with per-document values via dynamicProperties is owned by #96 (M5.4a). action_type defaults to 'GET' and must be 'GET' (GET-only in M5.4).",
             "pipeline.stages[].config.map_ref": "The map component id or a $ref:KEY token. Its reachability is enforced (MISSING_PROCESS_DEPENDENCY if the $ref key is not in depends_on), but its component TYPE is not type-checked at plan time — matching database_to_api_sync's transform.map_ref. A shared map-ref role check is a future concern.",
             "pipeline.dependencies": "Typed edges; sync_pipeline requires every edge to be edge_kind='ordering' (the default). The chain must be a single read -> [map] -> send path with no fan-out/fan-in.",
             "gated_blocks": "reliability (Try/Catch retry+DLQ), branch, process_calls, and return_documents are GATED for sync_pipeline — it is verified-linear only (M5.2). Use database_to_api_sync (reliability/dynamic path) or wrapper_subprocess (Process Calls) instead.",
@@ -6242,8 +6243,13 @@ _PROCESS_FLOW_PROTOCOLS = {
             "as for database_to_api_sync — the lowered config funnels through the same "
             "ref-type and reachability checks.",
             "Reserved stage kinds and gated blocks fail at PLAN time before any Boomi "
-            "mutation, each with a hint naming the owning issue (#72/#32 for fetch/"
-            "write, M10/#103 for control flow).",
+            "mutation, each with a hint naming the owning issue (#32 for write, "
+            "M10/#103 for control flow).",
+            "A fetch source (rest_fetch) models the REST operation param/header/path "
+            "SLOTS only; the runtime process-step binding that fills those slots with "
+            "per-document values via dynamicProperties is owned by #96 (M5.4a) and is "
+            "NOT emitted from a sync_pipeline fetch stage — the source connectoraction "
+            "emits an empty request document.",
         ],
         "example_component_spec": {
             "key": "sync_pipeline_process",
@@ -6289,6 +6295,22 @@ _PROCESS_FLOW_PROTOCOLS = {
                         {"from_stage": "transform", "to_stage": "target"},
                     ],
                 },
+            },
+        },
+        "fetch_source_stage_example": {
+            "_description": (
+                "Alternate REST source: swap the read(db_read) source stage above "
+                "for a fetch(rest_fetch) source stage to build an API-sourced sync "
+                "(M5.4 #72). The send target + map stages are unchanged. action_type "
+                "defaults to (and must be) 'GET'."
+            ),
+            "key": "source",
+            "kind": "fetch",
+            "config": {
+                "primitive": "rest_fetch",
+                "action_type": "GET",
+                "connection_id": "$ref:rest_src_conn",
+                "operation_id": "$ref:rest_src_op",
             },
         },
     },

@@ -1449,9 +1449,23 @@ def _check_process_flow_ref_types(
     dlq = reliability.get("dlq") if isinstance(reliability.get("dlq"), dict) else {}
     dlq_mode = str(dlq.get("mode") or "").strip().lower()
 
-    slot_rules = [
-        ("source.connection_id", source.get("connection_id"), "database connector-settings"),
-        ("source.operation_id", source.get("operation_id"), "database connector-action Get"),
+    # The source is a database (db_read) OR — for an API-sourced sync_pipeline
+    # fetch stage (M5.4 #72) — a REST Client GET (rest_fetch). Dispatch the two
+    # source slot rules on source.connector_type so a REST fetch source's $refs are
+    # type-checked against REST Client roles, not the DB roles. database_to_api_sync
+    # only ever emits a database source, so its source stays DB-checked.
+    source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
+    if source_is_rest:
+        source_rules = [
+            ("source.connection_id", source.get("connection_id"), "REST Client connector-settings"),
+            ("source.operation_id", source.get("operation_id"), "REST Client connector-action"),
+        ]
+    else:
+        source_rules = [
+            ("source.connection_id", source.get("connection_id"), "database connector-settings"),
+            ("source.operation_id", source.get("operation_id"), "database connector-action Get"),
+        ]
+    slot_rules = source_rules + [
         ("target.connection_id", target.get("connection_id"), "REST Client connector-settings"),
         ("target.operation_id", target.get("operation_id"), "REST Client connector-action"),
     ]
@@ -1537,6 +1551,7 @@ def _check_process_flow_ref_types(
     slot_rules = tuple(slot_rules)
 
     target_op_ref_component: Optional[IntegrationComponentSpec] = None
+    source_op_ref_component: Optional[IntegrationComponentSpec] = None
 
     for field_path, raw_value, expected_role in slot_rules:
         if not (isinstance(raw_value, str) and raw_value.startswith("$ref:")):
@@ -1559,7 +1574,13 @@ def _check_process_flow_ref_types(
             role, _ = _classify_connector_action(target_comp)
             ok = role == expected_role
             if ok:
-                target_op_ref_component = target_comp
+                # Capture source vs target separately so the source REST fetch op
+                # (M5.4 #72) does not clobber the target op used by the method/
+                # action_type consistency check below.
+                if field_path == "source.operation_id":
+                    source_op_ref_component = target_comp
+                else:
+                    target_op_ref_component = target_comp
         elif expected_role == "Document Cache":
             # Issue #51: the DLQ document-cache catch leg must point at a
             # Document Cache component (type "documentcache"), never a swapped
@@ -1639,6 +1660,48 @@ def _check_process_flow_ref_types(
                 ),
                 details={
                     "ref_key": target_op_ref_key,
+                    "expected_role": declared_method,
+                    "actual_role": declared_action_upper,
+                },
+            )
+
+    # Issue #72 M5.4: the same method/action_type consistency check for a REST
+    # fetch SOURCE — when source.operation_id resolves to an in-spec REST
+    # operation carrying a declared method, source.action_type ('GET') must match
+    # it uppercased. Skip silently when the referenced operation has no declared
+    # method (cannot compare against unknown).
+    if source_op_ref_component is not None:
+        _, declared_method = _classify_connector_action(source_op_ref_component)
+        declared_action_type = source.get("action_type")
+        declared_action_upper = (
+            declared_action_type.strip().upper()
+            if isinstance(declared_action_type, str) and declared_action_type.strip()
+            else None
+        )
+        if (
+            declared_method is not None
+            and declared_action_upper is not None
+            and declared_method != declared_action_upper
+        ):
+            source_op_raw = source.get("operation_id")
+            source_op_ref_key = (
+                source_op_raw[5:]
+                if isinstance(source_op_raw, str) and source_op_raw.startswith("$ref:")
+                else ""
+            )
+            return BuilderValidationError(
+                f"source.action_type {declared_action_upper!r} does not match "
+                f"the method {declared_method!r} declared on the referenced "
+                f"REST operation",
+                error_code="PROCESS_REF_TYPE_MISMATCH",
+                field="source.action_type",
+                hint=(
+                    "Align source.action_type with the HTTP method declared "
+                    "on the referenced REST connector-action, or change the "
+                    "referenced operation to one whose method matches."
+                ),
+                details={
+                    "ref_key": source_op_ref_key,
                     "expected_role": declared_method,
                     "actual_role": declared_action_upper,
                 },

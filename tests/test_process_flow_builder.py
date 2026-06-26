@@ -169,6 +169,34 @@ def test_source_connectoraction_carries_database_binding():
     assert ca.find("dynamicProperties") is not None
 
 
+def test_rest_get_source_keeps_canonical_subtype_and_empty_body():
+    # Issue #72 M5.4: a REST fetch source (connector_type='rest', action_type='GET')
+    # emits the canonical mixed-case REST Client subtype un-lowercased (an
+    # unconditional .lower() would corrupt the uppercase 'X' in X3979C) with the
+    # uppercased verb and an empty request document.
+    cfg = _base_config(
+        source={
+            "connector_type": "rest",
+            "connection_id": _REST_CONN_ID,
+            "operation_id": _REST_OP_ID,
+            "action_type": "get",  # lowercase input -> uppercased on emit
+        },
+    )
+    xml = ProcessFlowBuilder.build(cfg, name="API Fetch")
+    _, _, shapes = _parse_process(xml)
+    ca = shapes[1].find("configuration/connectoraction")
+    assert ca is not None
+    assert ca.attrib["connectorType"] == REST_CLIENT_SUBTYPE  # NOT lowercased
+    assert ca.attrib["actionType"] == "GET"
+    assert ca.attrib["connectionId"] == _REST_CONN_ID
+    assert ca.attrib["operationId"] == _REST_OP_ID
+    # The #72 empty-request guarantee: empty parameters + dynamicProperties, no
+    # process-step dynamicProperties (runtime slot binding is #96, M5.4a).
+    assert ca.find("parameters") is not None
+    assert ca.find("dynamicProperties") is not None
+    assert "propertyId=" not in ET.tostring(ca.find("dynamicProperties"), encoding="unicode")
+
+
 def test_target_connectoraction_normalizes_rest_aliases():
     xml = ProcessFlowBuilder.build(_base_config(), name="My Process")
     _, _, shapes = _parse_process(xml)
@@ -1368,16 +1396,36 @@ class TestValidateConfig:
         assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
         assert err.field == "source.connection_id"
 
-    def test_rejects_non_database_source_connector_type(self):
+    def test_rejects_unsupported_source_connector_type(self):
+        # Database (db_read Get) and REST Client (rest_fetch GET) are the supported
+        # source connectors; an unrelated connector (sftp) is still rejected.
         cfg = _base_config()
-        cfg["source"]["connector_type"] = "rest"
+        cfg["source"]["connector_type"] = "sftp"
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
         assert err.field == "source.connector_type"
 
+    def test_accepts_rest_get_source_connector_type(self):
+        # Issue #72 M5.4: a REST fetch source (GET) is now an accepted source
+        # binding (this is how a sync_pipeline fetch stage lowers).
+        cfg = _base_config()
+        cfg["source"]["connector_type"] = "rest"
+        cfg["source"]["action_type"] = "GET"
+        assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+
     def test_rejects_non_get_source_action_type(self):
         cfg = _base_config()
         cfg["source"]["action_type"] = "Send"
+        err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+        assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+        assert err.field == "source.action_type"
+
+    def test_rejects_non_get_rest_source_action_type(self):
+        # Issue #72 M5.4: a REST source is GET-only — POST/PATCH/etc. are rejected
+        # so a source-side write can never be modeled.
+        cfg = _base_config()
+        cfg["source"]["connector_type"] = "rest"
+        cfg["source"]["action_type"] = "POST"
         err = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
         assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
         assert err.field == "source.action_type"

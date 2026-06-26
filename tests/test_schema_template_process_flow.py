@@ -568,15 +568,21 @@ def test_sync_pipeline_protocol_documented():
         "pipeline.stages[].config.primitive",
     ):
         assert field in result["required_fields"], field
-    # Only the verified-linear surface is supported.
-    assert result["supported_stage_kinds"] == ["read", "map", "send"]
+    # The verified-linear surface: read|fetch source -> [map] -> send (issue #72
+    # M5.4 added the REST fetch source).
+    assert result["supported_stage_kinds"] == ["read", "fetch", "map", "send"]
     assert result["supported_edge_kinds"] == ["ordering"]
     assert result["supported_terminal_shapes"] == ["stop"]
-    # Reserved kinds point at their owning issues.
+    # fetch is now supported (not reserved); the remaining reserved kinds point at
+    # their owning issues.
     reserved = result["reserved_stage_kinds"]
-    assert "#72" in reserved["fetch"]
+    assert "fetch" not in reserved
     assert "#32" in reserved["write"]
     assert "#103" in reserved["flow_control"]
+    # The fetch source documents the #96 (M5.4a) runtime dynamicProperties boundary.
+    serialized_notes = json.dumps(result["field_notes"]) + json.dumps(result["notes"])
+    assert "#96" in serialized_notes
+    assert "dynamicProperties" in serialized_notes
     # The M5.2 structured errors are all advertised.
     codes = {e["error_code"] for e in result["structured_errors"]}
     for code in (

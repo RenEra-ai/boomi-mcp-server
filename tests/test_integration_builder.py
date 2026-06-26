@@ -6785,12 +6785,14 @@ class TestBuildPlanSyncPipeline:
         assert ve["details"]["actual_role"] == "PATCH"
 
     @patch(_PATCH_TARGET)
-    def test_reserved_fetch_kind_errors_at_plan(self, mock_pag):
+    def test_reserved_write_kind_errors_at_plan(self, mock_pag):
+        # 'write' (db_write) remains a reserved kind (M5.6 #32) after fetch was
+        # promoted to a supported source kind (#72).
         mock_pag.return_value = []
         comp = IntegrationComponentSpec(
             key="main_process", type="process", action="create", name="Bad",
             config={"process_kind": "sync_pipeline", "pipeline": {
-                "stages": [{"key": "s", "kind": "fetch", "config": {"primitive": "rest_fetch"}}],
+                "stages": [{"key": "s", "kind": "write", "config": {"primitive": "db_write"}}],
                 "dependencies": [],
             }},
             depends_on=[],
@@ -6809,3 +6811,100 @@ class TestBuildPlanSyncPipeline:
         for dep in ("db_connection", "db_query_operation", "field_map",
                     "target_rest_connection", "target_rest_operation"):
             assert order.index(dep) < order.index("main_process")
+
+
+# ---------------------------------------------------------------------------
+# Issue #72 M5.4 — REST fetch source sync_pipeline plan-time validation
+# ---------------------------------------------------------------------------
+
+
+def _rest_fetch_sync_config(*, source_overrides=None, with_map=True, **top):
+    fetch_cfg = {
+        "primitive": "rest_fetch",
+        "connection_id": "$ref:rest_src_connection",
+        "operation_id": "$ref:rest_src_operation",
+    }
+    fetch_cfg.update(source_overrides or {})
+    send_cfg = {
+        "primitive": "rest_send",
+        "action_type": "POST",
+        "connection_id": "$ref:target_rest_connection",
+        "operation_id": "$ref:target_rest_operation",
+    }
+    stages = [{"key": "source", "kind": "fetch", "config": fetch_cfg}]
+    deps = []
+    if with_map:
+        stages.append({"key": "transform", "kind": "map",
+                       "config": {"primitive": "map", "map_ref": "$ref:field_map"}})
+        deps.append({"from_stage": "source", "to_stage": "transform"})
+        deps.append({"from_stage": "transform", "to_stage": "target"})
+    else:
+        deps.append({"from_stage": "source", "to_stage": "target"})
+    stages.append({"key": "target", "kind": "send", "config": send_cfg})
+    cfg = {"process_kind": "sync_pipeline", "pipeline": {"stages": stages, "dependencies": deps}}
+    cfg.update(top)
+    return cfg
+
+
+def _rest_fetch_comp(source_overrides=None, with_map=True):
+    return IntegrationComponentSpec(
+        key="main_process", type="process", action="create", name="API Sync Pipeline",
+        config=_rest_fetch_sync_config(source_overrides=source_overrides, with_map=with_map),
+        depends_on=[
+            "rest_src_connection", "rest_src_operation", "field_map",
+            "target_rest_connection", "target_rest_operation",
+        ],
+    )
+
+
+def _rest_fetch_deps(source_op_role="REST Client connector-action", source_op_method="GET"):
+    return [
+        _stub_dep_comp("rest_src_connection", role="REST Client connector-settings"),
+        _stub_dep_comp("rest_src_operation", role=source_op_role, method=source_op_method),
+        _map_stub("field_map"),
+        _stub_dep_comp("target_rest_connection"),
+        _stub_dep_comp("target_rest_operation", method="POST"),
+    ]
+
+
+class TestBuildPlanSyncPipelineRestFetch:
+    """Plan-time validation for the M5.4 REST fetch source (#72)."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_rest_fetch_pipeline_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        components = _rest_fetch_deps() + [_rest_fetch_comp()]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        assert plan["_success"] is True, plan
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "create"
+        assert step["route"] == "process_flow_xml"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_swapped_source_op_to_db_surfaces_type_mismatch(self, mock_pag):
+        # A REST fetch source operation_id that resolves to a DATABASE
+        # connector-action is rejected: the source slot expects a REST Client
+        # connector-action (the new connector-aware source rule).
+        mock_pag.return_value = []
+        components = _rest_fetch_deps(source_op_role="database connector-action Get") + [_rest_fetch_comp()]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "error_process_validation"
+        ve = step["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "source.operation_id"
+        assert ve["details"]["expected_role"] == "REST Client connector-action"
+
+    @patch(_PATCH_TARGET)
+    def test_source_method_mismatch_surfaces_type_mismatch(self, mock_pag):
+        # The referenced REST source op declares POST; a fetch source is GET — the
+        # source-side method/action_type consistency check fires.
+        mock_pag.return_value = []
+        components = _rest_fetch_deps(source_op_method="POST") + [_rest_fetch_comp()]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "source.action_type"
+        assert ve["details"]["expected_role"] == "POST"
+        assert ve["details"]["actual_role"] == "GET"

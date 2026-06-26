@@ -13,7 +13,8 @@ Issue #27 added the source/transform primitives (``db_extract``,
 ``field_map``, ``xml_json_convert``); issue #28 adds the REST target primitive
 (``rest_send_with_retry``) and the operational reliability primitives
 (``schedule_envelope``, ``watermark_state``, ``error_classifier``,
-``dlq_writer``, ``run_metadata``).
+``dlq_writer``, ``run_metadata``). Issue #72 (M5.4) adds the REST source
+primitive (``rest_fetch``) — the REST counterpart to ``db_extract``.
 """
 
 from .branch import BranchPrimitive
@@ -30,6 +31,7 @@ from .operational import (
     ScheduleEnvelopePrimitive,
     WatermarkStatePrimitive,
 )
+from .rest_fetch import RestFetchPrimitive
 from .rest_send import RestSendWithRetryPrimitive
 from .return_documents import ReturnDocumentsPrimitive
 from .throw_exception import ThrowExceptionPrimitive
@@ -44,6 +46,7 @@ __all__ = [
     "DocumentCacheRetrievePrimitive",
     "FieldMapPrimitive",
     "XmlJsonConvertPrimitive",
+    "RestFetchPrimitive",
     "RestSendWithRetryPrimitive",
     "ReturnDocumentsPrimitive",
     "ThrowExceptionPrimitive",

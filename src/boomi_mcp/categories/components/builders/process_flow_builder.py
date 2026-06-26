@@ -654,15 +654,26 @@ class ProcessFlowBuilder:
         # mode=passthrough.
         flow: List[Tuple[str, Dict[str, Any]]] = []
         flow.append(("start_noaction", {}))
+        # Canonicalize the source connector subtype + verb before emission. Boomi
+        # expects exact case on both sides. A DATABASE source is `database` /
+        # `Get` — the validator accepts case-insensitive input, so lowercase the
+        # subtype (Codex review r6 P2.2). A REST fetch source (M5.4 #72) keeps the
+        # canonical mixed-case REST Client subtype (officialboomi-X3979C-rest-prod —
+        # an unconditional .lower() would corrupt the uppercase 'X') and the
+        # uppercased verb, matching the REST target emission convention.
+        source_canonical_type = _canonical_connector_type(source.get("connector_type"))
+        source_action_raw = str(source.get("action_type") or "").strip()
+        if _resolve_rest_connector_type(source.get("connector_type")) is not None:
+            source_connector_type = source_canonical_type
+            source_action_type = source_action_raw.upper()
+        else:
+            source_connector_type = source_canonical_type.lower()
+            source_action_type = source_action_raw
         flow.append((
             "connectoraction_source",
             {
-                # Database source — Boomi expects exact `connectorType="database"`
-                # and `actionType="Get"` (case-sensitive on both sides). The
-                # validator accepts case-insensitive input via .lower()/strip,
-                # so canonicalize here before emission. Codex review r6 P2.2.
-                "connector_type": _canonical_connector_type(source.get("connector_type")).lower(),
-                "action_type": str(source.get("action_type") or "").strip(),
+                "connector_type": source_connector_type,
+                "action_type": source_action_type,
                 "connection_id": str(source.get("connection_id") or "").strip(),
                 "operation_id": str(source.get("operation_id") or "").strip(),
                 "userlabel": str(source.get("label") or ""),
@@ -1241,17 +1252,35 @@ def _validate_source_binding(source: Any) -> Optional[BuilderValidationError]:
             field="source",
             hint="See get_schema_template(resource_type='process', operation='create', protocol='database_to_api_sync').",
         )
-    connector_type = str(source.get("connector_type") or "").strip().lower()
-    if connector_type != "database":
+    # The source connector is a database (db_read, action_type='Get') OR — for an
+    # API-sourced sync_pipeline fetch stage (M5.4 #72) — a REST Client GET. The
+    # database_to_api_sync archetype only ever emits a database source, so it is
+    # structurally unaffected by also accepting REST here (only the lowered
+    # rest_fetch path reaches the REST branch).
+    raw_connector_type = source.get("connector_type")
+    connector_type = str(raw_connector_type or "").strip().lower()
+    rest_source = _resolve_rest_connector_type(raw_connector_type) is not None
+    if connector_type != "database" and not rest_source:
         return BuilderValidationError(
-            f"source.connector_type must be 'database' for "
-            f"database_to_api_sync; got {connector_type!r}.",
+            f"source.connector_type must be 'database' (db_read) or a REST Client "
+            f"connector (rest_fetch); got {connector_type!r}.",
             error_code="PROCESS_CONNECTOR_BINDING_INVALID",
             field="source.connector_type",
-            hint="Database is the only supported source connector in M2.5.",
+            hint="Database (db_read Get) and REST Client (rest_fetch GET) are the supported source connectors.",
         )
     action_type = str(source.get("action_type") or "").strip()
-    if action_type not in _DB_ACTION_TYPES:
+    if rest_source:
+        # REST fetch is GET-only in M5.4 — reject any other verb so a source-side
+        # write can never be modeled here.
+        if action_type.upper() != "GET":
+            return BuilderValidationError(
+                f"source.action_type must be 'GET' for a REST fetch source; "
+                f"got {action_type!r}.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field="source.action_type",
+                hint="rest_fetch is GET-only in M5.4 (#72); other verbs are out of scope.",
+            )
+    elif action_type not in _DB_ACTION_TYPES:
         return BuilderValidationError(
             f"source.action_type must be 'Get' for database source; "
             f"got {action_type!r}.",
@@ -4422,24 +4451,26 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
 # Issue #70 M5.2 — sync_pipeline (verified-linear PipelineSpec lowering)
 # ----------------------------------------------------------------------
 
-# The ONLY PipelineStageKind values the verified-linear sync_pipeline builder
-# lowers to XML. Every other kind in the M5.1 (#69) vocabulary stays reserved —
-# modeled in the contract, no PipelineSpec->XML lowering yet — and is rejected
-# with a hint pointing at its owning issue. fetch/write are the reserved
-# source/target extension points (M5.4 #72 / M5.6 #32); the rest are
-# combine/lookup/control-flow owned by M10 (#103, e.g. Flow Control M10.7 #111).
-_SYNC_PIPELINE_SUPPORTED_KINDS = frozenset({"read", "map", "send"})
+# The PipelineStageKind values the verified-linear sync_pipeline builder lowers
+# to XML. ``read`` (db_read DB source) and ``fetch`` (rest_fetch REST source) are
+# the two supported source kinds; ``map``/``send`` the optional transform + REST
+# target. Every other kind in the M5.1 (#69) vocabulary stays reserved — modeled
+# in the contract, no PipelineSpec->XML lowering yet — and is rejected with a hint
+# pointing at its owning issue. ``write`` is the reserved DB target extension point
+# (M5.6 #32); the rest are combine/lookup/control-flow owned by M10 (#103, e.g.
+# Flow Control M10.7 #111).
+_SYNC_PIPELINE_SUPPORTED_KINDS = frozenset({"read", "fetch", "map", "send"})
 
 # The primitive discriminator each supported stage must declare in config.
 _SYNC_PIPELINE_STAGE_PRIMITIVE: Dict[str, str] = {
     "read": "db_read",
+    "fetch": "rest_fetch",
     "map": "map",
     "send": "rest_send",
 }
 
 # Hints for reserved stage *kinds* (rejected by the kind gate).
 _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
-    "fetch": "The 'fetch' (rest_fetch) REST source stage is reserved for M5.4 (issue #72).",
     "write": "The 'write' (db_write) DB target stage is reserved for M5.6 (issue #32).",
     "lookup": "The 'lookup' stage is reserved (modeled in M5.1 #69, no emitter yet).",
     "combine": "The 'combine' stage is reserved; combine/control-flow emitters are owned by M10 (issue #103).",
@@ -4453,9 +4484,11 @@ _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
     "finalize": "The 'finalize' stage is reserved (no PipelineSpec lowering yet).",
 }
 
-# Hints for reserved *primitives* mis-declared on an otherwise-supported kind.
+# Hints for *primitives* mis-declared on the wrong supported kind. ``rest_fetch``
+# is supported (on a ``fetch`` stage) but not on ``read``; ``db_write`` is still a
+# reserved DB target (M5.6 #32). Each points the caller at the right stage/issue.
 _SYNC_PIPELINE_RESERVED_PRIMITIVE_HINTS: Dict[str, str] = {
-    "rest_fetch": "rest_fetch (the REST 'fetch' source) is reserved for M5.4 (issue #72).",
+    "rest_fetch": "rest_fetch is the REST source primitive — declare it on a 'fetch' stage (M5.4 #72), not this one.",
     "db_write": "db_write (the DB 'write' target) is reserved for M5.6 (issue #32).",
 }
 
@@ -4634,24 +4667,35 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             stage_by_key[stage.key] = stage
 
         # 3. Single linear chain over the ordering edges, covering every stage.
+        # The source is exactly one of read(db_read) or fetch(rest_fetch); the
+        # target is always send(rest_send); an optional map sits between them.
         order = cls._linear_stage_order(spec, stage_by_key)
         kinds = [stage_by_key[k].kind for k in order]
-        if kinds not in (["read", "send"], ["read", "map", "send"]):
+        if kinds not in (
+            ["read", "send"],
+            ["read", "map", "send"],
+            ["fetch", "send"],
+            ["fetch", "map", "send"],
+        ):
             raise BuilderValidationError(
-                f"sync_pipeline must be read -> [map] -> send; got stage kinds "
-                f"{kinds}.",
+                f"sync_pipeline must be read|fetch -> [map] -> send; got stage "
+                f"kinds {kinds}.",
                 error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
                 field="pipeline.stages",
-                hint="Exactly one db_read source, an optional map, one rest_send target.",
+                hint="Exactly one db_read or rest_fetch source, an optional map, one rest_send target.",
             )
 
-        read_stage = stage_by_key[order[0]]
+        source_stage = stage_by_key[order[0]]
         send_stage = stage_by_key[order[-1]]
         map_stage = stage_by_key[order[1]] if len(order) == 3 else None
 
+        # A read source lowers to a DB connector binding; a fetch source to REST.
+        source_default_connector = "database" if source_stage.kind == "read" else "rest"
         lowered: Dict[str, Any] = {
             "process_kind": ProcessFlowBuilder.PROCESS_KIND,
-            "source": cls._lower_binding_stage(read_stage, default_connector_type="database"),
+            "source": cls._lower_binding_stage(
+                source_stage, default_connector_type=source_default_connector
+            ),
             "transform": cls._lower_map_stage(map_stage),
             "target": cls._lower_binding_stage(send_stage, default_connector_type="rest"),
         }
@@ -4776,13 +4820,18 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                     "(e.g. dynamic_path, reliability) are not lowered in M5.2."
                 ),
             )
+        # A read (db_read) source is always a Get; a fetch (rest_fetch) source is
+        # always a GET (M5.4 #72, GET-only); a send (rest_send) target carries an
+        # explicit HTTP method (no default).
+        if stage.kind == "read":
+            default_action_type: Optional[str] = "Get"
+        elif stage.kind == "fetch":
+            default_action_type = "GET"
+        else:
+            default_action_type = None
         binding: Dict[str, Any] = {
             "connector_type": stage.config.get("connector_type", default_connector_type),
-            # A read (db_read) source is always a Get in M2.5; a send (rest_send)
-            # target carries an explicit HTTP method (no default).
-            "action_type": stage.config.get(
-                "action_type", "Get" if stage.kind == "read" else None
-            ),
+            "action_type": stage.config.get("action_type", default_action_type),
             "connection_id": stage.config.get("connection_id"),
             "operation_id": stage.config.get("operation_id"),
         }

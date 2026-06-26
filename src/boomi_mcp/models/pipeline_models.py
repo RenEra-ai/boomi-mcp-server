@@ -37,9 +37,12 @@ ordering and unsupported failure modes.
 As of #70 (M5.2) there is exactly ONE lowering path from this contract to Boomi
 XML: the ``sync_pipeline`` process builder (``SyncPipelineBuilder`` in
 ``process_flow_builder.py``) lowers the verified-linear, all-``ordering`` subset
-— ``read(db_read) -> [map] -> send(rest_send)`` — into the proven
-``database_to_api_sync`` source/transform/target config. Every other stage kind
-(``fetch`` / ``write`` / ``lookup`` / ``combine`` / ``flow_control`` /
+into the proven ``database_to_api_sync`` source/transform/target config. The
+source stage is either ``read(db_read)`` (a DB Get) or — as of #72 (M5.4) —
+``fetch(rest_fetch)`` (a static REST GET source), followed by an optional
+``map`` and a ``send(rest_send)`` target:
+``read(db_read) | fetch(rest_fetch) -> [map] -> send(rest_send)``. Every other
+stage kind (``write`` / ``lookup`` / ``combine`` / ``flow_control`` /
 ``branch`` / ``decision`` / ``dataprocess`` / ``exception`` /
 ``doccacheretrieve`` / ``doccacheremove``) still has NO PipelineSpec->XML emitter
 and is rejected by that builder with a hint pointing at its owning issue. (Several

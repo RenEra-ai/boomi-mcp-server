@@ -210,7 +210,10 @@ class FieldMapPrimitive(PrimitivePattern):
 
     input_contract = PatternIOContract(
         name="database_extract_result",
-        description="Source profile binding and field index from an upstream extract.",
+        description=(
+            "Source profile binding and field index from an upstream "
+            "profile-backed source (db_extract or rest_fetch)."
+        ),
         profile_type="database",
         schema_={
             "type": "object",

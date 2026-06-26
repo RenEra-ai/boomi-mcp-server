@@ -54,6 +54,21 @@ def _send_stage(key="target", method="POST", **cfg):
     return {"key": key, "kind": "send", "config": config}
 
 
+# Issue #72 M5.4: a REST fetch source stage. Its $refs point at REST source
+# connection/operation keys (distinct from the DB source keys above).
+_FETCH_DEPS = ["rest_src_conn", "rest_src_op", "field_map", "rest_conn", "rest_op"]
+
+
+def _fetch_stage(key="source", **cfg):
+    config = {
+        "primitive": "rest_fetch",
+        "connection_id": "$ref:rest_src_conn",
+        "operation_id": "$ref:rest_src_op",
+    }
+    config.update(cfg)
+    return {"key": key, "kind": "fetch", "config": config}
+
+
 def _sync_config(stages, dependencies, **top):
     cfg = {"process_kind": "sync_pipeline", "pipeline": {"stages": stages, "dependencies": dependencies}}
     cfg.update(top)
@@ -236,6 +251,84 @@ def test_valid_no_map_validates_clean():
 
 
 # ---------------------------------------------------------------------------
+# REST fetch source stage (issue #72 M5.4)
+# ---------------------------------------------------------------------------
+
+
+def _fetch_with_map():
+    return _sync_config(
+        [_fetch_stage(), _map_stage(), _send_stage()],
+        [
+            {"from_stage": "source", "to_stage": "transform"},
+            {"from_stage": "transform", "to_stage": "target"},
+        ],
+    )
+
+
+def _fetch_no_map(method="POST"):
+    return _sync_config(
+        [_fetch_stage("s"), _send_stage("t", method=method)],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+
+
+def test_fetch_source_lowers_to_rest_get():
+    lowered = SyncPipelineBuilder.lower_config(_fetch_with_map())
+    assert lowered["source"] == {
+        "connector_type": "rest",
+        "action_type": "GET",
+        "connection_id": "$ref:rest_src_conn",
+        "operation_id": "$ref:rest_src_op",
+    }
+    assert lowered["transform"] == {"mode": "map_ref", "map_ref": "$ref:field_map"}
+
+
+def test_fetch_with_map_validates_clean():
+    assert _validate(_fetch_with_map(), depends_on=_FETCH_DEPS) is None
+
+
+def test_fetch_no_map_validates_clean():
+    assert _validate(_fetch_no_map(), depends_on=_FETCH_DEPS) is None
+
+
+def test_fetch_source_build_emits_rest_get_canonical_subtype():
+    xml = SyncPipelineBuilder.build(_fetch_no_map(), name="API Sync")
+    # Two connectoractions (REST source + REST target), no map shape.
+    assert xml.count('shapetype="connectoraction"') == 2
+    assert 'shapetype="map"' not in xml
+    # Source REST subtype kept mixed-case (the .lower() corruption guard) + GET.
+    from src.boomi_mcp.categories.components.builders.connector_builder import (
+        REST_CLIENT_SUBTYPE,
+    )
+    assert REST_CLIENT_SUBTYPE in xml
+    assert REST_CLIENT_SUBTYPE.lower() not in xml
+    assert 'actionType="GET"' in xml
+
+
+def test_db_read_on_fetch_stage_rejected():
+    # A fetch stage must declare rest_fetch, not db_read.
+    cfg = _sync_config(
+        [
+            {"key": "s", "kind": "fetch", "config": {"primitive": "db_read",
+             "connection_id": "$ref:rest_src_conn", "operation_id": "$ref:rest_src_op"}},
+            _send_stage("t"),
+        ],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_FETCH_DEPS)
+    assert err.error_code == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
+
+
+def test_non_get_fetch_action_type_rejected_by_delegate():
+    # rest_fetch is GET-only; a non-GET action_type is rejected by the delegate.
+    cfg = _sync_config(
+        [_fetch_stage("s", action_type="POST"), _send_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    assert _code(cfg, _FETCH_DEPS) == "PROCESS_CONNECTOR_BINDING_INVALID"
+
+
+# ---------------------------------------------------------------------------
 # Reserved stage kinds / primitives  -> SYNC_PIPELINE_STAGE_UNSUPPORTED
 # ---------------------------------------------------------------------------
 
@@ -243,7 +336,6 @@ def test_valid_no_map_validates_clean():
 @pytest.mark.parametrize(
     "kind,primitive,issue",
     [
-        ("fetch", "rest_fetch", "#72"),
         ("write", "db_write", "#32"),
         ("lookup", "lookup", None),
         ("combine", "combine", "#103"),
@@ -559,7 +651,8 @@ def test_build_raises_on_malformed_config_bypass():
 
 
 def test_build_raises_on_reserved_kind_bypass():
-    cfg = _sync_config([{"key": "s", "kind": "fetch", "config": {"primitive": "rest_fetch"}}], [])
+    # 'write' (db_write) remains a reserved kind (M5.6 #32) after fetch was added.
+    cfg = _sync_config([{"key": "s", "kind": "write", "config": {"primitive": "db_write"}}], [])
     with pytest.raises(BuilderValidationError) as exc:
         SyncPipelineBuilder.build(cfg, name="X")
     assert exc.value.error_code == "SYNC_PIPELINE_STAGE_UNSUPPORTED"

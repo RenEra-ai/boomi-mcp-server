@@ -39,6 +39,7 @@ from boomi_mcp.patterns.primitives import (
     DocumentCacheRemovePrimitive,
     DocumentCacheRetrievePrimitive,
     FieldMapPrimitive,
+    RestFetchPrimitive,
     ReturnDocumentsPrimitive,
     ThrowExceptionPrimitive,
     XmlJsonConvertPrimitive,
@@ -176,7 +177,7 @@ class TestRegistryAndMetadata:
 
     @pytest.mark.parametrize(
         "primitive",
-        [DbExtractPrimitive, FieldMapPrimitive, XmlJsonConvertPrimitive],
+        [DbExtractPrimitive, FieldMapPrimitive, XmlJsonConvertPrimitive, RestFetchPrimitive],
     )
     def test_describe_includes_contracts_and_builders(self, primitive):
         described = primitive.describe()
@@ -195,7 +196,7 @@ class TestRegistryAndMetadata:
 
     @pytest.mark.parametrize(
         "primitive",
-        [DbExtractPrimitive, FieldMapPrimitive, XmlJsonConvertPrimitive],
+        [DbExtractPrimitive, FieldMapPrimitive, XmlJsonConvertPrimitive, RestFetchPrimitive],
     )
     def test_no_raw_artifacts_in_describe(self, primitive):
         dumped = json.dumps(primitive.describe())
@@ -594,6 +595,31 @@ class TestFieldMap:
     def test_requires_at_least_one_operation(self):
         with pytest.raises(ValidationError):
             FieldMapPrimitive.validate_parameters(_field_map_params(direct=[]))
+
+    def test_rest_json_source_binding_feeds_map(self):
+        # Issue #72 M5.4: a rest_fetch JSON response is a profile.json source that
+        # feeds field_map through the same pipeline contract as a db_extract source.
+        rest_source_index = {
+            "Root/id": {"path": "Root/id", "name": "id", "data_type": "character", "mappable": True},
+            "Root/name": {"path": "Root/name", "name": "name", "data_type": "character", "mappable": True},
+        }
+        comps = _emit(
+            FieldMapPrimitive,
+            _field_map_params(
+                source={
+                    "source_profile_id": "$ref:cust_rest_operation",
+                    "source_profile_type": "profile.json",
+                    "source_field_index": rest_source_index,
+                },
+                direct=[
+                    {"source_field": "Root/id", "target_path": "Root/id"},
+                    {"source_field": "Root/name", "target_path": "Root/fullName"},
+                ],
+            ),
+        )
+        the_map = next(c for c in comps if c.type == "transform.map")
+        assert the_map.config["source_profile_type"] == "profile.json"
+        assert "cust_rest_operation" in the_map.depends_on
 
     def test_source_ref_added_to_map_depends_on(self):
         # A $ref source profile must appear in the map's depends_on so
