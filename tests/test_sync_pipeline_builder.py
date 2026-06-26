@@ -319,13 +319,29 @@ def test_db_read_on_fetch_stage_rejected():
     assert err.error_code == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
 
 
-def test_non_get_fetch_action_type_rejected_by_delegate():
-    # rest_fetch is GET-only; a non-GET action_type is rejected by the delegate.
+def test_non_get_fetch_action_type_rejected():
+    # rest_fetch is GET-only; a non-GET action_type is rejected (in lowering, so
+    # the error fires for both validate_config and a direct build()).
     cfg = _sync_config(
         [_fetch_stage("s", action_type="POST"), _send_stage("t")],
         [{"from_stage": "s", "to_stage": "t"}],
     )
-    assert _code(cfg, _FETCH_DEPS) == "PROCESS_CONNECTOR_BINDING_INVALID"
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_FETCH_DEPS)
+    assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+    assert err.field == "pipeline.stages[s].config.action_type"
+
+
+def test_build_raises_on_non_get_fetch_bypass():
+    # build() bypasses validate_config; the GET-only fetch constraint lives in
+    # lowering, so a direct build() of a POST fetch source still fails cleanly
+    # instead of emitting a REST source with actionType="POST".
+    cfg = _sync_config(
+        [_fetch_stage("s", action_type="POST"), _send_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    with pytest.raises(BuilderValidationError) as exc:
+        SyncPipelineBuilder.build(cfg, name="X")
+    assert exc.value.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
 
 
 def test_read_stage_connector_type_rest_rejected():

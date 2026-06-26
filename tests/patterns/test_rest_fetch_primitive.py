@@ -222,6 +222,17 @@ class TestResponseShape:
                 })
             )
 
+    def test_bare_ref_token_rejected(self):
+        # A bare '$ref:' (empty key) would publish an unresolvable output-shape ref.
+        with pytest.raises(ValidationError):
+            RestFetchPrimitive.validate_parameters(
+                _params(response={
+                    "profile_id": "$ref:",
+                    "profile_type": "profile.json",
+                    "field_index": {"a": {"data_type": "character"}},
+                })
+            )
+
 
 # ---------------------------------------------------------------------------
 # Operation slots (declared here; #96 binds them at runtime)
@@ -308,7 +319,20 @@ class TestPagination:
 
     def test_link_header_mode_defaults(self):
         frag = _fragment(_params(pagination={"mode": "link_header"}))
-        assert frag["metadata"]["rest_fetch"]["pagination"]["mode"] == "link_header"
+        pg = frag["metadata"]["rest_fetch"]["pagination"]
+        assert pg["mode"] == "link_header"
+        # The Link/next defaults are materialized so #96 knows which header +
+        # relation to follow even when the caller omits them.
+        assert pg["header_name"] == "Link"
+        assert pg["relation"] == "next"
+
+    def test_link_header_mode_honors_explicit_overrides(self):
+        frag = _fragment(
+            _params(pagination={"mode": "link_header", "header_name": "X-Next", "relation": "successor"})
+        )
+        pg = frag["metadata"]["rest_fetch"]["pagination"]
+        assert pg["header_name"] == "X-Next"
+        assert pg["relation"] == "successor"
 
     def test_page_mode_requires_page_parameter(self):
         with pytest.raises(ValidationError):

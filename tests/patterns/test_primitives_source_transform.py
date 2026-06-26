@@ -607,7 +607,9 @@ class TestFieldMap:
             FieldMapPrimitive,
             _field_map_params(
                 source={
-                    "source_profile_id": "$ref:cust_rest_operation",
+                    # A rest_fetch response binds to a profile component (the
+                    # explicit output shape), not the connector-action itself.
+                    "source_profile_id": "$ref:cust_rest_response_profile",
                     "source_profile_type": "profile.json",
                     "source_field_index": rest_source_index,
                 },
@@ -619,7 +621,7 @@ class TestFieldMap:
         )
         the_map = next(c for c in comps if c.type == "transform.map")
         assert the_map.config["source_profile_type"] == "profile.json"
-        assert "cust_rest_operation" in the_map.depends_on
+        assert "cust_rest_response_profile" in the_map.depends_on
 
     def test_source_ref_added_to_map_depends_on(self):
         # A $ref source profile must appear in the map's depends_on so

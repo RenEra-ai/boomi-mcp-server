@@ -184,6 +184,14 @@ class RestFetchResponseShape(BaseModel):
     def _require_non_blank_and_non_empty(self) -> "RestFetchResponseShape":
         if not self.profile_id or not self.profile_id.strip():
             raise ValueError("response.profile_id must be a non-blank '$ref:KEY' or profile UUID")
+        # A '$ref:' token must name a non-empty key — a bare '$ref:' would publish
+        # an unresolvable output-shape reference (ref_key() yields None, so it is
+        # neither added to depends_on nor resolvable at apply time).
+        stripped = self.profile_id.strip()
+        if stripped.startswith("$ref:") and not stripped[len("$ref:"):].strip():
+            raise ValueError(
+                "response.profile_id '$ref:' token must name a non-empty key ('$ref:KEY')"
+            )
         if not self.field_index:
             raise ValueError("response.field_index must be a non-empty per-leaf index")
         return self
@@ -259,6 +267,21 @@ class PaginationMeta(BaseModel):
                     mode=self.mode,
                 )
         return self
+
+    def resolved(self) -> Dict[str, Any]:
+        """Materialize the metadata with mode-appropriate defaults.
+
+        ``link_header`` mode carries default ``header_name="Link"`` /
+        ``relation="next"`` so #96 knows which response header + link relation to
+        follow even when the caller omits them. (The fields cannot default on the
+        model itself — a static default would make the cross-mode validator reject
+        them under every other mode.) Other modes dump verbatim.
+        """
+        dumped = self.model_dump(exclude_none=True)
+        if self.mode == "link_header":
+            dumped.setdefault("header_name", "Link")
+            dumped.setdefault("relation", "next")
+        return dumped
 
 
 class ConditionalRequestMeta(BaseModel):
@@ -515,7 +538,7 @@ class RestFetchPrimitive(PrimitivePattern):
                         "profile_type": params.response.profile_type,
                         "field_index": params.response.field_index,
                     },
-                    "pagination": params.pagination.model_dump(exclude_none=True),
+                    "pagination": params.pagination.resolved(),
                     "conditional_request": params.conditional_request.resolved(),
                     "operation_slots": cls._slot_metadata(params),
                     # A REST GET inherits the upstream document as its request body

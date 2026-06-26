@@ -4878,6 +4878,23 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             "connection_id": stage.config.get("connection_id"),
             "operation_id": stage.config.get("operation_id"),
         }
+        # A fetch (rest_fetch) source is GET-only (M5.4 #72). Enforce it HERE in the
+        # shared lowering so both validate_config AND a direct build() stay total —
+        # build() delegates to ProcessFlowBuilder.build() WITHOUT re-running the
+        # binding validators, so a non-GET fetch caught only by _validate_source_
+        # binding would still emit on the validate_config-bypass path. Raise the same
+        # PROCESS_CONNECTOR_BINDING_INVALID code the delegate uses so the validate
+        # path's error is unchanged (just surfaced one step earlier).
+        if stage.kind == "fetch":
+            action_value = binding["action_type"]
+            if action_value is not None and str(action_value).strip().upper() != "GET":
+                raise BuilderValidationError(
+                    f"sync_pipeline fetch stage {stage.key!r} action_type must be "
+                    f"'GET' (rest_fetch is GET-only, M5.4 #72); got {action_value!r}.",
+                    error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                    field=f"pipeline.stages[{stage.key}].config.action_type",
+                    hint="A fetch source is a REST GET; other verbs model a source-side write, which is out of scope.",
+                )
         if "label" in stage.config:
             binding["label"] = stage.config["label"]
         return binding
