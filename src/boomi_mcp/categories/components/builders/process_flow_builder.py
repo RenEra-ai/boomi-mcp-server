@@ -1600,9 +1600,17 @@ def _validate_dynamic_path(
     if dynamic_seg_count == 0:
         return err
     # request_profile_id is consumed only by profile segments (one shared profile).
+    rpid = dynamic_path.get("request_profile_id")
     if profile_segments:
-        rpid = dynamic_path.get("request_profile_id")
         if not isinstance(rpid, str) or not rpid.strip():
+            return err
+    else:
+        # A ddp/dpp-only path carries no profile, so request_profile_id must be
+        # None/absent (the lowered shape rest_fetch/rest_send produce). Any present,
+        # non-blank value is contradictory — a stray UUID string OR a malformed
+        # non-string (123/true) — and would (absent the emitter guard) bind a
+        # parameter-profile with no matching <profileelement>. Reject it at plan time.
+        if rpid is not None and str(rpid).strip():
             return err
     return None
 
@@ -3008,10 +3016,20 @@ def _emit_connectoraction(
     if isinstance(dynamic_path, dict) and dynamic_path:
         ddp_name = _escape_xml(str(dynamic_path.get("ddp_name") or "").strip())
         profile_id = _escape_xml(str(dynamic_path.get("request_profile_id") or "").strip())
-        # parameter-profile binds the connector step to the request/path profile.
-        # A ddp/dpp-only path (#96 §H) carries no profile, so omit the attribute
-        # rather than emit an empty parameter-profile="" (mirrors absent dynamic_path).
-        parameter_profile_attr = f' parameter-profile="{profile_id}"' if profile_id else ''
+        # parameter-profile binds the connector step to the request/path profile, and
+        # is meaningful only when a <profileelement> segment exists. A ddp/dpp-only
+        # path (#96 §H) carries no profile, so omit the attribute rather than emit an
+        # empty parameter-profile="" (no request_profile_id) or a bogus binding with
+        # no matching profile segment (validate_config bypass). Mirrors absent
+        # dynamic_path. validate_config already rejects a stray request_profile_id on
+        # a profile-less path; this keeps build() total if that gate is bypassed.
+        has_profile_segment = any(
+            isinstance(seg, dict) and seg.get("type") == "profile"
+            for seg in (dynamic_path.get("segments") or [])
+        )
+        parameter_profile_attr = (
+            f' parameter-profile="{profile_id}"' if (profile_id and has_profile_segment) else ''
+        )
         inner = (
             '<parameters/>'
             '<dynamicProperties>'

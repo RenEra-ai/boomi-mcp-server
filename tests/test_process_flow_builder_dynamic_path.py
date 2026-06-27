@@ -274,6 +274,49 @@ def test_profile_segment_without_request_profile_id_rejected():
     assert err.error_code == "PROCESS_PATH_REPLACEMENT_INVALID"
 
 
+def test_ddp_dpp_only_path_with_stray_request_profile_id_rejected():
+    # A ddp/dpp-only path carries no profile; a stray request_profile_id (e.g.
+    # copied from the old required shape) is contradictory — it would emit a
+    # parameter-profile with no matching profileelement. Reject at plan time.
+    bad = _ddp_dynamic_path()
+    bad["request_profile_id"] = "STALE-PROFILE-UUID"
+    err = ProcessFlowBuilder.validate_config(_config(dynamic_path=bad), depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_PATH_REPLACEMENT_INVALID"
+
+
+def test_ddp_dpp_only_path_with_nonstring_stray_request_profile_id_rejected():
+    # None/absent is the only valid shape on a profile-less path — a malformed
+    # NON-string stray value (123 / True / a list) is contradictory too and must
+    # not slip past validate_config just because it is not a string.
+    for stray in (123, True, ["x"], {"k": "v"}, 0):
+        bad = _ddp_dynamic_path()
+        bad["request_profile_id"] = stray
+        err = ProcessFlowBuilder.validate_config(_config(dynamic_path=bad), depends_on=[])
+        assert err is not None, f"non-string stray {stray!r} should be rejected"
+        assert err.error_code == "PROCESS_PATH_REPLACEMENT_INVALID"
+
+
+def test_ddp_dpp_only_path_blank_request_profile_id_accepted():
+    # A blank string is treated as absent (the emitter emits no parameter-profile),
+    # so it validates clean — only a meaningful (non-blank) value is contradictory.
+    for blank in (None, "", "   "):
+        ok = _ddp_dynamic_path()
+        ok["request_profile_id"] = blank
+        err = ProcessFlowBuilder.validate_config(_config(dynamic_path=ok), depends_on=[])
+        assert err is None, f"blank request_profile_id {blank!r} should validate clean"
+
+
+def test_ddp_dpp_only_path_stray_request_profile_id_not_emitted_on_bypass():
+    # Defense-in-depth: even if validate_config is bypassed, build() must not emit a
+    # parameter-profile for a profile-less path (no <profileelement> to bind to).
+    bad = _ddp_dynamic_path()
+    bad["request_profile_id"] = "STALE-PROFILE-UUID"
+    xml = ProcessFlowBuilder.build(_config(dynamic_path=bad), name="P")
+    assert "STALE-PROFILE-UUID" not in xml
+    assert "parameter-profile" not in xml
+
+
 def test_xml_well_formed_with_ddp_dpp_segments():
     xml = ProcessFlowBuilder.build(_config(dynamic_path=_ddp_dynamic_path()), name="P")
     ET.fromstring(xml)
