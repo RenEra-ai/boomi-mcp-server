@@ -1002,3 +1002,115 @@ class TestComposition:
             self._process_config(reliability), depends_on=[]
         )
         assert err is None
+
+
+# ===========================================================================
+# Issue #96 (M5.4a) — send-side runtime bindings + slots
+# ===========================================================================
+
+
+def _send_profile_source(**overrides):
+    src = {
+        "kind": "profile_field",
+        "profile_id": "$ref:cust_req_profile",
+        "profile_type": "profile.json",
+        "element_id": "3",
+        "element_name": "clientId (Root/clientId)",
+    }
+    src.update(overrides)
+    return src
+
+
+class TestRestSendRuntimeBindings:
+    def test_query_header_slots_validate_bindings(self):
+        frag = _fragment(
+            RestSendWithRetryPrimitive,
+            _rest_create_params(
+                operation={"method": "POST", "path": "/resource"},
+                query_parameter_slots=[{"name": "dryRun"}],
+                request_header_slots=[{"name": "X-Tenant"}],
+                runtime_bindings=[
+                    {"location": "query_parameter", "slot": "dryRun",
+                     "source": {"kind": "static", "value": "true"}},
+                    {"location": "request_header", "slot": "X-Tenant",
+                     "source": {"kind": "dpp", "property_name": "tenant"}},
+                ],
+            ),
+        )
+        pending = frag["metadata"]["runtime_bindings_pending"]
+        assert pending["emission_status"] == "pending_live_verify"
+        assert {b["location"] for b in pending["bindings"]} == {
+            "query_parameter",
+            "request_header",
+        }
+        # No path binding -> the target carries no dynamic_path.
+        assert "dynamic_path" not in frag["process_config"]["target"]
+
+    def test_path_replacements_alone_still_backwards_compatible(self):
+        # No runtime_bindings -> nothing changes vs the #100 path_replacements path.
+        frag = _fragment(
+            RestSendWithRetryPrimitive,
+            _rest_create_params(
+                operation={
+                    "method": "PATCH",
+                    "path": "/clients/{clientId}",
+                    "path_replacements": [
+                        {"name": "clientId", "target_path": "Root/clientId"}
+                    ],
+                }
+            ),
+        )
+        assert "runtime_bindings" not in frag.get("metadata", {})
+        assert "dynamic_path" not in frag["process_config"]["target"]
+
+    def test_path_replacements_plus_path_runtime_binding_conflict(self):
+        with pytest.raises(ValidationError):
+            RestSendWithRetryPrimitive.validate_parameters(
+                _rest_create_params(
+                    operation={
+                        "method": "PATCH",
+                        "path": "/clients/{clientId}",
+                        "path_replacements": [
+                            {"name": "clientId", "target_path": "Root/clientId"}
+                        ],
+                    },
+                    path_slots=[{"name": "clientId"}],
+                    runtime_bindings=[
+                        {"location": "path", "slot": "clientId",
+                         "source": _send_profile_source()},
+                    ],
+                )
+            )
+
+    def test_path_runtime_binding_lowers_and_blanks_path(self):
+        params = _rest_create_params(
+            operation={"method": "PATCH", "path": "/clients/{clientId}"},
+            path_slots=[{"name": "clientId"}],
+            runtime_bindings=[
+                {"location": "path", "slot": "clientId", "source": _send_profile_source()},
+            ],
+        )
+        frag = _fragment(RestSendWithRetryPrimitive, params)
+        dyn = frag["process_config"]["target"]["dynamic_path"]
+        assert dyn["segments"][-1] == {
+            "type": "profile",
+            "element_id": "3",
+            "element_name": "clientId (Root/clientId)",
+        }
+        op = next(
+            s for s in _emit(RestSendWithRetryPrimitive, params)
+            if s.type == "connector-action"
+        )
+        assert op.config["path"] == ""
+
+    def test_query_binding_missing_slot_rejected(self):
+        with pytest.raises(ValidationError):
+            RestSendWithRetryPrimitive.validate_parameters(
+                _rest_create_params(
+                    operation={"method": "POST", "path": "/resource"},
+                    runtime_bindings=[
+                        {"location": "query_parameter", "slot": "dryRun",
+                         "source": {"kind": "static", "value": "true"}},
+                    ],
+                )
+            )

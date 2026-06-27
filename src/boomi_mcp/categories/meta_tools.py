@@ -3787,6 +3787,18 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         "step, not in the operation XML — connection_ref_key is plan-only "
         "metadata for dependency ordering."
     ),
+    "runtime_binding_note": (
+        "Issue #96 (M5.4a): query_parameters / request_headers here are STATIC "
+        "name/value maps baked into the operation. Per-document RUNTIME values "
+        "are a process-step concern, expressed via runtime_bindings on the "
+        "rest_fetch / rest_send primitive (each binding fills a declared path / "
+        "query_parameter / request_header slot with a static / ddp / dpp / "
+        "profile_field source). A PATH runtime binding lowers into the live-proven "
+        "dynamic_path block the process-flow builder emits as the connector step's "
+        "'Path' dynamic operation property (a blank operation path); query/header "
+        "and DDP/DPP runtime XML are validated but pending_live_verify until a live "
+        "REST Client fixture pins the exact dynamicProperties keys/names."
+    ),
     "template": {
         "component_type": "connector-action",
         "connector_type": "rest",

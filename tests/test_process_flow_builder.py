@@ -3219,3 +3219,70 @@ def test_flow_control_composes_with_reliability_try_catch():
     shapetypes = [s.attrib["shapetype"] for s in shapes]
     assert "flowcontrol" in shapetypes
     assert "catcherrors" in shapetypes
+
+
+# ---------------------------------------------------------------------------
+# Issue #96 M5.4a — runtime_bindings gating + Branch/Decision composition
+# ---------------------------------------------------------------------------
+
+
+_RB = [{"location": "query_parameter", "slot": "x",
+        "source": {"kind": "static", "value": "1"}}]
+
+
+def test_target_runtime_bindings_rejected_unverified():
+    # The builder emits a path binding via dynamic_path; a raw runtime_bindings
+    # block (query/header/DDP/DPP) is gated, never silently dropped.
+    err = ProcessFlowBuilder.validate_config(
+        _base_config(target={**_base_config()["target"], "runtime_bindings": _RB})
+    )
+    assert err is not None and err.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+    assert err.field == "target.runtime_bindings"
+
+
+def test_source_runtime_bindings_rejected_unverified():
+    rest_source = {
+        "connector_type": "rest",
+        "connection_id": _REST_CONN_ID,
+        "operation_id": _REST_OP_ID,
+        "action_type": "GET",
+        "runtime_bindings": _RB,
+    }
+    err = ProcessFlowBuilder.validate_config(
+        _base_config(source=rest_source), allow_rest_source=True
+    )
+    assert err is not None and err.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+    assert err.field == "source.runtime_bindings"
+
+
+def test_runtime_bindings_rejected_under_branch():
+    err = ProcessFlowBuilder.validate_config(
+        _branch_config(target={**_base_config()["target"], "runtime_bindings": _RB})
+    )
+    assert err is not None and err.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+    assert err.field == "target.runtime_bindings"
+
+
+def test_branch_leg_runtime_bindings_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _branch_config(targets=[_branch_leg(runtime_bindings=_RB)])
+    )
+    assert err is not None and err.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+    assert err.field == "branch.targets[0].runtime_bindings"
+
+
+def test_runtime_bindings_rejected_under_decision():
+    err = ProcessFlowBuilder.validate_config(
+        _decision_config(target={**_base_config()["target"], "runtime_bindings": _RB})
+    )
+    assert err is not None and err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+    assert err.field == "target.runtime_bindings"
+
+
+def test_runtime_bindings_build_bypass_raises_under_branch():
+    # validate_config-bypass: build() funnels through the same branch guard, so a
+    # runtime_bindings + Branch composition raises rather than silently dropping.
+    cfg = _branch_config(target={**_base_config()["target"], "runtime_bindings": _RB})
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert exc.value.error_code == "PROCESS_BRANCH_CONFIG_INVALID"

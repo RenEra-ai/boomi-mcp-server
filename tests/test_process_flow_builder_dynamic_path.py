@@ -233,3 +233,62 @@ def test_connector_scoped_setproperties_inside_target_retry():
     # The map must NOT route directly to the target connector (it is separated by
     # the target catcherrors + Set Properties).
     assert shapes[map_names[0]][1] == [tgt_ce]
+
+
+# ---------------------------------------------------------------------------
+# Issue #96 M5.4a — source-side dynamic path emission (mirror of the target)
+# ---------------------------------------------------------------------------
+
+
+def _rest_source_config(source_dynamic_path):
+    return {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "rest",
+            "action_type": "GET",
+            "connection_id": "RCONN",
+            "operation_id": "ROP",
+            "dynamic_path": source_dynamic_path,
+        },
+        "transform": {"mode": "map_ref", "map_ref": "MAP-UUID"},
+        "target": {
+            "connector_type": "rest",
+            "action_type": "PATCH",
+            "connection_id": "CONN-UUID",
+            "operation_id": "OP-UUID",
+        },
+    }
+
+
+def test_source_dynamic_path_emits_setproperties_before_source():
+    xml = ProcessFlowBuilder.build(_rest_source_config(_dynamic_path()), name="P")
+    root = ET.fromstring(xml)
+
+    # Exactly one Set Properties shape (the source path DDP); target is static.
+    dps = [s for s in root.iter("shape") if s.get("shapetype") == "documentproperties"]
+    assert len(dps) == 1
+    prop = dps[0].find(".//documentproperty")
+    assert prop.get("propertyId") == "dynamicdocument.DDP_PATH_CLIENTS"
+
+    # The GET source connectoraction emits the live-proven "Path" property; the
+    # PATCH target connectoraction stays empty.
+    actions = {c.get("actionType"): c for c in root.iter("connectoraction")}
+    src_props = actions["GET"].findall(".//dynamicProperties/propertyvalue")
+    assert len(src_props) == 1
+    assert src_props[0].get("key") == "path" and src_props[0].get("name") == "Path"
+    assert src_props[0].get("valueType") == "track"
+    assert actions["PATCH"].findall(".//dynamicProperties/propertyvalue") == []
+
+    # Set Properties is positioned before the source connector in the shape order.
+    order = [s.get("shapetype") for s in root.iter("shape")]
+    assert order.index("documentproperties") < order.index("connectoraction")
+
+
+def test_source_without_dynamic_path_emits_empty_source_connectoraction():
+    cfg = _rest_source_config(_dynamic_path())
+    cfg["source"].pop("dynamic_path")
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    root = ET.fromstring(xml)
+    assert not [s for s in root.iter("shape") if s.get("shapetype") == "documentproperties"]
+    actions = {c.get("actionType"): c for c in root.iter("connectoraction")}
+    assert actions["GET"].findall(".//dynamicProperties/propertyvalue") == []

@@ -696,12 +696,33 @@ class ProcessFlowBuilder:
         # uppercased verb, matching the REST target emission convention.
         source_canonical_type = _canonical_connector_type(source.get("connector_type"))
         source_action_raw = str(source.get("action_type") or "").strip()
-        if _resolve_rest_connector_type(source.get("connector_type")) is not None:
+        source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
+        if source_is_rest:
             source_connector_type = source_canonical_type
             source_action_type = source_action_raw.upper()
         else:
             source_connector_type = source_canonical_type.lower()
             source_action_type = source_action_raw
+        # Issue #96 M5.4a: a REST source carrying a dynamic_path block (lowered from
+        # a rest_fetch path runtime_binding) gets a Set Properties shape building the
+        # path DDP BEFORE the source connector, and the source connectoraction emits
+        # the matching "Path" dynamic operation property — the same proven mechanism
+        # the #100 target path uses, applied to the source connectoraction (which
+        # otherwise emits empty <parameters/><dynamicProperties/>). Absent dynamic_
+        # path, the source flow is byte-for-byte unchanged.
+        source_dynamic_path = (
+            source.get("dynamic_path") if isinstance(source.get("dynamic_path"), dict) else None
+        )
+        if source_is_rest and source_dynamic_path:
+            flow.append((
+                "setproperties",
+                {
+                    "ddp_name": str(source_dynamic_path.get("ddp_name") or "").strip(),
+                    "request_profile_id": str(source_dynamic_path.get("request_profile_id") or "").strip(),
+                    "profile_type": str(source_dynamic_path.get("profile_type") or "profile.json").strip(),
+                    "segments": source_dynamic_path.get("segments") or [],
+                },
+            ))
         flow.append((
             "connectoraction_source",
             {
@@ -710,6 +731,7 @@ class ProcessFlowBuilder:
                 "connection_id": str(source.get("connection_id") or "").strip(),
                 "operation_id": str(source.get("operation_id") or "").strip(),
                 "userlabel": str(source.get("label") or ""),
+                "dynamic_path": source_dynamic_path if source_is_rest else None,
             },
         ))
         # Issue #111 M10.7: Flow Control (per-document batching) shape. Run the
@@ -1365,7 +1387,14 @@ def _validate_source_binding(
                     "depends_on)."
                 ),
             )
-    return None
+    # Issue #96 M5.4a: a REST source may carry a lowered dynamic_path (a path
+    # runtime binding); validate it with the same shape contract the target uses,
+    # and gate any raw runtime_bindings block (query/header/DDP/DPP) the builder
+    # does not emit as process XML.
+    dyn_err = _validate_dynamic_path(source.get("dynamic_path"), field_prefix="source")
+    if dyn_err is not None:
+        return dyn_err
+    return _validate_runtime_bindings_gate(source, "source")
 
 
 def _validate_target_binding(
@@ -1419,7 +1448,40 @@ def _validate_target_binding(
                     "depends_on)."
                 ),
             )
-    return _validate_dynamic_path(target.get("dynamic_path"), field_prefix=field_prefix)
+    dyn_err = _validate_dynamic_path(target.get("dynamic_path"), field_prefix=field_prefix)
+    if dyn_err is not None:
+        return dyn_err
+    return _validate_runtime_bindings_gate(target, field_prefix)
+
+
+def _validate_runtime_bindings_gate(
+    binding: Any, field_prefix: str
+) -> Optional[BuilderValidationError]:
+    """Reject a raw ``runtime_bindings`` block in a source/target binding (#96 M5.4a).
+
+    The builder emits a PATH runtime binding via a lowered ``dynamic_path`` block
+    (the live-proven #100 mechanism). It does NOT emit query/header or DDP/DPP
+    runtime XML — a primitive keeps those in ``pending_live_verify`` metadata. So a
+    ``runtime_bindings`` key reaching the builder is either hand-authored or an
+    un-emittable binding; gate it as ``PROCESS_RUNTIME_BINDING_UNVERIFIED`` rather
+    than silently dropping it. Absent / empty is a no-op (the normal lowered path).
+    """
+    if not isinstance(binding, dict):
+        return None
+    if binding.get("runtime_bindings"):
+        return BuilderValidationError(
+            f"{field_prefix}.runtime_bindings is not emitted as process XML.",
+            error_code="PROCESS_RUNTIME_BINDING_UNVERIFIED",
+            field=f"{field_prefix}.runtime_bindings",
+            hint=(
+                "A path runtime binding is emitted via a lowered dynamic_path "
+                "block; query/header and DDP/DPP runtime XML are pending a live "
+                "REST Client fixture (QA live-verify). Express a path binding "
+                "through the rest_fetch/rest_send primitive so it lowers to "
+                "dynamic_path."
+            ),
+        )
+    return None
 
 
 def _validate_dynamic_path(
@@ -1708,18 +1770,67 @@ def _validate_branch_config(config: Dict[str, Any]) -> Optional[BuilderValidatio
     return None
 
 
+def _runtime_binding_composition_error(
+    config: Dict[str, Any], *, error_code: str, feature: str
+) -> Optional[BuilderValidationError]:
+    """Reject #96 runtime bindings / source dynamic path under a branch/decision.
+
+    v1 does not compose a runtime binding (a source ``dynamic_path``, or any
+    source/target/leg ``runtime_bindings`` block) with a Branch fan-out or a
+    Decision route — each changes the shape graph and needs its own live capture.
+    ``feature`` names the composing block (``'a branch fan-out'`` / ``'a decision'``)
+    for the message; ``error_code`` is the owning block's config-invalid code.
+    Shared by ``validate_config`` and ``build()`` so the two cannot diverge.
+    """
+    source = config.get("source")
+    if isinstance(source, dict) and source.get("dynamic_path") is not None:
+        return BuilderValidationError(
+            f"source.dynamic_path is not supported together with {feature} in v1.",
+            error_code=error_code,
+            field="source.dynamic_path",
+            hint="Remove the source runtime path binding, or drop the composing block.",
+        )
+    for loc in ("source", "target"):
+        binding = config.get(loc)
+        if isinstance(binding, dict) and binding.get("runtime_bindings"):
+            return BuilderValidationError(
+                f"{loc}.runtime_bindings is not supported together with {feature} in v1.",
+                error_code=error_code,
+                field=f"{loc}.runtime_bindings",
+                hint="Remove the runtime_bindings, or drop the composing block.",
+            )
+    branch = config.get("branch") if isinstance(config.get("branch"), dict) else {}
+    legs = branch.get("targets")
+    if isinstance(legs, list):
+        for i, leg in enumerate(legs):
+            if isinstance(leg, dict) and leg.get("runtime_bindings"):
+                return BuilderValidationError(
+                    f"branch.targets[{i}].runtime_bindings is not supported in "
+                    f"{feature} in v1.",
+                    error_code=error_code,
+                    field=f"branch.targets[{i}].runtime_bindings",
+                    hint="Branch legs are plain REST targets in v1; remove the per-leg runtime_bindings.",
+                )
+    return None
+
+
 def _branch_unsupported_combo_error(
     config: Dict[str, Any]
 ) -> Optional[BuilderValidationError]:
     """v1 Branch composition guard (issue #112 M10.8).
 
     Branch fan-out v1 emits plain ``target -> Stop`` legs. It does not yet compose
-    with a dynamic REST path, a Try/Catch reliability wrapper, or a Return
-    Documents terminal — each would change the per-leg sub-flow shape and needs
-    its own live capture + tests. Returning a structured error here (rather than
-    silently ignoring the combination) is shared by ``validate_config`` (surfaces
-    it) and ``build()`` (raises it for totality on a validate_config bypass).
+    with a dynamic REST path, a Try/Catch reliability wrapper, a Return Documents
+    terminal, or a #96 runtime binding — each would change the per-leg sub-flow
+    shape and needs its own live capture + tests. Returning a structured error here
+    (rather than silently ignoring the combination) is shared by ``validate_config``
+    (surfaces it) and ``build()`` (raises it for totality on a validate_config bypass).
     """
+    rb_err = _runtime_binding_composition_error(
+        config, error_code="PROCESS_BRANCH_CONFIG_INVALID", feature="a branch fan-out"
+    )
+    if rb_err is not None:
+        return rb_err
     target = config.get("target")
     if isinstance(target, dict) and target.get("dynamic_path") is not None:
         return BuilderValidationError(
@@ -1911,6 +2022,11 @@ def _decision_unsupported_combo_error(
             field="branch",
             hint="Drop the branch block to use a Decision, or drop the decision block to fan out.",
         )
+    rb_err = _runtime_binding_composition_error(
+        config, error_code="PROCESS_DECISION_CONFIG_INVALID", feature="a decision"
+    )
+    if rb_err is not None:
+        return rb_err
     target = config.get("target")
     if isinstance(target, dict) and target.get("dynamic_path") is not None:
         return BuilderValidationError(
@@ -5071,7 +5187,9 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                 hint=(
                     "Allowed keys: "
                     f"{sorted(_SYNC_PIPELINE_BINDING_KEYS)}. Gated sub-blocks "
-                    "(e.g. dynamic_path, reliability) are not lowered in M5.2."
+                    "(e.g. dynamic_path, reliability, runtime_bindings) are not "
+                    "lowered by the thin sync_pipeline stage — express a #96 "
+                    "runtime binding on the rest_fetch/rest_send operation config."
                 ),
             )
         # A read (db_read) source is always a Get; a fetch (rest_fetch) source is

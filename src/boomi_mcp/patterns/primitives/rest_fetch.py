@@ -14,12 +14,15 @@ It also emits a process *fragment* (``emit_fragment``) describing the REST sourc
 binding plus the explicit output shape, pagination/conditional-request metadata,
 and the operation slot declarations.
 
-Scope (M5.4, #72): executable fetches are static REST ``GET`` source stages with
-NO connector-step parameters and NO ``dynamicProperties``. The runtime binding
-that fills the declared param/header/path slots with per-document values via
-``dynamicProperties`` is owned by #96 (M5.4a); this primitive only validates and
-records the slot metadata. Pagination and conditional-request behavior are carried
-as validated config/metadata, never canned request templates or process loops.
+Scope (M5.4, #72): #72 declares the param/header/path slots. Issue #96 (M5.4a)
+adds the ``runtime_bindings`` that fill those slots: a **path** binding lowers into
+the live-proven ``dynamic_path`` block (Set Properties DDP + connector-step "Path"
+dynamic operation property), which the process-flow builder emits as non-empty
+``dynamicProperties``; query/header bindings (and ddp/dpp path sources) are validated
+and carried as ``pending_live_verify`` metadata until QA captures the exact REST
+Client dynamic operation property XML — never a guessed emission. Pagination and
+conditional-request behavior are carried as validated config/metadata, never canned
+request templates or process loops.
 
 Like the other source/transform primitives, this emits JSON
 ``IntegrationComponentSpec`` objects only — every byte of XML and all structured
@@ -67,7 +70,15 @@ from ._helpers import (
     primitive_component_key,
     raise_for_builder_error,
     ref_key,
+    slugify,
     value_looks_secret,
+)
+from .rest_runtime import (
+    OperationSlot,
+    RuntimeBinding,
+    path_bindings_to_dynamic_path,
+    pending_runtime_bindings,
+    validate_runtime_bindings,
 )
 from .rest_send import RestConnection, RestSendComponentNames
 
@@ -197,16 +208,6 @@ class RestFetchResponseShape(BaseModel):
         if not self.field_index:
             raise ValueError("response.field_index must be a non-empty per-leaf index")
         return self
-
-
-class OperationSlot(BaseModel):
-    """One declared param/header/path slot on the REST operation (#96 binds it)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    required: bool = True
-    description: Optional[str] = None
 
 
 class PaginationMeta(BaseModel):
@@ -382,6 +383,10 @@ class RestFetchParameters(BaseModel):
     path_slots: Optional[List[OperationSlot]] = Field(default=None)
     query_parameter_slots: Optional[List[OperationSlot]] = Field(default=None)
     request_header_slots: Optional[List[OperationSlot]] = Field(default=None)
+    # Issue #96 (M5.4a): runtime values bound into the declared slots above. Path
+    # bindings lower into the live-proven dynamic_path block; query/header bindings
+    # are validated and carried as pending_live_verify metadata.
+    runtime_bindings: Optional[List[RuntimeBinding]] = Field(default=None)
     pagination: PaginationMeta = Field(default_factory=PaginationMeta)
     conditional_request: ConditionalRequestMeta = Field(
         default_factory=ConditionalRequestMeta
@@ -405,6 +410,14 @@ class RestFetchParameters(BaseModel):
             self.request_header_slots,
             path_tokens=None,
             static_keys=set((self.operation.request_headers or {}).keys()),
+        )
+        # Issue #96: validate each runtime binding against the declared slots.
+        validate_runtime_bindings(
+            self.runtime_bindings,
+            path_slots=self.path_slots,
+            query_parameter_slots=self.query_parameter_slots,
+            request_header_slots=self.request_header_slots,
+            path_tokens=path_tokens,
         )
         return self
 
@@ -463,10 +476,11 @@ class RestFetchPrimitive(PrimitivePattern):
         description=(
             "Materialize the REST fetch source group (connection, execute GET "
             "operation) from caller config and emit a process source fragment "
-            "with an explicit output shape. Pagination / conditional-request "
-            "behavior and operation param/header/path slots are recorded as "
-            "validated metadata only (no request templates, no dynamicProperties "
-            "— runtime slot binding is owned by #96). Emits JSON component specs "
+            "with an explicit output shape. Declares operation param/header/path "
+            "slots (#72) and binds them with runtime_bindings (#96): a path "
+            "binding lowers into the live-proven dynamic_path block the builder "
+            "emits as dynamicProperties; query/header bindings are validated and "
+            "carried as pending_live_verify metadata. Emits JSON component specs "
             "for the existing REST Client builders; never authors paths or calls "
             "a live API."
         ),
@@ -474,11 +488,12 @@ class RestFetchPrimitive(PrimitivePattern):
         use_cases=[
             "Read records from a REST API source via a created connection",
             "Reuse an existing REST connection as a fetch source",
+            "Bind a per-document REST path via a profile-field runtime binding (#96)",
         ],
         not_for=[
             "Database or file sources (use db_extract)",
             "REST writes / non-GET methods (fetch is GET-only in M5.4)",
-            "Runtime slot value binding / dynamicProperties (owned by #96, M5.4a)",
+            "Query/header or DDP/DPP runtime XML emission (validated but pending live verify, #96)",
         ],
     )
     parameters_model = RestFetchParameters
@@ -546,28 +561,49 @@ class RestFetchPrimitive(PrimitivePattern):
             "action_type": "GET",
             "label": f"{context.component_prefix} REST Fetch",
         }
+        # Issue #96: lower path runtime bindings into the live-proven dynamic_path
+        # block (Set Properties DDP + connector-step "Path" property). A ddp/dpp
+        # path source or an all-static path raises PROCESS_RUNTIME_BINDING_UNVERIFIED
+        # — plan-time failure, never a guessed emission. Query/header bindings stay
+        # in pending metadata (not yet live-proven for this REST Client subtype).
+        dynamic_path = path_bindings_to_dynamic_path(
+            params.runtime_bindings,
+            path_template=params.operation.path,
+            ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
+        )
+        if dynamic_path is not None:
+            source["dynamic_path"] = dynamic_path
+        rest_fetch_meta: Dict[str, Any] = {
+            "output_shape": {
+                "profile_id": params.response.profile_id,
+                "profile_type": params.response.profile_type,
+                "field_index": params.response.field_index,
+            },
+            "pagination": params.pagination.resolved(),
+            "conditional_request": params.conditional_request.resolved(),
+            "operation_slots": cls._slot_metadata(params),
+            # A REST GET inherits the upstream document as its request body
+            # and some APIs reject GET-with-body; the fetch guarantees an
+            # EMPTY request document (the source connectoraction emits empty
+            # <parameters/><dynamicProperties/> when no path binding is set).
+            "request_document": "empty",
+            # Connector responses generate NEW documents (replace, not merge).
+            "response_replaces_document": True,
+        }
+        if params.runtime_bindings:
+            rest_fetch_meta["runtime_bindings"] = [
+                b.model_dump(exclude_none=True) for b in params.runtime_bindings
+            ]
+            pending = pending_runtime_bindings(params.runtime_bindings)
+            if pending:
+                rest_fetch_meta["runtime_bindings_pending"] = {
+                    "emission_status": "pending_live_verify",
+                    "bindings": pending,
+                }
         fragment: Dict[str, Any] = {
             "process_config": {"source": source},
             "depends_on": [conn_key, op_key],
-            "metadata": {
-                "rest_fetch": {
-                    "output_shape": {
-                        "profile_id": params.response.profile_id,
-                        "profile_type": params.response.profile_type,
-                        "field_index": params.response.field_index,
-                    },
-                    "pagination": params.pagination.resolved(),
-                    "conditional_request": params.conditional_request.resolved(),
-                    "operation_slots": cls._slot_metadata(params),
-                    # A REST GET inherits the upstream document as its request body
-                    # and some APIs reject GET-with-body; the fetch guarantees an
-                    # EMPTY request document (the source connectoraction emits empty
-                    # <parameters/><dynamicProperties/>).
-                    "request_document": "empty",
-                    # Connector responses generate NEW documents (replace, not merge).
-                    "response_replaces_document": True,
-                }
-            },
+            "metadata": {"rest_fetch": rest_fetch_meta},
         }
         return fragment
 
@@ -693,6 +729,18 @@ class RestFetchPrimitive(PrimitivePattern):
         # empty (the #72 empty-request guarantee), so under #50 conditional
         # emission the builder emits no request-profile attrs at all.
         raise_for_builder_error(RestClientOperationBuilder.validate_config(config))
+
+        # Issue #96: when a path runtime binding supplies the path at the process
+        # step, blank the operation path so the emitted component carries no
+        # in-operation '{token}' (validated against the template above; the
+        # per-document path is built by the Set Properties DDP + connector "Path"
+        # property the fragment's dynamic_path block drives). Token coverage is
+        # validated by validate_runtime_bindings / path_bindings_to_dynamic_path.
+        has_path_runtime_binding = any(
+            b.location == "path" for b in (params.runtime_bindings or [])
+        )
+        if has_path_runtime_binding:
+            config["path"] = ""
 
         # Each in-spec profile referenced by $ref must appear in depends_on so
         # build_integration orders the profile before the operation and resolves

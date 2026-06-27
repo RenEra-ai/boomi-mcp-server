@@ -37,6 +37,7 @@ from pydantic import (
 )
 
 from ...categories.components.builders.connector_builder import (
+    BuilderValidationError,
     RestClientConnectionBuilder,
     RestClientOperationBuilder,
 )
@@ -58,6 +59,16 @@ from ._helpers import (
     primitive_component_key,
     raise_for_builder_error,
     ref_key,
+    slugify,
+)
+from .rest_runtime import (
+    _PATH_TOKEN_RE,
+    RUNTIME_BINDING_INVALID,
+    OperationSlot,
+    RuntimeBinding,
+    path_bindings_to_dynamic_path,
+    pending_runtime_bindings,
+    validate_runtime_bindings,
 )
 
 
@@ -240,6 +251,44 @@ class RestSendWithRetryParameters(BaseModel):
     operation: RestOperationParams
     retry_policy: Optional[RestRetryPolicy] = Field(default=None)
     component_names: RestSendComponentNames = Field(default_factory=RestSendComponentNames)
+    # Issue #96 (M5.4a): send-side operation slot declarations (the SEND
+    # counterpart of rest_fetch's slots — rest_send had none) and the
+    # runtime_bindings that fill them. Path slots are the '{token}'s in
+    # operation.path; query/header slots are declared explicitly here.
+    path_slots: Optional[List[OperationSlot]] = Field(default=None)
+    query_parameter_slots: Optional[List[OperationSlot]] = Field(default=None)
+    request_header_slots: Optional[List[OperationSlot]] = Field(default=None)
+    runtime_bindings: Optional[List[RuntimeBinding]] = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_runtime_bindings(self) -> "RestSendWithRetryParameters":
+        # path_replacements (#100 G2) is the canonical, backwards-compatible
+        # send-side dynamic-path surface. A runtime_bindings path entry would be a
+        # second, competing path mechanism — reject the combination rather than
+        # silently letting one win. Query/header runtime_bindings remain allowed
+        # alongside path_replacements.
+        if self.operation.path_replacements and self.runtime_bindings:
+            if any(b.location == "path" for b in self.runtime_bindings):
+                raise BuilderValidationError(
+                    "operation.path is already bound by path_replacements; do not "
+                    "also bind it via a path runtime_binding.",
+                    error_code=RUNTIME_BINDING_INVALID,
+                    field="runtime_bindings",
+                    hint=(
+                        "path_replacements (#100 G2) is the canonical send-side "
+                        "dynamic-path surface. Use it OR a path runtime_binding, "
+                        "not both. Query/header runtime_bindings may coexist."
+                    ),
+                )
+        path_tokens = set(_PATH_TOKEN_RE.findall(self.operation.path or ""))
+        validate_runtime_bindings(
+            self.runtime_bindings,
+            path_slots=self.path_slots,
+            query_parameter_slots=self.query_parameter_slots,
+            request_header_slots=self.request_header_slots,
+            path_tokens=path_tokens,
+        )
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -257,10 +306,14 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         description=(
             "Materialize the REST target send group (connection, execute "
             "operation) from caller config and emit a process target fragment "
-            "for archetype assembly. Emits JSON component specs for the "
-            "existing REST Client builders; retry intent is recorded as "
-            "planning metadata only and does not enable unverified process "
-            "retry/DLQ behavior."
+            "for archetype assembly. Declares send-side operation slots and binds "
+            "them with runtime_bindings (#96): a path binding lowers into the "
+            "live-proven dynamic_path block (path_replacements stays the canonical "
+            "send-side path surface — the two are mutually exclusive), and "
+            "query/header bindings are validated and carried as pending_live_verify "
+            "metadata. Emits JSON component specs for the existing REST Client "
+            "builders; retry intent is recorded as planning metadata only and does "
+            "not enable unverified process retry/DLQ behavior."
         ),
         tags=["target", "rest", "send"],
         use_cases=[
@@ -270,7 +323,8 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         not_for=[
             "Database or file targets",
             "Process-level retry/DLQ wiring (owned by the archetype RetryPolicy + ProcessFlowBuilder, not this primitive's metadata)",
-            "Authoring request payloads, paths, or credentials",
+            "Authoring request payloads or credentials",
+            "Query/header or DDP/DPP runtime XML emission (validated but pending live verify, #96)",
         ],
     )
     parameters_model = RestSendWithRetryParameters
@@ -329,27 +383,43 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
             "action_type": params.operation.method.upper(),
             "label": f"{context.component_prefix} REST Send",
         }
-        # Issue #100 G2: per-document dynamic REST paths are wired at the PROCESS
-        # level — a Set Properties shape building a Dynamic Document Property +
-        # the connector step's "Path" dynamic operation property (target.dynamic_
-        # path). Building that requires the request-profile field index (element
-        # id / name_path per target leaf), which this primitive does not have.
-        # So this fragment carries ONLY the target binding: it deliberately does
-        # NOT emit a partial dynamic-path signal it cannot complete. The consuming
-        # database_to_api_sync archetype builds the process target (including
-        # target.dynamic_path) directly in _build_main_process and does not
-        # consume this fragment for that wiring (emit_fragment is not invoked for
-        # this primitive today; emit_components owns the operation, which blanks
-        # the path when path_replacements is set).
+        # Issue #100 G2 / #96 M5.4a: per-document dynamic REST paths are wired at the
+        # PROCESS level — a Set Properties shape building a Dynamic Document Property
+        # + the connector step's "Path" dynamic operation property (target.dynamic_
+        # path). The database_to_api_sync archetype builds that target.dynamic_path
+        # directly from RestSendRequest.path_replacements in _build_main_process (it
+        # does NOT consume this fragment). When the rest_send primitive is driven
+        # directly with #96 runtime_bindings (e.g. by a future api_to_api_sync
+        # preset), a path binding lowers into target.dynamic_path here so the same
+        # builder emitters apply. Query/header bindings stay in pending metadata
+        # (not yet live-proven for this REST Client subtype).
+        dynamic_path = path_bindings_to_dynamic_path(
+            params.runtime_bindings,
+            path_template=params.operation.path,
+            ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
+        )
+        if dynamic_path is not None:
+            target["dynamic_path"] = dynamic_path
         fragment: Dict[str, Any] = {
             "process_config": {"target": target},
             "depends_on": [conn_key, op_key],
         }
+        metadata: Dict[str, Any] = {}
         if params.retry_policy is not None:
             # Planning metadata only — not consumed by ProcessFlowBuilder.
-            fragment["metadata"] = {
-                "retry_policy": params.retry_policy.model_dump(exclude_none=True)
-            }
+            metadata["retry_policy"] = params.retry_policy.model_dump(exclude_none=True)
+        if params.runtime_bindings:
+            metadata["runtime_bindings"] = [
+                b.model_dump(exclude_none=True) for b in params.runtime_bindings
+            ]
+            pending = pending_runtime_bindings(params.runtime_bindings)
+            if pending:
+                metadata["runtime_bindings_pending"] = {
+                    "emission_status": "pending_live_verify",
+                    "bindings": pending,
+                }
+        if metadata:
+            fragment["metadata"] = metadata
         return fragment
 
     # ------------------------------------------------------------------
@@ -478,11 +548,17 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
 
         raise_for_builder_error(RestClientOperationBuilder.validate_config(config))
 
-        # Issue #100 G2: validation passed against the TEMPLATE path; now blank the
-        # operation path so the emitted component carries no in-operation '{token}'
-        # (the per-document path is supplied at the process connector step). build()
-        # also blanks at XML emission; doing it here keeps the spec config blank too.
-        if op.path_replacements:
+        # Issue #100 G2 / #96: validation passed against the TEMPLATE path; now blank
+        # the operation path so the emitted component carries no in-operation
+        # '{token}' (the per-document path is supplied at the process connector step).
+        # Both the #100 path_replacements surface and a #96 path runtime_binding blank
+        # the path — the conflict rule guarantees at most one of them is set, and the
+        # runtime-binding token coverage is validated by validate_runtime_bindings /
+        # path_bindings_to_dynamic_path before this point.
+        has_path_runtime_binding = any(
+            b.location == "path" for b in (params.runtime_bindings or [])
+        )
+        if op.path_replacements or has_path_runtime_binding:
             config["path"] = ""
 
         # Each in-spec profile referenced by $ref must appear in depends_on so

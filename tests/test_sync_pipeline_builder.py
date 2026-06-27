@@ -609,6 +609,38 @@ def test_unknown_config_key_in_stage_rejected():
     assert _code(cfg, _DEPS) == "SYNC_PIPELINE_CONFIG_INVALID"
 
 
+def test_runtime_bindings_in_send_stage_rejected():
+    # Issue #96 M5.4a: the thin sync_pipeline stage cannot lower a runtime binding
+    # (it has no operation path template) — a runtime_bindings key on a send stage
+    # is a gated sub-block, rejected (not silently dropped). The binding is
+    # expressed on the rest_send operation config instead.
+    cfg = _sync_config(
+        [
+            _read_stage("s"),
+            _send_stage("t", runtime_bindings=[
+                {"location": "query_parameter", "slot": "x",
+                 "source": {"kind": "static", "value": "1"}}
+            ]),
+        ],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    assert _code(cfg, _DEPS) == "SYNC_PIPELINE_CONFIG_INVALID"
+
+
+def test_runtime_bindings_in_fetch_stage_rejected():
+    cfg = _sync_config(
+        [
+            _fetch_stage("s", runtime_bindings=[
+                {"location": "path", "slot": "id",
+                 "source": {"kind": "dpp", "property_name": "last_id"}}
+            ]),
+            _send_stage("t"),
+        ],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    assert _code(cfg, _FETCH_DEPS) == "SYNC_PIPELINE_CONFIG_INVALID"
+
+
 def test_component_ref_stage_rejected():
     cfg = _sync_config(
         [

@@ -289,6 +289,179 @@ class TestOperationSlots:
 
 
 # ---------------------------------------------------------------------------
+# Issue #96 (M5.4a) — runtime bindings that fill the declared slots
+# ---------------------------------------------------------------------------
+
+
+def _profile_source(**overrides):
+    src = {
+        "kind": "profile_field",
+        "profile_id": "$ref:cust_resp_profile",
+        "profile_type": "profile.json",
+        "element_id": "3",
+        "element_name": "id (Root/id)",
+    }
+    src.update(overrides)
+    return src
+
+
+class TestRuntimeBindings:
+    def test_path_binding_lowers_to_dynamic_path(self):
+        frag = _fragment(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id", "source": _profile_source()}
+                ],
+            )
+        )
+        dyn = frag["process_config"]["source"]["dynamic_path"]
+        assert dyn["request_profile_id"] == "$ref:cust_resp_profile"
+        assert dyn["profile_type"] == "profile.json"
+        assert dyn["segments"] == [
+            {"type": "static", "value": "/v1/items/"},
+            {"type": "profile", "element_id": "3", "element_name": "id (Root/id)"},
+        ]
+        # The full validated set is echoed in metadata.
+        assert frag["metadata"]["rest_fetch"]["runtime_bindings"][0]["location"] == "path"
+
+    def test_path_binding_blanks_operation_path(self):
+        specs = _emit(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id", "source": _profile_source()}
+                ],
+            )
+        )
+        op = next(s for s in specs if s.type == "connector-action")
+        assert op.config["path"] == ""
+
+    def test_query_header_bindings_land_in_pending_metadata(self):
+        frag = _fragment(
+            _params(
+                operation={"path": "/v1/items"},
+                query_parameter_slots=[{"name": "since"}],
+                request_header_slots=[{"name": "X-Tenant"}],
+                runtime_bindings=[
+                    {"location": "query_parameter", "slot": "since",
+                     "source": {"kind": "ddp", "property_name": "watermark"}},
+                    {"location": "request_header", "slot": "X-Tenant",
+                     "source": {"kind": "dpp", "property_name": "tenant"}},
+                ],
+            )
+        )
+        # No path binding → no dynamic_path emitted on the source.
+        assert "dynamic_path" not in frag["process_config"]["source"]
+        pending = frag["metadata"]["rest_fetch"]["runtime_bindings_pending"]
+        assert pending["emission_status"] == "pending_live_verify"
+        assert {b["location"] for b in pending["bindings"]} == {
+            "query_parameter",
+            "request_header",
+        }
+
+    def test_missing_slot_rejected(self):
+        # A binding for a slot that was never declared fails at plan time.
+        with pytest.raises(ValidationError):
+            RestFetchPrimitive.validate_parameters(
+                _params(
+                    operation={"path": "/v1/items"},
+                    runtime_bindings=[
+                        {"location": "query_parameter", "slot": "since",
+                         "source": {"kind": "static", "value": "x"}}
+                    ],
+                )
+            )
+
+    def test_mismatched_path_key_rejected(self):
+        # slot declared but not a '{token}' in the path.
+        with pytest.raises(ValidationError):
+            RestFetchPrimitive.validate_parameters(
+                _params(
+                    operation={"path": "/v1/items/{id}"},
+                    path_slots=[{"name": "id"}, {"name": "other"}],
+                    runtime_bindings=[
+                        {"location": "path", "slot": "other", "source": _profile_source()}
+                    ],
+                )
+            )
+
+    def test_duplicate_binding_rejected(self):
+        with pytest.raises(ValidationError):
+            RestFetchPrimitive.validate_parameters(
+                _params(
+                    operation={"path": "/v1/items"},
+                    query_parameter_slots=[{"name": "since"}],
+                    runtime_bindings=[
+                        {"location": "query_parameter", "slot": "since",
+                         "source": {"kind": "static", "value": "a"}},
+                        {"location": "query_parameter", "slot": "since",
+                         "source": {"kind": "static", "value": "b"}},
+                    ],
+                )
+            )
+
+    def test_secret_shaped_static_value_rejected(self):
+        with pytest.raises(ValidationError):
+            RestFetchPrimitive.validate_parameters(
+                _params(
+                    operation={"path": "/v1/items"},
+                    request_header_slots=[{"name": "X-Token"}],
+                    runtime_bindings=[
+                        {"location": "request_header", "slot": "X-Token",
+                         "source": {"kind": "static", "value": "Bearer abc.def.ghi"}}
+                    ],
+                )
+            )
+
+    def test_malformed_source_kind_rejected(self):
+        with pytest.raises(ValidationError):
+            RestFetchPrimitive.validate_parameters(
+                _params(
+                    operation={"path": "/v1/items"},
+                    query_parameter_slots=[{"name": "since"}],
+                    runtime_bindings=[
+                        {"location": "query_parameter", "slot": "since",
+                         "source": {"kind": "nope", "value": "x"}}
+                    ],
+                )
+            )
+
+    def test_dpp_path_source_unverified_at_fragment(self):
+        # A dpp path source validates but is not emitted as XML in v1.
+        params = RestFetchPrimitive.validate_parameters(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id",
+                     "source": {"kind": "dpp", "property_name": "last_id"}}
+                ],
+            )
+        )
+        with pytest.raises(BuilderValidationError) as exc:
+            RestFetchPrimitive.emit_fragment(_ctx(), params)
+        assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+
+    def test_all_static_path_unverified_at_fragment(self):
+        params = RestFetchPrimitive.validate_parameters(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id",
+                     "source": {"kind": "static", "value": "42"}}
+                ],
+            )
+        )
+        with pytest.raises(BuilderValidationError) as exc:
+            RestFetchPrimitive.emit_fragment(_ctx(), params)
+        assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+
+
+# ---------------------------------------------------------------------------
 # Pagination metadata (validated config, not request templates)
 # ---------------------------------------------------------------------------
 
