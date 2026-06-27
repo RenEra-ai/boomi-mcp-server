@@ -410,6 +410,47 @@ class TestRuntimeBindings:
                 )
             )
 
+    def test_required_slot_unbound_rejected_when_binding(self):
+        # Plan: "missing required slots". With runtime_bindings present, a declared
+        # required slot that has no binding fails at plan time.
+        with pytest.raises(ValidationError):
+            RestFetchPrimitive.validate_parameters(
+                _params(
+                    operation={"path": "/v1/items"},
+                    query_parameter_slots=[{"name": "since"}, {"name": "filter"}],
+                    runtime_bindings=[
+                        {"location": "query_parameter", "slot": "since",
+                         "source": {"kind": "static", "value": "x"}}
+                        # 'filter' (required by default) is left unbound -> error.
+                    ],
+                )
+            )
+
+    def test_required_slots_exempt_without_bindings(self):
+        # A #72-style caller that declares required slots WITHOUT runtime_bindings is
+        # exempt — slots are forward-declared metadata; binding is deferred.
+        params = RestFetchPrimitive.validate_parameters(
+            _params(
+                operation={"path": "/v1/items"},
+                query_parameter_slots=[{"name": "since"}, {"name": "filter"}],
+            )
+        )
+        assert params.query_parameter_slots is not None
+
+    def test_optional_slot_unbound_allowed(self):
+        # An optional (required=False) declared slot need not be bound.
+        params = RestFetchPrimitive.validate_parameters(
+            _params(
+                operation={"path": "/v1/items"},
+                query_parameter_slots=[{"name": "since"}, {"name": "filter", "required": False}],
+                runtime_bindings=[
+                    {"location": "query_parameter", "slot": "since",
+                     "source": {"kind": "static", "value": "x"}}
+                ],
+            )
+        )
+        assert params.runtime_bindings is not None
+
     def test_mismatched_path_key_rejected(self):
         # slot declared but not a '{token}' in the path.
         with pytest.raises(ValidationError):
@@ -480,39 +521,40 @@ class TestRuntimeBindings:
             RestFetchPrimitive.emit_fragment(_ctx(), params)
         assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
 
-    def test_all_static_path_unverified_at_fragment(self):
+    def test_all_static_path_resolves_into_operation_path(self):
+        # An all-static path is a constant — folded into the operation path (not a
+        # dynamic_path, which the #100 builder rejects as not-dynamic). Supports the
+        # static source kind without emitting an all-static "dynamic" path (#96 review).
+        params = _params(
+            operation={"path": "/v1/items/{id}"},
+            path_slots=[{"name": "id"}],
+            runtime_bindings=[
+                {"location": "path", "slot": "id",
+                 "source": {"kind": "static", "value": "42"}}
+            ],
+        )
+        frag = _fragment(params)
+        assert "dynamic_path" not in frag["process_config"]["source"]
+        op = next(s for s in _emit(params) if s.type == "connector-action")
+        assert op.config["path"] == "/v1/items/42"
+        assert "path_replacements" not in op.config
+
+    def test_dpp_path_source_unverified_at_emit_components(self):
+        # A ddp/dpp path source is not live-proven — emit_components surfaces the SAME
+        # unverified error as emit_fragment (never a half-formed operation, #96 review).
         params = RestFetchPrimitive.validate_parameters(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
                 runtime_bindings=[
                     {"location": "path", "slot": "id",
-                     "source": {"kind": "static", "value": "42"}}
+                     "source": {"kind": "dpp", "property_name": "last_id"}}
                 ],
             )
         )
         with pytest.raises(BuilderValidationError) as exc:
-            RestFetchPrimitive.emit_fragment(_ctx(), params)
+            RestFetchPrimitive.emit_components(_ctx(), params)
         assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
-
-    def test_unlowerable_path_also_unverified_at_emit_components(self):
-        # emit_components must surface the SAME unverified error as emit_fragment for
-        # a ddp/all-static path source — it must never blank the operation path and
-        # produce a buildable op with no process dynamic_path to fill it (#96 review).
-        for source in (
-            {"kind": "dpp", "property_name": "last_id"},
-            {"kind": "static", "value": "42"},
-        ):
-            params = RestFetchPrimitive.validate_parameters(
-                _params(
-                    operation={"path": "/v1/items/{id}"},
-                    path_slots=[{"name": "id"}],
-                    runtime_bindings=[{"location": "path", "slot": "id", "source": source}],
-                )
-            )
-            with pytest.raises(BuilderValidationError) as exc:
-                RestFetchPrimitive.emit_components(_ctx(), params)
-            assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
 
 
 # ---------------------------------------------------------------------------

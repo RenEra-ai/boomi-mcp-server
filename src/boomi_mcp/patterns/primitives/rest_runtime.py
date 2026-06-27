@@ -23,7 +23,7 @@ it returns validated JSON (the ``dynamic_path`` dict) consumed by the builder.
 from __future__ import annotations
 
 import re
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -157,6 +157,7 @@ def validate_runtime_bindings(
     query_parameter_slots: Optional[List[OperationSlot]],
     request_header_slots: Optional[List[OperationSlot]],
     path_tokens: Optional[set] = None,
+    path_bound_externally: bool = False,
 ) -> None:
     """Validate every binding against the declared slots; raise on the first defect.
 
@@ -205,6 +206,32 @@ def validate_runtime_bindings(
                 offending_slot=slot,
             )
         _validate_source(binding)
+
+    # Plan: "missing required slots". When the caller provides runtime_bindings,
+    # every declared required slot must be filled — a binding set that omits a
+    # required slot fails at plan time. A #72-style caller that forward-declares
+    # slots WITHOUT any runtime_bindings is exempt (the slots are recorded as
+    # metadata for a later binder); only the act of binding triggers completeness.
+    # ``path_bound_externally`` (rest_send with operation.path_replacements) marks
+    # the PATH as already satisfied by the #100 surface — declared path slots are
+    # then not required to carry a runtime binding (the conflict rule even forbids
+    # one), so they are skipped here. Query/header slots have no static alternative
+    # (#72 rejects a slot that duplicates a static key), so they are always enforced.
+    bound = {(b.location, b.slot) for b in bindings}
+    for location, slots in (
+        ("path", path_slots),
+        ("query_parameter", query_parameter_slots),
+        ("request_header", request_header_slots),
+    ):
+        if location == "path" and path_bound_externally:
+            continue
+        for slot in slots or []:
+            if slot.required and (location, slot.name) not in bound:
+                raise _binding_error(
+                    f"required {location} slot {slot.name!r} has no runtime binding",
+                    offending_location=location,
+                    offending_slot=slot.name,
+                )
 
 
 def _validate_source(binding: RuntimeBinding) -> None:
@@ -267,39 +294,49 @@ def _unverified_error(message: str, **details: Any) -> BuilderValidationError:
     )
 
 
-def path_bindings_to_dynamic_path(
+def lower_path_bindings(
     bindings: Optional[List[RuntimeBinding]],
     *,
     path_template: str,
     ddp_name: str,
-) -> Optional[Dict[str, Any]]:
-    """Lower path runtime bindings into the ``dynamic_path`` dict the builder emits.
+) -> Tuple[str, Any]:
+    """Lower the PATH runtime bindings, dispatching on what they resolve to.
 
-    Interleaves the literal text of ``path_template`` (the parts outside each
-    ``{token}``) as ``static`` segments with each token's bound source, producing
-    ``{ddp_name, request_profile_id, profile_type, segments}`` — the exact shape
-    ``_emit_setproperties`` / ``_emit_connectoraction`` already consume. Returns
-    ``None`` when there are no path bindings (a static path stays static).
+    Returns ``(mode, value)``:
+
+    - ``("none", None)`` — no path bindings; the operation path is unchanged.
+    - ``("static", resolved_path)`` — every path token is bound to a ``static``
+      source, so the path is a CONSTANT. It is resolved into the operation path
+      directly (no Set Properties / dynamic_path): an all-static path is not a
+      "dynamic" path, matching the #100 invariant that a segment list with no
+      profile segment is rejected — here it never reaches that validator because it
+      is folded into the static operation path instead.
+    - ``("dynamic", dynamic_path)`` — at least one ``profile_field`` source; the
+      ``{ddp_name, request_profile_id, profile_type, segments}`` block the
+      ``_emit_setproperties`` / ``_emit_connectoraction`` emitters consume.
 
     Raises ``PROCESS_RUNTIME_BINDING_UNVERIFIED`` for a ``ddp``/``dpp`` path source
-    or an all-static path (no profile field) — those XML shapes are not yet
-    live-proven. All profile_field path segments must share one profile id+type
-    (``_emit_setproperties`` emits a single ``profileId``/``profileType``).
+    (pending a live REST Client fixture) or a profile-id mismatch across profile
+    segments, and ``REST_RUNTIME_BINDING_INVALID`` for an ``operation.path`` token
+    with no matching binding. All profile_field path segments must share one profile
+    id+type (``_emit_setproperties`` emits a single ``profileId``/``profileType``).
     """
     path_bindings = [b for b in (bindings or []) if b.location == "path"]
     if not path_bindings:
-        return None
+        return ("none", None)
 
     by_slot = {b.slot: b for b in path_bindings}
     request_profile_id: Optional[str] = None
     profile_type: Optional[str] = None
     segments: List[Dict[str, Any]] = []
+    resolved_parts: List[str] = []
     profile_segments = 0
     last = 0
     for match in _PATH_TOKEN_RE.finditer(path_template or ""):
         literal = (path_template or "")[last:match.start()]
         if literal:
             segments.append({"type": "static", "value": literal})
+            resolved_parts.append(literal)
         token = match.group(1)
         binding = by_slot.get(token)
         if binding is None:
@@ -310,6 +347,7 @@ def path_bindings_to_dynamic_path(
         source = binding.source
         if isinstance(source, RuntimeStaticSource):
             segments.append({"type": "static", "value": source.value})
+            resolved_parts.append(source.value)
         elif isinstance(source, RuntimeProfileFieldSource):
             if request_profile_id is None:
                 request_profile_id = source.profile_id
@@ -327,6 +365,7 @@ def path_bindings_to_dynamic_path(
                     "element_name": source.element_name,
                 }
             )
+            resolved_parts.append("")  # placeholder — never used (dynamic path)
             profile_segments += 1
         else:  # ddp / dpp path source — not live-proven in v1
             raise _unverified_error(
@@ -338,18 +377,22 @@ def path_bindings_to_dynamic_path(
     trailing = (path_template or "")[last:]
     if trailing:
         segments.append({"type": "static", "value": trailing})
+        resolved_parts.append(trailing)
 
     if profile_segments == 0:
-        raise _unverified_error(
-            "a dynamic path needs at least one profile_field slot in v1 "
-            "(an all-static path is not emitted as dynamic)"
-        )
-    return {
-        "ddp_name": ddp_name,
-        "request_profile_id": request_profile_id,
-        "profile_type": profile_type,
-        "segments": segments,
-    }
+        # All path tokens are static → a constant path, folded into the operation
+        # path (no dynamic Set Properties). Supports the static source kind without
+        # emitting an all-static "dynamic" path (which the #100 builder rejects).
+        return ("static", "".join(resolved_parts))
+    return (
+        "dynamic",
+        {
+            "ddp_name": ddp_name,
+            "request_profile_id": request_profile_id,
+            "profile_type": profile_type,
+            "segments": segments,
+        },
+    )
 
 
 def synth_path_replacements(

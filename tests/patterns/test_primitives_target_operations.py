@@ -1064,6 +1064,32 @@ class TestRestSendRuntimeBindings:
         assert "runtime_bindings" not in frag.get("metadata", {})
         assert "dynamic_path" not in frag["process_config"]["target"]
 
+    def test_path_replacements_with_path_slots_and_query_binding_ok(self):
+        # #96 review regression guard: path handled by path_replacements (#100) +
+        # declared path_slots metadata + a query runtime binding must be VALID. The
+        # required-slot check must not flag the path slot (it is satisfied externally
+        # by path_replacements, and a path runtime binding is forbidden alongside it).
+        frag = _fragment(
+            RestSendWithRetryPrimitive,
+            _rest_create_params(
+                operation={
+                    "method": "PATCH",
+                    "path": "/clients/{clientId}",
+                    "path_replacements": [
+                        {"name": "clientId", "target_path": "Root/clientId"}
+                    ],
+                },
+                path_slots=[{"name": "clientId"}],
+                query_parameter_slots=[{"name": "dryRun"}],
+                runtime_bindings=[
+                    {"location": "query_parameter", "slot": "dryRun",
+                     "source": {"kind": "static", "value": "true"}}
+                ],
+            ),
+        )
+        pending = frag["metadata"]["runtime_bindings_pending"]
+        assert {b["location"] for b in pending["bindings"]} == {"query_parameter"}
+
     def test_path_replacements_plus_path_runtime_binding_conflict(self):
         with pytest.raises(ValidationError):
             RestSendWithRetryPrimitive.validate_parameters(
@@ -1122,22 +1148,39 @@ class TestRestSendRuntimeBindings:
                 )
             )
 
-    def test_unlowerable_path_also_unverified_at_emit_components(self):
-        # emit_components must surface the SAME unverified error as emit_fragment for
-        # a ddp/all-static path source (never a blank-path op with no dynamic_path).
-        for source in (
-            {"kind": "dpp", "property_name": "last_id"},
-            {"kind": "static", "value": "X"},
-        ):
-            params = RestSendWithRetryPrimitive.validate_parameters(
-                _rest_create_params(
-                    operation={"method": "PATCH", "path": "/clients/{clientId}"},
-                    path_slots=[{"name": "clientId"}],
-                    runtime_bindings=[
-                        {"location": "path", "slot": "clientId", "source": source}
-                    ],
-                )
+    def test_dpp_path_source_unverified_at_emit_components(self):
+        # A ddp/dpp path source is not live-proven — emit_components surfaces the SAME
+        # unverified error as emit_fragment (never a half-formed operation).
+        params = RestSendWithRetryPrimitive.validate_parameters(
+            _rest_create_params(
+                operation={"method": "PATCH", "path": "/clients/{clientId}"},
+                path_slots=[{"name": "clientId"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "clientId",
+                     "source": {"kind": "dpp", "property_name": "last_id"}}
+                ],
             )
-            with pytest.raises(BuilderValidationError) as exc:
-                RestSendWithRetryPrimitive.emit_components(_ctx(), params)
-            assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+        )
+        with pytest.raises(BuilderValidationError) as exc:
+            RestSendWithRetryPrimitive.emit_components(_ctx(), params)
+        assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+
+    def test_all_static_path_resolves_into_operation_path(self):
+        # An all-static path is a constant folded into the operation path (no
+        # dynamic_path); supports the static source kind end-to-end.
+        params = _rest_create_params(
+            operation={"method": "PATCH", "path": "/clients/{clientId}"},
+            path_slots=[{"name": "clientId"}],
+            runtime_bindings=[
+                {"location": "path", "slot": "clientId",
+                 "source": {"kind": "static", "value": "C-42"}}
+            ],
+        )
+        frag = _fragment(RestSendWithRetryPrimitive, params)
+        assert "dynamic_path" not in frag["process_config"]["target"]
+        op = next(
+            s for s in _emit(RestSendWithRetryPrimitive, params)
+            if s.type == "connector-action"
+        )
+        assert op.config["path"] == "/clients/C-42"
+        assert "path_replacements" not in op.config

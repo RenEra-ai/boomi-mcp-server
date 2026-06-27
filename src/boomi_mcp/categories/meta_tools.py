@@ -5741,7 +5741,20 @@ _PROCESS_FLOW_PROTOCOLS = {
             {"error_code": "PROCESS_NAME_CONFLICT", "field": "name"},
             {"error_code": "MISSING_PROCESS_DEPENDENCY", "field": "depends_on"},
             {"error_code": "PROCESS_CONNECTOR_BINDING_INVALID", "field": "source|target|branch.targets[N]|branch.targets[N].connector_type|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type"},
-            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type|transform.steps[N].profile_id"},
+            {"error_code": "PROCESS_REF_TYPE_MISMATCH", "field": "source.connection_id|source.operation_id|target.connection_id|target.operation_id|target.action_type|branch.targets[N].connection_id|branch.targets[N].operation_id|branch.targets[N].action_type|transform.steps[N].profile_id|source.dynamic_path.request_profile_id|target.dynamic_path.request_profile_id"},
+            # Issue #96 M5.4a: typed REST runtime bindings. The typed runtime_binding
+            # model (rest_fetch/rest_send) validates each binding against the declared
+            # path/query/header slots; a path binding lowers into the live-proven
+            # dynamic_path block the builder emits, while query/header (and DDP/DPP
+            # path sources) are validated but carried as pending_live_verify metadata
+            # (no guessed XML). REST_RUNTIME_BINDING_INVALID is the primitive-layer
+            # binding-shape error (undeclared/duplicate/secret-shaped slot, missing
+            # required slot, path_replacements+path-binding conflict).
+            # PROCESS_RUNTIME_BINDING_UNVERIFIED gates emission of anything not yet
+            # live-proven (query/header process XML, a DDP/DPP path source) — and a
+            # source.dynamic_path under a connector-scoped Try/Catch.
+            {"error_code": "REST_RUNTIME_BINDING_INVALID", "field": "runtime_bindings"},
+            {"error_code": "PROCESS_RUNTIME_BINDING_UNVERIFIED", "field": "runtime_bindings|source.runtime_bindings|target.runtime_bindings|source.dynamic_path"},
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},
             {"error_code": "PROCESS_DATAPROCESS_CONFIG_INVALID", "field": "transform|transform.steps|transform.steps[N].script|transform.steps[N].language|transform.steps[N].use_cache|transform.steps[N].profile_type|transform.steps[N].profile_id|transform.steps[N].link_element_key|transform.steps[N].link_element_name|transform.steps[N].combine_into_link_element_key"},
             {"error_code": "PROCESS_DATAPROCESS_OPERATION_UNSUPPORTED", "field": "transform.steps[N].operation"},

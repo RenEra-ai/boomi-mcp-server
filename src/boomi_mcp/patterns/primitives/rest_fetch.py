@@ -76,7 +76,7 @@ from ._helpers import (
 from .rest_runtime import (
     OperationSlot,
     RuntimeBinding,
-    path_bindings_to_dynamic_path,
+    lower_path_bindings,
     pending_runtime_bindings,
     synth_path_replacements,
     validate_runtime_bindings,
@@ -562,23 +562,24 @@ class RestFetchPrimitive(PrimitivePattern):
             "action_type": "GET",
             "label": f"{context.component_prefix} REST Fetch",
         }
-        # Issue #96: lower path runtime bindings into the live-proven dynamic_path
-        # block (Set Properties DDP + connector-step "Path" property). A ddp/dpp
-        # path source or an all-static path raises PROCESS_RUNTIME_BINDING_UNVERIFIED
-        # — plan-time failure, never a guessed emission. Query/header bindings stay
-        # in pending metadata (not yet live-proven for this REST Client subtype).
-        dynamic_path = path_bindings_to_dynamic_path(
+        # Issue #96: lower path runtime bindings. A profile_field path lowers into the
+        # live-proven dynamic_path block (Set Properties DDP + connector-step "Path"
+        # property); an all-static path is a constant folded into the operation path
+        # (no dynamic_path here). A ddp/dpp path source raises
+        # PROCESS_RUNTIME_BINDING_UNVERIFIED — plan-time failure, never a guessed
+        # emission. Query/header bindings stay in pending metadata.
+        path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=params.operation.path,
             ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
         )
         depends_on = [conn_key, op_key]
-        if dynamic_path is not None:
-            source["dynamic_path"] = dynamic_path
+        if path_mode == "dynamic":
+            source["dynamic_path"] = path_value
             # The dynamic_path may reference an in-spec profile ($ref:KEY) for a
             # profile_field path source; that ref must be a process dependency so
             # ProcessFlowBuilder's $ref-reachability check resolves it (#96 review).
-            dyn_profile_ref = ref_key(dynamic_path.get("request_profile_id"))
+            dyn_profile_ref = ref_key(path_value.get("request_profile_id"))
             if dyn_profile_ref and dyn_profile_ref not in depends_on:
                 depends_on.append(dyn_profile_ref)
         rest_fetch_meta: Dict[str, Any] = {
@@ -733,31 +734,30 @@ class RestFetchPrimitive(PrimitivePattern):
         if folder:
             config["folder_name"] = folder
 
-        # Issue #96: when a path runtime binding supplies the path at the process
-        # step, the operation carries a BLANK path (the per-document path is built
-        # by the Set Properties DDP + connector "Path" property the fragment's
-        # dynamic_path block drives). The REST operation builder only permits a
-        # blank path when a usable path_replacements marker is present, so reuse
-        # that #100 marker (synthesized from the path bindings, name<->token
-        # coverage checked against the TEMPLATE path below; build-only, not emitted
-        # into XML). Gate the marker + blanking on SUCCESSFUL lowering: a ddp/dpp/
-        # all-static path source raises PROCESS_RUNTIME_BINDING_UNVERIFIED here (the
-        # SAME failure emit_fragment surfaces), so emit_components never produces a
-        # blank-path operation with no process dynamic_path to fill it (#96 review).
-        path_dynamic = path_bindings_to_dynamic_path(
+        # Issue #96: lower the path runtime bindings (same dispatch emit_fragment
+        # uses, so a ddp/dpp path source raises PROCESS_RUNTIME_BINDING_UNVERIFIED
+        # here too — emit_components never produces a half-formed operation).
+        #   - "dynamic" (profile_field): the operation carries a BLANK path (supplied
+        #     at the process step). The REST operation builder permits a blank path
+        #     only with a usable path_replacements marker, so reuse the #100 marker
+        #     synthesized from the path bindings (build-only, not emitted into XML).
+        #   - "static": the path is a constant — fold it into the operation path.
+        path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=op.path,
             ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
         )
-        if path_dynamic is not None:
+        if path_mode == "dynamic":
             config["path_replacements"] = synth_path_replacements(params.runtime_bindings)
+        elif path_mode == "static":
+            config["path"] = path_value
 
         # No request_profile_id / request_profile_type: the GET request body is
         # empty (the #72 empty-request guarantee), so under #50 conditional
         # emission the builder emits no request-profile attrs at all.
         raise_for_builder_error(RestClientOperationBuilder.validate_config(config))
 
-        if path_dynamic is not None:
+        if path_mode == "dynamic":
             config["path"] = ""
 
         # Each in-spec profile referenced by $ref must appear in depends_on so

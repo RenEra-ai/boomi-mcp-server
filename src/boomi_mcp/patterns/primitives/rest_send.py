@@ -66,7 +66,7 @@ from .rest_runtime import (
     RUNTIME_BINDING_INVALID,
     OperationSlot,
     RuntimeBinding,
-    path_bindings_to_dynamic_path,
+    lower_path_bindings,
     pending_runtime_bindings,
     synth_path_replacements,
     validate_runtime_bindings,
@@ -288,6 +288,10 @@ class RestSendWithRetryParameters(BaseModel):
             query_parameter_slots=self.query_parameter_slots,
             request_header_slots=self.request_header_slots,
             path_tokens=path_tokens,
+            # When path_replacements (#100) handles the path, declared path slots are
+            # satisfied externally — and a path runtime_binding is forbidden alongside
+            # it (conflict rule) — so they are exempt from the required-slot check.
+            path_bound_externally=bool(self.operation.path_replacements),
         )
         return self
 
@@ -394,18 +398,18 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         # preset), a path binding lowers into target.dynamic_path here so the same
         # builder emitters apply. Query/header bindings stay in pending metadata
         # (not yet live-proven for this REST Client subtype).
-        dynamic_path = path_bindings_to_dynamic_path(
+        path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=params.operation.path,
             ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
         )
         depends_on = [conn_key, op_key]
-        if dynamic_path is not None:
-            target["dynamic_path"] = dynamic_path
+        if path_mode == "dynamic":
+            target["dynamic_path"] = path_value
             # A profile_field path source carries an in-spec profile $ref; it must be
             # a process dependency so ProcessFlowBuilder's $ref-reachability resolves
             # it (#96 review).
-            dyn_profile_ref = ref_key(dynamic_path.get("request_profile_id"))
+            dyn_profile_ref = ref_key(path_value.get("request_profile_id"))
             if dyn_profile_ref and dyn_profile_ref not in depends_on:
                 depends_on.append(dyn_profile_ref)
         fragment: Dict[str, Any] = {
@@ -549,25 +553,25 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         # "no dynamic path" — forwarding it would make the operation builder
         # reject an otherwise-static operation (REST_PATH_REPLACEMENT_INVALID),
         # and the blank-path branch above already treats [] as static.
-        # Issue #96: a path runtime_binding supplies the path at the process step
-        # too, so it reuses the same #100 path_replacements blank-path marker
-        # (synthesized from the path bindings; build-only, not emitted into XML).
-        # The conflict rule guarantees at most one of op.path_replacements /
-        # path runtime_binding is set, so they never both populate this field.
-        # Gate the marker + blanking on SUCCESSFUL lowering: path_bindings_to_
-        # dynamic_path raises PROCESS_RUNTIME_BINDING_UNVERIFIED for a ddp/dpp/
-        # all-static path source (the SAME failure emit_fragment surfaces), so
-        # emit_components never produces a blank-path operation with no process
-        # dynamic_path to fill it (#96 review).
-        path_dynamic = path_bindings_to_dynamic_path(
+        # Issue #96: lower the path runtime bindings (same dispatch emit_fragment
+        # uses). A profile_field path ("dynamic") reuses the #100 path_replacements
+        # blank-path marker (synthesized; build-only, not emitted into XML) and
+        # blanks the operation path; an all-static path ("static") is a constant
+        # folded into the operation path; a ddp/dpp path source raises
+        # PROCESS_RUNTIME_BINDING_UNVERIFIED (the SAME failure emit_fragment
+        # surfaces). The conflict rule guarantees op.path_replacements and a path
+        # runtime_binding never both populate the marker.
+        path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=op.path,
             ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
         )
         if op.path_replacements:
             config["path_replacements"] = op.path_replacements
-        elif path_dynamic is not None:
+        elif path_mode == "dynamic":
             config["path_replacements"] = synth_path_replacements(params.runtime_bindings)
+        elif path_mode == "static":
+            config["path"] = path_value
         if folder:
             config["folder_name"] = folder
 
@@ -578,7 +582,7 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         # path is supplied at the process connector step's "Path" property). Token
         # coverage was checked by the builder against the synthesized/real
         # path_replacements above.
-        if op.path_replacements or path_dynamic is not None:
+        if op.path_replacements or path_mode == "dynamic":
             config["path"] = ""
 
         # Each in-spec profile referenced by $ref must appear in depends_on so
