@@ -382,18 +382,17 @@ _REST_CLIENT_OPERATION_POLICY = PreservationPolicy(
         # (always explicitly emitted by the builder and meaningful to
         # users — method changes).
         #
-        # Codex r16 P2 trade-off: profile-related attrs
-        # (requestProfile, requestProfileType, responseProfile,
-        # responseProfileType) were ALSO in the closed owned_attrs set
-        # in r4 P2 to make explicit-clear (request_profile_type=NONE)
-        # land. But that broke path-only / method-only updates on live
-        # operations with existing profile bindings — the builder emits
-        # default `requestProfileType="xml"` without `requestProfile`,
-        # which the closed-set merge then forced onto current, dropping
-        # the live profile UUID. Common case (path/method tweaks)
-        # matters more than the rare case (explicit profile-binding
-        # clear). For explicit clears, use the raw-XML escape hatch
-        # via manage_component / manage_connector.
+        # Profile attrs (requestProfile, requestProfileType,
+        # responseProfile, responseProfileType) are all additive (#50):
+        # the builder now emits EACH of them only when the caller
+        # explicitly supplies it (the two type attrs were previously
+        # default-emitted as "xml", which forced the closed-set / coupled
+        # merge to special-case them). With fully-conditional emission,
+        # an attr present in desired is applied and an attr omitted from
+        # desired preserves the live value — so a path/method-only update
+        # leaves a live profile binding+type intact, a type-only update
+        # applies the new type without re-sending the id, and an id+type
+        # binding update applies both. No coupling needed.
         #
         # owned_keys enumerates every builder-emitted <field id="..."/>
         # so a key absent from desired (e.g. followRedirects omitted on
@@ -407,25 +406,16 @@ _REST_CLIENT_OPERATION_POLICY = PreservationPolicy(
                 "customOperationType",
                 "operationType",
             ),
-            # requestProfile / responseProfile are genuinely conditional
-            # (builder emits them only when the caller supplies a profile
-            # id), so additive semantics preserve a live binding on a
-            # path-only update and apply a new one when supplied.
+            # All four profile attrs are conditionally emitted by the
+            # builder (#50), so additive semantics preserve a live
+            # binding/type on a path-only update and apply new values when
+            # supplied. requestProfileType / responseProfileType no longer
+            # need coupled_attr_groups now that they are not default-emitted.
             owned_attrs_additive=(
                 "requestProfile",
+                "requestProfileType",
                 "responseProfile",
-            ),
-            # Review follow-up (supersedes r18 trade-off): the builder
-            # ALWAYS emits requestProfileType / responseProfileType with
-            # default "xml", so they can't be additive without clobbering
-            # a live JSON type on a path-only update. Couple each type to
-            # its profile binding — apply the type only when the matching
-            # profile id is present in desired; otherwise preserve the
-            # live type. So setting a binding applies its type, and a
-            # path/method-only update leaves the live binding+type intact.
-            coupled_attr_groups=(
-                ("requestProfile", ("requestProfileType",)),
-                ("responseProfile", ("responseProfileType",)),
+                "responseProfileType",
             ),
             owned_keys=(
                 "path",
@@ -2575,8 +2565,11 @@ class RestClientOperationBuilder:
         REST_OPERATION_VALIDATION_FAILED (no silent truthy-coercion).
 
     GenericOperationConfig: customOperationType=<METHOD>,
-    operationType="EXECUTE", requestProfileType / responseProfileType
-    lowercase ("xml" / "json" / "none") per the live exports.
+    operationType="EXECUTE". requestProfileType / responseProfileType are
+    emitted (lowercase "xml" / "json" / "none") ONLY when the caller
+    explicitly supplies request_profile_type / response_profile_type (#50);
+    they are no longer default-emitted, so a path-only update preserves the
+    live profile type instead of clobbering it.
 
     Verified live exports:
       * GET   (e268ea19), PATCH (64c4eafd), and all 6 other verbs
@@ -3066,11 +3059,6 @@ class RestClientOperationBuilder:
         folder_name = params.get("folder_name", "Home")
         description = params.get("description", "")
 
-        # Normalize profile types to Boomi's expected lowercase form. The
-        # validator accepts any casing of {none, xml, json}; XML emission
-        # must always be lowercase to match the live REST Client export.
-        request_profile_type = str(params.get("request_profile_type", "xml")).lower()
-        response_profile_type = str(params.get("response_profile_type", "xml")).lower()
         # validate_config (step 11) has already enforced that these are
         # bool (or None / omitted). Resolve None → default True without
         # truthy-coercing arbitrary values.
@@ -3083,8 +3071,6 @@ class RestClientOperationBuilder:
         safe_folder = _escape_xml(folder_name)
         safe_desc = _escape_xml(description)
         safe_path = _escape_xml(path)
-        safe_req_profile_type = _escape_xml(str(request_profile_type))
-        safe_resp_profile_type = _escape_xml(str(response_profile_type))
 
         op_envelope_attrs = (
             f'returnApplicationErrors="{_format_xml_value(return_application_errors)}"'
@@ -3103,6 +3089,28 @@ class RestClientOperationBuilder:
         if params.get("response_profile_id"):
             response_profile_attr = (
                 f' responseProfile="{_escape_xml(str(params["response_profile_id"]))}"'
+            )
+
+        # Profile-type attrs (#50): emitted ONLY when the caller explicitly
+        # supplies request_profile_type / response_profile_type. The
+        # membership test (`in params`, not `.get(...)`) keeps an explicit
+        # "none" emitting while an omitted type stays absent — so the merge
+        # layer's additive semantics preserve a live profile type on a
+        # path-only update instead of clobbering it with a builder default,
+        # and a type-only update (no profile id) still applies. The validator
+        # (step 10) already enforced the {none, xml, json} enum when present;
+        # XML emission is lowercase to match the live REST Client export.
+        request_profile_type_attr = ""
+        if "request_profile_type" in params:
+            request_profile_type_attr = (
+                f' requestProfileType='
+                f'"{_escape_xml(str(params["request_profile_type"]).lower())}"'
+            )
+        response_profile_type_attr = ""
+        if "response_profile_type" in params:
+            response_profile_type_attr = (
+                f' responseProfileType='
+                f'"{_escape_xml(str(params["response_profile_type"]).lower())}"'
             )
 
         # followRedirects emission rule (Phase 5):
@@ -3132,9 +3140,9 @@ class RestClientOperationBuilder:
             f'                <GenericOperationConfig customOperationType="{method}"'
             f' operationType="EXECUTE"'
             f'{request_profile_attr}'
-            f' requestProfileType="{safe_req_profile_type}"'
+            f'{request_profile_type_attr}'
             f'{response_profile_attr}'
-            f' responseProfileType="{safe_resp_profile_type}">\n'
+            f'{response_profile_type_attr}>\n'
             f'{follow_redirects_field}'
             f'                    <field id="path" type="string" value="{safe_path}"/>\n'
             f'{query_params_field}'

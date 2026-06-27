@@ -13,17 +13,20 @@ output elsewhere) and records the disposition of every catalog item in the
 Disposition vocabulary (issue #82):
   * ``guaranteed-by-construction`` — the typed builder already emits it; this
     module adds the regression lock.
-  * ``fixed-here`` — an audit gap closed in this issue (the only behavioral
-    change M9.6 ships is the non-blocking script lints, see test_script_lints).
+  * ``fixed-here`` — an audit gap closed in an issue (the M9.6 non-blocking
+    script lints, see test_script_lints; and the REST request/response
+    ProfileType conditional-emission resolution from #50 / M5.5 — see below).
   * ``not-applicable-yet`` — no typed builder emits this shape yet (e.g.
     Salesforce, listener, flat-file); table-only until the builder lands and
     inherits this checklist. (Branch graduated to guaranteed-by-construction in
     issue #112 M10.8.)
-  * ``disputed-owned-elsewhere`` — the REST request/response ProfileType
-    attributes: the Companion says never-emit, but this account's live exports
-    carry them on working operations and our builder emits them by design.
-    Disposition is owned by #50 (M5.5); this module only PINS current emission,
-    it never flips it.
+  * ``disputed-owned-elsewhere`` — formerly the REST request/response
+    ProfileType attributes (the Companion said never-emit, but this account's
+    live exports carried them and the builder default-emitted them). Resolved
+    by #50 (M5.5): the builder now emits requestProfileType/responseProfileType
+    ONLY when the caller explicitly supplies them, so the attrs are absent on a
+    plain build and present when requested. The disposition graduated to
+    ``fixed-here``; no catalog item carries ``disputed-owned-elsewhere`` today.
 
 Verification rule (issue #82, 2026-06-10): the Companion catalog is the
 checklist *source*, not evidence. Each lock here pins our own builder output;
@@ -816,23 +819,34 @@ def test_inv_map_no_function_output_to_function_input_chaining():
 
 
 # ---------------------------------------------------------------------------
-# Invariant assertions — REST operation (DISPUTED, pin current emission only)
+# Invariant assertions — REST operation profile-type emission (#50 resolved)
 # ---------------------------------------------------------------------------
 
 
-def test_inv_rest_profile_type_emission_pinned():
-    # DISPUTED (#50 owns disposition): this account's live exports carry these
-    # attributes on working operations and our builder emits them by design.
-    # We PIN the current emission (present + lowercase default), we DO NOT flip
-    # to never-emit here.
+def test_inv_rest_profile_type_emission_conditional():
+    # RESOLVED by #50: the builder emits requestProfileType /
+    # responseProfileType ONLY when the caller explicitly supplies
+    # request_profile_type / response_profile_type. When omitted (the
+    # _rest_get_config default), neither attr is present — so a path-only
+    # update preserves the live profile type instead of clobbering it.
+    # When supplied, the attr is emitted lowercase.
     xml = RestClientOperationBuilder().build(**_rest_get_config())
     root = ET.fromstring(xml)
     config = root.find(
         "bns:object/Operation/Configuration/GenericOperationConfig", NS
     )
     assert config is not None
-    assert config.attrib["requestProfileType"] == "xml"
-    assert config.attrib["responseProfileType"] == "xml"
+    assert "requestProfileType" not in config.attrib
+    assert "responseProfileType" not in config.attrib
+
+    xml_typed = RestClientOperationBuilder().build(
+        **_rest_get_config(request_profile_type="JSON", response_profile_type="json")
+    )
+    config_typed = ET.fromstring(xml_typed).find(
+        "bns:object/Operation/Configuration/GenericOperationConfig", NS
+    )
+    assert config_typed.attrib["requestProfileType"] == "json"
+    assert config_typed.attrib["responseProfileType"] == "json"
 
 
 # ---------------------------------------------------------------------------
@@ -980,10 +994,10 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
     },
     {
         "id": "rest_profile_type_attrs",
-        "invariant": "REST requestProfileType/responseProfileType on GenericOperationConfig",
+        "invariant": "REST requestProfileType/responseProfileType emitted conditionally (#50): only when the caller supplies request_profile_type/response_profile_type",
         "emitter": "connector_builder.RestClientOperationBuilder.build",
-        "disposition": "disputed-owned-elsewhere",
-        "test": "test_inv_rest_profile_type_emission_pinned",
+        "disposition": "fixed-here",
+        "test": "test_inv_rest_profile_type_emission_conditional",
     },
     # --- not-applicable-yet: no typed builder emits these shapes today ---
     {
@@ -1134,6 +1148,6 @@ def test_disposition_table_well_formed():
 def test_disposition_table_covers_every_catalog_item():
     # Sanity floor so a future edit can't silently drop catalog rows.
     dispositions = [e["disposition"] for e in INVARIANT_DISPOSITIONS]
-    assert dispositions.count("disputed-owned-elsewhere") == 1  # REST profile-type → #50
-    assert dispositions.count("fixed-here") == 2  # the two script lints
+    assert dispositions.count("disputed-owned-elsewhere") == 0  # REST profile-type resolved by #50
+    assert dispositions.count("fixed-here") == 3  # two script lints + REST conditional emission (#50)
     assert dispositions.count("guaranteed-by-construction") >= 15

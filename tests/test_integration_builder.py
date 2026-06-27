@@ -6144,12 +6144,12 @@ class TestCodexR16Followups:
 
     @patch(_PATCH_TARGET)
     def test_rest_op_policy_owned_attrs_only_contains_method(self, mock_pag):
-        """Codex r16 P2 trade-off: REST op owned_attrs is narrowed to
-        the always-explicit method attrs. Profile-related attrs
-        (requestProfile, responseProfile, *ProfileType) are NOT in
-        owned_attrs — they preserve live values on path-only updates.
-        Documented limitation: explicit-clear of profile bindings via
-        structured update no longer works; use raw-XML escape hatch."""
+        """REST op owned_attrs (the closed set) is narrowed to the
+        always-explicit method attrs. Profile-related attrs
+        (requestProfile, responseProfile, *ProfileType) are NOT in the
+        closed owned_attrs — under #50 all four are conditionally
+        emitted and merge via owned_attrs_additive, so they preserve
+        live values on a path-only update and apply when supplied."""
         from src.boomi_mcp.categories.components.builders.connector_builder import (
             _REST_CLIENT_OPERATION_POLICY,
         )

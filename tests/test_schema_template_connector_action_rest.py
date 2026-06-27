@@ -105,6 +105,24 @@ def test_template_documents_defaults():
     assert defaults["folder_name"] == "Home"
 
 
+def test_template_does_not_default_profile_types():
+    """#50: request_profile_type / response_profile_type are no longer
+    defaulted to 'xml' — the builder emits requestProfileType /
+    responseProfileType only when explicitly supplied, so a path-only
+    update preserves the live type. The fields remain documented optional
+    inputs (template + field_method_dependency_map), just not defaulted."""
+    result = _call(component_type="connector-action", protocol="rest.operation")
+    defaults = result["defaults"]
+    assert "request_profile_type" not in defaults
+    assert "response_profile_type" not in defaults
+    # Still documented as optional inputs elsewhere.
+    assert "request_profile_type" in result["template"]
+    assert "response_profile_type" in result["template"]
+    independent = result["field_method_dependency_map"]["independent"]
+    assert "request_profile_type" in independent
+    assert "response_profile_type" in independent
+
+
 def test_template_lists_supported_operation_modes():
     result = _call(component_type="connector-action", protocol="rest.operation")
     assert result["supported_operation_modes"] == ["execute"]

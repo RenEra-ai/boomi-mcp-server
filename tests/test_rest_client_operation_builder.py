@@ -143,8 +143,44 @@ def test_get_emits_custom_operation_type_get():
     config = _find_generic_op_config(_build_get())
     assert config.attrib["customOperationType"] == "GET"
     assert config.attrib["operationType"] == "EXECUTE"
-    assert config.attrib["requestProfileType"] == "xml"
-    assert config.attrib["responseProfileType"] == "xml"
+    # #50: profile-type attrs are NOT default-emitted; with no caller-supplied
+    # request_profile_type / response_profile_type, neither attr is present, so
+    # a path-only update preserves the live profile type rather than clobbering
+    # it with a builder default.
+    assert "requestProfileType" not in config.attrib
+    assert "responseProfileType" not in config.attrib
+
+
+# ----------------------------------------------------------------------------
+# Profile-type conditional emission (#50)
+# ----------------------------------------------------------------------------
+
+def test_profile_types_absent_when_omitted():
+    """#50: omitting both profile types emits neither attr."""
+    config = _find_generic_op_config(_build_get())
+    assert "requestProfileType" not in config.attrib
+    assert "responseProfileType" not in config.attrib
+
+
+def test_request_profile_type_emitted_lowercase_when_supplied():
+    """#50: an explicit request_profile_type emits requestProfileType,
+    lowercased, with no responseProfileType when that is omitted."""
+    config = _find_generic_op_config(_build_get(request_profile_type="JSON"))
+    assert config.attrib["requestProfileType"] == "json"
+    assert "responseProfileType" not in config.attrib
+
+
+def test_response_profile_type_emitted_lowercase_when_supplied():
+    config = _find_generic_op_config(_build_get(response_profile_type="JSON"))
+    assert config.attrib["responseProfileType"] == "json"
+    assert "requestProfileType" not in config.attrib
+
+
+def test_explicit_none_profile_type_emits_none():
+    """#50: emission is gated on membership (``in params``), not truthiness —
+    an explicit ``"none"`` still emits requestProfileType="none"."""
+    config = _find_generic_op_config(_build_get(request_profile_type="none"))
+    assert config.attrib["requestProfileType"] == "none"
 
 
 def test_get_field_order_matches_live_shape():

@@ -414,19 +414,23 @@ def _apply_owned_path(
         # Codex r17 P2: owned_attrs_additive runs after the closed-set
         # owned_attrs pass and overwrites without removing. Use for
         # builder-conditional attrs (e.g. REST ``requestProfile`` /
-        # ``responseProfile``) where the builder emits the attr only
-        # when the caller supplies it — current's live value should
-        # win when desired omits the attr.
+        # ``requestProfileType`` / ``responseProfile`` /
+        # ``responseProfileType`` after #50) where the builder emits the
+        # attr only when the caller supplies it — current's live value
+        # should win when desired omits the attr.
         if owned.owned_attrs_additive is not None:
             for attr_name in owned.owned_attrs_additive:
                 if attr_name in des_child.attrib:
                     cur_child.set(attr_name, des_child.attrib[attr_name])
-        # Codex r18 follow-up: coupled attribute groups. A dependent
-        # attr is applied from desired only when its trigger attr is
-        # present in desired; otherwise current's value is preserved.
-        # Lets e.g. requestProfileType travel with requestProfile so a
-        # path-only update (no requestProfile) keeps the live type
-        # instead of clobbering it with the builder's default.
+        # Coupled attribute groups: a dependent attr is applied from
+        # desired only when its trigger attr is present in desired;
+        # otherwise current's value is preserved. For a builder that
+        # unconditionally emits a default for an attr meaningful only
+        # alongside another, this keeps the live value when the trigger
+        # is absent. (No active policy uses it after #50 — the REST
+        # profile-type attrs that motivated it became conditionally
+        # emitted and moved to owned_attrs_additive — but the engine
+        # retains the feature for any future such case.)
         if owned.coupled_attr_groups is not None:
             for trigger_attr, dependent_attrs in owned.coupled_attr_groups:
                 if trigger_attr in des_child.attrib:

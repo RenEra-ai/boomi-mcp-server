@@ -3827,8 +3827,12 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         "connector_type": "rest",
         "operation_mode": "execute",
         "folder_name": "Home",
-        "request_profile_type": "xml",
-        "response_profile_type": "xml",
+        # request_profile_type / response_profile_type are intentionally NOT
+        # defaulted (#50): the builder emits requestProfileType /
+        # responseProfileType only when the caller explicitly supplies them,
+        # so a path-only update preserves the live profile type instead of
+        # forcing "xml". They remain documented optional fields in the
+        # template/example and field_method_dependency_map.
         "return_application_errors": True,
         "track_response": True,
     },
@@ -3995,18 +3999,13 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         "unknown field ids, Operation-level Archiving/Tracking/Caching, "
         "and any future siblings survive. UI-added live query parameters "
         "and request headers survive a path-only or method-only update "
-        "(Codex r8 P2). Profile bindings travel as a unit: "
-        "requestProfileType/responseProfileType follow their "
-        "requestProfile/responseProfile id, so a path/method-only update "
-        "preserves the live profile type and a binding change applies the "
-        "new id+type together. KNOWN LIMITATION (Codex r20 P2): a "
-        "type-only update (request_profile_type/response_profile_type "
-        "without the matching request_profile_id/response_profile_id) is a "
-        "no-op on update — the live type is preserved. The builder always "
-        "emits a default profile type, so the merge keys the type on its "
-        "id to avoid clobbering live JSON/XML bindings on path-only "
-        "updates; supply the profile id to change the type, or use the "
-        "raw-XML escape hatch (conditional-emission fix tracked in #50). "
+        "(Codex r8 P2). Profile bindings AND profile types are now each "
+        "conditionally emitted by the builder (#50), so all four attrs "
+        "merge additively: a path/method-only update (none of them "
+        "supplied) preserves the live profile id+type; a type-only update "
+        "(request_profile_type/response_profile_type without the matching "
+        "id) now applies the new type while keeping the live id; and "
+        "supplying request_profile_id+request_profile_type applies both. "
         "KNOWN LIMITATION (Codex r10 P2): an "
         "explicit ``query_parameters={}`` / ``request_headers={}`` to "
         "clear all live custom properties is indistinguishable from "

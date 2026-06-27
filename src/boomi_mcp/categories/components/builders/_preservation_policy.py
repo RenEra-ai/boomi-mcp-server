@@ -111,11 +111,14 @@ class OwnedPath:
     # ``((trigger_attr, (dependent_attr, ...)), ...)``. Each dependent
     # attr is applied from desired ONLY when its trigger attr is
     # present in desired; otherwise current's value is preserved. Use
-    # when an attribute is only meaningful alongside another — e.g.
-    # REST ``requestProfileType`` follows ``requestProfile``: a
-    # path-only update (no requestProfile emitted) must not clobber the
-    # live profile type with the builder's unconditional default
-    # (Codex r18 follow-up).
+    # when a builder unconditionally emits a default for one attr that
+    # is only meaningful alongside another, so the default must not
+    # clobber the live value when the trigger attr is absent. (Historic
+    # example: REST ``requestProfileType`` was coupled to
+    # ``requestProfile`` until #50 made both attrs conditionally emitted,
+    # at which point the REST policy moved them to plain
+    # ``owned_attrs_additive`` and dropped this coupling. The merge
+    # engine still supports the feature for any future such case.)
     coupled_attr_groups: Optional[Tuple[Tuple[str, Tuple[str, ...]], ...]] = None
 
 

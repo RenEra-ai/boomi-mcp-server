@@ -1486,12 +1486,14 @@ def test_newly_added_keyed_child_inserts_before_unkeyed():
 
 
 def test_rest_op_path_only_update_preserves_live_profile_bindings():
-    """Codex r16 P2: a path-only / method-only structured update on a
-    REST operation with existing profile bindings (requestProfile,
-    responseProfile, *ProfileType set in live XML) must NOT clobber
-    them. The builder emits default ``requestProfileType="xml"`` and
-    no requestProfile attr when caller omits these fields — relying
-    on the policy's narrowed owned_attrs to preserve live state."""
+    """Scope B (#50) — path-only case: a path-only / method-only
+    structured update on a REST operation with existing profile
+    bindings (requestProfile, responseProfile, *ProfileType set in
+    live XML) must NOT clobber them. Under #50 conditional emission the
+    builder emits NO requestProfile/responseProfile AND NO
+    requestProfileType/responseProfileType when the caller omits those
+    fields, so the policy's additive merge preserves all four live
+    attrs."""
     current = """\
 <bns:Component xmlns:bns="http://api.platform.boomi.com/"
                type="connector-action" subType="officialboomi-X3979C-rest-prod"
@@ -1512,9 +1514,10 @@ def test_rest_op_path_only_update_preserves_live_profile_bindings():
   </bns:object>
 </bns:Component>
 """
-    # Desired: caller only changes path. Builder emits the always-default
-    # ``requestProfileType="xml"`` / ``responseProfileType="xml"`` and
-    # omits the optional ``requestProfile`` / ``responseProfile`` attrs.
+    # Desired: caller only changes path. Under #50 conditional emission
+    # the builder emits NEITHER the optional requestProfile/responseProfile
+    # ids NOR the requestProfileType/responseProfileType attrs (caller
+    # supplied none of them), so desired carries none of the four.
     desired = """\
 <bns:Component xmlns:bns="http://api.platform.boomi.com/"
                type="connector-action" subType="officialboomi-X3979C-rest-prod"
@@ -1523,9 +1526,7 @@ def test_rest_op_path_only_update_preserves_live_profile_bindings():
     <Operation xmlns="">
       <Configuration>
         <GenericOperationConfig customOperationType="POST"
-                                operationType="EXECUTE"
-                                requestProfileType="xml"
-                                responseProfileType="xml">
+                                operationType="EXECUTE">
           <field id="path" type="string" value="/v1/new"/>
         </GenericOperationConfig>
       </Configuration>
@@ -1549,18 +1550,14 @@ def test_rest_op_path_only_update_preserves_live_profile_bindings():
         for f in cfg.findall("field")
     }
     assert fields.get("path") == "/v1/new"
-    # Live profile UUIDs preserved (conditional emission: builder
-    # only emits requestProfile/responseProfile when caller supplies
-    # the id, so additive merge preserves live values on path-only
-    # updates). Codex r16 P2 / r17 P2 invariants.
+    # Live profile UUIDs preserved (additive merge: desired omitted them).
     assert cfg.attrib.get("requestProfile") == "live-request-profile-id"
     assert cfg.attrib.get("responseProfile") == "live-response-profile-id"
-    # Review follow-up: profile TYPE attrs now travel with their
-    # binding via coupled_attr_groups. A path-only update emits no
-    # requestProfile/responseProfile, so the coupled type is NOT
-    # applied and the live JSON type is PRESERVED (was previously
-    # clobbered to the builder's default "xml" — the r18 trade-off is
-    # now resolved).
+    # Live profile TYPES preserved too — #50 made the type attrs
+    # conditionally emitted, so a path-only update omits them and the
+    # additive merge keeps the live JSON type (previously the builder's
+    # default "xml" clobbered this; the coupled_attr_groups hack that
+    # worked around it is now retired).
     assert cfg.attrib.get("requestProfileType") == "JSON"
     assert cfg.attrib.get("responseProfileType") == "JSON"
 
@@ -1724,6 +1721,117 @@ def test_rest_op_explicit_profile_binding_lands_with_correct_type():
     # New profile UUID lands.
     assert cfg.attrib["requestProfile"] == "new-uuid"
     # New profile type lands too (no stale "NONE" survives).
+    assert cfg.attrib["requestProfileType"] == "json"
+
+
+def test_rest_op_type_only_update_applies_type_and_preserves_live_id():
+    """Scope B (#50) — type-only case: a type-only update
+    (request_profile_type supplied WITHOUT request_profile_id) now
+    APPLIES the new type while preserving the live profile id. Before
+    #50 this was a no-op (the live type survived) because the builder
+    default-emitted the type and the merge coupled it to the id; now
+    the type is conditionally emitted and merges additively."""
+    current = """\
+<bns:Component xmlns:bns="http://api.platform.boomi.com/"
+               type="connector-action" subType="officialboomi-X3979C-rest-prod"
+               name="op">
+  <bns:object>
+    <Operation xmlns="">
+      <Configuration>
+        <GenericOperationConfig customOperationType="POST"
+                                operationType="EXECUTE"
+                                requestProfileType="JSON"
+                                requestProfile="live-request-id">
+          <field id="path" type="string" value="/v1/items"/>
+        </GenericOperationConfig>
+      </Configuration>
+    </Operation>
+  </bns:object>
+</bns:Component>
+"""
+    # Builder output when the caller supplies ONLY request_profile_type
+    # (a type-only update): requestProfileType emitted, requestProfile
+    # (the id) omitted.
+    desired = """\
+<bns:Component xmlns:bns="http://api.platform.boomi.com/"
+               type="connector-action" subType="officialboomi-X3979C-rest-prod"
+               name="op">
+  <bns:object>
+    <Operation xmlns="">
+      <Configuration>
+        <GenericOperationConfig customOperationType="POST"
+                                operationType="EXECUTE"
+                                requestProfileType="xml">
+          <field id="path" type="string" value="/v1/items"/>
+        </GenericOperationConfig>
+      </Configuration>
+    </Operation>
+  </bns:object>
+</bns:Component>
+"""
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        _REST_CLIENT_OPERATION_POLICY,
+    )
+    merged = merge_for_update(current, desired, _REST_CLIENT_OPERATION_POLICY)
+    root = _parse(merged)
+    cfg = root.find(
+        "bns:object/Operation/Configuration/GenericOperationConfig", NS
+    )
+    # The new type is applied...
+    assert cfg.attrib["requestProfileType"] == "xml"
+    # ...and the live profile id is preserved (desired omitted it).
+    assert cfg.attrib["requestProfile"] == "live-request-id"
+
+
+def test_rest_op_binding_update_applies_id_and_type_together():
+    """Scope B (#50) — binding case: supplying request_profile_id +
+    request_profile_type applies BOTH the id and the type to the merged
+    XML, overwriting the live binding."""
+    current = """\
+<bns:Component xmlns:bns="http://api.platform.boomi.com/"
+               type="connector-action" subType="officialboomi-X3979C-rest-prod"
+               name="op">
+  <bns:object>
+    <Operation xmlns="">
+      <Configuration>
+        <GenericOperationConfig customOperationType="POST"
+                                operationType="EXECUTE"
+                                requestProfileType="xml"
+                                requestProfile="old-id">
+          <field id="path" type="string" value="/v1/items"/>
+        </GenericOperationConfig>
+      </Configuration>
+    </Operation>
+  </bns:object>
+</bns:Component>
+"""
+    desired = """\
+<bns:Component xmlns:bns="http://api.platform.boomi.com/"
+               type="connector-action" subType="officialboomi-X3979C-rest-prod"
+               name="op">
+  <bns:object>
+    <Operation xmlns="">
+      <Configuration>
+        <GenericOperationConfig customOperationType="POST"
+                                operationType="EXECUTE"
+                                requestProfileType="json"
+                                requestProfile="new-id">
+          <field id="path" type="string" value="/v1/items"/>
+        </GenericOperationConfig>
+      </Configuration>
+    </Operation>
+  </bns:object>
+</bns:Component>
+"""
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        _REST_CLIENT_OPERATION_POLICY,
+    )
+    merged = merge_for_update(current, desired, _REST_CLIENT_OPERATION_POLICY)
+    root = _parse(merged)
+    cfg = root.find(
+        "bns:object/Operation/Configuration/GenericOperationConfig", NS
+    )
+    assert cfg.attrib["requestProfile"] == "new-id"
     assert cfg.attrib["requestProfileType"] == "json"
 
 

@@ -25,10 +25,11 @@ Like the other source/transform primitives, this emits JSON
 ``IntegrationComponentSpec`` objects only — every byte of XML and all structured
 validation is delegated to the existing ``RestClientConnectionBuilder`` /
 ``RestClientOperationBuilder``. It does not author REST paths, payloads, or call
-any live Boomi API. The #50 ``requestProfileType`` / ``responseProfileType``
-emission freeze is honored: the GET request body is empty, so this primitive never
-sets request-profile fields and lets the REST operation builder emit its frozen
-defaults.
+any live Boomi API. The GET request body is empty, so this primitive sets no
+request-profile fields; under #50 conditional emission the REST operation builder
+therefore emits no ``requestProfileType`` attr. It does carry the response profile
+id+type (a fetch needs an output profile), so ``responseProfile`` /
+``responseProfileType`` are emitted from those explicit values.
 """
 
 from __future__ import annotations
@@ -689,7 +690,8 @@ class RestFetchPrimitive(PrimitivePattern):
             config["folder_name"] = folder
 
         # No request_profile_id / request_profile_type: the GET request body is
-        # empty (the #72 empty-request guarantee + the #50 emission freeze).
+        # empty (the #72 empty-request guarantee), so under #50 conditional
+        # emission the builder emits no request-profile attrs at all.
         raise_for_builder_error(RestClientOperationBuilder.validate_config(config))
 
         # Each in-spec profile referenced by $ref must appear in depends_on so
