@@ -1023,29 +1023,23 @@ def _send_profile_source(**overrides):
 
 
 class TestRestSendRuntimeBindings:
-    def test_query_header_slots_validate_bindings(self):
-        frag = _fragment(
-            RestSendWithRetryPrimitive,
-            _rest_create_params(
-                operation={"method": "POST", "path": "/resource"},
-                query_parameter_slots=[{"name": "dryRun"}],
-                request_header_slots=[{"name": "X-Tenant"}],
-                runtime_bindings=[
-                    {"location": "query_parameter", "slot": "dryRun",
-                     "source": {"kind": "static", "value": "true"}},
-                    {"location": "request_header", "slot": "X-Tenant",
-                     "source": {"kind": "dpp", "property_name": "tenant"}},
-                ],
-            ),
-        )
-        pending = frag["metadata"]["runtime_bindings_pending"]
-        assert pending["emission_status"] == "pending_live_verify"
-        assert {b["location"] for b in pending["bindings"]} == {
-            "query_parameter",
-            "request_header",
-        }
-        # No path binding -> the target carries no dynamic_path.
-        assert "dynamic_path" not in frag["process_config"]["target"]
+    def test_query_header_bindings_rejected(self):
+        # REST Client query parameters / request headers are STATIC operation
+        # customProperties (Boomi UI verified — only 'Path' is a dynamic operation
+        # property), so a query_parameter / request_header runtime binding is rejected.
+        for location, slot in (("query_parameter", "dryRun"), ("request_header", "X-Tenant")):
+            with pytest.raises(ValidationError):
+                RestSendWithRetryPrimitive.validate_parameters(
+                    _rest_create_params(
+                        operation={"method": "POST", "path": "/resource"},
+                        query_parameter_slots=[{"name": "dryRun"}],
+                        request_header_slots=[{"name": "X-Tenant"}],
+                        runtime_bindings=[
+                            {"location": location, "slot": slot,
+                             "source": {"kind": "static", "value": "x"}}
+                        ],
+                    )
+                )
 
     def test_path_replacements_alone_still_backwards_compatible(self):
         # No runtime_bindings -> nothing changes vs the #100 path_replacements path.
@@ -1064,11 +1058,10 @@ class TestRestSendRuntimeBindings:
         assert "runtime_bindings" not in frag.get("metadata", {})
         assert "dynamic_path" not in frag["process_config"]["target"]
 
-    def test_path_replacements_with_path_slots_and_query_binding_ok(self):
-        # #96 review regression guard: path handled by path_replacements (#100) +
-        # declared path_slots metadata + a query runtime binding must be VALID. The
-        # required-slot check must not flag the path slot (it is satisfied externally
-        # by path_replacements, and a path runtime binding is forbidden alongside it).
+    def test_path_replacements_coexists_with_declared_slots(self):
+        # path_replacements (#100) + forward-declared path/query slot metadata (#72)
+        # without any runtime_bindings is valid — the declared slots are metadata and
+        # the path is handled by path_replacements.
         frag = _fragment(
             RestSendWithRetryPrimitive,
             _rest_create_params(
@@ -1081,14 +1074,10 @@ class TestRestSendRuntimeBindings:
                 },
                 path_slots=[{"name": "clientId"}],
                 query_parameter_slots=[{"name": "dryRun"}],
-                runtime_bindings=[
-                    {"location": "query_parameter", "slot": "dryRun",
-                     "source": {"kind": "static", "value": "true"}}
-                ],
             ),
         )
-        pending = frag["metadata"]["runtime_bindings_pending"]
-        assert {b["location"] for b in pending["bindings"]} == {"query_parameter"}
+        assert "runtime_bindings" not in frag.get("metadata", {})
+        assert "dynamic_path" not in frag["process_config"]["target"]
 
     def test_path_replacements_plus_path_runtime_binding_conflict(self):
         with pytest.raises(ValidationError):

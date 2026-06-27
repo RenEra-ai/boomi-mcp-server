@@ -15,14 +15,18 @@ binding plus the explicit output shape, pagination/conditional-request metadata,
 and the operation slot declarations.
 
 Scope (M5.4, #72): #72 declares the param/header/path slots. Issue #96 (M5.4a)
-adds the ``runtime_bindings`` that fill those slots: a **path** binding lowers into
-the live-proven ``dynamic_path`` block (Set Properties DDP + connector-step "Path"
-dynamic operation property), which the process-flow builder emits as non-empty
-``dynamicProperties``; query/header bindings (and ddp/dpp path sources) are validated
-and carried as ``pending_live_verify`` metadata until QA captures the exact REST
-Client dynamic operation property XML — never a guessed emission. Pagination and
-conditional-request behavior are carried as validated config/metadata, never canned
-request templates or process loops.
+adds the ``runtime_bindings`` that fill them. Per the live Boomi UI investigation
+(see ``.codex/plans/issue-96-live-captures.md`` §G), the REST Client connector step
+exposes exactly ONE dynamic operation property — **"Path"** — so only a path
+binding can be dynamic: it lowers into the live-proven ``dynamic_path`` block (Set
+Properties DDP + connector-step "Path" property) the process-flow builder emits as
+non-empty ``dynamicProperties`` (static + profile_field sources today; ddp/dpp
+sources are confirmed-valid Path value sources whose Set Properties segment XML is a
+narrow capture follow-up). Query parameters and request headers are STATIC operation
+``customProperties`` with no dynamic-binding mechanism, so a query/header runtime
+binding is REJECTED at plan time (vary a query param via the path/full-URL; headers
+are static). Pagination and conditional-request behavior are carried as validated
+config/metadata, never canned request templates or process loops.
 
 Like the other source/transform primitives, this emits JSON
 ``IntegrationComponentSpec`` objects only — every byte of XML and all structured
@@ -77,7 +81,6 @@ from .rest_runtime import (
     OperationSlot,
     RuntimeBinding,
     lower_path_bindings,
-    pending_runtime_bindings,
     synth_path_replacements,
     validate_runtime_bindings,
 )
@@ -384,9 +387,11 @@ class RestFetchParameters(BaseModel):
     path_slots: Optional[List[OperationSlot]] = Field(default=None)
     query_parameter_slots: Optional[List[OperationSlot]] = Field(default=None)
     request_header_slots: Optional[List[OperationSlot]] = Field(default=None)
-    # Issue #96 (M5.4a): runtime values bound into the declared slots above. Path
-    # bindings lower into the live-proven dynamic_path block; query/header bindings
-    # are validated and carried as pending_live_verify metadata.
+    # Issue #96 (M5.4a): runtime values bound into the declared slots above. Only a
+    # PATH binding is dynamically bindable on REST Client (Boomi UI verified — the
+    # connector step exposes only the "Path" dynamic operation property); it lowers
+    # into the live-proven dynamic_path block. A query_parameter/request_header
+    # binding is rejected at validation (REST Client query/header are static).
     runtime_bindings: Optional[List[RuntimeBinding]] = Field(default=None)
     pagination: PaginationMeta = Field(default_factory=PaginationMeta)
     conditional_request: ConditionalRequestMeta = Field(
@@ -478,12 +483,13 @@ class RestFetchPrimitive(PrimitivePattern):
             "Materialize the REST fetch source group (connection, execute GET "
             "operation) from caller config and emit a process source fragment "
             "with an explicit output shape. Declares operation param/header/path "
-            "slots (#72) and binds them with runtime_bindings (#96): a path "
-            "binding lowers into the live-proven dynamic_path block the builder "
-            "emits as dynamicProperties; query/header bindings are validated and "
-            "carried as pending_live_verify metadata. Emits JSON component specs "
-            "for the existing REST Client builders; never authors paths or calls "
-            "a live API."
+            "slots (#72); #96 binds the PATH via runtime_bindings — the only "
+            "dynamically bindable REST Client location (Boomi UI verified) — "
+            "lowering into the live-proven dynamic_path block the builder emits as "
+            "dynamicProperties (static + profile_field today). Query/header runtime "
+            "bindings are rejected (REST Client query/header are static). Emits JSON "
+            "component specs for the existing REST Client builders; never authors "
+            "paths or calls a live API."
         ),
         tags=["source", "rest", "fetch"],
         use_cases=[
@@ -494,7 +500,7 @@ class RestFetchPrimitive(PrimitivePattern):
         not_for=[
             "Database or file sources (use db_extract)",
             "REST writes / non-GET methods (fetch is GET-only in M5.4)",
-            "Query/header or DDP/DPP runtime XML emission (validated but pending live verify, #96)",
+            "Dynamic query/header binding (REST Client query/header are static — vary via the path, #96)",
         ],
     )
     parameters_model = RestFetchParameters
@@ -562,12 +568,13 @@ class RestFetchPrimitive(PrimitivePattern):
             "action_type": "GET",
             "label": f"{context.component_prefix} REST Fetch",
         }
-        # Issue #96: lower path runtime bindings. A profile_field path lowers into the
-        # live-proven dynamic_path block (Set Properties DDP + connector-step "Path"
-        # property); an all-static path is a constant folded into the operation path
-        # (no dynamic_path here). A ddp/dpp path source raises
-        # PROCESS_RUNTIME_BINDING_UNVERIFIED — plan-time failure, never a guessed
-        # emission. Query/header bindings stay in pending metadata.
+        # Issue #96: lower path runtime bindings (the only dynamically bindable REST
+        # Client location). A profile_field path lowers into the live-proven
+        # dynamic_path block (Set Properties DDP + connector-step "Path" property); an
+        # all-static path is a constant folded into the operation path (no dynamic_path
+        # here). A ddp/dpp path source raises PROCESS_RUNTIME_BINDING_UNVERIFIED
+        # (confirmed-valid Path source; segment XML capture pending) — never a guessed
+        # emission. Query/header bindings were already rejected at validation.
         path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=params.operation.path,
@@ -600,15 +607,12 @@ class RestFetchPrimitive(PrimitivePattern):
             "response_replaces_document": True,
         }
         if params.runtime_bindings:
+            # Only path bindings reach here — query/header bindings are rejected at
+            # validation (REST Client static; not dynamically bindable), and a
+            # ddp/dpp path source raised above. Record the (path) bindings as metadata.
             rest_fetch_meta["runtime_bindings"] = [
                 b.model_dump(exclude_none=True) for b in params.runtime_bindings
             ]
-            pending = pending_runtime_bindings(params.runtime_bindings)
-            if pending:
-                rest_fetch_meta["runtime_bindings_pending"] = {
-                    "emission_status": "pending_live_verify",
-                    "bindings": pending,
-                }
         fragment: Dict[str, Any] = {
             "process_config": {"source": source},
             "depends_on": depends_on,

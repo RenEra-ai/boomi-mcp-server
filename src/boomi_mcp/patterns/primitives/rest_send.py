@@ -67,7 +67,6 @@ from .rest_runtime import (
     OperationSlot,
     RuntimeBinding,
     lower_path_bindings,
-    pending_runtime_bindings,
     synth_path_replacements,
     validate_runtime_bindings,
 )
@@ -288,10 +287,6 @@ class RestSendWithRetryParameters(BaseModel):
             query_parameter_slots=self.query_parameter_slots,
             request_header_slots=self.request_header_slots,
             path_tokens=path_tokens,
-            # When path_replacements (#100) handles the path, declared path slots are
-            # satisfied externally — and a path runtime_binding is forbidden alongside
-            # it (conflict rule) — so they are exempt from the required-slot check.
-            path_bound_externally=bool(self.operation.path_replacements),
         )
         return self
 
@@ -311,14 +306,15 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         description=(
             "Materialize the REST target send group (connection, execute "
             "operation) from caller config and emit a process target fragment "
-            "for archetype assembly. Declares send-side operation slots and binds "
-            "them with runtime_bindings (#96): a path binding lowers into the "
-            "live-proven dynamic_path block (path_replacements stays the canonical "
-            "send-side path surface — the two are mutually exclusive), and "
-            "query/header bindings are validated and carried as pending_live_verify "
-            "metadata. Emits JSON component specs for the existing REST Client "
-            "builders; retry intent is recorded as planning metadata only and does "
-            "not enable unverified process retry/DLQ behavior."
+            "for archetype assembly. Declares send-side operation slots; #96 binds "
+            "the PATH via runtime_bindings — the only dynamically bindable REST "
+            "Client location (Boomi UI verified) — lowering into the live-proven "
+            "dynamic_path block (path_replacements stays the canonical send-side path "
+            "surface — the two are mutually exclusive). Query/header runtime bindings "
+            "are rejected (REST Client query/header are static). Emits JSON component "
+            "specs for the existing REST Client builders; retry intent is recorded as "
+            "planning metadata only and does not enable unverified process retry/DLQ "
+            "behavior."
         ),
         tags=["target", "rest", "send"],
         use_cases=[
@@ -329,7 +325,7 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
             "Database or file targets",
             "Process-level retry/DLQ wiring (owned by the archetype RetryPolicy + ProcessFlowBuilder, not this primitive's metadata)",
             "Authoring request payloads or credentials",
-            "Query/header or DDP/DPP runtime XML emission (validated but pending live verify, #96)",
+            "Dynamic query/header binding (REST Client query/header are static — vary via the path, #96)",
         ],
     )
     parameters_model = RestSendWithRetryParameters
@@ -395,9 +391,9 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         # directly from RestSendRequest.path_replacements in _build_main_process (it
         # does NOT consume this fragment). When the rest_send primitive is driven
         # directly with #96 runtime_bindings (e.g. by a future api_to_api_sync
-        # preset), a path binding lowers into target.dynamic_path here so the same
-        # builder emitters apply. Query/header bindings stay in pending metadata
-        # (not yet live-proven for this REST Client subtype).
+        # preset), a PATH binding lowers into target.dynamic_path here so the same
+        # builder emitters apply. Query/header bindings were already rejected at
+        # validation (REST Client query/header are static — Boomi UI verified).
         path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=params.operation.path,
@@ -421,15 +417,12 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
             # Planning metadata only — not consumed by ProcessFlowBuilder.
             metadata["retry_policy"] = params.retry_policy.model_dump(exclude_none=True)
         if params.runtime_bindings:
+            # Only path bindings reach here — query/header bindings are rejected at
+            # validation (REST Client static; not dynamically bindable), and a
+            # ddp/dpp path source raised above. Record the (path) bindings as metadata.
             metadata["runtime_bindings"] = [
                 b.model_dump(exclude_none=True) for b in params.runtime_bindings
             ]
-            pending = pending_runtime_bindings(params.runtime_bindings)
-            if pending:
-                metadata["runtime_bindings_pending"] = {
-                    "emission_status": "pending_live_verify",
-                    "bindings": pending,
-                }
         if metadata:
             fragment["metadata"] = metadata
         return fragment

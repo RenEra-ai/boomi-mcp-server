@@ -157,15 +157,20 @@ def validate_runtime_bindings(
     query_parameter_slots: Optional[List[OperationSlot]],
     request_header_slots: Optional[List[OperationSlot]],
     path_tokens: Optional[set] = None,
-    path_bound_externally: bool = False,
 ) -> None:
     """Validate every binding against the declared slots; raise on the first defect.
 
-    Enforces: unique ``(location, slot)``; non-blank, non-secret-shaped slot names;
-    non-secret static/ddp/dpp values; each binding's slot is declared for its
-    location (missing slot → error) and, for a path binding, also matches a
-    ``{token}`` in the operation path (mismatched key → error); profile-field
-    sources name a non-blank element and a resolvable ``$ref`` profile key.
+    Enforces: REST Client only supports a per-request dynamic **path** (Boomi UI
+    verified — see ``.codex/plans/issue-96-live-captures.md`` §G: the REST Client
+    connector step exposes exactly one dynamic operation property, "Path"; query
+    parameters and request headers are static operation ``customProperties`` with no
+    dynamic-binding mechanism), so a ``query_parameter`` / ``request_header`` runtime
+    binding is rejected. For path bindings: unique ``(location, slot)``; non-blank,
+    non-secret-shaped slot names; non-secret static/ddp/dpp values; each binding's
+    slot is declared and matches a ``{token}`` in the operation path (mismatched key
+    → error); profile-field sources name a non-blank element and a resolvable
+    ``$ref`` profile key; and every required path slot is filled (a path binding
+    cannot coexist with ``path_replacements`` — the rest_send conflict rule).
     """
     if not bindings:
         return
@@ -176,6 +181,19 @@ def validate_runtime_bindings(
     }
     seen: set = set()
     for binding in bindings:
+        if binding.location in ("query_parameter", "request_header"):
+            location_label = binding.location.replace("_", " ")
+            raise _binding_error(
+                "REST Client does not support a per-request dynamic "
+                f"{location_label} binding: query parameters and request headers are "
+                "static operation customProperties (Boomi UI verified — the REST "
+                "Client connector step exposes only 'Path' as a dynamic operation "
+                "property). Vary a query parameter per request by including it in the "
+                "operation path (e.g. '/items?since={since}') and binding that path "
+                "token; a request header can only be set statically on the operation.",
+                offending_location=binding.location,
+                offending_slot=binding.slot,
+            )
         slot = binding.slot
         if not slot or not slot.strip():
             raise _binding_error(f"a {binding.location} runtime binding has a blank slot name")
@@ -208,30 +226,22 @@ def validate_runtime_bindings(
         _validate_source(binding)
 
     # Plan: "missing required slots". When the caller provides runtime_bindings,
-    # every declared required slot must be filled — a binding set that omits a
-    # required slot fails at plan time. A #72-style caller that forward-declares
-    # slots WITHOUT any runtime_bindings is exempt (the slots are recorded as
-    # metadata for a later binder); only the act of binding triggers completeness.
-    # ``path_bound_externally`` (rest_send with operation.path_replacements) marks
-    # the PATH as already satisfied by the #100 surface — declared path slots are
-    # then not required to carry a runtime binding (the conflict rule even forbids
-    # one), so they are skipped here. Query/header slots have no static alternative
-    # (#72 rejects a slot that duplicates a static key), so they are always enforced.
-    bound = {(b.location, b.slot) for b in bindings}
-    for location, slots in (
-        ("path", path_slots),
-        ("query_parameter", query_parameter_slots),
-        ("request_header", request_header_slots),
-    ):
-        if location == "path" and path_bound_externally:
-            continue
-        for slot in slots or []:
-            if slot.required and (location, slot.name) not in bound:
-                raise _binding_error(
-                    f"required {location} slot {slot.name!r} has no runtime binding",
-                    offending_location=location,
-                    offending_slot=slot.name,
-                )
+    # every declared required PATH slot must be filled — a binding set that omits a
+    # required path slot fails at plan time. Only PATH slots are enforced: query/
+    # header slots cannot carry a runtime binding on REST Client (rejected above), so
+    # requiring one would be unsatisfiable — they stay #72 operation metadata. A
+    # #72-style caller that forward-declares slots WITHOUT any runtime_bindings is
+    # exempt (the early ``if not bindings: return`` above). A path binding cannot
+    # coexist with operation.path_replacements (the rest_send conflict rule), so the
+    # required check never collides with the #100 path surface.
+    bound_path = {b.slot for b in bindings if b.location == "path"}
+    for slot in path_slots or []:
+        if slot.required and slot.name not in bound_path:
+            raise _binding_error(
+                f"required path slot {slot.name!r} has no runtime binding",
+                offending_location="path",
+                offending_slot=slot.name,
+            )
 
 
 def _validate_source(binding: RuntimeBinding) -> None:
@@ -285,10 +295,13 @@ def _unverified_error(message: str, **details: Any) -> BuilderValidationError:
         error_code=RUNTIME_BINDING_UNVERIFIED,
         field="runtime_bindings",
         hint=(
-            "v1 emits process XML only for path slots bound to static literals + "
-            "at least one profile_field (the live-proven #100 mechanism). DDP/DPP "
-            "path sources and all query/header process XML are pending a live REST "
-            "Client fixture (QA live-verify) — they validate but are not emitted."
+            "Path runtime bindings emit today for static literals + profile_field "
+            "sources (the live-proven #100 Set Properties + connector 'Path' "
+            "mechanism). A ddp/dpp path source is a CONFIRMED-valid REST Client Path "
+            "value source (Boomi UI Type dropdown — see issue-96 live captures §G), "
+            "lowered via the same Set Properties segment; capturing the exact Boomi "
+            "valueType token for a DDP/DPP segment is a narrow follow-up. Use a "
+            "static or profile_field path source for emitted dynamicProperties today."
         ),
         details=details or None,
     )
@@ -367,10 +380,11 @@ def lower_path_bindings(
             )
             resolved_parts.append("")  # placeholder — never used (dynamic path)
             profile_segments += 1
-        else:  # ddp / dpp path source — not live-proven in v1
+        else:  # ddp / dpp path source — confirmed valid, segment XML capture pending
             raise _unverified_error(
-                f"{source.kind} path source for slot {binding.slot!r} is not "
-                "emitted in v1 (pending a live REST Client fixture)",
+                f"{source.kind} path source for slot {binding.slot!r} is a "
+                "confirmed-valid REST Client Path value source but its Set Properties "
+                "segment XML is not yet captured (narrow follow-up)",
                 offending_slot=binding.slot,
             )
         last = match.end()
@@ -417,18 +431,3 @@ def synth_path_replacements(
     ]
 
 
-def pending_runtime_bindings(
-    bindings: Optional[List[RuntimeBinding]],
-) -> List[Dict[str, Any]]:
-    """Dump the query/header (and any deferred) bindings carried as metadata.
-
-    Path bindings are lowered to ``dynamic_path`` and emitted; everything else is
-    recorded under ``runtime_bindings_pending`` with an ``emission_status`` so the
-    contract is explicit that the value is validated but not yet emitted.
-    """
-    pending: List[Dict[str, Any]] = []
-    for binding in bindings or []:
-        if binding.location == "path":
-            continue
-        pending.append(binding.model_dump(exclude_none=True))
-    return pending

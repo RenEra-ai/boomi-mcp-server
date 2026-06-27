@@ -374,61 +374,55 @@ class TestRuntimeBindings:
         )
         assert "req_profile" in frag["depends_on"]
 
-    def test_query_header_bindings_land_in_pending_metadata(self):
-        frag = _fragment(
-            _params(
-                operation={"path": "/v1/items"},
-                query_parameter_slots=[{"name": "since"}],
-                request_header_slots=[{"name": "X-Tenant"}],
-                runtime_bindings=[
-                    {"location": "query_parameter", "slot": "since",
-                     "source": {"kind": "ddp", "property_name": "watermark"}},
-                    {"location": "request_header", "slot": "X-Tenant",
-                     "source": {"kind": "dpp", "property_name": "tenant"}},
-                ],
-            )
-        )
-        # No path binding → no dynamic_path emitted on the source.
-        assert "dynamic_path" not in frag["process_config"]["source"]
-        pending = frag["metadata"]["rest_fetch"]["runtime_bindings_pending"]
-        assert pending["emission_status"] == "pending_live_verify"
-        assert {b["location"] for b in pending["bindings"]} == {
-            "query_parameter",
-            "request_header",
-        }
+    def test_query_header_bindings_rejected(self):
+        # REST Client query parameters / request headers are STATIC operation
+        # customProperties (Boomi UI verified — only 'Path' is a dynamic operation
+        # property), so a query_parameter / request_header runtime binding is rejected.
+        for location, slot in (("query_parameter", "since"), ("request_header", "X-Tenant")):
+            with pytest.raises(ValidationError):
+                RestFetchPrimitive.validate_parameters(
+                    _params(
+                        operation={"path": "/v1/items"},
+                        query_parameter_slots=[{"name": "since"}],
+                        request_header_slots=[{"name": "X-Tenant"}],
+                        runtime_bindings=[
+                            {"location": location, "slot": slot,
+                             "source": {"kind": "static", "value": "x"}}
+                        ],
+                    )
+                )
 
-    def test_missing_slot_rejected(self):
-        # A binding for a slot that was never declared fails at plan time.
+    def test_missing_path_slot_rejected(self):
+        # A path binding to a token with no declared path slot fails at plan time.
         with pytest.raises(ValidationError):
             RestFetchPrimitive.validate_parameters(
                 _params(
-                    operation={"path": "/v1/items"},
+                    operation={"path": "/v1/items/{id}"},
+                    # no path_slots declared
                     runtime_bindings=[
-                        {"location": "query_parameter", "slot": "since",
-                         "source": {"kind": "static", "value": "x"}}
+                        {"location": "path", "slot": "id", "source": _profile_source()}
                     ],
                 )
             )
 
-    def test_required_slot_unbound_rejected_when_binding(self):
+    def test_required_path_slot_unbound_rejected_when_binding(self):
         # Plan: "missing required slots". With runtime_bindings present, a declared
-        # required slot that has no binding fails at plan time.
+        # required PATH slot that has no binding fails at plan time.
         with pytest.raises(ValidationError):
             RestFetchPrimitive.validate_parameters(
                 _params(
-                    operation={"path": "/v1/items"},
-                    query_parameter_slots=[{"name": "since"}, {"name": "filter"}],
+                    operation={"path": "/v1/{a}/{b}"},
+                    path_slots=[{"name": "a"}, {"name": "b"}],
                     runtime_bindings=[
-                        {"location": "query_parameter", "slot": "since",
-                         "source": {"kind": "static", "value": "x"}}
-                        # 'filter' (required by default) is left unbound -> error.
+                        {"location": "path", "slot": "a", "source": _profile_source()}
+                        # 'b' (required by default) is left unbound -> error.
                     ],
                 )
             )
 
     def test_required_slots_exempt_without_bindings(self):
-        # A #72-style caller that declares required slots WITHOUT runtime_bindings is
-        # exempt — slots are forward-declared metadata; binding is deferred.
+        # A #72-style caller that declares slots WITHOUT runtime_bindings is exempt —
+        # slots are forward-declared operation metadata; binding is deferred.
         params = RestFetchPrimitive.validate_parameters(
             _params(
                 operation={"path": "/v1/items"},
@@ -436,20 +430,6 @@ class TestRuntimeBindings:
             )
         )
         assert params.query_parameter_slots is not None
-
-    def test_optional_slot_unbound_allowed(self):
-        # An optional (required=False) declared slot need not be bound.
-        params = RestFetchPrimitive.validate_parameters(
-            _params(
-                operation={"path": "/v1/items"},
-                query_parameter_slots=[{"name": "since"}, {"name": "filter", "required": False}],
-                runtime_bindings=[
-                    {"location": "query_parameter", "slot": "since",
-                     "source": {"kind": "static", "value": "x"}}
-                ],
-            )
-        )
-        assert params.runtime_bindings is not None
 
     def test_mismatched_path_key_rejected(self):
         # slot declared but not a '{token}' in the path.
