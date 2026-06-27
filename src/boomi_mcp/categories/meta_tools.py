@@ -3796,10 +3796,12 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
         "runtime_binding on the rest_fetch / rest_send primitive (static / ddp / dpp "
         "/ profile_field source); it lowers into the live-proven dynamic_path block "
         "the process-flow builder emits as the connector step's 'Path' dynamic "
-        "operation property over a blank operation path (static + profile_field emit "
-        "today; ddp/dpp are confirmed-valid Path sources whose Set Properties "
-        "segment XML is a narrow capture follow-up). A query_parameter / "
-        "request_header runtime_binding is REJECTED (REST_RUNTIME_BINDING_INVALID): "
+        "operation property over a blank operation path. All four value sources emit "
+        "(Set Properties segments live-captured): static (valueType=static), "
+        "profile_field (valueType=profile), ddp (valueType=track), dpp "
+        "(valueType=process); an all-static path is folded into the operation path. A "
+        "query_parameter / request_header runtime_binding is REJECTED "
+        "(REST_RUNTIME_BINDING_INVALID): "
         "vary a query parameter per request by encoding it in the path (e.g. "
         "'/items?since={since}'); request headers can only be set statically here."
     ),
@@ -5749,17 +5751,17 @@ _PROCESS_FLOW_PROTOCOLS = {
             # Issue #96 M5.4a: typed REST runtime bindings (Boomi UI verified — the
             # REST Client connector step exposes only the 'Path' dynamic operation
             # property). A PATH runtime binding lowers into the live-proven dynamic_path
-            # block the builder emits (static + profile_field today). A query_parameter
-            # / request_header binding is REJECTED with REST_RUNTIME_BINDING_INVALID —
+            # block the builder emits; all four value sources emit (static, profile_field,
+            # ddp, dpp — Set Properties segments live-captured). A query_parameter /
+            # request_header binding is REJECTED with REST_RUNTIME_BINDING_INVALID —
             # REST Client query/header are static operation customProperties (vary a
             # query param via the path; headers are static). REST_RUNTIME_BINDING_INVALID
             # is the primitive-layer binding-shape error (rejected query/header binding,
             # undeclared/duplicate/secret-shaped slot, missing required path slot,
             # path_replacements+path-binding conflict). PROCESS_RUNTIME_BINDING_UNVERIFIED
-            # gates a DDP/DPP path source (confirmed-valid Path value source whose Set
-            # Properties segment XML is a capture follow-up), a raw runtime_bindings
-            # block reaching the builder, and a source.dynamic_path under a
-            # connector-scoped Try/Catch.
+            # gates a raw runtime_bindings block reaching the builder (bypassing the
+            # primitive lowering) and a source.dynamic_path under a connector-scoped
+            # Try/Catch.
             {"error_code": "REST_RUNTIME_BINDING_INVALID", "field": "runtime_bindings"},
             {"error_code": "PROCESS_RUNTIME_BINDING_UNVERIFIED", "field": "runtime_bindings|source.runtime_bindings|target.runtime_bindings|source.dynamic_path"},
             {"error_code": "PROCESS_SHAPE_UNSUPPORTED", "field": "transform.mode"},

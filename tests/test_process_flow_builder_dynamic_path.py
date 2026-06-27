@@ -195,6 +195,91 @@ def test_malformed_profile_segment_rejected():
 
 
 # ---------------------------------------------------------------------------
+# Issue #96 §H — ddp / dpp Set Properties value-source segments
+# ---------------------------------------------------------------------------
+
+
+def _ddp_dynamic_path():
+    # A ddp/dpp-only dynamic path: no profile segment -> no request_profile_id.
+    return {
+        "ddp_name": "DDP_PATH_ITEMS",
+        "request_profile_id": None,
+        "profile_type": None,
+        "segments": [
+            {"type": "static", "value": "/v1/items/"},
+            {"type": "ddp", "property_name": "client_id"},
+            {"type": "static", "value": "/notes/"},
+            {"type": "dpp", "property_name": "run_id"},
+        ],
+    }
+
+
+def test_ddp_dpp_segments_emit_captured_xml():
+    # valueType="track" + <trackparameter> for a DDP source; valueType="process" +
+    # <processparameter> for a DPP source — both live-captured (#96 §H).
+    xml = ProcessFlowBuilder.build(_config(dynamic_path=_ddp_dynamic_path()), name="P")
+    root = ET.fromstring(xml)
+    prop = root.find(".//documentproperty")
+    assert prop.get("propertyId") == "dynamicdocument.DDP_PATH_ITEMS"
+    params = prop.findall(".//parametervalue")
+    assert [p.get("valueType") for p in params] == ["static", "track", "static", "process"]
+
+    ddp = params[1]
+    tp = ddp.find("trackparameter")
+    assert tp.get("propertyId") == "dynamicdocument.client_id"
+    assert tp.get("propertyName") == "Dynamic Document Property - client_id"
+    assert tp.get("defaultValue") == ""
+
+    dpp = params[3]
+    pp = dpp.find("processparameter")
+    assert pp.get("processproperty") == "run_id"
+    assert pp.get("processpropertydefaultvalue") == ""
+
+
+def test_ddp_dpp_only_path_omits_parameter_profile():
+    # No profile segment -> the connector step carries no parameter-profile attr
+    # (it must NOT be emitted as parameter-profile="").
+    xml = ProcessFlowBuilder.build(_config(dynamic_path=_ddp_dynamic_path()), name="P")
+    assert 'parameter-profile=""' not in xml
+    root = ET.fromstring(xml)
+    ca = next(c for c in root.iter("connectoraction") if c.get("actionType") == "PATCH")
+    assert ca.get("parameter-profile") is None
+    # The "Path" property still references the DDP the Set Properties step builds.
+    pv = ca.find(".//dynamicProperties/propertyvalue")
+    assert pv.get("valueType") == "track"
+    assert pv.find("trackparameter").get("propertyId") == "dynamicdocument.DDP_PATH_ITEMS"
+
+
+def test_ddp_dpp_only_path_validates_clean():
+    err = ProcessFlowBuilder.validate_config(
+        _config(dynamic_path=_ddp_dynamic_path()), depends_on=[]
+    )
+    assert err is None
+
+
+def test_blank_ddp_segment_property_name_rejected():
+    bad = _ddp_dynamic_path()
+    bad["segments"] = [{"type": "ddp", "property_name": "   "}]
+    err = ProcessFlowBuilder.validate_config(_config(dynamic_path=bad), depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_PATH_REPLACEMENT_INVALID"
+
+
+def test_profile_segment_without_request_profile_id_rejected():
+    # request_profile_id is required as soon as a profile segment is present.
+    bad = _dynamic_path()
+    bad["request_profile_id"] = None
+    err = ProcessFlowBuilder.validate_config(_config(dynamic_path=bad), depends_on=[])
+    assert err is not None
+    assert err.error_code == "PROCESS_PATH_REPLACEMENT_INVALID"
+
+
+def test_xml_well_formed_with_ddp_dpp_segments():
+    xml = ProcessFlowBuilder.build(_config(dynamic_path=_ddp_dynamic_path()), name="P")
+    ET.fromstring(xml)
+
+
+# ---------------------------------------------------------------------------
 # Connector-scoped Try/Catch (issue #99 G1 + #100 G2 interaction)
 # ---------------------------------------------------------------------------
 

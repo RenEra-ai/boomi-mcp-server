@@ -569,12 +569,11 @@ class RestFetchPrimitive(PrimitivePattern):
             "label": f"{context.component_prefix} REST Fetch",
         }
         # Issue #96: lower path runtime bindings (the only dynamically bindable REST
-        # Client location). A profile_field path lowers into the live-proven
-        # dynamic_path block (Set Properties DDP + connector-step "Path" property); an
-        # all-static path is a constant folded into the operation path (no dynamic_path
-        # here). A ddp/dpp path source raises PROCESS_RUNTIME_BINDING_UNVERIFIED
-        # (confirmed-valid Path source; segment XML capture pending) — never a guessed
-        # emission. Query/header bindings were already rejected at validation.
+        # Client location). A profile_field/ddp/dpp path lowers into the live-proven
+        # dynamic_path block (Set Properties DDP + connector-step "Path" property — all
+        # four value-source segment shapes live-captured, §C2/§H); an all-static path is
+        # a constant folded into the operation path (no dynamic_path here). Query/header
+        # bindings were already rejected at validation (REST Client static).
         path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=params.operation.path,
@@ -608,8 +607,8 @@ class RestFetchPrimitive(PrimitivePattern):
         }
         if params.runtime_bindings:
             # Only path bindings reach here — query/header bindings are rejected at
-            # validation (REST Client static; not dynamically bindable), and a
-            # ddp/dpp path source raised above. Record the (path) bindings as metadata.
+            # validation (REST Client static; not dynamically bindable). Record the
+            # (path) bindings as metadata.
             rest_fetch_meta["runtime_bindings"] = [
                 b.model_dump(exclude_none=True) for b in params.runtime_bindings
             ]
@@ -738,12 +737,10 @@ class RestFetchPrimitive(PrimitivePattern):
         if folder:
             config["folder_name"] = folder
 
-        # Issue #96: lower the path runtime bindings (same dispatch emit_fragment
-        # uses, so a ddp/dpp path source raises PROCESS_RUNTIME_BINDING_UNVERIFIED
-        # here too — emit_components never produces a half-formed operation).
-        #   - "dynamic" (profile_field): the operation carries a BLANK path (supplied
-        #     at the process step). The REST operation builder permits a blank path
-        #     only with a usable path_replacements marker, so reuse the #100 marker
+        # Issue #96: lower the path runtime bindings (same dispatch emit_fragment uses).
+        #   - "dynamic" (profile_field/ddp/dpp): the operation carries a BLANK path
+        #     (supplied at the process step). The REST operation builder permits a blank
+        #     path only with a usable path_replacements marker, so reuse the #100 marker
         #     synthesized from the path bindings (build-only, not emitted into XML).
         #   - "static": the path is a constant — fold it into the operation path.
         path_mode, path_value = lower_path_bindings(

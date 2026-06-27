@@ -1472,11 +1472,12 @@ def _validate_runtime_bindings_gate(
 ) -> Optional[BuilderValidationError]:
     """Reject a raw ``runtime_bindings`` block in a source/target binding (#96 M5.4a).
 
-    The builder emits a PATH runtime binding via a lowered ``dynamic_path`` block
-    (the live-proven #100 mechanism). It does NOT emit query/header or DDP/DPP
-    runtime XML — a primitive keeps those in ``pending_live_verify`` metadata. So a
-    ``runtime_bindings`` key reaching the builder is either hand-authored or an
-    un-emittable binding; gate it as ``PROCESS_RUNTIME_BINDING_UNVERIFIED`` rather
+    The builder emits a PATH runtime binding only via a lowered ``dynamic_path``
+    block (Set Properties DDP + connector-step "Path" — the live-proven #100/#96
+    mechanism); the rest_fetch/rest_send primitive performs that lowering. The
+    builder itself does NOT lower a raw ``runtime_bindings`` block, so a
+    ``runtime_bindings`` key reaching the builder is a hand-authored spec that
+    bypassed the primitive; gate it as ``PROCESS_RUNTIME_BINDING_UNVERIFIED`` rather
     than silently dropping it. Absent / empty is a no-op (the normal lowered path).
     """
     if not isinstance(binding, dict):
@@ -1488,10 +1489,9 @@ def _validate_runtime_bindings_gate(
             field=f"{field_prefix}.runtime_bindings",
             hint=(
                 "A path runtime binding is emitted via a lowered dynamic_path "
-                "block; query/header and DDP/DPP runtime XML are pending a live "
-                "REST Client fixture (QA live-verify). Express a path binding "
-                "through the rest_fetch/rest_send primitive so it lowers to "
-                "dynamic_path."
+                "block. Express it through the rest_fetch/rest_send primitive so it "
+                "lowers to dynamic_path (the builder does not lower a raw "
+                "runtime_bindings block)."
             ),
         )
     return None
@@ -1535,13 +1535,16 @@ def _source_dynamic_path_connector_scope_error(
 def _validate_dynamic_path(
     dynamic_path: Any, field_prefix: str = "target"
 ) -> Optional[BuilderValidationError]:
-    """Validate the optional ``<target>.dynamic_path`` block (issue #100 G2).
+    """Validate the optional ``<target>.dynamic_path`` block (issue #100 G2 / #96).
 
     Absent (None) is valid — the path stays static. When present it must carry a
-    non-blank ``ddp_name`` + ``request_profile_id`` and a non-empty ``segments``
-    list of well-formed static/profile entries with at least one profile segment
-    (an all-static path would not be dynamic). Errors never echo segment values
-    (path strings/element names can carry caller-specific identifiers).
+    non-blank ``ddp_name`` and a non-empty ``segments`` list of well-formed
+    static/profile/ddp/dpp entries with at least one DYNAMIC segment (profile / ddp
+    / dpp — an all-static path would not be dynamic). ``request_profile_id`` is
+    required ONLY when a ``profile`` segment is present (it feeds the single
+    ``<profileelement profileId=...>``); a ddp/dpp-only dynamic path carries no
+    profile and leaves it ``None`` (#96 §H). Errors never echo segment values (path
+    strings / element / property names can carry caller-specific identifiers).
     ``field_prefix`` scopes the error to the owning target (issue #112 M10.8).
     """
     if dynamic_path is None:
@@ -1551,23 +1554,25 @@ def _validate_dynamic_path(
         error_code="PROCESS_PATH_REPLACEMENT_INVALID",
         field=f"{field_prefix}.dynamic_path",
         hint=(
-            "dynamic_path needs a non-blank ddp_name and request_profile_id and "
-            "a non-empty segments list (static {type,value} / profile "
-            "{type,element_id,element_name}) with at least one profile segment. "
-            "It is normally emitted by the database_to_api_sync archetype from "
-            "target.send_request.path_replacements."
+            "dynamic_path needs a non-blank ddp_name and a non-empty segments list "
+            "(static {type,value} / profile {type,element_id,element_name} / "
+            "ddp|dpp {type,property_name}) with at least one dynamic (profile/ddp/dpp) "
+            "segment; a profile segment also requires a non-blank request_profile_id. "
+            "It is emitted by the rest_fetch/rest_send primitive from path "
+            "runtime_bindings (or the database_to_api_sync archetype from "
+            "target.send_request.path_replacements)."
         ),
     )
     if not isinstance(dynamic_path, dict):
         return err
-    for key in ("ddp_name", "request_profile_id"):
-        value = dynamic_path.get(key)
-        if not isinstance(value, str) or not value.strip():
-            return err
+    ddp_name = dynamic_path.get("ddp_name")
+    if not isinstance(ddp_name, str) or not ddp_name.strip():
+        return err
     segments = dynamic_path.get("segments")
     if not isinstance(segments, list) or not segments:
         return err
     profile_segments = 0
+    dynamic_seg_count = 0
     for seg in segments:
         if not isinstance(seg, dict):
             return err
@@ -1584,10 +1589,21 @@ def _validate_dynamic_path(
             if not isinstance(seg.get("element_name"), str) or not seg.get("element_name").strip():
                 return err
             profile_segments += 1
+            dynamic_seg_count += 1
+        elif seg_type in ("ddp", "dpp"):
+            name = seg.get("property_name")
+            if not isinstance(name, str) or not name.strip():
+                return err
+            dynamic_seg_count += 1
         else:
             return err
-    if profile_segments == 0:
+    if dynamic_seg_count == 0:
         return err
+    # request_profile_id is consumed only by profile segments (one shared profile).
+    if profile_segments:
+        rpid = dynamic_path.get("request_profile_id")
+        if not isinstance(rpid, str) or not rpid.strip():
+            return err
     return None
 
 
@@ -2992,7 +3008,10 @@ def _emit_connectoraction(
     if isinstance(dynamic_path, dict) and dynamic_path:
         ddp_name = _escape_xml(str(dynamic_path.get("ddp_name") or "").strip())
         profile_id = _escape_xml(str(dynamic_path.get("request_profile_id") or "").strip())
-        parameter_profile_attr = f' parameter-profile="{profile_id}"'
+        # parameter-profile binds the connector step to the request/path profile.
+        # A ddp/dpp-only path (#96 §H) carries no profile, so omit the attribute
+        # rather than emit an empty parameter-profile="" (mirrors absent dynamic_path).
+        parameter_profile_attr = f' parameter-profile="{profile_id}"' if profile_id else ''
         inner = (
             '<parameters/>'
             '<dynamicProperties>'
@@ -3535,6 +3554,24 @@ def _emit_setproperties(
                 f'<profileelement elementId="{element_id}" '
                 f'elementName="{element_name}" '
                 f'profileId="{profile_id}" profileType="{profile_type}"/>'
+                '</parametervalue>'
+            )
+        elif seg_type == "ddp":
+            # Dynamic Document Property value source (#96 §H). SAME valueType="track"
+            # + <trackparameter> shape as the connector-step Path reference (§C1).
+            name = _escape_xml(str(seg.get("property_name") or "").strip())
+            parametervalues.append(
+                f'<parametervalue key="{i}" usesEncryption="false" valueType="track">'
+                f'<trackparameter defaultValue="" propertyId="dynamicdocument.{name}" '
+                f'propertyName="Dynamic Document Property - {name}"/>'
+                '</parametervalue>'
+            )
+        elif seg_type == "dpp":
+            # Dynamic Process Property value source (#96 §H live capture).
+            name = _escape_xml(str(seg.get("property_name") or "").strip())
+            parametervalues.append(
+                f'<parametervalue key="{i}" usesEncryption="false" valueType="process">'
+                f'<processparameter processproperty="{name}" processpropertydefaultvalue=""/>'
                 '</parametervalue>'
             )
         else:  # pragma: no cover — _validate_dynamic_path rejects other types

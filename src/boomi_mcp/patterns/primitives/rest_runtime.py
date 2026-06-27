@@ -7,14 +7,17 @@ validates each binding against those slots.
 
 A :class:`RuntimeBinding` names a ``location`` (``path`` / ``query_parameter`` /
 ``request_header``), the declared ``slot`` it fills, and a discriminated ``source``
-value (``static`` / ``ddp`` / ``dpp`` / ``profile_field``). v1 lowers **path**
+value (``static`` / ``ddp`` / ``dpp`` / ``profile_field``). It lowers **path**
 bindings into the live-proven ``dynamic_path`` block that the process-flow builder
-already emits (Set Properties DDP + connector-step "Path" dynamic operation
-property — see ``.codex/plans/issue-96-live-captures.md`` / #100 G2). Query/header
-bindings and ``ddp``/``dpp`` path sources are typed and validated but NOT emitted as
-process XML until QA captures the exact REST Client dynamic operation property
-keys/names — :func:`path_bindings_to_dynamic_path` raises
-``PROCESS_RUNTIME_BINDING_UNVERIFIED`` rather than guessing XML.
+emits (Set Properties DDP + connector-step "Path" dynamic operation property — see
+``.codex/plans/issue-96-live-captures.md`` §C/§H + #100 G2). All four path value
+sources are live-captured and emitted: ``static`` (folded into the operation path
+when the whole path is constant), ``profile_field`` (``valueType="profile"``),
+``ddp`` (``valueType="track"``) and ``dpp`` (``valueType="process"``). Path is the
+ONLY dynamically bindable REST Client location — query parameters and request
+headers are static operation ``customProperties`` (Boomi UI verified, §G), so a
+``query_parameter`` / ``request_header`` binding is rejected
+(``REST_RUNTIME_BINDING_INVALID``).
 
 Like the other primitive-layer modules this emits no XML and calls no Boomi API —
 it returns validated JSON (the ``dynamic_path`` dict) consumed by the builder.
@@ -32,10 +35,6 @@ from ._helpers import _key_looks_secret, ref_key, value_looks_secret
 
 # Primitive-layer error code for a malformed/contradictory runtime binding set.
 RUNTIME_BINDING_INVALID = "REST_RUNTIME_BINDING_INVALID"
-# Raised when a binding is well-formed but its XML emission is not yet live-proven
-# (query/header process XML, or a ddp/dpp path source). Same string the builder
-# uses so the gate is consistent across the primitive and builder layers.
-RUNTIME_BINDING_UNVERIFIED = "PROCESS_RUNTIME_BINDING_UNVERIFIED"
 
 # `{token}` placeholders in an operation path (e.g. /v1/items/{id}/notes/{noteId}).
 _PATH_TOKEN_RE = re.compile(r"\{([^{}]+)\}")
@@ -289,24 +288,6 @@ def _validate_source(binding: RuntimeBinding) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _unverified_error(message: str, **details: Any) -> BuilderValidationError:
-    return BuilderValidationError(
-        message,
-        error_code=RUNTIME_BINDING_UNVERIFIED,
-        field="runtime_bindings",
-        hint=(
-            "Path runtime bindings emit today for static literals + profile_field "
-            "sources (the live-proven #100 Set Properties + connector 'Path' "
-            "mechanism). A ddp/dpp path source is a CONFIRMED-valid REST Client Path "
-            "value source (Boomi UI Type dropdown — see issue-96 live captures §G), "
-            "lowered via the same Set Properties segment; capturing the exact Boomi "
-            "valueType token for a DDP/DPP segment is a narrow follow-up. Use a "
-            "static or profile_field path source for emitted dynamicProperties today."
-        ),
-        details=details or None,
-    )
-
-
 def lower_path_bindings(
     bindings: Optional[List[RuntimeBinding]],
     *,
@@ -322,17 +303,24 @@ def lower_path_bindings(
       source, so the path is a CONSTANT. It is resolved into the operation path
       directly (no Set Properties / dynamic_path): an all-static path is not a
       "dynamic" path, matching the #100 invariant that a segment list with no
-      profile segment is rejected — here it never reaches that validator because it
+      dynamic segment is rejected — here it never reaches that validator because it
       is folded into the static operation path instead.
-    - ``("dynamic", dynamic_path)`` — at least one ``profile_field`` source; the
-      ``{ddp_name, request_profile_id, profile_type, segments}`` block the
-      ``_emit_setproperties`` / ``_emit_connectoraction`` emitters consume.
+    - ``("dynamic", dynamic_path)`` — at least one dynamic source (``profile_field``
+      / ``ddp`` / ``dpp``); the ``{ddp_name, request_profile_id, profile_type,
+      segments}`` block the ``_emit_setproperties`` / ``_emit_connectoraction``
+      emitters consume. ``request_profile_id``/``profile_type`` are ``None`` when no
+      ``profile_field`` segment is present (a ddp/dpp/static-only dynamic path).
 
-    Raises ``PROCESS_RUNTIME_BINDING_UNVERIFIED`` for a ``ddp``/``dpp`` path source
-    (pending a live REST Client fixture) or a profile-id mismatch across profile
-    segments, and ``REST_RUNTIME_BINDING_INVALID`` for an ``operation.path`` token
-    with no matching binding. All profile_field path segments must share one profile
-    id+type (``_emit_setproperties`` emits a single ``profileId``/``profileType``).
+    Each source lowers to one ordered Set Properties segment (live-captured shapes —
+    see ``.codex/plans/issue-96-live-captures.md`` §C2/§H): ``static`` →
+    ``{type:"static", value}``; ``profile_field`` → ``{type:"profile", element_id,
+    element_name}``; ``ddp`` → ``{type:"ddp", property_name}``; ``dpp`` →
+    ``{type:"dpp", property_name}``.
+
+    Raises ``REST_RUNTIME_BINDING_INVALID`` for an ``operation.path`` token with no
+    matching binding or a profile-id mismatch across profile segments. All
+    profile_field path segments must share one profile id+type
+    (``_emit_setproperties`` emits a single ``profileId``/``profileType``).
     """
     path_bindings = [b for b in (bindings or []) if b.location == "path"]
     if not path_bindings:
@@ -343,7 +331,7 @@ def lower_path_bindings(
     profile_type: Optional[str] = None
     segments: List[Dict[str, Any]] = []
     resolved_parts: List[str] = []
-    profile_segments = 0
+    dynamic_segments = 0
     last = 0
     for match in _PATH_TOKEN_RE.finditer(path_template or ""):
         literal = (path_template or "")[last:match.start()]
@@ -366,7 +354,7 @@ def lower_path_bindings(
                 request_profile_id = source.profile_id
                 profile_type = source.profile_type
             elif request_profile_id != source.profile_id or profile_type != source.profile_type:
-                raise _unverified_error(
+                raise _binding_error(
                     "all profile_field path segments must share one profile "
                     "(a single Set Properties profile is emitted)",
                     offending_slot=binding.slot,
@@ -379,21 +367,18 @@ def lower_path_bindings(
                 }
             )
             resolved_parts.append("")  # placeholder — never used (dynamic path)
-            profile_segments += 1
-        else:  # ddp / dpp path source — confirmed valid, segment XML capture pending
-            raise _unverified_error(
-                f"{source.kind} path source for slot {binding.slot!r} is a "
-                "confirmed-valid REST Client Path value source but its Set Properties "
-                "segment XML is not yet captured (narrow follow-up)",
-                offending_slot=binding.slot,
-            )
+            dynamic_segments += 1
+        else:  # ddp / dpp path source — live-captured Set Properties segment (§H)
+            segments.append({"type": source.kind, "property_name": source.property_name})
+            resolved_parts.append("")  # placeholder — never used (dynamic path)
+            dynamic_segments += 1
         last = match.end()
     trailing = (path_template or "")[last:]
     if trailing:
         segments.append({"type": "static", "value": trailing})
         resolved_parts.append(trailing)
 
-    if profile_segments == 0:
+    if dynamic_segments == 0:
         # All path tokens are static → a constant path, folded into the operation
         # path (no dynamic Set Properties). Supports the static source kind without
         # emitting an all-static "dynamic" path (which the #100 builder rejects).

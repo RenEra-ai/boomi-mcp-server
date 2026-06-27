@@ -392,8 +392,9 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         # does NOT consume this fragment). When the rest_send primitive is driven
         # directly with #96 runtime_bindings (e.g. by a future api_to_api_sync
         # preset), a PATH binding lowers into target.dynamic_path here so the same
-        # builder emitters apply. Query/header bindings were already rejected at
-        # validation (REST Client query/header are static — Boomi UI verified).
+        # builder emitters apply (all four value-source segment shapes live-captured,
+        # §C2/§H). Query/header bindings were already rejected at validation (REST
+        # Client query/header are static — Boomi UI verified).
         path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=params.operation.path,
@@ -418,8 +419,8 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
             metadata["retry_policy"] = params.retry_policy.model_dump(exclude_none=True)
         if params.runtime_bindings:
             # Only path bindings reach here — query/header bindings are rejected at
-            # validation (REST Client static; not dynamically bindable), and a
-            # ddp/dpp path source raised above. Record the (path) bindings as metadata.
+            # validation (REST Client static; not dynamically bindable). Record the
+            # (path) bindings as metadata.
             metadata["runtime_bindings"] = [
                 b.model_dump(exclude_none=True) for b in params.runtime_bindings
             ]
@@ -547,13 +548,12 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         # reject an otherwise-static operation (REST_PATH_REPLACEMENT_INVALID),
         # and the blank-path branch above already treats [] as static.
         # Issue #96: lower the path runtime bindings (same dispatch emit_fragment
-        # uses). A profile_field path ("dynamic") reuses the #100 path_replacements
-        # blank-path marker (synthesized; build-only, not emitted into XML) and
-        # blanks the operation path; an all-static path ("static") is a constant
-        # folded into the operation path; a ddp/dpp path source raises
-        # PROCESS_RUNTIME_BINDING_UNVERIFIED (the SAME failure emit_fragment
-        # surfaces). The conflict rule guarantees op.path_replacements and a path
-        # runtime_binding never both populate the marker.
+        # uses). A profile_field/ddp/dpp path ("dynamic") reuses the #100
+        # path_replacements blank-path marker (synthesized; build-only, not emitted
+        # into XML) and blanks the operation path; an all-static path ("static") is a
+        # constant folded into the operation path. The conflict rule guarantees
+        # op.path_replacements and a path runtime_binding never both populate the
+        # marker.
         path_mode, path_value = lower_path_bindings(
             params.runtime_bindings,
             path_template=op.path,

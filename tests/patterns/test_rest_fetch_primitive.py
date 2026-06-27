@@ -485,9 +485,10 @@ class TestRuntimeBindings:
                 )
             )
 
-    def test_dpp_path_source_unverified_at_fragment(self):
-        # A dpp path source validates but is not emitted as XML in v1.
-        params = RestFetchPrimitive.validate_parameters(
+    def test_dpp_path_source_lowers_to_dynamic_path(self):
+        # A dpp path source lowers into a dynamic_path with a dpp segment (#96 §H
+        # live capture). No profile segment -> request_profile_id is None.
+        frag = _fragment(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -497,9 +498,49 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        with pytest.raises(BuilderValidationError) as exc:
-            RestFetchPrimitive.emit_fragment(_ctx(), params)
-        assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+        dyn = frag["process_config"]["source"]["dynamic_path"]
+        assert dyn["request_profile_id"] is None
+        assert dyn["segments"] == [
+            {"type": "static", "value": "/v1/items/"},
+            {"type": "dpp", "property_name": "last_id"},
+        ]
+
+    def test_ddp_path_source_lowers_to_dynamic_path(self):
+        # A ddp path source lowers into a dynamic_path with a ddp segment (#96 §H).
+        frag = _fragment(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id",
+                     "source": {"kind": "ddp", "property_name": "client_id"}}
+                ],
+            )
+        )
+        dyn = frag["process_config"]["source"]["dynamic_path"]
+        assert dyn["request_profile_id"] is None
+        assert dyn["segments"] == [
+            {"type": "static", "value": "/v1/items/"},
+            {"type": "ddp", "property_name": "client_id"},
+        ]
+
+    def test_ddp_dpp_path_source_has_no_profile_dependency(self):
+        # A ddp/dpp path source carries no profile $ref, so depends_on stays the
+        # connection + operation only (the profile_field case adds the profile ref).
+        frag = _fragment(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id",
+                     "source": {"kind": "dpp", "property_name": "last_id"}}
+                ],
+            )
+        )
+        assert set(frag["depends_on"]) == {
+            "cust_rest_source_connection",
+            "cust_rest_source_operation",
+        }
 
     def test_all_static_path_resolves_into_operation_path(self):
         # An all-static path is a constant — folded into the operation path (not a
@@ -519,10 +560,14 @@ class TestRuntimeBindings:
         assert op.config["path"] == "/v1/items/42"
         assert "path_replacements" not in op.config
 
-    def test_dpp_path_source_unverified_at_emit_components(self):
-        # A ddp/dpp path source is not live-proven — emit_components surfaces the SAME
-        # unverified error as emit_fragment (never a half-formed operation, #96 review).
-        params = RestFetchPrimitive.validate_parameters(
+    def test_dpp_path_source_operation_is_buildable(self):
+        # A dpp path source blanks the operation path and synthesizes a usable
+        # path_replacements marker, so the emitted operation re-builds (build()
+        # revalidates) — same blank-path mechanism as the profile_field case.
+        from boomi_mcp.categories.components.builders.connector_builder import (
+            RestClientOperationBuilder,
+        )
+        specs = _emit(
             _params(
                 operation={"path": "/v1/items/{id}"},
                 path_slots=[{"name": "id"}],
@@ -532,9 +577,10 @@ class TestRuntimeBindings:
                 ],
             )
         )
-        with pytest.raises(BuilderValidationError) as exc:
-            RestFetchPrimitive.emit_components(_ctx(), params)
-        assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+        op = next(s for s in specs if s.type == "connector-action")
+        assert op.config["path"] == ""
+        xml = RestClientOperationBuilder().build(**op.config)
+        assert '<field id="path" type="string" value=""/>' in xml
 
 
 # ---------------------------------------------------------------------------

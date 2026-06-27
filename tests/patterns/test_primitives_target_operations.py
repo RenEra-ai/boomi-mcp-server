@@ -1137,22 +1137,48 @@ class TestRestSendRuntimeBindings:
                 )
             )
 
-    def test_dpp_path_source_unverified_at_emit_components(self):
-        # A ddp/dpp path source is not live-proven — emit_components surfaces the SAME
-        # unverified error as emit_fragment (never a half-formed operation).
-        params = RestSendWithRetryPrimitive.validate_parameters(
-            _rest_create_params(
-                operation={"method": "PATCH", "path": "/clients/{clientId}"},
-                path_slots=[{"name": "clientId"}],
-                runtime_bindings=[
-                    {"location": "path", "slot": "clientId",
-                     "source": {"kind": "dpp", "property_name": "last_id"}}
-                ],
-            )
+    def test_dpp_path_source_lowers_and_is_buildable(self):
+        # A dpp path source lowers into target.dynamic_path with a dpp segment (#96
+        # §H) and blanks the operation path; the emitted operation re-builds.
+        params = _rest_create_params(
+            operation={"method": "PATCH", "path": "/clients/{clientId}"},
+            path_slots=[{"name": "clientId"}],
+            runtime_bindings=[
+                {"location": "path", "slot": "clientId",
+                 "source": {"kind": "dpp", "property_name": "last_id"}}
+            ],
         )
-        with pytest.raises(BuilderValidationError) as exc:
-            RestSendWithRetryPrimitive.emit_components(_ctx(), params)
-        assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+        frag = _fragment(RestSendWithRetryPrimitive, params)
+        dyn = frag["process_config"]["target"]["dynamic_path"]
+        assert dyn["request_profile_id"] is None
+        assert dyn["segments"] == [
+            {"type": "static", "value": "/clients/"},
+            {"type": "dpp", "property_name": "last_id"},
+        ]
+        op = next(
+            s for s in _emit(RestSendWithRetryPrimitive, params)
+            if s.type == "connector-action"
+        )
+        assert op.config["path"] == ""
+        xml = RestClientOperationBuilder().build(**op.config)
+        assert '<field id="path" type="string" value=""/>' in xml
+
+    def test_ddp_path_source_lowers_to_dynamic_path(self):
+        # A ddp path source lowers into a target.dynamic_path with a ddp segment.
+        params = _rest_create_params(
+            operation={"method": "PATCH", "path": "/clients/{clientId}"},
+            path_slots=[{"name": "clientId"}],
+            runtime_bindings=[
+                {"location": "path", "slot": "clientId",
+                 "source": {"kind": "ddp", "property_name": "client_id"}}
+            ],
+        )
+        frag = _fragment(RestSendWithRetryPrimitive, params)
+        dyn = frag["process_config"]["target"]["dynamic_path"]
+        assert dyn["segments"] == [
+            {"type": "static", "value": "/clients/"},
+            {"type": "ddp", "property_name": "client_id"},
+        ]
 
     def test_all_static_path_resolves_into_operation_path(self):
         # An all-static path is a constant folded into the operation path (no
