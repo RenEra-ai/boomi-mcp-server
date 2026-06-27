@@ -422,6 +422,18 @@ def _apply_owned_path(
             for attr_name in owned.owned_attrs_additive:
                 if attr_name in des_child.attrib:
                     cur_child.set(attr_name, des_child.attrib[attr_name])
+        # Sentinel-driven sibling clears (#50 follow-up): when desired
+        # EXPLICITLY sets an attr to its "void" sentinel (e.g. REST
+        # requestProfileType="none"), the paired sibling id must be
+        # removed from current — otherwise the additive pass above would
+        # leave a stale requestProfile UUID dangling next to a "none"
+        # type. Gated on the explicit sentinel in desired, so a path-only
+        # update (no type attr emitted) never clears a live binding.
+        if owned.clear_attrs_when_value is not None:
+            for attr_name, sentinel, clear_attrs in owned.clear_attrs_when_value:
+                if des_child.attrib.get(attr_name) == sentinel:
+                    for clear_attr in clear_attrs:
+                        cur_child.attrib.pop(clear_attr, None)
         # Coupled attribute groups: a dependent attr is applied from
         # desired only when its trigger attr is present in desired;
         # otherwise current's value is preserved. For a builder that

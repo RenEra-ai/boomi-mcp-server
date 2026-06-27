@@ -120,6 +120,19 @@ class OwnedPath:
     # ``owned_attrs_additive`` and dropped this coupling. The merge
     # engine still supports the feature for any future such case.)
     coupled_attr_groups: Optional[Tuple[Tuple[str, Tuple[str, ...]], ...]] = None
+    # For ``mode="key_merge"``: sentinel-driven sibling clears
+    # ``((attr, sentinel_value, (sibling_to_clear, ...)), ...)``. When
+    # desired EXPLICITLY sets ``attr`` to ``sentinel_value``, each named
+    # sibling attr is REMOVED from current (after the additive pass). Use
+    # for paired attrs where one value means "this pairing is void" — e.g.
+    # REST ``requestProfileType="none"`` means the request profile is
+    # unbound, so the live ``requestProfile`` id must be cleared rather
+    # than left dangling next to a ``none`` type (#50 follow-up). It fires
+    # only on the explicit sentinel in desired, so a path-only update
+    # (which emits no type attr) never triggers a clear.
+    clear_attrs_when_value: Optional[
+        Tuple[Tuple[str, str, Tuple[str, ...]], ...]
+    ] = None
 
 
 @dataclass(frozen=True)

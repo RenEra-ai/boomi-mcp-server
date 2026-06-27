@@ -417,6 +417,15 @@ _REST_CLIENT_OPERATION_POLICY = PreservationPolicy(
                 "responseProfile",
                 "responseProfileType",
             ),
+            # An explicit ``*ProfileType="none"`` means the profile is
+            # unbound, so the paired id must be cleared rather than left
+            # dangling beside a "none" type (#50 follow-up). Fires only on
+            # the explicit sentinel in desired — a path-only update emits
+            # no type attr, so a live binding is preserved.
+            clear_attrs_when_value=(
+                ("requestProfileType", "none", ("requestProfile",)),
+                ("responseProfileType", "none", ("responseProfile",)),
+            ),
             owned_keys=(
                 "path",
                 "followRedirects",

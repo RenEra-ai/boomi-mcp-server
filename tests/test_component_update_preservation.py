@@ -1835,6 +1835,66 @@ def test_rest_op_binding_update_applies_id_and_type_together():
     assert cfg.attrib["requestProfileType"] == "json"
 
 
+def test_rest_op_type_none_clears_paired_profile_id():
+    """Scope B follow-up (#50, Codex r-review): an explicit
+    request_profile_type="none" (unbind) supplied WITHOUT an id, on an op
+    with a live binding, must CLEAR the live requestProfile id rather than
+    leave it dangling next to requestProfileType="none". The response side
+    (no responseProfileType in desired) is untouched."""
+    current = """\
+<bns:Component xmlns:bns="http://api.platform.boomi.com/"
+               type="connector-action" subType="officialboomi-X3979C-rest-prod"
+               name="op">
+  <bns:object>
+    <Operation xmlns="">
+      <Configuration>
+        <GenericOperationConfig customOperationType="POST"
+                                operationType="EXECUTE"
+                                requestProfileType="json"
+                                requestProfile="live-request-id"
+                                responseProfileType="json"
+                                responseProfile="live-response-id">
+          <field id="path" type="string" value="/v1/items"/>
+        </GenericOperationConfig>
+      </Configuration>
+    </Operation>
+  </bns:object>
+</bns:Component>
+"""
+    # Builder output when caller supplies ONLY request_profile_type="none".
+    desired = """\
+<bns:Component xmlns:bns="http://api.platform.boomi.com/"
+               type="connector-action" subType="officialboomi-X3979C-rest-prod"
+               name="op">
+  <bns:object>
+    <Operation xmlns="">
+      <Configuration>
+        <GenericOperationConfig customOperationType="POST"
+                                operationType="EXECUTE"
+                                requestProfileType="none">
+          <field id="path" type="string" value="/v1/items"/>
+        </GenericOperationConfig>
+      </Configuration>
+    </Operation>
+  </bns:object>
+</bns:Component>
+"""
+    from boomi_mcp.categories.components.builders.connector_builder import (
+        _REST_CLIENT_OPERATION_POLICY,
+    )
+    merged = merge_for_update(current, desired, _REST_CLIENT_OPERATION_POLICY)
+    root = _parse(merged)
+    cfg = root.find(
+        "bns:object/Operation/Configuration/GenericOperationConfig", NS
+    )
+    # Request binding unbound: type=none applied, stale id cleared.
+    assert cfg.attrib["requestProfileType"] == "none"
+    assert "requestProfile" not in cfg.attrib
+    # Response side untouched (desired carried no responseProfileType).
+    assert cfg.attrib["responseProfile"] == "live-response-id"
+    assert cfg.attrib["responseProfileType"] == "json"
+
+
 # ---------------------------------------------------------------------------
 # Review follow-up — subtree_merge mode (granular connector-body merge)
 # ---------------------------------------------------------------------------
@@ -2090,3 +2150,77 @@ def test_coupled_attr_applied_when_trigger_present():
     )
     assert cfg.attrib["requestProfile"] == "new-id"
     assert cfg.attrib["requestProfileType"] == "JSON"  # coupled, applied
+
+
+# ---------------------------------------------------------------------------
+# #50 follow-up — clear_attrs_when_value (sentinel-driven sibling clears)
+# ---------------------------------------------------------------------------
+
+
+_CLEAR_WHEN_POLICY = PreservationPolicy(
+    component_type="connector-action",
+    subtype="officialboomi-X3979C-rest-prod",
+    owned_paths=(
+        OwnedPath(
+            path="bns:object/Operation/Configuration/GenericOperationConfig",
+            mode="key_merge",
+            key_attr="id",
+            owned_attrs=("customOperationType", "operationType"),
+            owned_attrs_additive=("requestProfile", "requestProfileType"),
+            clear_attrs_when_value=(
+                ("requestProfileType", "none", ("requestProfile",)),
+            ),
+        ),
+    ),
+)
+
+
+def _clear_when_doc(inner):
+    return f"""\
+<bns:Component xmlns:bns="http://api.platform.boomi.com/"
+               type="connector-action" subType="officialboomi-X3979C-rest-prod" name="op">
+  <bns:object><Operation xmlns=""><Configuration>
+    <GenericOperationConfig customOperationType="POST" operationType="EXECUTE" {inner}>
+      <field id="path" type="string" value="/x"/>
+    </GenericOperationConfig>
+  </Configuration></Operation></bns:object>
+</bns:Component>
+"""
+
+
+def test_clear_when_value_removes_sibling_on_sentinel():
+    """Sentinel value in desired clears the paired sibling from current."""
+    current = _clear_when_doc('requestProfile="live-id" requestProfileType="json"')
+    desired = _clear_when_doc('requestProfileType="none"')
+    merged = merge_for_update(current, desired, _CLEAR_WHEN_POLICY)
+    cfg = _parse(merged).find(
+        "bns:object/Operation/Configuration/GenericOperationConfig", NS
+    )
+    assert cfg.attrib["requestProfileType"] == "none"
+    assert "requestProfile" not in cfg.attrib
+
+
+def test_clear_when_value_no_clear_on_non_sentinel_value():
+    """A non-sentinel value (e.g. type=xml) does NOT clear the sibling —
+    additive merge keeps the live id (this is the #50 type-only win)."""
+    current = _clear_when_doc('requestProfile="live-id" requestProfileType="json"')
+    desired = _clear_when_doc('requestProfileType="xml"')
+    merged = merge_for_update(current, desired, _CLEAR_WHEN_POLICY)
+    cfg = _parse(merged).find(
+        "bns:object/Operation/Configuration/GenericOperationConfig", NS
+    )
+    assert cfg.attrib["requestProfileType"] == "xml"
+    assert cfg.attrib["requestProfile"] == "live-id"
+
+
+def test_clear_when_value_no_clear_when_attr_absent_from_desired():
+    """A path-only update (no trigger attr in desired) never clears — the
+    live binding is fully preserved."""
+    current = _clear_when_doc('requestProfile="live-id" requestProfileType="json"')
+    desired = _clear_when_doc('')
+    merged = merge_for_update(current, desired, _CLEAR_WHEN_POLICY)
+    cfg = _parse(merged).find(
+        "bns:object/Operation/Configuration/GenericOperationConfig", NS
+    )
+    assert cfg.attrib["requestProfile"] == "live-id"
+    assert cfg.attrib["requestProfileType"] == "json"
