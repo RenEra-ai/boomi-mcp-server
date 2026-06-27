@@ -78,6 +78,7 @@ from .rest_runtime import (
     RuntimeBinding,
     path_bindings_to_dynamic_path,
     pending_runtime_bindings,
+    synth_path_replacements,
     validate_runtime_bindings,
 )
 from .rest_send import RestConnection, RestSendComponentNames
@@ -571,8 +572,15 @@ class RestFetchPrimitive(PrimitivePattern):
             path_template=params.operation.path,
             ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
         )
+        depends_on = [conn_key, op_key]
         if dynamic_path is not None:
             source["dynamic_path"] = dynamic_path
+            # The dynamic_path may reference an in-spec profile ($ref:KEY) for a
+            # profile_field path source; that ref must be a process dependency so
+            # ProcessFlowBuilder's $ref-reachability check resolves it (#96 review).
+            dyn_profile_ref = ref_key(dynamic_path.get("request_profile_id"))
+            if dyn_profile_ref and dyn_profile_ref not in depends_on:
+                depends_on.append(dyn_profile_ref)
         rest_fetch_meta: Dict[str, Any] = {
             "output_shape": {
                 "profile_id": params.response.profile_id,
@@ -602,7 +610,7 @@ class RestFetchPrimitive(PrimitivePattern):
                 }
         fragment: Dict[str, Any] = {
             "process_config": {"source": source},
-            "depends_on": [conn_key, op_key],
+            "depends_on": depends_on,
             "metadata": {"rest_fetch": rest_fetch_meta},
         }
         return fragment
@@ -725,21 +733,31 @@ class RestFetchPrimitive(PrimitivePattern):
         if folder:
             config["folder_name"] = folder
 
+        # Issue #96: when a path runtime binding supplies the path at the process
+        # step, the operation carries a BLANK path (the per-document path is built
+        # by the Set Properties DDP + connector "Path" property the fragment's
+        # dynamic_path block drives). The REST operation builder only permits a
+        # blank path when a usable path_replacements marker is present, so reuse
+        # that #100 marker (synthesized from the path bindings, name<->token
+        # coverage checked against the TEMPLATE path below; build-only, not emitted
+        # into XML). Gate the marker + blanking on SUCCESSFUL lowering: a ddp/dpp/
+        # all-static path source raises PROCESS_RUNTIME_BINDING_UNVERIFIED here (the
+        # SAME failure emit_fragment surfaces), so emit_components never produces a
+        # blank-path operation with no process dynamic_path to fill it (#96 review).
+        path_dynamic = path_bindings_to_dynamic_path(
+            params.runtime_bindings,
+            path_template=op.path,
+            ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
+        )
+        if path_dynamic is not None:
+            config["path_replacements"] = synth_path_replacements(params.runtime_bindings)
+
         # No request_profile_id / request_profile_type: the GET request body is
         # empty (the #72 empty-request guarantee), so under #50 conditional
         # emission the builder emits no request-profile attrs at all.
         raise_for_builder_error(RestClientOperationBuilder.validate_config(config))
 
-        # Issue #96: when a path runtime binding supplies the path at the process
-        # step, blank the operation path so the emitted component carries no
-        # in-operation '{token}' (validated against the template above; the
-        # per-document path is built by the Set Properties DDP + connector "Path"
-        # property the fragment's dynamic_path block drives). Token coverage is
-        # validated by validate_runtime_bindings / path_bindings_to_dynamic_path.
-        has_path_runtime_binding = any(
-            b.location == "path" for b in (params.runtime_bindings or [])
-        )
-        if has_path_runtime_binding:
+        if path_dynamic is not None:
             config["path"] = ""
 
         # Each in-spec profile referenced by $ref must appear in depends_on so

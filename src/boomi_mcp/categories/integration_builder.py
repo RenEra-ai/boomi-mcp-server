@@ -1548,6 +1548,25 @@ def _check_process_flow_ref_types(
                 slot_rules.append(
                     (f"transform.steps[{i}].profile_id", step.get("profile_id"), expected_role)
                 )
+    # Issue #96 M5.4a: a source/target dynamic_path (a runtime path binding lowered
+    # into a Set Properties DDP, or the #100 path_replacements path) carries a
+    # request_profile_id that may be a $ref to an in-spec profile. The Set Properties
+    # emitter writes it into <profileelement profileId=...>, so it must resolve to a
+    # profile.json/profile.xml component (per dynamic_path.profile_type) — a swapped
+    # connector/map/process ref would emit invalid XML that fails only when Boomi
+    # loads the process. Gate the ref TYPE here (the segment element ids are opaque
+    # UI-captured tokens, not cross-checked).
+    for binding_path, binding in (("source", source), ("target", target)):
+        dyn = binding.get("dynamic_path") if isinstance(binding.get("dynamic_path"), dict) else None
+        if not dyn:
+            continue
+        ptype = str(dyn.get("profile_type") or "profile.json").strip().lower()
+        expected_profile_role = ptype if ptype in ("profile.json", "profile.xml") else "profile.json"
+        slot_rules.append((
+            f"{binding_path}.dynamic_path.request_profile_id",
+            dyn.get("request_profile_id"),
+            expected_profile_role,
+        ))
     slot_rules = tuple(slot_rules)
 
     target_op_ref_component: Optional[IntegrationComponentSpec] = None

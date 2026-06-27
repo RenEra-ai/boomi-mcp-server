@@ -3286,3 +3286,65 @@ def test_runtime_bindings_build_bypass_raises_under_branch():
     with pytest.raises(BuilderValidationError) as exc:
         ProcessFlowBuilder.build(cfg, name="P")
     assert exc.value.error_code == "PROCESS_BRANCH_CONFIG_INVALID"
+
+
+def _rest_source_with_dynamic_path():
+    return {
+        "connector_type": "rest",
+        "connection_id": _REST_CONN_ID,
+        "operation_id": _REST_OP_ID,
+        "action_type": "GET",
+        "dynamic_path": _VALID_DYNAMIC_PATH,
+    }
+
+
+_CONNECTOR_SCOPE_RELIABILITY = {
+    "retry_count": 1,
+    "try_catch_scope": "connector",
+    "dlq": {"mode": "error_subprocess_ref", "process_id": "ERRSUB"},
+}
+
+
+def test_source_dynamic_path_rejected_with_connector_scoped_try_catch():
+    # The connector-scoped emitter assumes flow[1] is the source connector; a source
+    # Set Properties (from a source path runtime binding) would mis-wrap it. Reject.
+    cfg = _base_config(
+        source=_rest_source_with_dynamic_path(),
+        reliability=_CONNECTOR_SCOPE_RELIABILITY,
+    )
+    err = ProcessFlowBuilder.validate_config(cfg, allow_rest_source=True)
+    assert err is not None and err.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+    assert err.field == "source.dynamic_path"
+    # build() funnels through the same guard for totality on a validate_config bypass.
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="P")
+    assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+
+
+def test_source_dynamic_path_allowed_with_process_scoped_try_catch():
+    # The whole-process Try/Catch wraps the entire chain (flow[1:]), so a pre-source
+    # Set Properties is inside the wrap — the composition is allowed.
+    cfg = _base_config(
+        source=_rest_source_with_dynamic_path(),
+        reliability={
+            "retry_count": 1,
+            "try_catch_scope": "process",
+            "dlq": {"mode": "error_subprocess_ref", "process_id": "ERRSUB"},
+        },
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, allow_rest_source=True) is None
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    assert "documentproperties" in xml  # source path Set Properties emitted
+
+
+def test_dynamic_path_profile_ref_requires_depends_on():
+    # A dynamic_path request_profile_id that is a $ref must be reachable via
+    # depends_on (the primitive now adds it to the fragment deps, #96 review).
+    dyn = {
+        "ddp_name": "DDP_PATH",
+        "request_profile_id": "$ref:req_profile",
+        "segments": [{"type": "profile", "element_id": "e1", "element_name": "id"}],
+    }
+    cfg = _base_config(target={**_base_config()["target"], "dynamic_path": dyn})
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is not None
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=["req_profile"]) is None

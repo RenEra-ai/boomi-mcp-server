@@ -352,6 +352,28 @@ def path_bindings_to_dynamic_path(
     }
 
 
+def synth_path_replacements(
+    bindings: Optional[List[RuntimeBinding]],
+) -> List[Dict[str, str]]:
+    """Synthesize the operation-level ``path_replacements`` marker for path bindings.
+
+    The REST Client operation builder only permits a BLANK operation path (the path
+    is supplied at the process step) when a usable ``path_replacements`` declaration
+    is present (#100 G2). A #96 path runtime binding supplies the path at the process
+    step too, so it reuses that exact marker: one ``{name, target_path}`` entry per
+    path-bound token. The marker is build-only — it is NOT emitted into the operation
+    XML (verified: the live REST operation carries `value=""`, no replacement
+    elements) — and the actual per-document value comes from the lowered
+    ``dynamic_path`` block, NOT from ``target_path``. Returns ``[]`` when there are no
+    path bindings (a static path keeps its literal value).
+    """
+    return [
+        {"name": b.slot, "target_path": b.slot}
+        for b in (bindings or [])
+        if b.location == "path"
+    ]
+
+
 def pending_runtime_bindings(
     bindings: Optional[List[RuntimeBinding]],
 ) -> List[Dict[str, Any]]:

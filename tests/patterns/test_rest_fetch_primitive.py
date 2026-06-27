@@ -339,6 +339,41 @@ class TestRuntimeBindings:
         op = next(s for s in specs if s.type == "connector-action")
         assert op.config["path"] == ""
 
+    def test_path_binding_operation_is_buildable(self):
+        # The emitted operation spec must be re-buildable (build() revalidates):
+        # a blank path is only accepted with a usable path_replacements marker, which
+        # the primitive synthesizes from the path bindings (#96 review).
+        from boomi_mcp.categories.components.builders.connector_builder import (
+            RestClientOperationBuilder,
+        )
+        specs = _emit(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id", "source": _profile_source()}
+                ],
+            )
+        )
+        op = next(s for s in specs if s.type == "connector-action")
+        xml = RestClientOperationBuilder().build(**op.config)
+        assert '<field id="path" type="string" value=""/>' in xml
+
+    def test_path_binding_profile_ref_in_fragment_depends_on(self):
+        # A profile_field path source carries an in-spec profile $ref; it must be a
+        # process dependency so $ref-reachability resolves it (#96 review).
+        frag = _fragment(
+            _params(
+                operation={"path": "/v1/items/{id}"},
+                path_slots=[{"name": "id"}],
+                runtime_bindings=[
+                    {"location": "path", "slot": "id",
+                     "source": _profile_source(profile_id="$ref:req_profile")}
+                ],
+            )
+        )
+        assert "req_profile" in frag["depends_on"]
+
     def test_query_header_bindings_land_in_pending_metadata(self):
         frag = _fragment(
             _params(
@@ -459,6 +494,25 @@ class TestRuntimeBindings:
         with pytest.raises(BuilderValidationError) as exc:
             RestFetchPrimitive.emit_fragment(_ctx(), params)
         assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
+
+    def test_unlowerable_path_also_unverified_at_emit_components(self):
+        # emit_components must surface the SAME unverified error as emit_fragment for
+        # a ddp/all-static path source — it must never blank the operation path and
+        # produce a buildable op with no process dynamic_path to fill it (#96 review).
+        for source in (
+            {"kind": "dpp", "property_name": "last_id"},
+            {"kind": "static", "value": "42"},
+        ):
+            params = RestFetchPrimitive.validate_parameters(
+                _params(
+                    operation={"path": "/v1/items/{id}"},
+                    path_slots=[{"name": "id"}],
+                    runtime_bindings=[{"location": "path", "slot": "id", "source": source}],
+                )
+            )
+            with pytest.raises(BuilderValidationError) as exc:
+                RestFetchPrimitive.emit_components(_ctx(), params)
+            assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
 
 
 # ---------------------------------------------------------------------------

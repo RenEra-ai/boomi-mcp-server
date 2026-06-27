@@ -3683,6 +3683,63 @@ class TestBuildPlanProcessFlowRefTypes:
         assert "connector-action" in ve["details"]["actual_role"]
 
     @patch(_PATCH_TARGET)
+    def test_dynamic_path_profile_ref_wrong_type_errors(self, mock_pag):
+        # Issue #96 M5.4a: a target.dynamic_path.request_profile_id $ref must resolve
+        # to a profile component; a $ref to a non-profile (here the DB connection)
+        # is reachable but type-mismatched — caught at plan time, not at Boomi load.
+        mock_pag.return_value = []
+        bad = _process_flow_comp()
+        bad.config["target"]["dynamic_path"] = {
+            "ddp_name": "DDP_PATH",
+            "request_profile_id": "$ref:db_connection",
+            "profile_type": "profile.json",
+            "segments": [{"type": "profile", "element_id": "e1", "element_name": "id"}],
+        }
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "target.dynamic_path.request_profile_id"
+        assert ve["details"]["expected_role"] == "profile.json"
+
+    @patch(_PATCH_TARGET)
+    def test_dynamic_path_profile_ref_correct_type_ok(self, mock_pag):
+        # The same dynamic_path pointing at a real profile.json passes the type check.
+        mock_pag.return_value = []
+        bad = _process_flow_comp(
+            depends_on=(
+                "db_connection",
+                "db_query_operation",
+                "target_rest_connection",
+                "target_rest_operation",
+                "target_json_profile",
+            )
+        )
+        bad.config["target"]["dynamic_path"] = {
+            "ddp_name": "DDP_PATH",
+            "request_profile_id": "$ref:target_json_profile",
+            "profile_type": "profile.json",
+            "segments": [{"type": "profile", "element_id": "e1", "element_name": "id"}],
+        }
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _rest_json_profile_stub("target_json_profile"),
+            bad,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
     def test_source_operation_id_pointing_to_connection_errors(self, mock_pag):
         mock_pag.return_value = []
         bad = _process_flow_comp()

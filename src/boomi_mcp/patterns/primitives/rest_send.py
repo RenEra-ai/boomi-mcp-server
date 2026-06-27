@@ -68,6 +68,7 @@ from .rest_runtime import (
     RuntimeBinding,
     path_bindings_to_dynamic_path,
     pending_runtime_bindings,
+    synth_path_replacements,
     validate_runtime_bindings,
 )
 
@@ -398,11 +399,18 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
             path_template=params.operation.path,
             ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
         )
+        depends_on = [conn_key, op_key]
         if dynamic_path is not None:
             target["dynamic_path"] = dynamic_path
+            # A profile_field path source carries an in-spec profile $ref; it must be
+            # a process dependency so ProcessFlowBuilder's $ref-reachability resolves
+            # it (#96 review).
+            dyn_profile_ref = ref_key(dynamic_path.get("request_profile_id"))
+            if dyn_profile_ref and dyn_profile_ref not in depends_on:
+                depends_on.append(dyn_profile_ref)
         fragment: Dict[str, Any] = {
             "process_config": {"target": target},
-            "depends_on": [conn_key, op_key],
+            "depends_on": depends_on,
         }
         metadata: Dict[str, Any] = {}
         if params.retry_policy is not None:
@@ -541,24 +549,36 @@ class RestSendWithRetryPrimitive(PrimitivePattern):
         # "no dynamic path" — forwarding it would make the operation builder
         # reject an otherwise-static operation (REST_PATH_REPLACEMENT_INVALID),
         # and the blank-path branch above already treats [] as static.
+        # Issue #96: a path runtime_binding supplies the path at the process step
+        # too, so it reuses the same #100 path_replacements blank-path marker
+        # (synthesized from the path bindings; build-only, not emitted into XML).
+        # The conflict rule guarantees at most one of op.path_replacements /
+        # path runtime_binding is set, so they never both populate this field.
+        # Gate the marker + blanking on SUCCESSFUL lowering: path_bindings_to_
+        # dynamic_path raises PROCESS_RUNTIME_BINDING_UNVERIFIED for a ddp/dpp/
+        # all-static path source (the SAME failure emit_fragment surfaces), so
+        # emit_components never produces a blank-path operation with no process
+        # dynamic_path to fill it (#96 review).
+        path_dynamic = path_bindings_to_dynamic_path(
+            params.runtime_bindings,
+            path_template=op.path,
+            ddp_name=f"{slugify(params.key_prefix)}_path".upper(),
+        )
         if op.path_replacements:
             config["path_replacements"] = op.path_replacements
+        elif path_dynamic is not None:
+            config["path_replacements"] = synth_path_replacements(params.runtime_bindings)
         if folder:
             config["folder_name"] = folder
 
         raise_for_builder_error(RestClientOperationBuilder.validate_config(config))
 
-        # Issue #100 G2 / #96: validation passed against the TEMPLATE path; now blank
-        # the operation path so the emitted component carries no in-operation
-        # '{token}' (the per-document path is supplied at the process connector step).
-        # Both the #100 path_replacements surface and a #96 path runtime_binding blank
-        # the path — the conflict rule guarantees at most one of them is set, and the
-        # runtime-binding token coverage is validated by validate_runtime_bindings /
-        # path_bindings_to_dynamic_path before this point.
-        has_path_runtime_binding = any(
-            b.location == "path" for b in (params.runtime_bindings or [])
-        )
-        if op.path_replacements or has_path_runtime_binding:
+        # Validation passed against the TEMPLATE path; now blank the operation path
+        # so the emitted component carries no in-operation '{token}' (the per-document
+        # path is supplied at the process connector step's "Path" property). Token
+        # coverage was checked by the builder against the synthesized/real
+        # path_replacements above.
+        if op.path_replacements or path_dynamic is not None:
             config["path"] = ""
 
         # Each in-spec profile referenced by $ref must appear in depends_on so

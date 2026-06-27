@@ -591,6 +591,13 @@ class ProcessFlowBuilder:
         if reliability_err is not None:
             return reliability_err
 
+        # Issue #96 review: a source dynamic_path cannot compose with a
+        # connector-scoped Try/Catch (the emitter assumes the source connector is
+        # the first post-start shape). Reject after both are individually valid.
+        source_scope_err = _source_dynamic_path_connector_scope_error(config)
+        if source_scope_err is not None:
+            return source_scope_err
+
         # Issue #107 M10.3: validate the optional Return Documents terminal block.
         return_documents_err = _validate_return_documents(config.get("return_documents"))
         if return_documents_err is not None:
@@ -937,6 +944,12 @@ class ProcessFlowBuilder:
             # retry count. Otherwise emit the unchanged linear flow so existing
             # non-DLQ process XML is byte-for-byte identical.
             reliability_cfg = config.get("reliability")
+            # Issue #96 review: totality on a validate_config bypass — a source
+            # dynamic_path + connector-scoped Try/Catch would mis-wrap the source
+            # Set Properties shape; raise rather than emit broken XML.
+            source_scope_err = _source_dynamic_path_connector_scope_error(config)
+            if source_scope_err is not None:
+                raise source_scope_err
             if cls._should_emit_try_catch(reliability_cfg):
                 # _should_emit_try_catch proved retry_count is a valid int 0..5 and
                 # EITHER reliability_cfg["dlq"] is a Try/Catch DLQ mode OR
@@ -1482,6 +1495,41 @@ def _validate_runtime_bindings_gate(
             ),
         )
     return None
+
+
+def _source_dynamic_path_connector_scope_error(
+    config: Dict[str, Any]
+) -> Optional[BuilderValidationError]:
+    """Reject a source dynamic_path combined with a connector-scoped Try/Catch (#96 review).
+
+    A source dynamic_path (a rest_fetch path runtime binding) inserts a Set
+    Properties shape BEFORE the source connector. The connector-scoped Try/Catch
+    emitter (#99 G1) assumes ``flow[1]`` is the source connector, so it would wrap
+    the Set Properties step instead of the source connector — leaving source
+    failures uncaught/un-retried. v1 rejects this composition (the whole-process
+    Try/Catch wraps the entire chain and is unaffected). Shared by validate_config
+    (surfaces it) and build() (raises it for totality on a validate_config bypass).
+    """
+    source = config.get("source")
+    if not (isinstance(source, dict) and source.get("dynamic_path") is not None):
+        return None
+    reliability = config.get("reliability")
+    if not ProcessFlowBuilder._should_emit_try_catch(reliability):
+        return None
+    scope = str((reliability or {}).get("try_catch_scope") or "process").strip().lower()
+    if scope != "connector":
+        return None
+    return BuilderValidationError(
+        "source.dynamic_path is not supported together with a connector-scoped "
+        "Try/Catch (reliability.try_catch_scope='connector') in v1.",
+        error_code="PROCESS_RUNTIME_BINDING_UNVERIFIED",
+        field="source.dynamic_path",
+        hint=(
+            "Use try_catch_scope='process' (the whole-process Try/Catch wraps the "
+            "source path Set Properties + source connector together), or drop the "
+            "source runtime path binding."
+        ),
+    )
 
 
 def _validate_dynamic_path(

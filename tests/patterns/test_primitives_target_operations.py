@@ -21,6 +21,7 @@ from boomi_mcp.categories import integration_builder as ib
 from boomi_mcp.categories.components.builders import ProcessFlowBuilder
 from boomi_mcp.categories.components.builders.connector_builder import (
     BuilderValidationError,
+    RestClientOperationBuilder,
 )
 from boomi_mcp.categories.components.builders.profile_builder import (
     DatabaseReadProfileBuilder,
@@ -1102,6 +1103,12 @@ class TestRestSendRuntimeBindings:
             if s.type == "connector-action"
         )
         assert op.config["path"] == ""
+        # The blanked operation must be re-buildable (build() revalidates and only
+        # accepts a blank path with a usable path_replacements marker, #96 review).
+        xml = RestClientOperationBuilder().build(**op.config)
+        assert '<field id="path" type="string" value=""/>' in xml
+        # The path source's in-spec profile ref must be a fragment dependency.
+        assert "cust_req_profile" in frag["depends_on"]
 
     def test_query_binding_missing_slot_rejected(self):
         with pytest.raises(ValidationError):
@@ -1114,3 +1121,23 @@ class TestRestSendRuntimeBindings:
                     ],
                 )
             )
+
+    def test_unlowerable_path_also_unverified_at_emit_components(self):
+        # emit_components must surface the SAME unverified error as emit_fragment for
+        # a ddp/all-static path source (never a blank-path op with no dynamic_path).
+        for source in (
+            {"kind": "dpp", "property_name": "last_id"},
+            {"kind": "static", "value": "X"},
+        ):
+            params = RestSendWithRetryPrimitive.validate_parameters(
+                _rest_create_params(
+                    operation={"method": "PATCH", "path": "/clients/{clientId}"},
+                    path_slots=[{"name": "clientId"}],
+                    runtime_bindings=[
+                        {"location": "path", "slot": "clientId", "source": source}
+                    ],
+                )
+            )
+            with pytest.raises(BuilderValidationError) as exc:
+                RestSendWithRetryPrimitive.emit_components(_ctx(), params)
+            assert exc.value.error_code == "PROCESS_RUNTIME_BINDING_UNVERIFIED"
