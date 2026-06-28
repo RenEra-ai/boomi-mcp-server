@@ -264,10 +264,28 @@ def test_field_index_covers_fields_and_conditions():
         conditions=[{"name": "KEY_COL", "data_type": "number"}],
     )
     index = DatabaseWriteProfileBuilder.build_field_index(cfg)
-    assert index["COL_A"]["name_path"] == "Statement/Fields/COL_A"
-    assert index["COL_A"]["key_path"] == "*[@key='2']/*[@key='3']/*[@key='5']"
-    assert index["KEY_COL"]["name_path"] == "Statement/Conditions/KEY_COL"
-    assert index["KEY_COL"]["key_path"] == "*[@key='2']/*[@key='4']/*[@key='6']"
+    # Keys are namespace-prefixed so Fields and Conditions never collide.
+    assert index["Fields/COL_A"]["name"] == "COL_A"
+    assert index["Fields/COL_A"]["name_path"] == "Statement/Fields/COL_A"
+    assert index["Fields/COL_A"]["key_path"] == "*[@key='2']/*[@key='3']/*[@key='5']"
+    assert index["Conditions/KEY_COL"]["name"] == "KEY_COL"
+    assert index["Conditions/KEY_COL"]["name_path"] == "Statement/Conditions/KEY_COL"
+    assert index["Conditions/KEY_COL"]["key_path"] == "*[@key='2']/*[@key='4']/*[@key='6']"
+
+
+def test_field_index_same_name_in_fields_and_conditions_no_collision():
+    # A column used as both a SET field and a WHERE key must yield two distinct
+    # index entries (prefixed keys), not overwrite each other.
+    cfg = _cfg(
+        statement_type="dynamicupdate",
+        table_name="WRITE_TARGET",
+        fields=[{"name": "DUP", "data_type": "number"}],
+        conditions=[{"name": "DUP", "data_type": "number"}],
+    )
+    index = DatabaseWriteProfileBuilder.build_field_index(cfg)
+    assert "Fields/DUP" in index
+    assert "Conditions/DUP" in index
+    assert index["Fields/DUP"]["key"] != index["Conditions/DUP"]["key"]
 
 
 def test_field_index_keys_match_build():
@@ -281,11 +299,12 @@ def test_field_index_keys_match_build():
     index = DatabaseWriteProfileBuilder.build_field_index(cfg)
     built = {}
     for el in stmt.findall("DBFields/DatabaseElement"):
-        built[el.get("name")] = int(el.get("key"))
+        built[("Fields", el.get("name"))] = int(el.get("key"))
     for el in stmt.findall("DBConditions/DBCondition"):
-        built[el.get("name")] = int(el.get("key"))
-    for name, meta in index.items():
-        assert meta["key"] == built[name]
+        built[("Conditions", el.get("name"))] = int(el.get("key"))
+    for path, meta in index.items():
+        namespace, _, _name = path.partition("/")
+        assert meta["key"] == built[(namespace, meta["name"])]
 
 
 # ----------------------------------------------------------------------------

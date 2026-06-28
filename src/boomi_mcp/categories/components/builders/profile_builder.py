@@ -1134,17 +1134,24 @@ class DatabaseWriteProfileBuilder:
     def build_field_index(
         cls, config: Dict[str, Any]
     ) -> Dict[str, Dict[str, Any]]:
-        """Return ``{name: {key, key_path, name_path, ...}}`` for map targets.
+        """Return ``{path: {key, key_path, name_path, ...}}`` for map targets.
 
-        Keys mirror ``build()``: fields are emitted first starting at key 5
-        under DBFields (key 3), then conditions continue under DBConditions
-        (key 4). A write profile is a map *target*, so both the writable
-        columns (Fields) and the WHERE keys (Conditions) are mappable leaves.
-        Assumes a well-formed config (caller validates first).
+        The index is keyed by namespace-prefixed path — ``Fields/<name>`` for
+        the writable columns and ``Conditions/<name>`` for the WHERE keys — so a
+        column appearing in both the SET fields and the WHERE conditions of a
+        dynamic update stays distinct, and a map's ``target_path`` can address
+        either namespace unambiguously. Element ``key`` values mirror
+        ``build()``: fields are emitted first starting at key 5 under DBFields
+        (key 3), then conditions continue under DBConditions (key 4). Assumes a
+        well-formed config (caller validates first).
         """
         index: Dict[str, Dict[str, Any]] = {}
         next_key = 5
         statement_type = cls._normalized_statement_type(config)
+        # Keys are namespace-prefixed ("Fields/<name>" / "Conditions/<name>")
+        # so a column name appearing in BOTH the SET fields and the WHERE
+        # conditions (dynamic update) does not collide in the flat index, and
+        # a map can address either namespace unambiguously via target_path.
         if statement_type in cls._EMITS_FIELDS:
             for field in config.get("fields") or []:
                 if not isinstance(field, dict):
@@ -1153,9 +1160,10 @@ class DatabaseWriteProfileBuilder:
                 if not name_raw or not str(name_raw).strip():
                     continue
                 name = str(name_raw).strip()
+                path = f"Fields/{name}"
                 data_type = field.get("data_type", cls.DEFAULT_FIELD_DATA_TYPE)
-                index[name] = {
-                    "path": name,
+                index[path] = {
+                    "path": path,
                     "name": name,
                     "key": next_key,
                     "key_path": f"*[@key='2']/*[@key='3']/*[@key='{next_key}']",
@@ -1174,9 +1182,10 @@ class DatabaseWriteProfileBuilder:
                 if not name_raw or not str(name_raw).strip():
                     continue
                 name = str(name_raw).strip()
+                path = f"Conditions/{name}"
                 data_type = condition.get("data_type", cls.DEFAULT_FIELD_DATA_TYPE)
-                index[name] = {
-                    "path": name,
+                index[path] = {
+                    "path": path,
                     "name": name,
                     "key": next_key,
                     "key_path": f"*[@key='2']/*[@key='4']/*[@key='{next_key}']",
