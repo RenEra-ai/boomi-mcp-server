@@ -4153,6 +4153,16 @@ def _validate_flow_sequence_config(config: Dict[str, Any]) -> Optional[BuilderVa
     reliability = config.get("reliability")
     if isinstance(reliability, dict) and _reliability_requests_try_catch(reliability):
         return _sequence_sibling_error("reliability")
+    # A reliability block that does NOT request a Try/Catch is not consumed by the
+    # composed path (no wrapper is emitted), but a MALFORMED one must still be
+    # rejected rather than silently dropped — validate it with the SAME checker the
+    # legacy path uses (a no-op default {retry_count:0, dlq:{mode:disabled}} passes
+    # and is harmlessly ignored; retry_count out of range, a bad dlq/notify shape,
+    # or catch_notify without a catch path is rejected with its own code). Keeps
+    # validate_config and build() parity-total on the composed path (Codex #117).
+    reliability_err = _validate_reliability(reliability)
+    if reliability_err is not None:
+        return reliability_err
     # v1 rejects a source/target dynamic_path under a flow_sequence — the composed
     # sequencer emits plain connectors (a runtime path binding is a follow-up). The
     # source.dynamic_path presence guard runs BEFORE _validate_source_binding so the

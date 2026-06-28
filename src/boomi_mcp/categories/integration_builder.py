@@ -1881,7 +1881,22 @@ def _check_flow_sequence_steps_ref_types(
             continue
         kind = str(step.get("kind") or "").strip()
         step_field = f"{field}[{i}]"
-        if kind == "branch":
+        if kind in ("doccacheload", "doccacheretrieve", "doccacheremove"):
+            # A cache step's document_cache_id $ref must resolve to a Document Cache
+            # component — the SAME discipline the top-level doccacheretrieve/remove
+            # binding and the DLQ catch-leg cache binding enforce.
+            cache_raw = step.get("document_cache_id")
+            if isinstance(cache_raw, str) and cache_raw.startswith("$ref:") and cache_raw[5:]:
+                cache_comp = components_by_key.get(cache_raw[5:])
+                if cache_comp is not None and _effective_component_type(cache_comp) != "documentcache":
+                    return _process_ref_type_mismatch(
+                        f"{step_field}.document_cache_id",
+                        cache_raw,
+                        "Document Cache",
+                        cache_comp,
+                        cache_raw[5:],
+                    )
+        elif kind == "branch":
             legs = step.get("legs")
             if isinstance(legs, list):
                 for j, leg in enumerate(legs):
@@ -1894,6 +1909,14 @@ def _check_flow_sequence_steps_ref_types(
                     )
                     if leg_err is not None:
                         return leg_err
+                    # A branch leg is a linear sub-flow — recurse so a nested
+                    # dataprocess profile_id / cache document_cache_id $ref inside the
+                    # leg is type-checked too (not just the leg target).
+                    leg_steps_err = _check_flow_sequence_steps_ref_types(
+                        leg.get("steps"), f"{step_field}.legs[{j}].steps", components_by_key
+                    )
+                    if leg_steps_err is not None:
+                        return leg_steps_err
         elif kind == "decision":
             for side in ("true_steps", "false_steps"):
                 sub_err = _check_flow_sequence_steps_ref_types(

@@ -7062,3 +7062,111 @@ class TestBuildPlanFlowSequenceRefTypes:
         process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
         assert process_step["planned_action"] == "error_process_validation"
         assert process_step["validation_error"]["error_code"] == "MISSING_PROCESS_DEPENDENCY"
+
+    @patch(_PATCH_TARGET)
+    def test_flow_sequence_cache_step_swapped_ref_errors_with_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # A doccacheretrieve step's document_cache_id points at the REST connection
+        # (a connector-settings, not a Document Cache) -> PROCESS_REF_TYPE_MISMATCH
+        # (parity with the top-level transform.document_cache_id check).
+        proc = _process_flow_comp(
+            depends_on=(
+                "db_connection", "db_query_operation",
+                "target_rest_connection", "target_rest_operation",
+            ),
+            transform={"mode": "passthrough"},
+            reliability={"retry_count": 0, "dlq": {"mode": "disabled"}},
+            flow_sequence=[{"kind": "doccacheretrieve", "document_cache_id": "$ref:target_rest_connection"}],
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            proc,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert "flow_sequence[0].document_cache_id" in process_step["validation_error"]["field"]
+
+    @patch(_PATCH_TARGET)
+    def test_flow_sequence_cache_step_valid_ref_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        proc = _process_flow_comp(
+            depends_on=(
+                "db_connection", "db_query_operation",
+                "target_rest_connection", "target_rest_operation", "dlq_document_cache",
+            ),
+            transform={"mode": "passthrough"},
+            reliability={"retry_count": 0, "dlq": {"mode": "disabled"}},
+            flow_sequence=[{"kind": "doccacheretrieve", "document_cache_id": "$ref:dlq_document_cache"}],
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            _stub_dep_comp("dlq_document_cache"),
+            proc,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "create"
+        assert "validation_error" not in process_step
+
+    @patch(_PATCH_TARGET)
+    def test_flow_sequence_nested_branch_leg_dataprocess_profile_swapped_ref_errors(self, mock_pag):
+        mock_pag.return_value = []
+        # A dataprocess Split step INSIDE a branch leg with a profile_id pointing at
+        # the REST connection (not a profile.json) -> PROCESS_REF_TYPE_MISMATCH. This
+        # proves the walker recurses into branch leg steps (Codex #117 finding 2).
+        split_step = {
+            "kind": "dataprocess",
+            "steps": [
+                {
+                    "operation": "split_documents",
+                    "profile_type": "json",
+                    "profile_id": "$ref:target_rest_connection",
+                    "link_element_key": "k",
+                    "link_element_name": "n",
+                }
+            ],
+        }
+        rest_ref = {
+            "connector_type": "rest",
+            "connection_id": "$ref:target_rest_connection",
+            "operation_id": "$ref:target_rest_operation",
+            "action_type": "POST",
+        }
+        proc = _process_flow_comp(
+            depends_on=(
+                "db_connection", "db_query_operation",
+                "target_rest_connection", "target_rest_operation",
+            ),
+            transform={"mode": "passthrough"},
+            reliability={"retry_count": 0, "dlq": {"mode": "disabled"}},
+            flow_sequence=[
+                {
+                    "kind": "branch",
+                    "legs": [
+                        {"steps": [split_step], "target": rest_ref},
+                        {"target": rest_ref},
+                    ],
+                }
+            ],
+        )
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            proc,
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        # leg steps[0] = the dataprocess step; its internal steps[0] = the split op.
+        assert "flow_sequence[0].legs[0].steps[0].steps[0].profile_id" in process_step["validation_error"]["field"]

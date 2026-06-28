@@ -3836,3 +3836,46 @@ def test_flow_sequence_build_bypass_malformed_source_binding_raises():
     with pytest.raises(BuilderValidationError) as exc:
         ProcessFlowBuilder.build(cfg, name="X")
     assert exc.value.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+
+
+# --- Codex #117: reliability on a flow_sequence is validated, not silently dropped ---
+
+def test_flow_sequence_noop_reliability_is_allowed():
+    # A default no-op reliability ({retry_count:0, dlq disabled}) is harmless and
+    # ignored by the composed path — it must NOT be rejected.
+    cfg = _seq_config(
+        [{"kind": "map_ref", "map_ref": "M"}],
+        reliability={"retry_count": 0, "dlq": {"mode": "disabled"}},
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+
+
+def test_flow_sequence_malformed_reliability_rejected_not_dropped():
+    # retry_count out of range is NOT a Try/Catch-requesting sibling, but it is
+    # malformed — it must be rejected (PROCESS_RETRY_UNVERIFIED), not silently
+    # dropped. validate_config and build() agree.
+    cfg = _seq_config([{"kind": "map_ref", "map_ref": "M"}], reliability={"retry_count": 99})
+    v = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert v is not None and v.error_code == "PROCESS_RETRY_UNVERIFIED"
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="X")
+    assert exc.value.error_code == "PROCESS_RETRY_UNVERIFIED"
+
+
+def test_flow_sequence_catch_notify_without_path_rejected():
+    cfg = _seq_config(
+        [{"kind": "map_ref", "map_ref": "M"}],
+        reliability={"catch_notify": {"level": "ERROR", "message_template": "x meta.base.catcherrorsmessage"}},
+    )
+    v = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert v is not None and v.error_code == "PROCESS_NOTIFY_CONFIG_INVALID"
+
+
+def test_flow_sequence_try_catch_reliability_still_rejected_as_sibling():
+    cfg = _seq_config(
+        [{"kind": "map_ref", "map_ref": "M"}],
+        reliability={"retry_count": 1, "dlq": {"mode": "document_cache_ref", "document_cache_id": "C"}},
+    )
+    v = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert v is not None and v.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert v.field == "reliability"
