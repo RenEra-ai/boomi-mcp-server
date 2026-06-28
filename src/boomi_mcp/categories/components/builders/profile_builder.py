@@ -1017,6 +1017,19 @@ class DatabaseWriteProfileBuilder:
                 field="table_name",
                 hint="Provide the target table name for the dynamic write.",
             )
+        if statement_type not in cls._REQUIRES_TABLE and table_name is not None and str(table_name).strip():
+            # Live shape requires DBStatement@tableName="" for standard and
+            # storedprocedurewrite; a stray table_name would emit a hybrid.
+            return BuilderValidationError(
+                f"table_name is not allowed for statement_type={statement_type!r}",
+                error_code="DATABASE_OPERATION_VALIDATION_FAILED",
+                field="table_name",
+                hint=(
+                    "Only the dynamic* statement types target a table by name. "
+                    "Standard / storedprocedurewrite express the table through "
+                    "the SQL or stored procedure — omit table_name."
+                ),
+            )
 
         stored_procedure = config.get("stored_procedure")
         if statement_type in cls._REQUIRES_STORED_PROCEDURE and (
@@ -1030,6 +1043,19 @@ class DatabaseWriteProfileBuilder:
                 hint=(
                     "Provide the fully-qualified procedure name as your database "
                     "vendor expects it (stored verbatim, not normalized)."
+                ),
+            )
+        if statement_type not in cls._REQUIRES_STORED_PROCEDURE and stored_procedure is not None and str(stored_procedure).strip():
+            # Live shape requires DBStatement@storedProcedure="" for every
+            # non-SP statement type; a stray stored_procedure would emit a hybrid.
+            return BuilderValidationError(
+                f"stored_procedure is not allowed for statement_type={statement_type!r}",
+                error_code="DATABASE_OPERATION_VALIDATION_FAILED",
+                field="stored_procedure",
+                hint=(
+                    "Only storedprocedurewrite uses a stored procedure name. "
+                    "Other statement types express the write via SQL or "
+                    "table_name — omit stored_procedure."
                 ),
             )
 

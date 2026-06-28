@@ -1532,6 +1532,36 @@ class TestBuildPlanDatabaseSendOperationPreflight:
         assert op_step["validation_error"]["field"] == "write_profile_id"
 
     @patch(_PATCH_TARGET)
+    def test_raw_xml_write_profile_with_single_quoted_marker_is_accepted(self, mock_pag):
+        # A raw-XML profile.db whose dbwrite marker uses single quotes / spaces
+        # (valid XML) must be recognized as a write profile, not flagged
+        # DB_REF_TYPE_MISMATCH.
+        mock_pag.return_value = []
+        raw_write_profile = IntegrationComponentSpec(
+            key="db_write_profile",
+            type="profile.db",
+            action="create",
+            name="Raw Write Profile",
+            config={
+                "component_type": "profile.db",
+                "xml": (
+                    "<DatabaseProfile><ProfileProperties>"
+                    "<DatabaseGeneralInfo executionType = 'dbwrite'/>"
+                    "</ProfileProperties></DatabaseProfile>"
+                ),
+            },
+            depends_on=[],
+        )
+        comp = _db_send_op_comp()
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            raw_write_profile,
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_write_operation")
+        assert op_step.get("validation_error") is None
+
+    @patch(_PATCH_TARGET)
     def test_uuid_write_profile_id_does_not_require_depends_on(self, mock_pag):
         mock_pag.return_value = []
         comp = _db_send_op_comp(write_profile_id="abc-123-def")

@@ -24,6 +24,12 @@ from uuid import uuid4
 # database secret scan.
 _XML_DATABASE_SUBTYPE_RE = re.compile(r'\bsubType\s*=\s*["\']database["\']')
 
+# Issue #32 — a raw-XML profile.db component is a WRITE profile when its
+# DatabaseGeneralInfo carries executionType="dbwrite". XML allows either quote
+# style and whitespace around '=', so an exact substring check would falsely
+# reject a valid write profile referenced by a database Send op.
+_XML_DBWRITE_MARKER_RE = re.compile(r'\bexecutionType\s*=\s*["\']dbwrite["\']')
+
 # Same idea for REST Client raw XML — a connector_type-less raw payload that
 # carries `subType="officialboomi-X3979C-rest-prod"` should still trigger the
 # REST secret scan so plaintext credentials cannot leak through the plan echo
@@ -1314,7 +1320,7 @@ def _is_database_write_profile_target(target: IntegrationComponentSpec) -> bool:
     if isinstance(profile_type, str) and profile_type.strip().lower() == "database.write":
         return True
     xml_payload = raw.get("xml")
-    if isinstance(xml_payload, str) and 'executionType="dbwrite"' in xml_payload:
+    if isinstance(xml_payload, str) and _XML_DBWRITE_MARKER_RE.search(xml_payload):
         return True
     return False
 

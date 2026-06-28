@@ -390,6 +390,53 @@ def test_sql_rejected_for_dynamic():
     assert exc.value.field == "sql"
 
 
+def test_table_name_rejected_for_standard():
+    with pytest.raises(BuilderValidationError) as exc:
+        DatabaseWriteProfileBuilder().build(**_standard_insert(table_name="T"))
+    assert exc.value.error_code == "DATABASE_OPERATION_VALIDATION_FAILED"
+    assert exc.value.field == "table_name"
+
+
+def test_table_name_rejected_for_stored_procedure():
+    with pytest.raises(BuilderValidationError) as exc:
+        DatabaseWriteProfileBuilder().build(
+            **_cfg(statement_type="storedprocedurewrite",
+                   stored_procedure="dbo.usp_Sample",
+                   sql="{ call dbo.usp_Sample(?) }",
+                   table_name="T",
+                   fields=[{"name": "A"}])
+        )
+    assert exc.value.error_code == "DATABASE_OPERATION_VALIDATION_FAILED"
+    assert exc.value.field == "table_name"
+
+
+def test_stored_procedure_rejected_for_dynamic_insert():
+    with pytest.raises(BuilderValidationError) as exc:
+        DatabaseWriteProfileBuilder().build(
+            **_cfg(statement_type="dynamicinsert", table_name="T",
+                   stored_procedure="dbo.usp_Sample",
+                   fields=[{"name": "A"}])
+        )
+    assert exc.value.error_code == "DATABASE_OPERATION_VALIDATION_FAILED"
+    assert exc.value.field == "stored_procedure"
+
+
+def test_stored_procedure_rejected_for_standard():
+    with pytest.raises(BuilderValidationError) as exc:
+        DatabaseWriteProfileBuilder().build(
+            **_standard_insert(stored_procedure="dbo.usp_Sample")
+        )
+    assert exc.value.error_code == "DATABASE_OPERATION_VALIDATION_FAILED"
+    assert exc.value.field == "stored_procedure"
+
+
+def test_empty_irrelevant_table_name_is_allowed():
+    # An explicit empty string is harmless (it is the default for standard).
+    xml = DatabaseWriteProfileBuilder().build(**_standard_insert(table_name=""))
+    stmt = _statement(xml)
+    assert stmt.get("tableName") == ""
+
+
 def test_invalid_data_type_rejected():
     with pytest.raises(BuilderValidationError) as exc:
         DatabaseWriteProfileBuilder().build(
