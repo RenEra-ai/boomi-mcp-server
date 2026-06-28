@@ -1734,6 +1734,13 @@ def _check_process_flow_ref_types(
     if branch_err is not None:
         return branch_err
 
+    # Issue #117 M10 follow-up: type-check $refs nested in a composed flow_sequence
+    # (branch leg targets + Data Process Split/Combine profile_id) with the same
+    # discipline as their top-level equivalents.
+    flow_sequence_err = _check_flow_sequence_ref_types(raw_config, components_by_key)
+    if flow_sequence_err is not None:
+        return flow_sequence_err
+
     return None
 
 
@@ -1760,66 +1767,168 @@ def _check_branch_target_ref_types(
     for i, leg in enumerate(legs):
         if not isinstance(leg, dict):
             continue
-        prefix = f"branch.targets[{i}]"
+        leg_err = _check_rest_target_ref_types(leg, f"branch.targets[{i}]", components_by_key)
+        if leg_err is not None:
+            return leg_err
+    return None
 
-        # connection_id -> REST Client connector-settings
-        conn_raw = leg.get("connection_id")
-        if isinstance(conn_raw, str) and conn_raw.startswith("$ref:") and conn_raw[5:]:
-            conn_comp = components_by_key.get(conn_raw[5:])
-            if conn_comp is not None and (
-                _classify_connector_settings(conn_comp) != "REST Client connector-settings"
-            ):
-                return _process_ref_type_mismatch(
-                    f"{prefix}.connection_id", conn_raw, "REST Client connector-settings",
-                    conn_comp, conn_raw[5:],
-                )
 
-        # operation_id -> REST Client connector-action (captured for the action check)
-        op_comp: Optional[IntegrationComponentSpec] = None
-        op_raw = leg.get("operation_id")
-        if isinstance(op_raw, str) and op_raw.startswith("$ref:") and op_raw[5:]:
-            candidate = components_by_key.get(op_raw[5:])
-            if candidate is not None:
-                role, _ = _classify_connector_action(candidate)
-                if role != "REST Client connector-action":
-                    return _process_ref_type_mismatch(
-                        f"{prefix}.operation_id", op_raw, "REST Client connector-action",
-                        candidate, op_raw[5:],
-                    )
-                op_comp = candidate
+def _check_rest_target_ref_types(
+    leg: Dict[str, Any],
+    prefix: str,
+    components_by_key: Dict[str, IntegrationComponentSpec],
+) -> Optional[BuilderValidationError]:
+    """Type-check one REST leg target's $ref:KEY tokens (issue #112 M10.8 / #117).
 
-        # action_type must match the referenced operation's declared method.
-        if op_comp is not None:
-            _, declared_method = _classify_connector_action(op_comp)
-            declared_action_type = leg.get("action_type")
-            declared_action_upper = (
-                declared_action_type.strip().upper()
-                if isinstance(declared_action_type, str) and declared_action_type.strip()
-                else None
+    ``connection_id`` must reference a REST Client connector-settings, ``operation_id``
+    a REST Client connector-action, and ``action_type`` (when the referenced operation
+    declares a method) must match it. Direct UUID / literal ids are skipped
+    (outside-spec, like the top-level target). Shared by the Branch fan-out leg check
+    and the flow_sequence branch-leg check.
+    """
+    # connection_id -> REST Client connector-settings
+    conn_raw = leg.get("connection_id")
+    if isinstance(conn_raw, str) and conn_raw.startswith("$ref:") and conn_raw[5:]:
+        conn_comp = components_by_key.get(conn_raw[5:])
+        if conn_comp is not None and (
+            _classify_connector_settings(conn_comp) != "REST Client connector-settings"
+        ):
+            return _process_ref_type_mismatch(
+                f"{prefix}.connection_id", conn_raw, "REST Client connector-settings",
+                conn_comp, conn_raw[5:],
             )
-            if (
-                declared_method is not None
-                and declared_action_upper is not None
-                and declared_method != declared_action_upper
-            ):
-                op_ref_key = op_raw[5:] if isinstance(op_raw, str) and op_raw.startswith("$ref:") else ""
-                return BuilderValidationError(
-                    f"{prefix}.action_type {declared_action_upper!r} does not match "
-                    f"the method {declared_method!r} declared on the referenced "
-                    f"REST operation",
-                    error_code="PROCESS_REF_TYPE_MISMATCH",
-                    field=f"{prefix}.action_type",
-                    hint=(
-                        "Align the branch leg action_type with the HTTP method "
-                        "declared on the referenced REST connector-action, or change "
-                        "the referenced operation to one whose method matches."
-                    ),
-                    details={
-                        "ref_key": op_ref_key,
-                        "expected_role": declared_method,
-                        "actual_role": declared_action_upper,
-                    },
+
+    # operation_id -> REST Client connector-action (captured for the action check)
+    op_comp: Optional[IntegrationComponentSpec] = None
+    op_raw = leg.get("operation_id")
+    if isinstance(op_raw, str) and op_raw.startswith("$ref:") and op_raw[5:]:
+        candidate = components_by_key.get(op_raw[5:])
+        if candidate is not None:
+            role, _ = _classify_connector_action(candidate)
+            if role != "REST Client connector-action":
+                return _process_ref_type_mismatch(
+                    f"{prefix}.operation_id", op_raw, "REST Client connector-action",
+                    candidate, op_raw[5:],
                 )
+            op_comp = candidate
+
+    # action_type must match the referenced operation's declared method.
+    if op_comp is not None:
+        _, declared_method = _classify_connector_action(op_comp)
+        declared_action_type = leg.get("action_type")
+        declared_action_upper = (
+            declared_action_type.strip().upper()
+            if isinstance(declared_action_type, str) and declared_action_type.strip()
+            else None
+        )
+        if (
+            declared_method is not None
+            and declared_action_upper is not None
+            and declared_method != declared_action_upper
+        ):
+            op_ref_key = op_raw[5:] if isinstance(op_raw, str) and op_raw.startswith("$ref:") else ""
+            return BuilderValidationError(
+                f"{prefix}.action_type {declared_action_upper!r} does not match "
+                f"the method {declared_method!r} declared on the referenced "
+                f"REST operation",
+                error_code="PROCESS_REF_TYPE_MISMATCH",
+                field=f"{prefix}.action_type",
+                hint=(
+                    "Align the leg action_type with the HTTP method "
+                    "declared on the referenced REST connector-action, or change "
+                    "the referenced operation to one whose method matches."
+                ),
+                details={
+                    "ref_key": op_ref_key,
+                    "expected_role": declared_method,
+                    "actual_role": declared_action_upper,
+                },
+            )
+    return None
+
+
+def _check_flow_sequence_ref_types(
+    raw_config: Dict[str, Any],
+    components_by_key: Dict[str, IntegrationComponentSpec],
+) -> Optional[BuilderValidationError]:
+    """Type-check $ref:KEY tokens nested in a composed ``flow_sequence`` (issue #117).
+
+    Walks the flow_sequence (and decision true/false legs) for nested branch leg
+    targets — applying the SAME per-leg REST checks as the top-level Branch fan-out
+    (``_check_rest_target_ref_types``) — and nested Data Process Split/Combine
+    ``profile_id`` refs (the SAME profile-kind check the top-level transform applies).
+    Direct UUID / literal ids are skipped. ``document_cache_id`` / ``map_ref`` are not
+    type-checked (the top-level path does not type-check those either). Reachability +
+    apply-time $ref substitution for every nested token are already handled generically
+    by the builder's tree-walker, so only ref TYPE parity is added here.
+    """
+    seq = raw_config.get("flow_sequence")
+    if not isinstance(seq, list):
+        return None
+    return _check_flow_sequence_steps_ref_types(seq, "flow_sequence", components_by_key)
+
+
+def _check_flow_sequence_steps_ref_types(
+    steps: Any,
+    field: str,
+    components_by_key: Dict[str, IntegrationComponentSpec],
+) -> Optional[BuilderValidationError]:
+    """Recursively type-check nested $refs in a flow_sequence step list (issue #117)."""
+    if not isinstance(steps, list):
+        return None
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        kind = str(step.get("kind") or "").strip()
+        step_field = f"{field}[{i}]"
+        if kind == "branch":
+            legs = step.get("legs")
+            if isinstance(legs, list):
+                for j, leg in enumerate(legs):
+                    if not isinstance(leg, dict):
+                        continue
+                    leg_err = _check_rest_target_ref_types(
+                        leg.get("target") if isinstance(leg.get("target"), dict) else {},
+                        f"{step_field}.legs[{j}].target",
+                        components_by_key,
+                    )
+                    if leg_err is not None:
+                        return leg_err
+        elif kind == "decision":
+            for side in ("true_steps", "false_steps"):
+                sub_err = _check_flow_sequence_steps_ref_types(
+                    step.get(side), f"{step_field}.{side}", components_by_key
+                )
+                if sub_err is not None:
+                    return sub_err
+        elif kind == "dataprocess":
+            dp_steps = step.get("steps")
+            if isinstance(dp_steps, list):
+                for k, dp_step in enumerate(dp_steps):
+                    if not isinstance(dp_step, dict):
+                        continue
+                    operation = str(dp_step.get("operation") or "").strip()
+                    if operation not in {"split_documents", "combine_documents"}:
+                        continue
+                    profile_type = str(dp_step.get("profile_type") or "").strip().lower()
+                    if profile_type == "json":
+                        expected_role = "profile.json"
+                    elif profile_type == "xml":
+                        expected_role = "profile.xml"
+                    else:
+                        continue
+                    profile_raw = dp_step.get("profile_id")
+                    if not (isinstance(profile_raw, str) and profile_raw.startswith("$ref:") and profile_raw[5:]):
+                        continue
+                    profile_comp = components_by_key.get(profile_raw[5:])
+                    if profile_comp is not None and _classify_profile(profile_comp) != expected_role:
+                        return _process_ref_type_mismatch(
+                            f"{step_field}.steps[{k}].profile_id",
+                            profile_raw,
+                            expected_role,
+                            profile_comp,
+                            profile_raw[5:],
+                        )
     return None
 
 

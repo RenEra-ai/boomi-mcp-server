@@ -3348,3 +3348,491 @@ def test_dynamic_path_profile_ref_requires_depends_on():
     cfg = _base_config(target={**_base_config()["target"], "dynamic_path": dyn})
     assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is not None
     assert ProcessFlowBuilder.validate_config(cfg, depends_on=["req_profile"]) is None
+
+
+# ---------------------------------------------------------------------------
+# Issue #117 M10 follow-up — multi-control-shape composition (flow_sequence)
+# ---------------------------------------------------------------------------
+
+_REST_B_CONN_ID = "55555555-5555-5555-5555-555555555555"
+_REST_B_OP_ID = "66666666-6666-6666-6666-666666666666"
+_SEQ_GROOVY = "dataContext.storeStream(is, props);"
+
+_FLOW_SEQ_DECISION_BRANCH_GOLDEN = _GOLDEN_DIR / "flow_sequence_decision_branch_map.xml"
+_FLOW_SEQ_CACHE_CRUD_GOLDEN = _GOLDEN_DIR / "flow_sequence_cache_load_retrieve_remove.xml"
+_FLOW_SEQ_EXCEPTION_GOLDEN = _GOLDEN_DIR / "flow_sequence_exception_terminal.xml"
+
+
+def _rest_target(conn=_REST_CONN_ID, op=_REST_OP_ID, label="t", verb="POST"):
+    return {
+        "connector_type": "rest",
+        "connection_id": conn,
+        "operation_id": op,
+        "action_type": verb,
+        "label": label,
+    }
+
+
+def _seq_config(flow_sequence, **overrides):
+    return _base_config(flow_sequence=flow_sequence, **overrides)
+
+
+def _decision_branch_config():
+    """The canonical acceptance graph: Decision + Data Process on the true leg
+    (-> top-level target) and a Branch whose legs each carry a Map (issue #117)."""
+    return _seq_config(
+        [
+            {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_STATUS"},
+                "right": {"value_type": "static", "static_value": "ACTIVE"},
+                "label": "Status check",
+                "true_steps": [
+                    {
+                        "kind": "dataprocess",
+                        "label": "Tag",
+                        "steps": [{"operation": "custom_scripting", "script": _SEQ_GROOVY}],
+                    }
+                ],
+                "false_steps": [
+                    {
+                        "kind": "branch",
+                        "legs": [
+                            {
+                                "steps": [{"kind": "map_ref", "map_ref": "MAP-A", "label": "Map A"}],
+                                "target": _rest_target(label="Leg A"),
+                            },
+                            {
+                                "steps": [{"kind": "map_ref", "map_ref": "MAP-B", "label": "Map B"}],
+                                "target": _rest_target(_REST_B_CONN_ID, _REST_B_OP_ID, "Leg B"),
+                            },
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+
+def _cache_crud_config():
+    return _seq_config(
+        [
+            {"kind": "doccacheload", "document_cache_id": "CACHE-1", "label": "Add to cache"},
+            {"kind": "doccacheretrieve", "document_cache_id": "CACHE-1", "label": "Read cache"},
+            {"kind": "doccacheremove", "document_cache_id": "CACHE-1", "label": "Clear cache"},
+        ]
+    )
+
+
+def _exception_terminal_config():
+    return _seq_config(
+        [
+            {"kind": "message", "message_text": "processing", "label": "Log"},
+            {
+                "kind": "exception",
+                "title": "Halt",
+                "message_template": "halted: {1}",
+                "parameter_source": "caught_error",
+            },
+        ]
+    )
+
+
+def _edges(shapes):
+    """Map each shape name -> ordered list of dragpoint toShape targets."""
+    out = {}
+    for s in shapes:
+        dps = s.find("dragpoints")
+        targets = []
+        if dps is not None:
+            for dp in dps.findall("dragpoint"):
+                t = dp.get("toShape")
+                if t:
+                    targets.append(t)
+        out[s.attrib["name"]] = targets
+    return out
+
+
+# --- acceptance bullet 1: Decision + downstream + Branch leg carrying a Map ---
+
+def test_flow_sequence_decision_true_dataprocess_then_branch_map_legs():
+    cfg = _decision_branch_config()
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="Composed")
+    _, _, shapes = _parse_process(xml)
+    by_name = {s.attrib["name"]: s for s in shapes}
+    types = {s.attrib["name"]: s.attrib["shapetype"] for s in shapes}
+    edges = _edges(shapes)
+    # The composed graph contains a decision, a dataprocess on the true leg, a
+    # branch with two map-carrying legs, three connector targets and three stops.
+    assert sorted(types.values()) == sorted(
+        [
+            "start", "connectoraction", "decision", "dataprocess", "connectoraction",
+            "stop", "branch", "map", "connectoraction", "stop", "map", "connectoraction", "stop",
+        ]
+    )
+    decision = next(s for s in shapes if s.attrib["shapetype"] == "decision")
+    true_to, false_to = edges[decision.attrib["name"]]
+    assert types[true_to] == "dataprocess"          # true leg starts with Data Process
+    assert types[edges[true_to][0]] == "connectoraction"  # ... then the top-level target
+    branch = next(s for s in shapes if s.attrib["shapetype"] == "branch")
+    assert false_to == branch.attrib["name"]        # false leg routes into the branch
+    assert branch.find("configuration/branch").attrib["numBranches"] == "2"
+    leg_firsts = edges[branch.attrib["name"]]
+    assert len(leg_firsts) == 2
+    for leg_first in leg_firsts:
+        assert types[leg_first] == "map"            # each branch leg carries a Map
+        target = edges[leg_first][0]
+        assert types[target] == "connectoraction"   # ... then its own target
+        assert types[edges[target][0]] == "stop"    # ... then its own Stop
+
+
+def test_flow_sequence_decision_branch_map_matches_golden_fixture():
+    emitted = ProcessFlowBuilder.build(_decision_branch_config(), name="Flow Sequence Decision Branch Map")
+    assert emitted == _FLOW_SEQ_DECISION_BRANCH_GOLDEN.read_text()
+
+
+def test_flow_sequence_decision_branch_map_verifies_clean():
+    from src.boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
+
+    xml = ProcessFlowBuilder.build(_decision_branch_config(), name="Composed")
+    result = verify_process_graph(xml)
+    assert result["errors"] == []
+    assert result["warnings"] == []
+
+
+# --- acceptance bullet 2: cache load -> retrieve -> remove ---
+
+def test_flow_sequence_cache_load_retrieve_remove():
+    cfg = _cache_crud_config()
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="Cache CRUD")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "doccacheload", "doccacheretrieve",
+        "doccacheremove", "connectoraction", "stop",
+    ]
+    load = next(s for s in shapes if s.attrib["shapetype"] == "doccacheload")
+    # Add-to-Cache sits on the MAIN row (not the catch row) and forwards.
+    assert load.attrib["y"] == "96.0"
+    assert load.attrib["userlabel"] == "Add to cache"
+    assert load.find("configuration/doccacheload").attrib["docCache"] == "CACHE-1"
+    dp = load.find("dragpoints/dragpoint")
+    assert dp is not None and dp.get("toShape")  # non-terminal: has a forward edge
+
+
+def test_flow_sequence_cache_load_retrieve_remove_matches_golden_fixture():
+    emitted = ProcessFlowBuilder.build(_cache_crud_config(), name="Flow Sequence Cache Load Retrieve Remove")
+    assert emitted == _FLOW_SEQ_CACHE_CRUD_GOLDEN.read_text()
+
+
+# --- exception terminal ---
+
+def test_flow_sequence_exception_terminal():
+    cfg = _exception_terminal_config()
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="Exc")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "message", "exception",
+    ]
+    exc = next(s for s in shapes if s.attrib["shapetype"] == "exception")
+    assert exc.attrib["y"] == "96.0"               # main-row terminal, not the catch row
+    assert exc.find("dragpoints") is not None and len(exc.find("dragpoints")) == 0  # terminal
+
+
+def test_flow_sequence_exception_terminal_matches_golden_fixture():
+    emitted = ProcessFlowBuilder.build(_exception_terminal_config(), name="Flow Sequence Exception Terminal")
+    assert emitted == _FLOW_SEQ_EXCEPTION_GOLDEN.read_text()
+
+
+def test_flow_sequence_return_documents_linear_terminal():
+    cfg = _seq_config(
+        [{"kind": "map_ref", "map_ref": "MAP-1"}],
+        return_documents={"enabled": True, "label": "out"},
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="RD")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "map", "returndocuments",
+    ]
+
+
+# --- byte-stability: a legacy (no flow_sequence) config is unchanged ---
+
+def test_legacy_single_shape_unchanged_when_flow_sequence_absent():
+    # The early-return gate is keyed on flow_sequence presence, so a config without
+    # it takes the exact pre-#117 single-shape path. Spot-check the passthrough and
+    # a branch fan-out still emit their established shape graphs.
+    passthrough = ProcessFlowBuilder.build(_base_config(), name="Legacy")
+    _, _, shapes = _parse_process(passthrough)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "connectoraction", "stop",
+    ]
+    branch_cfg = _base_config(branch={"enabled": True, "targets": [_rest_target(label="Leg2")]})
+    _, _, b_shapes = _parse_process(ProcessFlowBuilder.build(branch_cfg, name="Legacy Branch"))
+    assert "branch" in [s.attrib["shapetype"] for s in b_shapes]
+
+
+# --- negatives (sequence STRUCTURE -> PROCESS_FLOW_SEQUENCE_CONFIG_INVALID) ---
+
+def _seq_err(flow_sequence, **overrides):
+    return ProcessFlowBuilder.validate_config(_seq_config(flow_sequence, **overrides), depends_on=[])
+
+
+def test_flow_sequence_rejects_empty_list():
+    err = _seq_err([])
+    assert err is not None and err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_flow_sequence_rejects_unknown_kind():
+    err = _seq_err([{"kind": "teleport"}])
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "flow_sequence[0].kind"
+
+
+def test_flow_sequence_rejects_unknown_step_key():
+    err = _seq_err([{"kind": "map_ref", "map_ref": "M", "bogus": 1}])
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_flow_sequence_rejects_control_not_last():
+    err = _seq_err(
+        [
+            {"kind": "branch", "legs": [{"target": _rest_target()}, {"target": _rest_target()}]},
+            {"kind": "message", "message_text": "after"},
+        ]
+    )
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "flow_sequence[0]"
+
+
+def test_flow_sequence_rejects_branch_too_few_legs():
+    err = _seq_err([{"kind": "branch", "legs": [{"target": _rest_target()}]}])
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "flow_sequence[0].legs"
+
+
+def test_flow_sequence_rejects_branch_too_many_legs():
+    legs = [{"target": _rest_target()} for _ in range(26)]
+    err = _seq_err([{"kind": "branch", "legs": legs}])
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_flow_sequence_rejects_decision_empty_false_steps():
+    err = _seq_err(
+        [
+            {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "b"},
+                "false_steps": [],
+            }
+        ]
+    )
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "flow_sequence[0].false_steps"
+
+
+def test_flow_sequence_rejects_nested_decision_in_decision_leg():
+    inner = {
+        "kind": "decision",
+        "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "a"},
+        "right": {"value_type": "static", "static_value": "b"},
+        "false_steps": [{"kind": "message", "message_text": "x"}],
+    }
+    err = _seq_err(
+        [
+            {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {"value_type": "static", "static_value": "a"},
+                "right": {"value_type": "static", "static_value": "b"},
+                "false_steps": [inner],
+            }
+        ]
+    )
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_flow_sequence_rejects_doccacheload_missing_cache_id():
+    err = _seq_err([{"kind": "doccacheload"}])
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "flow_sequence[0].document_cache_id"
+
+
+def test_flow_sequence_rejects_branch_leg_in_branch_leg():
+    # branch legs are linear-only in v1 (no nested control)
+    err = _seq_err(
+        [
+            {
+                "kind": "branch",
+                "legs": [
+                    {
+                        "steps": [
+                            {"kind": "branch", "legs": [{"target": _rest_target()}, {"target": _rest_target()}]}
+                        ],
+                        "target": _rest_target(),
+                    },
+                    {"target": _rest_target()},
+                ],
+            }
+        ]
+    )
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_flow_sequence_rejects_sibling_transform():
+    err = _seq_err([{"kind": "map_ref", "map_ref": "M"}], transform={"mode": "message", "message_text": "x"})
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "transform"
+
+
+def test_flow_sequence_rejects_sibling_branch_block():
+    err = _seq_err([{"kind": "map_ref", "map_ref": "M"}], branch={"enabled": True, "targets": [_rest_target()]})
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "branch"
+
+
+def test_flow_sequence_rejects_sibling_decision_block():
+    decision = {
+        "comparison": "equals",
+        "left": {"value_type": "static", "static_value": "a"},
+        "right": {"value_type": "static", "static_value": "b"},
+        "false_notify": "x",
+    }
+    err = _seq_err([{"kind": "map_ref", "map_ref": "M"}], decision=decision)
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "decision"
+
+
+def test_flow_sequence_rejects_sibling_flow_control_block():
+    err = _seq_err([{"kind": "map_ref", "map_ref": "M"}], flow_control={"enabled": True, "for_each_count": 5})
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "flow_control"
+
+
+def test_flow_sequence_rejects_sibling_try_catch_reliability():
+    reliability = {"retry_count": 1, "dlq": {"mode": "document_cache_ref", "document_cache_id": "C"}}
+    err = _seq_err([{"kind": "map_ref", "map_ref": "M"}], reliability=reliability)
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "reliability"
+
+
+def test_flow_sequence_rejects_return_documents_with_control():
+    err = _seq_err(
+        [{"kind": "exception", "title": "x", "message_template": "y", "parameter_source": "none"}],
+        return_documents={"enabled": True},
+    )
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "return_documents"
+
+
+def test_flow_sequence_rejects_source_dynamic_path():
+    src = {**_base_config()["source"], "dynamic_path": {"ddp_name": "x", "segments": [{"type": "ddp", "property_name": "p"}]}}
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config([{"kind": "map_ref", "map_ref": "M"}], source=src), depends_on=[]
+    )
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert err.field == "source.dynamic_path"
+
+
+def test_flow_sequence_rejects_branch_leg_dynamic_path():
+    leg = {"steps": [], "target": {**_rest_target(), "dynamic_path": {"ddp_name": "x", "segments": [{"type": "ddp", "property_name": "p"}]}}}
+    err = _seq_err([{"kind": "branch", "legs": [leg, {"target": _rest_target()}]}])
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+# --- step BODY errors reuse the per-shape config-invalid codes ---
+
+def test_flow_sequence_dataprocess_body_error_uses_dataprocess_code():
+    err = _seq_err([{"kind": "dataprocess", "steps": []}])
+    assert err.error_code == "PROCESS_DATAPROCESS_CONFIG_INVALID"
+
+
+def test_flow_sequence_decision_operand_error_uses_decision_code():
+    err = _seq_err(
+        [
+            {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {"value_type": "track"},  # missing property_id
+                "right": {"value_type": "static", "static_value": "b"},
+                "false_steps": [{"kind": "message", "message_text": "x"}],
+            }
+        ]
+    )
+    assert err.error_code == "PROCESS_DECISION_CONFIG_INVALID"
+
+
+def test_flow_sequence_branch_leg_binding_error_uses_connector_code():
+    err = _seq_err(
+        [{"kind": "branch", "legs": [{"target": {"connector_type": "rest"}}, {"target": _rest_target()}]}]
+    )
+    assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+
+
+def test_flow_sequence_exception_body_error_uses_exception_code():
+    err = _seq_err([{"kind": "exception", "message_template": "no placeholder", "parameter_source": "caught_error"}])
+    assert err.error_code == "PROCESS_EXCEPTION_CONFIG_INVALID"
+
+
+# --- build() totality on a validate_config bypass ---
+
+def test_flow_sequence_build_bypass_empty_sequence_raises():
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(_seq_config([]), name="X")
+    assert exc.value.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_flow_sequence_build_bypass_sibling_branch_raises():
+    cfg = _seq_config([{"kind": "map_ref", "map_ref": "M"}], branch={"enabled": True, "targets": [_rest_target()]})
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="X")
+    assert exc.value.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+# --- ref reachability: nested $ref tokens must be declared in depends_on ---
+
+def test_flow_sequence_nested_ref_requires_depends_on():
+    cfg = _seq_config(
+        [
+            {
+                "kind": "branch",
+                "legs": [
+                    {"steps": [{"kind": "map_ref", "map_ref": "$ref:legmap"}], "target": _rest_target()},
+                    {"target": _rest_target()},
+                ],
+            }
+        ]
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is not None
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=["legmap"]) is None
+
+
+def test_flow_sequence_source_dynamic_path_validate_build_parity():
+    # QA #142 regression: a malformed source.dynamic_path on a flow_sequence config
+    # must yield the SAME structured error from validate_config and build() (the
+    # flow_sequence composition guard fires before the generic dynamic_path-shape
+    # check on BOTH paths).
+    src = {**_base_config()["source"], "dynamic_path": {"ddp_name": "", "segments": []}}
+    cfg = _seq_config([{"kind": "map_ref", "map_ref": "M"}], source=src)
+    v = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert v is not None and v.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="X")
+    assert exc.value.error_code == v.error_code
+
+
+def test_flow_sequence_build_bypass_malformed_source_binding_raises():
+    # build()'s composed path validates the source binding (totality on a
+    # validate_config bypass) — a missing source connection_id raises.
+    bad_source = {"connector_type": "database", "operation_id": "o", "action_type": "Get"}
+    cfg = _seq_config([{"kind": "map_ref", "map_ref": "M"}], source=bad_source)
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="X")
+    assert exc.value.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"

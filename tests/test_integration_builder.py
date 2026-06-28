@@ -6965,3 +6965,100 @@ class TestBuildPlanSyncPipelineRestFetch:
         assert ve["field"] == "source.action_type"
         assert ve["details"]["expected_role"] == "POST"
         assert ve["details"]["actual_role"] == "GET"
+
+
+class TestBuildPlanFlowSequenceRefTypes:
+    """Issue #117 M10 follow-up — nested flow_sequence $ref reachability + type parity."""
+
+    def _branch_seq_process(self, leg0_target=None, leg1_target=None, depends_on=None):
+        def rest_target(conn="target_rest_connection", op="target_rest_operation", verb="POST"):
+            return {
+                "connector_type": "rest",
+                "connection_id": f"$ref:{conn}",
+                "operation_id": f"$ref:{op}",
+                "action_type": verb,
+            }
+
+        flow_sequence = [
+            {
+                "kind": "branch",
+                "legs": [
+                    {"steps": [], "target": leg0_target or rest_target()},
+                    {"steps": [], "target": leg1_target or rest_target()},
+                ],
+            }
+        ]
+        deps = depends_on or (
+            "db_connection",
+            "db_query_operation",
+            "target_rest_connection",
+            "target_rest_operation",
+        )
+        return _process_flow_comp(
+            depends_on=deps,
+            flow_sequence=flow_sequence,
+            transform={"mode": "passthrough"},
+            reliability={"retry_count": 0, "dlq": {"mode": "disabled"}},
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_flow_sequence_nested_branch_leg_refs_plan_clean(self, mock_pag):
+        mock_pag.return_value = []
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            self._branch_seq_process(),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "create"
+        assert "validation_error" not in process_step
+
+    @patch(_PATCH_TARGET)
+    def test_flow_sequence_nested_branch_leg_swapped_ref_errors_with_mismatch(self, mock_pag):
+        mock_pag.return_value = []
+        # leg 1's operation_id points at the REST connection (a connector-settings,
+        # not a connector-action) -> PROCESS_REF_TYPE_MISMATCH.
+        bad_leg = {
+            "connector_type": "rest",
+            "connection_id": "$ref:target_rest_connection",
+            "operation_id": "$ref:target_rest_connection",
+            "action_type": "POST",
+        }
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            self._branch_seq_process(leg1_target=bad_leg),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert "flow_sequence[0].legs[1].target.operation_id" in process_step["validation_error"]["field"]
+
+    @patch(_PATCH_TARGET)
+    def test_flow_sequence_nested_branch_leg_missing_dep_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        # A leg target $ref not declared in depends_on -> MISSING_PROCESS_DEPENDENCY
+        # (the generic reachability walker covers nested refs for free).
+        leg_with_undeclared = {
+            "connector_type": "rest",
+            "connection_id": "$ref:target_rest_connection",
+            "operation_id": "$ref:undeclared_op",
+            "action_type": "POST",
+        }
+        components = [
+            _stub_dep_comp("db_connection"),
+            _stub_dep_comp("db_query_operation"),
+            _stub_dep_comp("target_rest_connection"),
+            _stub_dep_comp("target_rest_operation"),
+            self._branch_seq_process(leg1_target=leg_with_undeclared),
+        ]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        process_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert process_step["planned_action"] == "error_process_validation"
+        assert process_step["validation_error"]["error_code"] == "MISSING_PROCESS_DEPENDENCY"

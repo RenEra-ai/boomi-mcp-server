@@ -221,6 +221,62 @@ _DOCCACHE_REMOVE_ALLOWED_KEYS = frozenset(
     {"mode", "label", "document_cache_id", "remove_all_documents"}
 )
 
+# Issue #117 M10 follow-up: multi-control-shape composition via an ordered
+# top-level ``flow_sequence``. Where the legacy single-slot blocks (transform /
+# flow_control / branch / decision) each emit ONE shape per process and mutually
+# exclude, a ``flow_sequence`` is an ordered list of step dicts that compose 2+
+# M10 control/transform shapes in one process. Each step carries a ``kind``:
+#   * LINEAR kinds insert one forward shape (the same shapes the legacy single
+#     slots emit) and continue down the chain;
+#   * CONTROL kinds (``decision`` / ``branch``) fan out and TERMINALIZE the
+#     containing sequence (v1: each is the last step of its sequence — no
+#     post-control join/continuation);
+#   * the TERMINAL ``exception`` kind ends a path in a thrown error.
+# ``flow_sequence`` is additive and opt-in: absent, the builder takes the exact
+# pre-#117 single-shape path (byte-identical). Present, it routes to the composed
+# sequencer and rejects ambiguous legacy siblings. The legacy single blocks stay
+# single-shape and mutually exclusive (their guards/tests are unchanged); rich
+# composition is expressed ONLY through ``flow_sequence``.
+_FLOW_SEQUENCE_LINEAR_KINDS = frozenset(
+    {
+        "flow_control",
+        "message",
+        "map_ref",
+        "dataprocess",
+        "doccacheload",
+        "doccacheretrieve",
+        "doccacheremove",
+    }
+)
+_FLOW_SEQUENCE_CONTROL_KINDS = frozenset({"decision", "branch"})
+_FLOW_SEQUENCE_TERMINAL_KINDS = frozenset({"exception"})
+_FLOW_SEQUENCE_ALLOWED_KINDS = (
+    _FLOW_SEQUENCE_LINEAR_KINDS | _FLOW_SEQUENCE_CONTROL_KINDS | _FLOW_SEQUENCE_TERMINAL_KINDS
+)
+# Per-kind allowed step keys (strict — an unknown key is a typo, never silently
+# dropped; mirrors the dataprocess/return_documents/catch_exception strictness).
+_FLOW_SEQUENCE_STEP_COMMON_KEYS = frozenset({"kind", "label"})
+_FLOW_SEQUENCE_STEP_KEYS: Dict[str, frozenset] = {
+    "flow_control": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"for_each_count"},
+    "message": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"message_text"},
+    "map_ref": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"map_ref"},
+    "dataprocess": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"steps"},
+    "doccacheload": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"document_cache_id"},
+    "doccacheretrieve": _FLOW_SEQUENCE_STEP_COMMON_KEYS
+    | {"document_cache_id", "empty_cache_behavior", "load_all_documents"},
+    "doccacheremove": _FLOW_SEQUENCE_STEP_COMMON_KEYS
+    | {"document_cache_id", "remove_all_documents"},
+    "decision": frozenset(
+        {"kind", "label", "comparison", "left", "right", "true_steps", "false_steps"}
+    ),
+    "branch": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"legs"},
+    "exception": frozenset(
+        {"kind", "title", "message_template", "stop_single_document", "parameter_source"}
+    ),
+}
+# Branch leg shape: {"steps"?: [...linear...], "target": {REST binding}}.
+_FLOW_SEQUENCE_BRANCH_LEG_KEYS = frozenset({"steps", "target"})
+
 # Issue #51 M3.R1a / #88 M4.5.3: DLQ modes that emit a verified Try/Catch
 # wrapper + DLQ catch-path (every supported mode except "disabled"). The catch
 # leg is structural, so positive retry_count is only emittable WITH one of
@@ -533,6 +589,29 @@ class ProcessFlowBuilder:
                 ),
             )
 
+        # Issue #117 M10 follow-up: a top-level ``flow_sequence`` routes to the
+        # composed multi-shape validator/emitter BEFORE the legacy source-binding +
+        # single-slot validators. _validate_flow_sequence_config owns the WHOLE
+        # validation order for a composed config (source/target bindings included)
+        # so its source.dynamic_path-not-supported guard fires before the generic
+        # dynamic_path-shape check — and so validate_config + build()'s
+        # _build_composed_process_flow run the IDENTICAL checks (no parity drift; QA
+        # #142). It rejects ambiguous legacy siblings (flow_control / branch /
+        # decision / non-passthrough transform / Try-Catch reliability), so the
+        # legacy validators never run for it. Absent flow_sequence, this returns
+        # immediately and the existing single-shape validation order is byte-for-byte
+        # unchanged. Reachability still runs last (the SAME $ref walker the legacy
+        # path uses), covering every nested ref.
+        if _flow_sequence_enabled(config):
+            seq_err = _validate_flow_sequence_config(config)
+            if seq_err is not None:
+                return seq_err
+            try:
+                _extract_process_extension_connections(config)
+            except BuilderValidationError as exc:
+                return exc
+            return _validate_ref_reachability(config, set(depends_on or []))
+
         source_err = _validate_source_binding(
             config.get("source"), allow_rest_source=allow_rest_source
         )
@@ -680,6 +759,13 @@ class ProcessFlowBuilder:
                 field="name",
                 hint="Pass a non-empty name via the IntegrationComponentSpec.name field.",
             )
+
+        # Issue #117 M10 follow-up: a top-level ``flow_sequence`` composes 2+ M10
+        # control/transform shapes in one process. Dispatch to the composed
+        # sequencer; the existing single-shape path below is reached unchanged (and
+        # byte-identical) when no flow_sequence is present.
+        if _flow_sequence_enabled(config):
+            return _build_composed_process_flow(config, name=name, folder_name=folder_name)
 
         source = config.get("source") or {}
         target = config.get("target") or {}
@@ -3993,6 +4079,773 @@ def _emit_decision_shapes(
     return parts
 
 
+# ----------------------------------------------------------------------
+# Issue #117 M10 follow-up — multi-control-shape composition (flow_sequence)
+#
+# An ordered ``flow_sequence`` composes 2+ M10 control/transform shapes in one
+# process. Validation + emission reuse the existing single-shape validators and
+# emitters (so each composed shape stays byte-accurate); only the wiring /
+# index allocation is new. v1 control/terminal kinds (decision / branch /
+# exception) terminalize the containing sequence — no post-control join yet.
+# Branch legs are linear sub-flows + a target; decision legs may end in a nested
+# branch or exception (one level), never a nested decision.
+# ----------------------------------------------------------------------
+
+
+def _flow_sequence_enabled(config: Dict[str, Any]) -> bool:
+    """True when the config carries a ``flow_sequence`` (presence, any value).
+
+    Presence — not well-formedness — routes to the composed path so a malformed
+    flow_sequence (empty list, non-list) is REJECTED there rather than silently
+    dropped while the legacy single-shape path emits a plain process. Absent (None)
+    keeps the pre-#117 single-shape behavior byte-for-byte.
+    """
+    return config.get("flow_sequence") is not None
+
+
+def _sequence_sibling_error(block: str) -> BuilderValidationError:
+    """Reject a legacy single-slot block present alongside a ``flow_sequence``."""
+    return BuilderValidationError(
+        f"{block} cannot be combined with a top-level flow_sequence in v1; express "
+        f"it as a flow_sequence step instead.",
+        error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+        field=block,
+        hint=(
+            "flow_sequence is the single composition surface — remove the legacy "
+            "single-slot block (flow_control / branch / decision / non-passthrough "
+            "transform / Try-Catch reliability) and add an equivalent flow_sequence step."
+        ),
+    )
+
+
+def _validate_flow_sequence_config(config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+    """Validate the optional top-level ``flow_sequence`` (issue #117).
+
+    Structural validation only — reachability is run separately by validate_config
+    (the SAME ``$ref`` walker the legacy path uses), so build() can re-run this for
+    totality on a validate_config bypass without depends_on. Precedence: non-empty
+    list -> no ambiguous legacy sibling -> source/target dynamic_path gate -> target
+    binding -> return_documents gate -> recursive step validation.
+    """
+    seq = config.get("flow_sequence")
+    if not isinstance(seq, list) or not seq:
+        return BuilderValidationError(
+            "flow_sequence must be a non-empty list of step objects.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field="flow_sequence",
+            hint=(
+                'Each step is {"kind": ..., ...}; a control kind (decision/branch) or '
+                "the exception terminal must be the LAST step of its sequence."
+            ),
+        )
+    # Ambiguous legacy siblings — rich composition is expressed ONLY via flow_sequence.
+    if _flow_control_enabled(config):
+        return _sequence_sibling_error("flow_control")
+    if _branch_enabled(config):
+        return _sequence_sibling_error("branch")
+    if _decision_enabled(config):
+        return _sequence_sibling_error("decision")
+    transform = config.get("transform")
+    if isinstance(transform, dict):
+        mode = str(transform.get("mode") or "passthrough").strip().lower()
+        if mode != "passthrough":
+            return _sequence_sibling_error("transform")
+    reliability = config.get("reliability")
+    if isinstance(reliability, dict) and _reliability_requests_try_catch(reliability):
+        return _sequence_sibling_error("reliability")
+    # v1 rejects a source/target dynamic_path under a flow_sequence — the composed
+    # sequencer emits plain connectors (a runtime path binding is a follow-up). The
+    # source.dynamic_path presence guard runs BEFORE _validate_source_binding so the
+    # composition rejection (not the generic dynamic_path-shape check) is reported,
+    # identically on the validate_config and build() paths (QA #142).
+    source = config.get("source")
+    if isinstance(source, dict) and source.get("dynamic_path") is not None:
+        return BuilderValidationError(
+            "source.dynamic_path is not supported together with flow_sequence in v1.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field="source.dynamic_path",
+            hint="Remove the source runtime path binding to compose a flow_sequence.",
+        )
+    # flow_sequence is database_to_api_sync-only (DB source); validate the source
+    # binding here so build()'s composed path is total on a validate_config bypass.
+    source_err = _validate_source_binding(source)
+    if source_err is not None:
+        return source_err
+    target = config.get("target")
+    if isinstance(target, dict) and target.get("dynamic_path") is not None:
+        return BuilderValidationError(
+            "target.dynamic_path is not supported together with flow_sequence in v1.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field="target.dynamic_path",
+            hint="Remove the target runtime path binding to compose a flow_sequence.",
+        )
+    # The top-level target is the default success terminal (used by a linear main
+    # line and by a decision TRUE leg); required even when every path self-terminates.
+    target_err = _validate_target_binding(target)
+    if target_err is not None:
+        return target_err
+    # return_documents terminal is allowed ONLY for a purely linear sequence — a
+    # control fan-out / exception already terminates every path.
+    rd = config.get("return_documents")
+    rd_err = _validate_return_documents(rd)
+    if rd_err is not None:
+        return rd_err
+    if isinstance(rd, dict) and rd.get("enabled") is True and not _sequence_is_linear_only(seq):
+        return BuilderValidationError(
+            "return_documents is not supported together with a branch/decision/exception "
+            "flow_sequence in v1.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field="return_documents",
+            hint=(
+                "A control/terminal step already terminates each path; use "
+                "return_documents only on a purely linear flow_sequence."
+            ),
+        )
+    return _validate_flow_sequence_steps(
+        seq,
+        "flow_sequence",
+        allowed_terminal_controls=_FLOW_SEQUENCE_CONTROL_KINDS | _FLOW_SEQUENCE_TERMINAL_KINDS,
+        allow_empty=False,
+    )
+
+
+def _validate_flow_sequence_steps(
+    steps: Any,
+    field: str,
+    *,
+    allowed_terminal_controls: frozenset,
+    allow_empty: bool,
+) -> Optional[BuilderValidationError]:
+    """Validate an ordered list of flow-sequence steps.
+
+    Only the LAST step may be a control (decision/branch) or terminal (exception)
+    kind, and only when its kind is in ``allowed_terminal_controls`` (top-level
+    allows decision/branch/exception; a decision leg allows branch/exception; a
+    branch leg is linear-only). Every step body is validated by
+    ``_validate_flow_sequence_step``.
+    """
+    if not isinstance(steps, list):
+        return BuilderValidationError(
+            f"{field} must be a list of step objects.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=field,
+            hint="Provide an ordered list of {kind: ...} step objects.",
+        )
+    if not steps:
+        if allow_empty:
+            return None
+        return BuilderValidationError(
+            f"{field} must be a non-empty list.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=field,
+            hint="Provide at least one step.",
+        )
+    last = len(steps) - 1
+    control_or_terminal = _FLOW_SEQUENCE_CONTROL_KINDS | _FLOW_SEQUENCE_TERMINAL_KINDS
+    for i, step in enumerate(steps):
+        kind = str((step.get("kind") if isinstance(step, dict) else "") or "").strip()
+        if kind in control_or_terminal:
+            if i != last:
+                return BuilderValidationError(
+                    f"{field}[{i}] is a {kind} step, which must be the LAST step in its "
+                    f"sequence (it terminalizes the path in v1).",
+                    error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                    field=f"{field}[{i}]",
+                    hint=(
+                        "Move the decision/branch/exception to the end, or push the "
+                        "trailing steps into its legs."
+                    ),
+                )
+            if kind not in allowed_terminal_controls:
+                return BuilderValidationError(
+                    f"{field}[{i}] kind {kind!r} is not allowed here; allowed terminal "
+                    f"control kinds: {sorted(allowed_terminal_controls)}.",
+                    error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                    field=f"{field}[{i}].kind",
+                    hint="A branch leg is linear in v1; a nested decision is a follow-up.",
+                )
+        step_err = _validate_flow_sequence_step(step, f"{field}[{i}]")
+        if step_err is not None:
+            return step_err
+    return None
+
+
+def _validate_flow_sequence_step(step: Any, field: str) -> Optional[BuilderValidationError]:
+    """Validate one flow-sequence step (kind -> per-kind body validation)."""
+    if not isinstance(step, dict):
+        return BuilderValidationError(
+            f"{field} must be a JSON object with a 'kind'.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=field,
+            hint='Each step is {"kind": "...", ...}.',
+        )
+    kind = str(step.get("kind") or "").strip()
+    if kind not in _FLOW_SEQUENCE_ALLOWED_KINDS:
+        return BuilderValidationError(
+            f"{field}.kind {kind!r} is not supported.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=f"{field}.kind",
+            hint=f"Supported kinds: {sorted(_FLOW_SEQUENCE_ALLOWED_KINDS)}.",
+        )
+    allowed_keys = _FLOW_SEQUENCE_STEP_KEYS[kind]
+    extra = set(step) - allowed_keys
+    if extra:
+        return BuilderValidationError(
+            f"{field} has unsupported key(s) for kind={kind!r}: {sorted(extra)}.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=field,
+            hint=f"Allowed keys for {kind!r}: {sorted(allowed_keys)}.",
+        )
+    if "label" in allowed_keys:
+        label = step.get("label")
+        if label is not None and not isinstance(label, str):
+            return BuilderValidationError(
+                f"{field}.label must be a string when provided.",
+                error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                field=f"{field}.label",
+                hint="Use a short display label, or omit it.",
+            )
+    if kind == "doccacheload":
+        return _validate_sequence_doccacheload_step(step, field)
+    if kind in _FLOW_SEQUENCE_LINEAR_KINDS:
+        return _validate_sequence_linear_step(step, field, kind)
+    if kind == "decision":
+        return _validate_sequence_decision_step(step, field)
+    if kind == "branch":
+        return _validate_sequence_branch_step(step, field)
+    if kind == "exception":
+        return _validate_sequence_exception_step(step, field)
+    return None  # pragma: no cover — kind already validated above
+
+
+def _validate_sequence_linear_step(
+    step: Dict[str, Any], field: str, kind: str
+) -> Optional[BuilderValidationError]:
+    """Validate a linear flow-sequence step by normalizing it into the equivalent
+    legacy single-slot shape and delegating to that shape's existing validator.
+
+    The delegated validator returns the SAME specific structured error code the
+    legacy single-slot shape returns (PROCESS_SHAPE_UNSUPPORTED for message/map,
+    PROCESS_DATAPROCESS_* / PROCESS_DOCCACHE_* / PROCESS_FLOW_CONTROL_*), so a
+    malformed step body is reported with the exact per-shape contract.
+    """
+    label = step.get("label")
+    if kind == "flow_control":
+        fc: Dict[str, Any] = {"enabled": True, "for_each_count": step.get("for_each_count")}
+        if label is not None:
+            fc["label"] = label
+        return _validate_flow_control_config({"flow_control": fc})
+    if kind == "message":
+        transform: Dict[str, Any] = {"mode": "message", "message_text": step.get("message_text")}
+    elif kind == "map_ref":
+        transform = {"mode": "map_ref", "map_ref": step.get("map_ref")}
+    elif kind == "dataprocess":
+        transform = {"mode": "dataprocess", "steps": step.get("steps")}
+    elif kind == "doccacheretrieve":
+        transform = {"mode": "doccacheretrieve", "document_cache_id": step.get("document_cache_id")}
+        if "empty_cache_behavior" in step:
+            transform["empty_cache_behavior"] = step.get("empty_cache_behavior")
+        if "load_all_documents" in step:
+            transform["load_all_documents"] = step.get("load_all_documents")
+    elif kind == "doccacheremove":
+        transform = {"mode": "doccacheremove", "document_cache_id": step.get("document_cache_id")}
+        if "remove_all_documents" in step:
+            transform["remove_all_documents"] = step.get("remove_all_documents")
+    else:  # pragma: no cover — kind already validated
+        return None
+    if label is not None:
+        transform["label"] = label
+    return _validate_transform(transform)
+
+
+def _validate_sequence_doccacheload_step(
+    step: Dict[str, Any], field: str
+) -> Optional[BuilderValidationError]:
+    """Validate a ``doccacheload`` (Add to Cache) flow-sequence step (issue #117).
+
+    The Add-to-Cache shape ships today only on the DLQ catch leg; as a main-row
+    sequence step it carries the single required ``document_cache_id`` (a literal id
+    or a $ref:KEY token in depends_on) plus an optional ``label``.
+    """
+    doc_cache_id = step.get("document_cache_id")
+    if not isinstance(doc_cache_id, str) or not doc_cache_id.strip():
+        return BuilderValidationError(
+            f"{field}.document_cache_id is required for a doccacheload (Add to Cache) step.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=f"{field}.document_cache_id",
+            hint=(
+                "Pass the Document Cache component id (a literal id or a $ref:KEY token "
+                "in depends_on) to add the current documents to."
+            ),
+        )
+    return None
+
+
+def _validate_sequence_decision_step(
+    step: Dict[str, Any], field: str
+) -> Optional[BuilderValidationError]:
+    """Validate a ``decision`` flow-sequence step (issue #117).
+
+    Reuses the legacy comparison enum + operand validators (same
+    PROCESS_DECISION_CONFIG_INVALID body contract). The TRUE leg (``true_steps``,
+    may be empty -> continue to the top-level target) and FALSE leg
+    (``false_steps``, required non-empty so the reject path is never a bare Stop —
+    keeps the verifier CONTROL_BRANCH_BARE_STOP-clean) each allow a nested branch or
+    exception as their LAST step. Sequence decisions have no false_next loop in v1.
+    """
+    comparison = step.get("comparison")
+    if not isinstance(comparison, str) or comparison.strip() not in _DECISION_COMPARISONS:
+        return BuilderValidationError(
+            f"{field}.comparison must be one of {sorted(_DECISION_COMPARISONS)}.",
+            error_code="PROCESS_DECISION_CONFIG_INVALID",
+            field=f"{field}.comparison",
+            hint="Boomi Decision operators: equals / greaterthaneq / lessthaneq / "
+            "greaterthan / lessthan / regex / wildcard.",
+        )
+    for side in ("left", "right"):
+        operand_err = _validate_decision_operand(step.get(side), f"{field}.{side}")
+        if operand_err is not None:
+            return operand_err
+    true_err = _validate_flow_sequence_steps(
+        step.get("true_steps") if step.get("true_steps") is not None else [],
+        f"{field}.true_steps",
+        allowed_terminal_controls=frozenset({"branch"}) | _FLOW_SEQUENCE_TERMINAL_KINDS,
+        allow_empty=True,
+    )
+    if true_err is not None:
+        return true_err
+    return _validate_flow_sequence_steps(
+        step.get("false_steps"),
+        f"{field}.false_steps",
+        allowed_terminal_controls=frozenset({"branch"}) | _FLOW_SEQUENCE_TERMINAL_KINDS,
+        allow_empty=False,
+    )
+
+
+def _validate_sequence_branch_step(
+    step: Dict[str, Any], field: str
+) -> Optional[BuilderValidationError]:
+    """Validate a ``branch`` flow-sequence step (issue #117).
+
+    ``legs`` is a 2..25-length list; each leg is ``{steps?: [...linear...],
+    target: {REST binding}}``. The leg target reuses ``_validate_target_binding``
+    (PROCESS_CONNECTOR_BINDING_INVALID body contract); leg steps are linear-only.
+    """
+    legs = step.get("legs")
+    if not isinstance(legs, list) or len(legs) < 2:
+        return BuilderValidationError(
+            f"{field}.legs must be a list of at least 2 branch legs.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=f"{field}.legs",
+            hint="A Branch needs 2..25 legs; each leg is {steps?: [...], target: {REST binding}}.",
+        )
+    if len(legs) > _BRANCH_MAX_LEGS:
+        return BuilderValidationError(
+            f"{field}.legs supports 2..{_BRANCH_MAX_LEGS} legs; got {len(legs)}.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=f"{field}.legs",
+            hint=f"Boomi Branch supports up to {_BRANCH_MAX_LEGS} paths.",
+        )
+    for i, leg in enumerate(legs):
+        leg_field = f"{field}.legs[{i}]"
+        if not isinstance(leg, dict):
+            return BuilderValidationError(
+                f"{leg_field} must be a JSON object.",
+                error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                field=leg_field,
+                hint="Each leg is {steps?: [...], target: {REST binding}}.",
+            )
+        extra = set(leg) - _FLOW_SEQUENCE_BRANCH_LEG_KEYS
+        if extra:
+            return BuilderValidationError(
+                f"{leg_field} has unsupported key(s): {sorted(extra)}.",
+                error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                field=leg_field,
+                hint=f"Allowed leg keys: {sorted(_FLOW_SEQUENCE_BRANCH_LEG_KEYS)}.",
+            )
+        leg_target = leg.get("target")
+        if isinstance(leg_target, dict) and leg_target.get("dynamic_path") is not None:
+            return BuilderValidationError(
+                f"{leg_field}.target.dynamic_path is not supported in a flow_sequence "
+                "branch leg in v1.",
+                error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                field=f"{leg_field}.target.dynamic_path",
+                hint="Branch legs are plain REST targets in v1; remove the per-leg dynamic_path.",
+            )
+        target_err = _validate_target_binding(leg_target, field_prefix=f"{leg_field}.target")
+        if target_err is not None:
+            return target_err
+        steps_err = _validate_flow_sequence_steps(
+            leg.get("steps") if leg.get("steps") is not None else [],
+            f"{leg_field}.steps",
+            allowed_terminal_controls=frozenset(),
+            allow_empty=True,
+        )
+        if steps_err is not None:
+            return steps_err
+    return None
+
+
+def _validate_sequence_exception_step(
+    step: Dict[str, Any], field: str
+) -> Optional[BuilderValidationError]:
+    """Validate an ``exception`` flow-sequence terminal step (issue #117).
+
+    Reuses ``_validate_catch_exception`` (same keys: title / message_template /
+    stop_single_document / parameter_source) so the throw contract is identical to
+    the Try/Catch catch-leg exception — PROCESS_EXCEPTION_CONFIG_INVALID body code.
+    """
+    return _validate_catch_exception({k: v for k, v in step.items() if k != "kind"})
+
+
+def _sequence_is_linear_only(steps: Any) -> bool:
+    """True when every step kind in ``steps`` is a linear (non-control/terminal) kind."""
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        kind = str((step.get("kind") if isinstance(step, dict) else "") or "").strip()
+        if kind not in _FLOW_SEQUENCE_LINEAR_KINDS:
+            return False
+    return True
+
+
+# --- composed emission --------------------------------------------------------
+
+
+def _seq_step_to_flow_entry(step: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Map a LINEAR flow-sequence step to an ``(emit_kind, params)`` flow entry.
+
+    ``emit_kind`` is the shape kind the emitter dispatches on (``flowcontrol`` /
+    ``message`` / ``map`` / ``dataprocess`` / ``doccacheload`` / ``doccacheretrieve``
+    / ``doccacheremove``); ``params`` matches the keys the corresponding emitter
+    reads, so each composed shape reuses its byte-accurate single-shape emitter.
+    """
+    kind = str(step.get("kind") or "").strip()
+    label = str(step.get("label") or "")
+    if kind == "flow_control":
+        return ("flowcontrol", {"for_each_count": step.get("for_each_count"), "userlabel": label})
+    if kind == "message":
+        return ("message", {"text": str(step.get("message_text") or ""), "userlabel": label})
+    if kind == "map_ref":
+        return ("map", {"map_id": str(step.get("map_ref") or "").strip(), "userlabel": label})
+    if kind == "dataprocess":
+        return ("dataprocess", {"steps": step.get("steps") or [], "userlabel": label})
+    if kind == "doccacheload":
+        return (
+            "doccacheload",
+            {"document_cache_id": str(step.get("document_cache_id") or "").strip(), "userlabel": label},
+        )
+    if kind == "doccacheretrieve":
+        return (
+            "doccacheretrieve",
+            {
+                "document_cache_id": str(step.get("document_cache_id") or "").strip(),
+                "empty_cache_behavior": str(
+                    step.get("empty_cache_behavior") or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR
+                ).strip(),
+                "load_all_documents": step.get("load_all_documents", True),
+                "userlabel": label,
+            },
+        )
+    if kind == "doccacheremove":
+        return (
+            "doccacheremove",
+            {
+                "document_cache_id": str(step.get("document_cache_id") or "").strip(),
+                "remove_all_documents": step.get("remove_all_documents", True),
+                "userlabel": label,
+            },
+        )
+    raise BuilderValidationError(  # pragma: no cover — defensive
+        f"Unknown linear flow_sequence step kind {kind!r}.",
+        error_code="PROCESS_XML_VALIDATION_FAILED",
+        field="flow_sequence",
+        hint="Internal builder bug — please report.",
+    )
+
+
+def _seq_exception_params(step: Dict[str, Any]) -> Dict[str, Any]:
+    """Map an ``exception`` step to the params ``_emit_exception`` reads."""
+    return {
+        "title": step.get("title"),
+        "message_template": step.get("message_template"),
+        "stop_single_document": step.get("stop_single_document", False),
+        "parameter_source": step.get("parameter_source"),
+    }
+
+
+def _source_prefix_flow_entries(config: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """Build the shared ``start -> source`` prefix flow entries (issue #117).
+
+    Reuses build()'s source canonicalization (DB source for the base protocol;
+    REST source handled defensively for symmetry) minus dynamic_path — a
+    flow_sequence rejects a source dynamic_path, so the source connector is plain.
+    """
+    source = config.get("source") or {}
+    source_canonical_type = _canonical_connector_type(source.get("connector_type"))
+    source_action_raw = str(source.get("action_type") or "").strip()
+    source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
+    if source_is_rest:
+        source_connector_type = source_canonical_type
+        source_action_type = source_action_raw.upper()
+    else:
+        source_connector_type = source_canonical_type.lower()
+        source_action_type = source_action_raw
+    return [
+        ("start_noaction", {}),
+        (
+            "connectoraction_source",
+            {
+                "connector_type": source_connector_type,
+                "action_type": source_action_type,
+                "connection_id": str(source.get("connection_id") or "").strip(),
+                "operation_id": str(source.get("operation_id") or "").strip(),
+                "userlabel": str(source.get("label") or ""),
+                "dynamic_path": None,
+            },
+        ),
+    ]
+
+
+def _target_terminal_entries(config: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """The default success terminal flow entries: ``target -> Stop`` (or a single
+    ``Return Documents`` terminal when return_documents.enabled on a linear sequence)."""
+    rd = config.get("return_documents")
+    if isinstance(rd, dict) and rd.get("enabled") is True:
+        return [("returndocuments", {"label": str(rd.get("label") or "")})]
+    target = config.get("target") or {}
+    return [
+        (
+            "connectoraction_target",
+            {
+                "connector_type": _canonical_connector_type(target.get("connector_type")),
+                "action_type": str(target.get("action_type") or "").strip().upper(),
+                "connection_id": str(target.get("connection_id") or "").strip(),
+                "operation_id": str(target.get("operation_id") or "").strip(),
+                "userlabel": str(target.get("label") or ""),
+                "dynamic_path": None,
+            },
+        ),
+        ("stop", {"continue_": True}),
+    ]
+
+
+def _emit_seq_linear(
+    emit_kind: str,
+    params: Dict[str, Any],
+    shape_name: str,
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit one LINEAR composed-sequence shape forwarding to ``next_name``.
+
+    ``doccacheload`` is emitted via ``_emit_doccacheload`` directly (it is not a
+    ``_emit_flow_shape`` dispatch kind — it ships as a catch-leg terminal today),
+    placing it on the main row (``_SHAPE_Y``). Every other linear kind goes through
+    the existing ``_emit_flow_shape`` dispatch.
+    """
+    if emit_kind == "doccacheload":
+        return _emit_doccacheload(
+            shape_name,
+            str(params.get("document_cache_id") or "").strip(),
+            shape_index,
+            next_name=next_name,
+            y=_SHAPE_Y,
+            dragpoint_y=_DRAGPOINT_Y,
+            userlabel=str(params.get("userlabel") or ""),
+        )
+    return _emit_flow_shape(emit_kind, params, shape_name, next_name, shape_index)
+
+
+def _append_linear_entries(
+    parts: List[str], entries: List[Tuple[str, Dict[str, Any]]], start_index: int
+) -> int:
+    """Emit ``entries`` as a forward chain (the last entry terminal). Returns next index."""
+    idx = start_index
+    m = len(entries)
+    for j, (kind, params) in enumerate(entries):
+        name = f"shape{idx}"
+        nxt = None if j == m - 1 else f"shape{idx + 1}"
+        parts.append(_emit_flow_shape(kind, params, name, nxt, idx))
+        idx += 1
+    return idx
+
+
+def _append_path(
+    parts: List[str],
+    steps: List[Dict[str, Any]],
+    start_index: int,
+    *,
+    fallthrough: List[Tuple[str, Dict[str, Any]]],
+    config: Dict[str, Any],
+) -> int:
+    """Emit one path = linear prefix + a terminal, starting at ``start_index``.
+
+    The terminal is the last step when it is a control (decision/branch) or terminal
+    (exception) kind, otherwise the ``fallthrough`` entries (a linear continuation
+    ending in Stop / Return Documents). The shape before the terminal forwards into
+    the terminal's first shape. Returns the next free shape index. Index allocation
+    is depth-first and matches the legacy branch/decision emitters' positional walk.
+    """
+    terminal_step: Optional[Dict[str, Any]] = None
+    linear_prefix: List[Dict[str, Any]] = steps
+    if steps:
+        last_kind = str((steps[-1].get("kind") if isinstance(steps[-1], dict) else "") or "").strip()
+        if last_kind in (_FLOW_SEQUENCE_CONTROL_KINDS | _FLOW_SEQUENCE_TERMINAL_KINDS):
+            linear_prefix = steps[:-1]
+            terminal_step = steps[-1]
+
+    idx = start_index
+    for step in linear_prefix:
+        emit_kind, params = _seq_step_to_flow_entry(step)
+        name = f"shape{idx}"
+        nxt = f"shape{idx + 1}"  # last linear shape -> first terminal/fallthrough shape
+        parts.append(_emit_seq_linear(emit_kind, params, name, nxt, idx))
+        idx += 1
+
+    if terminal_step is None:
+        return _append_linear_entries(parts, fallthrough, idx)
+    kind = str(terminal_step.get("kind") or "").strip()
+    if kind == "exception":
+        parts.append(_emit_exception(f"shape{idx}", _seq_exception_params(terminal_step), idx, y=_SHAPE_Y))
+        return idx + 1
+    if kind == "decision":
+        return _append_decision(parts, terminal_step, idx, config=config)
+    if kind == "branch":
+        return _append_branch(parts, terminal_step, idx, config=config)
+    raise BuilderValidationError(  # pragma: no cover — kind already validated
+        f"Unknown terminal flow_sequence step kind {kind!r}.",
+        error_code="PROCESS_XML_VALIDATION_FAILED",
+        field="flow_sequence",
+        hint="Internal builder bug — please report.",
+    )
+
+
+def _append_decision(
+    parts: List[str],
+    decision_step: Dict[str, Any],
+    decision_index: int,
+    *,
+    config: Dict[str, Any],
+) -> int:
+    """Emit a composed Decision + its true/false legs (issue #117).
+
+    The TRUE leg falls through to the top-level success terminal (target -> Stop /
+    Return Documents); the FALSE (reject) leg falls through to its own Stop. Either
+    leg may itself end in a nested branch or exception. Emits ``decision -> true leg
+    -> false leg`` (the same shape order the legacy ``_emit_decision_shapes`` uses).
+    """
+    success = _target_terminal_entries(config)
+    true_start = decision_index + 1
+    true_parts: List[str] = []
+    false_start = _append_path(
+        true_parts,
+        decision_step.get("true_steps") or [],
+        true_start,
+        fallthrough=success,
+        config=config,
+    )
+    false_parts: List[str] = []
+    end_index = _append_path(
+        false_parts,
+        decision_step.get("false_steps") or [],
+        false_start,
+        fallthrough=[("stop", {"continue_": True})],
+        config=config,
+    )
+    parts.append(
+        _emit_decision(
+            f"shape{decision_index}",
+            decision_step,
+            f"shape{true_start}",
+            f"shape{false_start}",
+            decision_index,
+        )
+    )
+    parts.extend(true_parts)
+    parts.extend(false_parts)
+    return end_index
+
+
+def _append_branch(
+    parts: List[str],
+    branch_step: Dict[str, Any],
+    branch_index: int,
+    *,
+    config: Dict[str, Any],
+) -> int:
+    """Emit a composed Branch + N independent legs (issue #117).
+
+    Each leg is its own linear sub-flow (``leg.steps``) ending in the leg's own
+    ``target -> Stop`` — forward-only, no join/merge (the legacy fan-out contract).
+    Emits ``branch -> leg1 -> leg2 -> ...`` (the same shape order as
+    ``_emit_branch_shapes``).
+    """
+    legs = branch_step.get("legs") or []
+    leg_first_names: List[str] = []
+    leg_parts: List[str] = []
+    cur = branch_index + 1
+    for leg in legs:
+        leg_first_names.append(f"shape{cur}")
+        fallthrough = [
+            ("connectoraction_target", _branch_target_params(leg.get("target") or {})),
+            ("stop", {"continue_": True}),
+        ]
+        cur = _append_path(
+            leg_parts, leg.get("steps") or [], cur, fallthrough=fallthrough, config=config
+        )
+    parts.append(_emit_branch(f"shape{branch_index}", leg_first_names, branch_index))
+    parts.extend(leg_parts)
+    return cur
+
+
+def _emit_composed_flow_shapes(
+    prefix: List[Tuple[str, Dict[str, Any]]],
+    steps: List[Dict[str, Any]],
+    config: Dict[str, Any],
+) -> List[str]:
+    """Emit ``start -> source -> <composed flow_sequence>`` (issue #117).
+
+    The prefix shapes (start, source) chain forward; the last prefix shape forwards
+    to the first sequence shape (index ``len(prefix)+1``). The sequence is laid out
+    by ``_append_path`` with the top-level success terminal as its fallthrough.
+    """
+    parts: List[str] = []
+    p = len(prefix)
+    for i, (kind, params) in enumerate(prefix):
+        idx = i + 1
+        parts.append(_emit_flow_shape(kind, params, f"shape{idx}", f"shape{idx + 1}", idx))
+    _append_path(parts, steps, p + 1, fallthrough=_target_terminal_entries(config), config=config)
+    return parts
+
+
+def _build_composed_process_flow(
+    config: Dict[str, Any], *, name: str, folder_name: Optional[str] = None
+) -> str:
+    """Emit the full Component XML for a composed ``flow_sequence`` process (issue #117).
+
+    Re-runs the structural validator for totality on a validate_config bypass
+    (mirrors how build() funnels through the legacy validators), reuses the same
+    process_extensions / envelope assembly as the single-shape path.
+    """
+    seq_err = _validate_flow_sequence_config(config)
+    if seq_err is not None:
+        raise seq_err
+    prefix = _source_prefix_flow_entries(config)
+    shape_xml_parts = _emit_composed_flow_shapes(prefix, config.get("flow_sequence") or [], config)
+    process_overrides_xml = ""
+    connections = _extract_process_extension_connections(config)
+    if connections:
+        process_overrides_xml = _emit_process_overrides(connections)
+    return _assemble_process_component_xml(
+        shape_xml_parts,
+        name=name,
+        description=str(config.get("description") or ""),
+        folder_name=folder_name,
+        process_overrides_xml=process_overrides_xml,
+    )
+
+
 def _emit_try_catch_shapes(
     flow: List[Tuple[str, Dict[str, Any]]],
     dlq: Dict[str, Any],
@@ -4429,9 +5282,15 @@ def _emit_exception(
     shape_name: str,
     catch_exception: Dict[str, Any],
     shape_index: int,
+    *,
+    y: float = _CATCH_SHAPE_Y,
 ) -> str:
     """Emit a deliberate Exception (Throw) terminal on the Try/Catch catch leg
-    (issue #108 M10.4).
+    (issue #108 M10.4) or a composed flow-sequence path (issue #117).
+
+    ``y`` defaults to the catch-row y so the existing catch-leg call site stays
+    byte-for-byte identical; the #117 composed sequencer passes ``y=_SHAPE_Y`` to
+    place the Exception as a main-row path terminal.
 
     Byte-accurate to the live ``work``-account capture (component
     1139079f-fff5-434c-aedc-d2758cc20525 shape10 + the decision-terminal
@@ -4464,7 +5323,7 @@ def _emit_exception(
     source = str(catch_exception.get("parameter_source") or "caught_error").strip().lower()
     return (
         f'<shape image="exception_icon" name="{shape_name}" shapetype="exception" '
-        f'userlabel="{title_attr}" x="{_shape_x(shape_index)}" y="{_CATCH_SHAPE_Y}">'
+        f'userlabel="{title_attr}" x="{_shape_x(shape_index)}" y="{y}">'
         '<configuration>'
         f'<exception stopProcessReturnSingleDoc="false" stopsingledoc="{stop_single}" '
         f'title="{title_attr}">'
@@ -4478,23 +5337,35 @@ def _emit_exception(
 
 
 def _emit_doccacheload(
-    shape_name: str, doc_cache_id: str, shape_index: int, next_name: Optional[str] = None
+    shape_name: str,
+    doc_cache_id: str,
+    shape_index: int,
+    next_name: Optional[str] = None,
+    *,
+    y: float = _CATCH_SHAPE_Y,
+    dragpoint_y: float = _CATCH_DRAGPOINT_Y,
+    userlabel: str = "Route caught errors to DLQ cache",
 ) -> str:
-    """Emit the verified document-cache DLQ catch leg.
+    """Emit the verified document-cache Add-to-Cache shape.
 
     Live shape: doccacheload with a docCache id (live component dff0bf83-...
-    shape80). Terminal (empty dragpoints) by default; when ``next_name`` is set
-    (issue #89 notify path) it routes to the catch-row Stop.
+    shape80). Terminal (empty dragpoints) by default; when ``next_name`` is set it
+    routes forward (issue #89 catch-leg notify path → catch Stop; issue #117
+    composed main-row Add-to-Cache → next shape). The ``y`` / ``dragpoint_y`` /
+    ``userlabel`` keyword params default to the catch-leg values so every existing
+    DLQ catch-leg call site stays byte-for-byte identical; the #117 composed
+    sequencer overrides them for a main-row cache write (``y=_SHAPE_Y``,
+    ``dragpoint_y=_DRAGPOINT_Y``, a step ``userlabel``).
     """
     dragpoints_xml = (
-        f'<dragpoints>{_emit_dragpoints([next_name], shape_index, y=_CATCH_DRAGPOINT_Y)}</dragpoints>'
+        f'<dragpoints>{_emit_dragpoints([next_name], shape_index, y=dragpoint_y)}</dragpoints>'
         if next_name
         else '<dragpoints/>'
     )
     return (
         f'<shape image="doccacheload_icon" name="{shape_name}" '
-        f'shapetype="doccacheload" userlabel="Route caught errors to DLQ cache" '
-        f'x="{_shape_x(shape_index)}" y="{_CATCH_SHAPE_Y}">'
+        f'shapetype="doccacheload" userlabel="{_escape_xml(userlabel)}" '
+        f'x="{_shape_x(shape_index)}" y="{y}">'
         f'<configuration><doccacheload docCache="{_escape_xml(doc_cache_id)}"/></configuration>'
         f'{dragpoints_xml}'
         '</shape>'

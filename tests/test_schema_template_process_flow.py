@@ -723,3 +723,60 @@ def test_workflow_sequences_drops_manage_process_create():
     blob = json.dumps(result["workflow_sequences"])
     assert "manage_process(action='create'" not in blob
     assert "manage_process(action=\"create\"" not in blob
+
+
+def test_template_documents_flow_sequence_surface(template):
+    # Issue #117 M10 follow-up: the composed flow_sequence authoring surface, the
+    # supported_sequence_kinds list, and the PROCESS_FLOW_SEQUENCE_CONFIG_INVALID
+    # structured error are all documented.
+    optional = template["optional_fields"]
+    for field in (
+        "flow_sequence",
+        "flow_sequence[].kind",
+        "flow_sequence[].true_steps",
+        "flow_sequence[].false_steps",
+        "flow_sequence[].legs",
+        "flow_sequence[].legs[].steps",
+        "flow_sequence[].legs[].target",
+        "flow_sequence[].steps",
+        "flow_sequence[].document_cache_id",
+        "flow_sequence[].message_template",
+    ):
+        assert field in optional, field
+    assert template["supported_sequence_kinds"] == [
+        "flow_control",
+        "message",
+        "map_ref",
+        "dataprocess",
+        "doccacheload",
+        "doccacheretrieve",
+        "doccacheremove",
+        "decision",
+        "branch",
+        "exception",
+    ]
+    errors_by_code = {e["error_code"]: e["field"] for e in template["structured_errors"]}
+    assert "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID" in errors_by_code
+    fs_fields = errors_by_code["PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"]
+    assert "flow_sequence" in fs_fields
+    assert "flow_sequence[N].legs" in fs_fields
+
+
+def test_template_legacy_single_slot_blocks_stay_mutually_exclusive(template):
+    # Issue #117 deviation: the legacy single-slot guards are NOT relaxed — rich
+    # composition is via flow_sequence. The flow_control structured error still
+    # documents branch/decision as unsupported siblings (the legacy guard stands).
+    errors_by_code = {e["error_code"]: e["field"] for e in template["structured_errors"]}
+    fc_fields = errors_by_code["PROCESS_FLOW_CONTROL_CONFIG_INVALID"]
+    assert "branch" in fc_fields and "decision" in fc_fields
+
+
+def test_template_sync_pipeline_points_multi_shape_to_flow_sequence():
+    # Issue #117: the sync_pipeline protocol's field_notes point multi-shape M10
+    # composition at database_to_api_sync.flow_sequence (not stage-kind lowering).
+    result = get_schema_template_action(
+        resource_type="process", operation="create", protocol="sync_pipeline"
+    )
+    assert result["_success"] is True
+    note = result["field_notes"]["multi_shape_composition"]
+    assert "flow_sequence" in note

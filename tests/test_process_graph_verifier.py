@@ -834,3 +834,99 @@ def test_decision_loop_back_through_message_verifies_clean():
     result = verify_process_graph(_decision_process_xml(false_notify="retry", false_next="shape2"))
     assert result["errors"] == []
     assert "CONTROL_BRANCH_BARE_STOP" not in _codes(result["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# Issue #117 M10 follow-up — composed flow_sequence graphs verify clean
+# ---------------------------------------------------------------------------
+
+_FS_DB = {"connector_type": "database", "connection_id": "c", "operation_id": "o", "action_type": "Get"}
+
+
+def _fs_rest(label="t", conn="rc", op="ro"):
+    return {"connector_type": "rest", "connection_id": conn, "operation_id": op, "action_type": "POST", "label": label}
+
+
+def _fs_base(flow_sequence):
+    return {
+        "process_kind": "database_to_api_sync",
+        "source": _FS_DB,
+        "target": _fs_rest("Main"),
+        "flow_sequence": flow_sequence,
+    }
+
+
+def test_composed_decision_dataprocess_branch_map_verifies_clean():
+    cfg = _fs_base(
+        [
+            {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {"value_type": "track", "property_id": "dynamicdocument.S"},
+                "right": {"value_type": "static", "static_value": "A"},
+                "true_steps": [
+                    {"kind": "dataprocess", "steps": [{"operation": "custom_scripting", "script": "x;"}]}
+                ],
+                "false_steps": [
+                    {
+                        "kind": "branch",
+                        "legs": [
+                            {"steps": [{"kind": "map_ref", "map_ref": "M1"}], "target": _fs_rest("A", "ca", "oa")},
+                            {"steps": [{"kind": "map_ref", "map_ref": "M2"}], "target": _fs_rest("B", "cb", "ob")},
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+    result = verify_process_graph(ProcessFlowBuilder.build(cfg, name="Composed"))
+    assert result["errors"] == []
+    assert result["warnings"] == []
+
+
+def test_composed_cache_load_retrieve_remove_verifies_clean():
+    cfg = _fs_base(
+        [
+            {"kind": "doccacheload", "document_cache_id": "C"},
+            {"kind": "doccacheretrieve", "document_cache_id": "C"},
+            {"kind": "doccacheremove", "document_cache_id": "C"},
+        ]
+    )
+    result = verify_process_graph(ProcessFlowBuilder.build(cfg, name="Cache CRUD"))
+    assert result["errors"] == []
+    assert result["warnings"] == []
+
+
+def test_composed_exception_terminal_verifies_clean_no_dead_end():
+    cfg = _fs_base(
+        [
+            {"kind": "message", "message_text": "log"},
+            {"kind": "exception", "title": "Halt", "message_template": "{1}", "parameter_source": "caught_error"},
+        ]
+    )
+    result = verify_process_graph(ProcessFlowBuilder.build(cfg, name="Exc"))
+    assert result["errors"] == []
+    assert result["warnings"] == []
+
+
+def test_composed_decision_false_exception_no_bare_stop_warning():
+    # A decision whose false leg throws (rather than a bare Stop) keeps the
+    # verifier CONTROL_BRANCH_BARE_STOP-clean.
+    cfg = _fs_base(
+        [
+            {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {"value_type": "track", "property_id": "dynamicdocument.S"},
+                "right": {"value_type": "static", "static_value": "A"},
+                "true_steps": [],
+                "false_steps": [
+                    {"kind": "exception", "title": "Reject", "message_template": "{1}", "parameter_source": "caught_error"}
+                ],
+            }
+        ]
+    )
+    result = verify_process_graph(ProcessFlowBuilder.build(cfg, name="DecExc"))
+    assert result["errors"] == []
+    codes = {w["code"] for w in result["warnings"]}
+    assert "CONTROL_BRANCH_BARE_STOP" not in codes

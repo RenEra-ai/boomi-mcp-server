@@ -5663,6 +5663,46 @@ _PROCESS_FLOW_PROTOCOLS = {
             "flow_control.enabled",
             "flow_control.for_each_count",
             "flow_control.label",
+            # Issue #117 M10 follow-up: optional top-level Flow Sequence — an
+            # ordered list of steps that composes 2+ M10 control/transform shapes
+            # in ONE process (where the legacy single-slot blocks above each emit
+            # one shape and mutually exclude). Each step carries a `kind`: a LINEAR
+            # kind (flow_control / message / map_ref / dataprocess / doccacheload /
+            # doccacheretrieve / doccacheremove) inserts one forward shape; a CONTROL
+            # kind (decision / branch) fans out and TERMINALIZES the sequence (v1:
+            # last step only — no post-control join); the TERMINAL `exception` kind
+            # throws. A decision owns true_steps (may be empty -> continue to the
+            # top-level target) + false_steps (required); a branch owns legs (2..25),
+            # each a linear sub-flow + its own target. Per-step body fields mirror the
+            # equivalent legacy single-slot shape's fields. Mutually exclusive with the
+            # legacy single-slot flow_control / branch / decision / non-passthrough
+            # transform / Try-Catch reliability blocks. Default (absent) keeps the
+            # single-shape flow byte-for-byte. return_documents is allowed only on a
+            # purely linear flow_sequence; source/target dynamic_path is not yet
+            # composable with flow_sequence (v1).
+            "flow_sequence",
+            "flow_sequence[].kind",
+            "flow_sequence[].label",
+            "flow_sequence[].message_text",
+            "flow_sequence[].map_ref",
+            "flow_sequence[].for_each_count",
+            "flow_sequence[].document_cache_id",
+            "flow_sequence[].empty_cache_behavior",
+            "flow_sequence[].load_all_documents",
+            "flow_sequence[].remove_all_documents",
+            "flow_sequence[].steps",
+            "flow_sequence[].comparison",
+            "flow_sequence[].left",
+            "flow_sequence[].right",
+            "flow_sequence[].true_steps",
+            "flow_sequence[].false_steps",
+            "flow_sequence[].legs",
+            "flow_sequence[].legs[].steps",
+            "flow_sequence[].legs[].target",
+            "flow_sequence[].title",
+            "flow_sequence[].message_template",
+            "flow_sequence[].stop_single_document",
+            "flow_sequence[].parameter_source",
             # Issue #92 M4.5.7: declare connection fields as per-environment
             # override points on the deployed process (see notes for the
             # CREATE-only behavior and the connection_id / fields shape).
@@ -5723,6 +5763,22 @@ _PROCESS_FLOW_PROTOCOLS = {
         # the per-document batching shape. Route remains design guidance (not yet
         # builder-emitted).
         "supported_control_shapes": ["branch", "decision", "flow_control"],
+        # Issue #117 M10 follow-up: the step `kind`s a composed flow_sequence
+        # accepts — LINEAR (flow_control / message / map_ref / dataprocess /
+        # doccacheload / doccacheretrieve / doccacheremove), CONTROL (decision /
+        # branch, terminalizing in v1), and the TERMINAL exception throw.
+        "supported_sequence_kinds": [
+            "flow_control",
+            "message",
+            "map_ref",
+            "dataprocess",
+            "doccacheload",
+            "doccacheretrieve",
+            "doccacheremove",
+            "decision",
+            "branch",
+            "exception",
+        ],
         # Issue #111 M10.7: the only live-verified Flow Control mode the builder
         # emits — per-document batching (chunkStyle=threadOnly, chunks=0,
         # forEachCount=N). True parallel chunks (chunks>0), multiProcess, and the
@@ -5805,6 +5861,24 @@ _PROCESS_FLOW_PROTOCOLS = {
             # unsupported v1 composition (branch / decision alongside flow_control)
             # all return PROCESS_FLOW_CONTROL_CONFIG_INVALID.
             {"error_code": "PROCESS_FLOW_CONTROL_CONFIG_INVALID", "field": "flow_control|flow_control.enabled|flow_control.for_each_count|flow_control.label|branch|decision"},
+            # Issue #117 M10 follow-up: Flow Sequence (multi-control-shape
+            # composition). PROCESS_FLOW_SEQUENCE_CONFIG_INVALID covers the sequence
+            # STRUCTURE — a non-list/empty flow_sequence, an unknown step kind, an
+            # unsupported step key, a control/terminal step that is not last (or not
+            # allowed in that position), a malformed branch legs list / leg, a
+            # doccacheload step missing its document_cache_id, an ambiguous legacy
+            # sibling block (flow_control / branch / decision / non-passthrough
+            # transform / Try-Catch reliability) present alongside flow_sequence, a
+            # source/target dynamic_path under flow_sequence, or return_documents on a
+            # non-linear sequence. A malformed step BODY reuses the SAME structured
+            # error code as the equivalent legacy single-slot shape — PROCESS_SHAPE_UNSUPPORTED
+            # (message/map_ref), PROCESS_DATAPROCESS_* / PROCESS_DOCCACHE_* /
+            # PROCESS_FLOW_CONTROL_* (linear cache/dataprocess/batching steps),
+            # PROCESS_DECISION_CONFIG_INVALID (decision comparison/operands),
+            # PROCESS_EXCEPTION_CONFIG_INVALID (exception throw), and
+            # PROCESS_CONNECTOR_BINDING_INVALID / PROCESS_REF_TYPE_MISMATCH (branch leg
+            # target binding / swapped $ref) — all field-scoped to the flow_sequence path.
+            {"error_code": "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID", "field": "flow_sequence|flow_sequence[N].kind|flow_sequence[N].document_cache_id|flow_sequence[N].true_steps|flow_sequence[N].false_steps|flow_sequence[N].legs|flow_sequence[N].legs[M].target|source.dynamic_path|target.dynamic_path|return_documents|flow_control|branch|decision|transform|reliability"},
             {"error_code": "PROCESS_XML_VALIDATION_FAILED", "field": "config"},
             {"error_code": "PROCESS_EXTENSIONS_INVALID", "field": "process_extensions|process_extensions.connections|process_extensions.connections[N].connection_id|process_extensions.connections[N].fields"},
             {"error_code": "PLAINTEXT_SECRET_REJECTED", "field": "<scanned secret field path>"},
@@ -6017,6 +6091,30 @@ _PROCESS_FLOW_PROTOCOLS = {
             "success from update_extensions is not proof a field exists as an "
             "override point — verify via get_extensions after deploy. Malformed "
             "shapes return PROCESS_EXTENSIONS_INVALID.",
+            "Issue #117 M10 follow-up: flow_sequence composes MULTIPLE M10 "
+            "control/transform shapes in one process (the legacy single-slot "
+            "flow_control / branch / decision / transform blocks each emit ONE shape "
+            "and mutually exclude). It is an ordered list of {kind, ...} steps: LINEAR "
+            "kinds (flow_control / message / map_ref / dataprocess / doccacheload / "
+            "doccacheretrieve / doccacheremove) chain forward; a CONTROL kind (decision "
+            "/ branch) fans out and is the LAST step of its sequence in v1 (no "
+            "post-control join); the TERMINAL exception kind throws. A decision owns "
+            "true_steps (may be empty -> continue to the top-level target, the success "
+            "path) + false_steps (required, the reject path) and each leg may end in a "
+            "nested branch or exception; a branch owns 2..25 legs, each a linear "
+            "sub-flow + its own target -> Stop. The cache-CRUD census sequence "
+            "(doccacheload -> doccacheretrieve -> doccacheremove) is a purely linear "
+            "flow_sequence. flow_sequence is mutually exclusive with the legacy "
+            "single-slot flow_control / branch / decision / non-passthrough transform / "
+            "Try-Catch reliability blocks (each returns "
+            "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID); return_documents is allowed only on "
+            "a purely linear flow_sequence; source/target dynamic_path does not yet "
+            "compose with flow_sequence (v1). The legacy single-slot blocks themselves "
+            "stay single-shape and mutually exclusive — rich composition is expressed "
+            "ONLY via flow_sequence. Default (flow_sequence absent) keeps the "
+            "single-shape flow byte-for-byte. Each composed shape reuses its "
+            "byte-accurate single-shape emitter; the verifier (build_integration "
+            "action='verify') confirms the composed graph wiring.",
             "Schedule activation, deployment, and execution remain M3 scope.",
         ],
         "example_component_spec": {
@@ -6276,6 +6374,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "pipeline.stages[].config.map_ref": "The map component id or a $ref:KEY token. Its reachability is enforced (MISSING_PROCESS_DEPENDENCY if the $ref key is not in depends_on), but its component TYPE is not type-checked at plan time — matching database_to_api_sync's transform.map_ref. A shared map-ref role check is a future concern.",
             "pipeline.dependencies": "Typed edges; sync_pipeline requires every edge to be edge_kind='ordering' (the default). The chain must be a single read -> [map] -> send path with no fan-out/fan-in.",
             "gated_blocks": "reliability (Try/Catch retry+DLQ), branch, process_calls, and return_documents are GATED for sync_pipeline — it is verified-linear only (M5.2). Use database_to_api_sync (reliability/dynamic path) or wrapper_subprocess (Process Calls) instead.",
+            "multi_shape_composition": "Issue #117 M10 follow-up: a multi-shape M10 graph (chained routing/batching/cache/throw) is authored via database_to_api_sync.flow_sequence, NOT through sync_pipeline reserved-stage lowering — sync_pipeline stays verified-linear (read -> [map] -> send). The reserved combine/flow_control/branch/decision/dataprocess/exception/doccache stage kinds above remain unlowered.",
         },
         "structured_errors": [
             {"error_code": "PROCESS_KIND_UNSUPPORTED", "field": "process_kind"},
