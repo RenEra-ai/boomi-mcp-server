@@ -1,5 +1,9 @@
 """Concrete V3 archetypes. Discovered by PatternRegistry.from_package('boomi_mcp.patterns')."""
 
+from .api_to_api_sync import (
+    ApiToApiSyncArchetype,
+    ApiToApiSyncParameters,
+)
 from .database_to_api_sync import (
     DatabaseToApiSyncArchetype,
     DatabaseToApiSyncParameters,
@@ -10,6 +14,8 @@ from .stub_minimal import (
 )
 
 __all__ = [
+    "ApiToApiSyncArchetype",
+    "ApiToApiSyncParameters",
     "DatabaseToApiSyncArchetype",
     "DatabaseToApiSyncParameters",
     "StubMinimalIntegrationArchetype",
