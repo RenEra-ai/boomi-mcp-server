@@ -7,7 +7,7 @@ shape — the DELETE half of Document Cache CRUD — as a
 set alongside the already-shipped Add to Cache (``doccacheload``, write) and
 Document Cache Retrieve (``doccacheretrieve``, read, #109).
 Live-captured from the ``work`` account (component
-6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 "[Intapp CDS] Initialize Caches" shapes 3-7;
+6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 "[CDS] Initialize Caches" shapes 3-7;
 see ``.codex/plans/issue-110-live-captures.md``).
 
 v1 emits only the live-observed all-document remove (``remove_all_documents``

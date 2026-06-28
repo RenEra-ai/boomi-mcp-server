@@ -5964,7 +5964,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "empty_cache_behavior / load_all_documents (those are retrieve-only). "
             "Malformed config returns PROCESS_DOCCACHE_REMOVE_CONFIG_INVALID. "
             "Live-verified against a real work-account process export "
-            "('[Intapp CDS] Initialize Caches').",
+            "('[CDS] Initialize Caches').",
             "Issue #112 M10.8: an optional branch block fans the post-source "
             "document out to N independent forward legs (an unconditional Branch — "
             "use a Decision/Route for value-comparing selection). Leg 1 is the "

@@ -198,7 +198,7 @@ _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR = "stopprocess"
 
 # Issue #110 M10.6: process-level Document Cache Remove shape
 # (transform.mode='doccacheremove'). Live-captured from the `work` account
-# (component 6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 "[Intapp CDS] Initialize
+# (component 6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 "[CDS] Initialize
 # Caches" shapes 3-7; see .codex/plans/issue-110-live-captures.md): a Document
 # Cache Remove shape clears documents from a Document Cache — the DELETE half of
 # Document Cache CRUD, completing the set alongside Add to Cache (doccacheload,
@@ -3432,7 +3432,7 @@ def _emit_doccacheremove(
     """Emit a process-level Document Cache Remove shape (issue #110 M10.6).
 
     Byte-accurate to the live ``work``-account capture (component
-    6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 "[Intapp CDS] Initialize Caches" shapes
+    6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 "[CDS] Initialize Caches" shapes
     3-7; see ``.codex/plans/issue-110-live-captures.md``):
     ``<shape image="doccacheremove_icon" ... shapetype="doccacheremove"
     userlabel="..."><configuration><doccacheremove docCache="..."
