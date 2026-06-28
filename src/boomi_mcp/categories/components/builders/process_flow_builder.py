@@ -62,9 +62,10 @@ _REST_ACTION_TYPES = frozenset({
     "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE",
 })
 
-# Database connector-action types supported here. M2 vertical slice is
-# Get only; Send/Upsert are tracked by issue #32 and would need their own
-# process-flow surface area.
+# Database connector-action types wired into a process flow here. Get only:
+# the Send/write *component* builders land in #32 (component-level), but
+# wiring a Send step into a process flow is part of the api_to_database_sync
+# preset (#74) and would need its own process-flow surface area.
 _DB_ACTION_TYPES = frozenset({"Get"})
 
 _SUPPORTED_TRANSFORM_MODES = frozenset(

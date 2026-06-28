@@ -159,10 +159,12 @@ def test_template_documents_forbidden_secret_fields():
 def test_template_documents_out_of_scope():
     result = _call(component_type="profile.db", protocol="database.stored_procedure_read")
     out_of_scope = result["out_of_scope"]
-    # Pure-action procs and write profiles are explicitly out of scope.
+    # Pure-action procs (no result set) remain out of scope.
     assert "no_result_set" in out_of_scope
-    assert "write_profile" in out_of_scope
-    assert "#32" in out_of_scope["write_profile"]
+    # Write profiles are now in scope (issue #32) — pointed at via see_also.
+    see_also = result.get("see_also", {})
+    assert "write_profile" in see_also
+    assert "database.write" in see_also["write_profile"]
 
 
 def test_template_points_at_select_variant_via_see_also():

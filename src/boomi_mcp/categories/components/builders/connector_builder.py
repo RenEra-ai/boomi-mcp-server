@@ -266,6 +266,23 @@ _DATABASE_GET_OPERATION_POLICY = PreservationPolicy(
     ),
 )
 
+# Issue #32 — database Send (write) operation. Mirrors the Get policy:
+# subtree_merge so unknown/future attrs or children on DatabaseSendAction
+# survive a structured update. Builder owns the commit/batch attrs and the
+# WriteProfile child block.
+_DATABASE_SEND_OPERATION_POLICY = PreservationPolicy(
+    component_type="connector-action",
+    subtype="database",
+    owned_paths=(
+        OwnedPath(
+            path="bns:object/Operation/Configuration/DatabaseSendAction",
+            mode="subtree_merge",
+            owned_attrs=("batchCount", "commitOption", "enableBatching"),
+            owned_child_tags=("WriteProfile",),
+        ),
+    ),
+)
+
 # Every field id RestClientConnectionBuilder.build() can emit. owned_keys on
 # the GenericConnectionConfig OwnedPath uses this enumeration so updates that
 # omit a builder-emitted id (e.g. an auth-mode switch dropping oauth-specific
@@ -1395,7 +1412,8 @@ class DatabaseGetOperationBuilder:
     Config keys:
         component_name:    required for top-level component naming
         operation_mode:    required, must be "get". "send" is rejected with
-                           UNSUPPORTED_DB_OPERATION_MODE (tracked by issue #32).
+                           UNSUPPORTED_DB_OPERATION_MODE — use
+                           DatabaseSendOperationBuilder (operation_mode="send").
         read_profile_id:   required, the Boomi profile component ID OR a
                            "$ref:KEY" token (preserved verbatim — caller-side
                            resolution happens before build()).
@@ -1450,13 +1468,15 @@ class DatabaseGetOperationBuilder:
         operation_mode = _om_raw.lower() if isinstance(_om_raw, str) else ""
         if operation_mode in cls.UNSUPPORTED_OPERATION_MODES:
             return BuilderValidationError(
-                f"operation_mode={operation_mode!r} is not supported in issue #23",
+                f"operation_mode={operation_mode!r} is not handled by the "
+                "database Get operation builder",
                 error_code="UNSUPPORTED_DB_OPERATION_MODE",
                 field="operation_mode",
                 hint=(
-                    "Database Send/write operations require WriteProfile and "
-                    "DatabaseSendAction support, tracked separately by issue "
-                    "#32. Use operation_mode='get' for read extractions."
+                    "This builder emits Get (read) operations only. For "
+                    "database Send/write operations use operation_mode='send' "
+                    "(DatabaseSendOperationBuilder); use operation_mode='get' "
+                    "here for read extractions."
                 ),
             )
         if operation_mode not in cls.SUPPORTED_OPERATION_MODES:
@@ -1556,6 +1576,208 @@ class DatabaseGetOperationBuilder:
             f'                <DatabaseGetAction batchCount="{batch_count}" maxRows="{max_rows}">\n'
             f'                    <ReadProfile profileId="{safe_profile_id}"/>\n'
             '                </DatabaseGetAction>\n'
+            '            </Configuration>\n'
+            '            <Tracking><TrackedFields/></Tracking>\n'
+            '            <Caching/>\n'
+            '        </Operation>\n'
+            '    </bns:object>\n'
+            '</bns:Component>'
+        )
+
+
+class DatabaseSendOperationBuilder:
+    """Builder for connector-action subType="database" Send (write) operations.
+
+    Issue #32 — M5.6. Emits a <DatabaseSendAction> envelope that references a
+    pre-existing database Write profile via <WriteProfile profileId="..."/>.
+    The profile ID is typically resolved upstream from a $ref:KEY token by
+    integration_builder._resolve_dependency_tokens at apply time; the builder
+    preserves whatever string the caller passes (UUID or $ref token).
+
+    Reference XML shape (renera connector-action exports, 2026-06-27):
+
+        <bns:Component type="connector-action" subType="database" name="..." folderName="...">
+          <bns:encryptedValues/>
+          <bns:description>...</bns:description>
+          <bns:object>
+            <Operation xmlns="">
+              <Archiving directory="" enabled="false"/>
+              <Configuration>
+                <DatabaseSendAction batchCount="0" commitOption="commitprofile" enableBatching="true">
+                  <WriteProfile profileId="..."/>
+                </DatabaseSendAction>
+              </Configuration>
+              <Tracking><TrackedFields/></Tracking>
+              <Caching/>
+            </Operation>
+          </bns:object>
+        </bns:Component>
+
+    Config keys:
+        component_name:    required for top-level component naming.
+        operation_mode:    required, must be "send".
+        write_profile_id:  required, the Boomi profile component ID OR a
+                           "$ref:KEY" token (preserved verbatim).
+        commit_option:     optional, "commitprofile" (default — commit per
+                           profile) or "commitrows" (commit by row count).
+        batch_count:       optional non-negative integer, defaults to 0.
+        enable_batching:   optional bool, defaults to True (JDBC batching).
+        folder_name:       optional; defaults to "Home".
+        description:       optional.
+        connection_ref_key, connector_type, component_type: caller-supplied
+                           routing context not emitted into XML — Boomi binds
+                           the connection at the process connector step.
+    """
+
+    SUPPORTED_OPERATION_MODES = ("send",)
+    SUPPORTED_COMMIT_OPTIONS = ("commitprofile", "commitrows")
+    DEFAULT_COMMIT_OPTION = "commitprofile"
+    DEFAULT_BATCH_COUNT = 0
+    DEFAULT_ENABLE_BATCHING = True
+    # Defensive consistency — no secrets are expected in a Send op config, but
+    # mirror the scan so integration_builder preflight is uniform.
+    FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
+
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        """Reuse DatabaseConnectorBuilder's scan — same forbidden-key set."""
+        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+            config, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate a Send operation config without building XML."""
+        # 1) Plaintext secret-shaped keys (defensive).
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        # 2) operation_mode must be 'send'. Guard against non-string values
+        # (e.g. an int from malformed JSON) before calling .lower().
+        _om_raw = config.get("operation_mode")
+        operation_mode = _om_raw.lower() if isinstance(_om_raw, str) else ""
+        if operation_mode not in cls.SUPPORTED_OPERATION_MODES:
+            supported = ", ".join(cls.SUPPORTED_OPERATION_MODES)
+            return BuilderValidationError(
+                f"operation_mode is required and must be one of: {supported}",
+                error_code="UNSUPPORTED_DB_OPERATION_MODE",
+                field="operation_mode",
+                hint=f"Supported operation_modes: {supported}.",
+            )
+
+        # 3) component_name required.
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required",
+                error_code="DATABASE_OPERATION_VALIDATION_FAILED",
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        # 4) write_profile_id required and non-empty.
+        write_profile_id = config.get("write_profile_id")
+        if write_profile_id is None or not str(write_profile_id).strip():
+            return BuilderValidationError(
+                "write_profile_id is required for database Send operations",
+                error_code="MISSING_DB_WRITE_PROFILE_REF",
+                field="write_profile_id",
+                hint=(
+                    "Provide either a Boomi profile component ID (UUID) or a "
+                    "'$ref:KEY' token that resolves to the write profile "
+                    "created earlier in the integration plan."
+                ),
+            )
+
+        # 5) commit_option must be a supported value when present.
+        if "commit_option" in config:
+            _co_raw = config.get("commit_option")
+            commit_option = _co_raw.lower() if isinstance(_co_raw, str) else ""
+            if commit_option not in cls.SUPPORTED_COMMIT_OPTIONS:
+                supported = ", ".join(cls.SUPPORTED_COMMIT_OPTIONS)
+                return BuilderValidationError(
+                    f"commit_option={config.get('commit_option')!r} is not supported",
+                    error_code="INVALID_DB_COMMIT_OPTION",
+                    field="commit_option",
+                    hint=(
+                        f"Supported commit options: {supported}. "
+                        "'commitprofile' commits per the write profile; "
+                        "'commitrows' commits by row count (batch_count)."
+                    ),
+                )
+
+        # 6) batch_count non-negative integer; enable_batching a bool.
+        if "batch_count" in config:
+            value = config["batch_count"]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                return BuilderValidationError(
+                    "batch_count must be a non-negative integer",
+                    error_code="INVALID_DB_BATCH_CONFIG",
+                    field="batch_count",
+                    hint=(
+                        f"Use a JSON integer >= 0. Default for batch_count is "
+                        f"{cls.DEFAULT_BATCH_COUNT}."
+                    ),
+                )
+        if "enable_batching" in config and not isinstance(
+            config["enable_batching"], bool
+        ):
+            return BuilderValidationError(
+                "enable_batching must be a boolean",
+                error_code="INVALID_DB_BATCH_CONFIG",
+                field="enable_batching",
+                hint=(
+                    f"Use true or false. Default for enable_batching is "
+                    f"{str(cls.DEFAULT_ENABLE_BATCHING).lower()}."
+                ),
+            )
+
+        return None
+
+    def build(self, **params) -> str:
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        component_name = params["component_name"]
+        write_profile_id = params["write_profile_id"]
+        _co_raw = params.get("commit_option", self.DEFAULT_COMMIT_OPTION)
+        commit_option = _co_raw.lower() if isinstance(_co_raw, str) else self.DEFAULT_COMMIT_OPTION
+        batch_count = params.get("batch_count", self.DEFAULT_BATCH_COUNT)
+        enable_batching = params.get("enable_batching", self.DEFAULT_ENABLE_BATCHING)
+        folder_name = params.get("folder_name", "Home")
+        description = params.get("description", "")
+
+        safe_name = _escape_xml(component_name)
+        safe_folder = _escape_xml(folder_name)
+        safe_desc = _escape_xml(description)
+        safe_profile_id = _escape_xml(str(write_profile_id))
+        enable_batching_str = "true" if enable_batching else "false"
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
+            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+            '               type="connector-action" subType="database"\n'
+            f'               name="{safe_name}"\n'
+            f'               folderName="{safe_folder}">\n'
+            '    <bns:encryptedValues/>\n'
+            f'    <bns:description>{safe_desc}</bns:description>\n'
+            '    <bns:object>\n'
+            '        <Operation xmlns="">\n'
+            '            <Archiving directory="" enabled="false"/>\n'
+            '            <Configuration>\n'
+            f'                <DatabaseSendAction batchCount="{batch_count}"'
+            f' commitOption="{commit_option}" enableBatching="{enable_batching_str}">\n'
+            f'                    <WriteProfile profileId="{safe_profile_id}"/>\n'
+            '                </DatabaseSendAction>\n'
             '            </Configuration>\n'
             '            <Tracking><TrackedFields/></Tracking>\n'
             '            <Caching/>\n'
@@ -3200,6 +3422,7 @@ CONNECTOR_BUILDERS: Dict[str, type] = {
 # near the registry for discoverability.
 DatabaseConnectorBuilder.PRESERVATION_POLICY = _DATABASE_CONNECTOR_POLICY
 DatabaseGetOperationBuilder.PRESERVATION_POLICY = _DATABASE_GET_OPERATION_POLICY
+DatabaseSendOperationBuilder.PRESERVATION_POLICY = _DATABASE_SEND_OPERATION_POLICY
 RestClientConnectionBuilder.PRESERVATION_POLICY = _REST_CLIENT_CONNECTION_POLICY
 RestClientOperationBuilder.PRESERVATION_POLICY = _REST_CLIENT_OPERATION_POLICY
 
@@ -3217,6 +3440,7 @@ def get_connector_builder(connector_type: str):
 # connector-action have different XML shapes and required-field sets.
 CONNECTOR_ACTION_BUILDERS: Dict[tuple, type] = {
     ("database", "get"): DatabaseGetOperationBuilder,
+    ("database", "send"): DatabaseSendOperationBuilder,
     ("rest", "execute"): RestClientOperationBuilder,
     ("rest_client", "execute"): RestClientOperationBuilder,
     (REST_CLIENT_SUBTYPE.lower(), "execute"): RestClientOperationBuilder,

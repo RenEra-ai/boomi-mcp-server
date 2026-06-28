@@ -58,7 +58,7 @@ def test_profile_db_registered_in_profile_builders():
 
 
 def test_get_profile_builder_unknown_returns_none():
-    assert get_profile_builder("profile.db", "database.write") is None
+    assert get_profile_builder("profile.db", "database.bogus") is None
     assert get_profile_builder("profile.json", "database.read") is None
     assert get_profile_builder("", "") is None
 

@@ -2,8 +2,9 @@
 
 Issue #23 (M2.3). Anti-template policy: examples MUST use angle-bracket
 placeholders only and $ref:KEY tokens — no canned payloads or CDS wrapper
-snippets. Database Send/write is OUT OF SCOPE — protocol='database.send'
-must return _success: False with an issue-#32 hint.
+snippets. Database Send/write (protocol='database.send') is now implemented
+(issue #32) — its dedicated coverage lives in
+test_schema_template_connector_action_database_send.py.
 """
 
 import json
@@ -76,12 +77,12 @@ def test_full_template_returned_for_database_get_protocol():
     assert result["protocol"] == "database.get"
 
 
-def test_database_send_protocol_returns_explicit_issue_32_error():
-    # Send/write is intentionally OUT OF SCOPE for issue #23.
+def test_database_send_protocol_now_returns_template():
+    # Issue #32 implemented database.send — it now returns a real template
+    # (full coverage lives in test_schema_template_connector_action_database_send.py).
     result = _call(component_type="connector-action", protocol="database.send")
-    assert result["_success"] is False
-    assert result["error_code"] == "UNSUPPORTED_DB_OPERATION_MODE"
-    assert "#32" in result["hint"]
+    assert result["_success"] is True
+    assert result["protocol"] == "database.send"
 
 
 # ----------------------------------------------------------------------------
@@ -110,11 +111,11 @@ def test_template_documents_defaults():
     assert result["defaults"]["folder_name"] == "Home"
 
 
-def test_template_lists_unsupported_operation_modes():
+def test_template_points_to_send_protocol():
     result = _call(component_type="connector-action", protocol="database.get")
     assert result["supported_operation_modes"] == ["get"]
-    assert "send" in result["unsupported_operation_modes"]
-    assert "#32" in result["unsupported_operation_modes_note"]
+    # Send is now a sibling protocol, not an out-of-scope mode.
+    assert "database.send" in result["other_operation_modes_note"]
 
 
 def test_template_documents_link_element_deferral():
@@ -151,11 +152,11 @@ def test_template_documents_forbidden_secret_fields():
         assert field in forbidden
 
 
-def test_template_documents_out_of_scope_send_pointer():
+def test_template_documents_send_see_also_pointer():
     result = _call(component_type="connector-action", protocol="database.get")
-    out_of_scope = result["out_of_scope"]
-    assert "database_send" in out_of_scope
-    assert "#32" in out_of_scope["database_send"]
+    see_also = result["see_also"]
+    assert "database_send" in see_also
+    assert "database.send" in see_also["database_send"]
 
 
 # ----------------------------------------------------------------------------

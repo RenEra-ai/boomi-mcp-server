@@ -82,7 +82,7 @@ class TestRegistry:
         assert isinstance(builder, DatabaseStoredProcedureReadProfileBuilder)
 
     def test_factory_returns_none_for_unknown(self):
-        assert get_profile_builder("profile.db", "database.write") is None
+        assert get_profile_builder("profile.db", "database.bogus") is None
 
 
 # ----------------------------------------------------------------------------

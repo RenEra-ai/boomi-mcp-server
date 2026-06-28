@@ -129,14 +129,17 @@ from .components.builders import (
     BuilderValidationError,
     DatabaseConnectorBuilder,
     DatabaseGetOperationBuilder,
+    DatabaseSendOperationBuilder,
     DatabaseReadProfileBuilder,
     DatabaseStoredProcedureReadProfileBuilder,
+    DatabaseWriteProfileBuilder,
     REST_CLIENT_SUBTYPE,
     RestClientConnectionBuilder,
     RestClientOperationBuilder,
     ProcessFlowBuilder,
     WrapperSubprocessBuilder,
     SyncPipelineBuilder,
+    CONNECTOR_ACTION_BUILDERS,
     PROFILE_BUILDERS,
     PROCESS_FLOW_BUILDERS,
     get_connector_action_builder,
@@ -1143,7 +1146,15 @@ def _resolve_preservation_policy(
         if _resolve_rest_connector_type(connector_type) is not None:
             return RestClientOperationBuilder.PRESERVATION_POLICY
         if connector_type == "database":
-            return DatabaseGetOperationBuilder.PRESERVATION_POLICY
+            # Resolve the policy from the operation-mode-specific builder so a
+            # Send update gets the Send policy (and Get the Get policy). An
+            # unknown/missing mode resolves to no builder → no policy; the
+            # plan-time builder preflight surfaces the structured error.
+            op_mode = _safe_lower(raw_config.get("operation_mode"))
+            action_builder = get_connector_action_builder("database", op_mode)
+            if action_builder is None:
+                return None
+            return getattr(type(action_builder), "PRESERVATION_POLICY", None)
         return None
     if comp.type == "profile.db":
         # Codex r3 P2: metadata-only updates skip the builder; the
@@ -1283,6 +1294,138 @@ def _check_database_get_dependencies(
                     details={
                         "ref_key": ref_key,
                         "expected_role": "profile.db",
+                        "actual_role": actual_role,
+                    },
+                )
+
+    return None
+
+
+def _is_database_write_profile_target(target: IntegrationComponentSpec) -> bool:
+    """True when an in-spec profile.db target is a Database Write profile.
+
+    ``_classify_profile`` returns ``"profile.db"`` for read AND write profiles,
+    so the Send dependency check needs this finer test: either a structured
+    ``profile_type="database.write"`` config or a raw-XML escape-hatch profile
+    carrying the ``executionType="dbwrite"`` marker.
+    """
+    raw = target.config if isinstance(target.config, dict) else {}
+    profile_type = raw.get("profile_type")
+    if isinstance(profile_type, str) and profile_type.strip().lower() == "database.write":
+        return True
+    xml_payload = raw.get("xml")
+    if isinstance(xml_payload, str) and 'executionType="dbwrite"' in xml_payload:
+        return True
+    return False
+
+
+def _check_database_send_dependencies(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+    components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
+) -> Optional[BuilderValidationError]:
+    """Cross-step dependency checks specific to database Send operations (issue #32).
+
+    Boomi binds a connection to an operation at the process connector step,
+    not in the operation XML — so the connection ID is never embedded. But
+    plan-time we still need the caller to declare both dependencies via
+    `connection_ref_key` + `depends_on` (for connection) and `write_profile_id`
+    + `depends_on` (when write_profile_id is a `$ref:KEY` token), otherwise the
+    apply ordering would be unsafe.
+    """
+    depends_on = set(comp.depends_on or [])
+
+    connection_ref_key = raw_config.get("connection_ref_key")
+    if not connection_ref_key or not str(connection_ref_key).strip():
+        return BuilderValidationError(
+            "connection_ref_key is required for database Send operations",
+            error_code="MISSING_DB_DEPENDENCY",
+            field="connection_ref_key",
+            hint=(
+                "Declare the database connector-settings key the operation "
+                "will bind to at process time, and add the same key to "
+                "depends_on so plan ordering is correct."
+            ),
+        )
+    if connection_ref_key not in depends_on:
+        return BuilderValidationError(
+            f"connection_ref_key {connection_ref_key!r} must also appear in depends_on",
+            error_code="MISSING_DB_DEPENDENCY",
+            field="depends_on",
+            hint=(
+                "Add the connector-settings key to depends_on so the "
+                "execution order creates the connection before the operation."
+            ),
+        )
+
+    # Cross-component type check. Skip outside-spec refs (components_by_key.get
+    # returns None for direct UUIDs / live IDs).
+    if components_by_key is not None:
+        target = components_by_key.get(connection_ref_key)
+        if target is not None and _classify_connector_settings(target) != "database connector-settings":
+            actual_role = _format_actual_role(target)
+            return BuilderValidationError(
+                f"connection_ref_key {connection_ref_key!r} must reference a "
+                f"database connector-settings component (got {actual_role})",
+                error_code="DB_REF_TYPE_MISMATCH",
+                field="connection_ref_key",
+                hint=(
+                    "Point connection_ref_key at the database "
+                    "connector-settings key; profile and connector-action "
+                    "keys are not valid here."
+                ),
+                details={
+                    "ref_key": connection_ref_key,
+                    "expected_role": "database connector-settings",
+                    "actual_role": actual_role,
+                },
+            )
+
+    write_profile_id = raw_config.get("write_profile_id")
+    if isinstance(write_profile_id, str) and write_profile_id.startswith("$ref:"):
+        ref_key = write_profile_id[5:]
+        if not ref_key:
+            return BuilderValidationError(
+                "write_profile_id $ref token is empty (expected '$ref:KEY')",
+                error_code="MISSING_DB_WRITE_PROFILE_REF",
+                field="write_profile_id",
+                hint=(
+                    "Use '$ref:db_write_profile' to reference a profile.db "
+                    "component created earlier in the same integration spec."
+                ),
+            )
+        if ref_key not in depends_on:
+            return BuilderValidationError(
+                f"write_profile_id $ref target {ref_key!r} must also appear in depends_on",
+                error_code="MISSING_DB_DEPENDENCY",
+                field="depends_on",
+                hint=(
+                    "Add the write profile key to depends_on so the execution "
+                    "order creates the profile before the operation."
+                ),
+            )
+        if components_by_key is not None:
+            target = components_by_key.get(ref_key)
+            if target is not None and (
+                _classify_profile(target) != "profile.db"
+                or not _is_database_write_profile_target(target)
+            ):
+                actual_role = _format_actual_role(target)
+                return BuilderValidationError(
+                    f"write_profile_id $ref target {ref_key!r} must reference a "
+                    f"database write profile (profile.db with "
+                    f"profile_type='database.write'); got {actual_role}",
+                    error_code="DB_REF_TYPE_MISMATCH",
+                    field="write_profile_id",
+                    hint=(
+                        "Point write_profile_id at a profile.db component with "
+                        "profile_type='database.write' declared earlier in the "
+                        "spec; a read profile (database.read / "
+                        "database.stored_procedure_read) is not valid here."
+                    ),
+                    details={
+                        "ref_key": ref_key,
+                        "expected_role": "profile.db (database.write)",
                         "actual_role": actual_role,
                     },
                 )
@@ -4238,10 +4381,11 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         is_database_read_profile = (comp.type == "profile.db")
         # Every connector-action with connector_type='database' is a builder
         # candidate (regardless of operation_mode value). The validator
-        # returns UNSUPPORTED_DB_OPERATION_MODE for send/upsert/missing, so
-        # unknown modes can't slip through as clean `create` plans with
-        # un-redacted secret echoes (Codex review item #4).
-        is_database_get_operation = (
+        # dispatches get/send by operation_mode and returns
+        # UNSUPPORTED_DB_OPERATION_MODE for unknown/missing modes, so they
+        # can't slip through as clean `create` plans with un-redacted secret
+        # echoes (Codex review item #4).
+        is_database_operation = (
             comp.type == "connector-action"
             and (raw_config.get("connector_type") or "").lower() == "database"
         )
@@ -4270,7 +4414,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         will_invoke_builder = (
             (is_database_connector_settings
              or is_database_read_profile
-             or is_database_get_operation)
+             or is_database_operation)
             and not xml_payload
             and (
                 planned_action in ("create", "create_clone")
@@ -4283,7 +4427,10 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             secret_scanner_cls = DatabaseConnectorBuilder
         elif is_database_read_profile:
             secret_scanner_cls = DatabaseReadProfileBuilder
-        elif is_database_get_operation:
+        elif is_database_operation:
+            # Get and Send share the same forbidden-key set (both delegate to
+            # DatabaseConnectorBuilder's scan), so either builder works as the
+            # scanner regardless of operation_mode.
             secret_scanner_cls = DatabaseGetOperationBuilder
         if secret_scanner_cls is not None:
             db_err = secret_scanner_cls.scan_forbidden_secret_fields(raw_config)
@@ -4319,22 +4466,48 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                                 "Use one of the supported profile_type values "
                                 "(database.read for Select-statement profiles, "
                                 "database.stored_procedure_read for Stored "
-                                "Procedure profiles). Write profiles are "
-                                "tracked by issue #32."
+                                "Procedure profiles, database.write for write "
+                                "profiles)."
                             ),
                         )
                     else:
                         db_err = type(builder_instance).validate_config(effective_config)
-                elif is_database_get_operation:
-                    db_err = DatabaseGetOperationBuilder.validate_config(effective_config)
-                    # Cross-step dependency checks only apply to the
-                    # supported Get path — for unsupported modes (send,
-                    # upsert, missing), validate_config above returns first
-                    # with UNSUPPORTED_DB_OPERATION_MODE.
-                    if db_err is None:
-                        db_err = _check_database_get_dependencies(
-                            comp, raw_config, components_by_key
+                elif is_database_operation:
+                    # Dispatch on operation_mode via the registry. Get and
+                    # Send have distinct builders + dependency checks; an
+                    # unknown/missing mode resolves to no builder and surfaces
+                    # a unified UNSUPPORTED_DB_OPERATION_MODE listing the
+                    # supported modes. _safe_lower guards non-string modes.
+                    op_mode = _safe_lower(effective_config.get("operation_mode"))
+                    action_builder = get_connector_action_builder("database", op_mode)
+                    if action_builder is None:
+                        valid = sorted({
+                            om for (ct, om) in CONNECTOR_ACTION_BUILDERS
+                            if ct == "database"
+                        })
+                        db_err = BuilderValidationError(
+                            f"operation_mode {op_mode!r} is not supported for "
+                            f"database connector-actions. Supported: "
+                            f"{', '.join(valid)}.",
+                            error_code="UNSUPPORTED_DB_OPERATION_MODE",
+                            field="operation_mode",
+                            hint=(
+                                "Use operation_mode='get' for read extractions "
+                                "or operation_mode='send' for write operations."
+                            ),
                         )
+                    else:
+                        db_err = type(action_builder).validate_config(effective_config)
+                        # Cross-step dependency checks only run once the
+                        # builder's own field validation passes.
+                        if db_err is None and op_mode == "get":
+                            db_err = _check_database_get_dependencies(
+                                comp, raw_config, components_by_key
+                            )
+                        elif db_err is None and op_mode == "send":
+                            db_err = _check_database_send_dependencies(
+                                comp, raw_config, components_by_key
+                            )
         if db_err is not None:
             planned_action = "error_database_validation"
             validation_error = {

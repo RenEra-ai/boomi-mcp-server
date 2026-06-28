@@ -1686,9 +1686,9 @@ _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
 # Examples MUST use angle-bracket placeholders (<<task-authored SQL>>,
 # <<field_name>>, <<schema.procedure>>, $ref:<key>). No canned SQL,
 # procedure names, table/column names, CDS wrapper snippets, or payload
-# templates. Database Send/write is OUT OF SCOPE — defer to issue #32
-# (DatabaseSendAction, WriteProfile, commit semantics, JDBC batching,
-# dynamic insert/update/delete).
+# templates. Database Send/write (DatabaseSendAction, WriteProfile, commit
+# semantics, JDBC batching, dynamic insert/update/delete) lands in issue #32:
+# profile.db protocol='database.write' + connector-action protocol='database.send'.
 # ============================================================================
 
 _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
@@ -1825,18 +1825,16 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_READ = {
             "SQL template — author the query based on task requirements."
         ),
     },
-    "out_of_scope": {
-        "write_profile": (
-            "Database write profiles (Standard/Dynamic Insert/Update/Delete, "
-            "Stored Procedure Write) are tracked by issue #32."
-        ),
-    },
     "see_also": {
         "stored_procedure_read": (
             "For procedure-based Read profiles, use "
             "protocol='database.stored_procedure_read' instead — that "
             "template emits statementType='spread', accepts a procedure_name "
             "config key, and supports parameters[].mode='in'/'out'/'in_out'/'return'."
+        ),
+        "write_profile": (
+            "For Database Write profiles (Standard/Dynamic Insert/Update/"
+            "Delete, Stored Procedure Write), use protocol='database.write'."
         ),
     },
 }
@@ -2028,16 +2026,183 @@ _COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ = {
             "are not supported in v1. The output_fields list must have at "
             "least one entry."
         ),
-        "write_profile": (
-            "Database write profiles (Standard/Dynamic Insert/Update/Delete, "
-            "Stored Procedure Write) are tracked by issue #32."
-        ),
     },
     "see_also": {
         "select_statement_read": (
             "For Select-statement Read profiles, use "
             "protocol='database.read' instead — that template emits "
             "statementType='select' with caller-authored SQL."
+        ),
+        "write_profile": (
+            "For Database Write profiles (Standard/Dynamic Insert/Update/"
+            "Delete, Stored Procedure Write), use protocol='database.write' "
+            "(statement_type selects the variant)."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_PROFILE_DB_DATABASE_WRITE = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "profile.db",
+    "protocol": "database.write",
+    "tool": "manage_component (action='create')",
+    "note": (
+        "Database (Legacy) Write profile (issue #32). Describes the target "
+        "table/column shape (and WHERE keys, for dynamic update/delete) that a "
+        "database Send operation (connector-action database.send) writes "
+        "through via WriteProfile. statement_type selects the variant; all SQL, "
+        "table names, stored-procedure names, fields, and conditions are "
+        "task-authored — the builder never generates SQL or canned templates."
+    ),
+    "template": {
+        "component_type": "profile.db",
+        "profile_type": "database.write",
+        "component_name": "<<write profile name>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "statement_type": "<<standardinsertupdatedelete|dynamicinsert|dynamicupdate|dynamicdelete|storedprocedurewrite>>",
+        "table_name": "<<target table (dynamic* only)>>",
+        "stored_procedure": "<<procedure name (storedprocedurewrite only)>>",
+        "sql": "<<task-authored SQL (standard / storedprocedurewrite only)>>",
+        "fields": [
+            {
+                "name": "<<column_name>>",
+                "data_type": "character",
+                "mandatory": False,
+                "enforce_unique": False,
+            },
+        ],
+        "conditions": [
+            {
+                "name": "<<where_key_column>>",
+                "data_type": "character",
+            },
+        ],
+    },
+    "required": [
+        "component_type",
+        "profile_type",
+        "component_name",
+        "statement_type",
+    ],
+    "defaults": {
+        "profile_type": "database.write",
+        "folder_name": "Home",
+    },
+    "statement_types": {
+        "standardinsertupdatedelete": (
+            "Caller supplies the full INSERT/UPDATE/DELETE SQL (with '?' "
+            "placeholders) plus fields[] (the '?'-bound columns in order). No "
+            "table_name, no conditions."
+        ),
+        "dynamicinsert": (
+            "Boomi builds the INSERT from table_name + fields[]; omit sql. No "
+            "conditions."
+        ),
+        "dynamicupdate": (
+            "Boomi builds the UPDATE from table_name + fields[] (SET columns) + "
+            "conditions[] (WHERE keys); omit sql."
+        ),
+        "dynamicdelete": (
+            "Boomi builds the DELETE from table_name + conditions[] (WHERE "
+            "keys); omit sql and fields."
+        ),
+        "storedprocedurewrite": (
+            "Caller supplies stored_procedure + the '{ call proc(?, ...) }' sql "
+            "plus fields[]. Emits XML statementType='spwrite'."
+        ),
+    },
+    "field_shape": {
+        "name": {"type": "string", "required": True},
+        "data_type": {
+            "type": "string",
+            "default": "character",
+            "supported": ["character", "number", "datetime"],
+            "note": (
+                "character→ProfileCharacterFormat (dataType attribute omitted), "
+                "number→ProfileNumberFormat, datetime→ProfileDateFormat."
+            ),
+        },
+        "mandatory": {"type": "boolean", "default": False},
+        "enforce_unique": {"type": "boolean", "default": False},
+    },
+    "condition_shape": {
+        "name": {"type": "string", "required": True},
+        "data_type": {
+            "type": "string",
+            "default": "character",
+            "supported": ["character", "number", "datetime"],
+        },
+    },
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    ],
+    "error_codes": {
+        "UNSUPPORTED_DB_STATEMENT_TYPE": "statement_type missing or not one of the five supported values",
+        "MISSING_DB_SQL": "sql absent for standardinsertupdatedelete / storedprocedurewrite",
+        "MISSING_DB_TABLE_NAME": "table_name absent for a dynamic* statement type",
+        "MISSING_DB_STORED_PROCEDURE": "stored_procedure absent for storedprocedurewrite",
+        "MISSING_DB_FIELDS": "fields missing/empty where the statement type requires them",
+        "MISSING_DB_CONDITIONS": "conditions missing/empty for dynamicupdate / dynamicdelete",
+        "UNSUPPORTED_DB_PROFILE_FIELD_TYPE": "a field/condition data_type is not character/number/datetime",
+        "UNSUPPORTED_DB_PROFILE_MODE": "profile_type is not database.write",
+        "DATABASE_OPERATION_VALIDATION_FAILED": "shape / type / cross-field issue (e.g. sql supplied for a dynamic type)",
+        "PLAINTEXT_SECRET_REJECTED": "a forbidden secret-shaped key appeared in config",
+    },
+    "gotchas": [
+        (
+            "SQL/table/procedure/field/condition names are stored verbatim — "
+            "the builder validates none of them and generates no SQL. "
+            "Task-authored values only."
+        ),
+        (
+            "dynamicdelete carries conditions only (no fields); standard types "
+            "carry fields only (no conditions)."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Pick the statement_type for the write.",
+        "2. For standard/storedprocedurewrite: author the SQL and list fields[] in '?' order.",
+        "3. For dynamic*: set table_name, list fields[] (SET/INSERT columns) and, for update/delete, conditions[] (WHERE keys).",
+        "4. Plan the write profile alongside the matching connector-action "
+        "(database.send) — depends_on the write profile key from the operation.",
+    ],
+    "example": {
+        "key": "db_write_profile",
+        "type": "profile.db",
+        "action": "create",
+        "name": "<<write profile name>>",
+        "config": {
+            "component_type": "profile.db",
+            "profile_type": "database.write",
+            "component_name": "<<write profile name>>",
+            "statement_type": "dynamicinsert",
+            "table_name": "<<target table>>",
+            "fields": [
+                {"name": "<<column_name>>", "data_type": "character"},
+            ],
+        },
+        "_example_note": (
+            "Placeholder values only. Do not copy this example as a starting "
+            "SQL/table template — author values based on task requirements."
+        ),
+    },
+    "see_also": {
+        "send_operation": (
+            "Wrap this write profile in a database Send operation via "
+            "get_schema_template(component_type='connector-action', "
+            "protocol='database.send')."
+        ),
+        "read_profile": (
+            "For read/query profiles, use protocol='database.read' or "
+            "protocol='database.stored_procedure_read'."
         ),
     },
 }
@@ -2049,20 +2214,23 @@ _COMPONENT_CREATE_PROFILE_DB_OVERVIEW = {
     "component_type": "profile.db",
     "tool": "manage_component (action='create')",
     "note": (
-        "Database (Legacy) Read profile builders. Two statement-type variants "
-        "are supported (issue #23): database.read (Select statement) and "
-        "database.stored_procedure_read (Stored Procedure). Database write "
-        "profiles are tracked by issue #32."
+        "Database (Legacy) profile builders. Read variants (issue #23): "
+        "database.read (Select statement) and database.stored_procedure_read "
+        "(Stored Procedure). Write variant (issue #32): database.write "
+        "(Standard/Dynamic Insert/Update/Delete, Stored Procedure Write — "
+        "statement_type selects the shape)."
     ),
     "available_protocols": [
         "database.read",
         "database.stored_procedure_read",
+        "database.write",
     ],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
         "component_type='profile.db', protocol='database.read') for a "
-        "Select-statement Read profile, or protocol='database.stored_procedure_read' "
-        "for a Stored Procedure Read profile."
+        "Select-statement Read profile, protocol='database.stored_procedure_read' "
+        "for a Stored Procedure Read profile, or protocol='database.write' for a "
+        "write profile."
     ),
     "escape_hatch": (
         "For profile shapes without a builder, use query_components action='get' "
@@ -2116,11 +2284,10 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
         "folder_name": "Home",
     },
     "supported_operation_modes": ["get"],
-    "unsupported_operation_modes": ["send"],
-    "unsupported_operation_modes_note": (
-        "Database Send/write operations require DatabaseSendAction + "
-        "WriteProfile and are tracked by issue #32 (M5.x). They will fail "
-        "with UNSUPPORTED_DB_OPERATION_MODE in plan preflight."
+    "other_operation_modes_note": (
+        "This template is for Get (read) operations. Database Send/write "
+        "operations use operation_mode='send' — request "
+        "protocol='database.send' for that template."
     ),
     "link_element_status": "unsupported_pending_shape_verification",
     "link_element_note": (
@@ -2200,9 +2367,144 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET = {
             "with the created profile's component_id during apply."
         ),
     },
-    "out_of_scope": {
+    "see_also": {
         "database_send": (
-            "Database Send/write (DatabaseSendAction) is tracked by issue #32."
+            "For Database Send/write (DatabaseSendAction + WriteProfile), use "
+            "protocol='database.send'."
+        ),
+    },
+}
+
+
+_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_SEND = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-action",
+    "protocol": "database.send",
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "Database Send (write) operation (issue #32). Wraps a previously-"
+        "created database Write profile (profile.db, profile_type="
+        "'database.write') in a DatabaseSendAction envelope. The connection "
+        "itself is bound at the process connector step, not in the operation "
+        "XML — connection_ref_key is a plan-only dependency."
+    ),
+    "template": {
+        "component_type": "connector-action",
+        "connector_type": "database",
+        "operation_mode": "send",
+        "component_name": "<<operation name>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "connection_ref_key": "<<db connection key>>",
+        "write_profile_id": "$ref:<<db write profile key>>",
+        "commit_option": "commitprofile",
+        "batch_count": 0,
+        "enable_batching": True,
+    },
+    "required": [
+        "component_type",
+        "connector_type",
+        "operation_mode",
+        "component_name",
+        "connection_ref_key",
+        "write_profile_id",
+    ],
+    "defaults": {
+        "component_type": "connector-action",
+        "connector_type": "database",
+        "operation_mode": "send",
+        "commit_option": "commitprofile",
+        "batch_count": 0,
+        "enable_batching": True,
+        "folder_name": "Home",
+    },
+    "supported_operation_modes": ["send"],
+    "commit_option_values": {
+        "commitprofile": "Commit per the write profile (Boomi default).",
+        "commitrows": "Commit by row count (paired with batch_count).",
+    },
+    "depends_on_requirements": [
+        "Include connection_ref_key in depends_on (so the connector-settings runs first).",
+        "When write_profile_id uses '$ref:KEY', include KEY in depends_on too.",
+    ],
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+    ],
+    "error_codes": {
+        "UNSUPPORTED_DB_OPERATION_MODE": "operation_mode is not 'send'",
+        "MISSING_DB_WRITE_PROFILE_REF": "write_profile_id absent or empty",
+        "INVALID_DB_COMMIT_OPTION": "commit_option is not commitprofile/commitrows",
+        "INVALID_DB_BATCH_CONFIG": "batch_count is not a non-negative integer, or enable_batching is not a bool",
+        "MISSING_DB_DEPENDENCY": "connection_ref_key / $ref target missing from depends_on",
+        "DB_REF_TYPE_MISMATCH": "connection_ref_key or write_profile_id $ref points to a component of the wrong type",
+        "DATABASE_OPERATION_VALIDATION_FAILED": "shape / type / cross-field issue",
+    },
+    "gotchas": [
+        (
+            "Boomi binds the connection at the process connector step, not in "
+            "the operation XML. The builder will NOT emit a connection ID — "
+            "connection_ref_key is plan-only metadata for dependency ordering."
+        ),
+        (
+            "write_profile_id must reference a database WRITE profile "
+            "(profile_type='database.write'); a read profile is rejected with "
+            "DB_REF_TYPE_MISMATCH."
+        ),
+        (
+            "commit_option='commitrows' with batch_count=0 is allowed (matches "
+            "live exports)."
+        ),
+    ],
+    "recommended_workflow": [
+        "1. Create the database connector-settings (manage_connector, connector_type=database).",
+        "2. Create the write profile (manage_component, component_type=profile.db, profile_type=database.write).",
+        "3. Plan this Send operation with depends_on=[<connection_key>, <write_profile_key>] and write_profile_id='$ref:<write_profile_key>'.",
+        "4. Apply — $ref is resolved to the write profile's component_id from the id_registry.",
+    ],
+    "update_note": (
+        "Structured updates via build_integration action='update' use "
+        "read-merge-write semantics (issue #45): inside DatabaseSendAction the "
+        "merge updates only the owned batchCount/commitOption/enableBatching "
+        "attrs and the WriteProfile child, preserving unknown/future attrs or "
+        "children on the action element. Operation-level Archiving, Tracking, "
+        "Caching, and any unknown future siblings also survive."
+    ),
+    "example": {
+        "key": "db_write_operation",
+        "type": "connector-action",
+        "action": "create",
+        "name": "<<operation name>>",
+        "depends_on": ["db_connection", "db_write_profile"],
+        "config": {
+            "component_type": "connector-action",
+            "connector_type": "database",
+            "operation_mode": "send",
+            "component_name": "<<operation name>>",
+            "connection_ref_key": "db_connection",
+            "write_profile_id": "$ref:db_write_profile",
+            "commit_option": "commitprofile",
+            "batch_count": 0,
+            "enable_batching": True,
+        },
+        "_example_note": (
+            "Placeholder values only. The write_profile_id $ref is substituted "
+            "with the created profile's component_id during apply."
+        ),
+    },
+    "see_also": {
+        "write_profile": (
+            "Create the referenced write profile via "
+            "get_schema_template(component_type='profile.db', "
+            "protocol='database.write')."
+        ),
+        "get_operation": (
+            "For Database Get (read) operations, use protocol='database.get'."
         ),
     },
 }
@@ -4090,10 +4392,10 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW = {
     "tool": "manage_connector (action='create')",
     "note": (
         "Connector-action (operation) builders. Available: database.get "
-        "(issue #23) and rest.operation (issue #24). Database send/write "
-        "is tracked by issue #32."
+        "(issue #23), database.send (issue #32), and rest.operation "
+        "(issue #24)."
     ),
-    "available_protocols": ["database.get", "rest.operation"],
+    "available_protocols": ["database.get", "database.send", "rest.operation"],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
         "component_type='connector-action', protocol='<protocol>') for the chosen "
@@ -6563,6 +6865,8 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
                     "_success": True,
                     **_COMPONENT_CREATE_PROFILE_DB_DATABASE_STORED_PROCEDURE_READ,
                 }
+            if protocol == "database.write":
+                return {"_success": True, **_COMPONENT_CREATE_PROFILE_DB_DATABASE_WRITE}
             if protocol:
                 return {
                     "_success": False,
@@ -6615,21 +6919,10 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         if component_type == "connector-action":
             if protocol == "database.get":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}
+            if protocol == "database.send":
+                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_SEND}
             if protocol == "rest.operation":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION}
-            if protocol == "database.send":
-                # Explicit out-of-scope marker — point callers at issue #32
-                # so they don't think this is a typo we'd accept later.
-                return {
-                    "_success": False,
-                    "error_code": "UNSUPPORTED_DB_OPERATION_MODE",
-                    "error": "Database Send/write operations are not implemented in issue #23",
-                    "hint": (
-                        "Database Send (DatabaseSendAction + WriteProfile + "
-                        "commit semantics) is tracked by issue #32 (M5.x). "
-                        "Use protocol='database.get' for read extractions."
-                    ),
-                }
             if protocol:
                 return {
                     "_success": False,

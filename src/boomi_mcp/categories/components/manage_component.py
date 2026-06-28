@@ -108,8 +108,8 @@ def create_component(
                         f"and supply the matching structured config "
                         "(query+output_fields for database.read, "
                         "procedure_name+output_fields for "
-                        "database.stored_procedure_read). Write profiles "
-                        "are tracked by issue #32."
+                        "database.stored_procedure_read, "
+                        "statement_type+fields/conditions for database.write)."
                     ),
                     "profile": profile,
                 }

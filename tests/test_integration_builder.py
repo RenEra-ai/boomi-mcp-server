@@ -217,6 +217,65 @@ def _db_get_op_comp(key="db_query_operation", name="Example DB Query",
     )
 
 
+def _db_write_profile_config(**overrides):
+    """A minimal-valid database write-profile config dict (Issue #32)."""
+    cfg = {
+        "component_type": "profile.db",
+        "profile_type": "database.write",
+        "component_name": "Example Write Profile",
+        "folder_name": "Process Library",
+        "statement_type": "dynamicinsert",
+        "table_name": "WRITE_TARGET",
+        "fields": [{"name": "COL_A"}],
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _db_write_profile_comp(key="db_write_profile", name="Example Write Profile",
+                           action="create", depends_on=None, **config_overrides):
+    return IntegrationComponentSpec(
+        key=key,
+        type="profile.db",
+        action=action,
+        name=name,
+        config=_db_write_profile_config(**config_overrides),
+        depends_on=depends_on or [],
+    )
+
+
+def _db_send_op_config(**overrides):
+    """A minimal-valid database Send-operation config dict (Issue #32)."""
+    cfg = {
+        "component_type": "connector-action",
+        "connector_type": "database",
+        "operation_mode": "send",
+        "component_name": "Example DB Write",
+        "folder_name": "Process Library",
+        "connection_ref_key": "db_connection",
+        "write_profile_id": "$ref:db_write_profile",
+        "commit_option": "commitprofile",
+        "batch_count": 0,
+        "enable_batching": True,
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def _db_send_op_comp(key="db_write_operation", name="Example DB Write",
+                     action="create",
+                     depends_on=("db_connection", "db_write_profile"),
+                     **config_overrides):
+    return IntegrationComponentSpec(
+        key=key,
+        type="connector-action",
+        action=action,
+        name=name,
+        config=_db_send_op_config(**config_overrides),
+        depends_on=list(depends_on),
+    )
+
+
 def _build_config(components, conflict_policy="reuse"):
     """Minimal config dict accepted by _build_plan."""
     return {
@@ -1192,7 +1251,9 @@ class TestBuildPlanDatabaseReadProfilePreflight:
     def test_unsupported_profile_type_surfaces_unsupported_db_profile_mode(self, mock_pag):
         mock_pag.return_value = []
         comp = _db_read_profile_comp()
-        comp.config["profile_type"] = "database.write"
+        # database.write is now a supported profile_type (issue #32); use a
+        # genuinely-unknown type to exercise the unsupported-profile_type path.
+        comp.config["profile_type"] = "database.bogus"
         plan = _build_plan(MagicMock(), _build_config([comp]))
         step = plan["steps"][0]
         assert step["planned_action"] == "error_database_validation"
@@ -1253,7 +1314,10 @@ class TestBuildPlanDatabaseGetOperationPreflight:
         assert routes["db_query_operation"] == "connector_builder_or_xml"
 
     @patch(_PATCH_TARGET)
-    def test_operation_mode_send_is_rejected_with_issue32_hint(self, mock_pag):
+    def test_operation_mode_send_routes_to_send_builder(self, mock_pag):
+        # Issue #32: operation_mode='send' now routes to the Send builder.
+        # A get-shaped config (read_profile_id, no write_profile_id) therefore
+        # surfaces MISSING_DB_WRITE_PROFILE_REF, not an out-of-scope error.
         mock_pag.return_value = []
         comp = _db_get_op_comp(operation_mode="send")
         plan = _build_plan(MagicMock(), _build_config([
@@ -1263,8 +1327,7 @@ class TestBuildPlanDatabaseGetOperationPreflight:
         ]))
         op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
         assert op_step["planned_action"] == "error_database_validation"
-        assert op_step["validation_error"]["error_code"] == "UNSUPPORTED_DB_OPERATION_MODE"
-        assert "#32" in (op_step["validation_error"]["hint"] or "")
+        assert op_step["validation_error"]["error_code"] == "MISSING_DB_WRITE_PROFILE_REF"
 
     @patch(_PATCH_TARGET)
     def test_missing_read_profile_id_surfaces_missing_db_read_profile_ref(self, mock_pag):
@@ -1353,6 +1416,160 @@ class TestBuildPlanDatabaseGetOperationPreflight:
         assert op_step["validation_error"]["error_code"] == "UNSUPPORTED_DB_GET_FIELD"
 
 
+class TestBuildPlanDatabaseSendOperationPreflight:
+    """Issue #32 — preflight contract for connector-action + database.send."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_send_op_with_full_deps_plans_without_error(self, mock_pag):
+        mock_pag.return_value = []
+        config = _build_config([
+            _db_comp(),
+            _db_write_profile_comp(),
+            _db_send_op_comp(),
+        ])
+        plan = _build_plan(MagicMock(), config)
+        # Execution order must place connection -> write profile -> operation.
+        assert plan["execution_order"] == [
+            "db_connection",
+            "db_write_profile",
+            "db_write_operation",
+        ]
+        for step in plan["steps"]:
+            assert step.get("validation_error") is None
+        routes = {s["key"]: s["route"] for s in plan["steps"]}
+        assert routes["db_connection"] == "connector_builder_or_xml"
+        assert routes["db_write_profile"] == "profile_builder_or_xml"
+        assert routes["db_write_operation"] == "connector_builder_or_xml"
+
+    @patch(_PATCH_TARGET)
+    def test_write_profile_plans_without_error(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([_db_write_profile_comp()]))
+        step = plan["steps"][0]
+        assert step.get("validation_error") is None
+        assert step["route"] == "profile_builder_or_xml"
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_statement_type_surfaces_structured_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_write_profile_comp(statement_type="upsert")
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = plan["steps"][0]
+        assert step["planned_action"] == "error_database_validation"
+        assert step["validation_error"]["error_code"] == "UNSUPPORTED_DB_STATEMENT_TYPE"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_write_profile_id_surfaces_missing_ref(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_send_op_comp()
+        comp.config.pop("write_profile_id")
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_write_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_write_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "MISSING_DB_WRITE_PROFILE_REF"
+
+    @patch(_PATCH_TARGET)
+    def test_invalid_commit_option_surfaces_structured_error(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_send_op_comp(commit_option="commitnow")
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_write_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_write_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "INVALID_DB_COMMIT_OPTION"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_connection_ref_key_surfaces_missing_db_dependency(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_send_op_comp()
+        comp.config.pop("connection_ref_key")
+        comp.depends_on = ["db_write_profile"]
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_write_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_write_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "MISSING_DB_DEPENDENCY"
+        assert op_step["validation_error"]["field"] == "connection_ref_key"
+
+    @patch(_PATCH_TARGET)
+    def test_write_profile_ref_not_in_depends_on_surfaces_missing_db_dependency(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_send_op_comp()
+        comp.depends_on = ["db_connection"]  # forgot the write profile
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            _db_write_profile_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_write_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "MISSING_DB_DEPENDENCY"
+
+    @patch(_PATCH_TARGET)
+    def test_write_profile_ref_pointing_at_read_profile_is_type_mismatch(self, mock_pag):
+        # A $ref to a READ profile (not a write profile) must be rejected.
+        mock_pag.return_value = []
+        read_profile = _db_read_profile_comp(key="db_write_profile",
+                                             name="Mislabeled Profile")
+        comp = _db_send_op_comp()
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            read_profile,
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_write_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "DB_REF_TYPE_MISMATCH"
+        assert op_step["validation_error"]["field"] == "write_profile_id"
+
+    @patch(_PATCH_TARGET)
+    def test_uuid_write_profile_id_does_not_require_depends_on(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _db_send_op_comp(write_profile_id="abc-123-def")
+        comp.depends_on = ["db_connection"]
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_write_operation")
+        assert op_step.get("validation_error") is None
+
+    @patch("src.boomi_mcp.categories.integration_builder._execute_component")
+    @patch(_PATCH_TARGET)
+    def test_apply_resolves_write_profile_ref_to_created_id(
+        self, mock_pag, mock_exec
+    ):
+        # db_connection -> db_write_profile -> db_write_operation. When the
+        # operation step executes, $ref:db_write_profile in its config must be
+        # substituted with the write profile's component_id.
+        mock_pag.return_value = []
+        mock_exec.side_effect = [
+            {"_success": True, "component_id": "conn-001", "type": "connector-settings"},
+            {"_success": True, "component_id": "wprofile-002", "type": "profile.db"},
+            {"_success": True, "component_id": "op-003", "type": "connector-action"},
+        ]
+        config = _build_config([
+            _db_comp(),
+            _db_write_profile_comp(),
+            _db_send_op_comp(),
+        ])
+        config["dry_run"] = False
+        result = _apply_plan(MagicMock(), "dev", config)
+        assert result["_success"] is True
+        third_call = mock_exec.call_args_list[2]
+        resolved_config = third_call.kwargs["config"]
+        assert resolved_config["write_profile_id"] == "wprofile-002"
+
+
 class TestApplyPlanDatabaseProfileAndGetFailFast:
     """Issue #23 — apply must fail-fast on read-profile or Get-op errors."""
 
@@ -1374,9 +1591,11 @@ class TestApplyPlanDatabaseProfileAndGetFailFast:
 
     @patch("src.boomi_mcp.categories.integration_builder._execute_component")
     @patch(_PATCH_TARGET)
-    def test_apply_fails_before_execution_on_get_op_send_mode(
+    def test_apply_fails_before_execution_on_send_mode_missing_write_profile(
         self, mock_pag, mock_exec
     ):
+        # Issue #32: a send-mode op missing write_profile_id still fails fast
+        # at plan time (now MISSING_DB_WRITE_PROFILE_REF), before any execution.
         mock_pag.return_value = []
         comp = _db_get_op_comp(operation_mode="send")
         config = _build_config([
@@ -1388,7 +1607,7 @@ class TestApplyPlanDatabaseProfileAndGetFailFast:
         result = _apply_plan(MagicMock(), "dev", config)
         assert result["_success"] is False
         codes = {s["validation_error"]["error_code"] for s in result["unresolvable_steps"]}
-        assert "UNSUPPORTED_DB_OPERATION_MODE" in codes
+        assert "MISSING_DB_WRITE_PROFILE_REF" in codes
         mock_exec.assert_not_called()
 
     @patch("src.boomi_mcp.categories.integration_builder._execute_component")
@@ -5689,7 +5908,7 @@ class TestPlanTimeValidationOfUpdates:
             component_id="explicit-profile-id",
             config={
                 "component_type": "profile.db",
-                "profile_type": "database.write",  # unsupported in M2
+                "profile_type": "database.bogus",  # genuinely unsupported
                 "component_name": "Example Read Profile",
                 "query": "SELECT 1 AS one",
                 "output_fields": [{"name": "one"}],

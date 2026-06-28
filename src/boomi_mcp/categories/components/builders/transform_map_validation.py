@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from .connector_builder import BuilderValidationError
 from .json_profile_builder import JSONGeneratedProfileBuilder
 from .map_builder import get_map_builder
-from .profile_builder import DatabaseReadProfileBuilder
+from .profile_builder import DatabaseReadProfileBuilder, get_profile_builder
 from .xml_profile_builder import XMLGeneratedProfileBuilder
 
 
@@ -42,7 +42,19 @@ def resolve_map_profile_index(
     elif target_comp.type == "profile.xml":
         builder_cls = XMLGeneratedProfileBuilder
     elif target_comp.type == "profile.db":
-        builder_cls = DatabaseReadProfileBuilder
+        # Resolve the profile.db builder by profile_type so write profiles
+        # (database.write) index as map targets, not only read profiles. When
+        # the profile_type is unknown/missing, fall back to the read-profile
+        # field index — the pre-#32 behavior (the read base's build_field_index
+        # is shape-agnostic over output_fields).
+        profile_type = raw_config.get("profile_type")
+        profile_type = profile_type.lower() if isinstance(profile_type, str) else ""
+        builder_instance = get_profile_builder("profile.db", profile_type)
+        builder_cls = (
+            type(builder_instance)
+            if builder_instance is not None
+            else DatabaseReadProfileBuilder
+        )
     if builder_cls is None:
         return None
     # Mirror _execute_component's comp.name → component_name fallback. A

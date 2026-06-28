@@ -137,14 +137,14 @@ def test_template_documents_forbidden_secret_fields():
         assert field in forbidden
 
 
-def test_template_documents_out_of_scope_variants():
+def test_template_points_at_write_profile_via_see_also():
     result = _call(component_type="profile.db", protocol="database.read")
-    out_of_scope = result["out_of_scope"]
-    # Stored Procedure Read moved into see_also (now in scope under a
-    # separate protocol). write_profile is still out of scope.
-    assert "stored_procedure_read" not in out_of_scope
-    assert "write_profile" in out_of_scope
-    assert "#32" in out_of_scope["write_profile"]
+    # Both Stored Procedure Read and Write profiles are now in scope under
+    # their own protocols, so the read template points at them via see_also
+    # rather than an out_of_scope marker.
+    see_also = result.get("see_also", {})
+    assert "write_profile" in see_also
+    assert "database.write" in see_also["write_profile"]
 
 
 def test_template_points_at_stored_procedure_variant_via_see_also():

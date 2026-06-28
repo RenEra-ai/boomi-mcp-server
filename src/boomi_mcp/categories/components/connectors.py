@@ -37,7 +37,6 @@ from ._shared import (
 )
 from .builders.connector_builder import (
     BuilderValidationError,
-    DatabaseGetOperationBuilder,
     RestClientOperationBuilder,
     _resolve_rest_connector_type,
     get_connector_builder, CONNECTOR_BUILDERS,
@@ -402,9 +401,21 @@ def create_connector(
                 # action ends up with a generic "no builder" message instead
                 # of the documented UNSUPPORTED_REST_OPERATION_MODE hint.
                 if connector_type.lower() == 'database':
-                    db_err = DatabaseGetOperationBuilder.validate_config(config)
-                    if db_err is not None:
-                        raise db_err
+                    valid_db_modes = sorted({
+                        om for (ct, om) in CONNECTOR_ACTION_BUILDERS
+                        if ct == 'database'
+                    })
+                    raise BuilderValidationError(
+                        f"operation_mode={operation_mode!r} is not supported "
+                        f"for database connector-actions. Supported: "
+                        f"{', '.join(valid_db_modes)}.",
+                        error_code="UNSUPPORTED_DB_OPERATION_MODE",
+                        field="operation_mode",
+                        hint=(
+                            "Use operation_mode='get' for read extractions or "
+                            "operation_mode='send' for write operations."
+                        ),
+                    )
                 if _resolve_rest_connector_type(connector_type) is not None:
                     rest_err = RestClientOperationBuilder.validate_config(config)
                     if rest_err is not None:

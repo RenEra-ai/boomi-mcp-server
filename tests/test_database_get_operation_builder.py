@@ -59,7 +59,7 @@ def test_database_get_registered_in_action_builders():
 
 
 def test_get_connector_action_builder_unknown_returns_none():
-    assert get_connector_action_builder("database", "send") is None
+    assert get_connector_action_builder("database", "bogus") is None
     assert get_connector_action_builder("http", "get") is None
     assert get_connector_action_builder("", "") is None
 
@@ -189,12 +189,14 @@ def test_component_name_and_folder_name_xml_escape():
 # Structured validation errors
 # ----------------------------------------------------------------------------
 
-def test_operation_mode_send_is_rejected_with_issue32_hint():
+def test_operation_mode_send_is_rejected_by_get_builder():
+    # The Get builder is get-only; 'send' belongs to DatabaseSendOperationBuilder
+    # (issue #32). The Get builder still rejects it with a pointer to send.
     with pytest.raises(BuilderValidationError) as excinfo:
         DatabaseGetOperationBuilder().build(**_minimal_config(operation_mode="send"))
     assert excinfo.value.error_code == "UNSUPPORTED_DB_OPERATION_MODE"
     assert excinfo.value.field == "operation_mode"
-    assert "#32" in (excinfo.value.hint or "")
+    assert "send" in (excinfo.value.hint or "")
 
 
 @pytest.mark.parametrize("missing_value", [None, "", "   "])
@@ -276,12 +278,15 @@ def test_validate_config_returns_first_error_without_raising():
 
 
 # ----------------------------------------------------------------------------
-# Standalone manage_connector dispatcher must surface structured error for
-# database send (regression for Bug #121: dispatcher was returning a generic
-# "no builder" envelope instead of UNSUPPORTED_DB_OPERATION_MODE + #32 hint).
+# Standalone manage_connector dispatcher must surface a structured error for an
+# UNSUPPORTED database operation_mode (regression for Bug #121: dispatcher was
+# returning a generic "no builder" envelope instead of a structured
+# UNSUPPORTED_DB_OPERATION_MODE). NB: 'send' is now a supported mode (issue
+# #32), so this exercises a genuinely-unsupported mode and asserts the error
+# lists the real supported modes (get, send).
 # ----------------------------------------------------------------------------
 
-def test_create_connector_dispatcher_surfaces_unsupported_db_operation_mode_for_send():
+def test_create_connector_dispatcher_surfaces_unsupported_db_operation_mode():
     from unittest.mock import MagicMock
     from boomi_mcp.categories.components.connectors import create_connector
 
@@ -290,12 +295,13 @@ def test_create_connector_dispatcher_surfaces_unsupported_db_operation_mode_for_
     result = create_connector(
         boomi_client,
         "dev",
-        _minimal_config(operation_mode="send"),
+        _minimal_config(operation_mode="upsert"),
     )
     assert result["_success"] is False
     assert result["error_code"] == "UNSUPPORTED_DB_OPERATION_MODE"
-    assert "#32" in (result["hint"] or "")
     assert result["field"] == "operation_mode"
+    # The dispatcher now enumerates the real supported database modes.
+    assert "get" in result["error"] and "send" in result["error"]
 
 
 def test_create_connector_dispatcher_surfaces_link_element_rejection_through_validator():

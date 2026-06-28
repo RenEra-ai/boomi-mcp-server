@@ -9,6 +9,7 @@ from .connector_builder import (
     BuilderValidationError,
     DatabaseConnectorBuilder,
     DatabaseGetOperationBuilder,
+    DatabaseSendOperationBuilder,
     REST_CLIENT_SUBTYPE,
     RestClientConnectionBuilder,
     RestClientOperationBuilder,
@@ -20,6 +21,7 @@ from .connector_builder import (
 from .profile_builder import (
     DatabaseReadProfileBuilder,
     DatabaseStoredProcedureReadProfileBuilder,
+    DatabaseWriteProfileBuilder,
     PROFILE_BUILDERS,
     get_profile_builder,
 )
@@ -35,8 +37,10 @@ __all__ = [
     "BuilderValidationError",
     "DatabaseConnectorBuilder",
     "DatabaseGetOperationBuilder",
+    "DatabaseSendOperationBuilder",
     "DatabaseReadProfileBuilder",
     "DatabaseStoredProcedureReadProfileBuilder",
+    "DatabaseWriteProfileBuilder",
     "REST_CLIENT_SUBTYPE",
     "RestClientConnectionBuilder",
     "RestClientOperationBuilder",
