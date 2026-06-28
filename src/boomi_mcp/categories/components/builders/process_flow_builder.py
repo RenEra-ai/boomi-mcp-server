@@ -3828,7 +3828,7 @@ def _emit_linear_shapes(flow: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
 
 
 def _emit_branch(
-    shape_name: str, leg_first_names: List[str], shape_index: int
+    shape_name: str, leg_first_names: List[str], shape_index: int, *, userlabel: str = ""
 ) -> str:
     """Emit a Branch (N-way forward fan-out) shape (issue #112 M10.8).
 
@@ -3843,6 +3843,11 @@ def _emit_branch(
     inline here — like ``_emit_catcherrors`` — because the plain
     ``_emit_dragpoints`` helper emits no ``identifier``/``text`` (those are
     label-bearing edges).
+
+    ``userlabel`` defaults to ``""`` so the legacy single-shape branch fan-out
+    (``_emit_branch_shapes``) stays byte-for-byte identical; the #117 composed
+    sequencer threads a branch step's ``label`` through so it is not silently
+    dropped (every other composed step kind emits its label).
     """
     dragpoints = "".join(
         f'<dragpoint identifier="{i}" name="{shape_name}.dragpoint{i}" '
@@ -3852,7 +3857,7 @@ def _emit_branch(
     )
     return (
         f'<shape image="branch_icon" name="{shape_name}" shapetype="branch" '
-        f'userlabel="" x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        f'userlabel="{_escape_xml(userlabel)}" x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
         f'<configuration><branch numBranches="{len(leg_first_names)}"/></configuration>'
         f'<dragpoints>{dragpoints}</dragpoints>'
         '</shape>'
@@ -4138,17 +4143,26 @@ def _validate_flow_sequence_config(config: Dict[str, Any]) -> Optional[BuilderVa
                 "the exception terminal must be the LAST step of its sequence."
             ),
         )
-    # Ambiguous legacy siblings — rich composition is expressed ONLY via flow_sequence.
-    if _flow_control_enabled(config):
-        return _sequence_sibling_error("flow_control")
-    if _branch_enabled(config):
-        return _sequence_sibling_error("branch")
-    if _decision_enabled(config):
-        return _sequence_sibling_error("decision")
+    # Ambiguous legacy siblings — rich composition is expressed ONLY via
+    # flow_sequence. Reject ANY co-present legacy single-slot block by PRESENCE (not
+    # just when "enabled"): the composed emitter ignores branch/decision/flow_control
+    # /transform entirely, so a present block — enabled, disabled, OR a malformed
+    # scalar like ``branch=1`` (which the *_enabled predicates read as disabled) —
+    # would be silently dropped. Rejecting on presence keeps validate_config and
+    # build()'s _build_composed_process_flow parity-total and never silently drops a
+    # caller-specified block (Codex #117). A passthrough transform (or no transform)
+    # is the harmless default and stays allowed; any other transform value (a
+    # non-passthrough dict OR a malformed non-dict) is rejected.
+    for sibling in ("flow_control", "branch", "decision"):
+        if config.get(sibling) is not None:
+            return _sequence_sibling_error(sibling)
     transform = config.get("transform")
-    if isinstance(transform, dict):
-        mode = str(transform.get("mode") or "passthrough").strip().lower()
-        if mode != "passthrough":
+    if transform is not None:
+        is_passthrough = (
+            isinstance(transform, dict)
+            and str(transform.get("mode") or "passthrough").strip().lower() == "passthrough"
+        )
+        if not is_passthrough:
             return _sequence_sibling_error("transform")
     reliability = config.get("reliability")
     if isinstance(reliability, dict) and _reliability_requests_try_catch(reliability):
@@ -4804,7 +4818,14 @@ def _append_branch(
         cur = _append_path(
             leg_parts, leg.get("steps") or [], cur, fallthrough=fallthrough, config=config
         )
-    parts.append(_emit_branch(f"shape{branch_index}", leg_first_names, branch_index))
+    parts.append(
+        _emit_branch(
+            f"shape{branch_index}",
+            leg_first_names,
+            branch_index,
+            userlabel=str(branch_step.get("label") or ""),
+        )
+    )
     parts.extend(leg_parts)
     return cur
 

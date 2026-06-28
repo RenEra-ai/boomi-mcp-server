@@ -3879,3 +3879,74 @@ def test_flow_sequence_try_catch_reliability_still_rejected_as_sibling():
     v = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
     assert v is not None and v.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
     assert v.field == "reliability"
+
+
+# --- Codex architect review #117: stray/malformed legacy siblings + branch label ---
+
+@pytest.mark.parametrize("sibling_override", [
+    {"branch": 1},
+    {"decision": 1},
+    {"flow_control": 1},
+    {"transform": 1},
+    {"branch": {"enabled": False}},
+    {"decision": {"enabled": False}},
+    {"flow_control": {"enabled": False}},
+])
+def test_flow_sequence_rejects_present_legacy_sibling_by_presence(sibling_override):
+    # A co-present legacy single-slot block — even a malformed scalar (branch=1) or a
+    # disabled block — is rejected (it would otherwise be silently dropped by the
+    # composed emitter). validate_config and build() agree.
+    cfg = _seq_config([{"kind": "map_ref", "map_ref": "M"}], **sibling_override)
+    v = ProcessFlowBuilder.validate_config(cfg, depends_on=[])
+    assert v is not None and v.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    with pytest.raises(BuilderValidationError) as exc:
+        ProcessFlowBuilder.build(cfg, name="X")
+    assert exc.value.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_flow_sequence_passthrough_transform_sibling_allowed():
+    # The harmless default passthrough transform (and no transform) stays allowed.
+    assert ProcessFlowBuilder.validate_config(
+        _seq_config([{"kind": "map_ref", "map_ref": "M"}], transform={"mode": "passthrough"}), depends_on=[]
+    ) is None
+    assert ProcessFlowBuilder.validate_config(
+        _seq_config([{"kind": "map_ref", "map_ref": "M"}], transform=None), depends_on=[]
+    ) is None
+
+
+def test_flow_sequence_branch_step_label_is_emitted():
+    # A branch step's label is no longer silently dropped — it reaches the shape's
+    # userlabel (consistent with every other composed step kind).
+    cfg = _seq_config(
+        [
+            {
+                "kind": "branch",
+                "label": "Route by region",
+                "legs": [
+                    {"steps": [{"kind": "map_ref", "map_ref": "A"}], "target": _rest_target(label="A")},
+                    {"steps": [{"kind": "map_ref", "map_ref": "B"}], "target": _rest_target(label="B")},
+                ],
+            }
+        ]
+    )
+    _, _, shapes = _parse_process(ProcessFlowBuilder.build(cfg, name="X"))
+    branch = next(s for s in shapes if s.attrib["shapetype"] == "branch")
+    assert branch.attrib["userlabel"] == "Route by region"
+
+
+def test_flow_sequence_branch_step_without_label_stays_empty_userlabel():
+    # No label -> userlabel="" (byte-stable with the legacy branch fan-out).
+    cfg = _seq_config(
+        [
+            {
+                "kind": "branch",
+                "legs": [
+                    {"steps": [], "target": _rest_target(label="A")},
+                    {"steps": [], "target": _rest_target(label="B")},
+                ],
+            }
+        ]
+    )
+    _, _, shapes = _parse_process(ProcessFlowBuilder.build(cfg, name="X"))
+    branch = next(s for s in shapes if s.attrib["shapetype"] == "branch")
+    assert branch.attrib["userlabel"] == ""
