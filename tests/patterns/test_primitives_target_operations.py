@@ -1317,3 +1317,59 @@ class TestDbWriteComponents:
         order = plan["execution_order"]
         assert order.index("tgt_db_connection") < order.index("tgt_db_write_operation")
         assert order.index("tgt_db_write_profile") < order.index("tgt_db_write_operation")
+
+
+class TestFieldMapTargetBinding:
+    """Issue #74: field_map's optional target_binding (bind a pre-existing
+    in-spec profile, e.g. a db_write write profile, instead of generating one)."""
+
+    def _params(self, **target_binding_overrides):
+        tb = {
+            "target_profile_id": "$ref:tgt_db_write_profile",
+            "target_profile_type": "profile.db",
+            "target_field_index": {
+                "Fields/col_a": {"data_type": "character", "mappable": True, "required": True},
+            },
+        }
+        tb.update(target_binding_overrides)
+        return {
+            "key_prefix": "transform",
+            "source": {
+                "source_profile_id": "$ref:src_profile",
+                "source_profile_type": "profile.json",
+                "source_field_index": _source_index([{"name": "a"}]),
+            },
+            "target_binding": tb,
+            "direct": [{"source_field": "a", "target_path": "Fields/col_a"}],
+        }
+
+    def test_target_binding_emits_no_generated_profile(self):
+        # With target_binding the primitive emits only the transform.map (the
+        # target profile lives elsewhere in the spec) — no generated JSON profile.
+        comps = _emit(FieldMapPrimitive, self._params())
+        assert [c.type for c in comps] == ["transform.map"]
+        map_cfg = comps[0].config
+        assert map_cfg["target_profile_id"] == "$ref:tgt_db_write_profile"
+        assert map_cfg["target_profile_type"] == "profile.db"
+        # The map depends on the in-spec write profile it references.
+        assert "tgt_db_write_profile" in comps[0].depends_on
+
+    def test_target_binding_rejects_literal_uuid(self):
+        # A literal existing-profile UUID is not indexable for the map build
+        # (MAP_PROFILE_INDEX_UNAVAILABLE) — rejected fast at the param boundary.
+        with pytest.raises(ValidationError):
+            FieldMapPrimitive.validate_parameters(
+                self._params(target_profile_id="00000000-0000-0000-0000-realprofile")
+            )
+
+    def test_target_binding_and_payload_profile_mutually_exclusive(self):
+        params = self._params()
+        params["target_payload_profile"] = {"format": "json", "root": {"name": "R", "kind": "object"}}
+        with pytest.raises(ValidationError):
+            FieldMapPrimitive.validate_parameters(params)
+
+    def test_neither_target_provided_rejected(self):
+        params = self._params()
+        del params["target_binding"]
+        with pytest.raises(ValidationError):
+            FieldMapPrimitive.validate_parameters(params)

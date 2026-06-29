@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...categories.components.builders.json_profile_builder import (
     JSONGeneratedProfileBuilder,
@@ -145,21 +145,32 @@ class MapScriptOp(BaseModel):
 
 
 class TargetProfileBinding(BaseModel):
-    """Bind the map target to a PRE-EXISTING profile instead of generating one.
+    """Bind the map target to a PRE-EXISTING IN-SPEC profile instead of generating one.
 
-    Used when the target profile is materialized elsewhere — e.g. the #32
-    database Write profile emitted by the ``db_write`` primitive for the
+    Used when the target profile is materialized elsewhere in the SAME spec — e.g.
+    the #32 database Write profile emitted by the ``db_write`` primitive for the
     ``api_to_database_sync`` preset (#74). The map then writes into that profile
     via ``target_profile_id`` + the caller-supplied ``target_field_index`` (the
-    write profile's ``Fields/<col>`` / ``Conditions/<col>`` index), exactly the
-    way the source binds ``source_profile_id`` + ``source_field_index`` — no JSON
-    target profile is generated. Mutually exclusive with ``target_payload_profile``.
+    write profile's ``Fields/<col>`` / ``Conditions/<col>`` index), the way the
+    source binds ``source_profile_id`` + ``source_field_index`` — no JSON target
+    profile is generated. Mutually exclusive with ``target_payload_profile``.
+
+    ``target_profile_id`` MUST be an in-spec ``$ref:KEY`` token: at apply time
+    build_integration recomputes the map's target index from the referenced
+    in-spec profile component, and a literal existing-profile UUID is not indexable
+    (it would fail late with MAP_PROFILE_INDEX_UNAVAILABLE). Rejecting a literal
+    here fails fast at the param boundary instead.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     target_profile_id: str = Field(
-        ..., description="'$ref:KEY' to an in-spec profile or a literal profile UUID"
+        ...,
+        description=(
+            "'$ref:KEY' to an in-spec profile (e.g. a db_write write profile). A "
+            "literal existing-profile UUID is rejected — it is not indexable for "
+            "the map build (MAP_PROFILE_INDEX_UNAVAILABLE)."
+        ),
     )
     target_profile_type: _PROFILE_TYPE = Field(
         ..., description="Profile kind of the pre-existing target (e.g. 'profile.db')"
@@ -168,6 +179,18 @@ class TargetProfileBinding(BaseModel):
         ...,
         description="Per-leaf target index ({path: {data_type, mappable, ...}})",
     )
+
+    @field_validator("target_profile_id")
+    @classmethod
+    def _require_in_spec_ref(cls, value: str) -> str:
+        if ref_key(value) is None:
+            raise ValueError(
+                "target_binding.target_profile_id must be an in-spec '$ref:KEY' "
+                "token; a literal existing-profile UUID is not indexable for the "
+                "map build (it would fail with MAP_PROFILE_INDEX_UNAVAILABLE). "
+                "Emit the target profile in the same spec and reference it by $ref."
+            )
+        return value
 
 
 class FieldMapComponentNames(BaseModel):

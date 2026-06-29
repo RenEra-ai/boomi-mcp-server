@@ -6238,8 +6238,9 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         Only source stages (read/fetch) are guarded — a read stage is a DB source
         and a fetch stage is a REST source; an explicit connector_type may restate
         that family but must not flip it. Absent connector_type is fine (the
-        kind-derived default applies). The send target family is enforced by
-        _validate_target_binding, so this is a no-op for non-source kinds.
+        kind-derived default applies). The target family is guarded symmetrically
+        by :meth:`_check_target_connector_family`, so this is a no-op for non-source
+        kinds.
         """
         if stage.kind not in ("read", "fetch"):
             return
@@ -6263,6 +6264,43 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                 error_code="SYNC_PIPELINE_CONFIG_INVALID",
                 field=f"pipeline.stages[{stage.key}].config.connector_type",
                 hint="Use a 'read' stage (db_read) for a database source; a fetch stage is REST-only.",
+            )
+
+    @classmethod
+    def _check_target_connector_family(cls, stage: "StageSpec") -> None:
+        """Reject an explicit target connector_type that contradicts the kind (#74).
+
+        The mirror of :meth:`_check_source_connector_family` for the target. A
+        ``send`` stage is a REST (rest_send) target and a ``write`` stage is a
+        database (db_write) target; an explicit connector_type may restate that
+        family but must not flip it. Without this, the delegate's ``allow_db_target``
+        would accept a ``send`` stage forced to ``connector_type='database'`` (a DB
+        target from a REST-send stage) or a ``write`` stage forced back to REST —
+        bypassing the send-vs-write split. Absent connector_type is fine (the
+        kind-derived default applies). No-op for non-target kinds.
+        """
+        if stage.kind not in ("send", "write"):
+            return
+        explicit = stage.config.get("connector_type")
+        if explicit is None:
+            return
+        is_rest = _resolve_rest_connector_type(explicit) is not None
+        is_database = isinstance(explicit, str) and explicit.strip().lower() == "database"
+        if stage.kind == "send" and not is_rest:
+            raise BuilderValidationError(
+                f"sync_pipeline send stage {stage.key!r} connector_type must be a "
+                f"REST Client connector (a send stage is a rest_send target); got {explicit!r}.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].config.connector_type",
+                hint="Use a 'write' stage (db_write) for a database target; a send stage is REST-only.",
+            )
+        if stage.kind == "write" and not is_database:
+            raise BuilderValidationError(
+                f"sync_pipeline write stage {stage.key!r} connector_type must be "
+                f"'database' (a write stage is a db_write target); got {explicit!r}.",
+                error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                field=f"pipeline.stages[{stage.key}].config.connector_type",
+                hint="Use a 'send' stage (rest_send) for a REST target; a write stage is database-only.",
             )
 
     @classmethod
@@ -6312,9 +6350,15 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         # connector_type='rest' (or a fetch stage with connector_type='database')
         # would silently build the wrong source. Reject the contradiction here so a
         # read stays a DB source and a fetch stays a REST source (the kind, not a
-        # config override, decides the source family). The send target's family is
-        # enforced separately by _validate_target_binding.
+        # config override, decides the source family).
         cls._check_source_connector_family(stage)
+        # Symmetrically (#74), an explicit connector_type on a TARGET stage must
+        # agree with the kind's family: now that the delegate accepts both REST and
+        # DB targets (allow_db_target), a send stage forced to connector_type=
+        # 'database' (or a write stage forced to REST) would otherwise bypass the
+        # send-vs-write split. The kind, not a config override, decides the target
+        # family.
+        cls._check_target_connector_family(stage)
         # Resolve the binding action_type. For a fetch (rest_fetch) source an
         # explicit ``action_type: null`` (the key present with value None) means
         # "the default verb" — identical to omitting the key — so it resolves to

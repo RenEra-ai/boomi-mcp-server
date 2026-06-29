@@ -850,3 +850,41 @@ def test_rest_send_on_write_stage_rejected():
     err = SyncPipelineBuilder.validate_config(cfg, depends_on=_WRITE_DEPS)
     assert err is not None
     assert err.error_code == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
+
+
+def test_send_stage_forced_to_database_connector_type_rejected():
+    # A send stage carries the rest_send primitive but an explicit
+    # connector_type='database' would lower to a DB target — the target-family
+    # guard rejects the contradiction (mirrors the read/fetch source guard) so
+    # the send-vs-write split cannot be bypassed.
+    cfg = _sync_config(
+        [
+            _fetch_stage("s"),
+            {"key": "t", "kind": "send", "config": {"primitive": "rest_send",
+             "connector_type": "database", "action_type": "Send",
+             "connection_id": "$ref:db_w_conn", "operation_id": "$ref:db_w_op"}},
+        ],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_WRITE_DEPS)
+    assert err is not None
+    assert err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
+    assert "send stage" in str(err)
+
+
+def test_write_stage_forced_to_rest_connector_type_rejected():
+    # Symmetrically, a write stage forced to connector_type='rest' (which would
+    # lower to a REST target) is rejected — a write stage is database-only.
+    cfg = _sync_config(
+        [
+            _fetch_stage("s"),
+            {"key": "t", "kind": "write", "config": {"primitive": "db_write",
+             "connector_type": "rest", "action_type": "POST",
+             "connection_id": "$ref:db_w_conn", "operation_id": "$ref:db_w_op"}},
+        ],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_WRITE_DEPS)
+    assert err is not None
+    assert err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
+    assert "write stage" in str(err)
