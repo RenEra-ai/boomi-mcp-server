@@ -135,13 +135,16 @@ def _script_var_name(path: str) -> str:
     The variable is the path's FINAL segment, sanitized: every run of
     non-identifier characters collapses to ``_`` (so ``order-id`` -> ``order_id``)
     and a leading digit / empty result is prefixed with ``_`` so the result always
-    matches ScriptMappingBuilder's ``^[A-Za-z_][A-Za-z0-9_]*$``. Two distinct paths
-    can still derive the same variable (e.g. ``Root/a/id`` and ``Root/b/id`` -> the
-    shared ``id`` namespace); the contract validator rejects that collision rather
-    than letting it fail deep in the builder.
+    matches ScriptMappingBuilder's ``^[A-Za-z_][A-Za-z0-9_]*$``. Underscores are
+    identifier-safe, so leaves that are ALREADY valid identifiers are preserved
+    verbatim — including leading/trailing underscores (``_id`` stays ``_id``, and
+    ``_id`` vs ``id`` are distinct, not a collision). Two distinct paths can still
+    derive the same variable (e.g. ``Root/a/id`` and ``Root/b/id`` -> the shared
+    ``id`` namespace); the contract validator rejects that collision rather than
+    letting it fail deep in the builder.
     """
     leaf = path.rsplit("/", 1)[-1]
-    sanitized = _NON_IDENTIFIER_RE.sub("_", leaf).strip("_")
+    sanitized = _NON_IDENTIFIER_RE.sub("_", leaf)
     if not sanitized or sanitized[0].isdigit():
         sanitized = "_" + sanitized
     return sanitized

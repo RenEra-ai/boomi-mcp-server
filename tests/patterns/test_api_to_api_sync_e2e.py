@@ -490,6 +490,33 @@ class TestHeadersAndScriptVars:
         assert msum["input_variables"] == ["order_id"]
         assert msum["output_variables"] == ["ext_id"]
 
+    def test_map_script_preserves_valid_underscore_identifiers(self):
+        # A leaf that is already a valid identifier with a leading underscore
+        # ('_id') must be preserved verbatim — not stripped to 'id' — and must not
+        # collide with a distinct 'id' output variable.
+        params = copy.deepcopy(_minimal())
+        params["source"]["response_profile"]["root"]["children"] = [
+            {"name": "_id", "kind": "simple", "data_type": "character"},
+        ]
+        params["target"]["payload_profile"]["root"]["children"] = [
+            {"name": "id", "kind": "simple", "data_type": "character"},
+        ]
+        params["transform"]["operations"] = [
+            {
+                "operation_type": "map_script",
+                "script_slot": "s",
+                "language": "groovy2",
+                "inputs": ["Root/_id"],
+                "outputs": ["Root/id"],
+                "script_body": "x",
+            }
+        ]
+        spec = _spec(params)
+        tflow = next(f for f in spec["flows"] if f.get("operation") == "transform")
+        msum = next(o for o in tflow["operations"] if o["operation_type"] == "map_script")
+        assert msum["input_variables"] == ["_id"]  # leading underscore preserved
+        assert msum["output_variables"] == ["id"]  # distinct from _id, no collision
+
 
 # ===========================================================================
 # Full local chain: review + plan + apply
