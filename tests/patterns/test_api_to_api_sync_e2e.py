@@ -410,6 +410,86 @@ class TestParameterValidation:
         assert result["_success"] is False
         assert result["error_code"] == "UNSUPPORTED_SCRIPT_COMPONENT_REF"
 
+    def test_map_script_colliding_variable_names_rejected(self):
+        # Two source leaves whose final segments both sanitize to 'id' collide in
+        # the script's shared input/output namespace -> rejected at the contract.
+        bad = copy.deepcopy(_minimal())
+        bad["source"]["response_profile"]["root"]["children"] = [
+            {"name": "a", "kind": "object", "children": [
+                {"name": "id", "kind": "simple", "data_type": "character"}]},
+            {"name": "b", "kind": "object", "children": [
+                {"name": "id", "kind": "simple", "data_type": "character"}]},
+        ]
+        bad["target"]["payload_profile"]["root"]["children"] = [
+            {"name": "out1", "kind": "simple", "data_type": "character"},
+            {"name": "out2", "kind": "simple", "data_type": "character"},
+        ]
+        bad["transform"]["operations"] = [
+            {
+                "operation_type": "map_script",
+                "script_slot": "s",
+                "language": "groovy2",
+                "inputs": ["Root/a/id", "Root/b/id"],
+                "outputs": ["Root/out1", "Root/out2"],
+                "script_body": "x",
+            }
+        ]
+        result = _build(bad)
+        assert result["_success"] is False
+        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+# ===========================================================================
+# Header handling + map_script variable naming
+# ===========================================================================
+
+
+class TestHeadersAndScriptVars:
+    def test_create_mode_default_headers_applied_to_operation(self):
+        # Connection default_headers (accepted by the reused RestCreateSettings
+        # schema) must be honored as operation request headers, not dropped.
+        params = copy.deepcopy(_minimal())
+        params["source"]["binding"]["settings"]["default_headers"] = {
+            "X-Src": "1",
+            "Accept": "application/json",
+        }
+        # An operation header with the same key must win over the connection default.
+        params["source"]["fetch_request"]["request_headers"] = {"Accept": "text/plain"}
+        params["target"]["binding"]["settings"]["default_headers"] = {"X-Tgt": "2"}
+        spec = _spec(params)
+        comps = _by_key(spec)
+        src_op = comps["source_rest_source_operation"]["config"]
+        tgt_op = comps["target_rest_operation"]["config"]
+        assert src_op["request_headers"] == {"X-Src": "1", "Accept": "text/plain"}
+        assert tgt_op["request_headers"] == {"X-Tgt": "2"}
+
+    def test_map_script_sanitizes_unsafe_leaf_names(self):
+        # A hyphenated leaf segment ('order-id') is language-unsafe as a script
+        # variable; the preset sanitizes it to 'order_id' and builds successfully.
+        params = copy.deepcopy(_minimal())
+        params["source"]["response_profile"]["root"]["children"].append(
+            {"name": "order-id", "kind": "simple", "data_type": "character"}
+        )
+        params["target"]["payload_profile"]["root"]["children"].append(
+            {"name": "ext-id", "kind": "simple", "data_type": "character"}
+        )
+        params["transform"]["operations"] = [
+            {"operation_type": "direct", "source_path": "Root/source_a", "target_path": "Root/target_a"},
+            {
+                "operation_type": "map_script",
+                "script_slot": "enrich",
+                "language": "groovy2",
+                "inputs": ["Root/order-id"],
+                "outputs": ["Root/ext-id"],
+                "script_body": "dataContext.storeStream()",
+            },
+        ]
+        spec = _spec(params)
+        tflow = next(f for f in spec["flows"] if f.get("operation") == "transform")
+        msum = next(o for o in tflow["operations"] if o["operation_type"] == "map_script")
+        assert msum["input_variables"] == ["order_id"]
+        assert msum["output_variables"] == ["ext_id"]
+
 
 # ===========================================================================
 # Full local chain: review + plan + apply

@@ -123,6 +123,29 @@ _ROLE_SOURCE_PROFILE = "source_profile"
 # thin sync_pipeline stage rejects runtime_bindings). Reject it at the contract.
 _DYNAMIC_PATH_TOKEN_RE = re.compile(r"\{[^{}]*\}")
 
+# Characters not allowed in a Boomi script.mapping variable identifier
+# (ScriptMappingBuilder enforces ^[A-Za-z_][A-Za-z0-9_]*$). Used to derive a
+# language-safe in-script variable name from a JSON leaf path segment.
+_NON_IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_]+")
+
+
+def _script_var_name(path: str) -> str:
+    """Derive a language-safe map_script variable name from a JSON leaf path.
+
+    The variable is the path's FINAL segment, sanitized: every run of
+    non-identifier characters collapses to ``_`` (so ``order-id`` -> ``order_id``)
+    and a leading digit / empty result is prefixed with ``_`` so the result always
+    matches ScriptMappingBuilder's ``^[A-Za-z_][A-Za-z0-9_]*$``. Two distinct paths
+    can still derive the same variable (e.g. ``Root/a/id`` and ``Root/b/id`` -> the
+    shared ``id`` namespace); the contract validator rejects that collision rather
+    than letting it fail deep in the builder.
+    """
+    leaf = path.rsplit("/", 1)[-1]
+    sanitized = _NON_IDENTIFIER_RE.sub("_", leaf).strip("_")
+    if not sanitized or sanitized[0].isdigit():
+        sanitized = "_" + sanitized
+    return sanitized
+
 # Example payload sentinel — intentionally NOT a reusable path/payload template.
 _EXAMPLE_PATH_SENTINEL = "/v1/<<source resource>>"
 
@@ -420,12 +443,23 @@ class MapScriptApiTransformOperation(_BaseApiTransformOperation):
     inputs: List[str] = Field(
         ...,
         min_length=1,
-        description="Source leaf paths consumed by the script (each a kind='simple' leaf in source.response_profile).",
+        description=(
+            "Source leaf paths consumed by the script (each a kind='simple' leaf "
+            "in source.response_profile). The in-script variable for each path is "
+            "its final segment sanitized to a language-safe identifier (e.g. "
+            "'Root/order-id' -> 'order_id'); two paths that derive the same "
+            "variable name (across inputs AND outputs) are rejected."
+        ),
     )
     outputs: List[str] = Field(
         ...,
         min_length=1,
-        description="Target leaf paths populated by the script (each a kind='simple' leaf in target.payload_profile).",
+        description=(
+            "Target leaf paths populated by the script (each a kind='simple' leaf "
+            "in target.payload_profile). The in-script variable for each path is "
+            "its final segment sanitized to a language-safe identifier; it must not "
+            "collide with another input/output variable name."
+        ),
     )
     script_component_ref: Optional[str] = Field(
         default=None,
@@ -561,6 +595,7 @@ class ApiToApiSyncParameters(BaseModel):
         unknown_source_refs = 0
         unknown_target_refs = 0
         duplicate_target_bindings = 0
+        script_var_collisions = 0
         bound_target_paths: Set[str] = set()
 
         def _bind(target_path: str) -> None:
@@ -595,6 +630,16 @@ class ApiToApiSyncParameters(BaseModel):
                         _bind(out)
                     else:
                         unknown_target_refs += 1
+                # The in-script variable for each path is its sanitized final
+                # segment; inputs and outputs share one namespace inside the
+                # script (ScriptMappingBuilder), so two paths deriving the same
+                # variable name cannot be expressed. Reject here (clear, early)
+                # instead of failing deep with SCRIPT_MAPPING_VARIABLE_INVALID.
+                script_vars = [_script_var_name(p) for p in op.inputs] + [
+                    _script_var_name(p) for p in op.outputs
+                ]
+                if len(set(script_vars)) != len(script_vars):
+                    script_var_collisions += 1
 
         required_target_paths = _required_simple_leaf_paths(self.target.payload_profile)
         unmapped_required_count = len(required_target_paths - bound_target_paths)
@@ -624,6 +669,14 @@ class ApiToApiSyncParameters(BaseModel):
                 "target leaf path(s) unmapped; every required simple leaf in "
                 "target.payload_profile must be the destination of at least one "
                 "direct/map_function/map_script output"
+            )
+        if script_var_collisions:
+            issues.append(
+                f"{script_var_collisions} map_script operation(s) derive two or "
+                "more identical in-script variable names from distinct paths (each "
+                "variable is a path's sanitized final segment, and inputs/outputs "
+                "share one namespace); rename the colliding leaves so every "
+                "map_script input/output path yields a unique variable name"
             )
 
         if issues:
@@ -668,7 +721,10 @@ def _map_rest_connection(
             "base_url": settings.base_url,
             "auth": auth,
         }
-        # default_headers has no RestConnectionCreate field — metadata-deferred.
+        # NOTE: settings.default_headers is intentionally NOT mapped here —
+        # RestConnectionCreate has no such field. The fetch/send param builders
+        # instead apply create-mode default_headers as operation-level
+        # request_headers (so the caller's headers are honored, not dropped).
         return connection
 
     connection = {"mode": "reuse"}
@@ -677,6 +733,32 @@ def _map_rest_connection(
     if binding.component_name:
         connection["component_name"] = binding.component_name
     return connection
+
+
+def _create_default_headers(binding: RestConnectionBinding) -> Dict[str, str]:
+    """Return create-mode connection ``default_headers`` (empty for reuse).
+
+    RestConnectionCreate carries no default_headers field, so these are applied as
+    operation-level request_headers instead of being silently dropped. Reuse-mode
+    bindings have no settings, so they contribute nothing here (an existing
+    connection already carries its own configured headers).
+    """
+    if binding.mode == "create" and binding.settings is not None:
+        return dict(binding.settings.default_headers or {})
+    return {}
+
+
+def _merge_request_headers(
+    default_headers: Dict[str, str], operation_headers: Optional[Dict[str, str]]
+) -> Optional[Dict[str, str]]:
+    """Merge connection default_headers with operation headers (operation wins).
+
+    Operation-level headers are more specific than connection defaults, so a key
+    set in both resolves to the operation value. Returns None when both are empty
+    so the operation config omits request_headers entirely.
+    """
+    merged = {**default_headers, **(operation_headers or {})}
+    return merged or None
 
 
 def _build_rest_fetch_params(
@@ -690,9 +772,15 @@ def _build_rest_fetch_params(
     fetch = source.fetch_request
 
     operation: Dict[str, Any] = {"path": fetch.path}
+    # Apply create-mode connection default_headers as operation request_headers
+    # (operation headers win on key conflict) so they are honored, not dropped.
+    request_headers = _merge_request_headers(
+        _create_default_headers(source.binding), fetch.request_headers
+    )
+    if request_headers is not None:
+        operation["request_headers"] = request_headers
     for attr in (
         "query_parameters",
-        "request_headers",
         "follow_redirects",
         "return_application_errors",
         "track_response",
@@ -777,15 +865,17 @@ def _build_field_map_params(
                     ),
                 )
             # The contract's inputs/outputs are JSON leaf paths; field_map's
-            # MapScriptOp needs named ports, so derive port names from the leaf
-            # segment. field_map enforces that script_body is present.
+            # MapScriptOp needs named ports, so derive a language-safe variable
+            # name from each path (sanitized final segment). Uniqueness across the
+            # shared input/output namespace was already enforced by the contract
+            # validator. field_map enforces that script_body is present.
             script_entry: Dict[str, Any] = {
                 "inputs": [
-                    {"source_path": path, "input_name": path.rsplit("/", 1)[-1]}
+                    {"source_path": path, "input_name": _script_var_name(path)}
                     for path in op.inputs
                 ],
                 "outputs": [
-                    {"output_name": path.rsplit("/", 1)[-1], "target_path": path}
+                    {"output_name": _script_var_name(path), "target_path": path}
                     for path in op.outputs
                 ],
                 "language": op.language,
@@ -848,8 +938,13 @@ def _build_rest_send_params(
     }
     if send.query_parameters:
         operation["query_parameters"] = dict(send.query_parameters)
-    if send.request_headers:
-        operation["request_headers"] = dict(send.request_headers)
+    # Apply create-mode connection default_headers as operation request_headers
+    # (operation headers win on key conflict) so they are honored, not dropped.
+    request_headers = _merge_request_headers(
+        _create_default_headers(target.binding), send.request_headers
+    )
+    if request_headers is not None:
+        operation["request_headers"] = request_headers
 
     component_names: Dict[str, str] = {}
     conn_name = _named(
@@ -1053,6 +1148,10 @@ def _operation_summaries(
                 "input_count": len(op.inputs),
                 "outputs": list(op.outputs),
                 "output_count": len(op.outputs),
+                # The in-script variable names derived from each path (so a caller
+                # knows which identifiers to reference in script_body).
+                "input_variables": [_script_var_name(p) for p in op.inputs],
+                "output_variables": [_script_var_name(p) for p in op.outputs],
                 "script_body_present": op.script_body is not None,
             }
             if op.script_body is not None:
@@ -1124,7 +1223,8 @@ class ApiToApiSyncArchetype(ArchetypePattern):
         "Static REST only: a '{token}' dynamic path is rejected (runtime path binding is #96 M5.4a); query parameters and headers are static.",
         "Pagination, conditional requests, retry/DLQ, watermark, and schedule activation are out of scope for this preset.",
         "REST create-mode emits only auth='none'; secured auth (basic / bearer / oauth2) requires binding.mode='reuse'.",
-        "map_script materializes only an inline script_body; external script_component_ref reuse is rejected (#51).",
+        "Create-mode connection default_headers are applied as operation-level request headers (operation-specific headers win on conflict); a reuse-mode connection carries its own configured headers.",
+        "map_script materializes only an inline script_body; external script_component_ref reuse is rejected (#51). Each in-script variable is a path's sanitized final segment; two map_script paths that derive the same variable name are rejected (rename the colliding leaves).",
         "Does not mix map_function and map_script in one call (UNSUPPORTED_TRANSFORM_ROUTE); split into separate maps.",
         "operation_type='xslt' is rejected; the XSLT decision is owned by issue #42.",
         "credential_ref values are opaque end-to-end; the contract never resolves or validates secrets.",
