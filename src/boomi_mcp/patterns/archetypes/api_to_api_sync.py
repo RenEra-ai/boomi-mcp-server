@@ -756,11 +756,22 @@ def _merge_request_headers(
 ) -> Optional[Dict[str, str]]:
     """Merge connection default_headers with operation headers (operation wins).
 
-    Operation-level headers are more specific than connection defaults, so a key
-    set in both resolves to the operation value. Returns None when both are empty
-    so the operation config omits request_headers entirely.
+    Operation-level headers are more specific than connection defaults, so a
+    header set in both resolves to the operation value. HTTP header names are
+    case-insensitive (RFC 7230), so the conflict is resolved on the lowercased
+    name — an operation ``{"accept": ...}`` overrides a default ``{"Accept": ...}``
+    (emitting only the operation header, with its original spelling), rather than
+    leaking two case-variant entries for the same header. Returns None when both
+    are empty so the operation config omits request_headers entirely.
     """
-    merged = {**default_headers, **(operation_headers or {})}
+    operation_headers = operation_headers or {}
+    operation_lower = {name.lower() for name in operation_headers}
+    merged = {
+        name: value
+        for name, value in default_headers.items()
+        if name.lower() not in operation_lower
+    }
+    merged.update(operation_headers)
     return merged or None
 
 

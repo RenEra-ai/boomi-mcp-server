@@ -463,6 +463,24 @@ class TestHeadersAndScriptVars:
         assert src_op["request_headers"] == {"X-Src": "1", "Accept": "text/plain"}
         assert tgt_op["request_headers"] == {"X-Tgt": "2"}
 
+    def test_default_headers_conflict_is_case_insensitive(self):
+        # HTTP header names are case-insensitive: an operation header 'accept'
+        # must override a connection default 'Accept' (one entry, operation
+        # spelling+value wins) — not leak two case-variant Accept headers.
+        params = copy.deepcopy(_minimal())
+        params["source"]["binding"]["settings"]["default_headers"] = {
+            "Accept": "application/json",
+            "X-Keep": "yes",
+        }
+        params["source"]["fetch_request"]["request_headers"] = {"accept": "text/plain"}
+        spec = _spec(params)
+        headers = _by_key(spec)["source_rest_source_operation"]["config"]["request_headers"]
+        # Exactly one Accept-ish header, the operation's; the non-conflicting
+        # default is preserved.
+        assert headers == {"accept": "text/plain", "X-Keep": "yes"}
+        accept_keys = [k for k in headers if k.lower() == "accept"]
+        assert accept_keys == ["accept"]
+
     def test_map_script_sanitizes_unsafe_leaf_names(self):
         # A hyphenated leaf segment ('order-id') is language-unsafe as a script
         # variable; the preset sanitizes it to 'order_id' and builds successfully.
