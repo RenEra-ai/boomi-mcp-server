@@ -42,9 +42,12 @@ XML: the ``sync_pipeline`` process builder (``SyncPipelineBuilder`` in
 into the proven ``database_to_api_sync`` source/transform/target config. The
 source stage is either ``read(db_read)`` (a DB Get) or — as of #72 (M5.4) —
 ``fetch(rest_fetch)`` (a static REST GET source), followed by an optional
-``map`` and a ``send(rest_send)`` target:
-``read(db_read) | fetch(rest_fetch) -> [map] -> send(rest_send)``. Every other
-stage kind (``write`` / ``lookup`` / ``combine`` / ``flow_control`` /
+``map`` and a target stage that is either ``send(rest_send)`` (a REST target) or
+— as of #74 (M5.8), from a ``fetch`` source — ``write(db_write)`` (a database
+Send/write target, built on the #32 component builders):
+``read(db_read) | fetch(rest_fetch) -> [map] -> send(rest_send)`` and
+``fetch(rest_fetch) -> [map] -> write(db_write)``. Every other
+stage kind (``lookup`` / ``combine`` / ``flow_control`` /
 ``branch`` / ``decision`` / ``dataprocess`` / ``exception`` /
 ``doccacheretrieve`` / ``doccacheremove``) still has NO PipelineSpec->XML emitter
 and is rejected by that builder with a hint pointing at its owning issue. (Several
@@ -65,6 +68,9 @@ PipelineStageKind = Literal[
     "lookup",
     "map",
     "send",
+    # M5.8 (issue #74): the database Send/write target stage. Lowered by
+    # SyncPipelineBuilder (fetch -> [map] -> write) to a database connector
+    # binding through the #32 write-profile / Send-operation builders.
     "write",
     "finalize",
     "combine",

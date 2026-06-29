@@ -62,11 +62,17 @@ _REST_ACTION_TYPES = frozenset({
     "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE",
 })
 
-# Database connector-action types wired into a process flow here. Get only:
-# the Send/write *component* builders land in #32 (component-level), but
-# wiring a Send step into a process flow is part of the api_to_database_sync
-# preset (#74) and would need its own process-flow surface area.
+# Database SOURCE connector-action types wired into a process flow here. Get
+# only: a read stage is a db_read Get source. The Send/write *target* is a
+# separate slot (see _DB_TARGET_ACTION_TYPES) — broadening this set would wrongly
+# accept a DB-source Send.
 _DB_ACTION_TYPES = frozenset({"Get"})
+
+# Database TARGET connector-action types (#74, M5.8). The api_to_database_sync
+# preset wires a Send (write) step as the sync_pipeline target — the #32 Send/
+# write *component* builders supply the connector-action; this lowers a `write`
+# stage to a `database`/`Send` connector binding. Send only (Get is a source).
+_DB_TARGET_ACTION_TYPES = frozenset({"Send"})
 
 _SUPPORTED_TRANSFORM_MODES = frozenset(
     {"passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve", "doccacheremove"}
@@ -557,6 +563,7 @@ class ProcessFlowBuilder:
         *,
         depends_on: Optional[Iterable[str]] = None,
         allow_rest_source: bool = False,
+        allow_db_target: bool = False,
     ) -> Optional[BuilderValidationError]:
         """Validate structured process config; return error or None.
 
@@ -564,6 +571,11 @@ class ProcessFlowBuilder:
         (DB source only); SyncPipelineBuilder passes True so a lowered rest_fetch
         fetch stage's REST GET source is accepted (M5.4 #72). A hand-authored
         database_to_api_sync with a REST source therefore stays rejected.
+
+        ``allow_db_target`` is False for the base protocol (REST target only);
+        SyncPipelineBuilder passes True so a lowered ``write`` stage's database
+        Send target is accepted (#74 M5.8). A hand-authored database_to_api_sync
+        with a database target therefore stays rejected.
 
         Validation order is intentional — surface the most-specific
         actionable error first:
@@ -659,7 +671,9 @@ class ProcessFlowBuilder:
         if decision_err is not None:
             return decision_err
 
-        target_err = _validate_target_binding(config.get("target"))
+        target_err = _validate_target_binding(
+            config.get("target"), allow_db_target=allow_db_target
+        )
         if target_err is not None:
             return target_err
 
@@ -990,7 +1004,27 @@ class ProcessFlowBuilder:
             # pass dynamic_path into the connector step so it emits the matching
             # "Path" dynamic operation property. Absent dynamic_path, no shape is
             # added and the flow is byte-for-byte the pre-#100 chain.
-            dynamic_path = target.get("dynamic_path") if isinstance(target.get("dynamic_path"), dict) else None
+            # Canonicalize the target connector subtype + verb before emission,
+            # mirroring the source branch. A REST target keeps the canonical
+            # mixed-case REST Client subtype and an uppercased HTTP verb. A
+            # DATABASE write target (#74 M5.8) lowercases the subtype to
+            # `database` and keeps the mixed-case verb `Send` (Boomi's DB
+            # connectoraction emits actionType="Send", like the DB source's "Get"
+            # — an unconditional .upper() would corrupt it to "SEND"). A DB target
+            # carries no dynamic_path (REST path-binding only).
+            target_canonical_type = _canonical_connector_type(target.get("connector_type"))
+            target_is_rest = _resolve_rest_connector_type(target.get("connector_type")) is not None
+            if target_is_rest:
+                target_connector_type = target_canonical_type
+                target_action_type = str(target.get("action_type") or "").strip().upper()
+            else:
+                target_connector_type = target_canonical_type.lower()
+                target_action_type = str(target.get("action_type") or "").strip()
+            dynamic_path = (
+                target.get("dynamic_path")
+                if (target_is_rest and isinstance(target.get("dynamic_path"), dict))
+                else None
+            )
             if dynamic_path:
                 flow.append((
                     "setproperties",
@@ -1004,14 +1038,8 @@ class ProcessFlowBuilder:
             flow.append((
                 "connectoraction_target",
                 {
-                    # _canonical_connector_type maps REST aliases ("rest",
-                    # "rest_client") to the canonical subtype.
-                    "connector_type": _canonical_connector_type(target.get("connector_type")),
-                    # REST HTTP methods are case-insensitive on input (validator
-                    # uppercases for membership check) but Boomi's live XML uses
-                    # uppercase actionType="POST" — uppercase here so the emitted
-                    # XML matches the canonical form. Codex review C3.
-                    "action_type": str(target.get("action_type") or "").strip().upper(),
+                    "connector_type": target_connector_type,
+                    "action_type": target_action_type,
                     # Strip ID whitespace so whitespace-padded refs don't leak
                     # into emitted XML. Codex review r6 P2.2.
                     "connection_id": str(target.get("connection_id") or "").strip(),
@@ -1497,15 +1525,59 @@ def _validate_source_binding(
     return _validate_runtime_bindings_gate(source, "source")
 
 
-def _validate_target_binding(
-    target: Any, field_prefix: str = "target"
+def _validate_db_target_binding(
+    target: Dict[str, Any], field_prefix: str
 ) -> Optional[BuilderValidationError]:
-    """Validate one REST connector target binding.
+    """Validate a database Send (write) target binding (#74 M5.8).
+
+    A `write` stage lowers to a `database`/`Send` target. The action_type is
+    NOT uppercased for membership (Boomi's DB connectoraction emits the mixed-case
+    verb ``Send``, mirroring the DB source's ``Get``). connection_id/operation_id
+    are required; a DB target carries no dynamic_path/runtime_bindings (those are
+    REST path-binding only), so the runtime-binding gate still applies.
+    """
+    action_type = str(target.get("action_type") or "").strip()
+    if action_type not in _DB_TARGET_ACTION_TYPES:
+        return BuilderValidationError(
+            f"{field_prefix}.action_type must be one of {sorted(_DB_TARGET_ACTION_TYPES)} "
+            f"for a database target; got {target.get('action_type')!r}.",
+            error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+            field=f"{field_prefix}.action_type",
+            hint="A database write target is a Send operation (db_write); Get is a source.",
+        )
+    for required in ("connection_id", "operation_id"):
+        value = target.get(required)
+        if not isinstance(value, str) or not value.strip():
+            return BuilderValidationError(
+                f"{field_prefix}.{required} is required.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field=f"{field_prefix}.{required}",
+                hint=(
+                    "Pass the component_id of the already-built database "
+                    "connector-settings / connector-action Send, or a "
+                    "$ref:KEY token pointing at it (and add KEY to depends_on)."
+                ),
+            )
+    dyn_err = _validate_dynamic_path(target.get("dynamic_path"), field_prefix=field_prefix)
+    if dyn_err is not None:
+        return dyn_err
+    return _validate_runtime_bindings_gate(target, field_prefix)
+
+
+def _validate_target_binding(
+    target: Any, field_prefix: str = "target", *, allow_db_target: bool = False
+) -> Optional[BuilderValidationError]:
+    """Validate one connector target binding (REST, or DB Send when allowed).
 
     ``field_prefix`` scopes every emitted ``field``/message to the binding's
     location in the config tree — ``"target"`` for the top-level target (leg 1)
     and ``"branch.targets[i]"`` for Branch legs 2..N (issue #112 M10.8). The
     contract is identical regardless of prefix, so both share this one validator.
+
+    ``allow_db_target`` (#74 M5.8) accepts a ``database``/``Send`` target in
+    addition to REST — only the sync_pipeline path (api_to_database_sync) opts in,
+    so a hand-authored database_to_api_sync target and every Branch leg stay
+    REST-only (the default).
     """
     if not isinstance(target, dict):
         return BuilderValidationError(
@@ -1518,6 +1590,13 @@ def _validate_target_binding(
     raw_connector_type = target.get("connector_type")
     canonical = _resolve_rest_connector_type(raw_connector_type)
     if canonical is None:
+        # #74 M5.8: a sync_pipeline write target lowers to a database Send binding.
+        if (
+            allow_db_target
+            and isinstance(raw_connector_type, str)
+            and raw_connector_type.strip().lower() == "database"
+        ):
+            return _validate_db_target_binding(target, field_prefix)
         return BuilderValidationError(
             f"{field_prefix}.connector_type must be 'rest', 'rest_client', or "
             f"{REST_CLIENT_SUBTYPE!r}; got {raw_connector_type!r}.",
@@ -5795,13 +5874,13 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
 
 # The PipelineStageKind values the verified-linear sync_pipeline builder lowers
 # to XML. ``read`` (db_read DB source) and ``fetch`` (rest_fetch REST source) are
-# the two supported source kinds; ``map``/``send`` the optional transform + REST
-# target. Every other kind in the M5.1 (#69) vocabulary stays reserved — modeled
-# in the contract, no PipelineSpec->XML lowering yet — and is rejected with a hint
-# pointing at its owning issue. ``write`` is the reserved DB target extension point
-# (M5.6 #32); the rest are combine/lookup/control-flow owned by M10 (#103, e.g.
-# Flow Control M10.7 #111).
-_SYNC_PIPELINE_SUPPORTED_KINDS = frozenset({"read", "fetch", "map", "send"})
+# the two supported source kinds; ``map`` the optional transform; ``send``
+# (rest_send REST target) and ``write`` (db_write DB target, #74 M5.8) the two
+# supported target kinds. Every other kind in the M5.1 (#69) vocabulary stays
+# reserved — modeled in the contract, no PipelineSpec->XML lowering yet — and is
+# rejected with a hint pointing at its owning issue (combine/lookup/control-flow
+# owned by M10 (#103, e.g. Flow Control M10.7 #111)).
+_SYNC_PIPELINE_SUPPORTED_KINDS = frozenset({"read", "fetch", "map", "send", "write"})
 
 # The primitive discriminator each supported stage must declare in config.
 _SYNC_PIPELINE_STAGE_PRIMITIVE: Dict[str, str] = {
@@ -5809,11 +5888,11 @@ _SYNC_PIPELINE_STAGE_PRIMITIVE: Dict[str, str] = {
     "fetch": "rest_fetch",
     "map": "map",
     "send": "rest_send",
+    "write": "db_write",
 }
 
 # Hints for reserved stage *kinds* (rejected by the kind gate).
 _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
-    "write": "The 'write' (db_write) DB target stage is reserved for M5.6 (issue #32).",
     "lookup": "The 'lookup' stage is reserved (modeled in M5.1 #69, no emitter yet).",
     "combine": "The 'combine' stage is reserved; combine/control-flow emitters are owned by M10 (issue #103).",
     "flow_control": "The 'flow_control' stage kind has no PipelineSpec lowering; the Flow Control shape is emittable via the process_config.flow_control block (M10.7, issue #111).",
@@ -5827,11 +5906,13 @@ _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
 }
 
 # Hints for *primitives* mis-declared on the wrong supported kind. ``rest_fetch``
-# is supported (on a ``fetch`` stage) but not on ``read``; ``db_write`` is still a
-# reserved DB target (M5.6 #32). Each points the caller at the right stage/issue.
+# is supported (on a ``fetch`` stage) but not on ``read``; ``db_write`` is the DB
+# write target (#74, built on the #32 component builders) and belongs on a
+# ``write`` stage, not a ``send`` (REST) stage. Each points the caller at the
+# right stage/issue.
 _SYNC_PIPELINE_RESERVED_PRIMITIVE_HINTS: Dict[str, str] = {
     "rest_fetch": "rest_fetch is the REST source primitive — declare it on a 'fetch' stage (M5.4 #72), not this one.",
-    "db_write": "db_write (the DB 'write' target) is reserved for M5.6 (issue #32).",
+    "db_write": "db_write is the DB 'write' target primitive — declare it on a 'write' stage (#74, #32 builders), not this one.",
 }
 
 # Config keys allowed on a read/send (connector-binding) stage. Anything else —
@@ -6010,7 +6091,11 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
 
         # 3. Single linear chain over the ordering edges, covering every stage.
         # The source is exactly one of read(db_read) or fetch(rest_fetch); the
-        # target is always send(rest_send); an optional map sits between them.
+        # target is send(rest_send) OR — for the API-to-DB chain (#74 M5.8) —
+        # write(db_write); an optional map sits between them. A db_write target is
+        # only supported from a REST (fetch) source (the api_to_database_sync
+        # preset); a read->write DB-to-DB chain has no archetype and stays out of
+        # scope.
         order = cls._linear_stage_order(spec, stage_by_key)
         kinds = [stage_by_key[k].kind for k in order]
         if kinds not in (
@@ -6018,28 +6103,39 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             ["read", "map", "send"],
             ["fetch", "send"],
             ["fetch", "map", "send"],
+            ["fetch", "write"],
+            ["fetch", "map", "write"],
         ):
             raise BuilderValidationError(
-                f"sync_pipeline must be read|fetch -> [map] -> send; got stage "
-                f"kinds {kinds}.",
+                f"sync_pipeline must be read|fetch -> [map] -> send, or "
+                f"fetch -> [map] -> write; got stage kinds {kinds}.",
                 error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
                 field="pipeline.stages",
-                hint="Exactly one db_read or rest_fetch source, an optional map, one rest_send target.",
+                hint=(
+                    "Exactly one db_read or rest_fetch source, an optional map, and "
+                    "one target — a rest_send REST target, or (from a rest_fetch "
+                    "source) a db_write database target."
+                ),
             )
 
         source_stage = stage_by_key[order[0]]
-        send_stage = stage_by_key[order[-1]]
+        target_stage = stage_by_key[order[-1]]
         map_stage = stage_by_key[order[1]] if len(order) == 3 else None
 
         # A read source lowers to a DB connector binding; a fetch source to REST.
         source_default_connector = "database" if source_stage.kind == "read" else "rest"
+        # A send target lowers to a REST binding; a write target to a database
+        # (db_write) Send binding (#74 M5.8).
+        target_default_connector = "database" if target_stage.kind == "write" else "rest"
         lowered: Dict[str, Any] = {
             "process_kind": ProcessFlowBuilder.PROCESS_KIND,
             "source": cls._lower_binding_stage(
                 source_stage, default_connector_type=source_default_connector
             ),
             "transform": cls._lower_map_stage(map_stage),
-            "target": cls._lower_binding_stage(send_stage, default_connector_type="rest"),
+            "target": cls._lower_binding_stage(
+                target_stage, default_connector_type=target_default_connector
+            ),
         }
         # Carry non-flow metadata the base builder already supports. name /
         # folder_name are consumed by the integration builder / build() kwargs,
@@ -6199,12 +6295,15 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                 ),
             )
         # A read (db_read) source is always a Get; a fetch (rest_fetch) source is
-        # always a GET (M5.4 #72, GET-only); a send (rest_send) target carries an
-        # explicit HTTP method (no default).
+        # always a GET (M5.4 #72, GET-only); a write (db_write) target is always a
+        # Send (#74 M5.8); a send (rest_send) target carries an explicit HTTP
+        # method (no default).
         if stage.kind == "read":
             default_action_type: Optional[str] = "Get"
         elif stage.kind == "fetch":
             default_action_type = "GET"
+        elif stage.kind == "write":
+            default_action_type = "Send"
         else:
             default_action_type = None
         # An explicit connector_type on a SOURCE stage must agree with the stage
@@ -6316,11 +6415,15 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             lowered = cls.lower_config(config)
         except BuilderValidationError as exc:
             return exc
-        # A lowered fetch stage carries a REST GET source; allow it here (only the
-        # sync_pipeline path does). The base database_to_api_sync validation stays
-        # DB-source-only.
+        # A lowered fetch stage carries a REST GET source and a lowered write stage
+        # carries a database Send target; allow both here (only the sync_pipeline
+        # path does). The base database_to_api_sync validation stays DB-source-only
+        # and REST-target-only.
         return ProcessFlowBuilder.validate_config(
-            lowered, depends_on=depends_on, allow_rest_source=True
+            lowered,
+            depends_on=depends_on,
+            allow_rest_source=True,
+            allow_db_target=True,
         )
 
     @classmethod

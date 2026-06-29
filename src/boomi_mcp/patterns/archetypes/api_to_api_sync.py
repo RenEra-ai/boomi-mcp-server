@@ -154,11 +154,15 @@ _EXAMPLE_PATH_SENTINEL = "/v1/<<source resource>>"
 
 
 def _reject_dynamic_path(value: str) -> str:
-    """Reject a `{token}` dynamic path (runtime path binding is #96, out of scope)."""
+    """Reject a `{token}` dynamic path (runtime path binding is #96, out of scope).
+
+    Shared by the static-REST presets (api_to_api_sync, api_to_database_sync), so
+    the message stays preset-neutral — it names no single preset/milestone.
+    """
     stripped = _stripped_nonblank(value)
     if _DYNAMIC_PATH_TOKEN_RE.search(stripped):
         raise ValueError(
-            "path must be static for the api_to_api_sync preset (M5.7); a "
+            "path must be static for this sync_pipeline preset; a "
             "'{token}' per-document dynamic path is runtime-bound behavior owned "
             "by #96 (M5.4a) and is not exposed here. Use a static path."
         )

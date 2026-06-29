@@ -69,6 +69,22 @@ def _fetch_stage(key="source", **cfg):
     return {"key": key, "kind": "fetch", "config": config}
 
 
+# Issue #74 M5.8: a database write (db_write) target stage. Its $refs point at DB
+# write connection/operation keys; the chain is fetch(rest_fetch) -> [map] ->
+# write(db_write) (write is only supported from a REST fetch source).
+_WRITE_DEPS = ["rest_src_conn", "rest_src_op", "field_map", "db_w_conn", "db_w_op"]
+
+
+def _write_stage(key="target", **cfg):
+    config = {
+        "primitive": "db_write",
+        "connection_id": "$ref:db_w_conn",
+        "operation_id": "$ref:db_w_op",
+    }
+    config.update(cfg)
+    return {"key": key, "kind": "write", "config": config}
+
+
 def _sync_config(stages, dependencies, **top):
     cfg = {"process_kind": "sync_pipeline", "pipeline": {"stages": stages, "dependencies": dependencies}}
     cfg.update(top)
@@ -399,7 +415,6 @@ def test_read_stage_explicit_database_connector_type_still_accepted():
 @pytest.mark.parametrize(
     "kind,primitive,issue",
     [
-        ("write", "db_write", "#32"),
         ("lookup", "lookup", None),
         ("combine", "combine", "#103"),
         ("flow_control", "flow_control", "#111"),
@@ -746,8 +761,92 @@ def test_build_raises_on_malformed_config_bypass():
 
 
 def test_build_raises_on_reserved_kind_bypass():
-    # 'write' (db_write) remains a reserved kind (M5.6 #32) after fetch was added.
-    cfg = _sync_config([{"key": "s", "kind": "write", "config": {"primitive": "db_write"}}], [])
+    # 'lookup' remains a reserved kind (no PipelineSpec lowering) after write was
+    # added in M5.8 (#74); a direct build() that bypasses validate_config still
+    # fails cleanly instead of emitting a malformed process.
+    cfg = _sync_config([{"key": "s", "kind": "lookup", "config": {"primitive": "lookup"}}], [])
     with pytest.raises(BuilderValidationError) as exc:
         SyncPipelineBuilder.build(cfg, name="X")
     assert exc.value.error_code == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
+
+
+# ---------------------------------------------------------------------------
+# Issue #74 M5.8 — database write (db_write) target: fetch -> [map] -> write
+# ---------------------------------------------------------------------------
+
+
+def _fetch_to_write():
+    return _sync_config(
+        [_fetch_stage(), _map_stage(), _write_stage()],
+        [
+            {"from_stage": "source", "to_stage": "transform"},
+            {"from_stage": "transform", "to_stage": "target"},
+        ],
+    )
+
+
+def _fetch_to_write_no_map():
+    return _sync_config(
+        [_fetch_stage("s"), _write_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+
+
+def test_write_target_lowers_to_database_send():
+    lowered = SyncPipelineBuilder.lower_config(_fetch_to_write())
+    assert lowered["target"] == {
+        "connector_type": "database",
+        "action_type": "Send",
+        "connection_id": "$ref:db_w_conn",
+        "operation_id": "$ref:db_w_op",
+    }
+    # The fetch source still lowers to a REST GET; the map is unchanged.
+    assert lowered["source"]["connector_type"] == "rest"
+    assert lowered["transform"] == {"mode": "map_ref", "map_ref": "$ref:field_map"}
+
+
+def test_fetch_to_write_with_map_validates_clean():
+    assert _validate(_fetch_to_write(), depends_on=_WRITE_DEPS) is None
+
+
+def test_fetch_to_write_no_map_validates_clean():
+    assert _validate(_fetch_to_write_no_map(), depends_on=_WRITE_DEPS) is None
+
+
+def test_write_target_build_emits_database_send_connectoraction():
+    xml = SyncPipelineBuilder.build(_fetch_to_write_no_map(), name="API to DB Sync")
+    # Two connectoractions (REST source + DB target), no map shape.
+    assert xml.count('shapetype="connectoraction"') == 2
+    assert 'shapetype="map"' not in xml
+    # The target connectoraction emits connectorType="database" actionType="Send"
+    # (mixed-case Send preserved — not uppercased to SEND).
+    assert 'connectorType="database"' in xml
+    assert 'actionType="Send"' in xml
+    assert 'actionType="SEND"' not in xml
+
+
+def test_read_to_write_db_to_db_rejected():
+    # A write target is only supported from a REST fetch source; a read(db_read) ->
+    # write(db_write) DB-to-DB chain is out of scope and rejected.
+    cfg = _sync_config(
+        [_read_stage("s"), _write_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_WRITE_DEPS)
+    assert err is not None
+    assert err.error_code == "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED"
+
+
+def test_rest_send_on_write_stage_rejected():
+    # A write stage must declare db_write, not rest_send.
+    cfg = _sync_config(
+        [
+            _fetch_stage("s"),
+            {"key": "t", "kind": "write", "config": {"primitive": "rest_send",
+             "action_type": "POST", "connection_id": "$ref:db_w_conn", "operation_id": "$ref:db_w_op"}},
+        ],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=_WRITE_DEPS)
+    assert err is not None
+    assert err.error_code == "SYNC_PIPELINE_STAGE_UNSUPPORTED"

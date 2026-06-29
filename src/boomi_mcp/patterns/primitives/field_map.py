@@ -144,6 +144,32 @@ class MapScriptOp(BaseModel):
         return self
 
 
+class TargetProfileBinding(BaseModel):
+    """Bind the map target to a PRE-EXISTING profile instead of generating one.
+
+    Used when the target profile is materialized elsewhere — e.g. the #32
+    database Write profile emitted by the ``db_write`` primitive for the
+    ``api_to_database_sync`` preset (#74). The map then writes into that profile
+    via ``target_profile_id`` + the caller-supplied ``target_field_index`` (the
+    write profile's ``Fields/<col>`` / ``Conditions/<col>`` index), exactly the
+    way the source binds ``source_profile_id`` + ``source_field_index`` — no JSON
+    target profile is generated. Mutually exclusive with ``target_payload_profile``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_profile_id: str = Field(
+        ..., description="'$ref:KEY' to an in-spec profile or a literal profile UUID"
+    )
+    target_profile_type: _PROFILE_TYPE = Field(
+        ..., description="Profile kind of the pre-existing target (e.g. 'profile.db')"
+    )
+    target_field_index: Dict[str, Dict[str, Any]] = Field(
+        ...,
+        description="Per-leaf target index ({path: {data_type, mappable, ...}})",
+    )
+
+
 class FieldMapComponentNames(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -157,8 +183,21 @@ class FieldMapParameters(BaseModel):
 
     key_prefix: str = Field(..., description="Stable key prefix for deterministic keys")
     source: SourceBinding
-    target_payload_profile: Dict[str, Any] = Field(
-        ..., description="JSON profile tree ({format: 'json', root: {...}})"
+    target_payload_profile: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "JSON profile tree ({format: 'json', root: {...}}) — the primitive "
+            "generates a json.generated target profile from it. Mutually exclusive "
+            "with target_binding (provide exactly one)."
+        ),
+    )
+    target_binding: Optional[TargetProfileBinding] = Field(
+        default=None,
+        description=(
+            "Bind the map to a pre-existing target profile (e.g. a #32 DB write "
+            "profile) instead of generating one. Mutually exclusive with "
+            "target_payload_profile (provide exactly one)."
+        ),
     )
     direct: List[DirectOp] = Field(default_factory=list)
     map_function: List[MapFunctionOp] = Field(default_factory=list)
@@ -166,6 +205,16 @@ class FieldMapParameters(BaseModel):
     component_names: FieldMapComponentNames = Field(
         default_factory=FieldMapComponentNames
     )
+
+    @model_validator(mode="after")
+    def _require_one_target(self) -> "FieldMapParameters":
+        if bool(self.target_payload_profile) == bool(self.target_binding):
+            raise ValueError(
+                "field_map requires exactly one of target_payload_profile "
+                "(generate a JSON target profile) or target_binding (bind a "
+                "pre-existing target profile)"
+            )
+        return self
 
     @model_validator(mode="after")
     def _require_at_least_one_operation(self) -> "FieldMapParameters":
@@ -262,12 +311,27 @@ class FieldMapPrimitive(PrimitivePattern):
         route = cls._select_route(params)
         folder = context.folder_path
 
-        target_key = primitive_component_key(params.key_prefix, ROLE_TARGET_PROFILE)
         map_key = primitive_component_key(params.key_prefix, ROLE_TRANSFORM_MAP)
 
-        target_profile, target_index = cls._emit_target_profile(
-            context, params, target_key, folder
-        )
+        # Resolve the target. Either generate a JSON target profile from
+        # target_payload_profile (the default), or bind a pre-existing target
+        # profile supplied via target_binding (e.g. a #32 DB write profile, #74).
+        if params.target_binding is not None:
+            target_profile = None
+            target_index = params.target_binding.target_field_index
+            target_profile_id = params.target_binding.target_profile_id
+            target_profile_type = params.target_binding.target_profile_type
+            # The pre-existing target may be an in-spec $ref or a literal UUID;
+            # only an in-spec $ref becomes a map dependency.
+            target_dep = ref_key(target_profile_id)
+        else:
+            target_key = primitive_component_key(params.key_prefix, ROLE_TARGET_PROFILE)
+            target_profile, target_index = cls._emit_target_profile(
+                context, params, target_key, folder
+            )
+            target_profile_id = f"{_REF_PREFIX}{target_key}"
+            target_profile_type = "profile.json"
+            target_dep = target_key
 
         map_common: Dict[str, Any] = {
             "component_name": (
@@ -276,41 +340,47 @@ class FieldMapPrimitive(PrimitivePattern):
             ),
             "source_profile_id": params.source.source_profile_id,
             "source_profile_type": params.source.source_profile_type,
-            "target_profile_id": f"{_REF_PREFIX}{target_key}",
-            "target_profile_type": "profile.json",
+            "target_profile_id": target_profile_id,
+            "target_profile_type": target_profile_type,
         }
         if folder:
             map_common["folder_path"] = folder
         source_index = params.source.source_field_index
 
-        # When the source profile is referenced by $ref to an in-spec
-        # component (e.g. db_extract's read profile), the map must depend on
-        # it — build_integration rejects a map whose source/target $ref is
-        # absent from depends_on (MAP_PROFILE_REF_REQUIRED). The target
-        # profile $ref is always in-spec; the source may be a $ref or a
-        # literal (literals are not in-spec keys and so are not dependencies).
-        profile_deps = [target_key]
+        # When a profile is referenced by $ref to an in-spec component (e.g.
+        # db_extract's read profile, the generated JSON target, or a db_write
+        # write profile), the map must depend on it — build_integration rejects a
+        # map whose source/target $ref is absent from depends_on
+        # (MAP_PROFILE_REF_REQUIRED). A literal UUID is not an in-spec key and so
+        # is not a dependency.
+        profile_deps: List[str] = []
+        if target_dep:
+            profile_deps.append(target_dep)
         source_ref = ref_key(params.source.source_profile_id)
         if source_ref:
             profile_deps.append(source_ref)
+
+        # Prepend the generated target profile when one was emitted (target_binding
+        # supplies it externally, so there is nothing to prepend in that case).
+        prefix_components = [target_profile] if target_profile is not None else []
 
         if route == "direct":
             map_component = cls._emit_direct_map(
                 map_common, params, source_index, target_index, map_key, profile_deps
             )
-            return [target_profile, map_component]
+            return [*prefix_components, map_component]
 
         if route == "function":
             map_component = cls._emit_function_map(
                 map_common, params, source_index, target_index, map_key, profile_deps
             )
-            return [target_profile, map_component]
+            return [*prefix_components, map_component]
 
         # script route
         script_components, map_component = cls._emit_script_map(
             context, map_common, params, source_index, target_index, map_key, profile_deps, folder
         )
-        return [target_profile, *script_components, map_component]
+        return [*prefix_components, *script_components, map_component]
 
     # ------------------------------------------------------------------
     # Route selection

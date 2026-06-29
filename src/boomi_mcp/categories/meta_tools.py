@@ -6623,12 +6623,13 @@ _PROCESS_FLOW_PROTOCOLS = {
             "Verified-linear process builder (issue #70 M5.2). Takes a semantic "
             "M5.1 PipelineSpec (issue #69) stage graph and lowers the all-"
             "'ordering' linear subset — read(db_read) | fetch(rest_fetch) -> [map] "
-            "-> send(rest_send) -> stop — into the proven database_to_api_sync "
+            "-> send(rest_send) -> stop, or (M5.8 #74) fetch(rest_fetch) -> [map] "
+            "-> write(db_write) -> stop — into the proven database_to_api_sync "
             "source/transform/target config. The source is a DB Get (read) or a "
-            "REST GET (fetch, M5.4 #72); it adds NO new shape: the emitted XML is "
-            "identical to the equivalent database_to_api_sync process. Routed via "
-            "build_integration when a type='process' component carries "
-            "config.process_kind='sync_pipeline'."
+            "REST GET (fetch, M5.4 #72); the target is a REST send or a database "
+            "Send/write (write, M5.8 #74, via the #32 write-profile / Send-operation "
+            "builders); it adds NO new shape. Routed via build_integration when a "
+            "type='process' component carries config.process_kind='sync_pipeline'."
         ),
         "required_fields": [
             "process_kind",
@@ -6652,11 +6653,10 @@ _PROCESS_FLOW_PROTOCOLS = {
             "pipeline.stages[].config.map_ref",
             "pipeline.stages[].config.label",
         ],
-        "supported_stage_kinds": ["read", "fetch", "map", "send"],
+        "supported_stage_kinds": ["read", "fetch", "map", "send", "write"],
         "supported_edge_kinds": ["ordering"],
         "supported_terminal_shapes": ["stop"],
         "reserved_stage_kinds": {
-            "write": "db_write DB target — reserved for M5.6 (issue #32).",
             "lookup": "reserved (modeled in M5.1 #69, no emitter yet).",
             "combine": "reserved; combine/control-flow emitters owned by M10 (#103).",
             "flow_control": "no PipelineSpec lowering; Flow Control shape emittable via process_config.flow_control block (M10.7, issue #111).",
@@ -6669,10 +6669,11 @@ _PROCESS_FLOW_PROTOCOLS = {
         },
         "field_notes": {
             "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
-            "pipeline.stages[].kind": "One of read/fetch/map/send. The source is exactly one of read (DB Get) or fetch (REST GET); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
-            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' for a fetch stage, 'map' for a map stage, 'rest_send' for a send stage. The reserved 'db_write' primitive is rejected with its owning-issue hint; 'rest_fetch' on a non-fetch stage is rejected with a hint to use a fetch stage.",
-            "pipeline.stages[].config": "read/fetch/send carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
+            "pipeline.stages[].kind": "One of read/fetch/map/send/write. The source is exactly one of read (DB Get) or fetch (REST GET); the target is send (REST) or write (DB Send, M5.8 #74 — from a fetch source); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
+            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' for a fetch stage, 'map' for a map stage, 'rest_send' for a send stage, 'db_write' for a write stage (M5.8 #74). A primitive on the wrong stage (e.g. 'db_write' on a 'send' stage, or 'rest_fetch' on a non-fetch stage) is rejected with a hint pointing at the right stage.",
+            "pipeline.stages[].config": "read/fetch/send/write carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
             "fetch": "A fetch stage (config.primitive='rest_fetch') is a static REST GET source (M5.4 #72). It carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body). The operation's param/header/path SLOTS are modeled on the rest_fetch primitive; the runtime binding that fills those slots with per-document values via dynamicProperties is owned by #96 (M5.4a). action_type defaults to 'GET' and must be 'GET' (GET-only in M5.4).",
+            "write": "A write stage (config.primitive='db_write') is a database Send/write target (M5.8 #74, api_to_database_sync) — supported only from a fetch source. It lowers to a database connector binding (connectorType='database', actionType='Send'); action_type defaults to 'Send'. The write profile + Send operation are built by the confirmed #32 builders, so unconfirmed write-profile statement_type variants (e.g. 'upsert') are rejected (UNSUPPORTED_DB_STATEMENT_TYPE) when the components are built.",
             "pipeline.stages[].config.map_ref": "The map component id or a $ref:KEY token. Its reachability is enforced (MISSING_PROCESS_DEPENDENCY if the $ref key is not in depends_on), but its component TYPE is not type-checked at plan time — matching database_to_api_sync's transform.map_ref. A shared map-ref role check is a future concern.",
             "pipeline.dependencies": "Typed edges; sync_pipeline requires every edge to be edge_kind='ordering' (the default). The chain must be a single read -> [map] -> send path with no fan-out/fan-in.",
             "gated_blocks": "reliability (Try/Catch retry+DLQ), branch, process_calls, and return_documents are GATED for sync_pipeline — it is verified-linear only (M5.2). Use database_to_api_sync (reliability/dynamic path) or wrapper_subprocess (Process Calls) instead.",
@@ -6705,8 +6706,8 @@ _PROCESS_FLOW_PROTOCOLS = {
             "as for database_to_api_sync — the lowered config funnels through the same "
             "ref-type and reachability checks.",
             "Reserved stage kinds and gated blocks fail at PLAN time before any Boomi "
-            "mutation, each with a hint naming the owning issue (#32 for write, "
-            "M10/#103 for control flow).",
+            "mutation, each with a hint naming the owning issue (M10/#103 for control "
+            "flow). The write (db_write) DB target is supported as of M5.8 (#74).",
             "A fetch source (rest_fetch) models the REST operation param/header/path "
             "SLOTS only; the runtime process-step binding that fills those slots with "
             "per-document values via dynamicProperties is owned by #96 (M5.4a) and is "

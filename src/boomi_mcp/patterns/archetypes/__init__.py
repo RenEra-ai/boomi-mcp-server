@@ -4,6 +4,10 @@ from .api_to_api_sync import (
     ApiToApiSyncArchetype,
     ApiToApiSyncParameters,
 )
+from .api_to_database_sync import (
+    ApiToDatabaseSyncArchetype,
+    ApiToDatabaseSyncParameters,
+)
 from .database_to_api_sync import (
     DatabaseToApiSyncArchetype,
     DatabaseToApiSyncParameters,
@@ -16,6 +20,8 @@ from .stub_minimal import (
 __all__ = [
     "ApiToApiSyncArchetype",
     "ApiToApiSyncParameters",
+    "ApiToDatabaseSyncArchetype",
+    "ApiToDatabaseSyncParameters",
     "DatabaseToApiSyncArchetype",
     "DatabaseToApiSyncParameters",
     "StubMinimalIntegrationArchetype",

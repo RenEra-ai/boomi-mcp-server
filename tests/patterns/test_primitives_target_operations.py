@@ -29,6 +29,7 @@ from boomi_mcp.categories.components.builders.profile_builder import (
 from boomi_mcp.patterns.base import PatternKind, PrimitiveBuildContext
 from boomi_mcp.patterns.primitives import (
     DbExtractPrimitive,
+    DbWritePrimitive,
     DlqWriterPrimitive,
     ErrorClassifierPrimitive,
     FieldMapPrimitive,
@@ -37,6 +38,7 @@ from boomi_mcp.patterns.primitives import (
     ScheduleEnvelopePrimitive,
     WatermarkStatePrimitive,
 )
+from boomi_mcp.patterns.primitives.db_write import DbWriteProfileParams
 from boomi_mcp.patterns.registry import PatternRegistry
 
 _NEW_PRIMITIVES = [
@@ -1199,3 +1201,119 @@ class TestRestSendRuntimeBindings:
         )
         assert op.config["path"] == "/clients/C-42"
         assert "path_replacements" not in op.config
+
+
+# ===========================================================================
+# db_write (issue #74 M5.8) — database write target primitive
+# ===========================================================================
+
+
+def _db_write_params(**overrides):
+    params = {
+        "key_prefix": "tgt",
+        "connection": {
+            "mode": "create",
+            "driver_id": "mysql",
+            "auth_mode": "username_password",
+            "host": "db.invalid",
+            "username": "svc",
+            "credential_ref": "credential://db",
+            "dbname": "warehouse",
+        },
+        "write_profile": {
+            "statement_type": "dynamicinsert",
+            "table_name": "customers",
+            "fields": [
+                {"name": "id", "data_type": "character", "mandatory": True},
+                {"name": "amount", "data_type": "number"},
+            ],
+        },
+    }
+    params.update(overrides)
+    return params
+
+
+class TestDbWriteComponents:
+    def test_registry_discovers_db_write(self):
+        reg = PatternRegistry.from_package("boomi_mcp.patterns")
+        cls = reg.get("db_write")
+        assert cls.metadata.kind == PatternKind.PRIMITIVE
+
+    def test_describe_hygiene_and_required_builders(self):
+        described = DbWritePrimitive.describe()
+        for key in ("metadata", "parameter_schema", "output_contract", "required_builders"):
+            assert key in described
+        assert set(described["required_builders"]) == {
+            "DatabaseConnectorBuilder",
+            "DatabaseWriteProfileBuilder",
+            "DatabaseSendOperationBuilder",
+        }
+        for archetype_only in ("capability_notes", "limitations", "examples"):
+            assert archetype_only not in described
+        dumped = json.dumps(described)
+        for forbidden in ("<bns:", "<?xml", "INSERT INTO", "SELECT ", "```"):
+            assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
+
+    def test_create_emits_connection_profile_operation(self):
+        comps = _emit(DbWritePrimitive, _db_write_params())
+        assert [c.key for c in comps] == [
+            "tgt_db_connection",
+            "tgt_db_write_profile",
+            "tgt_db_write_operation",
+        ]
+        assert [c.type for c in comps] == [
+            "connector-settings",
+            "profile.db",
+            "connector-action",
+        ]
+        conn, profile, op = comps
+        assert conn.config["connector_type"] == "database"
+        assert profile.config["profile_type"] == "database.write"
+        assert profile.config["statement_type"] == "dynamicinsert"
+        assert op.config["operation_mode"] == "send"
+        assert op.config["write_profile_id"] == "$ref:tgt_db_write_profile"
+        assert op.config["connection_ref_key"] == "tgt_db_connection"
+        # The Send op depends on both the connection and the write profile.
+        assert set(op.depends_on) == {"tgt_db_connection", "tgt_db_write_profile"}
+
+    def test_reuse_connection_is_reference_only(self):
+        comps = _emit(
+            DbWritePrimitive,
+            _db_write_params(connection={"mode": "reuse", "component_id": "<<db conn>>"}),
+        )
+        conn = comps[0]
+        assert conn.config["reference_only"] is True
+        assert conn.config["connector_type"] == "database"
+        assert conn.component_id == "<<db conn>>"
+
+    def test_field_index_exposes_namespace_prefixed_paths(self):
+        wp = DbWriteProfileParams(
+            statement_type="dynamicupdate",
+            table_name="t",
+            fields=[{"name": "amount", "data_type": "number"}],
+            conditions=[{"name": "id", "data_type": "number"}],
+        )
+        idx = DbWritePrimitive.build_field_index(wp)
+        assert set(idx.keys()) == {"Fields/amount", "Conditions/id"}
+        assert idx["Fields/amount"]["mappable"] is True
+        assert idx["Conditions/id"]["required"] is True
+
+    def test_unsupported_statement_type_rejected_by_builder(self):
+        with pytest.raises(BuilderValidationError) as exc:
+            _emit(DbWritePrimitive, _db_write_params(
+                write_profile={
+                    "statement_type": "upsert",
+                    "table_name": "t",
+                    "fields": [{"name": "id", "data_type": "character"}],
+                },
+            ))
+        assert exc.value.error_code == "UNSUPPORTED_DB_STATEMENT_TYPE"
+
+    def test_emitted_components_pass_build_plan(self):
+        comps = _emit(DbWritePrimitive, _db_write_params())
+        plan = _plan(comps)
+        assert plan["_success"] is True, plan
+        # Topo order: connection + write profile before the Send operation.
+        order = plan["execution_order"]
+        assert order.index("tgt_db_connection") < order.index("tgt_db_write_operation")
+        assert order.index("tgt_db_write_profile") < order.index("tgt_db_write_operation")

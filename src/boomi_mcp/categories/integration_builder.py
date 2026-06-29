@@ -987,6 +987,10 @@ def _classify_connector_action(
         )
         if mode_lower == "get" or action_lower == "get":
             return ("database connector-action Get", None)
+        # Issue #74 M5.8: a database Send (write) operation is the db_write target
+        # of an api_to_database_sync sync_pipeline.
+        if mode_lower == "send" or action_lower == "send":
+            return ("database connector-action Send", None)
         return ("database connector-action <other>", None)
 
     if _resolve_rest_connector_type(connector_type) is not None:
@@ -1614,10 +1618,23 @@ def _check_process_flow_ref_types(
             ("source.connection_id", source.get("connection_id"), "database connector-settings"),
             ("source.operation_id", source.get("operation_id"), "database connector-action Get"),
         ]
-    slot_rules = source_rules + [
-        ("target.connection_id", target.get("connection_id"), "REST Client connector-settings"),
-        ("target.operation_id", target.get("operation_id"), "REST Client connector-action"),
-    ]
+    # The target is a REST Client (rest_send) OR — for an API-to-DB sync_pipeline
+    # write stage (M5.8 #74) — a database Send (db_write). Dispatch the two target
+    # slot rules on target.connector_type so a DB write target's $refs are
+    # type-checked against the database roles, not the REST roles. A REST target
+    # (database_to_api_sync, api_to_api_sync) stays REST-checked.
+    target_is_rest = _resolve_rest_connector_type(target.get("connector_type")) is not None
+    if target_is_rest:
+        target_rules = [
+            ("target.connection_id", target.get("connection_id"), "REST Client connector-settings"),
+            ("target.operation_id", target.get("operation_id"), "REST Client connector-action"),
+        ]
+    else:
+        target_rules = [
+            ("target.connection_id", target.get("connection_id"), "database connector-settings"),
+            ("target.operation_id", target.get("operation_id"), "database connector-action Send"),
+        ]
+    slot_rules = source_rules + target_rules
     # Issue #51 M3.R1a: the DLQ catch-leg bindings are $ref-resolvable too, so
     # type-check them with the same discipline as source/target. Gate each rule
     # on the active dlq.mode — a stray cross-mode binding (e.g. a process_id set
@@ -1734,6 +1751,14 @@ def _check_process_flow_ref_types(
         if expected_role == "database connector-settings":
             ok = _classify_connector_settings(target_comp) == expected_role
         elif expected_role == "database connector-action Get":
+            role, _ = _classify_connector_action(target_comp)
+            ok = role == expected_role
+        elif expected_role == "database connector-action Send":
+            # Issue #74 M5.8: the db_write target operation_id must resolve to a
+            # database Send connector-action (a swapped REST op / write profile /
+            # connection is rejected). The REST-only method/action_type consistency
+            # capture below only fires in the REST branch, so a DB Send target
+            # correctly skips the HTTP-method check.
             role, _ = _classify_connector_action(target_comp)
             ok = role == expected_role
         elif expected_role == "REST Client connector-settings":

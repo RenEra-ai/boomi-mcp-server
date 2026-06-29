@@ -2948,6 +2948,14 @@ def _stub_dep_comp(key, *, role=None, method="POST"):
             component_id=stub_id, name=name,
             config={"connector_type": "database", "operation_mode": "get", "name": name},
         )
+    if role == "database connector-action Send":
+        # Issue #74 M5.8: a database Send (write) operation — the db_write target
+        # of an api_to_database_sync sync_pipeline.
+        return IntegrationComponentSpec(
+            key=key, type="connector-action", action="update",
+            component_id=stub_id, name=name,
+            config={"connector_type": "database", "operation_mode": "send", "name": name},
+        )
     if role == "REST Client connector-settings":
         return IntegrationComponentSpec(
             key=key, type="connector-settings", action="update",
@@ -7091,24 +7099,6 @@ class TestBuildPlanSyncPipeline:
         assert ve["details"]["actual_role"] == "PATCH"
 
     @patch(_PATCH_TARGET)
-    def test_reserved_write_kind_errors_at_plan(self, mock_pag):
-        # 'write' (db_write) remains a reserved kind (M5.6 #32) after fetch was
-        # promoted to a supported source kind (#72).
-        mock_pag.return_value = []
-        comp = IntegrationComponentSpec(
-            key="main_process", type="process", action="create", name="Bad",
-            config={"process_kind": "sync_pipeline", "pipeline": {
-                "stages": [{"key": "s", "kind": "write", "config": {"primitive": "db_write"}}],
-                "dependencies": [],
-            }},
-            depends_on=[],
-        )
-        plan = _build_plan(MagicMock(), _build_config([comp]))
-        step = next(s for s in plan["steps"] if s["key"] == "main_process")
-        assert step["planned_action"] == "error_process_validation"
-        assert step["validation_error"]["error_code"] == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
-
-    @patch(_PATCH_TARGET)
     def test_topo_order_places_sync_pipeline_after_deps(self, mock_pag):
         mock_pag.return_value = []
         components = [_sync_pipeline_comp()] + _sync_deps()
@@ -7214,6 +7204,116 @@ class TestBuildPlanSyncPipelineRestFetch:
         assert ve["field"] == "source.action_type"
         assert ve["details"]["expected_role"] == "POST"
         assert ve["details"]["actual_role"] == "GET"
+
+
+# ---------------------------------------------------------------------------
+# Issue #74 M5.8 — REST fetch -> map -> database write (db_write) plan-time checks
+# ---------------------------------------------------------------------------
+
+
+def _rest_fetch_to_db_write_config(*, target_overrides=None, **top):
+    fetch_cfg = {
+        "primitive": "rest_fetch",
+        "connection_id": "$ref:rest_src_connection",
+        "operation_id": "$ref:rest_src_operation",
+    }
+    write_cfg = {
+        "primitive": "db_write",
+        "connection_id": "$ref:target_db_connection",
+        "operation_id": "$ref:target_db_operation",
+    }
+    write_cfg.update(target_overrides or {})
+    stages = [
+        {"key": "source", "kind": "fetch", "config": fetch_cfg},
+        {"key": "transform", "kind": "map", "config": {"primitive": "map", "map_ref": "$ref:field_map"}},
+        {"key": "target", "kind": "write", "config": write_cfg},
+    ]
+    deps = [
+        {"from_stage": "source", "to_stage": "transform"},
+        {"from_stage": "transform", "to_stage": "target"},
+    ]
+    cfg = {"process_kind": "sync_pipeline", "pipeline": {"stages": stages, "dependencies": deps}}
+    cfg.update(top)
+    return cfg
+
+
+def _rest_fetch_to_db_write_comp(target_overrides=None):
+    return IntegrationComponentSpec(
+        key="main_process", type="process", action="create", name="API to DB Sync",
+        config=_rest_fetch_to_db_write_config(target_overrides=target_overrides),
+        depends_on=[
+            "rest_src_connection", "rest_src_operation", "field_map",
+            "target_db_connection", "target_db_operation",
+        ],
+    )
+
+
+def _rest_fetch_to_db_write_deps():
+    return [
+        _stub_dep_comp("rest_src_connection", role="REST Client connector-settings"),
+        _stub_dep_comp("rest_src_operation", role="REST Client connector-action", method="GET"),
+        # The REST connector-action stub hardcodes a depends_on/connection_ref_key
+        # of "target_rest_connection"; include it (inert here) so that dependency
+        # resolves, mirroring the M5.4 rest-fetch deps.
+        _stub_dep_comp("target_rest_connection", role="REST Client connector-settings"),
+        _map_stub("field_map"),
+        _stub_dep_comp("target_db_connection", role="database connector-settings"),
+        _stub_dep_comp("target_db_operation", role="database connector-action Send"),
+    ]
+
+
+class TestBuildPlanSyncPipelineDbWrite:
+    """Plan-time validation for the M5.8 database write target (#74)."""
+
+    @patch(_PATCH_TARGET)
+    def test_valid_rest_fetch_to_db_write_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        components = _rest_fetch_to_db_write_deps() + [_rest_fetch_to_db_write_comp()]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        assert plan["_success"] is True, plan
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "create"
+        assert step["route"] == "process_flow_xml"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_swapped_db_write_target_refs_surface_type_mismatch(self, mock_pag):
+        # target.operation_id resolves to the database connection (a connector-
+        # settings, not a Send connector-action) -> PROCESS_REF_TYPE_MISMATCH on the
+        # database connector-action Send role.
+        mock_pag.return_value = []
+        comp = _rest_fetch_to_db_write_comp(target_overrides={
+            "connection_id": "$ref:target_db_operation",
+            "operation_id": "$ref:target_db_connection",
+            "primitive": "db_write",
+        })
+        components = _rest_fetch_to_db_write_deps() + [comp]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "target.connection_id"
+        assert ve["details"]["expected_role"] == "database connector-settings"
+
+    @patch(_PATCH_TARGET)
+    def test_db_write_target_op_pointing_at_rest_op_rejected(self, mock_pag):
+        # target.operation_id resolving to a REST connector-action (not a database
+        # Send) is rejected — the DB target slot expects a database Send.
+        mock_pag.return_value = []
+        deps = [
+            _stub_dep_comp("rest_src_connection", role="REST Client connector-settings"),
+            _stub_dep_comp("rest_src_operation", role="REST Client connector-action", method="GET"),
+            _stub_dep_comp("target_rest_connection", role="REST Client connector-settings"),
+            _map_stub("field_map"),
+            _stub_dep_comp("target_db_connection", role="database connector-settings"),
+            # The "Send" op slot instead resolves to a REST Client connector-action.
+            _stub_dep_comp("target_db_operation", role="REST Client connector-action", method="POST"),
+        ]
+        components = deps + [_rest_fetch_to_db_write_comp()]
+        plan = _build_plan(MagicMock(), _build_config(components))
+        ve = next(s for s in plan["steps"] if s["key"] == "main_process")["validation_error"]
+        assert ve["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
+        assert ve["field"] == "target.operation_id"
+        assert ve["details"]["expected_role"] == "database connector-action Send"
 
 
 class TestBuildPlanFlowSequenceRefTypes:

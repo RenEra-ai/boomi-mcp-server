@@ -606,16 +606,22 @@ def test_sync_pipeline_protocol_documented():
         "pipeline.stages[].config.primitive",
     ):
         assert field in result["required_fields"], field
-    # The verified-linear surface: read|fetch source -> [map] -> send (issue #72
-    # M5.4 added the REST fetch source).
-    assert result["supported_stage_kinds"] == ["read", "fetch", "map", "send"]
+    # The verified-linear surface: read|fetch source -> [map] -> send|write (issue
+    # #72 M5.4 added the REST fetch source; issue #74 M5.8 added the db_write DB
+    # target).
+    assert result["supported_stage_kinds"] == ["read", "fetch", "map", "send", "write"]
     assert result["supported_edge_kinds"] == ["ordering"]
     assert result["supported_terminal_shapes"] == ["stop"]
-    # fetch is now supported (not reserved); the remaining reserved kinds point at
-    # their owning issues.
+    # fetch and write are now supported (not reserved); the remaining reserved
+    # kinds point at their owning issues.
     reserved = result["reserved_stage_kinds"]
     assert "fetch" not in reserved
-    assert "#32" in reserved["write"]
+    assert "write" not in reserved
+    # The write (db_write) DB target is documented as a supported write-stage
+    # primitive, referencing the #32 builders it routes through.
+    serialized_doc = json.dumps(result["field_notes"]) + json.dumps(result["notes"])
+    assert "db_write" in serialized_doc
+    assert "#74" in serialized_doc
     # Issue #111 M10.7: flow_control's reserved wording flipped to the
     # emittable-via-process_config form (mirrors the decision flip).
     assert "process_config.flow_control" in reserved["flow_control"]

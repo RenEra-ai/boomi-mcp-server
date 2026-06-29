@@ -48,6 +48,15 @@ ROLE_REST_OPERATION = "rest_operation"
 ROLE_REST_SOURCE_CONNECTION = "rest_source_connection"
 ROLE_REST_SOURCE_OPERATION = "rest_source_operation"
 
+# Issue #74 — DB *target* (write) component roles for the db_write primitive /
+# api_to_database_sync preset. Distinct from the DB *source* roles
+# (db_connection/db_read_profile/db_get_operation) so an API-to-DB flow that
+# emits a db_write target stays collision-free, and so a future read+write flow
+# under one key_prefix produces unique component keys for both. The shared
+# connection reuses ROLE_DB_CONNECTION (a write group has exactly one connection).
+ROLE_DB_WRITE_PROFILE = "db_write_profile"
+ROLE_DB_WRITE_OPERATION = "db_write_operation"
+
 
 # Error code raised when a source field data type has no script.mapping input
 # equivalent. Lives here (not in profile_generation) because the bridge is a
