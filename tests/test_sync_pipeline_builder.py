@@ -872,6 +872,32 @@ def test_send_stage_forced_to_database_connector_type_rejected():
     assert "send stage" in str(err)
 
 
+def test_build_raises_on_non_send_write_bypass():
+    # build() bypasses validate_config; the Send-only db_write constraint lives in
+    # lowering, so a direct build() of a write stage with an explicit wrong
+    # action_type still fails cleanly instead of emitting a database target step
+    # with actionType="Get" (#74 review — mirror of the fetch GET-only bypass guard).
+    cfg = _sync_config(
+        [_fetch_stage("s"), _write_stage("t", action_type="Get")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    with pytest.raises(BuilderValidationError) as exc:
+        SyncPipelineBuilder.build(cfg, name="X")
+    assert exc.value.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+
+
+def test_explicit_send_write_action_type_accepted():
+    # An explicit action_type='Send' on a write stage is identical to omitting it
+    # (the default) — lowering accepts it and validates clean.
+    cfg = _sync_config(
+        [_fetch_stage("s"), _write_stage("t", action_type="Send")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    assert _validate(cfg, depends_on=_WRITE_DEPS) is None
+    lowered = SyncPipelineBuilder.lower_config(cfg)
+    assert lowered["target"]["action_type"] == "Send"
+
+
 def test_write_stage_forced_to_rest_connector_type_rejected():
     # Symmetrically, a write stage forced to connector_type='rest' (which would
     # lower to a REST target) is rejected — a write stage is database-only.

@@ -6390,6 +6390,26 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                     field=f"pipeline.stages[{stage.key}].config.action_type",
                     hint="A fetch source is a REST GET; other verbs model a source-side write, which is out of scope.",
                 )
+        # A write (db_write) target is Send-only (#74 M5.8) — the mirror of the
+        # fetch GET-only guard. Enforce it HERE in the shared lowering so both
+        # validate_config AND a direct build() stay total: build() delegates to
+        # ProcessFlowBuilder.build() WITHOUT re-running _validate_db_target_binding,
+        # so an explicit non-Send write action (e.g. action_type='Get') caught only
+        # by the validator would otherwise emit a malformed database target step
+        # (connectorType='database' actionType='Get') on the validate_config-bypass
+        # path. Match the validator's exact-'Send' contract (case-sensitive, like
+        # the DB 'Get' source verb). The None check is defensive — null already
+        # resolved to 'Send' above.
+        if stage.kind == "write":
+            action_value = binding["action_type"]
+            if action_value is None or str(action_value).strip() != "Send":
+                raise BuilderValidationError(
+                    f"sync_pipeline write stage {stage.key!r} action_type must be "
+                    f"'Send' (db_write is a database Send target, #74 M5.8); got {action_value!r}.",
+                    error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                    field=f"pipeline.stages[{stage.key}].config.action_type",
+                    hint="A write target is a database Send; other verbs are not valid for db_write.",
+                )
         if "label" in stage.config:
             binding["label"] = stage.config["label"]
         return binding
