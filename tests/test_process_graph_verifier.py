@@ -392,6 +392,36 @@ def test_terminal_return_documents_is_clean():
     assert result["errors"] == [], result["errors"]
 
 
+def test_terminal_shape_with_outbound_edge_is_error():
+    """An always-terminal shape that carries an outbound dragpoint is malformed.
+
+    `returndocuments -> message -> exception` reaches no Stop, so the #102 C2a
+    reachability check stays silent, yet Return Documents ends the path and must
+    not have an outbound edge — the verifier must flag it on its own.
+    """
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="returndocuments_icon" name="shape2" shapetype="returndocuments" x="2" y="1">'
+        '<configuration/>'
+        '<dragpoints><dragpoint name="d2" toShape="shape3" x="3" y="2"/></dragpoints></shape>'
+        '<shape image="message_icon" name="shape3" shapetype="message" x="3" y="1">'
+        '<configuration/>'
+        '<dragpoints><dragpoint name="d3" toShape="shape4" x="4" y="2"/></dragpoints></shape>'
+        '<shape image="exception_icon" name="shape4" shapetype="exception" x="4" y="1">'
+        '<configuration/><dragpoints/></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "TERMINAL_SHAPE_HAS_OUTBOUND" in codes
+    assert "RETURN_DOCS_STOP_EXCLUSIVE" not in codes  # no downstream Stop reached
+    bad = [e for e in result["errors"] if e["code"] == "TERMINAL_SHAPE_HAS_OUTBOUND"]
+    assert bad[0]["shape"] == "shape2"
+
+
 def test_control_branch_bare_stop_is_warning():
     """Issue #102 C2b: a Decision/Route/Try-Catch branch wired straight into a
     Stop drops rejected documents untraceably — a warning (intentional drops are

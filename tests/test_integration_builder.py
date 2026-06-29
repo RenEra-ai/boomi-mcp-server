@@ -1415,6 +1415,27 @@ class TestBuildPlanDatabaseGetOperationPreflight:
         assert op_step["planned_action"] == "error_database_validation"
         assert op_step["validation_error"]["error_code"] == "UNSUPPORTED_DB_GET_FIELD"
 
+    @patch(_PATCH_TARGET)
+    def test_read_profile_ref_pointing_at_write_profile_is_type_mismatch(self, mock_pag):
+        # Mirror of the Send-side guard: since issue #32/#74 registered
+        # database.write as a profile.db subtype, the coarse profile.db check
+        # alone would accept a write profile for read_profile_id and emit a
+        # <ReadProfile> bound to a DB write profile. A $ref to a WRITE profile
+        # (not a read profile) must be rejected on the Get side too.
+        mock_pag.return_value = []
+        write_profile = _db_write_profile_comp(key="db_read_profile",
+                                               name="Mislabeled Profile")
+        comp = _db_get_op_comp()
+        plan = _build_plan(MagicMock(), _build_config([
+            _db_comp(),
+            write_profile,
+            comp,
+        ]))
+        op_step = next(s for s in plan["steps"] if s["key"] == "db_query_operation")
+        assert op_step["planned_action"] == "error_database_validation"
+        assert op_step["validation_error"]["error_code"] == "DB_REF_TYPE_MISMATCH"
+        assert op_step["validation_error"]["field"] == "read_profile_id"
+
 
 class TestBuildPlanDatabaseSendOperationPreflight:
     """Issue #32 — preflight contract for connector-action + database.send."""
@@ -3760,7 +3781,7 @@ class TestBuildPlanDatabaseGetRefTypes:
         assert op_step["planned_action"] == "error_database_validation"
         assert ve["error_code"] == "DB_REF_TYPE_MISMATCH"
         assert ve["field"] == "read_profile_id"
-        assert ve["details"]["expected_role"] == "profile.db"
+        assert ve["details"]["expected_role"] == "profile.db (database read)"
         # actual_role reflects the database connector-settings classification.
         assert "database connector-settings" in ve["details"]["actual_role"]
 

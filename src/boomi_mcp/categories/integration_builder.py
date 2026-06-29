@@ -1290,20 +1290,30 @@ def _check_database_get_dependencies(
             )
         if components_by_key is not None:
             target = components_by_key.get(ref_key)
-            if target is not None and _classify_profile(target) != "profile.db":
+            # Issue #74 review: database.write is a registered profile.db
+            # subtype, so the coarse profile.db check alone would accept a write
+            # profile here and emit a <ReadProfile> bound to it. Mirror the
+            # Send-side fine-grained guard and reject write profiles too.
+            if target is not None and (
+                _classify_profile(target) != "profile.db"
+                or _is_database_write_profile_target(target)
+            ):
                 actual_role = _format_actual_role(target)
                 return BuilderValidationError(
                     f"read_profile_id $ref target {ref_key!r} must reference a "
-                    f"profile.db component (got {actual_role})",
+                    f"database read profile (profile.db that is not "
+                    f"profile_type='database.write'); got {actual_role}",
                     error_code="DB_REF_TYPE_MISMATCH",
                     field="read_profile_id",
                     hint=(
-                        "Point read_profile_id at a profile.db component "
-                        "declared earlier in the spec."
+                        "Point read_profile_id at a profile.db read profile "
+                        "(database.read / database.stored_procedure_read) "
+                        "declared earlier in the spec; a write profile "
+                        "(database.write) is not valid here."
                     ),
                     details={
                         "ref_key": ref_key,
-                        "expected_role": "profile.db",
+                        "expected_role": "profile.db (database read)",
                         "actual_role": actual_role,
                     },
                 )

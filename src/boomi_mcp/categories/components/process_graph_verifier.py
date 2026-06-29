@@ -44,6 +44,13 @@ from typing import Any, Dict, List, Optional
 # exactly what this pass verifies.
 _TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "doccacheload", "exception"})
 
+# Shape types that ALWAYS end the path — an outbound dragpoint to a real shape
+# is malformed (documents would flow past a terminal). Narrower than
+# ``_TERMINAL_SHAPE_TYPES``: ``doccacheload`` is excluded because a Document
+# Cache load can legitimately continue downstream in hand-authored/live XML,
+# and ``processcall`` is conditionally terminal (handled by ``_is_terminal``).
+_ALWAYS_TERMINAL_SHAPE_TYPES = frozenset({"stop", "returndocuments", "exception"})
+
 # Shape types whose outputs are explicit branch outputs that must be wired.
 _BRANCHING_SHAPE_TYPES = frozenset({"branch", "decision", "route"})
 
@@ -338,6 +345,31 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                     stype,
                     f"Non-terminal shape '{name}' ({stype or 'unknown'}) has no outbound path.",
                     f"Wire '{name}' to a next shape, or make it a terminal shape (stop/returndocuments).",
+                )
+            )
+
+    # ------------------------------------------------------------------
+    # Pass 2a — always-terminal shapes must not carry an outbound edge.
+    # ------------------------------------------------------------------
+    # ``stop`` / ``returndocuments`` / ``exception`` end the path. An outbound
+    # dragpoint to a real shape means documents flow past a terminal, which is
+    # malformed even when no downstream Stop is reached (so the #102 C2a
+    # reachability check below stays silent). The builder always emits these
+    # with an empty ``<dragpoints/>``, so this never fires on builder output.
+    for shape in shape_elems:
+        name = shape.get("name") or ""
+        stype = _shape_type(shape)
+        outbound = edges.get(name)
+        if stype in _ALWAYS_TERMINAL_SHAPE_TYPES and outbound:
+            errors.append(
+                _issue(
+                    "TERMINAL_SHAPE_HAS_OUTBOUND",
+                    name,
+                    stype,
+                    f"Terminal shape '{name}' ({stype}) has an outbound edge to "
+                    f"{', '.join(outbound)}; terminal shapes end the path.",
+                    f"Remove the outbound dragpoint from '{name}', or replace "
+                    f"'{name}' with a non-terminal shape if the path must continue.",
                 )
             )
 
