@@ -5381,9 +5381,9 @@ _SCRIPT_DATAPROCESS_AUTHORING_SCHEMA = {
     "skeleton": (
         "import com.boomi.execution.ExecutionUtil\n"
         "\n"
-        "dataContext.dataCount.times { i ->\n"
-        "    def stream = dataContext.getStream(i)\n"
-        "    def props = dataContext.getProperties(i)\n"
+        "for (int i = 0; i < dataContext.getDataCount(); i++) {\n"
+        "    InputStream is = dataContext.getStream(i)\n"
+        "    Properties props = dataContext.getProperties(i)\n"
         "    // read a dynamic document property (note the required prefix):\n"
         "    //   props.getProperty('document.dynamic.userdefined.DDP_NAME')\n"
         "    // write one only when the value is not null:\n"
@@ -5391,7 +5391,7 @@ _SCRIPT_DATAPROCESS_AUTHORING_SCHEMA = {
         "    // read/write a dynamic process property:\n"
         "    //   ExecutionUtil.getDynamicProcessProperty('DPP_NAME')\n"
         "    //   ExecutionUtil.setDynamicProcessProperty('DPP_NAME', String.valueOf(n), false)\n"
-        "    dataContext.storeStream(stream, props)  // required, or the document is dropped\n"
+        "    dataContext.storeStream(is, props)  // required, or the document is dropped\n"
         "}\n"
     ),
     "rules": [

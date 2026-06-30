@@ -196,6 +196,9 @@ def test_script_dataprocess_schema_returns_authoring_contract():
         "search_boomi_docs",
     ):
         assert token in blob, token
+    # The copyable skeleton must use the canonical dataContext.getDataCount()
+    # loop (what the official docs and real scripts use), not a closure variant.
+    assert "dataContext.getDataCount()" in result["skeleton"]
     assert "groovy_compiles_first_execution" in result["related_gotchas"]
     for gid in (
         "groovy_dataprocess_storestream_required",
