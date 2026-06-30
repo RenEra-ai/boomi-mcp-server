@@ -61,6 +61,10 @@ MAP_FUNCTION_INPUT_COUNT_MISMATCH = "MAP_FUNCTION_INPUT_COUNT_MISMATCH"
 MAP_FUNCTION_PARAMETER_MISSING = "MAP_FUNCTION_PARAMETER_MISSING"
 MAP_FUNCTION_PARAMETER_INVALID = "MAP_FUNCTION_PARAMETER_INVALID"
 UNSUPPORTED_MATH_OPERATION = "UNSUPPORTED_MATH_OPERATION"
+# A defined_process_property_* function references a Process Property
+# component via a $ref that is missing, not declared in depends_on, or whose
+# referenced component is not a processproperty.
+MAP_FUNCTION_COMPONENT_REF_REQUIRED = "MAP_FUNCTION_COMPONENT_REF_REQUIRED"
 
 # Issue #41 additions — consumed by ScriptMappingBuilder (standalone
 # script.mapping components) and MapScriptBuilder (in-map Scripting

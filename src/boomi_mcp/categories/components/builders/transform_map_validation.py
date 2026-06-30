@@ -15,7 +15,9 @@ from typing import Any, Dict, List, Mapping, Optional
 from .connector_builder import BuilderValidationError
 from .json_profile_builder import JSONGeneratedProfileBuilder
 from .map_builder import get_map_builder
+from .map_function_registry import get_function_family
 from .profile_builder import DatabaseReadProfileBuilder, get_profile_builder
+from .profile_generation import MAP_FUNCTION_COMPONENT_REF_REQUIRED
 from .xml_profile_builder import XMLGeneratedProfileBuilder
 
 
@@ -405,6 +407,95 @@ def validate_transform_map(
                 )
                 if port_err is not None:
                     gen_profile_err = port_err
+                    break
+
+    # function_mappings[] component references (defined_process_property_*):
+    # the process_property_component_id $ref must appear in depends_on AND
+    # resolve to an in-spec processproperty component.
+    if gen_profile_err is None and map_type in ("function", "map_function"):
+        fm_list = effective_config.get("function_mappings") or []
+        if isinstance(fm_list, list):
+            for fm_idx, fm in enumerate(fm_list):
+                if not isinstance(fm, Mapping):
+                    continue
+                function_type = fm.get("function_type")
+                family = (
+                    get_function_family(function_type)
+                    if isinstance(function_type, str)
+                    else None
+                )
+                if family is None or family.component_reference_parameter is None:
+                    continue
+                param_name = family.component_reference_parameter
+                field_path = f"function_mappings[{fm_idx}].parameters.{param_name}"
+                parameters = fm.get("parameters")
+                ref_value = (
+                    parameters.get(param_name)
+                    if isinstance(parameters, Mapping)
+                    else None
+                )
+                if not (isinstance(ref_value, str) and ref_value.startswith("$ref:")):
+                    gen_profile_err = BuilderValidationError(
+                        f"{field_path} must be a '$ref:KEY' pointing at an "
+                        f"in-spec {family.component_reference_type} component "
+                        f"for function_type {family.name!r}; literal component "
+                        "IDs are not accepted at plan time.",
+                        error_code=MAP_FUNCTION_COMPONENT_REF_REQUIRED,
+                        field=field_path,
+                        hint=(
+                            "Declare the Process Property component in-spec and "
+                            f"reference it via '$ref:<key>'; add <key> to the "
+                            "map's depends_on."
+                        ),
+                        details={
+                            "function_mappings_index": fm_idx,
+                            "function_type": family.name,
+                            "parameter": param_name,
+                        },
+                    )
+                    break
+                ref_key = ref_value[len("$ref:") :]
+                if ref_key not in declared_deps:
+                    gen_profile_err = BuilderValidationError(
+                        f"{field_path} $ref target {ref_key!r} must also appear "
+                        "in depends_on so the Process Property component applies "
+                        "before this map.",
+                        error_code=MAP_FUNCTION_COMPONENT_REF_REQUIRED,
+                        field="depends_on",
+                        hint=(
+                            "Add the processproperty component key to depends_on "
+                            "so the execution order builds it before the map."
+                        ),
+                        details={
+                            "function_mappings_index": fm_idx,
+                            "ref_key": ref_key,
+                        },
+                    )
+                    break
+                target_comp = (
+                    components_by_key.get(ref_key)
+                    if components_by_key is not None
+                    else None
+                )
+                target_type = target_comp.type if target_comp is not None else None
+                if target_type != family.component_reference_type:
+                    gen_profile_err = BuilderValidationError(
+                        f"{field_path} $ref target {ref_key!r} resolves to a "
+                        f"{target_type!r} component, not a "
+                        f"{family.component_reference_type!r} component.",
+                        error_code=MAP_FUNCTION_COMPONENT_REF_REQUIRED,
+                        field=field_path,
+                        hint=(
+                            "Reference a Process Property component "
+                            f"(type={family.component_reference_type!r}) declared "
+                            "in-spec."
+                        ),
+                        details={
+                            "function_mappings_index": fm_idx,
+                            "ref_key": ref_key,
+                            "target_component_type": target_type,
+                        },
+                    )
                     break
 
     if gen_profile_err is None:

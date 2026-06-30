@@ -3128,11 +3128,16 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
     "note": (
         "Structured map-function transform.map. Each entry in function_mappings "
         "declares one mapped output via {function_type, inputs, target_path, "
-        "parameters}. M2.6a supports a 14-family allow-list: date_format, "
+        "parameters}. A 20-family allow-list: date_format, "
         "default_value, trim, left_trim, right_trim, uppercase, lowercase, "
         "append, prepend, replace, remove, simple_lookup, sequential_value, "
-        "math. Mixed maps may also declare direct field_mappings alongside "
-        "function_mappings. Source/target profile refs follow the same "
+        "math, plus the native ProcessProperty families "
+        "dynamic_process_property_get, dynamic_process_property_set, "
+        "document_property_get, document_property_set, "
+        "defined_process_property_get, defined_process_property_set. The three "
+        "'set' property families are side-effecting — they omit target_path "
+        "(no output leaf). Mixed maps may also declare direct field_mappings "
+        "alongside function_mappings. Source/target profile refs follow the same "
         "'$ref:KEY' rule as direct maps; literal existing-profile UUIDs are "
         "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (separate future work; infer_profile_fields does not index live existing-profile XML). "
         "Reusable script-based transforms (Groovy / JavaScript) ship in "
@@ -3322,6 +3327,92 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
                 "ceil/floor/abs take 1 mapped input."
             ),
         },
+        "dynamic_process_property_get": {
+            "mapped_inputs": 0,
+            "required_parameters": ["property_name"],
+            "optional_parameters": ["default_value"],
+            "target_path": "required (reads the DPP into the target leaf)",
+            "note": (
+                "Get Dynamic Process Property (PropertyGet). Reads the dynamic "
+                "process property named parameters.property_name; the optional "
+                "parameters.default_value is used when the DPP is unset. No "
+                "mapped source input."
+            ),
+        },
+        "dynamic_process_property_set": {
+            "mapped_inputs": 1,
+            "required_parameters": ["property_name"],
+            "optional_parameters": [],
+            "target_path": "omitted (side-effecting setter — no output leaf)",
+            "note": (
+                "Set Dynamic Process Property (PropertySet). inputs[0] is the "
+                "source value written to the DPP named parameters.property_name. "
+                "Side-effecting: omit target_path."
+            ),
+        },
+        "document_property_get": {
+            "mapped_inputs": 0,
+            "required_parameters": ["document_property_name"],
+            "optional_parameters": [],
+            "target_path": "required (reads the DDP into the target leaf)",
+            "note": (
+                "Get Document Property (DocumentPropertyGet). Reads the dynamic "
+                "document property named parameters.document_property_name (the "
+                "bare name — the builder adds the 'dynamicdocument.' prefix). No "
+                "mapped source input."
+            ),
+        },
+        "document_property_set": {
+            "mapped_inputs": 1,
+            "required_parameters": ["document_property_name"],
+            "optional_parameters": [],
+            "target_path": "omitted (side-effecting setter — no output leaf)",
+            "note": (
+                "Set Document Property (DocumentPropertySet). inputs[0] is the "
+                "source value written to the DDP named "
+                "parameters.document_property_name (bare name). Side-effecting: "
+                "omit target_path."
+            ),
+        },
+        "defined_process_property_get": {
+            "mapped_inputs": 0,
+            "required_parameters": [
+                "process_property_component_id",
+                "process_property_component_name",
+                "process_property_key",
+                "process_property_name",
+            ],
+            "optional_parameters": [],
+            "target_path": "required (reads the property into the target leaf)",
+            "note": (
+                "Get Process Property (DefinedProcessPropertyGet), a "
+                "component-backed Process Property. "
+                "parameters.process_property_component_id MUST be a "
+                "'$ref:<key>' to an in-spec processproperty component declared "
+                "in depends_on; the other three parameters identify the "
+                "component name and the specific property (key + name). No "
+                "mapped source input."
+            ),
+        },
+        "defined_process_property_set": {
+            "mapped_inputs": 1,
+            "required_parameters": [
+                "process_property_component_id",
+                "process_property_component_name",
+                "process_property_key",
+                "process_property_name",
+            ],
+            "optional_parameters": [],
+            "target_path": "omitted (side-effecting setter — no output leaf)",
+            "note": (
+                "Set Process Property (DefinedProcessPropertySet), a "
+                "component-backed Process Property. inputs[0] is the source "
+                "value written to the property. "
+                "parameters.process_property_component_id MUST be a "
+                "'$ref:<key>' to an in-spec processproperty component declared "
+                "in depends_on. Side-effecting: omit target_path."
+            ),
+        },
     },
     "unsupported_routes": {
         "functions": (
@@ -3371,6 +3462,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         "Both profiles must be in-spec — literal existing-profile UUIDs "
         "produce MAP_PROFILE_INDEX_UNAVAILABLE (indexing live existing-profile "
         "XML remains separate future work; not infer_profile_fields).",
+        "For defined_process_property_get/set, include the Process Property "
+        "component's $ref key (from parameters.process_property_component_id) "
+        "in depends_on so the processproperty component runs before the map "
+        "(else MAP_FUNCTION_COMPONENT_REF_REQUIRED).",
     ],
     "forbidden_secret_fields": [
         "password",
@@ -3406,7 +3501,13 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
             "hatch, scripts, XSLT, or expressions"
         ),
         "UNSUPPORTED_MAP_FUNCTION_TYPE": (
-            "function_type is not in the supported 14-family allow-list"
+            "function_type is not in the supported 20-family allow-list"
+        ),
+        "MAP_FUNCTION_COMPONENT_REF_REQUIRED": (
+            "a defined_process_property_get/set function's "
+            "parameters.process_property_component_id is missing, not a "
+            "'$ref:KEY', absent from depends_on, or resolves to a component "
+            "that is not a processproperty"
         ),
         "MAP_FUNCTION_INPUT_COUNT_MISMATCH": (
             "function_mappings[].inputs count does not match the family's "
@@ -3436,9 +3537,12 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
     },
     "gotchas": [
         (
-            "Each function_mapping produces ONE target output in M2.6a. "
-            "Multi-output graphs (StringSplit, user-defined functions) and "
-            "chained function steps are future work."
+            "Each function_mapping produces ONE target output, EXCEPT the three "
+            "side-effecting 'set' property families "
+            "(dynamic_process_property_set, document_property_set, "
+            "defined_process_property_set) which produce NO output and omit "
+            "target_path. Multi-output graphs (StringSplit, user-defined "
+            "functions) and chained function steps are future work."
         ),
         (
             "Mapping order is deterministic: direct field_mappings first, "
@@ -5462,8 +5566,12 @@ _SCRIPT_MAPPING_AUTHORING_SCHEMA = {
     ],
     "follow_up": (
         "Native Get/Set Dynamic Process Property and Get/Set Document Property "
-        "map functions are not yet emittable by the MCP (map_function_registry) "
-        "— pending live FunctionStep shape capture."
+        "map functions are now emittable via map_type='function' — use "
+        "function_type 'dynamic_process_property_get' / "
+        "'dynamic_process_property_set' / 'document_property_get' / "
+        "'document_property_set' (and the component-backed "
+        "'defined_process_property_get' / 'defined_process_property_set') in "
+        "the structured function_mappings contract."
     ),
 }
 

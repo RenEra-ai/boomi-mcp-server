@@ -81,7 +81,7 @@ def test_template_lists_field_mappings_as_optional():
     assert "field_mappings" in result.get("optional", [])
 
 
-def test_template_documents_all_14_supported_function_types():
+def test_template_documents_all_20_supported_function_types():
     result = _call(component_type="transform.map", protocol="function")
     supported = result["supported_function_types"]
     for name in (
@@ -99,8 +99,39 @@ def test_template_documents_all_14_supported_function_types():
         "simple_lookup",
         "sequential_value",
         "math",
+        "dynamic_process_property_get",
+        "dynamic_process_property_set",
+        "document_property_get",
+        "document_property_set",
+        "defined_process_property_get",
+        "defined_process_property_set",
     ):
         assert name in supported, f"missing {name!r} in supported_function_types"
+
+
+def test_template_setter_families_document_target_path_omitted():
+    result = _call(component_type="transform.map", protocol="function")
+    supported = result["supported_function_types"]
+    for name in (
+        "dynamic_process_property_set",
+        "document_property_set",
+        "defined_process_property_set",
+    ):
+        assert "omitted" in supported[name]["target_path"]
+
+
+def test_template_defined_property_documents_ref_and_depends_on():
+    result = _call(component_type="transform.map", protocol="function")
+    supported = result["supported_function_types"]
+    for name in ("defined_process_property_get", "defined_process_property_set"):
+        note = supported[name]["note"]
+        assert "$ref" in note
+        assert "depends_on" in note
+        assert "processproperty" in note
+    # depends_on_requirements call out the processproperty component ref.
+    assert any(
+        "processproperty" in req for req in result["depends_on_requirements"]
+    )
 
 
 def test_template_documents_sequential_value_authorable_params():
@@ -177,6 +208,8 @@ def test_template_advertises_issue_40_error_codes():
         "MAP_FUNCTION_PARAMETER_MISSING",
         "MAP_FUNCTION_PARAMETER_INVALID",
         "UNSUPPORTED_MATH_OPERATION",
+        # native property map function addition.
+        "MAP_FUNCTION_COMPONENT_REF_REQUIRED",
     ):
         assert expected in codes
 

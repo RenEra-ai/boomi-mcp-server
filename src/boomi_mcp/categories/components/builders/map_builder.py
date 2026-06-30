@@ -90,10 +90,11 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import BuilderValidationError, _escape_xml
 from .map_function_registry import (
-    FUNCTION_OUTPUT_KEY,
     SUPPORTED_FUNCTION_TYPES,
     emit_default_entry,
     emit_function_step,
+    function_mapped_input_keys,
+    function_output_key,
     get_function_family,
     validate_function_mapping,
 )
@@ -827,14 +828,37 @@ class MapFunctionBuilder:
                     },
                 )
 
-            target_path = fm.get("target_path")
-            if not isinstance(target_path, str) or not target_path.strip():
-                return BuilderValidationError(
-                    f"{field_prefix}.target_path must be a non-blank string",
-                    error_code=PROFILE_FIELD_VALIDATION_FAILED,
-                    field=f"{field_prefix}.target_path",
-                )
-            target_path = target_path.strip()
+            # default_value emits a <Default> bound to target_path; output-
+            # producing function families bind their single output to it. The
+            # no-output "Set" property families (output_key is None) have no
+            # target leaf — target_path must be omitted for them.
+            requires_target = (
+                family.is_default_value_sentinel or family.output_key is not None
+            )
+            target_path_raw = fm.get("target_path")
+            if requires_target:
+                if not isinstance(target_path_raw, str) or not target_path_raw.strip():
+                    return BuilderValidationError(
+                        f"{field_prefix}.target_path must be a non-blank string",
+                        error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                        field=f"{field_prefix}.target_path",
+                    )
+                target_path: Optional[str] = target_path_raw.strip()
+            else:
+                if isinstance(target_path_raw, str) and target_path_raw.strip():
+                    return BuilderValidationError(
+                        f"{field_prefix}.target_path must be omitted for "
+                        f"{family.name!r} — a no-output property setter has no "
+                        "target leaf",
+                        error_code=PROFILE_FIELD_VALIDATION_FAILED,
+                        field=f"{field_prefix}.target_path",
+                        hint=(
+                            "Set-property functions have a side effect, not an "
+                            "output; omit target_path. The value to set flows "
+                            "from inputs[0]."
+                        ),
+                    )
+                target_path = None
 
             inputs_raw = fm.get("inputs", [])
             if inputs_raw is None:
@@ -877,23 +901,25 @@ class MapFunctionBuilder:
             if family_err is not None:
                 return family_err
 
-            # Duplicate target across both lists.
-            if target_path in seen_target_paths:
-                return BuilderValidationError(
-                    f"{field_prefix}.target_path is bound more than once",
-                    error_code=DUPLICATE_TARGET_MAPPING,
-                    field=f"{field_prefix}.target_path",
-                    hint=(
-                        "Each destination leaf may receive at most one "
-                        "mapping across field_mappings and function_mappings."
-                    ),
-                    details={
-                        "path": target_path,
-                        "first_index": seen_target_paths[target_path],
-                        "duplicate_index": index,
-                    },
-                )
-            seen_target_paths[target_path] = index
+            # Duplicate target across both lists. No-output setter families
+            # (target_path is None) write no target leaf — skip the check.
+            if target_path is not None:
+                if target_path in seen_target_paths:
+                    return BuilderValidationError(
+                        f"{field_prefix}.target_path is bound more than once",
+                        error_code=DUPLICATE_TARGET_MAPPING,
+                        field=f"{field_prefix}.target_path",
+                        hint=(
+                            "Each destination leaf may receive at most one "
+                            "mapping across field_mappings and function_mappings."
+                        ),
+                        details={
+                            "path": target_path,
+                            "first_index": seen_target_paths[target_path],
+                            "duplicate_index": index,
+                        },
+                    )
+                seen_target_paths[target_path] = index
 
             # Index-sensitive checks for inputs + target_path.
             if source_index is not None:
@@ -924,7 +950,7 @@ class MapFunctionBuilder:
                             ),
                             details={"path": source_path, "side": "source"},
                         )
-            if target_index is not None:
+            if target_index is not None and target_path is not None:
                 tgt_entry = target_index.get(target_path)
                 if tgt_entry is None:
                     return BuilderValidationError(
@@ -1051,7 +1077,12 @@ class MapFunctionBuilder:
                     field="function_type",
                 )
 
-            target_path = str(fm["target_path"]).strip()
+            target_raw = fm.get("target_path")
+            target_path: Optional[str] = (
+                target_raw.strip()
+                if isinstance(target_raw, str) and target_raw.strip()
+                else None
+            )
             inputs = [str(p).strip() for p in (fm.get("inputs") or [])]
             parameters = dict(fm.get("parameters") or {})
 
@@ -1065,8 +1096,11 @@ class MapFunctionBuilder:
             function_step_counter += 1
             step_key = function_step_counter
 
-            # 2a. Profile → function input mappings.
-            for input_index, source_path in enumerate(inputs, start=1):
+            # 2a. Profile → function input mappings. The mapped value's toKey is
+            # per-family (PropertySet binds its source value to input key 2,
+            # after the static "Property Name" input at key 1).
+            mapped_keys = function_mapped_input_keys(family, parameters, len(inputs))
+            for source_path, to_key in zip(inputs, mapped_keys):
                 src_entry = source_index[source_path]
                 mapping_lines.append(
                     f'<Mapping fromKey="{src_entry["key"]}" '
@@ -1074,24 +1108,26 @@ class MapFunctionBuilder:
                     f'fromNamePath="{_escape_xml(src_entry["name_path"])}" '
                     f'fromType="profile" '
                     f'toFunction="{step_key}" '
-                    f'toKey="{input_index}" '
+                    f'toKey="{to_key}" '
                     f'toType="function"/>'
                 )
 
-            # 2b. Function output → profile mapping (single output per M2.6a).
-            # fromKey must match the FUNCTION_OUTPUT_KEY emitted in the
-            # corresponding FunctionStep's <Outputs> block (live Boomi UI
-            # saves use key=2 for single-output families).
-            tgt_entry = target_index[target_path]
-            mapping_lines.append(
-                f'<Mapping fromFunction="{step_key}" '
-                f'fromKey="{FUNCTION_OUTPUT_KEY}" '
-                f'fromType="function" '
-                f'toKey="{tgt_entry["key"]}" '
-                f'toKeyPath="{_escape_xml(tgt_entry["key_path"])}" '
-                f'toNamePath="{_escape_xml(tgt_entry["name_path"])}" '
-                f'toType="profile"/>'
-            )
+            # 2b. Function output → profile mapping, only for output-producing
+            # families. No-output "Set" property families (output_key is None)
+            # have a side effect and bind no target leaf. fromKey matches the
+            # per-family output key emitted in the FunctionStep's <Outputs>.
+            out_key = function_output_key(family, parameters)
+            if out_key is not None and target_path is not None:
+                tgt_entry = target_index[target_path]
+                mapping_lines.append(
+                    f'<Mapping fromFunction="{step_key}" '
+                    f'fromKey="{out_key}" '
+                    f'fromType="function" '
+                    f'toKey="{tgt_entry["key"]}" '
+                    f'toKeyPath="{_escape_xml(tgt_entry["key_path"])}" '
+                    f'toNamePath="{_escape_xml(tgt_entry["name_path"])}" '
+                    f'toType="profile"/>'
+                )
 
             # 3. FunctionStep emission.
             function_blocks.append(

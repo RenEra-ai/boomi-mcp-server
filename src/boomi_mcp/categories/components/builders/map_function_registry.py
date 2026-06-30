@@ -107,6 +107,43 @@ class FunctionFamily:
     emit_configuration: Optional[Callable[[Mapping[str, object]], str]]
     parameter_validators: Mapping[str, Callable[[object], Optional[str]]]
 
+    # --- Optional metadata (issue: native property map functions) ----------
+    # Every field below defaults to the historical behaviour so the 14
+    # pre-existing families emit byte-identical XML. They generalise the
+    # emitter for the six ProcessProperty families (Get/Set Dynamic Process
+    # Property, Get/Set Document Property, Get/Set defined Process Property).
+
+    # FunctionStep ``name="..."`` attribute. None => use ``fn_type``.
+    display_name: Optional[str] = None
+    # ``cacheOption="..."`` attribute; None => omit it.
+    cache_option: Optional[str] = None
+    # ``enabled="true"`` attribute; None => omit it (True => emit "true").
+    enabled: Optional[bool] = None
+    # Single-output port key. None => emit an empty ``<Outputs/>`` (no output,
+    # used by the side-effecting "Set" families).
+    output_key: Optional[int] = FUNCTION_OUTPUT_KEY
+    # When set, the output name is ``output_name_prefix + str(parameters[key])``.
+    output_name_parameter: Optional[str] = None
+    output_name_prefix: str = ""
+    # Extra ``<Output>`` attributes, e.g. (("isReset", "false"),).
+    output_extra_attrs: Tuple[Tuple[str, str], ...] = ()
+    # Explicit ``toKey`` values for the mapped inputs (in mapped order). Empty
+    # => default 1..N. ``PropertySet`` maps its value to input key 2.
+    mapped_input_keys: Tuple[int, ...] = ()
+    # When True, omit ``default=""`` on a static input whose resolved default
+    # is empty (the property families render bare ``<Input key.../>``).
+    omit_empty_input_defaults: bool = False
+    # When set, emit a single ``<Input key="1" name="{prefix}{parameters[key]}"/>``
+    # (no default) instead of static_input_names — the document/defined setters.
+    dynamic_input_name: Optional[Tuple[str, str]] = None
+    # Parameter holding a ``$ref:`` to an in-spec component (defined process
+    # property families) + the required referenced component type.
+    component_reference_parameter: Optional[str] = None
+    component_reference_type: Optional[str] = None
+    # Canonical canvas coordinates emitted in the FunctionStep open tag.
+    x: str = "10.0"
+    y: str = "10.0"
+
     @property
     def is_default_value_sentinel(self) -> bool:
         return self.fn_type == _DEFAULT_VALUE_SENTINEL
@@ -193,6 +230,52 @@ def _emit_sequential_value_configuration(_parameters: Mapping[str, object]) -> s
     return "<Configuration><SequentialValue/></Configuration>"
 
 
+def _emit_document_property_configuration(parameters: Mapping[str, object]) -> str:
+    """Render the ``<DocumentProperty>`` Configuration body (live-captured).
+
+    The DDP name supplied in ``parameters["document_property_name"]`` is the
+    bare name (e.g. ``DDP_FOO``); Boomi stores it as
+    ``propertyId="dynamicdocument.<DDP>"`` and
+    ``propertyName="Dynamic Document Property - <DDP>"``. Attributes are
+    serialised alphabetically (defaultValue, persist, propertyId,
+    propertyName) to match the captured XML byte-for-byte.
+    """
+    ddp = str(parameters.get("document_property_name", ""))
+    return (
+        "<Configuration>"
+        '<DocumentProperty defaultValue="" persist="false" '
+        f'propertyId="dynamicdocument.{_escape_xml(ddp)}" '
+        f'propertyName="Dynamic Document Property - {_escape_xml(ddp)}"/>'
+        "</Configuration>"
+    )
+
+
+def _emit_defined_process_property_configuration(
+    parameters: Mapping[str, object],
+) -> str:
+    """Render the ``<DefinedProcessProperty>`` Configuration body (live-captured).
+
+    References a Process Property COMPONENT: ``componentId`` +
+    ``componentName`` identify the component, ``propertyKey`` +
+    ``propertyName`` the specific property within it. ``componentId`` is read
+    from the resolved ``process_property_component_id`` (a Boomi UUID after
+    ``$ref:`` resolution). Attributes are serialised alphabetically
+    (componentId, componentName, propertyKey, propertyName).
+    """
+    component_id = str(parameters.get("process_property_component_id", ""))
+    component_name = str(parameters.get("process_property_component_name", ""))
+    property_key = str(parameters.get("process_property_key", ""))
+    property_name = str(parameters.get("process_property_name", ""))
+    return (
+        "<Configuration>"
+        f'<DefinedProcessProperty componentId="{_escape_xml(component_id)}" '
+        f'componentName="{_escape_xml(component_name)}" '
+        f'propertyKey="{_escape_xml(property_key)}" '
+        f'propertyName="{_escape_xml(property_name)}"/>'
+        "</Configuration>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Per-parameter validators
 # ---------------------------------------------------------------------------
@@ -201,6 +284,23 @@ def _emit_sequential_value_configuration(_parameters: Mapping[str, object]) -> s
 def _validate_non_blank_string(value: object) -> Optional[str]:
     if not isinstance(value, str) or not value.strip():
         return "must be a non-blank string"
+    return None
+
+
+def _validate_ddp_name(value: object) -> Optional[str]:
+    """Validate a Dynamic Document Property name.
+
+    Must be the bare name (e.g. ``DDP_FOO``) — the
+    ``dynamicdocument.`` prefix is added by the emitter, so a caller-supplied
+    prefix would double it.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return "must be a non-blank string"
+    if value.strip().startswith("dynamicdocument."):
+        return (
+            "must be the bare DDP name without the 'dynamicdocument.' prefix "
+            "(the builder adds it)"
+        )
     return None
 
 
@@ -552,6 +652,173 @@ _MATH = FunctionFamily(
 )
 
 
+# ---------------------------------------------------------------------------
+# Native property map functions (category="ProcessProperty").
+# Live FunctionStep shapes captured in
+# .codex/plans/property-functionstep-live-captures.md. Two distinct
+# "process property" families: the DYNAMIC process property (PropertyGet/
+# PropertySet, keyed by name, empty Configuration) vs the COMPONENT-backed
+# defined Process Property (DefinedProcessPropertyGet/Set, referencing a
+# Process Property component via componentId + propertyKey).
+# ---------------------------------------------------------------------------
+
+# dynamic_process_property_get (PropertyGet) — reads a Dynamic Process
+# Property. No mapped source input; the DPP name is the "Property Name" input
+# default; result flows to the target via output key 3.
+_DYNAMIC_PROCESS_PROPERTY_GET = FunctionFamily(
+    name="dynamic_process_property_get",
+    fn_type="PropertyGet",
+    category="ProcessProperty",
+    mapped_input_count=(0, 0),
+    static_input_names=("Property Name", "Default Value"),
+    parameter_input_defaults={"property_name": 0, "default_value": 1},
+    required_parameters=("property_name",),
+    optional_parameters=("default_value",),
+    output_name="Result",
+    emit_configuration=_emit_empty_configuration,
+    parameter_validators={
+        "property_name": _validate_non_blank_string,
+        "default_value": _validate_string,
+    },
+    display_name="Get Dynamic Process Property",
+    cache_option="none",
+    output_key=3,
+    omit_empty_input_defaults=True,
+)
+
+# dynamic_process_property_set (PropertySet) — writes a Dynamic Process
+# Property. The DPP name is the "Property Name" input default; the mapped
+# source value flows into "Property Value" (input key 2); no output.
+_DYNAMIC_PROCESS_PROPERTY_SET = FunctionFamily(
+    name="dynamic_process_property_set",
+    fn_type="PropertySet",
+    category="ProcessProperty",
+    mapped_input_count=(1, 1),
+    static_input_names=("Property Name", "Property Value"),
+    parameter_input_defaults={"property_name": 0},
+    required_parameters=("property_name",),
+    optional_parameters=(),
+    output_name="",
+    emit_configuration=_emit_empty_configuration,
+    parameter_validators={"property_name": _validate_non_blank_string},
+    display_name="Set Dynamic Process Property",
+    cache_option="none",
+    output_key=None,
+    mapped_input_keys=(2,),
+    omit_empty_input_defaults=True,
+)
+
+# document_property_get (DocumentPropertyGet) — reads a Dynamic Document
+# Property. Empty inputs; the DDP is read into the output (key 3) whose name
+# is "Dynamic Document Property - <DDP>"; Configuration carries DocumentProperty.
+_DOCUMENT_PROPERTY_GET = FunctionFamily(
+    name="document_property_get",
+    fn_type="DocumentPropertyGet",
+    category="ProcessProperty",
+    mapped_input_count=(0, 0),
+    static_input_names=(),
+    parameter_input_defaults={},
+    required_parameters=("document_property_name",),
+    optional_parameters=(),
+    output_name="",
+    emit_configuration=_emit_document_property_configuration,
+    parameter_validators={"document_property_name": _validate_ddp_name},
+    display_name="Get Document Property",
+    cache_option="none",
+    enabled=True,
+    output_key=3,
+    output_name_parameter="document_property_name",
+    output_name_prefix="Dynamic Document Property - ",
+    output_extra_attrs=(("isReset", "false"),),
+)
+
+# document_property_set (DocumentPropertySet) — writes a Dynamic Document
+# Property. The mapped source value flows into the single input named
+# "Dynamic Document Property - <DDP>" (key 1); no output; DocumentProperty config.
+_DOCUMENT_PROPERTY_SET = FunctionFamily(
+    name="document_property_set",
+    fn_type="DocumentPropertySet",
+    category="ProcessProperty",
+    mapped_input_count=(1, 1),
+    static_input_names=(),
+    parameter_input_defaults={},
+    required_parameters=("document_property_name",),
+    optional_parameters=(),
+    output_name="",
+    emit_configuration=_emit_document_property_configuration,
+    parameter_validators={"document_property_name": _validate_ddp_name},
+    display_name="Set Document Property",
+    cache_option="none",
+    output_key=None,
+    dynamic_input_name=("Dynamic Document Property - ", "document_property_name"),
+)
+
+# defined_process_property_get (DefinedProcessPropertyGet) — reads a
+# component-backed Process Property. Empty inputs; value read into output
+# (key 1) named after the property; references a Process Property component.
+_DEFINED_PROCESS_PROPERTY_GET = FunctionFamily(
+    name="defined_process_property_get",
+    fn_type="DefinedProcessPropertyGet",
+    category="ProcessProperty",
+    mapped_input_count=(0, 0),
+    static_input_names=(),
+    parameter_input_defaults={},
+    required_parameters=(
+        "process_property_component_id",
+        "process_property_component_name",
+        "process_property_key",
+        "process_property_name",
+    ),
+    optional_parameters=(),
+    output_name="",
+    emit_configuration=_emit_defined_process_property_configuration,
+    parameter_validators={
+        "process_property_component_id": _validate_non_blank_string,
+        "process_property_component_name": _validate_non_blank_string,
+        "process_property_key": _validate_non_blank_string,
+        "process_property_name": _validate_non_blank_string,
+    },
+    display_name="Get Process Property",
+    output_key=1,
+    output_name_parameter="process_property_name",
+    component_reference_parameter="process_property_component_id",
+    component_reference_type="processproperty",
+)
+
+# defined_process_property_set (DefinedProcessPropertySet) — writes a
+# component-backed Process Property. The mapped source value flows into the
+# single input named after the property (key 1); no output; references a
+# Process Property component.
+_DEFINED_PROCESS_PROPERTY_SET = FunctionFamily(
+    name="defined_process_property_set",
+    fn_type="DefinedProcessPropertySet",
+    category="ProcessProperty",
+    mapped_input_count=(1, 1),
+    static_input_names=(),
+    parameter_input_defaults={},
+    required_parameters=(
+        "process_property_component_id",
+        "process_property_component_name",
+        "process_property_key",
+        "process_property_name",
+    ),
+    optional_parameters=(),
+    output_name="",
+    emit_configuration=_emit_defined_process_property_configuration,
+    parameter_validators={
+        "process_property_component_id": _validate_non_blank_string,
+        "process_property_component_name": _validate_non_blank_string,
+        "process_property_key": _validate_non_blank_string,
+        "process_property_name": _validate_non_blank_string,
+    },
+    display_name="Set Process Property",
+    output_key=None,
+    dynamic_input_name=("", "process_property_name"),
+    component_reference_parameter="process_property_component_id",
+    component_reference_type="processproperty",
+)
+
+
 FUNCTION_FAMILIES: Dict[str, FunctionFamily] = {
     family.name: family
     for family in (
@@ -569,6 +836,12 @@ FUNCTION_FAMILIES: Dict[str, FunctionFamily] = {
         _SIMPLE_LOOKUP,
         _SEQUENTIAL_VALUE,
         _MATH,
+        _DYNAMIC_PROCESS_PROPERTY_GET,
+        _DYNAMIC_PROCESS_PROPERTY_SET,
+        _DOCUMENT_PROPERTY_GET,
+        _DOCUMENT_PROPERTY_SET,
+        _DEFINED_PROCESS_PROPERTY_GET,
+        _DEFINED_PROCESS_PROPERTY_SET,
     )
 }
 
@@ -603,6 +876,49 @@ def math_input_count_for_operation(operation: str) -> Optional[int]:
     if not isinstance(operation, str):
         return None
     return _MATH_OPERATION_INPUT_COUNT.get(operation.strip().lower())
+
+
+def function_output_key(
+    family: FunctionFamily, parameters: Optional[Mapping[str, object]] = None
+) -> Optional[int]:
+    """Return the single-output port key for a family, or None for no output.
+
+    None means the family is side-effecting (a "Set" property function) and
+    emits an empty ``<Outputs/>`` — the map builder must NOT wire a
+    function-output→profile mapping for it.
+    """
+    return family.output_key
+
+
+def function_mapped_input_keys(
+    family: FunctionFamily,
+    parameters: Mapping[str, object],
+    input_count: int,
+) -> List[int]:
+    """Return the ``toKey`` values for a family's mapped inputs, in order.
+
+    Defaults to ``1..input_count``; a family may override via
+    ``mapped_input_keys`` (e.g. ``PropertySet`` maps its single source value
+    to input key 2, after the static "Property Name" input at key 1).
+    """
+    if family.mapped_input_keys:
+        return list(family.mapped_input_keys)[:input_count]
+    return list(range(1, input_count + 1))
+
+
+def _resolve_output_name(
+    family: FunctionFamily, parameters: Mapping[str, object]
+) -> str:
+    """Resolve the ``<Output name="...">`` for a family.
+
+    Families with a ``output_name_parameter`` derive the name from a
+    parameter (e.g. the DDP/process-property name); others use the static
+    ``output_name`` (defaulting to "Result").
+    """
+    if family.output_name_parameter is not None:
+        value = str(parameters.get(family.output_name_parameter, ""))
+        return f"{family.output_name_prefix}{value}"
+    return family.output_name or "Result"
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +1068,7 @@ def emit_function_step(
         )
 
     # Resolve math operation → fn_type.
+    op = None
     if family.name == "math":
         op = str(parameters.get("operation", "")).strip().lower()
         fn_type = _MATH_OPERATION_TO_FN_TYPE.get(op)
@@ -781,41 +1098,81 @@ def emit_function_step(
         static_inputs = family.static_input_names
         category = family.category
 
+    # FunctionStep ``name="..."`` attribute (display name) defaults to fn_type.
+    display_name = family.display_name or fn_type
+
     # Emit <Inputs>.
     input_parts: List[str] = []
-    for i, input_name in enumerate(static_inputs, start=1):
-        default_value = ""
-        for param_key, position in family.parameter_input_defaults.items():
-            # parameter_input_defaults positions are 0-based into static_inputs
-            if position + 1 == i and param_key in parameters:
-                default_value = str(parameters[param_key])
-                break
-        if family.name == "math" and op == "set_precision" and i == 2:
-            if "precision" in parameters and parameters["precision"] is not None:
-                default_value = str(parameters["precision"])
-        input_parts.append(
-            f'<Input default="{_escape_xml(default_value)}" '
-            f'key="{i}" name="{_escape_xml(input_name)}"/>'
-        )
+    if family.dynamic_input_name is not None:
+        # Single input whose name is derived from a parameter (the document /
+        # defined-property setters). No ``default`` attribute.
+        prefix, param_key = family.dynamic_input_name
+        input_name = f"{prefix}{parameters.get(param_key, '')}"
+        input_parts.append(f'<Input key="1" name="{_escape_xml(input_name)}"/>')
+    else:
+        for i, input_name in enumerate(static_inputs, start=1):
+            default_value = ""
+            for param_key, position in family.parameter_input_defaults.items():
+                # parameter_input_defaults positions are 0-based into static_inputs
+                if position + 1 == i and param_key in parameters:
+                    default_value = str(parameters[param_key])
+                    break
+            if family.name == "math" and op == "set_precision" and i == 2:
+                if "precision" in parameters and parameters["precision"] is not None:
+                    default_value = str(parameters["precision"])
+            if family.omit_empty_input_defaults and default_value == "":
+                # The property families render a bare <Input key.../> when the
+                # input carries no caller-supplied default value.
+                input_parts.append(
+                    f'<Input key="{i}" name="{_escape_xml(input_name)}"/>'
+                )
+            else:
+                input_parts.append(
+                    f'<Input default="{_escape_xml(default_value)}" '
+                    f'key="{i}" name="{_escape_xml(input_name)}"/>'
+                )
     inputs_xml = f"<Inputs>{''.join(input_parts)}</Inputs>" if input_parts else "<Inputs/>"
 
-    # Emit <Outputs>. Output key per FUNCTION_OUTPUT_KEY (live-verified
-    # convention: Boomi UI saves single-output families with key=2).
-    output_name = family.output_name or "Result"
-    outputs_xml = (
-        f'<Outputs><Output key="{FUNCTION_OUTPUT_KEY}" '
-        f'name="{_escape_xml(output_name)}"/></Outputs>'
-    )
+    # Emit <Outputs>. output_key is None for side-effecting "Set" families
+    # (empty <Outputs/>); otherwise emit the single output at the per-family
+    # key (live convention: most families key=2, property getters key=3/1).
+    if family.output_key is None:
+        outputs_xml = "<Outputs/>"
+    else:
+        output_attrs: Dict[str, str] = {
+            attr: value for attr, value in family.output_extra_attrs
+        }
+        output_attrs["key"] = str(family.output_key)
+        output_attrs["name"] = _resolve_output_name(family, parameters)
+        attr_str = " ".join(
+            f'{attr}="{_escape_xml(str(value))}"'
+            for attr, value in sorted(output_attrs.items())
+        )
+        outputs_xml = f"<Outputs><Output {attr_str}/></Outputs>"
 
     # Emit <Configuration>.
     emit_cfg = family.emit_configuration or _emit_empty_configuration
     configuration_xml = emit_cfg(parameters)
 
+    # FunctionStep open-tag attributes — emitted in Boomi's alphabetical order
+    # (cacheEnabled, cacheOption?, category, enabled?, key, name, position,
+    # sumEnabled, type, x, y); cacheOption / enabled are per-family optionals.
+    open_attrs: List[str] = ['cacheEnabled="true"']
+    if family.cache_option is not None:
+        open_attrs.append(f'cacheOption="{_escape_xml(family.cache_option)}"')
+    open_attrs.append(f'category="{_escape_xml(category)}"')
+    if family.enabled is not None:
+        open_attrs.append(f'enabled="{"true" if family.enabled else "false"}"')
+    open_attrs.append(f'key="{step_key}"')
+    open_attrs.append(f'name="{_escape_xml(display_name)}"')
+    open_attrs.append(f'position="{step_key}"')
+    open_attrs.append('sumEnabled="false"')
+    open_attrs.append(f'type="{_escape_xml(fn_type)}"')
+    open_attrs.append(f'x="{_escape_xml(family.x)}"')
+    open_attrs.append(f'y="{_escape_xml(family.y)}"')
+
     return (
-        f'<FunctionStep cacheEnabled="true" category="{_escape_xml(category)}" '
-        f'key="{step_key}" name="{_escape_xml(fn_type)}" position="{step_key}" '
-        f'sumEnabled="false" type="{_escape_xml(fn_type)}" '
-        f'x="10.0" y="10.0">'
+        f'<FunctionStep {" ".join(open_attrs)}>'
         f"{inputs_xml}"
         f"{outputs_xml}"
         f"{configuration_xml}"
@@ -838,6 +1195,8 @@ __all__ = [
     "SUPPORTED_MATH_OPERATIONS",
     "emit_default_entry",
     "emit_function_step",
+    "function_mapped_input_keys",
+    "function_output_key",
     "get_function_family",
     "math_input_count_for_operation",
     "resolve_math_fn_type",

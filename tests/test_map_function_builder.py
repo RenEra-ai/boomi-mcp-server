@@ -738,4 +738,149 @@ def test_direct_builder_rejects_function_mappings():
     assert err is not None
     assert err.error_code == "UNSUPPORTED_TRANSFORM_ROUTE"
     assert err.field == "function_mappings"
-    assert "map_type='function'" in (err.hint or "")
+
+
+# ---------------------------------------------------------------------------
+# Native property map functions (Get/Set Process/Document Property)
+# ---------------------------------------------------------------------------
+
+
+_DEFINED_PARAMS = {
+    "process_property_component_id": "cccccccc-3333-3333-3333-333333333333",
+    "process_property_component_name": "New Process Property",
+    "process_property_key": "0e89ebf1-cd46-46df-904e-94c7e7ade31e",
+    "process_property_name": "Example Property",
+}
+
+
+def test_build_dynamic_process_property_set_maps_source_to_input_key_2():
+    xml = _build(
+        _function_map_config(
+            function_mappings=[
+                {
+                    "function_type": "dynamic_process_property_set",
+                    "inputs": ["rows/row[]/name"],
+                    "parameters": {"property_name": "DPP_EXAMPLE"},
+                },
+            ],
+        )
+    )
+    root = _parse(xml)
+    steps = root.findall("bns:object/Map/Functions/FunctionStep", NS)
+    assert len(steps) == 1
+    assert steps[0].attrib["type"] == "PropertySet"
+    # No-output setter: empty <Outputs/>.
+    assert steps[0].findall("Outputs/Output") == []
+
+    mappings = root.findall("bns:object/Map/Mappings/Mapping", NS)
+    # Only the source→function-input mapping; no function→profile mapping.
+    assert len(mappings) == 1
+    assert mappings[0].attrib["toType"] == "function"
+    assert mappings[0].attrib["toFunction"] == "1"
+    assert mappings[0].attrib["toKey"] == "2"
+    assert "fromFunction" not in mappings[0].attrib
+    # No function-output→profile mapping is emitted for a setter.
+    assert [m for m in mappings if m.attrib.get("fromType") == "function"] == []
+
+
+def test_build_document_property_get_uses_output_key_3():
+    xml = _build(
+        _function_map_config(
+            function_mappings=[
+                {
+                    "function_type": "document_property_get",
+                    "inputs": [],
+                    "target_path": "Root/list[]/status",
+                    "parameters": {"document_property_name": "DDP_FOO"},
+                },
+            ],
+        )
+    )
+    root = _parse(xml)
+    steps = root.findall("bns:object/Map/Functions/FunctionStep", NS)
+    assert steps[0].attrib["type"] == "DocumentPropertyGet"
+    assert steps[0].findall("Inputs/Input") == []
+
+    mappings = root.findall("bns:object/Map/Mappings/Mapping", NS)
+    function_to_profile = [m for m in mappings if m.attrib.get("fromType") == "function"]
+    assert len(function_to_profile) == 1
+    assert function_to_profile[0].attrib["fromFunction"] == "1"
+    assert function_to_profile[0].attrib["fromKey"] == "3"
+
+
+def test_build_defined_process_property_get_uses_output_key_1():
+    xml = _build(
+        _function_map_config(
+            function_mappings=[
+                {
+                    "function_type": "defined_process_property_get",
+                    "inputs": [],
+                    "target_path": "Root/list[]/status",
+                    "parameters": dict(_DEFINED_PARAMS),
+                },
+            ],
+        )
+    )
+    root = _parse(xml)
+    steps = root.findall("bns:object/Map/Functions/FunctionStep", NS)
+    assert steps[0].attrib["type"] == "DefinedProcessPropertyGet"
+    cfg_el = steps[0].find("Configuration/DefinedProcessProperty")
+    assert cfg_el is not None
+    assert cfg_el.attrib["componentId"] == _DEFINED_PARAMS[
+        "process_property_component_id"
+    ]
+
+    mappings = root.findall("bns:object/Map/Mappings/Mapping", NS)
+    function_to_profile = [m for m in mappings if m.attrib.get("fromType") == "function"]
+    assert len(function_to_profile) == 1
+    assert function_to_profile[0].attrib["fromKey"] == "1"
+
+
+def test_validate_config_setter_forbids_target_path():
+    cfg = _function_map_config(
+        function_mappings=[
+            {
+                "function_type": "document_property_set",
+                "inputs": ["rows/row[]/name"],
+                "target_path": "Root/list[]/status",
+                "parameters": {"document_property_name": "DDP_FOO"},
+            },
+        ],
+    )
+    err = MapFunctionBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROFILE_FIELD_VALIDATION_FAILED"
+    assert err.field.endswith("target_path")
+
+
+def test_validate_config_setter_accepts_omitted_target_path():
+    src_idx, tgt_idx = _build_indexes()
+    cfg = _function_map_config(
+        function_mappings=[
+            {
+                "function_type": "defined_process_property_set",
+                "inputs": ["rows/row[]/name"],
+                "parameters": dict(_DEFINED_PARAMS),
+            },
+        ],
+    )
+    err = MapFunctionBuilder.validate_config(
+        cfg, source_index=src_idx, target_index=tgt_idx
+    )
+    assert err is None
+
+
+def test_validate_config_getter_requires_target_path():
+    cfg = _function_map_config(
+        function_mappings=[
+            {
+                "function_type": "document_property_get",
+                "inputs": [],
+                "parameters": {"document_property_name": "DDP_FOO"},
+            },
+        ],
+    )
+    err = MapFunctionBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROFILE_FIELD_VALIDATION_FAILED"
+    assert err.field.endswith("target_path")

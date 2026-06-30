@@ -818,6 +818,37 @@ def test_inv_map_no_function_output_to_function_input_chaining():
         )
 
 
+def test_inv_map_no_output_setter_emits_empty_outputs_and_no_target_mapping():
+    # The side-effecting property setters (output_key is None) emit an empty
+    # <Outputs/> and NO function-output→profile mapping; position still
+    # mirrors key.
+    src_idx = XMLGeneratedProfileBuilder.build_field_index(_xml_profile_config())
+    tgt_idx = JSONGeneratedProfileBuilder.build_field_index(_json_profile_config())
+    xml = MapFunctionBuilder().build(
+        source_index=src_idx,
+        target_index=tgt_idx,
+        **_function_map_config(
+            function_mappings=[
+                {
+                    "function_type": "document_property_set",
+                    "inputs": ["rows/row[]/amount"],
+                    "parameters": {"document_property_name": "DDP_FOO"},
+                },
+            ],
+        ),
+    )
+    root = ET.fromstring(xml)
+    steps = root.findall("bns:object/Map/Functions/FunctionStep", NS)
+    assert steps and steps[0].findall("Outputs/Output") == []
+    assert steps[0].attrib["position"] == steps[0].attrib["key"]
+    function_to_profile = [
+        m
+        for m in root.findall("bns:object/Map/Mappings/Mapping", NS)
+        if m.attrib.get("fromType") == "function"
+    ]
+    assert function_to_profile == []
+
+
 # ---------------------------------------------------------------------------
 # Invariant assertions — REST operation profile-type emission (#50 resolved)
 # ---------------------------------------------------------------------------
@@ -966,7 +997,7 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
     },
     {
         "id": "map_function_step_attrs",
-        "invariant": "Map FunctionStep carries cacheEnabled/sumEnabled/x/y (PRESENCE only — values vary)",
+        "invariant": "Map FunctionStep carries cacheEnabled/sumEnabled/x/y (PRESENCE only — values vary; property families add per-family cacheOption/enabled and use per-family output keys 3/1, or empty <Outputs/> for setters)",
         "emitter": "map_function_registry.emit_function_step",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_map_function_step_attrs_present",
@@ -977,6 +1008,13 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "emitter": "map_builder (function mapping renderer)",
         "disposition": "guaranteed-by-construction",
         "test": "test_inv_map_no_function_output_to_function_input_chaining",
+    },
+    {
+        "id": "map_no_output_setter",
+        "invariant": "No-output property setters (output_key None) emit empty <Outputs/> and no function-output→profile mapping",
+        "emitter": "map_builder (function mapping renderer)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_map_no_output_setter_emits_empty_outputs_and_no_target_mapping",
     },
     {
         "id": "script_processing_store_stream",

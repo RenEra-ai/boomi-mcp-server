@@ -94,7 +94,11 @@ class MapFunctionOp(BaseModel):
 
     function_type: str
     inputs: List[str] = Field(default_factory=list)
-    target_path: str
+    # Required for output-producing families; omitted (None) for the no-output
+    # "Set" property families (dynamic/document/defined process property set),
+    # which have a side effect and bind no target leaf. MapFunctionBuilder
+    # enforces required-vs-forbidden per function_type.
+    target_path: Optional[str] = None
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -525,13 +529,23 @@ class FieldMapPrimitive(PrimitivePattern):
                 config, source_index=source_index, target_index=target_index
             )
         )
+        # depends_on: source/target profiles + every in-spec component a
+        # defined-process-property function references via a '$ref:' in
+        # parameters.process_property_component_id (after the profile deps).
+        depends_on = list(profile_deps)
+        for op in params.map_function:
+            ref = op.parameters.get("process_property_component_id")
+            if isinstance(ref, str) and ref.startswith(_REF_PREFIX):
+                dep_key = ref[len(_REF_PREFIX):]
+                if dep_key and dep_key not in depends_on:
+                    depends_on.append(dep_key)
         return IntegrationComponentSpec(
             key=map_key,
             type="transform.map",
             action="create",
             name=config["component_name"],
             config=config,
-            depends_on=list(profile_deps),
+            depends_on=depends_on,
         )
 
     @classmethod

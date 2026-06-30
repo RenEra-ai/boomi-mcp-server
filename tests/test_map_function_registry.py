@@ -33,6 +33,12 @@ SUPPORTED_FAMILIES = (
     "simple_lookup",
     "sequential_value",
     "math",
+    "dynamic_process_property_get",
+    "dynamic_process_property_set",
+    "document_property_get",
+    "document_property_set",
+    "defined_process_property_get",
+    "defined_process_property_set",
 )
 
 
@@ -526,3 +532,196 @@ def test_emit_math_step_is_byte_stable_across_operations():
         a = emit_function_step(family, step_key=1, parameters=params)
         b = emit_function_step(family, step_key=1, parameters=params)
         assert a == b, f"non-deterministic emission for {op}"
+
+
+# ---------------------------------------------------------------------------
+# Native property map functions (byte-exact against live captures in
+# .codex/plans/property-functionstep-live-captures.md)
+# ---------------------------------------------------------------------------
+
+
+_DEFINED_PARAMS = {
+    "process_property_component_id": "UUID",
+    "process_property_component_name": "New Process Property",
+    "process_property_key": "KEY",
+    "process_property_name": "Example Property",
+}
+
+
+def test_emit_dynamic_process_property_get_byte_exact():
+    family = get_function_family("dynamic_process_property_get")
+    xml = emit_function_step(family, step_key=1, parameters={"property_name": "DPP_X"})
+    assert xml == (
+        '<FunctionStep cacheEnabled="true" cacheOption="none" '
+        'category="ProcessProperty" key="1" name="Get Dynamic Process Property" '
+        'position="1" sumEnabled="false" type="PropertyGet" x="10.0" y="10.0">'
+        '<Inputs><Input default="DPP_X" key="1" name="Property Name"/>'
+        '<Input key="2" name="Default Value"/></Inputs>'
+        '<Outputs><Output key="3" name="Result"/></Outputs>'
+        "<Configuration/></FunctionStep>"
+    )
+
+
+def test_emit_dynamic_process_property_get_with_default_value():
+    family = get_function_family("dynamic_process_property_get")
+    xml = emit_function_step(
+        family,
+        step_key=1,
+        parameters={"property_name": "DPP_X", "default_value": "N/A"},
+    )
+    assert '<Input default="N/A" key="2" name="Default Value"/>' in xml
+
+
+def test_emit_dynamic_process_property_set_byte_exact():
+    family = get_function_family("dynamic_process_property_set")
+    xml = emit_function_step(
+        family, step_key=1, parameters={"property_name": "DPP_EXAMPLE"}
+    )
+    assert xml == (
+        '<FunctionStep cacheEnabled="true" cacheOption="none" '
+        'category="ProcessProperty" key="1" name="Set Dynamic Process Property" '
+        'position="1" sumEnabled="false" type="PropertySet" x="10.0" y="10.0">'
+        '<Inputs><Input default="DPP_EXAMPLE" key="1" name="Property Name"/>'
+        '<Input key="2" name="Property Value"/></Inputs>'
+        "<Outputs/><Configuration/></FunctionStep>"
+    )
+
+
+def test_emit_document_property_get_byte_exact():
+    family = get_function_family("document_property_get")
+    xml = emit_function_step(
+        family, step_key=1, parameters={"document_property_name": "DDP_FOO"}
+    )
+    assert xml == (
+        '<FunctionStep cacheEnabled="true" cacheOption="none" '
+        'category="ProcessProperty" enabled="true" key="1" '
+        'name="Get Document Property" position="1" sumEnabled="false" '
+        'type="DocumentPropertyGet" x="10.0" y="10.0"><Inputs/>'
+        '<Outputs><Output isReset="false" key="3" '
+        'name="Dynamic Document Property - DDP_FOO"/></Outputs>'
+        '<Configuration><DocumentProperty defaultValue="" persist="false" '
+        'propertyId="dynamicdocument.DDP_FOO" '
+        'propertyName="Dynamic Document Property - DDP_FOO"/></Configuration>'
+        "</FunctionStep>"
+    )
+
+
+def test_emit_document_property_set_byte_exact():
+    family = get_function_family("document_property_set")
+    xml = emit_function_step(
+        family, step_key=1, parameters={"document_property_name": "DDP_BAR"}
+    )
+    assert xml == (
+        '<FunctionStep cacheEnabled="true" cacheOption="none" '
+        'category="ProcessProperty" key="1" name="Set Document Property" '
+        'position="1" sumEnabled="false" type="DocumentPropertySet" '
+        'x="10.0" y="10.0"><Inputs>'
+        '<Input key="1" name="Dynamic Document Property - DDP_BAR"/></Inputs>'
+        '<Outputs/><Configuration><DocumentProperty defaultValue="" '
+        'persist="false" propertyId="dynamicdocument.DDP_BAR" '
+        'propertyName="Dynamic Document Property - DDP_BAR"/></Configuration>'
+        "</FunctionStep>"
+    )
+
+
+def test_emit_defined_process_property_get_byte_exact():
+    family = get_function_family("defined_process_property_get")
+    xml = emit_function_step(family, step_key=1, parameters=dict(_DEFINED_PARAMS))
+    assert xml == (
+        '<FunctionStep cacheEnabled="true" category="ProcessProperty" key="1" '
+        'name="Get Process Property" position="1" sumEnabled="false" '
+        'type="DefinedProcessPropertyGet" x="10.0" y="10.0"><Inputs/>'
+        '<Outputs><Output key="1" name="Example Property"/></Outputs>'
+        '<Configuration><DefinedProcessProperty componentId="UUID" '
+        'componentName="New Process Property" propertyKey="KEY" '
+        'propertyName="Example Property"/></Configuration></FunctionStep>'
+    )
+
+
+def test_emit_defined_process_property_set_byte_exact():
+    family = get_function_family("defined_process_property_set")
+    xml = emit_function_step(family, step_key=1, parameters=dict(_DEFINED_PARAMS))
+    assert xml == (
+        '<FunctionStep cacheEnabled="true" category="ProcessProperty" key="1" '
+        'name="Set Process Property" position="1" sumEnabled="false" '
+        'type="DefinedProcessPropertySet" x="10.0" y="10.0">'
+        '<Inputs><Input key="1" name="Example Property"/></Inputs>'
+        '<Outputs/><Configuration><DefinedProcessProperty componentId="UUID" '
+        'componentName="New Process Property" propertyKey="KEY" '
+        'propertyName="Example Property"/></Configuration></FunctionStep>'
+    )
+
+
+def test_property_setters_emit_empty_outputs():
+    for name in (
+        "dynamic_process_property_set",
+        "document_property_set",
+        "defined_process_property_set",
+    ):
+        family = get_function_family(name)
+        params = (
+            dict(_DEFINED_PARAMS)
+            if name == "defined_process_property_set"
+            else {"property_name": "DPP", "document_property_name": "DDP"}
+        )
+        xml = emit_function_step(family, step_key=1, parameters=params)
+        assert "<Outputs/>" in xml
+        assert "<Output " not in xml
+
+
+# Validators ----------------------------------------------------------------
+
+
+def test_dynamic_process_property_get_requires_property_name():
+    family = get_function_family("dynamic_process_property_get")
+    err = validate_function_mapping(
+        family, inputs=[], parameters={}, field_prefix="fm[0]"
+    )
+    assert err is not None
+    assert err.error_code == "MAP_FUNCTION_PARAMETER_MISSING"
+
+
+def test_document_property_name_rejects_dynamicdocument_prefix():
+    family = get_function_family("document_property_get")
+    err = validate_function_mapping(
+        family,
+        inputs=[],
+        parameters={"document_property_name": "dynamicdocument.DDP_FOO"},
+        field_prefix="fm[0]",
+    )
+    assert err is not None
+    assert err.error_code == "MAP_FUNCTION_PARAMETER_INVALID"
+
+
+def test_defined_process_property_requires_all_four_params():
+    family = get_function_family("defined_process_property_get")
+    err = validate_function_mapping(
+        family,
+        inputs=[],
+        parameters={"process_property_component_id": "$ref:pp"},
+        field_prefix="fm[0]",
+    )
+    assert err is not None
+    assert err.error_code == "MAP_FUNCTION_PARAMETER_MISSING"
+
+
+def test_defined_process_property_carries_component_reference_metadata():
+    for name in ("defined_process_property_get", "defined_process_property_set"):
+        family = get_function_family(name)
+        assert family.component_reference_parameter == "process_property_component_id"
+        assert family.component_reference_type == "processproperty"
+
+
+def test_property_setter_families_have_no_output_key():
+    for name in (
+        "dynamic_process_property_set",
+        "document_property_set",
+        "defined_process_property_set",
+    ):
+        assert get_function_family(name).output_key is None
+
+
+def test_property_getter_families_output_keys():
+    assert get_function_family("dynamic_process_property_get").output_key == 3
+    assert get_function_family("document_property_get").output_key == 3
+    assert get_function_family("defined_process_property_get").output_key == 1

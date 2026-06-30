@@ -203,3 +203,14 @@ def test_discovery_overview_points_at_script_mapping_authoring_schema():
     assert result["filtered_type"] == "script.mapping"
     assert "script_mapping" in result["authoring_guidance"]
     assert "search_boomi_docs" in result["authoring_guidance"]
+
+
+def test_authoring_schema_follow_up_no_longer_says_not_yet_emittable():
+    # Native property map functions are now emittable via map_type='function';
+    # the stale "not yet emittable" follow_up must be replaced.
+    result = get_schema_template_action(schema_name="script_mapping")
+    follow_up = result["follow_up"]
+    assert "not yet emittable" not in follow_up
+    assert "pending live FunctionStep shape capture" not in follow_up
+    assert "map_type='function'" in follow_up
+    assert "dynamic_process_property_get" in follow_up
