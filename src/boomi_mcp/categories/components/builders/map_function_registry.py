@@ -287,20 +287,33 @@ def _validate_non_blank_string(value: object) -> Optional[str]:
     return None
 
 
+# Property-namespace prefixes a DDP name must NOT carry. The emitter adds the
+# map-form ``dynamicdocument.`` prefix itself; a caller-supplied prefix (either
+# the map form, or the scripting form ``document.dynamic.userdefined.`` that the
+# Groovy authoring docs use) would be double-prefixed into a wrong propertyId.
+_DDP_FORBIDDEN_PREFIXES: Tuple[str, ...] = (
+    "dynamicdocument.",
+    "document.dynamic.userdefined.",
+)
+
+
 def _validate_ddp_name(value: object) -> Optional[str]:
     """Validate a Dynamic Document Property name.
 
-    Must be the bare name (e.g. ``DDP_FOO``) — the
-    ``dynamicdocument.`` prefix is added by the emitter, so a caller-supplied
-    prefix would double it.
+    Must be the bare name (e.g. ``DDP_FOO``) — the ``dynamicdocument.`` prefix
+    is added by the emitter, so a caller-supplied namespace prefix would double
+    it (e.g. ``dynamicdocument.document.dynamic.userdefined.DDP_FOO``) and point
+    the map at the wrong property.
     """
     if not isinstance(value, str) or not value.strip():
         return "must be a non-blank string"
-    if value.strip().startswith("dynamicdocument."):
-        return (
-            "must be the bare DDP name without the 'dynamicdocument.' prefix "
-            "(the builder adds it)"
-        )
+    stripped = value.strip()
+    for prefix in _DDP_FORBIDDEN_PREFIXES:
+        if stripped.startswith(prefix):
+            return (
+                f"must be the bare DDP name without the {prefix!r} prefix "
+                "(the builder adds the 'dynamicdocument.' prefix itself)"
+            )
     return None
 
 

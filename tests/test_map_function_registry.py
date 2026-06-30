@@ -681,12 +681,21 @@ def test_dynamic_process_property_get_requires_property_name():
     assert err.error_code == "MAP_FUNCTION_PARAMETER_MISSING"
 
 
-def test_document_property_name_rejects_dynamicdocument_prefix():
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "dynamicdocument.DDP_FOO",
+        "document.dynamic.userdefined.DDP_FOO",
+    ],
+)
+def test_document_property_name_rejects_namespace_prefixes(bad_name):
+    # The emitter adds the 'dynamicdocument.' prefix; a caller-supplied prefix
+    # (map form OR the scripting form the Groovy docs use) would double it.
     family = get_function_family("document_property_get")
     err = validate_function_mapping(
         family,
         inputs=[],
-        parameters={"document_property_name": "dynamicdocument.DDP_FOO"},
+        parameters={"document_property_name": bad_name},
         field_prefix="fm[0]",
     )
     assert err is not None
