@@ -5425,7 +5425,13 @@ _SCRIPT_MAPPING_AUTHORING_SCHEMA = {
         "script.mapping component body (script_body) referenced by a map "
         "Scripting function"
     ),
-    "tool": "manage_component(action='create', type='script.mapping')",
+    "tool": (
+        "manage_component(action='create', config='{\"component_type\": "
+        "\"script.mapping\", \"component_name\": \"...\", \"language\": "
+        "\"groovy2\", \"script_body\": \"...\", \"inputs\": [{\"name\": "
+        "\"...\", \"data_type\": \"character\"}], \"outputs\": [{\"name\": "
+        "\"...\"}]}')"
+    ),
     "language": "groovy2",
     "docs": "search_boomi_docs('Boomi map scripting function')",
     "skeleton": (

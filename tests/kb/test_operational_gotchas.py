@@ -331,9 +331,44 @@ def test_scripting_symptoms_route_to_their_gotchas():
     assert "groovy_dataprocess_storestream_required" in triage_symptoms(
         "documents dropped after script storeStream missing"
     )
+    # effect-based route fires via an unambiguous scripting token
+    assert "groovy_dataprocess_storestream_required" in triage_symptoms(
+        "documents disappear after the groovy scripting step"
+    )
+    # "groovy" parity across all effect verbs (dropped / disappear / no output)
+    assert "groovy_dataprocess_storestream_required" in triage_symptoms(
+        "no output documents from the groovy data process step"
+    )
+    # the "custom script" feature-name phrasing also routes (substring-safe)
+    assert "groovy_dataprocess_storestream_required" in triage_symptoms(
+        "documents disappear after custom script step"
+    )
+    # "data process script" phrasing routes (word-anchored, substring-safe)
+    assert "groovy_dataprocess_storestream_required" in triage_symptoms(
+        "documents disappear after the data process script step"
+    )
     assert "groovy_props_setproperty_null_npe" in triage_symptoms(
         "NullPointerException from setProperty null in script"
     )
     assert "groovy_ddp_prefix_required" in triage_symptoms(
         "ddp prefix document.dynamic.userdefined missing"
+    )
+
+
+def test_generic_dropped_document_does_not_route_to_storestream():
+    # A bare "dropped document" with no scripting context must NOT route to the
+    # storeStream gotcha (it can be any connector/routing drop). Matching is
+    # substring-based, so this also guards the "description" contains "script"
+    # false positive — the context token must be "scripting"/"groovy", never
+    # a bare "script".
+    assert "groovy_dataprocess_storestream_required" not in triage_symptoms(
+        "the connector dropped a document on the floor"
+    )
+    assert "groovy_dataprocess_storestream_required" not in triage_symptoms(
+        "connector dropped a document because description is missing"
+    )
+    # "transcript step" contains "script step" as a substring — must NOT route
+    # (a transcript is itself a document, so this is a realistic collision).
+    assert "groovy_dataprocess_storestream_required" not in triage_symptoms(
+        "the transcript step dropped a document"
     )

@@ -218,6 +218,13 @@ def test_script_mapping_schema_returns_authoring_contract():
     assert "storeStream" not in result["skeleton"]
     for token in ("ExecutionUtil", "search_boomi_docs", "output"):
         assert token in blob, token
+    # The create invocation must pass config as a JSON STRING (the public
+    # manage_component wrapper is config: str + json.loads), carrying
+    # component_type — not a top-level type= arg and not a Python dict.
+    assert "config='{" in result["tool"]  # single-quoted JSON string
+    assert '"component_type": "script.mapping"' in result["tool"]
+    assert "type='script.mapping'" not in result["tool"]  # no bare type= arg
+    assert "config={" not in result["tool"]  # not a Python dict
 
 
 def test_script_schemas_listed_and_in_unknown_envelope():

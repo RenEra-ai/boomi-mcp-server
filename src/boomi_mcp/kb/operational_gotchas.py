@@ -1218,6 +1218,33 @@ def search_operational_gotchas(
 # ids referenced here are asserted to exist in the catalog at import.
 # ---------------------------------------------------------------------------
 
+# The storeStream gotcha's effect-based routes are generated as the FULL cross
+# product of a document-loss verb and an UNAMBIGUOUS scripting-context phrase,
+# so the verb×context grid is symmetric by construction (no manually-missed
+# pairing). Context phrases must be substring-safe, because triage matches with
+# raw ``token in text``: bare "script" is a substring of "description", and
+# "script step" is a substring of "transcript step" (a transcript is itself a
+# document) — both are excluded. "custom script" (needs the "custom " prefix),
+# "groovy", "scripting", and the word-anchored "custom script" / "data process
+# script" carry no realistic collision in a Boomi troubleshooting symptom and
+# cover the canonical phrasings for a Data Process script. The two
+# storeStream-method signatures fire on the method name itself.
+_STORESTREAM_LOSS_VERBS = ("dropped", "disappear", "no output")
+_STORESTREAM_SCRIPT_CONTEXT = (
+    "scripting",
+    "groovy",
+    "custom script",
+    "data process script",
+)
+_STORESTREAM_SIGNATURES = [
+    ("storestream",),
+    ("store", "stream"),
+] + [
+    (verb, "document", context)
+    for verb in _STORESTREAM_LOSS_VERBS
+    for context in _STORESTREAM_SCRIPT_CONTEXT
+]
+
 _SYMPTOM_ROUTES: List[tuple] = [
     # Variables/credentials/uniform-401 → an env-var reference carried verbatim.
     # The catalog has no dedicated API-auth-route entry, so auth-despite-creds
@@ -1289,17 +1316,10 @@ _SYMPTOM_ROUTES: List[tuple] = [
             ("split", "document"),
         ],
     ),
-    # Documents vanishing after a Groovy Data Process step → missing storeStream.
-    (
-        "groovy_dataprocess_storestream_required",
-        [
-            ("storestream",),              # "forgot storeStream"
-            ("store", "stream"),           # "did not store the stream"
-            ("dropped", "document"),
-            ("document", "disappear", "script"),
-            ("no output", "document", "script"),
-        ],
-    ),
+    # Documents vanishing after a Data Process custom script that forgot
+    # dataContext.storeStream → the storeStream-method signatures plus the
+    # generated verb×scripting-context grid (see _STORESTREAM_SIGNATURES above).
+    ("groovy_dataprocess_storestream_required", _STORESTREAM_SIGNATURES),
     # NullPointerException from a script property assignment → null setProperty.
     (
         "groovy_props_setproperty_null_npe",
