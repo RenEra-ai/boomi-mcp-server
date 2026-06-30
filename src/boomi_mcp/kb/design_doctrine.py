@@ -1260,9 +1260,21 @@ _ENTRIES: List[Dict[str, Any]] = [
         "when_not_to_use": (
             "Genuinely novel logic with no native equivalent may need a "
             "script; keep it small and justified. A split or combine is a "
-            "native operation and never qualifies. The Data Process Custom "
+            "native operation and never qualifies. Several limits also mark a "
+            "script as the wrong tool: a script is sandboxed and cannot make "
+            "external network calls, so any outbound call belongs in a "
+            "connector step; and a script cannot reference other components "
+            "such as profiles, connections, or maps. The Data Process Custom "
             "Scripting shape that carries a justified script is emittable today, "
-            "so reserve it for that case rather than reaching for it by default."
+            "so reserve it for that case rather than reaching for it by "
+            "default. When a script is genuinely required, consult "
+            "search_boomi_docs for the dataContext, storeStream, and "
+            "ExecutionUtil authoring contract before writing it. Mind the "
+            "property-access boundary: dynamic document properties are not "
+            "reachable inside a map Scripting function body, where the Get and "
+            "Set Document Property function steps are used instead, while a "
+            "dynamic process property via ExecutionUtil is accessible from both "
+            "a map Scripting function and a Data Process script."
         ),
         "verification_status": "live_verified",
         "capability_status": "emittable_today",

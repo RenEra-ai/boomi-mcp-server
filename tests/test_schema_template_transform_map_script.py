@@ -198,3 +198,21 @@ def test_template_recommended_workflow_lists_script_component_step():
     result = _call(component_type="transform.map", protocol="script")
     workflow_blob = " ".join(result["recommended_workflow"]).lower()
     assert "script.mapping" in workflow_blob
+
+
+def test_template_points_at_script_mapping_authoring_schema():
+    # The script-route map template must point authors at the script_mapping
+    # authoring schema for the per-body contract (scripting affordance work).
+    result = _call(component_type="transform.map", protocol="script")
+    assert "script_mapping" in json.dumps(result)
+
+
+def test_discovery_overview_points_at_script_mapping_authoring_schema():
+    # Bug #144: the bare discovery call (no operation, protocol dropped) must
+    # also surface the map-script authoring pointer for transform.map.
+    result = get_schema_template_action(
+        resource_type="component", component_type="transform.map"
+    )
+    assert result["_success"] is True
+    assert result["filtered_type"] == "transform.map"
+    assert "script_mapping" in result["authoring_guidance"]

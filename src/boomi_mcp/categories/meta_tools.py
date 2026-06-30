@@ -3552,6 +3552,13 @@ _COMPONENT_CREATE_SCRIPT_MAPPING = {
         "component in build_integration alongside the transform.map that "
         "calls them via map_type='script' (#41)."
     ),
+    "authoring_guidance": (
+        "For the script-body authoring contract (named input/output variables, "
+        "assign-do-not-return, ExecutionUtil dynamic-process-property access, "
+        "and the no-document-property-access rule) plus a skeleton, call "
+        "get_schema_template(schema_name='script_mapping') and "
+        "search_boomi_docs('Boomi map scripting function')."
+    ),
     "note": (
         "Wraps a caller-authored Boomi Map Script in a structured component "
         "with declared <Input> and <Output> variables. Boomi sets mapped "
@@ -3751,6 +3758,11 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
         "'$ref:KEY' script_component_id references via depends_on. "
         "manage_component (action='create') only dispatches profile builders "
         "today — it does not understand structured script_mappings."
+    ),
+    "authoring_guidance": (
+        "Each referenced script.mapping body follows the map-script contract — "
+        "call get_schema_template(schema_name='script_mapping') for the named "
+        "input/output variable model and a skeleton."
     ),
     "note": (
         "In-map calls to one or more reusable script.mapping components. "
@@ -5325,6 +5337,8 @@ def _valid_schema_names() -> list:
         "workflow_sequences",
         "design_doctrine",
         "account_governance",
+        "script_dataprocess",
+        "script_mapping",
     ]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
     # design_doctrine / account_governance are stdlib-only static modules —
@@ -5348,6 +5362,104 @@ def _valid_schema_names() -> list:
         return names
     names += [f"archetype:{cls.metadata.name}" for cls in archetypes]
     return names
+
+
+# Read-only Groovy custom-scripting authoring contracts (script affordance work).
+# Surfaced at the emit point so an agent authoring a script body gets the
+# mandatory idioms (the canonical loop + storeStream + DDP/DPP) and a docs
+# pointer here, not only from parametric memory. Skeletons are plain strings
+# (no fenced blocks, no raw component XML) and the related_gotchas ids are
+# wired to the kb.operational_gotchas catalog.
+_SCRIPT_DATAPROCESS_AUTHORING_SCHEMA = {
+    "surface": "data_process custom_scripting step (transform.steps[].script)",
+    "tool": (
+        "build_integration — a process config.process_kind transform carrying a "
+        "data_process custom_scripting step"
+    ),
+    "language": "groovy2",
+    "docs": "search_boomi_docs('Boomi Custom Scripting dataContext')",
+    "skeleton": (
+        "import com.boomi.execution.ExecutionUtil\n"
+        "\n"
+        "dataContext.dataCount.times { i ->\n"
+        "    def stream = dataContext.getStream(i)\n"
+        "    def props = dataContext.getProperties(i)\n"
+        "    // read a dynamic document property (note the required prefix):\n"
+        "    //   props.getProperty('document.dynamic.userdefined.DDP_NAME')\n"
+        "    // write one only when the value is not null:\n"
+        "    //   if (v != null) props.setProperty('document.dynamic.userdefined.DDP_NAME', v)\n"
+        "    // read/write a dynamic process property:\n"
+        "    //   ExecutionUtil.getDynamicProcessProperty('DPP_NAME')\n"
+        "    //   ExecutionUtil.setDynamicProcessProperty('DPP_NAME', String.valueOf(n), false)\n"
+        "    dataContext.storeStream(stream, props)  // required, or the document is dropped\n"
+        "}\n"
+    ),
+    "rules": [
+        "Process every document: loop over dataContext.getDataCount(), reading "
+        "getStream(i) and getProperties(i).",
+        "Call dataContext.storeStream(is, props) for every document you keep — "
+        "an unstored document is silently dropped; storing N streams emits N "
+        "documents.",
+        "Prefix dynamic document property keys with "
+        "document.dynamic.userdefined. (case-sensitive).",
+        "Reach dynamic process properties and the execution logger through "
+        "ExecutionUtil; property values are strings, so convert numbers "
+        "explicitly.",
+        "Never pass null to props.setProperty — it throws a NullPointerException "
+        "at assignment.",
+        "Use ByteArrayInputStream to emit rewritten content; the runtime is "
+        "sandboxed (no external network calls — use a connector step instead).",
+        "Prefer native components over scripting; a split or combine is a native "
+        "Data Process operation, never a reason to script.",
+    ],
+    "related_gotchas": [
+        "groovy_dataprocess_storestream_required",
+        "groovy_props_setproperty_null_npe",
+        "groovy_ddp_prefix_required",
+        "groovy_compiles_first_execution",
+    ],
+}
+
+_SCRIPT_MAPPING_AUTHORING_SCHEMA = {
+    "surface": (
+        "script.mapping component body (script_body) referenced by a map "
+        "Scripting function"
+    ),
+    "tool": "manage_component(action='create', type='script.mapping')",
+    "language": "groovy2",
+    "docs": "search_boomi_docs('Boomi map scripting function')",
+    "skeleton": (
+        "// Inputs and outputs are pre-declared variables — do not redeclare them.\n"
+        "// Read each input and assign each output; a returned value is ignored.\n"
+        "outputVar = (inputVar ?: '').trim()\n"
+        "// A dynamic process property is available here:\n"
+        "//   import com.boomi.execution.ExecutionUtil\n"
+        "//   ExecutionUtil.setDynamicProcessProperty('DPP_NAME', String.valueOf(n), false)\n"
+        "// Dynamic DOCUMENT properties are NOT accessible in this body —\n"
+        "// use the Get Document Property / Set Document Property function steps.\n"
+    ),
+    "rules": [
+        "Inputs and outputs are pre-declared variables — read inputs, assign "
+        "outputs, and do not redeclare them.",
+        "Bind a result by assigning the named output variable; a 'return' value "
+        "is ignored.",
+        "The dataContext loop and storeStream are not map-script concepts.",
+        "A dynamic process property via ExecutionUtil is accessible; dynamic "
+        "document properties are NOT accessible in the body — use the Get and "
+        "Set Document Property function steps in the map.",
+        "Character inputs are never null (an empty string for a missing value); "
+        "date, integer, and float inputs can be null, so guard them.",
+    ],
+    "related_gotchas": [
+        "groovy_ddp_prefix_required",
+        "groovy_compiles_first_execution",
+    ],
+    "follow_up": (
+        "Native Get/Set Dynamic Process Property and Get/Set Document Property "
+        "map functions are not yet emittable by the MCP (map_function_registry) "
+        "— pending live FunctionStep shape capture."
+    ),
+}
 
 
 def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
@@ -5515,6 +5627,30 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
             **cls.describe(),
             "raw_xml_exposed": False,
             "boomi_mutation": False,
+        }
+
+    if schema_name == "script_dataprocess":
+        # Read-only Groovy authoring contract for the Data Process Custom
+        # Scripting body (no component XML emitted — guidance only).
+        return {
+            "_success": True,
+            "schema_name": "script_dataprocess",
+            **_SCRIPT_DATAPROCESS_AUTHORING_SCHEMA,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "read_only": True,
+        }
+
+    if schema_name == "script_mapping":
+        # Read-only Groovy authoring contract for the map Scripting function /
+        # script.mapping body (no component XML emitted — guidance only).
+        return {
+            "_success": True,
+            "schema_name": "script_mapping",
+            **_SCRIPT_MAPPING_AUTHORING_SCHEMA,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "read_only": True,
         }
 
     return {
@@ -6047,6 +6183,13 @@ _PROCESS_FLOW_PROTOCOLS = {
         ],
         "supported_transform_modes": ["passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve", "doccacheremove"],
         "supported_dataprocess_operations": ["custom_scripting", "split_documents", "combine_documents"],
+        "dataprocess_authoring": (
+            "When a dataprocess transform carries a custom_scripting step, call "
+            "get_schema_template(schema_name='script_dataprocess') for the "
+            "Custom Scripting authoring contract — the dataContext loop, the "
+            "storeStream-or-the-document-is-dropped rule, and the dynamic "
+            "document/process property idioms."
+        ),
         # Issue #109 M10.5: the only live-verified Document Cache Retrieve
         # "If cache is empty" wire value (Stop document execution, recommended).
         # The backward-compat "fail document with errors" behavior is deferred.
@@ -6835,6 +6978,20 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
             if component_type in valid:
                 result["filtered_type"] = component_type
                 result["hint"] = f"Use operation='create' or 'search' for {component_type}-specific templates"
+                if component_type in ("script.mapping", "transform.map"):
+                    # Surface the map-script authoring pointer on the discovery
+                    # call too (no operation), mirroring the process side's
+                    # dataprocess_authoring — so an agent is nudged to the
+                    # script_mapping contract before it picks operation='create'.
+                    result["authoring_guidance"] = (
+                        "Authoring a script body? Call "
+                        "get_schema_template(schema_name='script_mapping') for the "
+                        "map-script contract (named input/output variables, "
+                        "assign-do-not-return, ExecutionUtil dynamic-process-"
+                        "property access, and the no-document-property-access "
+                        "rule) plus a skeleton, and "
+                        "search_boomi_docs('Boomi map scripting function')."
+                    )
             else:
                 return {
                     "_success": False,
@@ -8546,7 +8703,8 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "schema_name": "str (optional) — authoring schema selector: 'IntegrationSpecV1' | "
                                "'archetype:<name>' | 'workflow_sequences' | 'workflow:<name>' | "
                                "'design_doctrine' | 'design_pattern:<name>' | "
-                               "'account_governance' | 'governance_pattern:<name>'. "
+                               "'account_governance' | 'governance_pattern:<name>' | "
+                               "'script_dataprocess' | 'script_mapping'. "
                                "Takes precedence over resource_type.",
             },
             "examples": [
@@ -8559,6 +8717,8 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 'get_schema_template(schema_name="workflow_sequences")',
                 'get_schema_template(schema_name="account_governance")',
                 'get_schema_template(schema_name="governance_pattern:descriptive_unique_component_names")',
+                'get_schema_template(schema_name="script_dataprocess")',
+                'get_schema_template(schema_name="script_mapping")',
             ],
             "note": "No profile needed — returns static reference data. No API calls. "
                     "Omitting both resource_type and schema_name returns SCHEMA_SELECTOR_REQUIRED.",

@@ -786,3 +786,11 @@ def test_template_sync_pipeline_points_multi_shape_to_flow_sequence():
     assert result["_success"] is True
     note = result["field_notes"]["multi_shape_composition"]
     assert "flow_sequence" in note
+
+
+def test_dataprocess_points_at_script_authoring_schema(template):
+    # A dataprocess custom_scripting step must point authors at the dedicated
+    # script_dataprocess authoring schema (scripting affordance work).
+    blob = json.dumps(template)
+    assert "script_dataprocess" in blob
+    assert "storeStream" in blob

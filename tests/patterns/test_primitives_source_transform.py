@@ -1046,6 +1046,18 @@ class TestDataProcess:
         for forbidden in ("<bns:", "</", "<?xml", "```"):
             assert forbidden not in dumped, f"{forbidden!r} leaked into describe()"
 
+    def test_script_field_describes_authoring_contract(self):
+        # The Custom Scripting body field must surface the mandatory authoring
+        # idioms + a docs pointer at the emit point (scripting affordance work).
+        dumped = json.dumps(DataProcessPrimitive.describe())
+        for token in (
+            "search_boomi_docs",
+            "storeStream",
+            "document.dynamic.userdefined",
+            "ExecutionUtil",
+        ):
+            assert token in dumped, f"{token!r} missing from data_process describe()"
+
     def test_emit_components_is_empty(self):
         params = DataProcessPrimitive.validate_parameters(
             {"steps": [{"operation": "custom_scripting", "script": "dataContext.storeStream(is, props);"}]}

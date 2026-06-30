@@ -174,6 +174,20 @@ def test_missing_script_body_rejected():
     assert exc_info.value.error_code == "SCRIPT_MAPPING_BODY_REQUIRED"
 
 
+def test_body_required_hint_carries_authoring_contract():
+    # The body-required hint must teach the map-script idioms at the point an
+    # agent authors the body (scripting affordance work).
+    cfg = _minimal_config()
+    del cfg["script_body"]
+    with pytest.raises(Exception) as exc_info:
+        ScriptMappingBuilder().build(**cfg)
+    hint = exc_info.value.hint
+    assert "search_boomi_docs" in hint
+    assert "assign each output" in hint
+    assert "ExecutionUtil" in hint
+    assert "not accessible" in hint  # document properties not reachable in body
+
+
 def test_blank_script_body_rejected():
     with pytest.raises(Exception) as exc_info:
         ScriptMappingBuilder().build(**_minimal_config(script_body="   "))

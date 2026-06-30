@@ -182,3 +182,24 @@ def test_template_gotchas_mention_input_null_semantics():
     gotchas_blob = " ".join(result["gotchas"]).lower()
     assert "null" in gotchas_blob
     assert "character" in gotchas_blob
+
+
+def test_template_points_at_script_mapping_authoring_schema():
+    # The component template must point authors at the dedicated script_mapping
+    # authoring schema + the docs search (scripting affordance work).
+    result = _call(component_type="script.mapping")
+    blob = json.dumps(result)
+    assert "script_mapping" in blob
+    assert "search_boomi_docs" in blob
+
+
+def test_discovery_overview_points_at_script_mapping_authoring_schema():
+    # Bug #144: the bare discovery call (no operation) must also surface the
+    # map-script authoring pointer — symmetric with the process side.
+    result = get_schema_template_action(
+        resource_type="component", component_type="script.mapping"
+    )
+    assert result["_success"] is True
+    assert result["filtered_type"] == "script.mapping"
+    assert "script_mapping" in result["authoring_guidance"]
+    assert "search_boomi_docs" in result["authoring_guidance"]

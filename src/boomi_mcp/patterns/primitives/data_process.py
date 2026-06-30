@@ -50,7 +50,21 @@ class CustomScriptingStep(BaseModel):
     operation: Literal["custom_scripting"] = Field(
         ..., description="Data Process operation (v1: 'custom_scripting')"
     )
-    script: str = Field(..., min_length=1, description="Custom Scripting body")
+    script: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Custom Scripting (Groovy) body. Before authoring, call "
+            "search_boomi_docs('Boomi Custom Scripting dataContext'). Loop over "
+            "dataContext.getDataCount(), reading getStream(i) and "
+            "getProperties(i); call dataContext.storeStream(is, props) for "
+            "every document you keep, or an unstored document is silently "
+            "dropped. Use ByteArrayInputStream for content rewrites; prefix "
+            "dynamic document property keys with document.dynamic.userdefined.; "
+            "reach dynamic process properties and the logger through "
+            "ExecutionUtil; never pass null to props.setProperty."
+        ),
+    )
     language: Literal["groovy2"] = Field(default="groovy2", description="Script engine (only 'groovy2')")
     use_cache: Literal[True] = Field(default=True, description="Script compilation caching (must be true)")
 

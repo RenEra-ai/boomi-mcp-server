@@ -74,7 +74,9 @@ VERIFICATION_STATUSES = frozenset(
     }
 )
 
-#: The six issue-#77 source domains, used as the catalog facet.
+#: The issue-#77 source domains, used as the catalog facet. ``scripting`` was
+#: added for the Groovy custom-scripting authoring traps (storeStream omission,
+#: null property assignment, DDP prefix) surfaced at the emit point.
 CATEGORIES = frozenset(
     {
         "listener_wss",
@@ -83,6 +85,7 @@ CATEGORIES = frozenset(
         "deployment_testing",
         "process_serialization",
         "marketplace",
+        "scripting",
     }
 )
 
@@ -839,6 +842,124 @@ _ENTRIES: List[Dict[str, Any]] = [
         "verification_status": "companion_unverified",
         "category": "marketplace",
     },
+    {
+        "id": "groovy_dataprocess_storestream_required",
+        "title": "A Data Process Groovy step that omits dataContext.storeStream silently drops the document",
+        "symptom": (
+            "Documents vanish from the process flow after a Custom Scripting "
+            "(Groovy) Data Process step: downstream steps receive fewer "
+            "documents, or none at all, and no error appears in the log."
+        ),
+        "detection": "silent",
+        "frequency": "high",
+        "root_cause": (
+            "The custom scripting framework forwards a document to the next "
+            "step only when the script calls dataContext.storeStream(is, props) "
+            "for it. A per-document loop that reads getStream and getProperties "
+            "but never calls storeStream emits zero documents, and the omission "
+            "raises no error. The number of streams stored is the number of "
+            "documents passed on."
+        ),
+        "wrong_pattern": (
+            "Modifying properties or content inside the "
+            "dataContext.getDataCount() loop and falling through the iteration "
+            "without calling dataContext.storeStream(is, props) for each "
+            "document the step should keep."
+        ),
+        "correct_pattern": (
+            "Call dataContext.storeStream(is, props) for every document the "
+            "step emits: once per iteration for a pass-through, or once per "
+            "produced stream when splitting one document into many."
+        ),
+        "remediation": (
+            "Add dataContext.storeStream(is, props) at the end of the "
+            "per-document loop, then run the process once against "
+            "representative data and confirm the downstream document count."
+        ),
+        "applies_to": ["groovy_script", "data_process_shape"],
+        "provenance": {"source_label": _COMPANION_DOCS, "retrieval_date": "2026-06-30"},
+        "verification_status": "docs_corroborated",
+        "category": "scripting",
+    },
+    {
+        "id": "groovy_props_setproperty_null_npe",
+        "title": "Passing null to props.setProperty in a Groovy script throws a NullPointerException at first run",
+        "symptom": (
+            "A Custom Scripting (Groovy) step deploys cleanly and then fails "
+            "the first time it executes with a NullPointerException originating "
+            "from a props.setProperty call."
+        ),
+        "detection": "runtime_error",
+        "frequency": "medium",
+        "root_cause": (
+            "The script props object is a java.util.Properties (a Hashtable), "
+            "whose setProperty rejects a null value with a NullPointerException "
+            "at assignment time. A value computed from an upstream lookup or "
+            "parse that can return null is passed straight into setProperty."
+        ),
+        "wrong_pattern": (
+            "Calling props.setProperty(key, value) where value may be null, for "
+            "example assigning the result of a lookup or parse that can return "
+            "null without a guard."
+        ),
+        "correct_pattern": (
+            "Guard before assigning: call props.setProperty(key, value) only "
+            "when value is not null, substituting an explicit empty string or "
+            "skipping the property otherwise, and convert numbers or booleans "
+            "to String first."
+        ),
+        "remediation": (
+            "Wrap each property assignment in a null check, then run the "
+            "deployed process once against representative data so the script "
+            "compiles and the assignment path executes."
+        ),
+        "applies_to": ["groovy_script", "data_process_shape"],
+        "provenance": {"source_label": _COMPANION_ONLY, "retrieval_date": "2026-06-30"},
+        "verification_status": "companion_unverified",
+        "category": "scripting",
+    },
+    {
+        "id": "groovy_ddp_prefix_required",
+        "title": "Dynamic document property access in a Groovy script silently misses without the document.dynamic.userdefined. prefix",
+        "symptom": (
+            "A Groovy Data Process script sets or reads a dynamic document "
+            "property by a bare name and the value never appears downstream: a "
+            "later Get or Set sees nothing, with no error raised."
+        ),
+        "detection": "silent",
+        "frequency": "medium",
+        "root_cause": (
+            "User-defined dynamic document properties are keyed by the full "
+            "document.dynamic.userdefined. prefix plus the property name. A "
+            "props.getProperty or setProperty call that uses the bare name "
+            "addresses a different key, so the read returns null and the write "
+            "is invisible to later steps; property names are also "
+            "case-sensitive. Inside a map Scripting function the props object is "
+            "not available at all, so document properties there go through the "
+            "Get Document Property and Set Document Property function steps."
+        ),
+        "wrong_pattern": (
+            "Calling props.getProperty or props.setProperty with a bare "
+            "property name instead of the document.dynamic.userdefined. "
+            "prefixed key, or attempting props access from inside a map "
+            "Scripting function body."
+        ),
+        "correct_pattern": (
+            "In a Data Process script, prefix every user-defined dynamic "
+            "document property key with document.dynamic.userdefined. and match "
+            "the exact case on read and write. In a map Scripting function, use "
+            "the Get and Set Document Property function steps instead of props."
+        ),
+        "remediation": (
+            "Update each property key to include the "
+            "document.dynamic.userdefined. prefix, then run the process once "
+            "and confirm the value is present on the document at the next step."
+        ),
+        "applies_to": ["groovy_script", "data_process_shape", "map"],
+        "provenance": {"source_label": _COMPANION_DOCS, "retrieval_date": "2026-06-30"},
+        "verification_status": "docs_corroborated",
+        "category": "scripting",
+    },
 ]
 
 
@@ -1166,6 +1287,39 @@ _SYMPTOM_ROUTES: List[tuple] = [
             ("missing", "multi-record"),
             ("missing", "multi record"),
             ("split", "document"),
+        ],
+    ),
+    # Documents vanishing after a Groovy Data Process step → missing storeStream.
+    (
+        "groovy_dataprocess_storestream_required",
+        [
+            ("storestream",),              # "forgot storeStream"
+            ("store", "stream"),           # "did not store the stream"
+            ("dropped", "document"),
+            ("document", "disappear", "script"),
+            ("no output", "document", "script"),
+        ],
+    ),
+    # NullPointerException from a script property assignment → null setProperty.
+    (
+        "groovy_props_setproperty_null_npe",
+        [
+            ("setproperty", "null"),
+            ("null", "setproperty"),
+            ("nullpointer", "script"),
+            ("npe", "script"),
+            ("nullpointerexception", "property"),
+        ],
+    ),
+    # A dynamic document property set/read in a script that never lands → prefix.
+    (
+        "groovy_ddp_prefix_required",
+        [
+            ("userdefined", "prefix"),
+            ("document.dynamic.userdefined",),
+            ("ddp", "prefix"),
+            ("ddp", "missing", "script"),
+            ("dynamic document property", "missing"),
         ],
     ),
 ]

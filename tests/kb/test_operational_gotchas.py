@@ -27,6 +27,7 @@ from boomi_mcp.kb.operational_gotchas import (  # noqa: E402
     list_operational_gotchas_index,
     render_operational_gotchas_resource,
     search_operational_gotchas,
+    triage_symptoms,
     valid_operational_gotcha_ids,
 )
 
@@ -305,3 +306,34 @@ def test_resource_renders_attribution_and_taxonomies():
         assert gid in body, f"resource missing entry {gid}"
     for token in DETECTIONS | FREQUENCIES | VERIFICATION_STATUSES:
         assert token in body, f"resource missing taxonomy token {token}"
+
+
+# ---------------------------------------------------------------------------
+# Scripting gotchas (Groovy custom-scripting authoring traps).
+# ---------------------------------------------------------------------------
+
+_SCRIPTING_IDS = (
+    "groovy_dataprocess_storestream_required",
+    "groovy_props_setproperty_null_npe",
+    "groovy_ddp_prefix_required",
+)
+
+
+def test_scripting_category_and_entries_present():
+    assert "scripting" in CATEGORIES
+    for gid in _SCRIPTING_IDS:
+        assert gid in OPERATIONAL_GOTCHA_ENTRIES, gid
+        assert OPERATIONAL_GOTCHA_ENTRIES[gid]["category"] == "scripting"
+        assert "groovy_script" in OPERATIONAL_GOTCHA_ENTRIES[gid]["applies_to"]
+
+
+def test_scripting_symptoms_route_to_their_gotchas():
+    assert "groovy_dataprocess_storestream_required" in triage_symptoms(
+        "documents dropped after script storeStream missing"
+    )
+    assert "groovy_props_setproperty_null_npe" in triage_symptoms(
+        "NullPointerException from setProperty null in script"
+    )
+    assert "groovy_ddp_prefix_required" in triage_symptoms(
+        "ddp prefix document.dynamic.userdefined missing"
+    )

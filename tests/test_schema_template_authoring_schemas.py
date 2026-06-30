@@ -5,6 +5,7 @@ calls. Covers the four schema_name families, error envelopes, selector
 precedence, and legacy resource_type compatibility.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -171,3 +172,58 @@ def test_archetype_discovery_resolves_callers_namespace():
     assert result["success"] is True or result["module"].startswith(
         "src.boomi_mcp.patterns"
     ), f"discovery did not resolve the caller's namespace: {result!r}"
+
+
+# ---------------------------------------------------------------------------
+# script_dataprocess / script_mapping — Groovy authoring contracts
+# ---------------------------------------------------------------------------
+
+
+def test_script_dataprocess_schema_returns_authoring_contract():
+    result = get_schema_template_action(schema_name="script_dataprocess")
+    assert result["_success"] is True
+    assert result["schema_name"] == "script_dataprocess"
+    assert result["read_only"] is True
+    assert result["raw_xml_exposed"] is False
+    assert result["boomi_mutation"] is False
+    blob = json.dumps(result)
+    assert "```" not in blob and "<bns:" not in blob and "<?xml" not in blob
+    for token in (
+        "dataContext",
+        "storeStream",
+        "document.dynamic.userdefined",
+        "ExecutionUtil",
+        "search_boomi_docs",
+    ):
+        assert token in blob, token
+    assert "groovy_compiles_first_execution" in result["related_gotchas"]
+    for gid in (
+        "groovy_dataprocess_storestream_required",
+        "groovy_props_setproperty_null_npe",
+        "groovy_ddp_prefix_required",
+    ):
+        assert gid in result["related_gotchas"], gid
+
+
+def test_script_mapping_schema_returns_authoring_contract():
+    result = get_schema_template_action(schema_name="script_mapping")
+    assert result["_success"] is True
+    assert result["schema_name"] == "script_mapping"
+    assert result["read_only"] is True
+    assert result["raw_xml_exposed"] is False
+    assert result["boomi_mutation"] is False
+    blob = json.dumps(result)
+    assert "```" not in blob and "<bns:" not in blob
+    # storeStream is not a map-script concept — must not appear in the skeleton.
+    assert "storeStream" not in result["skeleton"]
+    for token in ("ExecutionUtil", "search_boomi_docs", "output"):
+        assert token in blob, token
+
+
+def test_script_schemas_listed_and_in_unknown_envelope():
+    names = _valid_schema_names()
+    assert "script_dataprocess" in names
+    assert "script_mapping" in names
+    envelope = get_schema_template_action(schema_name="__bogus__")
+    assert "script_dataprocess" in envelope["valid_schema_names"]
+    assert "script_mapping" in envelope["valid_schema_names"]

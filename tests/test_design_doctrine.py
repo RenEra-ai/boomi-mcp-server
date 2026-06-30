@@ -222,6 +222,21 @@ def test_valid_schema_names_includes_design_doctrine_and_patterns():
     assert "design_pattern:wrapper_subprocess_separation" in names
 
 
+def test_native_over_custom_scripting_names_wrong_tool_and_map_boundary():
+    # The native-vs-script boundary must name concrete wrong-tool reasons and
+    # the map-script property-access boundary (scripting affordance work).
+    catalog = get_design_doctrine_catalog()
+    entry = next(
+        e for e in catalog["entries"] if e["name"] == "native_over_custom_scripting"
+    )
+    text = entry["when_not_to_use"]
+    assert "connector step" in text  # sandboxed: no external network calls
+    assert "cannot reference other components" in text
+    assert "search_boomi_docs" in text  # authoring-contract pointer
+    assert "Set Document Property" in text  # map-script property boundary
+    assert "ExecutionUtil" in text
+
+
 # ---------------------------------------------------------------------------
 # Consolidation + mutual exclusion (adversarial-critique requirements)
 # ---------------------------------------------------------------------------

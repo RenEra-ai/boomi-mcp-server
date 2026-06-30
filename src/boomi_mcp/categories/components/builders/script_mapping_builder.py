@@ -92,6 +92,22 @@ _SUPPORTED_INPUT_DATA_TYPES: Tuple[str, ...] = (
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+# Authoring contract surfaced in the body-required validation hint so an agent
+# that reaches this builder learns the map-script idioms at the authoring point
+# (the body stays opaque and is never inspected). Kept prose-only — no canned
+# script/business logic — per the module's no-canned-logic guard test.
+_SCRIPT_MAPPING_BODY_AUTHORING = (
+    "Map scripts bind the declared input and output variables by name: read "
+    "the inputs and assign each output variable, and do not return a value. "
+    "storeStream is not a map-script concept. Set a dynamic process property "
+    "through ExecutionUtil; dynamic document properties are not accessible "
+    "inside the map Scripting function body, so use the Get and Set Document "
+    "Property steps there. For the full contract and a skeleton see "
+    "get_schema_template(schema_name='script_mapping') and "
+    "search_boomi_docs('Boomi map scripting function')."
+)
+
+
 # Secret-shaped key names that script.mapping configs must never carry.
 # Mirrors the set rejected by ``map_builder.DirectMapBuilder.FORBIDDEN_SECRET_FIELDS``
 # so a single audit covers every map-family builder. ``script_body`` may
@@ -318,7 +334,7 @@ class ScriptMappingBuilder:
                 hint=(
                     "Provide the script source as a string. Bodies are "
                     "XML-escaped and emitted verbatim — Boomi runs them "
-                    "in the chosen language runtime."
+                    "in the chosen language runtime. " + _SCRIPT_MAPPING_BODY_AUTHORING
                 ),
             )
 
