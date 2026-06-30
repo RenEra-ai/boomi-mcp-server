@@ -853,6 +853,46 @@ def test_validate_config_setter_forbids_target_path():
     assert err.field.endswith("target_path")
 
 
+@pytest.mark.parametrize("bad_target", [123, [], {}, True, "Root/list[]/status"])
+def test_validate_config_setter_rejects_any_provided_target_path(bad_target):
+    # A no-output setter must omit target_path entirely. Any PROVIDED value —
+    # non-blank string OR a non-string (int/list/dict/bool) — is rejected, not
+    # silently discarded.
+    cfg = _function_map_config(
+        function_mappings=[
+            {
+                "function_type": "dynamic_process_property_set",
+                "inputs": ["rows/row[]/name"],
+                "target_path": bad_target,
+                "parameters": {"property_name": "DPP_X"},
+            },
+        ],
+    )
+    err = MapFunctionBuilder.validate_config(cfg)
+    assert err is not None
+    assert err.error_code == "PROFILE_FIELD_VALIDATION_FAILED"
+    assert err.field.endswith("target_path")
+
+
+@pytest.mark.parametrize("omitted_target", [None, "", "   "])
+def test_validate_config_setter_treats_blank_target_path_as_omitted(omitted_target):
+    src_idx, tgt_idx = _build_indexes()
+    cfg = _function_map_config(
+        function_mappings=[
+            {
+                "function_type": "dynamic_process_property_set",
+                "inputs": ["rows/row[]/name"],
+                "target_path": omitted_target,
+                "parameters": {"property_name": "DPP_X"},
+            },
+        ],
+    )
+    err = MapFunctionBuilder.validate_config(
+        cfg, source_index=src_idx, target_index=tgt_idx
+    )
+    assert err is None
+
+
 def test_validate_config_setter_accepts_omitted_target_path():
     src_idx, tgt_idx = _build_indexes()
     cfg = _function_map_config(

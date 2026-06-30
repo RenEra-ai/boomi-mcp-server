@@ -845,7 +845,17 @@ class MapFunctionBuilder:
                     )
                 target_path: Optional[str] = target_path_raw.strip()
             else:
-                if isinstance(target_path_raw, str) and target_path_raw.strip():
+                # No-output setters must OMIT target_path. None / a blank
+                # string count as omitted; any other provided value — a
+                # non-blank string OR a non-string (int, list, dict, bool) —
+                # is a contract violation and must be rejected rather than
+                # silently discarded (validate_config is a public boundary
+                # reachable with raw config dicts that never pass through the
+                # MapFunctionOp model's type check).
+                provided = target_path_raw is not None and not (
+                    isinstance(target_path_raw, str) and not target_path_raw.strip()
+                )
+                if provided:
                     return BuilderValidationError(
                         f"{field_prefix}.target_path must be omitted for "
                         f"{family.name!r} — a no-output property setter has no "
