@@ -402,6 +402,32 @@ def test_invalid_build_id_type_returns_structured_error():
     assert result["build_id"] is None
 
 
+def test_early_error_envelope_sanitizes_non_string_profile():
+    # #129 D2 (review r1): a non-string raw profile on the ValidationError path must be sanitized to
+    # null in the envelope (never echoed raw), matching the other sanitized request fields and
+    # keeping the response contract/JSON-serializability intact.
+    result = orchestrate_deploy_action(
+        build_id=[], environment_id="env-1", runtime_id="rt-1", profile=[],
+    )
+    assert result["_success"] is False
+    assert set(_codes(result)) == {"INVALID_REQUEST"}
+    # A non-string profile is nulled in the envelope, never echoed raw.
+    assert result["profile"] is None
+    _assert_full_error_envelope(result)
+
+
+def test_early_error_envelope_preserves_valid_string_profile(registry):
+    # A VALID string profile is preserved in the early-error envelope (sanitize nulls only non-str).
+    bid = registry("b-prof-ok", _single_process_entry())
+    result = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1",
+        profile="prof-x", schedule_override=[],
+    )
+    assert result["_success"] is False
+    assert _codes(result) == ["INVALID_REQUEST"]
+    assert result["profile"] == "prof-x"
+
+
 def test_invalid_schedule_override_type_returns_structured_error(registry):
     # A non-dict schedule_override must not raise ValidationError out of the function.
     bid = registry("b-badsched", _single_process_entry())
@@ -539,6 +565,25 @@ def test_single_process_non_string_component_id_returns_malformed(registry):
     assert result["_success"] is False
     assert _codes(result) == ["BUILD_REGISTRY_ENTRY_MALFORMED"]
     assert result["errors"][0]["details"]["process_key"] == "proc"
+
+
+@pytest.mark.parametrize("bad_key", [[], {}, ["p"], {"k": 1}])
+def test_single_process_unhashable_key_returns_malformed_not_typeerror(registry, bad_key):
+    # #129 D3 (review r1): an UNHASHABLE key (list/dict) must NOT raise TypeError from the
+    # results.get(process_key) lookup — the malformed-key guard runs before any dict lookup and
+    # returns a structured BUILD_REGISTRY_ENTRY_MALFORMED.
+    entry = _entry(
+        components=[{"key": bad_key, "type": "process", "action": "create", "name": "P",
+                     "component_id": "CID-1", "config": {}, "depends_on": []}],
+        results={},
+        execution_order=[],
+    )
+    bid = registry("b-unhashable-key", entry)
+    result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is False
+    assert _codes(result) == ["BUILD_REGISTRY_ENTRY_MALFORMED"]
+    assert result["errors"][0]["details"]["process_key"] == "<unknown>"
+    _assert_full_error_envelope(result)
 
 
 def test_multiple_process_components_keys_are_strings(registry):

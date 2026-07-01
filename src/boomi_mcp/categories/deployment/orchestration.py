@@ -558,12 +558,12 @@ def _resolve_build_deployment_target(
 
     process_comp = process_candidates[0]
     process_key = process_comp.get("key")
-    result_entry = results.get(process_key) if process_key is not None else None
-    result_entry = result_entry if isinstance(result_entry, dict) else {}
 
-    # A malformed registry entry (missing/blank/non-string key) must surface as a structured
-    # error, not an uncaught Pydantic ValidationError from constructing ResolvedBuildTarget
-    # (model field ``process_key: str``) below (#129 D3).
+    # A malformed registry entry (missing/blank/non-string key — including an UNHASHABLE list/dict)
+    # must surface as a structured error, not an uncaught exception (#129 D3). Validate BEFORE using
+    # process_key as a dict key below: ``results.get(process_key)`` raises TypeError on an unhashable
+    # key, and ResolvedBuildTarget (model field ``process_key: str``) raises ValidationError on a
+    # non-string key — both must become BUILD_REGISTRY_ENTRY_MALFORMED instead.
     if not isinstance(process_key, str) or not process_key.strip():
         return None, _error(
             BUILD_REGISTRY_ENTRY_MALFORMED,
@@ -571,6 +571,9 @@ def _resolve_build_deployment_target(
             field="build_id",
             details={"build_id": build_id, "process_key": _safe_process_key(process_comp)},
         )
+
+    result_entry = results.get(process_key)
+    result_entry = result_entry if isinstance(result_entry, dict) else {}
 
     process_component_id = result_entry.get("component_id") or process_comp.get("component_id")
     if not process_component_id:
@@ -667,7 +670,10 @@ def _error_response(
     metadata is attached — those belong to real-run stage failures, not pre-stage validation.
     """
     # Sanitize raw context: only echo values that already have the expected type into the
-    # placeholder stage models (the initial ValidationError path may pass a list/dict here).
+    # placeholder stage models AND the top-level envelope (the initial ValidationError path may
+    # pass a list/dict/other non-string here). ``profile`` is sanitized too so it can never echo a
+    # non-string raw object into the response contract or break JSON-serializability (#129 review).
+    safe_profile = profile if isinstance(profile, str) else None
     safe_build_id = build_id if isinstance(build_id, str) else None
     safe_environment_id = environment_id if isinstance(environment_id, str) else None
     safe_runtime_id = runtime_id if isinstance(runtime_id, str) else None
@@ -700,7 +706,7 @@ def _error_response(
 
     return {
         "_success": False,
-        "profile": profile,
+        "profile": safe_profile,
         "build_id": safe_build_id,
         "dry_run": dry_run_flag,
         "plan_only": bool(plan_only),
