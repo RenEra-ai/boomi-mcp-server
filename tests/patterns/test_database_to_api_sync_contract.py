@@ -778,6 +778,35 @@ def test_reuse_binding_without_component_id_or_name_returns_field_error():
     _assert_path_match(paths, "source.binding")
 
 
+def test_source_reuse_binding_with_both_ids_returns_field_error():
+    # Issue #127 B2: reuse mode must supply EXACTLY one identifier; both-present
+    # used to pass the public contract and only fail downstream.
+    payload = _valid_minimal()
+    payload["source"]["binding"] = {
+        "mode": "reuse",
+        "component_id": "conn-123",
+        "component_name": "Existing DB Conn",
+    }
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "source.binding")
+    assert any(
+        "exactly one of component_id or component_name" in fe["message"]
+        for fe in _build(payload)["field_errors"]
+    ), _build(payload)["field_errors"]
+
+
+def test_target_reuse_binding_with_both_ids_returns_field_error():
+    # Issue #127 B2: same exactly-one rule on the REST target binding.
+    payload = _valid_minimal()
+    payload["target"]["binding"] = {
+        "mode": "reuse",
+        "component_id": "rest-123",
+        "component_name": "Existing REST Conn",
+    }
+    paths = _field_paths(_build(payload))
+    _assert_path_match(paths, "target.binding")
+
+
 def test_blank_sql_returns_field_error():
     payload = _valid_minimal()
     payload["source"]["read_operation"]["sql"] = "   "
@@ -1307,6 +1336,58 @@ def test_map_function_parameters_accepts_credential_ref_style_keys():
     payload = _map_function_payload_with_parameters(
         {"credential_ref": "secrets/rest/bearer", "settings_ref": "configs/x"}
     )
+    params = DatabaseToApiSyncArchetype.validate_parameters(payload)
+    assert isinstance(params, DatabaseToApiSyncParameters)
+
+
+# ---------------------------------------------------------------------------
+# Issue #127 B1: naming.runtime_hints is the second schema-opaque dict echoed
+# verbatim into the emitted spec (under spec.runtime), so it must run the same
+# plaintext secret-shaped-key scan as map_function.parameters.
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_hints_rejects_top_level_secret_key():
+    payload = _valid_minimal()
+    payload["naming"]["runtime_hints"] = {"password": "hunter2"}
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+    _assert_path_match(
+        [fe["field_path"] for fe in result["field_errors"]], "naming.runtime_hints"
+    )
+    assert any(
+        "forbidden secret-shaped substring" in fe["message"]
+        for fe in result["field_errors"]
+    ), f"expected secret-shape rejection, got {result['field_errors']!r}"
+
+
+def test_runtime_hints_rejects_nested_secret_key():
+    """The scan must descend into nested dicts so callers can't bypass it by
+    wrapping the secret-shaped key one level deeper."""
+    payload = _valid_minimal()
+    payload["naming"]["runtime_hints"] = {"outer": {"api_key": "<<sentinel>>"}}
+    result = _build(payload)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_runtime_hints_rejection_does_not_echo_offending_value():
+    sentinel = "sk_live_RUNTIME_HINTS_GUARD_DEADBEEF"
+    payload = _valid_minimal()
+    payload["naming"]["runtime_hints"] = {"authorization": sentinel}
+    result = _build(payload)
+    assert result["_success"] is False
+    assert sentinel not in json.dumps(result), (
+        "runtime_hints secret-shaped-key rejection must not echo the value"
+    )
+
+
+def test_runtime_hints_accepts_non_secret_keys():
+    """Legitimate runtime hints (atom selection, environment tags) must pass
+    the secret-shaped-key scan."""
+    payload = _valid_minimal()
+    payload["naming"]["runtime_hints"] = {"atom_pool": "primary", "env_tag": "prod"}
     params = DatabaseToApiSyncArchetype.validate_parameters(payload)
     assert isinstance(params, DatabaseToApiSyncParameters)
 

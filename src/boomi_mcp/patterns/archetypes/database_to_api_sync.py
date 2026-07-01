@@ -151,10 +151,11 @@ def _stripped_nonblank(value: str) -> str:
 # FORBIDDEN_SECRET_FIELDS verbatim — case-insensitive substring match catches
 # camelCase, snake-prefixed, and SCREAMING-CASE variants. credential_ref and
 # similar *_ref keys carry opaque URI references and are intentionally NOT in
-# this list. Codex review r1 P2: map_function.parameters is the only
-# schema-opaque dict the archetype echoes back into IntegrationSpecV1 on
-# success, so plaintext secret keys must be rejected at parameter-validation
-# time before they can leak through the spec.
+# this list. Codex review r1 P2 / issue #127 B1: map_function.parameters and
+# naming.runtime_hints are the schema-opaque dicts the archetype echoes back
+# into IntegrationSpecV1 on success (the former under the transform operation,
+# the latter under spec.runtime), so plaintext secret keys must be rejected at
+# parameter-validation time before they can leak through the spec.
 _FORBIDDEN_SECRET_KEY_SUBSTRINGS = (
     "password",
     "passcode",
@@ -275,6 +276,30 @@ class NamingConfig(BaseModel):
         if value is None:
             return None
         return _stripped_nonblank(value)
+
+    @field_validator("runtime_hints")
+    @classmethod
+    def _reject_plaintext_secret_keys(
+        cls, value: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        # runtime_hints is echoed verbatim under spec.runtime (issue #127 B1),
+        # so reject plaintext secret-shaped keys at any nesting depth before
+        # they can leak through the emitted spec — the same concern the
+        # map_function.parameters scan exists to prevent. The offending key
+        # name is NOT echoed back through the error envelope; callers route
+        # connector secrets via the connection binding's credential_ref.
+        if value is None:
+            return None
+        if _scan_for_secret_shaped_keys(value):
+            raise ValueError(
+                "naming.runtime_hints contains a key whose name matches a "
+                "forbidden secret-shaped substring (e.g. password / token / "
+                "secret / api_key / bearer / authorization). Reference "
+                "connector secrets via the connection binding's credential_ref "
+                "instead; naming.runtime_hints is echoed back in the emitted "
+                "IntegrationSpec and must not carry plaintext secrets."
+            )
+        return value
 
 
 # ---------------------------------------------------------------------------
@@ -502,17 +527,18 @@ class DbConnectionBinding(BaseModel):
     component_id: Optional[str] = Field(
         default=None,
         description=(
-            "Existing Boomi connector component id to reuse. Required when "
-            "mode='reuse' if component_name is not supplied; must be omitted "
-            "when mode='create'."
+            "Existing Boomi connector component id to reuse. Supply exactly one "
+            "of component_id or component_name when mode='reuse'; must be "
+            "omitted when mode='create'."
         ),
     )
     component_name: Optional[str] = Field(
         default=None,
         description=(
             "Existing Boomi connector component name to reuse (resolved at "
-            "execution time). Required when mode='reuse' if component_id is "
-            "not supplied; must be omitted when mode='create'."
+            "execution time). Supply exactly one of component_id or "
+            "component_name when mode='reuse'; must be omitted when "
+            "mode='create'."
         ),
     )
 
@@ -533,9 +559,14 @@ class DbConnectionBinding(BaseModel):
                     "mode='create' must not supply component_id or component_name"
                 )
         else:  # reuse
-            if not (self.component_id or self.component_name):
+            # Issue #127 B2: require exactly one reuse identifier. Both-present
+            # passed the public contract before and was only rejected far
+            # downstream; reject it here so the origin is the binding.
+            identifiers = [self.component_id, self.component_name]
+            if sum(1 for value in identifiers if value) != 1:
                 raise ValueError(
-                    "mode='reuse' requires component_id or component_name"
+                    "mode='reuse' requires exactly one of component_id or "
+                    "component_name"
                 )
             if self.settings is not None:
                 raise ValueError("mode='reuse' must not supply settings")
@@ -771,17 +802,18 @@ class RestConnectionBinding(BaseModel):
     component_id: Optional[str] = Field(
         default=None,
         description=(
-            "Existing Boomi connector component id to reuse. Required when "
-            "mode='reuse' if component_name is not supplied; must be omitted "
-            "when mode='create'."
+            "Existing Boomi connector component id to reuse. Supply exactly one "
+            "of component_id or component_name when mode='reuse'; must be "
+            "omitted when mode='create'."
         ),
     )
     component_name: Optional[str] = Field(
         default=None,
         description=(
             "Existing Boomi connector component name to reuse (resolved at "
-            "execution time). Required when mode='reuse' if component_id is "
-            "not supplied; must be omitted when mode='create'."
+            "execution time). Supply exactly one of component_id or "
+            "component_name when mode='reuse'; must be omitted when "
+            "mode='create'."
         ),
     )
 
@@ -802,9 +834,14 @@ class RestConnectionBinding(BaseModel):
                     "mode='create' must not supply component_id or component_name"
                 )
         else:
-            if not (self.component_id or self.component_name):
+            # Issue #127 B2: require exactly one reuse identifier (see
+            # DbConnectionBinding). Both-present passed the public contract
+            # before and was only rejected downstream.
+            identifiers = [self.component_id, self.component_name]
+            if sum(1 for value in identifiers if value) != 1:
                 raise ValueError(
-                    "mode='reuse' requires component_id or component_name"
+                    "mode='reuse' requires exactly one of component_id or "
+                    "component_name"
                 )
             if self.settings is not None:
                 raise ValueError("mode='reuse' must not supply settings")
@@ -2162,20 +2199,22 @@ class DatabaseToApiSyncParameters(BaseModel):
                 replacement_unknown_target_refs += 1
             elif replacement.target_path not in bound_target_paths:
                 replacement_unbound_target_refs += 1
-        # Reverse check: when path_replacements is in use, every '{token}' in the
-        # path must have a matching replacement. Otherwise an undeclared token
-        # (e.g. '{region}' in '/clients/{clientId}/{region}') would survive into
-        # the emitted path as a literal '{region}' and break the request at
-        # runtime. Only enforced when the caller opts into dynamic paths so an
-        # empty path_replacements leaves a static path with literal braces (if
-        # any) byte-for-byte unchanged.
-        undeclared_token_count = 0
+        # Reverse check: when path_replacements is in use, every brace in the
+        # path must belong to a declared '{name}' replacement. Strip each
+        # declared token, then reject any residual '{' or '}'. This catches an
+        # undeclared token (e.g. '{region}' in '/clients/{clientId}/{region}'),
+        # an empty '{}' (issue #127 B3 — the old non-empty-token regex
+        # '{([^{}]+)}' skipped it), and an unbalanced brace ('/v1/{clientId') —
+        # all of which would otherwise survive into the emitted path as literal
+        # braces and break the request at runtime. Only enforced when the caller
+        # opts into dynamic paths so an empty path_replacements leaves a static
+        # path with literal braces (if any) byte-for-byte unchanged.
+        residual_brace_issue = False
         if send_request.path_replacements:
-            declared_names = set(replacement_names)
-            path_tokens = re.findall(r"\{([^{}]+)\}", send_request.path)
-            undeclared_token_count = sum(
-                1 for token in path_tokens if token not in declared_names
-            )
+            residual = send_request.path
+            for name in replacement_names:
+                residual = residual.replace("{" + name + "}", "")
+            residual_brace_issue = "{" in residual or "}" in residual
 
         issues: List[str] = []
         if unknown_source_refs:
@@ -2230,11 +2269,12 @@ class DatabaseToApiSyncParameters(BaseModel):
                 "transform output binds; a dynamic path segment can only "
                 "source a mapped leaf"
             )
-        if undeclared_token_count:
+        if residual_brace_issue:
             issues.append(
-                f"target.send_request.path contains {undeclared_token_count} "
-                "'{name}' placeholder(s) with no matching path_replacements "
-                "entry; every token must be a declared replacement so no "
+                "target.send_request.path contains an unresolved '{'/'}' brace "
+                "after removing declared path_replacements token(s); every "
+                "brace must belong to a declared '{name}' replacement (no "
+                "undeclared '{token}', empty '{}', or unbalanced brace) so no "
                 "unresolved placeholder reaches the emitted path"
             )
 
@@ -2757,10 +2797,17 @@ def _build_dynamic_path(
     for match in token_re.finditer(send.path):
         replacement = by_name.get(match.group(1))
         if replacement is None:
-            # Not a declared replacement — leave the literal braces inside the
-            # surrounding static segment (the validator already proved every
-            # declared name appears as a {name} token here).
-            continue
+            # Defense-in-depth backstop (issue #127 B3): the contract validator
+            # already rejects any brace that is not a declared replacement, so
+            # an unmatched token reaching here means an upstream invariant was
+            # violated. Fail hard rather than silently emitting literal braces
+            # into the request path.
+            raise BuilderValidationError(
+                "target.send_request.path contains a '{...}' token with no "
+                "matching path_replacements entry",
+                error_code="ARCHETYPE_PARAM_INVALID",
+                field="target.send_request.path",
+            )
         if match.start() > last:
             segments.append({"type": "static", "value": send.path[last:match.start()]})
         entry = target_index[replacement.target_path]

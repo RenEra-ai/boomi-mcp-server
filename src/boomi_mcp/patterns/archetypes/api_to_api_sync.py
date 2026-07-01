@@ -513,6 +513,21 @@ class MapScriptApiTransformOperation(_BaseApiTransformOperation):
             cleaned.append(_stripped_nonblank(item))
         return cleaned
 
+    @model_validator(mode="after")
+    def _require_script_material(self) -> "MapScriptApiTransformOperation":
+        # Issue #127 A2: a map_script op with neither script_body nor
+        # script_component_ref carries no script to materialize. Reject it at
+        # the contract layer so callers get a clear origin instead of the
+        # downstream FieldMapPrimitive ARCHETYPE_PARAM_INVALID. (This preset
+        # only supports inline script_body; script_component_ref reuse is still
+        # rejected later at assembly — #51 owns external reuse.)
+        if self.script_component_ref is None and self.script_body is None:
+            raise ValueError(
+                "map_script requires script_body when script_component_ref is "
+                "absent"
+            )
+        return self
+
 
 ApiTransformOperation = Annotated[
     Union[
@@ -755,8 +770,39 @@ def _create_default_headers(binding: RestConnectionBinding) -> Dict[str, str]:
     return {}
 
 
+def _reject_case_variant_headers(headers: Dict[str, str], *, field: str) -> None:
+    """Reject two keys in one header dict that differ only in letter case.
+
+    HTTP header names are case-insensitive (RFC 7230); a single caller dict
+    carrying both ``Accept`` and ``accept`` would otherwise emit two entries for
+    one logical header (issue #127 A1). The cross-dict operation-wins dedupe in
+    ``_merge_request_headers`` only resolves conflicts *between* the default and
+    operation dicts, not *within* one. Raising (rather than silently keeping the
+    last spelling, which depends on dict insertion order) surfaces the authoring
+    error as a structured ``ARCHETYPE_PARAM_INVALID``. The offending key name is
+    NOT echoed (defense-in-depth).
+    """
+    seen: Set[str] = set()
+    for name in headers:
+        lower = name.lower()
+        if lower in seen:
+            raise BuilderValidationError(
+                "request headers contain two entries that differ only in "
+                "letter case; HTTP header names are case-insensitive, so "
+                "declare each header once.",
+                error_code="ARCHETYPE_PARAM_INVALID",
+                field=field,
+                hint="Merge the case-variant header keys into a single entry.",
+            )
+        seen.add(lower)
+
+
 def _merge_request_headers(
-    default_headers: Dict[str, str], operation_headers: Optional[Dict[str, str]]
+    default_headers: Dict[str, str],
+    operation_headers: Optional[Dict[str, str]],
+    *,
+    default_field: str,
+    operation_field: str,
 ) -> Optional[Dict[str, str]]:
     """Merge connection default_headers with operation headers (operation wins).
 
@@ -765,10 +811,14 @@ def _merge_request_headers(
     case-insensitive (RFC 7230), so the conflict is resolved on the lowercased
     name — an operation ``{"accept": ...}`` overrides a default ``{"Accept": ...}``
     (emitting only the operation header, with its original spelling), rather than
-    leaking two case-variant entries for the same header. Returns None when both
-    are empty so the operation config omits request_headers entirely.
+    leaking two case-variant entries for the same header. Each input dict is
+    first checked for case-variant duplicates *within* itself (issue #127 A1).
+    Returns None when both are empty so the operation config omits
+    request_headers entirely.
     """
+    _reject_case_variant_headers(default_headers, field=default_field)
     operation_headers = operation_headers or {}
+    _reject_case_variant_headers(operation_headers, field=operation_field)
     operation_lower = {name.lower() for name in operation_headers}
     merged = {
         name: value
@@ -793,7 +843,10 @@ def _build_rest_fetch_params(
     # Apply create-mode connection default_headers as operation request_headers
     # (operation headers win on key conflict) so they are honored, not dropped.
     request_headers = _merge_request_headers(
-        _create_default_headers(source.binding), fetch.request_headers
+        _create_default_headers(source.binding),
+        fetch.request_headers,
+        default_field="source.binding.settings.default_headers",
+        operation_field="source.fetch_request.request_headers",
     )
     if request_headers is not None:
         operation["request_headers"] = request_headers
@@ -959,7 +1012,10 @@ def _build_rest_send_params(
     # Apply create-mode connection default_headers as operation request_headers
     # (operation headers win on key conflict) so they are honored, not dropped.
     request_headers = _merge_request_headers(
-        _create_default_headers(target.binding), send.request_headers
+        _create_default_headers(target.binding),
+        send.request_headers,
+        default_field="target.binding.settings.default_headers",
+        operation_field="target.send_request.request_headers",
     )
     if request_headers is not None:
         operation["request_headers"] = request_headers

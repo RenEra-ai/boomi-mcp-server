@@ -413,6 +413,35 @@ class TestParameterValidation:
         assert result["_success"] is False
         assert result["error_code"] == "UNSUPPORTED_SCRIPT_COMPONENT_REF"
 
+    def test_map_script_without_body_or_ref_rejected_at_contract(self):
+        # Issue #127 A2: this preset reuses MapScriptApiTransformOperation, so
+        # the shared one-of validator rejects a map_script op with neither
+        # script_body nor script_component_ref at the contract layer.
+        bad = copy.deepcopy(_minimal())
+        bad["transform"]["operations"] = [
+            {
+                "operation_type": "map_script",
+                "script_slot": "enrich",
+                "language": "groovy2",
+                "inputs": ["Root/source_a"],
+                "outputs": ["Fields/col_a"],
+            }
+        ]
+        result = _build(bad)
+        assert result["_success"] is False
+        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+    def test_runtime_hints_secret_shaped_key_rejected_via_shared_naming(self):
+        # Issue #127 B1: the shared NamingConfig.runtime_hints secret scan
+        # applies to this preset too.
+        bad = copy.deepcopy(_minimal())
+        secret = "sk_live_API_TO_DB_GUARD"
+        bad["naming"]["runtime_hints"] = {"client_secret": secret}
+        result = _build(bad)
+        assert result["_success"] is False
+        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+        assert secret not in json.dumps(result)
+
 
 # ===========================================================================
 # Full local chain: plan + apply

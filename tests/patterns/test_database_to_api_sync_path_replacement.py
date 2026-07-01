@@ -226,3 +226,27 @@ def test_replacement_target_unbound_rejected():
             children=children,
         )
     )
+
+
+def test_empty_brace_path_segment_rejected():
+    # Issue #127 B3: the old non-empty-token regex '{([^{}]+)}' skipped an empty
+    # '{}' segment, so '/v1/{}/{clientId}' validated clean and emitted a literal
+    # '/v1/{}/' segment. The residual-brace check must reject it.
+    _expect_rejected(
+        _params(
+            "/v1/{}/{clientId}",
+            [{"name": "clientId", "target_path": "Root/clientId"}],
+        )
+    )
+
+
+def test_unbalanced_path_brace_rejected():
+    # Issue #127 B3: a stray unmatched brace also survived the non-empty-token
+    # regex. '{clientId}' is a declared token (so no missing-token error); the
+    # trailing stray '}' must trip the residual-brace check.
+    _expect_rejected(
+        _params(
+            "/v1/clients/{clientId}}",
+            [{"name": "clientId", "target_path": "Root/clientId"}],
+        )
+    )

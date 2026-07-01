@@ -438,6 +438,35 @@ class TestParameterValidation:
         assert result["_success"] is False
         assert result["error_code"] == "PARAM_VALIDATION_FAILED"
 
+    def test_map_script_without_body_or_ref_rejected_at_contract(self):
+        # Issue #127 A2: a map_script op carrying neither script_body nor
+        # script_component_ref has no script to materialize; reject it at the
+        # contract layer (PARAM_VALIDATION_FAILED) rather than downstream.
+        bad = copy.deepcopy(_minimal())
+        bad["transform"]["operations"] = [
+            {
+                "operation_type": "map_script",
+                "script_slot": "enrich",
+                "language": "groovy2",
+                "inputs": ["Root/source_a"],
+                "outputs": ["Root/target_a"],
+            }
+        ]
+        result = _build(bad)
+        assert result["_success"] is False
+        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+    def test_runtime_hints_secret_shaped_key_rejected_via_shared_naming(self):
+        # Issue #127 B1: the shared NamingConfig.runtime_hints scan applies to
+        # every preset that reuses NamingConfig, including api_to_api_sync.
+        bad = copy.deepcopy(_minimal())
+        secret = "Bearer sk_live_API_TO_API_GUARD"
+        bad["naming"]["runtime_hints"] = {"authorization": secret}
+        result = _build(bad)
+        assert result["_success"] is False
+        assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+        assert secret not in json.dumps(result)
+
 
 # ===========================================================================
 # Header handling + map_script variable naming
@@ -480,6 +509,31 @@ class TestHeadersAndScriptVars:
         assert headers == {"accept": "text/plain", "X-Keep": "yes"}
         accept_keys = [k for k in headers if k.lower() == "accept"]
         assert accept_keys == ["accept"]
+
+    def test_default_headers_case_variant_within_dict_rejected(self):
+        # Issue #127 A1: the cross-dict operation-wins dedupe resolves conflicts
+        # BETWEEN default and operation headers, but a single dict carrying two
+        # case-variants of one header ('Accept' + 'accept') would emit both.
+        # Reject it as a structured ARCHETYPE_PARAM_INVALID.
+        params = copy.deepcopy(_minimal())
+        params["source"]["binding"]["settings"]["default_headers"] = {
+            "Accept": "application/json",
+            "accept": "text/plain",
+        }
+        result = _build(params)
+        assert result["_success"] is False
+        assert result["error_code"] == "ARCHETYPE_PARAM_INVALID"
+
+    def test_operation_headers_case_variant_within_dict_rejected(self):
+        # Issue #127 A1: same within-dict rule on operation request_headers.
+        params = copy.deepcopy(_minimal())
+        params["source"]["fetch_request"]["request_headers"] = {
+            "Accept": "a",
+            "accept": "b",
+        }
+        result = _build(params)
+        assert result["_success"] is False
+        assert result["error_code"] == "ARCHETYPE_PARAM_INVALID"
 
     def test_map_script_sanitizes_unsafe_leaf_names(self):
         # A hyphenated leaf segment ('order-id') is language-unsafe as a script
