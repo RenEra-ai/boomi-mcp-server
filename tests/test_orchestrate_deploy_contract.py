@@ -118,6 +118,32 @@ def _codes(result):
     return [e["code"] for e in result["errors"]]
 
 
+# The 19 keys every full response envelope carries (mirrors test_full_success_contract). A full
+# ERROR envelope is these plus "error" (#129 D2 — early/pre-stage failures now return this shape).
+_FULL_ENVELOPE_KEYS = {
+    "_success", "profile", "build_id", "dry_run", "plan_only", "behavior_verified",
+    "integration_name", "target", "component_summary", "package", "deployment",
+    "runtime_attachment", "schedule", "execution", "logs", "cleanup", "summary",
+    "warnings", "errors",
+}
+
+
+def _assert_full_error_envelope(result):
+    """A pre-stage/early failure must carry the SAME full envelope shape as a late-stage failure
+    (#129 D2): every stage key present (as a blocked placeholder) so a caller branching on any
+    stage key never silently breaks on an early error."""
+    assert result["_success"] is False
+    assert set(result) >= _FULL_ENVELOPE_KEYS | {"error"}
+    # Each stage placeholder is present and blocked.
+    for stage in ("package", "deployment", "runtime_attachment", "schedule", "execution",
+                  "logs", "cleanup"):
+        assert result[stage]["status"] == "blocked", stage
+    assert isinstance(result["summary"], dict)
+    assert isinstance(result["behavior_verified"], dict)
+    assert result["behavior_verified"]["verified"] is False
+    assert result["warnings"] == []
+
+
 # ---------------------------------------------------------------------------
 # Real-run (issue #61) fakes & helpers
 # ---------------------------------------------------------------------------
@@ -150,6 +176,43 @@ class _FakeAction:
 
 # Backwards-compatible alias used by the issue #61 deploy tests.
 _FakeDeploymentAction = _FakeAction
+
+
+class _SeqFakeAction(_FakeAction):
+    """Like ``_FakeAction`` but a per-action response may be a LIST returned in sequence (the last
+    entry repeats once the queue is down to one), so a single action can return different responses
+    across repeated calls — e.g. ``list_packages`` empty on the first call, then the recovered
+    package on the conflict re-list (#129 D4).
+    """
+
+    def __call__(self, sdk=None, profile=None, action=None, config_data=None, **kwargs):
+        self.calls.append({"action": action, "config_data": config_data})
+        if self.order_log is not None:
+            self.order_log.append((self.label, action))
+        if action not in self.responses:
+            raise AssertionError(f"unexpected {self.label or 'deployment'} action call: {action}")
+        resp = self.responses[action]
+        if isinstance(resp, list):
+            if not resp:
+                raise AssertionError(f"no queued response left for action: {action}")
+            return resp.pop(0) if len(resp) > 1 else resp[0]
+        return resp
+
+
+def _patch_deploy_seq(monkeypatch, deployment, *, runtime_id="rt-1", environment_id="env-1"):
+    """Patch routers for a real run whose DEPLOYMENT router is sequence-aware (#129 D4).
+
+    Environment/runtime/schedule routers stay static; returns the deployment fake for assertions.
+    """
+    dep = _SeqFakeAction(deployment, label="deployment")
+    env = _FakeAction(_ok_env(environment_id), label="environments")
+    rt = _FakeAction(_ok_runtime(runtime_id, environment_id, attached=True), label="runtimes")
+    sch = _FakeAction({}, label="schedules")
+    monkeypatch.setattr(orchestration, "manage_deployment_action", dep)
+    monkeypatch.setattr(orchestration, "manage_environments_action", env)
+    monkeypatch.setattr(orchestration, "manage_runtimes_action", rt)
+    monkeypatch.setattr(orchestration, "manage_schedules_action", sch)
+    return dep
 
 
 def _att(att_id, *, atom_id=None, environment_id=None, process_id=None):
@@ -318,6 +381,10 @@ def test_all_required_missing_collected():
     assert result["_success"] is False
     assert set(_codes(result)) == {"BUILD_ID_REQUIRED", "ENVIRONMENT_ID_REQUIRED", "RUNTIME_ID_REQUIRED"}
     assert result["error"] == "Missing required deployment inputs."
+    _assert_full_error_envelope(result)
+    # Unresolved-target early error → target is null with an empty component summary.
+    assert result["target"] is None
+    assert result["component_summary"]["total_components"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +396,10 @@ def test_invalid_build_id_type_returns_structured_error():
     assert result["_success"] is False
     assert _codes(result) == ["INVALID_REQUEST"]
     assert result["errors"][0]["field"] == "build_id"
+    # #129 D2: even the raw-ValidationError path returns the full envelope; the unhashable/mistyped
+    # build_id is sanitized to null rather than making a placeholder stage model raise.
+    _assert_full_error_envelope(result)
+    assert result["build_id"] is None
 
 
 def test_invalid_schedule_override_type_returns_structured_error(registry):
@@ -340,6 +411,7 @@ def test_invalid_schedule_override_type_returns_structured_error(registry):
     assert result["_success"] is False
     assert _codes(result) == ["INVALID_REQUEST"]
     assert result["errors"][0]["field"] == "schedule_override"
+    _assert_full_error_envelope(result)
 
 
 def test_multiple_invalid_types_collected():
@@ -374,6 +446,8 @@ def test_unknown_build_id():
     )
     assert result["_success"] is False
     assert _codes(result) == ["BUILD_ID_UNKNOWN"]
+    _assert_full_error_envelope(result)
+    assert result["target"] is None
 
 
 def test_malformed_registry_entry(registry):
@@ -381,6 +455,7 @@ def test_malformed_registry_entry(registry):
     result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
     assert result["_success"] is False
     assert _codes(result) == ["BUILD_REGISTRY_ENTRY_MALFORMED"]
+    _assert_full_error_envelope(result)
 
 
 def test_no_process_component(registry):
@@ -432,6 +507,63 @@ def test_single_process_results_entry_absent(registry):
     result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
     assert result["_success"] is False
     assert _codes(result) == ["BUILD_PROCESS_ID_MISSING"]
+
+
+def test_single_process_missing_key_returns_malformed_not_validation_error(registry):
+    # #129 D3: a process component whose key is None must surface a structured
+    # BUILD_REGISTRY_ENTRY_MALFORMED, NOT an uncaught Pydantic ValidationError from constructing
+    # ResolvedBuildTarget(process_key: str).
+    entry = _entry(
+        components=[{"key": None, "type": "process", "action": "create", "name": "P",
+                     "component_id": "CID-1", "config": {}, "depends_on": []}],
+        results={},
+        execution_order=[],
+    )
+    bid = registry("b-nokey", entry)
+    result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is False
+    assert _codes(result) == ["BUILD_REGISTRY_ENTRY_MALFORMED"]
+    assert result["errors"][0]["details"]["process_key"] == "<unknown>"
+    _assert_full_error_envelope(result)
+
+
+def test_single_process_non_string_component_id_returns_malformed(registry):
+    # #129 D3: a present-but-non-string component_id is malformed registry data — a structured
+    # error, not a raised ValidationError from ResolvedBuildTarget(process_component_id: str).
+    entry = _entry(
+        components=[_component("proc", "process", name="P")],
+        results={"proc": {"status": "created", "component_id": 123, "type": "process", "name": "P"}},
+    )
+    bid = registry("b-nonstr-id", entry)
+    result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is False
+    assert _codes(result) == ["BUILD_REGISTRY_ENTRY_MALFORMED"]
+    assert result["errors"][0]["details"]["process_key"] == "proc"
+
+
+def test_multiple_process_components_keys_are_strings(registry):
+    # #129 D8: when one of several process candidates has no key, the process_keys error detail
+    # must contain only strings (substituting "<unknown>"), never a None.
+    entry = _entry(
+        components=[
+            _component("p1", "process", name="P1"),
+            {"key": None, "type": "process", "action": "create", "name": "P2",
+             "component_id": "PID-2", "config": {}, "depends_on": []},
+        ],
+        results={
+            "p1": _result(status="created", component_id="PID-1", ctype="process", name="P1"),
+        },
+        execution_order=["p1"],
+    )
+    bid = registry("b-multi-nokey", entry)
+    result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is False
+    assert _codes(result) == ["BUILD_MULTIPLE_PROCESS_COMPONENTS"]
+    keys = result["errors"][0]["details"]["process_keys"]
+    assert all(isinstance(k, str) for k in keys)
+    assert None not in keys
+    assert "<unknown>" in keys
+    assert "p1" in keys
 
 
 # ---------------------------------------------------------------------------
@@ -797,6 +929,161 @@ def test_real_run_ambiguous_existing_active_deployments_blocks_redeploy(registry
     assert result["deployment"]["status"] == "failed"
     assert result["runtime_attachment"]["status"] == "blocked"
     assert result["execution"]["status"] == "blocked"
+
+
+def test_package_selection_deterministic_on_created_date_tie(registry, monkeypatch):
+    # #129 D6: two packages match the same version with identical created_date. Selection must be
+    # deterministic — the total sort key (created_date, package_id) breaks the tie by package_id
+    # (highest under reverse sort), never leaving it to backend list order.
+    bid = registry("b-tie", _single_process_entry(process_id="CID-1"))
+    same_date = "2026-02-02T00:00:00Z"
+    dep = _bind_success(monkeypatch, {
+        "list_packages": {"_success": True, "packages": [
+            _pkg("pkg-aaa", bid, created_date=same_date),
+            _pkg("pkg-zzz", bid, created_date=same_date),
+        ]},
+        "list_deployments": {"_success": True, "deployments": [_dep("dep-1", True, current_version="1")]},
+    })
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert result["package"]["status"] == "reused"
+    assert result["package"]["package_id"] == "pkg-zzz"
+    # The multi-match warning names the (created_date, package_id) tie-breaker.
+    assert any("package_id" in w for w in result["package"]["warnings"])
+
+
+def test_package_create_conflict_relists_and_reuses(registry, monkeypatch):
+    # #129 D4: a concurrent create fills the list-then-create window. On a 409/conflict create
+    # failure, re-list once and reuse the winner instead of surfacing a spurious PACKAGE_CREATE_FAILED.
+    bid = registry("b-pkg-race", _single_process_entry(process_id="CID-1"))
+    dep = _patch_deploy_seq(monkeypatch, {
+        "list_packages": [
+            {"_success": True, "packages": []},                    # first: none → create
+            {"_success": True, "packages": [_pkg("pkg-1", bid)]},  # re-list after conflict
+        ],
+        "create_package": {"_success": False, "status_code": 409, "error": "package already exists"},
+        "list_deployments": {"_success": True, "deployments": [_dep("dep-1", True, current_version="1")]},
+        **_process_attachments("rt-1", "env-1", "CID-1"),
+    })
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert "PACKAGE_CREATE_FAILED" not in _codes(result)
+    assert result["package"]["status"] == "reused"
+    assert result["package"]["package_id"] == "pkg-1"
+    assert any("conflict" in w.lower() for w in result["package"]["warnings"])
+    assert dep.actions_called().count("list_packages") == 2
+
+
+def test_package_create_conflict_empty_relist_stays_failed(registry, monkeypatch):
+    # #129 D4: a conflict whose re-list still finds no matching package is a genuine failure —
+    # surface PACKAGE_CREATE_FAILED rather than silently succeeding.
+    bid = registry("b-pkg-race-empty", _single_process_entry(process_id="CID-1"))
+    dep = _patch_deploy_seq(monkeypatch, {
+        "list_packages": [
+            {"_success": True, "packages": []},
+            {"_success": True, "packages": []},  # re-list STILL empty
+        ],
+        "create_package": {"_success": False, "status_code": 409, "error": "conflict"},
+        "list_deployments": {"_success": True, "deployments": [_dep("dep-1", True)]},
+        **_process_attachments("rt-1", "env-1", "CID-1"),
+    })
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "PACKAGE_CREATE_FAILED" in _codes(result)
+
+
+def test_deploy_conflict_relists_and_reuses(registry, monkeypatch):
+    # #129 D4: a concurrent deploy fills the list-then-deploy window. On a conflict, re-list once
+    # and reuse the single active deployment.
+    bid = registry("b-dep-race", _single_process_entry(process_id="CID-1"))
+    dep = _patch_deploy_seq(monkeypatch, {
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": [
+            {"_success": True, "deployments": []},                                        # none active → deploy
+            {"_success": True, "deployments": [_dep("dep-1", True, current_version="1")]},  # re-list
+        ],
+        "deploy": {"_success": False, "status_code": 409, "error": "already deployed"},
+        **_process_attachments("rt-1", "env-1", "CID-1"),
+    })
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is True
+    assert "DEPLOY_CREATE_FAILED" not in _codes(result)
+    assert result["deployment"]["status"] == "reused"
+    assert result["deployment"]["deployment_id"] == "dep-1"
+    assert any("conflict" in w.lower() for w in result["deployment"]["warnings"])
+    assert dep.actions_called().count("list_deployments") == 2
+
+
+def test_deploy_conflict_relist_ambiguous_blocks(registry, monkeypatch):
+    # #129 D4: a conflict whose re-list finds MORE than one active deployment is ambiguous — refuse.
+    bid = registry("b-dep-race-ambig", _single_process_entry(process_id="CID-1"))
+    dep = _patch_deploy_seq(monkeypatch, {
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": [
+            {"_success": True, "deployments": []},
+            {"_success": True, "deployments": [_dep("dep-a", True), _dep("dep-b", True)]},
+        ],
+        "deploy": {"_success": False, "status_code": 409, "error": "conflict"},
+        **_process_attachments("rt-1", "env-1", "CID-1"),
+    })
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "DEPLOY_AMBIGUOUS_EXISTING" in _codes(result)
+    assert result["deployment"]["status"] == "failed"
+
+
+def test_deploy_conflict_empty_relist_stays_failed(registry, monkeypatch):
+    # #129 D4: a conflict whose re-list finds no active deployment is a genuine failure.
+    bid = registry("b-dep-race-empty", _single_process_entry(process_id="CID-1"))
+    dep = _patch_deploy_seq(monkeypatch, {
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": [
+            {"_success": True, "deployments": []},
+            {"_success": True, "deployments": []},  # re-list STILL none active
+        ],
+        "deploy": {"_success": False, "status_code": 409, "error": "conflict"},
+        **_process_attachments("rt-1", "env-1", "CID-1"),
+    })
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "DEPLOY_CREATE_FAILED" in _codes(result)
+
+
+def test_deploy_non_conflict_failure_stays_hard_error(registry, monkeypatch):
+    # #129 D4: a NON-conflict deploy failure must remain a hard error with NO recovery re-list.
+    bid = registry("b-dep-hardfail", _single_process_entry(process_id="CID-1"))
+    dep = _patch_deploy_seq(monkeypatch, {
+        "list_packages": {"_success": True, "packages": [_pkg("pkg-1", bid)]},
+        "list_deployments": {"_success": True, "deployments": []},
+        "deploy": {"_success": False, "error": "permission denied"},
+        **_process_attachments("rt-1", "env-1", "CID-1"),
+    })
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", dry_run=False,
+    )
+    assert result["_success"] is False
+    assert "DEPLOY_CREATE_FAILED" in _codes(result)
+    # Only ONE list_deployments call — a non-conflict failure never triggers the recovery re-list.
+    assert dep.actions_called().count("list_deployments") == 1
 
 
 def test_real_run_missing_process_id_from_resolver_never_calls_sdk(registry):
@@ -1406,6 +1693,18 @@ def test_runtime_attachment_id_missing_after_create_reports_changed(registry, mo
     assert result["summary"]["resource_changes"]["runtime_attachment"] is True
     assert result["schedule"]["status"] == "blocked"
     assert sch.actions_called() == []
+    # #129 D5: the attach mutated the account but returned no id, so cleanup CANNOT plan an
+    # executable detach-by-id (a resource_id=None op is rejected by the detach handler). Instead
+    # of emitting a bogus op, cleanup reports status=warning with manual-intervention guidance and
+    # NO operation carrying a null resource_id.
+    cleanup = result["cleanup"]
+    assert cleanup["status"] == "warning"
+    assert cleanup["operations"] == []
+    assert cleanup["warnings"]
+    assert any(
+        "manual" in w.lower() or "re-list" in w.lower() for w in cleanup["warnings"]
+    )
+    assert all(op["resource_id"] is not None for op in cleanup["operations"])
 
 
 def test_schedule_changed_flag_reflects_failed_mutation(registry, monkeypatch):
@@ -2100,7 +2399,8 @@ def test_require_test_logs_true_does_not_fail_on_artifact_failure(registry, monk
 
 def test_require_test_logs_true_execution_failure_takes_precedence(registry, monkeypatch):
     # An ERROR execution dominates: the surfaced code is TEST_EXECUTION_FAILED, never masked by a
-    # log failure, and the marker reports test_failed_or_warned (not logs_unavailable).
+    # log failure, and the marker reports test_failed (not logs_unavailable) — #129 D7 split the
+    # old catch-all test_failed_or_warned into distinct warn/fail/timeout reasons.
     bid = _seed_real_run(registry, monkeypatch, "b-rt-reqlogs-execfail")
     execute = _FakeExecuteAction(_exec_failed(status="ERROR"))
     monitor = _FakeMonitorAction(
@@ -2116,7 +2416,7 @@ def test_require_test_logs_true_execution_failure_takes_precedence(registry, mon
     assert "TEST_EXECUTION_FAILED" in _codes(result)
     assert "TEST_LOGS_UNAVAILABLE" not in _codes(result)
     assert result["failed_stage"] == "execution"
-    assert result["behavior_verified"]["reason"] == "test_failed_or_warned"
+    assert result["behavior_verified"]["reason"] == "test_failed"
     # The logs stage stays diagnostic-only on a failed execution — never contradictorily promoted
     # to TEST_LOGS_UNAVAILABLE with a "test execution succeeded" hint (#81 review).
     assert result["logs"]["error_code"] == "LOG_RETRIEVAL_FAILED"
@@ -2224,12 +2524,31 @@ def test_behavior_verified_marker_complete_warn(registry, monkeypatch):
         boomi_client=MagicMock(), build_id=bid,
         environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
     )
-    # COMPLETE_WARN is success-with-warning, but it is NOT behavioral verification.
+    # COMPLETE_WARN is success-with-warning, but it is NOT behavioral verification. #129 D7 gives
+    # it its own reason (test_completed_with_warnings) distinct from a hard failure/timeout.
     assert result["_success"] is True
     assert result["execution"]["status"] == "warning"
     assert result["behavior_verified"] == {
-        "verified": False, "reason": "test_failed_or_warned", "logs_status": "retrieved",
+        "verified": False, "reason": "test_completed_with_warnings", "logs_status": "retrieved",
     }
+
+
+@pytest.mark.parametrize("status", ["ERROR", "ABORTED"])
+def test_behavior_verified_marker_execution_failed(registry, monkeypatch, status):
+    # #129 D7: a hard terminal failure (ERROR/ABORTED) reports reason=test_failed, distinct from
+    # the COMPLETE_WARN (test_completed_with_warnings) and TIMEOUT (test_timeout) reasons.
+    bid = _seed_real_run(registry, monkeypatch, f"b-bv-fail-{status.lower()}")
+    execute = _FakeExecuteAction(_exec_failed(status=status))
+    monitor = _monitor_ok()
+    _patch_test_actions(monkeypatch, execute=execute, monitor=monitor)
+    result = orchestrate_deploy_action(
+        boomi_client=MagicMock(), build_id=bid,
+        environment_id="env-1", runtime_id="rt-1", run_test=True, dry_run=False,
+    )
+    assert result["_success"] is False
+    assert result["execution"]["status"] == "failed"
+    assert result["behavior_verified"]["verified"] is False
+    assert result["behavior_verified"]["reason"] == "test_failed"
 
 
 def test_run_test_execute_setup_failure_is_execution_failed_not_request_id_missing(registry, monkeypatch):
@@ -2491,6 +2810,8 @@ def test_execution_timeout_includes_failure_metadata_and_prior_summary(registry,
     assert result["_success"] is False
     assert result["error_code"] == "TEST_EXECUTION_TIMEOUT"
     assert result["failed_stage"] == "execution"
+    # #129 D7: a timeout gets its own behavior_verified reason, distinct from warn/fail.
+    assert result["behavior_verified"]["reason"] == "test_timeout"
     # Every pipeline stage before execution is summarized (package/deploy/runtime/schedule).
     assert set(result["prior_stage_summary"]) == {
         "package", "deployment", "runtime_attachment", "schedule",

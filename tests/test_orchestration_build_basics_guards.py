@@ -68,6 +68,16 @@ def test_empty_overrides_over_declared_extensions_hard_fails(registry):
     )
     assert result["_success"] is False
     assert "EMPTY_PROCESS_OVERRIDES_REJECTED" in _codes(result)
+    # #129 D2: this post-target-resolution early error returns the FULL envelope — every stage key
+    # present as a blocked placeholder plus summary/behavior_verified — so a caller branching on any
+    # stage key never breaks. Because build resolution already succeeded, target is non-null.
+    for stage in ("package", "deployment", "runtime_attachment", "schedule", "execution",
+                  "logs", "cleanup"):
+        assert result[stage]["status"] == "blocked", stage
+    assert isinstance(result["summary"], dict)
+    assert result["behavior_verified"]["verified"] is False
+    assert result["target"] is not None
+    assert result["target"]["process_component_id"] == "proc-id"
 
 
 def test_empty_overrides_without_declared_extensions_is_allowed(registry):

@@ -468,6 +468,18 @@ def _build_component_summary(
     )
 
 
+def _safe_process_key(comp: Any) -> str:
+    """A process component's key as a string, or ``"<unknown>"`` for a missing/blank/non-str key.
+
+    Used so structured error details (e.g. ``BUILD_MULTIPLE_PROCESS_COMPONENTS.process_keys``)
+    never carry ``None`` into a consumer that treats the entries as strings (#129 D8/D3).
+    """
+    key = comp.get("key") if isinstance(comp, dict) else None
+    if isinstance(key, str) and key.strip():
+        return key
+    return "<unknown>"
+
+
 def _resolve_build_deployment_target(
     build_id: str,
 ) -> Tuple[Optional[ResolvedBuildTarget], Optional[OrchestrateDeployError]]:
@@ -533,7 +545,7 @@ def _resolve_build_deployment_target(
         )
 
     if len(process_candidates) > 1:
-        process_keys = [comp.get("key") for comp in process_candidates]
+        process_keys = [_safe_process_key(comp) for comp in process_candidates]
         return None, _error(
             BUILD_MULTIPLE_PROCESS_COMPONENTS,
             (
@@ -549,12 +561,36 @@ def _resolve_build_deployment_target(
     result_entry = results.get(process_key) if process_key is not None else None
     result_entry = result_entry if isinstance(result_entry, dict) else {}
 
+    # A malformed registry entry (missing/blank/non-string key) must surface as a structured
+    # error, not an uncaught Pydantic ValidationError from constructing ResolvedBuildTarget
+    # (model field ``process_key: str``) below (#129 D3).
+    if not isinstance(process_key, str) or not process_key.strip():
+        return None, _error(
+            BUILD_REGISTRY_ENTRY_MALFORMED,
+            f"Build '{build_id}' process component has a missing or non-string key.",
+            field="build_id",
+            details={"build_id": build_id, "process_key": _safe_process_key(process_comp)},
+        )
+
     process_component_id = result_entry.get("component_id") or process_comp.get("component_id")
     if not process_component_id:
         return None, _error(
             BUILD_PROCESS_ID_MISSING,
             (
                 f"Process component '{process_key}' in build '{build_id}' has no resolved "
+                "component_id."
+            ),
+            field="build_id",
+            details={"build_id": build_id, "process_key": process_key},
+        )
+
+    # Present-but-non-string component_id is malformed registry data, distinct from the blank/missing
+    # id above; coerce to a structured error before model construction (#129 D3).
+    if not isinstance(process_component_id, str):
+        return None, _error(
+            BUILD_REGISTRY_ENTRY_MALFORMED,
+            (
+                f"Process component '{process_key}' in build '{build_id}' has a non-string "
                 "component_id."
             ),
             field="build_id",
@@ -604,9 +640,85 @@ def _build_declares_process_extensions(build_id: str) -> bool:
 def _error_response(
     error_message: str,
     errors: List[OrchestrateDeployError],
+    *,
+    profile: Optional[str] = None,
+    build_id: Optional[Any] = None,
+    dry_run: Any = True,
+    plan_only: bool = False,
+    target: Optional[ResolvedBuildTarget] = None,
+    environment_id: Optional[Any] = None,
+    runtime_id: Optional[Any] = None,
+    schedule_override: Optional[Any] = None,
+    run_test: Any = False,
+    package_version: Optional[Any] = None,
 ) -> Dict[str, Any]:
+    """Full-envelope response for a pre-stage/early failure (#129 D2).
+
+    Early failures now return the SAME top-level shape as late-stage failures — every stage key
+    present as a ``blocked`` placeholder — so a caller that branches on any stage key does not
+    silently break when the error is raised before the first SDK call. Context is optional and
+    defensively sanitized: raw request echoes (from the initial ``ValidationError`` path) are only
+    passed through to the placeholder models when they already have the expected type, so a
+    mistyped raw ``build_id``/``environment_id`` never makes a placeholder model raise.
+
+    ``target`` is supplied only for errors that occur AFTER build-target resolution (schedule /
+    process-overrides content validation); pre-resolution errors leave it ``None`` with an empty
+    ``ComponentSummary``. No ``error_code``/``failed_stage``/``prior_stage_summary``/``next_step``
+    metadata is attached — those belong to real-run stage failures, not pre-stage validation.
+    """
+    # Sanitize raw context: only echo values that already have the expected type into the
+    # placeholder stage models (the initial ValidationError path may pass a list/dict here).
+    safe_build_id = build_id if isinstance(build_id, str) else None
+    safe_environment_id = environment_id if isinstance(environment_id, str) else None
+    safe_runtime_id = runtime_id if isinstance(runtime_id, str) else None
+    safe_package_version = package_version if isinstance(package_version, str) else None
+    safe_schedule_override = schedule_override if isinstance(schedule_override, dict) else None
+    dry_run_flag = bool(dry_run)
+    run_test_flag = bool(run_test)
+
+    if target is not None:
+        pkg_version = _effective_package_version(safe_package_version, safe_build_id)
+        package = PackageStage(
+            status="blocked",
+            component_id=target.process_component_id,
+            component_type="process",
+            package_version=pkg_version,
+        )
+        component_summary = target.component_summary
+        integration_name = target.integration_name
+    else:
+        package = PackageStage(status="blocked", package_version=safe_package_version)
+        component_summary = ComponentSummary()
+        integration_name = None
+
+    deployment = DeploymentStage(status="blocked", environment_id=safe_environment_id)
+    runtime_attachment = RuntimeAttachmentStage(status="blocked", runtime_id=safe_runtime_id)
+    schedule = ScheduleStage(status="blocked", schedule_override=safe_schedule_override)
+    execution = ExecutionStage(status="blocked", run_test=run_test_flag)
+    logs = LogsStage(status="blocked")
+    cleanup = CleanupStage(status="blocked")
+
     return {
         "_success": False,
+        "profile": profile,
+        "build_id": safe_build_id,
+        "dry_run": dry_run_flag,
+        "plan_only": bool(plan_only),
+        "behavior_verified": _behavior_verified_marker(
+            dry_run=dry_run_flag, execution=execution, logs=logs
+        ),
+        "integration_name": integration_name,
+        "target": target.model_dump() if target is not None else None,
+        "component_summary": component_summary.model_dump(),
+        "package": package.model_dump(),
+        "deployment": deployment.model_dump(),
+        "runtime_attachment": runtime_attachment.model_dump(),
+        "schedule": schedule.model_dump(),
+        "execution": execution.model_dump(),
+        "logs": logs.model_dump(),
+        "cleanup": cleanup.model_dump(),
+        "summary": _stage_summary(package, deployment, runtime_attachment, schedule),
+        "warnings": [],
         "error": error_message,
         "errors": [err.model_dump() for err in errors],
     }
@@ -748,11 +860,39 @@ def _deployment_is_active(dep: Any) -> bool:
     return bool(raw) if raw is not None else False
 
 
-def _created_date_key(pkg: Any) -> str:
-    """Sort key for newest-first package selection; missing dates sort last."""
+def _created_date_key(pkg: Any) -> Tuple[str, str]:
+    """Total sort key for newest-first package selection; missing dates sort last.
+
+    A tuple of ``(created_date, package_id)`` (each defaulting to ``""``) so that identical or
+    missing ``created_date`` values resolve deterministically by ``package_id`` under a reverse
+    sort — instead of leaving ``matches[0]`` at the mercy of the backend list order (#129 D6).
+    """
     if isinstance(pkg, dict):
-        return pkg.get("created_date") or ""
-    return ""
+        return (pkg.get("created_date") or "", pkg.get("package_id") or "")
+    return ("", "")
+
+
+# Conservative conflict-signal tokens for a duplicate create/deploy (#129 D4). The router
+# swallows ApiError into ``{"_success": False, "error": ...}`` with no stable conflict field, so
+# detection stays local: an explicit ``409`` status or a duplicate-flavored error string.
+_CONFLICT_TOKENS = ("409", "conflict", "already exists", "already deployed", "duplicate")
+
+
+def _is_create_conflict_response(response: Any) -> bool:
+    """True when a failed create/deploy response looks like a concurrent-create conflict (#129 D4).
+
+    Conservative and side-effect-free: a non-dict is never a conflict; an explicit
+    ``status_code == 409`` is; otherwise the lowercased ``error``/``message``/``exception_type``
+    text is scanned for a duplicate-flavored token. Used to trigger a single re-list recovery.
+    """
+    if not isinstance(response, dict):
+        return False
+    if response.get("status_code") == 409:
+        return True
+    haystack = " ".join(
+        str(response.get(field) or "") for field in ("error", "message", "exception_type")
+    ).lower()
+    return any(token in haystack for token in _CONFLICT_TOKENS)
 
 
 def _find_or_create_package(
@@ -792,7 +932,7 @@ def _find_or_create_package(
         if len(matches) > 1:
             warnings.append(
                 f"{len(matches)} existing packages match component {component_id} "
-                f"version {package_version}; reused the newest by created_date."
+                f"version {package_version}; reused the newest by (created_date, package_id)."
             )
     else:
         created = _call_deployment_action(
@@ -806,14 +946,48 @@ def _find_or_create_package(
             },
         )
         if not created.get("_success"):
-            return None, _error(
-                PACKAGE_CREATE_FAILED,
-                created.get("error") or "Failed to create package.",
-                field="build_id",
-                details={"component_id": component_id, "package_version": package_version},
-            )
-        selected = created.get("package") or {}
-        status = "created"
+            # A concurrent call may have created this same package in the list-then-create window
+            # (#129 D4). On a conflict-flavored failure, re-list once and reuse the winner rather
+            # than surfacing a spurious create failure; any other failure stays a hard error.
+            if _is_create_conflict_response(created):
+                relisted = _call_deployment_action(
+                    boomi_client, profile, "list_packages", {"component_id": component_id}
+                )
+                relist_matches = (
+                    [
+                        p
+                        for p in (relisted.get("packages") or [])
+                        if isinstance(p, dict) and p.get("package_version") == package_version
+                    ]
+                    if relisted.get("_success")
+                    else []
+                )
+                if relist_matches:
+                    relist_matches.sort(key=_created_date_key, reverse=True)
+                    selected = relist_matches[0]
+                    status = "reused"
+                    warnings.append(
+                        f"create_package for component {component_id} version {package_version} "
+                        "conflicted with a concurrent create; re-listed and reused the existing "
+                        "package."
+                    )
+                else:
+                    return None, _error(
+                        PACKAGE_CREATE_FAILED,
+                        created.get("error") or "Failed to create package.",
+                        field="build_id",
+                        details={"component_id": component_id, "package_version": package_version},
+                    )
+            else:
+                return None, _error(
+                    PACKAGE_CREATE_FAILED,
+                    created.get("error") or "Failed to create package.",
+                    field="build_id",
+                    details={"component_id": component_id, "package_version": package_version},
+                )
+        else:
+            selected = created.get("package") or {}
+            status = "created"
 
     package_id = selected.get("package_id") if isinstance(selected, dict) else None
     if not package_id:
@@ -897,14 +1071,66 @@ def _find_or_create_deployment(
             {"package_id": package_id, "environment_id": environment_id},
         )
         if not created.get("_success"):
-            return None, _error(
-                DEPLOY_CREATE_FAILED,
-                created.get("error") or "Failed to deploy package.",
-                field="environment_id",
-                details={"package_id": package_id, "environment_id": environment_id},
-            )
-        selected = created.get("deployment") or {}
-        status = "deployed"
+            # A concurrent call may have deployed this package in the list-then-deploy window
+            # (#129 D4). On a conflict-flavored failure, re-list once: reuse a single active
+            # deployment, refuse an ambiguous multi-active state, else surface the create failure.
+            if _is_create_conflict_response(created):
+                relisted = _call_deployment_action(
+                    boomi_client,
+                    profile,
+                    "list_deployments",
+                    {"package_id": package_id, "environment_id": environment_id},
+                )
+                if not relisted.get("_success"):
+                    return None, _error(
+                        DEPLOY_CREATE_FAILED,
+                        created.get("error") or "Failed to deploy package.",
+                        field="environment_id",
+                        details={"package_id": package_id, "environment_id": environment_id},
+                    )
+                relist_active = [
+                    d for d in (relisted.get("deployments") or []) if _deployment_is_active(d)
+                ]
+                if len(relist_active) > 1:
+                    return None, _error(
+                        DEPLOY_AMBIGUOUS_EXISTING,
+                        (
+                            f"deploy conflicted and re-listing found {len(relist_active)} active "
+                            f"deployments for package {package_id} in environment "
+                            f"{environment_id}; refusing to redeploy."
+                        ),
+                        field="environment_id",
+                        details={
+                            "package_id": package_id,
+                            "environment_id": environment_id,
+                            "active_count": len(relist_active),
+                        },
+                    )
+                if len(relist_active) == 1:
+                    selected = relist_active[0]
+                    status = "reused"
+                    warnings.append(
+                        f"deploy for package {package_id} in environment {environment_id} "
+                        "conflicted with a concurrent deploy; re-listed and reused the existing "
+                        "active deployment."
+                    )
+                else:
+                    return None, _error(
+                        DEPLOY_CREATE_FAILED,
+                        created.get("error") or "Failed to deploy package.",
+                        field="environment_id",
+                        details={"package_id": package_id, "environment_id": environment_id},
+                    )
+            else:
+                return None, _error(
+                    DEPLOY_CREATE_FAILED,
+                    created.get("error") or "Failed to deploy package.",
+                    field="environment_id",
+                    details={"package_id": package_id, "environment_id": environment_id},
+                )
+        else:
+            selected = created.get("deployment") or {}
+            status = "deployed"
 
     deployment_id = selected.get("deployment_id") if isinstance(selected, dict) else None
     if not deployment_id:
@@ -1944,9 +2170,18 @@ def _behavior_verified_marker(
                 "logs_status": logs_status,
             }
         return {"verified": False, "reason": "logs_unavailable", "logs_status": logs_status}
-    # warning (COMPLETE_WARN) / failed (ERROR/ABORTED) / timeout — a test ran but did not cleanly
-    # complete, so it is never behaviorally verified.
-    return {"verified": False, "reason": "test_failed_or_warned", "logs_status": logs_status}
+    # A test ran but did not cleanly COMPLETE, so it is never behaviorally verified. Split the
+    # reason so a caller can distinguish warn vs hard-fail vs timeout without re-parsing
+    # execution.status/poll_status (#129 D7).
+    if execution.status == "warning":
+        return {
+            "verified": False,
+            "reason": "test_completed_with_warnings",
+            "logs_status": logs_status,
+        }
+    if execution.status == "timeout" or execution.poll_status == "TIMEOUT":
+        return {"verified": False, "reason": "test_timeout", "logs_status": logs_status}
+    return {"verified": False, "reason": "test_failed", "logs_status": logs_status}
 
 
 # ---------------------------------------------------------------------------
@@ -2121,8 +2356,9 @@ def _cleanup_operations_for_failure(
     runtime_attachment: Optional[RuntimeAttachmentStage],
     *,
     environment_id: Optional[str],
-) -> List[CleanupOperation]:
-    """Destructive operations, in reverse creation order, that undo what THIS attempt created.
+) -> Tuple[List[CleanupOperation], List[str]]:
+    """Destructive operations (reverse creation order) undoing what THIS attempt created, plus
+    manual-intervention warnings for mutations that cannot be expressed as an executable op.
 
     Only resources this orchestration attempt actually CREATED are listed — reused/not-required
     resources are omitted (a retry reuses them idempotently, so undoing them would break an
@@ -2131,42 +2367,61 @@ def _cleanup_operations_for_failure(
     and a retry re-applies ``schedule_override`` idempotently — so destructively deleting it would
     risk wiping a pre-existing schedule rather than undoing this attempt. The result *names* exactly
     what a caller would undeploy / delete / detach; it performs no mutation by itself.
+
+    An attachment leg that was ``attached`` (mutated the account) but returned no id (#129 D5)
+    cannot be undone by a detach-by-id op — a ``resource_id=None`` op is rejected by the detach
+    handler — so instead of emitting a bogus op, its manual-cleanup need is surfaced as a warning.
     """
     ops: List[CleanupOperation] = []
+    manual_warnings: List[str] = []
 
     # 1. process<->runtime attachment.
     if (
         runtime_attachment is not None
         and runtime_attachment.process_runtime_attachment_status == "attached"
     ):
-        ops.append(CleanupOperation(
-            tool="manage_deployment",
-            action="detach_process_atom",
-            resource_type="process_runtime_attachment",
-            resource_id=runtime_attachment.process_runtime_attachment_id,
-            config={"resource_id": runtime_attachment.process_runtime_attachment_id},
-            reason=(
-                "This run attached the process to the runtime; detach it to undo the new "
-                "process<->runtime binding."
-            ),
-        ))
+        if runtime_attachment.process_runtime_attachment_id:
+            ops.append(CleanupOperation(
+                tool="manage_deployment",
+                action="detach_process_atom",
+                resource_type="process_runtime_attachment",
+                resource_id=runtime_attachment.process_runtime_attachment_id,
+                config={"resource_id": runtime_attachment.process_runtime_attachment_id},
+                reason=(
+                    "This run attached the process to the runtime; detach it to undo the new "
+                    "process<->runtime binding."
+                ),
+            ))
+        else:
+            manual_warnings.append(
+                "This run attached the process to the runtime but the create returned no "
+                "attachment id, so it cannot be auto-detached. Re-list ProcessAtomAttachment for "
+                "this process/runtime and detach it manually."
+            )
 
     # 2. process<->environment attachment.
     if (
         runtime_attachment is not None
         and runtime_attachment.process_env_attachment_status == "attached"
     ):
-        ops.append(CleanupOperation(
-            tool="manage_deployment",
-            action="detach_process_environment",
-            resource_type="process_env_attachment",
-            resource_id=runtime_attachment.process_env_attachment_id,
-            config={"resource_id": runtime_attachment.process_env_attachment_id},
-            reason=(
-                "This run attached the process to the environment; detach it to undo the new "
-                "process<->environment binding."
-            ),
-        ))
+        if runtime_attachment.process_env_attachment_id:
+            ops.append(CleanupOperation(
+                tool="manage_deployment",
+                action="detach_process_environment",
+                resource_type="process_env_attachment",
+                resource_id=runtime_attachment.process_env_attachment_id,
+                config={"resource_id": runtime_attachment.process_env_attachment_id},
+                reason=(
+                    "This run attached the process to the environment; detach it to undo the new "
+                    "process<->environment binding."
+                ),
+            ))
+        else:
+            manual_warnings.append(
+                "This run attached the process to the environment but the create returned no "
+                "attachment id, so it cannot be auto-detached. Re-list "
+                "ProcessEnvironmentAttachment for this process/environment and detach it manually."
+            )
 
     # 3. runtime<->environment attachment. Detach by the attachment id ONLY (the direct path):
     #    manage_runtimes_action('detach') treats resource_id as a *runtime* id whenever
@@ -2176,17 +2431,24 @@ def _cleanup_operations_for_failure(
         runtime_attachment is not None
         and runtime_attachment.runtime_env_attachment_status == "attached"
     ):
-        ops.append(CleanupOperation(
-            tool="manage_runtimes",
-            action="detach",
-            resource_type="runtime_env_attachment",
-            resource_id=runtime_attachment.runtime_env_attachment_id,
-            config={"resource_id": runtime_attachment.runtime_env_attachment_id},
-            reason=(
-                "This run attached the runtime to the environment; detach it to undo the new "
-                "runtime<->environment binding."
-            ),
-        ))
+        if runtime_attachment.runtime_env_attachment_id:
+            ops.append(CleanupOperation(
+                tool="manage_runtimes",
+                action="detach",
+                resource_type="runtime_env_attachment",
+                resource_id=runtime_attachment.runtime_env_attachment_id,
+                config={"resource_id": runtime_attachment.runtime_env_attachment_id},
+                reason=(
+                    "This run attached the runtime to the environment; detach it to undo the new "
+                    "runtime<->environment binding."
+                ),
+            ))
+        else:
+            manual_warnings.append(
+                "This run attached the runtime to the environment but the create returned no "
+                "attachment id, so it cannot be auto-detached. Re-list EnvironmentAtomAttachment "
+                "for this runtime/environment and detach it manually."
+            )
 
     # 4. deployment — undeploy the package this run deployed.
     if deployment is not None and deployment.status == "deployed":
@@ -2214,7 +2476,7 @@ def _cleanup_operations_for_failure(
             reason="This run created the package; delete it to undo the new package.",
         ))
 
-    return ops
+    return ops, manual_warnings
 
 
 # Maps a cleanup operation's ``tool`` to the sibling-router wrapper that performs it.
@@ -2243,10 +2505,25 @@ def _cleanup_stage_for_failure(
     passes ``cleanup_on_failure=True`` and a client is available; each operation's result is
     recorded and a failed operation is surfaced (``CLEANUP_OPERATION_FAILED``) without raising.
     """
-    operations = _cleanup_operations_for_failure(
+    operations, manual_warnings = _cleanup_operations_for_failure(
         package, deployment, runtime_attachment, environment_id=environment_id,
     )
     if not operations:
+        # No executable ops. If a mutation could not be expressed as one (attached-without-id,
+        # #129 D5), surface it as a ``warning`` with manual guidance rather than the misleading
+        # ``not_required`` — the account WAS mutated and needs manual cleanup.
+        if manual_warnings:
+            return CleanupStage(
+                status="warning",
+                dry_run=True,
+                mutation_allowed=bool(cleanup_on_failure),
+                warnings=manual_warnings,
+                next_step=(
+                    "This attempt created attachment(s) that returned no id and cannot be "
+                    "auto-detached; re-list the named attachment(s) and detach them manually "
+                    "before retrying."
+                ),
+            )
         return CleanupStage(
             status="not_required",
             dry_run=True,
@@ -2263,6 +2540,7 @@ def _cleanup_stage_for_failure(
             dry_run=True,
             mutation_allowed=False,
             operations=operations,
+            warnings=manual_warnings,
             next_step=(
                 "These destructive cleanup operations are planned only — nothing was mutated. "
                 "Re-run with cleanup_on_failure=true to execute them, or run the named tools "
@@ -2272,7 +2550,7 @@ def _cleanup_stage_for_failure(
 
     # Explicit opt-in: execute each planned operation in order, recording every result.
     results: List[Dict[str, Any]] = []
-    warnings: List[str] = []
+    warnings: List[str] = list(manual_warnings)
     all_ok = True
     for op in operations:
         caller = _CLEANUP_TOOL_DISPATCH.get(op.tool)
@@ -2305,8 +2583,11 @@ def _cleanup_stage_for_failure(
             "error": None if ok else result.get("error"),
         })
 
+    # A manual-cleanup warning (attached-without-id, #129 D5) is not an executed-op failure but
+    # still leaves an un-undone mutation, so it demotes a clean run to ``warning`` too.
+    clean = all_ok and not manual_warnings
     return CleanupStage(
-        status="completed" if all_ok else "warning",
+        status="completed" if clean else "warning",
         dry_run=False,
         mutation_allowed=True,
         operations=operations,
@@ -2314,9 +2595,10 @@ def _cleanup_stage_for_failure(
         warnings=warnings,
         next_step=(
             "Cleanup completed; re-run orchestrate_deploy to retry the deployment."
-            if all_ok
-            else "Some cleanup operations failed; inspect cleanup.results/warnings and clean up "
-            "the remaining resources manually before retrying."
+            if clean
+            else "Some cleanup operations failed or require manual intervention; inspect "
+            "cleanup.results/warnings and clean up the remaining resources manually before "
+            "retrying."
         ),
     )
 
@@ -2764,9 +3046,18 @@ def orchestrate_deploy_action(
             process_overrides=process_overrides,
         )
     except ValidationError as exc:
+        # ``request`` never bound — echo the RAW inputs; the builder sanitizes mistyped values.
         return _error_response(
             "Invalid orchestrate_deploy request.",
             [_validation_error_entry(err) for err in exc.errors()],
+            profile=profile,
+            build_id=build_id,
+            dry_run=dry_run,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            schedule_override=schedule_override,
+            run_test=run_test,
+            package_version=package_version,
         )
 
     build_id = request.build_id
@@ -2794,21 +3085,55 @@ def orchestrate_deploy_action(
             _error(RUNTIME_ID_REQUIRED, "runtime_id is required.", field="runtime_id")
         )
     if required_errors:
-        return _error_response("Missing required deployment inputs.", required_errors)
+        return _error_response(
+            "Missing required deployment inputs.",
+            required_errors,
+            profile=profile,
+            build_id=build_id,
+            dry_run=dry_run,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            schedule_override=schedule_override,
+            run_test=run_test,
+            package_version=package_version,
+        )
 
     # 2. Resolve the build to a single process component. This happens BEFORE any SDK call,
     #    so a resolver failure (e.g. BUILD_PROCESS_ID_MISSING) never touches boomi_client —
     #    even when dry_run is False.
     target, resolve_error = _resolve_build_deployment_target(build_id)
     if resolve_error is not None:
-        return _error_response(resolve_error.message, [resolve_error])
+        return _error_response(
+            resolve_error.message,
+            [resolve_error],
+            profile=profile,
+            build_id=build_id,
+            dry_run=dry_run,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            schedule_override=schedule_override,
+            run_test=run_test,
+            package_version=package_version,
+        )
 
     # 2b. Validate schedule_override CONTENT (format) up front — a fail-fast structured error
     #     in BOTH dry-run and real-run, before any SDK call. The normalized form is reused by
     #     the real-run schedule stage; an invalid override never reaches package/deploy.
     normalized_schedule, schedule_override_error = _normalize_schedule_override(schedule_override)
     if schedule_override_error is not None:
-        return _error_response(schedule_override_error.message, [schedule_override_error])
+        return _error_response(
+            schedule_override_error.message,
+            [schedule_override_error],
+            profile=profile,
+            build_id=build_id,
+            dry_run=dry_run,
+            target=target,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            schedule_override=schedule_override,
+            run_test=run_test,
+            package_version=package_version,
+        )
 
     # 2c. Build-basics deploy guards (issue #102). Read-only registry inspection, before any
     #     SDK call, in BOTH dry-run and real-run.
@@ -2835,6 +3160,15 @@ def orchestrate_deploy_action(
                     details={"build_id": build_id},
                 )
             ],
+            profile=profile,
+            build_id=build_id,
+            dry_run=dry_run,
+            target=target,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            schedule_override=schedule_override,
+            run_test=run_test,
+            package_version=package_version,
         )
     # F1 + B4 steering warnings (advisory, never block). Surfaced on the dry-run plan where
     # they are actionable before the caller commits to a real deploy.
