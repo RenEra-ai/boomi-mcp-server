@@ -931,6 +931,21 @@ class RestPathReplacement(BaseModel):
     def _strip_required(cls, value: str) -> str:
         return _stripped_nonblank(value)
 
+    @field_validator("name")
+    @classmethod
+    def _reject_brace_in_name(cls, value: str) -> str:
+        # Issue #127 B3 (review r1): a replacement name that itself contains a
+        # brace (e.g. 'clientId}{region') would let the residual-brace check's
+        # token stripping erase unrelated '{token}'s from the path, masking
+        # malformed input and deferring rejection to the build layer. A valid
+        # token name never contains '{' or '}', so reject it here at the
+        # contract layer (PARAM_VALIDATION_FAILED).
+        if "{" in value or "}" in value:
+            raise ValueError(
+                "path_replacements name must not contain '{' or '}'"
+            )
+        return value
+
 
 class RestSendRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

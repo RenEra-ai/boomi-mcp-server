@@ -250,3 +250,16 @@ def test_unbalanced_path_brace_rejected():
             [{"name": "clientId", "target_path": "Root/clientId"}],
         )
     )
+
+
+def test_brace_bearing_replacement_name_rejected():
+    # Issue #127 B3 (review r1): a replacement name containing braces could fool
+    # the residual-brace stripping (name='clientId}{region' would strip BOTH
+    # '{clientId}' and '{region}' tokens, leaving no residual), so it is rejected
+    # at the contract layer via the name field validator.
+    _expect_rejected(
+        _params(
+            "/v1/{clientId}{region}",
+            [{"name": "clientId}{region", "target_path": "Root/clientId"}],
+        )
+    )
