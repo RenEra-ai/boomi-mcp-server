@@ -9,7 +9,16 @@ emitted ``<profileelement>`` matches the generated request profile).
 
 from typing import Any, Dict
 
+import pytest
+
+from boomi_mcp.categories.components.builders.connector_builder import (
+    BuilderValidationError,
+)
 from boomi_mcp.categories.integration_authoring import build_from_archetype_action
+from boomi_mcp.patterns.archetypes.database_to_api_sync import (
+    DatabaseToApiSyncArchetype,
+    _build_dynamic_path,
+)
 
 
 def _params(path: str, path_replacements, children=None) -> Dict[str, Any]:
@@ -263,3 +272,21 @@ def test_brace_bearing_replacement_name_rejected():
             [{"name": "clientId}{region", "target_path": "Root/clientId"}],
         )
     )
+
+
+def test_build_dynamic_path_defends_against_post_validation_brace():
+    # Issue #127 B3 (review r2): defense-in-depth backstop. The contract
+    # validator rejects residual braces, but if a validated params object is
+    # mutated afterwards to reintroduce an empty '{}' (which the non-empty-token
+    # regex skips), _build_dynamic_path must raise ARCHETYPE_PARAM_INVALID rather
+    # than silently emit the '{}' as a literal static path segment.
+    payload = _params(
+        "/v1/clients/{clientId}",
+        [{"name": "clientId", "target_path": "Root/clientId"}],
+    )
+    params = DatabaseToApiSyncArchetype.validate_parameters(payload)
+    # Bypass the contract-layer check via post-validation mutation.
+    params.target.send_request.path = "/v1/{}/{clientId}"
+    with pytest.raises(BuilderValidationError) as exc:
+        _build_dynamic_path(params)
+    assert exc.value.error_code == "ARCHETYPE_PARAM_INVALID"

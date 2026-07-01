@@ -2806,6 +2806,23 @@ def _build_dynamic_path(
     target_index = JSONGeneratedProfileBuilder.build_field_index(profile_config)
 
     by_name = {r.name: r for r in send.path_replacements}
+    # Defense-in-depth backstop (issue #127 B3): the contract validator already
+    # rejects any residual brace, but re-check here before segment construction
+    # in case _build_dynamic_path is reached with a path that bypassed Pydantic
+    # validation (e.g. a params object mutated after validation). Strip every
+    # declared '{name}' token — names are guaranteed brace-free by the contract
+    # validator — then any remaining '{'/'}' is malformed (empty '{}', undeclared
+    # '{token}', or unbalanced brace) and must not be emitted as a static segment.
+    residual_path = send.path
+    for name in by_name:
+        residual_path = residual_path.replace("{" + name + "}", "")
+    if "{" in residual_path or "}" in residual_path:
+        raise BuilderValidationError(
+            "target.send_request.path contains an unresolved '{'/'}' brace "
+            "after removing declared path_replacements token(s)",
+            error_code="ARCHETYPE_PARAM_INVALID",
+            field="target.send_request.path",
+        )
     token_re = re.compile(r"\{([^{}]+)\}")
     segments: List[Dict[str, Any]] = []
     last = 0
