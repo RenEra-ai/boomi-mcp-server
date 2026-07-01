@@ -575,25 +575,36 @@ def _resolve_build_deployment_target(
     result_entry = results.get(process_key)
     result_entry = result_entry if isinstance(result_entry, dict) else {}
 
-    process_component_id = result_entry.get("component_id") or process_comp.get("component_id")
-    if not process_component_id:
+    # Resolve the effective component_id, preferring the result entry and falling back to the spec
+    # only when the result entry has NONE at all. A plain ``x or y`` would silently drop a present
+    # but FALSY non-string id (0, [], False) and misclassify it as "missing" instead of "malformed"
+    # (#129 D3 review r2), so use an explicit ``is not None`` fallback that preserves the present
+    # value for the type check below.
+    result_component_id = result_entry.get("component_id")
+    process_component_id = (
+        result_component_id if result_component_id is not None
+        else process_comp.get("component_id")
+    )
+
+    # Present-but-non-string component_id is malformed registry data, distinct from the blank/missing
+    # id below; coerce to a structured error before model construction (#129 D3). Checked BEFORE the
+    # truthiness test so a falsy non-string (0/[]/False) is classified malformed, not missing.
+    if process_component_id is not None and not isinstance(process_component_id, str):
         return None, _error(
-            BUILD_PROCESS_ID_MISSING,
+            BUILD_REGISTRY_ENTRY_MALFORMED,
             (
-                f"Process component '{process_key}' in build '{build_id}' has no resolved "
+                f"Process component '{process_key}' in build '{build_id}' has a non-string "
                 "component_id."
             ),
             field="build_id",
             details={"build_id": build_id, "process_key": process_key},
         )
 
-    # Present-but-non-string component_id is malformed registry data, distinct from the blank/missing
-    # id above; coerce to a structured error before model construction (#129 D3).
-    if not isinstance(process_component_id, str):
+    if not process_component_id:
         return None, _error(
-            BUILD_REGISTRY_ENTRY_MALFORMED,
+            BUILD_PROCESS_ID_MISSING,
             (
-                f"Process component '{process_key}' in build '{build_id}' has a non-string "
+                f"Process component '{process_key}' in build '{build_id}' has no resolved "
                 "component_id."
             ),
             field="build_id",
@@ -679,8 +690,11 @@ def _error_response(
     safe_runtime_id = runtime_id if isinstance(runtime_id, str) else None
     safe_package_version = package_version if isinstance(package_version, str) else None
     safe_schedule_override = schedule_override if isinstance(schedule_override, dict) else None
-    dry_run_flag = bool(dry_run)
-    run_test_flag = bool(run_test)
+    # Type-check the bool flags rather than truthily coercing (bool("banana") == True would echo a
+    # misleading run_test/dry_run into an INVALID_REQUEST envelope); a non-bool raw value falls back
+    # to the field default (#129 review r2). This matches the str-or-None sanitization above.
+    dry_run_flag = dry_run if isinstance(dry_run, bool) else True
+    run_test_flag = run_test if isinstance(run_test, bool) else False
 
     if target is not None:
         pkg_version = _effective_package_version(safe_package_version, safe_build_id)
@@ -723,6 +737,12 @@ def _error_response(
         "execution": execution.model_dump(),
         "logs": logs.model_dump(),
         "cleanup": cleanup.model_dump(),
+        # Summary matches the established blocked-downstream failure convention (deploy-fail /
+        # runtime-fail paths): execution/logs are NOT passed here. Passing them would add a
+        # ``summary["test"]`` sub-summary, breaking the contract that ``test`` appears ONLY when a
+        # run-test stage actually ran (enforced by test_run_test_false_* — #129 review r3). The
+        # blocked execution/logs/cleanup stages are still fully present as TOP-LEVEL keys above,
+        # which is the D2 deliverable (a caller branching on any stage key never breaks).
         "summary": _stage_summary(package, deployment, runtime_attachment, schedule),
         "warnings": [],
         "error": error_message,
@@ -888,12 +908,17 @@ def _is_create_conflict_response(response: Any) -> bool:
     """True when a failed create/deploy response looks like a concurrent-create conflict (#129 D4).
 
     Conservative and side-effect-free: a non-dict is never a conflict; an explicit
-    ``status_code == 409`` is; otherwise the lowercased ``error``/``message``/``exception_type``
-    text is scanned for a duplicate-flavored token. Used to trigger a single re-list recovery.
+    ``status_code`` of 409 (int OR the string ``"409"``) is; otherwise the lowercased
+    ``error``/``message``/``exception_type`` text is scanned for a duplicate-flavored token. Used to
+    trigger a single re-list recovery. Detection stays deliberately conservative (exact status match
+    + a small token set) so a NON-conflict failure is never misread as a conflict and made to reuse
+    the wrong resource — this repo's ``manage_deployment_action`` exposes no stable conflict field,
+    so the error text is the real signal (#129 D4).
     """
     if not isinstance(response, dict):
         return False
-    if response.get("status_code") == 409:
+    # Exact match on int 409 or its string form only — no loose numeric parsing (false-positive safe).
+    if response.get("status_code") in (409, "409"):
         return True
     haystack = " ".join(
         str(response.get(field) or "") for field in ("error", "message", "exception_type")

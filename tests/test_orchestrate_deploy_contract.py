@@ -139,6 +139,13 @@ def _assert_full_error_envelope(result):
                   "logs", "cleanup"):
         assert result[stage]["status"] == "blocked", stage
     assert isinstance(result["summary"], dict)
+    # summary matches the blocked-downstream failure convention: the 4 core stages appear in
+    # stage_statuses, and NO ``test`` sub-summary is present — that only appears when a run-test
+    # stage actually ran (#129 D2 review r3; same contract as test_run_test_false_*).
+    stage_statuses = result["summary"]["stage_statuses"]
+    for stage in ("package", "deployment", "runtime_attachment", "schedule"):
+        assert stage_statuses.get(stage) == "blocked", stage
+    assert "test" not in result["summary"]
     assert isinstance(result["behavior_verified"], dict)
     assert result["behavior_verified"]["verified"] is False
     assert result["warnings"] == []
@@ -428,6 +435,18 @@ def test_early_error_envelope_preserves_valid_string_profile(registry):
     assert result["profile"] == "prof-x"
 
 
+def test_early_error_envelope_type_checks_bool_flags():
+    # #129 D2 (review r2): a non-bool raw run_test/dry_run must NOT be truthily coerced (bool(
+    # "banana") == True) into the error envelope — it falls back to the field default. A "banana"
+    # run_test on the ValidationError path yields execution.run_test == False, not True.
+    result = orchestrate_deploy_action(
+        build_id="x", environment_id="env-1", runtime_id="rt-1", run_test="banana",
+    )
+    assert result["_success"] is False
+    assert "INVALID_REQUEST" in _codes(result)
+    assert result["execution"]["run_test"] is False
+
+
 def test_invalid_schedule_override_type_returns_structured_error(registry):
     # A non-dict schedule_override must not raise ValidationError out of the function.
     bid = registry("b-badsched", _single_process_entry())
@@ -565,6 +584,34 @@ def test_single_process_non_string_component_id_returns_malformed(registry):
     assert result["_success"] is False
     assert _codes(result) == ["BUILD_REGISTRY_ENTRY_MALFORMED"]
     assert result["errors"][0]["details"]["process_key"] == "proc"
+
+
+@pytest.mark.parametrize("bad_id", [0, False, [], {}, ["x"]])
+def test_single_process_falsy_non_string_component_id_returns_malformed(registry, bad_id):
+    # #129 D3 (review r2): a present but FALSY non-string component_id (0/False/[]/{}) must be
+    # classified BUILD_REGISTRY_ENTRY_MALFORMED, not silently dropped by `x or y` and reported as
+    # BUILD_PROCESS_ID_MISSING.
+    entry = _entry(
+        components=[_component("proc", "process", name="P")],
+        results={"proc": {"status": "created", "component_id": bad_id, "type": "process", "name": "P"}},
+    )
+    bid = registry("b-falsy-id", entry)
+    result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is False
+    assert _codes(result) == ["BUILD_REGISTRY_ENTRY_MALFORMED"]
+
+
+def test_single_process_spec_fallback_still_used_when_result_id_absent(registry):
+    # The `is not None` fallback must still defer to the spec component_id when the RESULT entry has
+    # no component_id at all (guards against the review-r2 fix over-narrowing the fallback).
+    entry = _entry(
+        components=[_component("proc", "process", name="P", action="update", component_id="SPEC-CID")],
+        results={"proc": {"status": "created", "type": "process", "name": "P"}},  # no component_id key
+    )
+    bid = registry("b-spec-fallback2", entry)
+    result = orchestrate_deploy_action(build_id=bid, environment_id="env-1", runtime_id="rt-1")
+    assert result["_success"] is True
+    assert result["target"]["process_component_id"] == "SPEC-CID"
 
 
 @pytest.mark.parametrize("bad_key", [[], {}, ["p"], {"k": 1}])
@@ -1129,6 +1176,21 @@ def test_deploy_non_conflict_failure_stays_hard_error(registry, monkeypatch):
     assert "DEPLOY_CREATE_FAILED" in _codes(result)
     # Only ONE list_deployments call — a non-conflict failure never triggers the recovery re-list.
     assert dep.actions_called().count("list_deployments") == 1
+
+
+def test_is_create_conflict_response_matches_int_and_string_409():
+    # #129 D4 (review r2): the conflict detector matches status_code 409 as BOTH int and string,
+    # matches duplicate-flavored error text, and stays conservative — a non-conflict failure and a
+    # non-dict are never misread as a conflict (which would wrongly trigger reuse of another resource).
+    f = orchestration._is_create_conflict_response
+    assert f({"status_code": 409}) is True
+    assert f({"status_code": "409"}) is True
+    assert f({"error": "Action 'deploy' failed: Conflict — already deployed"}) is True
+    assert f({"exception_type": "ApiError", "error": "duplicate package version"}) is True
+    assert f({"error": "permission denied"}) is False
+    assert f({"status_code": 500, "error": "internal error"}) is False
+    assert f(None) is False
+    assert f("409") is False  # non-dict is never a conflict
 
 
 def test_real_run_missing_process_id_from_resolver_never_calls_sdk(registry):
