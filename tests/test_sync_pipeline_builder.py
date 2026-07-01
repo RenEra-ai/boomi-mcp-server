@@ -717,7 +717,11 @@ def test_missing_connection_id_rejected_by_delegate():
     assert _code(cfg, _DEPS) == "PROCESS_CONNECTOR_BINDING_INVALID"
 
 
-def test_send_without_action_type_rejected_by_delegate():
+def test_send_without_action_type_rejected_by_lowering():
+    # A send stage missing action_type is rejected in lowering (#128 C1), so the
+    # error now originates in _lower_binding_stage — the precise stage field is
+    # available — rather than in the delegate's _validate_target_binding. The
+    # error code is unchanged (PROCESS_CONNECTOR_BINDING_INVALID).
     cfg = _sync_config(
         [
             _read_stage("s"),
@@ -726,7 +730,54 @@ def test_send_without_action_type_rejected_by_delegate():
         ],
         [{"from_stage": "s", "to_stage": "t"}],
     )
-    assert _code(cfg, _DEPS) == "PROCESS_CONNECTOR_BINDING_INVALID"
+    err = _validate(cfg, depends_on=_DEPS)
+    assert err is not None
+    assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+    assert err.field == "pipeline.stages[t].config.action_type"
+
+
+def test_build_raises_on_send_without_action_type_bypass():
+    # build() bypasses validate_config; the send non-empty action_type invariant
+    # lives in lowering (#128 C1, mirror of the fetch GET-only / write Send-only
+    # bypass guards), so a direct build() of a send stage with no action_type
+    # fails cleanly instead of emitting a REST target with actionType="".
+    cfg = _sync_config(
+        [
+            _read_stage("s"),
+            {"key": "t", "kind": "send", "config": {"primitive": "rest_send",
+             "connection_id": "$ref:rest_conn", "operation_id": "$ref:rest_op"}},
+        ],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    with pytest.raises(BuilderValidationError) as exc:
+        SyncPipelineBuilder.build(cfg, name="X")
+    assert exc.value.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+    assert exc.value.field == "pipeline.stages[t].config.action_type"
+
+
+def test_send_explicit_null_action_type_rejected():
+    # Unlike fetch (null -> GET) and write (null -> Send), a send target has no
+    # default verb: an explicit action_type=None is rejected, not normalized.
+    cfg = _sync_config(
+        [_read_stage("s"), _send_stage("t", action_type=None)],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = _validate(cfg, depends_on=_DEPS)
+    assert err is not None
+    assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+    assert err.field == "pipeline.stages[t].config.action_type"
+
+
+def test_send_blank_action_type_rejected():
+    # A whitespace-only action_type is empty after strip() and rejected too.
+    cfg = _sync_config(
+        [_read_stage("s"), _send_stage("t", action_type="   ")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    err = _validate(cfg, depends_on=_DEPS)
+    assert err is not None
+    assert err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+    assert err.field == "pipeline.stages[t].config.action_type"
 
 
 def test_unreachable_ref_rejected_by_delegate():
@@ -896,6 +947,22 @@ def test_explicit_send_write_action_type_accepted():
     assert _validate(cfg, depends_on=_WRITE_DEPS) is None
     lowered = SyncPipelineBuilder.lower_config(cfg)
     assert lowered["target"]["action_type"] == "Send"
+
+
+def test_explicit_null_write_action_type_resolves_to_send():
+    # An explicit action_type=None on a write stage means "the default verb"
+    # (Send) — identical to omitting the key — so lowering resolves it to Send and
+    # build() never leaks actionType="" (#128 C4, mirror of the fetch null->GET
+    # normalization at test_explicit_null_fetch_action_type_resolves_to_get).
+    cfg = _sync_config(
+        [_fetch_stage("s"), _write_stage("t", action_type=None)],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    assert SyncPipelineBuilder.lower_config(cfg)["target"]["action_type"] == "Send"
+    assert _validate(cfg, depends_on=_WRITE_DEPS) is None
+    xml = SyncPipelineBuilder.build(cfg, name="X")
+    assert 'actionType=""' not in xml
+    assert 'actionType="Send"' in xml
 
 
 def test_write_stage_forced_to_rest_connector_type_rejected():

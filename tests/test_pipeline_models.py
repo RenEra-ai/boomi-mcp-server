@@ -395,3 +395,63 @@ def test_integration_spec_pipeline_coerced_from_dict():
     )
     assert isinstance(spec.pipeline, PipelineSpec)
     assert spec.pipeline.stages[0].kind == "read"
+
+
+# ---------------------------------------------------------------------------
+# #128 C2 — extra="forbid": unknown fields are rejected, not silently dropped
+# ---------------------------------------------------------------------------
+
+
+def test_edge_unknown_field_rejected():
+    # A typo like edge_kinnd would previously be dropped (edge_kind falls back to
+    # 'ordering'); extra='forbid' now rejects it so the mis-authored edge cannot
+    # lower a different dependency than intended.
+    with pytest.raises(ValidationError):
+        PipelineEdgeSpec(from_stage="a", to_stage="b", edge_kinnd="ordering")
+
+
+def test_stage_unknown_field_rejected():
+    with pytest.raises(ValidationError):
+        StageSpec(key="a", kind="read", component_reff="c")
+
+
+def test_pipeline_unknown_field_rejected():
+    with pytest.raises(ValidationError):
+        PipelineSpec(stages=[StageSpec(key="a", kind="read")], dependancies=[])
+
+
+# ---------------------------------------------------------------------------
+# #128 C3 — ordinal is a non-negative StrictInt (no bool/str/float coercion)
+# ---------------------------------------------------------------------------
+
+
+def test_edge_ordinal_zero_accepted():
+    edge = PipelineEdgeSpec(from_stage="a", to_stage="b", ordinal=0)
+    assert edge.ordinal == 0
+
+
+def test_edge_ordinal_positive_accepted():
+    edge = PipelineEdgeSpec(from_stage="a", to_stage="b", ordinal=3)
+    assert edge.ordinal == 3
+
+
+def test_edge_ordinal_negative_rejected():
+    with pytest.raises(ValidationError):
+        PipelineEdgeSpec(from_stage="a", to_stage="b", ordinal=-1)
+
+
+def test_edge_ordinal_string_rejected():
+    with pytest.raises(ValidationError):
+        PipelineEdgeSpec(from_stage="a", to_stage="b", ordinal="1")
+
+
+def test_edge_ordinal_bool_rejected():
+    # bool is an int subclass in Python; StrictInt (not plain int + ge) is what
+    # rejects True/False so an accidental boolean is not coerced to 1/0.
+    with pytest.raises(ValidationError):
+        PipelineEdgeSpec(from_stage="a", to_stage="b", ordinal=True)
+
+
+def test_edge_ordinal_float_rejected():
+    with pytest.raises(ValidationError):
+        PipelineEdgeSpec(from_stage="a", to_stage="b", ordinal=1.0)

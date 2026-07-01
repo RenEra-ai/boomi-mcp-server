@@ -60,7 +60,7 @@ through PipelineSpec lowering.)
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 PipelineStageKind = Literal[
     "read",
@@ -130,6 +130,8 @@ class PipelineEdgeSpec(BaseModel):
     linear dependencies stay valid without callers opting in.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     from_stage: str = Field(..., description="Source stage key")
     to_stage: str = Field(..., description="Target stage key (lowers to dragpoint toShape)")
     edge_kind: PipelineEdgeKind = Field(
@@ -137,7 +139,7 @@ class PipelineEdgeSpec(BaseModel):
         description="Edge semantics; default 'ordering' preserves linear wiring",
     )
     label: Optional[str] = Field(default=None, description="Optional edge label (dragpoint text/identifier)")
-    ordinal: Optional[int] = Field(default=None, description="Optional ordering hint among sibling edges")
+    ordinal: Optional[StrictInt] = Field(default=None, ge=0, description="Optional ordering hint among sibling edges")
 
 
 class StageSpec(BaseModel):
@@ -150,6 +152,8 @@ class StageSpec(BaseModel):
     ``config`` is a type-specific payload and ``component_ref`` references an
     existing component key for reuse stages.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     key: str = Field(..., description="Unique stage key")
     kind: PipelineStageKind = Field(..., description="Stage kind (vocabulary includes reserved branch/decision)")
@@ -187,6 +191,8 @@ class PipelineSpec(BaseModel):
     The validator does cycle CLASSIFICATION: untyped back-edges are rejected and
     only ``loop_back`` edges that close an existing forward path are allowed.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     stages: List[StageSpec] = Field(default_factory=list)
     dependencies: List[PipelineEdgeSpec] = Field(

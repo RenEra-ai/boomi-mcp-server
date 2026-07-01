@@ -6359,13 +6359,16 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         # send-vs-write split. The kind, not a config override, decides the target
         # family.
         cls._check_target_connector_family(stage)
-        # Resolve the binding action_type. For a fetch (rest_fetch) source an
-        # explicit ``action_type: null`` (the key present with value None) means
-        # "the default verb" — identical to omitting the key — so it resolves to
-        # GET rather than leaking a None that build() would emit as actionType="".
+        # Resolve the binding action_type. For a fetch (rest_fetch) source and a
+        # write (db_write) target, an explicit ``action_type: null`` (the key
+        # present with value None) means "the default verb" — identical to
+        # omitting the key — so it resolves to that kind's default (fetch -> GET,
+        # write -> Send) rather than leaking a None that build() would emit as
+        # actionType="". A send (rest_send) target has NO default: it requires an
+        # explicit HTTP method (enforced by the send guard below).
         action_type = stage.config.get("action_type", default_action_type)
-        if stage.kind == "fetch" and action_type is None:
-            action_type = default_action_type  # "GET"
+        if stage.kind in ("fetch", "write") and action_type is None:
+            action_type = default_action_type  # fetch -> "GET", write -> "Send"
         binding: Dict[str, Any] = {
             "connector_type": stage.config.get("connector_type", default_connector_type),
             "action_type": action_type,
@@ -6409,6 +6412,26 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                     error_code="PROCESS_CONNECTOR_BINDING_INVALID",
                     field=f"pipeline.stages[{stage.key}].config.action_type",
                     hint="A write target is a database Send; other verbs are not valid for db_write.",
+                )
+        # A send (rest_send) target carries an explicit HTTP method — there is NO
+        # default (unlike read Get / fetch GET / write Send). Enforce a non-empty
+        # action_type HERE in the shared lowering so both validate_config AND a
+        # direct build() stay total: build() delegates to ProcessFlowBuilder.build()
+        # WITHOUT re-running _validate_target_binding, so a send stage missing
+        # action_type (action_type=None) would leak None and emit actionType="" on
+        # the validate_config-bypass path. Raise the same PROCESS_CONNECTOR_BINDING_
+        # INVALID code the delegate uses. Only the non-empty invariant is enforced
+        # here (C1, #128) — the HTTP verb vocabulary stays with the delegate's
+        # _validate_target_binding, which the archetype->plan->apply path exercises.
+        if stage.kind == "send":
+            action_value = binding["action_type"]
+            if action_value is None or str(action_value).strip() == "":
+                raise BuilderValidationError(
+                    f"sync_pipeline send stage {stage.key!r} requires an explicit "
+                    f"action_type (rest_send has no default HTTP method); got {action_value!r}.",
+                    error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                    field=f"pipeline.stages[{stage.key}].config.action_type",
+                    hint="Set config.action_type to the REST verb (e.g. POST/PUT/PATCH/GET) for the send target.",
                 )
         if "label" in stage.config:
             binding["label"] = stage.config["label"]
