@@ -549,6 +549,7 @@ def test_missing_start_shape_reported():
     )
     result = verify_process_graph(xml)
     assert "PROCESS_START_MISSING" in _codes(result["errors"])
+    assert "START_SHAPE_HAS_INBOUND" not in _codes(result["errors"])
 
 
 def test_bare_process_root_is_supported():
@@ -960,3 +961,61 @@ def test_composed_decision_false_exception_no_bare_stop_warning():
     assert result["errors"] == []
     codes = {w["code"] for w in result["warnings"]}
     assert "CONTROL_BRANCH_BARE_STOP" not in codes
+
+
+# ---------------------------------------------------------------------------
+# Issue #130 M9.9 — START_SHAPE_HAS_INBOUND (start must have no inbound edge)
+# ---------------------------------------------------------------------------
+
+
+def test_inbound_edge_into_start_shape_is_error():
+    """start(shape1) -> message(shape2) -> shape1: the message loops back into
+    the start, which is the sole entry point. Exactly one START_SHAPE_HAS_INBOUND
+    (naming shape2), and neither shape is a dead end / unreachable — the mirror
+    of test_terminal_shape_with_outbound_edge_is_error."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape2" x="2" y="2"/></dragpoints></shape>'
+        '<shape image="message_icon" name="shape2" shapetype="message" x="2" y="1">'
+        '<configuration/>'
+        '<dragpoints><dragpoint name="d2" toShape="shape1" x="1" y="2"/></dragpoints></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "START_SHAPE_HAS_INBOUND" in codes
+    inbound = [e for e in result["errors"] if e["code"] == "START_SHAPE_HAS_INBOUND"]
+    assert len(inbound) == 1
+    assert inbound[0]["shape"] == "shape1"
+    assert inbound[0]["shape_type"] == "start"
+    assert "shape2" in inbound[0]["message"]
+    assert "SHAPE_UNREACHABLE" not in codes
+    assert "NON_TERMINAL_SHAPE_DEAD_END" not in codes
+
+
+def test_start_self_edge_is_error():
+    """A start with a dragpoint to itself (start -> start) is one form of
+    inbound-to-start and must be flagged."""
+    xml = (
+        '<process xmlns=""><shapes>'
+        '<shape image="start" name="shape1" shapetype="start" x="1" y="1">'
+        '<configuration><noaction/></configuration>'
+        '<dragpoints><dragpoint name="d1" toShape="shape1" x="1" y="2"/></dragpoints></shape>'
+        "</shapes></process>"
+    )
+    result = verify_process_graph(xml)
+    codes = _codes(result["errors"])
+    assert "START_SHAPE_HAS_INBOUND" in codes
+    inbound = [e for e in result["errors"] if e["code"] == "START_SHAPE_HAS_INBOUND"]
+    assert len(inbound) == 1
+    assert inbound[0]["shape"] == "shape1"
+    assert "shape1" in inbound[0]["message"]
+
+
+def test_builder_loop_back_does_not_trigger_start_inbound():
+    """A builder-emitted decision loop-back targets a downstream shape (shape2),
+    never the start — START_SHAPE_HAS_INBOUND must not fire on legal loop-backs."""
+    result = verify_process_graph(_decision_process_xml(false_notify=None, false_next="shape2"))
+    assert "START_SHAPE_HAS_INBOUND" not in _codes(result["errors"])

@@ -330,6 +330,26 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                     )
 
     # ------------------------------------------------------------------
+    # Start-shape discovery (shared by the Pass 2c inbound-edge guard and the
+    # Pass 3 reachability BFS). ``start_name`` keeps the existing first-start
+    # behavior; ``start_names`` collects every named start so an inbound edge
+    # into ANY start (e.g. a second one) is caught without adding a
+    # multiple-start validator.
+    # ------------------------------------------------------------------
+    start_name: Optional[str] = None
+    start_names: set = set()
+    first_start_seen = False
+    for shape in shape_elems:
+        if _shape_type(shape) != "start":
+            continue
+        name = shape.get("name")
+        if not first_start_seen:
+            start_name = name
+            first_start_seen = True
+        if name:
+            start_names.add(name)
+
+    # ------------------------------------------------------------------
     # Pass 2 — non-terminal dead ends.
     # ------------------------------------------------------------------
     for shape in shape_elems:
@@ -434,14 +454,33 @@ def verify_process_graph(process_xml: str) -> Dict[str, Any]:
                     )
 
     # ------------------------------------------------------------------
+    # Pass 2c — start shapes must not be the target of any inbound edge.
+    # ------------------------------------------------------------------
+    # The start is the sole entry point; any resolved edge that lands on it is
+    # malformed wiring — the exact mirror of the Pass 2a terminal-outbound
+    # guard. This runs on the resolved ``edges`` map, so a self-edge
+    # (start -> start) is flagged, while legal builder loop-backs (which target
+    # a downstream shape, never the start) do not trigger it. Offenders are
+    # sorted for deterministic output.
+    for inbound_start in sorted(start_names):
+        offenders = sorted(src for src, targets in edges.items() if inbound_start in targets)
+        if offenders:
+            errors.append(
+                _issue(
+                    "START_SHAPE_HAS_INBOUND",
+                    inbound_start,
+                    "start",
+                    f"Start shape '{inbound_start}' is the target of inbound edge(s) from "
+                    f"{', '.join(offenders)}; the start is the sole entry point and must "
+                    "have no inbound edge.",
+                    f"Re-point the dragpoint(s) from {', '.join(offenders)} at a non-start "
+                    "shape (loop-backs must target a downstream shape, never the start).",
+                )
+            )
+
+    # ------------------------------------------------------------------
     # Pass 3 — reachability from the start shape.
     # ------------------------------------------------------------------
-    start_name: Optional[str] = None
-    for shape in shape_elems:
-        if _shape_type(shape) == "start":
-            start_name = shape.get("name")
-            break
-
     if not start_name:
         errors.append(
             _issue(
