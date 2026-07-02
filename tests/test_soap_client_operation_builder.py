@@ -231,3 +231,39 @@ def test_registry_maps_soap_execute():
         get_connector_action_builder("soap_client", "execute"), SoapClientOperationBuilder
     )
     assert get_connector_action_builder("soap_client", "get") is None
+
+
+def test_injected_framework_name_and_component_type_accepted():
+    """Codex #126 review P1: the apply path setdefaults a top-level `name` (and
+    `component_type`) into the connector-action payload — the closed allowlist
+    must tolerate them so a SOAP operation that plans clean does not fail apply."""
+    cfg = _minimal_config(name="Injected Op Name", component_type="connector-action")
+    assert SoapClientOperationBuilder.validate_config(cfg) is None
+    assert 'subType="wssoapclientsdk"' in SoapClientOperationBuilder().build(**cfg)
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["return_application_errors", "track_response", "expose_request_envelope", "expose_response_envelope"],
+)
+def test_non_bool_operation_flag_rejected(flag):
+    """Codex #126 review P2: a string/int flag must be rejected up front, not
+    silently truthy-coerced by bool() into a wrong XML attribute."""
+    err = SoapClientOperationBuilder.validate_config(_minimal_config(**{flag: "false"}))
+    assert err is not None and err.error_code == "SOAP_OPERATION_VALIDATION_FAILED"
+    assert err.field == flag
+
+
+def test_explicit_none_flag_resolves_to_documented_default():
+    """Codex #126 review P2: an explicit null must resolve to the documented
+    default (expose_request_envelope -> true), not bool(None) -> false."""
+    built = SoapClientOperationBuilder().build(**_minimal_config(expose_request_envelope=None))
+    assert '<field id="exposeRequestEnvelope" type="boolean" value="true"/>' in built
+
+
+def test_valid_bool_flags_pass_through():
+    built = SoapClientOperationBuilder().build(
+        **_minimal_config(return_application_errors=True, expose_response_envelope=True)
+    )
+    assert 'returnApplicationErrors="true"' in built
+    assert '<field id="exposeResponseEnvelope" type="boolean" value="true"/>' in built

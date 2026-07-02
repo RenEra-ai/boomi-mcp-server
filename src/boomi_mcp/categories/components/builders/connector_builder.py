@@ -3584,9 +3584,12 @@ class SoapClientConnectionBuilder:
     _BOOMI_COMPONENT_ID_RE = RestClientConnectionBuilder._BOOMI_COMPONENT_ID_RE
     FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
     _ALLOWED_FIELDS = frozenset({
-        # Framework routing keys that legitimately flow into the builder
-        # (create dispatch / integration spec) — tolerated, not user fields.
+        # Framework routing / identity keys that legitimately flow into the
+        # builder (create dispatch, and the top-level `name` + `component_type`
+        # that integration_builder._execute_component setdefaults into the
+        # payload at apply time) — tolerated, not user fields.
         "component_type",
+        "name",
         "connector_type",
         "component_name",
         "folder_name",
@@ -3902,9 +3905,12 @@ class SoapClientOperationBuilder:
     )
     FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
     _ALLOWED_FIELDS = frozenset({
-        # Framework routing keys that legitimately flow into the builder
-        # (create dispatch / integration spec) — tolerated, not user fields.
+        # Framework routing / identity keys that legitimately flow into the
+        # builder (create dispatch, and the top-level `name` + `component_type`
+        # that integration_builder._execute_component setdefaults into the
+        # payload at apply time) — tolerated, not user fields.
         "component_type",
+        "name",
         "connector_type",
         "component_name",
         "folder_name",
@@ -4135,6 +4141,33 @@ class SoapClientOperationBuilder:
                     hint="Pass the GUID-shaped document-cache component id.",
                 )
 
+        # 10) Bool operation flags. Reject non-bool callers up front — build()
+        #     must not `bool(...)`-coerce, or a string "false" would become True
+        #     and an explicit null would flip the documented default. None is
+        #     treated as "not supplied" and resolves to the default at build.
+        #     (Mirrors RestClientOperationBuilder step 11.)
+        for bool_field in (
+            "return_application_errors",
+            "track_response",
+            "expose_request_envelope",
+            "expose_response_envelope",
+        ):
+            if bool_field in config and config[bool_field] is not None:
+                value = config[bool_field]
+                if not isinstance(value, bool):
+                    return BuilderValidationError(
+                        f"{bool_field} must be a boolean (got "
+                        f"{type(value).__name__})",
+                        error_code="SOAP_OPERATION_VALIDATION_FAILED",
+                        field=bool_field,
+                        hint=(
+                            f"Pass {bool_field}=True or False. String "
+                            "'true'/'false' and numeric 0/1 are rejected to "
+                            "prevent silent truthy-coercion that would mis-emit "
+                            "the XML attribute."
+                        ),
+                    )
+
         return None
 
     @staticmethod
@@ -4231,10 +4264,18 @@ class SoapClientOperationBuilder:
         request_profile_type = str(params.get("request_profile_type", "xml")).lower()
         response_profile_type = str(params.get("response_profile_type", "xml")).lower()
 
-        rae = bool(params.get("return_application_errors", False))
-        track_response = bool(params.get("track_response", False))
-        expose_request = bool(params.get("expose_request_envelope", True))
-        expose_response = bool(params.get("expose_response_envelope", False))
+        # validate_config (step 10) already enforced these are bool (or
+        # None / omitted). Resolve None → the documented default WITHOUT
+        # truthy-coercing (no bool(...) on an arbitrary value) so an explicit
+        # null keeps the default and a validated bool passes through verbatim.
+        def _flag(name: str, default: bool) -> bool:
+            value = params.get(name)
+            return default if value is None else value
+
+        rae = _flag("return_application_errors", False)
+        track_response = _flag("track_response", False)
+        expose_request = _flag("expose_request_envelope", True)
+        expose_response = _flag("expose_response_envelope", False)
         attachment_cache_id = params.get("attachment_cache_id", "")
 
         safe_name = _escape_xml(component_name)

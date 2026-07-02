@@ -235,3 +235,15 @@ def test_set_by_extension_allowed_on_endpoint_and_username():
 def test_build_raises_on_invalid_config():
     with pytest.raises(BuilderValidationError):
         SoapClientConnectionBuilder().build(**_minimal_config(security="BASIC"))
+
+
+def test_injected_framework_name_and_component_type_accepted():
+    """Codex #126 review P1: integration_builder._execute_component setdefaults a
+    top-level `name` (and `component_type`) into the connector payload at apply
+    time. The closed allowlist must tolerate these framework keys so a SOAP
+    connection that plans clean does not fail at apply."""
+    cfg = _minimal_config(name="Injected Display Name", component_type="connector-settings")
+    assert SoapClientConnectionBuilder.validate_config(cfg) is None
+    # And build() succeeds (the injected keys are ignored by emission).
+    built = SoapClientConnectionBuilder().build(**cfg)
+    assert 'subType="wssoapclientsdk"' in built
