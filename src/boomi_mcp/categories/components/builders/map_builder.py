@@ -99,6 +99,7 @@ from .map_function_registry import (
     validate_function_mapping,
 )
 from .profile_generation import (
+    MAP_DOCUMENT_CACHE_JOINS_INVALID,
     DUPLICATE_TARGET_MAPPING,
     MAP_FIELD_NOT_FOUND,
     MAP_PROFILE_INDEX_UNAVAILABLE,
@@ -511,6 +512,201 @@ def _render_direct_mapping(
     )
 
 
+_ALLOWED_JOIN_KEYS = (
+    "document_cache_id",
+    "cache_index",
+    "join_id",
+    "src_parent_key",
+    "key_values",
+)
+
+_ALLOWED_JOIN_KEY_VALUE_KEYS = ("cache_key_id", "cache_key_name", "src_link_key")
+
+
+def _positive_int_or_none(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value > 0 else None
+
+
+def validate_document_cache_joins_structure(
+    joins: Any, field_prefix: str = "document_cache_joins"
+) -> Optional[BuilderValidationError]:
+    """Structural validation for authored map-level Document Cache joins
+    (issue #122 M11.3). Wire shape live-captured in the #119 census
+    (``tests/fixtures/live_xml/m11/map_document_cache_joins.xml``): each join
+    carries cacheIndex / docCache / docCacheJoinId, a srcParentKey (the source
+    profile node the join hangs off), and one CacheKeyJoinValue per cache key
+    linking a source profile node (srcLinkKey) to the cache key.
+
+    $ref/depends_on and in-spec cache index/key cross-checks live in
+    ``transform_map_validation._validate_document_cache_joins`` — this helper
+    is the shape contract shared by plan-time validation and build-time
+    rendering.
+    """
+    if joins is None:
+        return None
+    if not isinstance(joins, list) or not joins:
+        return BuilderValidationError(
+            f"{field_prefix} must be a non-empty list when provided",
+            error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+            field=field_prefix,
+            hint=(
+                "Each entry is {document_cache_id, cache_index, join_id, "
+                "src_parent_key, key_values: [{cache_key_id, cache_key_name, "
+                "src_link_key}]}."
+            ),
+        )
+    seen_join_ids: Dict[int, str] = {}
+    for i, join in enumerate(joins):
+        join_field = f"{field_prefix}[{i}]"
+        if not isinstance(join, Mapping):
+            return BuilderValidationError(
+                f"{join_field} must be a JSON object",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=join_field,
+            )
+        extra = set(join) - set(_ALLOWED_JOIN_KEYS)
+        if extra:
+            return BuilderValidationError(
+                f"{join_field} has unsupported key(s): {sorted(extra)}.",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=join_field,
+                hint=f"Allowed join keys: {sorted(_ALLOWED_JOIN_KEYS)}.",
+            )
+        cache_id = join.get("document_cache_id")
+        if not isinstance(cache_id, str) or not cache_id.strip():
+            return BuilderValidationError(
+                f"{join_field}.document_cache_id is required (a literal "
+                "documentcache component id or a $ref:KEY token)",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.document_cache_id",
+            )
+        cache_index = _positive_int_or_none(join.get("cache_index"))
+        if cache_index is None:
+            return BuilderValidationError(
+                f"{join_field}.cache_index must be a positive non-zero integer "
+                "(the cache component's CacheIndex indexId)",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.cache_index",
+            )
+        join_id = _positive_int_or_none(join.get("join_id"))
+        if join_id is None:
+            return BuilderValidationError(
+                f"{join_field}.join_id must be a positive non-zero integer "
+                "(the docCacheJoinId Mapping rows reference via fromCacheJoinKey)",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.join_id",
+            )
+        if join_id in seen_join_ids:
+            return BuilderValidationError(
+                f"{join_field}.join_id duplicates {seen_join_ids[join_id]}",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.join_id",
+            )
+        seen_join_ids[join_id] = f"{join_field}.join_id"
+        src_parent_key = join.get("src_parent_key")
+        if isinstance(src_parent_key, bool) or not isinstance(
+            src_parent_key, (str, int)
+        ) or not str(src_parent_key).strip():
+            return BuilderValidationError(
+                f"{join_field}.src_parent_key is required (the source profile "
+                "node key the joined cache record hangs off)",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.src_parent_key",
+            )
+        key_values = join.get("key_values")
+        if not isinstance(key_values, list) or not key_values:
+            return BuilderValidationError(
+                f"{join_field}.key_values must be a non-empty list (one entry "
+                "per cache key in the joined index)",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.key_values",
+            )
+        for j, kv in enumerate(key_values):
+            kv_field = f"{join_field}.key_values[{j}]"
+            if not isinstance(kv, Mapping):
+                return BuilderValidationError(
+                    f"{kv_field} must be a JSON object",
+                    error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                    field=kv_field,
+                )
+            extra = set(kv) - set(_ALLOWED_JOIN_KEY_VALUE_KEYS)
+            if extra:
+                return BuilderValidationError(
+                    f"{kv_field} has unsupported key(s): {sorted(extra)}.",
+                    error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                    field=kv_field,
+                    hint=f"Allowed keys: {sorted(_ALLOWED_JOIN_KEY_VALUE_KEYS)}.",
+                )
+            if _positive_int_or_none(kv.get("cache_key_id")) is None:
+                return BuilderValidationError(
+                    f"{kv_field}.cache_key_id must be a positive non-zero "
+                    "integer (the cache component's cacheKey id)",
+                    error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                    field=f"{kv_field}.cache_key_id",
+                )
+            name = kv.get("cache_key_name")
+            if not isinstance(name, str) or not name.strip():
+                return BuilderValidationError(
+                    f"{kv_field}.cache_key_name is required",
+                    error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                    field=f"{kv_field}.cache_key_name",
+                    hint=(
+                        "Use the cache key display form, e.g. "
+                        "'wallID (Root/wall/wallID)'."
+                    ),
+                )
+            link = kv.get("src_link_key")
+            if isinstance(link, bool) or not isinstance(link, (str, int)) or not str(
+                link
+            ).strip():
+                return BuilderValidationError(
+                    f"{kv_field}.src_link_key is required (the source profile "
+                    "node key supplying this cache key's value)",
+                    error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                    field=f"{kv_field}.src_link_key",
+                )
+    return None
+
+
+def _render_document_cache_joins(joins: Any) -> str:
+    """Render the ``<DocumentCacheJoins>`` section (issue #122 M11.3).
+
+    Byte-locked to the #119 live capture: attribute names/order and the
+    fixed ``tagListKey="0"`` match ``map_document_cache_joins.xml``. Absent /
+    empty config keeps the pre-#122 empty element byte-for-byte.
+    """
+    if not joins:
+        return "<DocumentCacheJoins/>"
+    err = validate_document_cache_joins_structure(joins)
+    if err is not None:
+        raise err
+    parts: List[str] = []
+    for join in joins:
+        kv_parts: List[str] = []
+        for kv in join["key_values"]:
+            kv_parts.append(
+                f'<CacheKeyJoinValue cacheKeyId="{int(kv["cache_key_id"])}" '
+                f'cacheKeyName="{_escape_xml(str(kv["cache_key_name"]).strip())}">'
+                f'<srcLinkKey key="{_escape_xml(str(kv["src_link_key"]).strip())}" '
+                'tagListKey="0"/>'
+                "</CacheKeyJoinValue>"
+            )
+        parts.append(
+            f'<DocumentCacheJoin cacheIndex="{int(join["cache_index"])}" '
+            f'docCache="{_escape_xml(str(join["document_cache_id"]).strip())}" '
+            f'docCacheJoinId="{int(join["join_id"])}">'
+            f'<srcParentKey key="{_escape_xml(str(join["src_parent_key"]).strip())}" '
+            'tagListKey="0"/>'
+            "<CacheKeyJoinValues>"
+            f"{''.join(kv_parts)}"
+            "</CacheKeyJoinValues>"
+            "</DocumentCacheJoin>"
+        )
+    return f"<DocumentCacheJoins>{''.join(parts)}</DocumentCacheJoins>"
+
+
 def _render_map_envelope(
     *,
     component_name: str,
@@ -521,6 +717,7 @@ def _render_map_envelope(
     mappings_xml: str,
     functions_xml: str,
     defaults_xml: str,
+    document_cache_joins_xml: str = "<DocumentCacheJoins/>",
 ) -> str:
     """Wrap the ``<Map>`` body with the standard ``<bns:Component>`` envelope."""
     folder_attr = (
@@ -542,7 +739,7 @@ def _render_map_envelope(
         f"<Mappings>{mappings_xml}</Mappings>"
         f"{functions_xml}"
         f"{defaults_xml}"
-        "<DocumentCacheJoins/>"
+        f"{document_cache_joins_xml}"
         "</Map>"
         "</bns:object>"
         "</bns:Component>"
@@ -684,6 +881,9 @@ class DirectMapBuilder:
             )
 
         return _render_map_envelope(
+            document_cache_joins_xml=_render_document_cache_joins(
+                config.get("document_cache_joins")
+            ),
             component_name=component_name,
             folder_path=folder_path,
             description=description,
@@ -1158,6 +1358,9 @@ class MapFunctionBuilder:
         )
 
         return _render_map_envelope(
+            document_cache_joins_xml=_render_document_cache_joins(
+                config.get("document_cache_joins")
+            ),
             component_name=component_name,
             folder_path=folder_path,
             description=description,
@@ -1699,6 +1902,9 @@ class MapScriptBuilder:
         )
 
         return _render_map_envelope(
+            document_cache_joins_xml=_render_document_cache_joins(
+                config.get("document_cache_joins")
+            ),
             component_name=component_name,
             folder_path=folder_path,
             description=description,

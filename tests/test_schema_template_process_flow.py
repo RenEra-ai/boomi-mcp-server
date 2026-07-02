@@ -760,6 +760,9 @@ def test_template_documents_flow_sequence_surface(template):
         # Issue #121 M11.2: generic DDP/DPP Set Properties steps.
         "set_ddp",
         "set_dpp",
+        # Issue #122 M11.3: authored cache write/read steps.
+        "cache_put",
+        "cache_get",
         "decision",
         "branch",
         "exception",

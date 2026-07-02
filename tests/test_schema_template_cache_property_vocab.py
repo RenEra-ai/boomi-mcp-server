@@ -75,6 +75,10 @@ _EXECUTABLE_TERMS = {
     "get_property",
     "set_process_property",
     "processproperty_component",
+    "cache_put",
+    "cache_get",
+    "cache_join",
+    "documentcache_component",
 }
 
 

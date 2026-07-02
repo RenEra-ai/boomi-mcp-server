@@ -22,6 +22,8 @@ from .data_process import DataProcessPrimitive
 from .db_extract import DbExtractPrimitive
 from .db_write import DbWritePrimitive
 from .decision import DecisionPrimitive
+from .document_cache_lookup import DocumentCacheLookupPrimitive
+from .document_cache_put import DocumentCachePutPrimitive
 from .document_cache_remove import DocumentCacheRemovePrimitive
 from .document_cache_retrieve import DocumentCacheRetrievePrimitive
 from .field_map import FieldMapPrimitive
@@ -47,6 +49,8 @@ __all__ = [
     "DbExtractPrimitive",
     "DbWritePrimitive",
     "DecisionPrimitive",
+    "DocumentCacheLookupPrimitive",
+    "DocumentCachePutPrimitive",
     "DocumentCacheRemovePrimitive",
     "DocumentCacheRetrievePrimitive",
     "FieldMapPrimitive",

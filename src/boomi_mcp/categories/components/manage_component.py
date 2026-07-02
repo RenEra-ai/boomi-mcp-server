@@ -24,6 +24,7 @@ from .builders import (
     PROFILE_BUILDERS,
     get_profile_builder,
 )
+from .builders.document_cache_builder import get_document_cache_builder
 from .builders.process_property_builder import get_process_property_builder
 from .builders.script_mapping_builder import get_script_mapping_builder
 
@@ -91,6 +92,19 @@ def create_component(
             pp_builder_cls = get_process_property_builder(component_type)
             if pp_builder_cls is not None:
                 xml = pp_builder_cls().build(**config)
+                result = _create_component_raw(boomi_client, xml)
+                return {
+                    "_success": True,
+                    "message": f"Created {component_type} '{result['name']}'",
+                    "component_id": result['component_id'],
+                    "name": result['name'],
+                    "type": result['type'],
+                    "profile": profile,
+                }
+            # Issue #122 M11.3: standalone documentcache components too.
+            dc_builder_cls = get_document_cache_builder(component_type)
+            if dc_builder_cls is not None:
+                xml = dc_builder_cls().build(**config)
                 result = _create_component_raw(boomi_client, xml)
                 return {
                     "_success": True,

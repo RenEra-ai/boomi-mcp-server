@@ -266,6 +266,13 @@ _FLOW_SEQUENCE_LINEAR_KINDS = frozenset(
         # helper emits, via the shared generic emitters below.
         "set_ddp",
         "set_dpp",
+        # Issue #122 M11.3 (epic #118): authored cache vocabulary. cache_put is
+        # the success-path Add to Cache write (lowers to the byte-locked
+        # doccacheload emitter); cache_get retrieves (lowers to the all-document
+        # doccacheretrieve emitter — keyed mode is gated pending a live keyed
+        # capture, #119 census Outcome B).
+        "cache_put",
+        "cache_get",
     }
 )
 _FLOW_SEQUENCE_CONTROL_KINDS = frozenset({"decision", "branch"})
@@ -292,6 +299,13 @@ _FLOW_SEQUENCE_STEP_KEYS: Dict[str, frozenset] = {
     # `persist` (DPP only) persists the value at atom level.
     "set_ddp": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"name", "source_values"},
     "set_dpp": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"name", "source_values", "persist"},
+    # Issue #122 M11.3: authored cache steps. The keyed-retrieval keys
+    # (doc_cache_index / cache_key_values / load_all_documents) are allow-listed
+    # so the validator can reject them with the NAMED gated error instead of a
+    # generic unknown-key message.
+    "cache_put": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"document_cache_id"},
+    "cache_get": _FLOW_SEQUENCE_STEP_COMMON_KEYS
+    | {"document_cache_id", "empty_cache_behavior", "doc_cache_index", "cache_key_values", "load_all_documents"},
     "decision": frozenset(
         {"kind", "label", "comparison", "left", "right", "true_steps", "false_steps"}
     ),
@@ -4621,6 +4635,10 @@ def _validate_flow_sequence_step(step: Any, field: str) -> Optional[BuilderValid
         return _validate_sequence_doccacheload_step(step, field)
     if kind in ("set_ddp", "set_dpp"):
         return _validate_sequence_set_properties_step(step, field, kind)
+    if kind == "cache_put":
+        return _validate_sequence_cache_put_step(step, field)
+    if kind == "cache_get":
+        return _validate_sequence_cache_get_step(step, field)
     if kind in _FLOW_SEQUENCE_LINEAR_KINDS:
         return _validate_sequence_linear_step(step, field, kind)
     if kind == "decision":
@@ -4834,6 +4852,70 @@ def _validate_sequence_set_properties_step(
     return None
 
 
+def _validate_sequence_cache_put_step(
+    step: Dict[str, Any], field: str
+) -> Optional[BuilderValidationError]:
+    """Validate a ``cache_put`` step (issue #122) — the authored success-path
+    Add to Cache write. Same contract as ``doccacheload``: one required
+    ``document_cache_id`` (literal id or $ref:KEY token in depends_on)."""
+    doc_cache_id = step.get("document_cache_id")
+    if not isinstance(doc_cache_id, str) or not doc_cache_id.strip():
+        return BuilderValidationError(
+            f"{field}.document_cache_id is required for a cache_put step.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=f"{field}.document_cache_id",
+            hint=(
+                "Pass the Document Cache component id (a literal id or a "
+                "$ref:KEY token in depends_on) to write the current documents to."
+            ),
+        )
+    return None
+
+
+def _validate_sequence_cache_get_step(
+    step: Dict[str, Any], field: str
+) -> Optional[BuilderValidationError]:
+    """Validate a ``cache_get`` step (issue #122) — authored retrieve.
+
+    v1 supports the all-document form only (the byte-locked M10 retrieve).
+    Keyed/index retrieval keys are recognized but rejected with the NAMED
+    gated error: the #119 census found no live capture of a populated
+    ``cacheKeyValues`` wire shape (Outcome B), so emitting one would be
+    invented XML.
+    """
+    for gated_key in ("doc_cache_index", "cache_key_values"):
+        if gated_key in step:
+            return BuilderValidationError(
+                f"{field}.{gated_key} is gated — keyed cache retrieval has no "
+                "live-captured wire shape (#119 census).",
+                error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+                field=f"{field}.{gated_key}",
+                hint=(
+                    "v1 cache_get retrieves ALL cached documents. The keyed "
+                    "form unlocks after a disposable-account round-trip "
+                    "captures the populated cacheKeyValues shape."
+                ),
+            )
+    if "load_all_documents" in step and step.get("load_all_documents") is not True:
+        return BuilderValidationError(
+            f"{field}.load_all_documents supports only true in v1 (keyed "
+            "retrieval is gated, #119 census).",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field=f"{field}.load_all_documents",
+            hint="Omit the key or pass true; keyed mode needs a live capture.",
+        )
+    transform: Dict[str, Any] = {
+        "mode": "doccacheretrieve",
+        "document_cache_id": step.get("document_cache_id"),
+    }
+    if "empty_cache_behavior" in step:
+        transform["empty_cache_behavior"] = step.get("empty_cache_behavior")
+    label = step.get("label")
+    if label is not None:
+        transform["label"] = label
+    return _validate_transform(transform)
+
+
 def _validate_sequence_decision_step(
     step: Dict[str, Any], field: str
 ) -> Optional[BuilderValidationError]:
@@ -5006,6 +5088,26 @@ def _seq_step_to_flow_entry(step: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             {
                 "document_cache_id": str(step.get("document_cache_id") or "").strip(),
                 "remove_all_documents": step.get("remove_all_documents", True),
+                "userlabel": label,
+            },
+        )
+    if kind == "cache_put":
+        # Issue #122 M11.3: authored alias over the byte-locked Add to Cache
+        # (doccacheload) emitter.
+        return (
+            "doccacheload",
+            {"document_cache_id": str(step.get("document_cache_id") or "").strip(), "userlabel": label},
+        )
+    if kind == "cache_get":
+        # Issue #122 M11.3: authored alias over the all-document retrieve.
+        return (
+            "doccacheretrieve",
+            {
+                "document_cache_id": str(step.get("document_cache_id") or "").strip(),
+                "empty_cache_behavior": str(
+                    step.get("empty_cache_behavior") or _DOCCACHE_RETRIEVE_DEFAULT_EMPTY_BEHAVIOR
+                ).strip(),
+                "load_all_documents": True,
                 "userlabel": label,
             },
         )

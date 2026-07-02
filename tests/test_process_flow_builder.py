@@ -4231,3 +4231,81 @@ def test_set_dpp_step_non_bool_persist_rejected():
     )
     assert err is not None
     assert err.error_code == "PROCESS_SET_PROPERTIES_CONFIG_INVALID"
+
+
+# ---------------------------------------------------------------------------
+# Issue #122 M11.3 (epic #118) — authored cache_put / cache_get steps
+# ---------------------------------------------------------------------------
+
+_CACHE_PUT_GET_GOLDEN = _GOLDEN_DIR / "flow_sequence_cache_put_get.xml"
+
+
+def _cache_put_get_config():
+    return _seq_config(
+        [
+            {"kind": "cache_put", "document_cache_id": "CACHE-1", "label": "Stage rows"},
+            {"kind": "cache_get", "document_cache_id": "CACHE-1", "label": "Read staged rows"},
+        ]
+    )
+
+
+def test_cache_put_get_sequence_matches_golden_fixture():
+    cfg = _cache_put_get_config()
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    emitted = ProcessFlowBuilder.build(cfg, name="Flow Sequence Cache Put Get")
+    assert emitted == _CACHE_PUT_GET_GOLDEN.read_text()
+
+
+def test_cache_put_lowers_to_doccacheload_and_cache_get_to_retrieve():
+    xml = ProcessFlowBuilder.build(_cache_put_get_config(), name="X")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "doccacheload", "doccacheretrieve",
+        "connectoraction", "stop",
+    ]
+    load = shapes[2]
+    assert load.attrib["userlabel"] == "Stage rows"
+    assert load.find("configuration/doccacheload").attrib["docCache"] == "CACHE-1"
+    retrieve = shapes[3].find("configuration/doccacheretrieve")
+    # The authored cache_get emits the byte-locked all-document retrieve.
+    assert retrieve.attrib["docCache"] == "CACHE-1"
+    assert retrieve.attrib["loadAllDoc"] == "true"
+    assert retrieve.attrib["emptyCacheBehavior"] == "stopprocess"
+
+
+def test_cache_put_requires_document_cache_id():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config([{"kind": "cache_put", "label": "x"}])
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_cache_get_keyed_mode_gated_with_named_error():
+    # #119 census Outcome B: no live keyed-retrieve capture — the keyed keys
+    # are recognized and rejected with the NAMED gated error.
+    for gated in (
+        {"doc_cache_index": 1},
+        {"cache_key_values": [{"cache_key_id": 2, "source": {"value_type": "current"}}]},
+        {"load_all_documents": False},
+    ):
+        step = {"kind": "cache_get", "document_cache_id": "CACHE-1", **gated}
+        err = ProcessFlowBuilder.validate_config(_seq_config([step]))
+        assert err is not None, gated
+        assert err.error_code == "PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID", gated
+        assert "gated" in str(err) or "keyed" in (err.hint or ""), gated
+
+
+def test_cache_get_load_all_documents_true_allowed():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "cache_get",
+                    "document_cache_id": "CACHE-1",
+                    "load_all_documents": True,
+                }
+            ]
+        )
+    )
+    assert err is None

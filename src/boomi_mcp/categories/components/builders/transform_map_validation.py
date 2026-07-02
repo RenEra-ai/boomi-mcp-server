@@ -14,10 +14,13 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from .connector_builder import BuilderValidationError
 from .json_profile_builder import JSONGeneratedProfileBuilder
-from .map_builder import get_map_builder
+from .map_builder import get_map_builder, validate_document_cache_joins_structure
 from .map_function_registry import get_function_family
 from .profile_builder import DatabaseReadProfileBuilder, get_profile_builder
-from .profile_generation import MAP_FUNCTION_COMPONENT_REF_REQUIRED
+from .profile_generation import (
+    MAP_DOCUMENT_CACHE_JOINS_INVALID,
+    MAP_FUNCTION_COMPONENT_REF_REQUIRED,
+)
 from .xml_profile_builder import XMLGeneratedProfileBuilder
 
 
@@ -581,4 +584,116 @@ def validate_transform_map(
                 )
                 break
 
+    # Issue #122 M11.3: authored map-level Document Cache joins — structural
+    # shape plus $ref/depends_on and in-spec cache index/key cross-checks.
+    if gen_profile_err is None:
+        gen_profile_err = _validate_document_cache_joins(
+            effective_config, declared_deps, components_by_key
+        )
+
     return gen_profile_err
+
+
+def _validate_document_cache_joins(
+    effective_config: Mapping[str, Any],
+    declared_deps: Any,
+    components_by_key: Optional[Dict[str, Any]],
+) -> Optional[BuilderValidationError]:
+    """Validate authored ``document_cache_joins`` (issue #122 M11.3).
+
+    Structure is checked by the shared map_builder helper (the same contract
+    build-time rendering enforces). On top of that: a ``$ref:KEY``
+    ``document_cache_id`` must appear in depends_on and resolve to an in-spec
+    ``documentcache`` component, and when that component carries a structured
+    config, the declared ``cache_index`` / ``cache_key_id`` values must exist
+    in it (writer/reader/join key compatibility, pre-mutation).
+    """
+    joins = effective_config.get("document_cache_joins")
+    if joins is None:
+        return None
+    structural = validate_document_cache_joins_structure(joins)
+    if structural is not None:
+        return structural
+    deps = set(declared_deps or [])
+    for i, join in enumerate(joins):
+        join_field = f"document_cache_joins[{i}]"
+        cache_id = str(join.get("document_cache_id") or "").strip()
+        if not cache_id.startswith("$ref:"):
+            # Literal id — an existing account cache; nothing to cross-check.
+            continue
+        ref_key = cache_id[len("$ref:") :]
+        if ref_key not in deps:
+            return BuilderValidationError(
+                f"{join_field}.document_cache_id $ref target must also appear "
+                "in depends_on so the cache builds before the map",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field="depends_on",
+                hint=f"Add {ref_key!r} to the map component's depends_on.",
+                details={"ref_key": ref_key},
+            )
+        target_comp = (
+            components_by_key.get(ref_key)
+            if components_by_key is not None
+            else None
+        )
+        if target_comp is None or getattr(target_comp, "type", None) != "documentcache":
+            return BuilderValidationError(
+                f"{join_field}.document_cache_id $ref must resolve to an "
+                "in-spec documentcache component",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.document_cache_id",
+                details={
+                    "ref_key": ref_key,
+                    "target_component_type": getattr(target_comp, "type", None),
+                },
+            )
+        cache_config = getattr(target_comp, "config", None) or {}
+        indexes = cache_config.get("indexes")
+        if not isinstance(indexes, list) or not indexes:
+            # Raw-XML or config-less cache spec — no structure to cross-check.
+            continue
+        index_entry = next(
+            (
+                idx
+                for idx in indexes
+                if isinstance(idx, Mapping)
+                and idx.get("index_id") == join.get("cache_index")
+            ),
+            None,
+        )
+        if index_entry is None:
+            return BuilderValidationError(
+                f"{join_field}.cache_index {join.get('cache_index')!r} does not "
+                f"exist in the referenced documentcache component {ref_key!r}",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.cache_index",
+                details={
+                    "ref_key": ref_key,
+                    "declared_indexes": [
+                        idx.get("index_id")
+                        for idx in indexes
+                        if isinstance(idx, Mapping)
+                    ],
+                },
+            )
+        declared_key_ids = {
+            key.get("id")
+            for key in (index_entry.get("keys") or [])
+            if isinstance(key, Mapping)
+        }
+        for j, kv in enumerate(join.get("key_values") or []):
+            if kv.get("cache_key_id") not in declared_key_ids:
+                return BuilderValidationError(
+                    f"{join_field}.key_values[{j}].cache_key_id "
+                    f"{kv.get('cache_key_id')!r} does not exist in index "
+                    f"{join.get('cache_index')!r} of {ref_key!r}",
+                    error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                    field=f"{join_field}.key_values[{j}].cache_key_id",
+                    details={
+                        "ref_key": ref_key,
+                        "declared_key_ids": sorted(
+                            k for k in declared_key_ids if k is not None
+                        ),
+                    },
+                )
+    return None

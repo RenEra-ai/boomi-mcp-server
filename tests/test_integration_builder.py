@@ -7642,3 +7642,91 @@ class TestBuildPlanProcessPropertyComponent:
     def test_metadata_type_map_includes_processproperty(self):
         from src.boomi_mcp.categories.integration_builder import _METADATA_TYPE_MAP
         assert _METADATA_TYPE_MAP["processproperty"] == "processproperty"
+
+
+# ---------------------------------------------------------------------------
+# Issue #122 M11.3 — documentcache component plan/apply dispatch
+# ---------------------------------------------------------------------------
+
+
+def _document_cache_comp(
+    key="lookup_cache",
+    name="Lookup Cache",
+    **config_overrides,
+):
+    cfg = {
+        "component_type": "documentcache",
+        "component_name": name,
+        "profile_type": "profile.json",
+        "profile_id": "eeeeeeee-5555-5555-5555-555555555555",
+        "indexes": [
+            {
+                "index_id": 1,
+                "index_name": "by id",
+                "keys": [{"id": 2, "element_key": "3", "name": "id (Root/id)"}],
+            }
+        ],
+    }
+    cfg.update(config_overrides)
+    return IntegrationComponentSpec(
+        key=key, type="documentcache", action="create", name=name, config=cfg,
+    )
+
+
+class TestBuildPlanDocumentCacheComponent:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_documentcache_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([_document_cache_comp()]))
+        step = next(s for s in plan["steps"] if s["key"] == "lookup_cache")
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_gated_profile_type_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _document_cache_comp(profile_type="profile.none")
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = next(s for s in plan["steps"] if s["key"] == "lookup_cache")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "DOCUMENT_CACHE_PROFILE_TYPE_UNSUPPORTED"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_zero_key_id_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _document_cache_comp()
+        bad.config["indexes"][0]["keys"][0]["id"] = 0
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = next(s for s in plan["steps"] if s["key"] == "lookup_cache")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"] == "DOCUMENT_CACHE_KEY_INVALID"
+        )
+
+    def test_structured_update_xml_resolves_builder_and_policy(self):
+        from src.boomi_mcp.categories.integration_builder import (
+            build_structured_update_xml,
+        )
+        comp = _document_cache_comp()
+        comp.action = "update"
+        comp.component_id = "ffffffff-6666-6666-6666-666666666666"
+        result = build_structured_update_xml(MagicMock(), comp, dict(comp.config))
+        assert result["_success"] is True
+        assert 'type="documentcache"' in result["built_xml"]
+        assert [p.path for p in result["policy"].owned_paths] == [
+            "bns:object/DocumentCache"
+        ]
+
+    def test_clone_suffix_applies_to_documentcache(self):
+        from src.boomi_mcp.categories.integration_builder import _apply_clone_suffix
+        comp = _document_cache_comp()
+        cloned = _apply_clone_suffix(comp, dict(comp.config))
+        assert cloned["component_name"] == "Lookup Cache-clone"
+
+    def test_metadata_type_map_includes_documentcache(self):
+        from src.boomi_mcp.categories.integration_builder import _METADATA_TYPE_MAP
+        assert _METADATA_TYPE_MAP["documentcache"] == "documentcache"

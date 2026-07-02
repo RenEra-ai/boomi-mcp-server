@@ -3722,6 +3722,115 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
 }
 
 
+# Issue #122 M11.3 (epic #118): typed documentcache create template.
+_COMPONENT_CREATE_DOCUMENT_CACHE = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "documentcache",
+    "tool": "manage_component (action='create')",
+    "tool_note": (
+        "Standalone Document Cache components can be created via "
+        "manage_component directly, or declared as an in-spec component in "
+        "build_integration alongside the cache_put / cache_get flow-sequence "
+        "steps and map-level document_cache_joins entries that reference it "
+        "via $ref (#122)."
+    ),
+    "note": (
+        "Defines the cache's profile binding plus index/key structure. Cache "
+        "steps and map joins reference this component by id — they never "
+        "define structure inline. cacheKey elementKey values reference the "
+        "bound profile's element keys."
+    ),
+    "update_note": (
+        "Structured updates use read-merge-write (issue #45 semantics): the "
+        "builder-owned <DocumentCache> subtree is replaced while "
+        "bns:encryptedValues and unknown siblings survive."
+    ),
+    "template": {
+        "component_type": "documentcache",
+        "component_name": "<<cache display name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "profile_type": "<<profile.json | profile.xml>>",
+        "profile_id": "<<profile componentId or $ref:KEY>>",
+        "enforce_single_lucene": True,
+        "indexes": [
+            {
+                "index_id": 1,
+                "index_name": "<<by key name>>",
+                "keys": [
+                    {
+                        "id": 2,
+                        "element_key": "<<profile element key>>",
+                        "name": "<<element display, e.g. ID (Root/Object/ID)>>",
+                    },
+                ],
+            },
+        ],
+    },
+    "required": [
+        "component_type",
+        "component_name",
+        "profile_type",
+        "profile_id",
+        "indexes",
+    ],
+    "optional": ["folder_path", "description", "enforce_single_lucene"],
+    "defaults": {"component_type": "documentcache", "enforce_single_lucene": True},
+    "supported_profile_types": ["profile.json", "profile.xml"],
+    "gated_profile_types_note": (
+        "profile.none / profile.flatfile / profile.db / profile.edi are "
+        "companion-documented but have no live-captured wire shape (#119 "
+        "census) — gated until a disposable-account round-trip verifies them."
+    ),
+    "gated_key_kinds_note": (
+        "Cache keys support the live-verified profile-element form only; "
+        "kind='document_property' (DocumentPropertyKeyConfig) is gated for "
+        "the same evidence reason."
+    ),
+    "id_zero_gotcha": (
+        "index_id and cacheKey id MUST be non-zero: 0 is accepted by the API "
+        "but silently indexes nothing at runtime (nothing retrievable, no "
+        "error)."
+    ),
+    "raw_xml_exposed": False,
+    "error_codes": {
+        "DOCUMENT_CACHE_VALIDATION_FAILED": "shape / unknown-key / type-check failure",
+        "DOCUMENT_CACHE_NAME_REQUIRED": "component_name missing/blank",
+        "DOCUMENT_CACHE_PROFILE_TYPE_UNSUPPORTED": "profile_type outside the live-verified v1 set",
+        "DOCUMENT_CACHE_PROFILE_REQUIRED": "profile_id missing for a profiled cache",
+        "DOCUMENT_CACHE_INDEX_REQUIRED": "indexes list missing or empty",
+        "DOCUMENT_CACHE_INDEX_INVALID": "index_id zero/duplicate, index_name missing, or keys empty",
+        "DOCUMENT_CACHE_KEY_INVALID": "cacheKey id zero/duplicate or element_key/name missing",
+        "DOCUMENT_CACHE_KEY_KIND_GATED": "kind='document_property' requested (gated, #119)",
+        "DOCUMENT_CACHE_RAW_XML_UNSUPPORTED": "raw DocumentCache subtree keys are not accepted",
+        "PLAINTEXT_SECRET_REJECTED": "a dict key inside the config matches a secret-shaped name",
+    },
+    "example": {
+        "key": "<<cache_key>>",
+        "type": "documentcache",
+        "action": "create",
+        "name": "<<cache display name>>",
+        "config": {
+            "component_type": "documentcache",
+            "component_name": "<<cache display name>>",
+            "profile_type": "profile.json",
+            "profile_id": "$ref:<<response_profile_key>>",
+            "indexes": [
+                {
+                    "index_id": 1,
+                    "index_name": "by id",
+                    "keys": [
+                        {"id": 2, "element_key": "<<element key>>", "name": "<<element display>>"},
+                    ],
+                },
+            ],
+        },
+        "_example_note": "Placeholder values only.",
+    },
+}
+
+
 # Issue #131 M11.7 (epic #118): typed processproperty create template.
 _COMPONENT_CREATE_PROCESS_PROPERTY = {
     "resource_type": "component",
@@ -5749,6 +5858,7 @@ def _valid_schema_names() -> list:
         "script_mapping",
         "cache_property_authoring",
         "process_property",
+        "document_cache",
     ]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
     # design_doctrine / account_governance are stdlib-only static modules —
@@ -5928,18 +6038,30 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
     },
     "cache_put": {
         "meaning": "Write current documents into a Document Cache (success-path Add to Cache)",
-        "capability_status": "reserved_not_executable",
+        "capability_status": "executable",
         "owning_issue": "#122 (M11.3)",
+        "surface": "build_integration process config flow_sequence[].kind='cache_put' (document_cache_id)",
     },
     "cache_get": {
         "meaning": "Retrieve documents from a Document Cache (all-document; keyed mode gated on live evidence)",
-        "capability_status": "reserved_not_executable",
+        "capability_status": "executable",
         "owning_issue": "#122 (M11.3)",
+        "surface": (
+            "build_integration process config flow_sequence[].kind='cache_get' "
+            "(document_cache_id + empty_cache_behavior). Keyed retrieval "
+            "(doc_cache_index / cache_key_values) stays gated — no live "
+            "capture (#119 census)."
+        ),
     },
     "cache_join": {
         "meaning": "Join cached documents into a map by cache index/key (DocumentCacheJoins)",
-        "capability_status": "reserved_not_executable",
+        "capability_status": "executable",
         "owning_issue": "#122 (M11.3)",
+        "surface": (
+            "build_integration transform.map config document_cache_joins[] "
+            "(document_cache_id + cache_index + join_id + src_parent_key + "
+            "key_values) — live-captured wire shape (#119 census Outcome A)."
+        ),
     },
     "processproperty_component": {
         "meaning": "Typed create/update of a standalone Process Property component (definedProcessProperty slots)",
@@ -5954,8 +6076,14 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
     },
     "documentcache_component": {
         "meaning": "Typed create/update of a Document Cache component (profile/index/key modeling)",
-        "capability_status": "reserved_not_executable",
+        "capability_status": "executable",
         "owning_issue": "#122 (M11.3)",
+        "surface": (
+            "manage_component(action='create', config={component_type:"
+            "'documentcache', ...}) or an in-spec build_integration component; "
+            "template at get_schema_template(component_type='documentcache', "
+            "operation='create')"
+        ),
     },
 }
 
@@ -6004,6 +6132,41 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
     """
     if schema_name == "cache_property_authoring":
         return _cache_property_authoring_schema()
+
+    if schema_name == "document_cache":
+        # Issue #122 M11.3: read-only authoring reference for Document Cache
+        # component/index/key modeling and the join/read/write coupling.
+        return {
+            "_success": True,
+            "schema_name": "document_cache",
+            "surface": "document_cache",
+            "read_only": True,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "create_template_pointer": (
+                "get_schema_template(resource_type='component', "
+                "operation='create', component_type='documentcache')"
+            ),
+            "coupling": (
+                "cache_put / cache_get flow-sequence steps and map-level "
+                "document_cache_joins entries reference the cache component "
+                "by id ($ref for in-spec caches). Joins additionally bind "
+                "cache_index to a CacheIndex indexId and each key_values "
+                "entry's cache_key_id to a cacheKey id — plan-time validation "
+                "cross-checks those against the in-spec cache config."
+            ),
+            "scope_note": (
+                "Caches are execution-scoped: a cache_get / cache_join needs "
+                "an upstream cache_put (or DLQ doccacheload) in an earlier "
+                "reachable path of the same run unless the cache is "
+                "explicitly documented as externally populated."
+            ),
+            "gates": (
+                "Keyed cache_get, profile.none / flatfile / db / edi caches, "
+                "and document-property cache keys are gated pending live "
+                "wire-shape captures (#119 census)."
+            ),
+        }
 
     if schema_name == "process_property":
         # Issue #131 M11.7: read-only authoring reference for the Process
@@ -6717,6 +6880,10 @@ _PROCESS_FLOW_PROTOCOLS = {
             "flow_sequence[].name",
             "flow_sequence[].source_values",
             "flow_sequence[].persist",
+            # Issue #122 M11.3: cache_put/cache_get reuse document_cache_id /
+            # empty_cache_behavior above; map-level cache joins are authored on
+            # the transform.map component via config.document_cache_joins.
+
             # Issue #92 M4.5.7: declare connection fields as per-environment
             # override points on the deployed process (see notes for the
             # CREATE-only behavior and the connection_id / fields shape).
@@ -6799,6 +6966,9 @@ _PROCESS_FLOW_PROTOCOLS = {
             # Issue #121 M11.2 (epic #118): generic DDP/DPP Set Properties steps.
             "set_ddp",
             "set_dpp",
+            # Issue #122 M11.3: authored cache write/read steps.
+            "cache_put",
+            "cache_get",
             "decision",
             "branch",
             "exception",
@@ -7660,6 +7830,9 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
             # Issue #131 M11.7: typed template replaces the generic raw-XML
             # fallback, making the list_capabilities advertisement truthful.
             return {"_success": True, **_COMPONENT_CREATE_PROCESS_PROPERTY}
+        if component_type == "documentcache":
+            # Issue #122 M11.3: same truthful-advertisement upgrade.
+            return {"_success": True, **_COMPONENT_CREATE_DOCUMENT_CACHE}
         if component_type == "connector-action":
             if protocol == "database.get":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}

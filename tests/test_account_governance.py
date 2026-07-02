@@ -327,12 +327,13 @@ _PAGINATE = "boomi_mcp.categories.integration_builder.paginate_metadata"
 
 
 def _dc(key, name, **config_extra):
-    """A documentcache create component — reaches planned_action='create'
-    cleanly (no connector/profile body validation), so the name lint is the
-    only gate exercised."""
+    """A crossref create component — reaches planned_action='create' cleanly
+    (no builder body validation), so the name lint is the only gate exercised.
+    (Was documentcache until #122 M11.3 gave that type a structured builder
+    with its own plan-time validation.)"""
     config = {"name": name, **config_extra}
     return IntegrationComponentSpec(
-        key=key, type="documentcache", action="create", name=name, config=config
+        key=key, type="crossref", action="create", name=name, config=config
     )
 
 
@@ -354,7 +355,7 @@ def _step(plan, key):
 @patch(_PAGINATE, return_value=[])
 def test_build_plan_rejects_missing_component_name(_mock_pag):
     comp = IntegrationComponentSpec(
-        key="c", type="documentcache", action="create", name=None, config={}
+        key="c", type="crossref", action="create", name=None, config={}
     )
     plan = _build_plan(MagicMock(), _plan_cfg([comp]))
     step = _step(plan, "c")
@@ -376,7 +377,7 @@ def test_build_plan_rejects_default_name_in_config_component_name(_mock_pag):
     # config.component_name (the field profile/map/trading-partner builders
     # actually emit). The lint checks ALL candidate name fields.
     comp = IntegrationComponentSpec(
-        key="c", type="documentcache", action="create", name="Good Cache",
+        key="c", type="crossref", action="create", name="Good Cache",
         config={"component_name": "New Map"},
     )
     plan = _build_plan(MagicMock(), _plan_cfg([comp]))

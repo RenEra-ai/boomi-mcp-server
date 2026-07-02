@@ -68,9 +68,11 @@ _COMPONENT_NAME_PRIMARY_TYPES = frozenset({
     "transform.map",
     "script.mapping",
     "transform.function",
-    # Issue #131 M11.7: standalone processproperty components are generated
-    # builder components too — component_name is the emitted-name source.
+    # Issue #131 M11.7 / #122 M11.3: standalone processproperty and
+    # documentcache components are generated builder components too —
+    # component_name is the emitted-name source.
     "processproperty",
+    "documentcache",
 })
 # Copy-induced numeric suffix: a display name ending in whitespace then 1 or 2
 # (Integration's "... 1"/"... 2" clone artifacts).
@@ -180,6 +182,10 @@ from .components.builders.transform_map_validation import (
     resolve_map_profile_index,
     validate_transform_map,
 )
+from .components.builders.document_cache_builder import (
+    DocumentCacheBuilder,
+    get_document_cache_builder,
+)
 from .components.builders.process_property_builder import (
     ProcessPropertyBuilder,
     get_process_property_builder,
@@ -243,6 +249,8 @@ _METADATA_TYPE_MAP = {
     # metadata lookup so conflict_policy=reuse/fail and update-by-name resolve
     # (mirrors the script.mapping wiring).
     "processproperty": "processproperty",
+    # Issue #122 M11.3: typed documentcache components participate too.
+    "documentcache": "documentcache",
 }
 
 
@@ -1227,6 +1235,9 @@ def _resolve_preservation_policy(
     if comp.type == "processproperty":
         # Issue #131 M11.7: owns bns:object/DefinedProcessProperties.
         return ProcessPropertyBuilder.PRESERVATION_POLICY
+    if comp.type == "documentcache":
+        # Issue #122 M11.3: owns bns:object/DocumentCache.
+        return DocumentCacheBuilder.PRESERVATION_POLICY
     return None
 
 
@@ -2642,6 +2653,7 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
         "script.mapping",
         "transform.function",
         "processproperty",
+        "documentcache",
     ):
         base = cloned.get("component_name") or comp.name
         if base:
@@ -2949,6 +2961,27 @@ def build_structured_update_xml(
             "policy": getattr(builder_class, "PRESERVATION_POLICY", None),
         }
 
+    if comp.type == "documentcache":
+        # Issue #122 M11.3: structured documentcache update (read-merge-write
+        # over the DocumentCache owned subtree).
+        builder_class = get_document_cache_builder(comp.type)
+        if builder_class is None:
+            return {
+                "_success": False,
+                "error_code": "DOCUMENT_CACHE_VALIDATION_FAILED",
+                "error": f"No DocumentCacheBuilder registered for {comp.type!r}.",
+                "field": "component_type",
+            }
+        try:
+            built_xml = builder_class().build(**payload)
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(builder_class, "PRESERVATION_POLICY", None),
+        }
+
     if comp.type == "profile.db":
         profile_type = _safe_lower(payload.get("profile_type"))
         builder_instance = get_profile_builder("profile.db", profile_type)
@@ -3091,6 +3124,7 @@ def _execute_component(
         "script.mapping",
         "transform.function",
         "processproperty",
+        "documentcache",
     ):
         payload.setdefault("component_type", comp.type)
     if comp.name:
@@ -3109,6 +3143,7 @@ def _execute_component(
             "script.mapping",
             "transform.function",
             "processproperty",
+            "documentcache",
         ):
             # Mirror plan-time validation, which injects comp.name into
             # effective_config["component_name"] before calling validate_config.
@@ -3444,6 +3479,48 @@ def _execute_component(
                 "_success": False,
                 "error": (
                     f"Missing component_id for update of processproperty '{comp.key}'"
+                ),
+            }
+        return _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            comp,
+            built_xml,
+            getattr(builder_class, "PRESERVATION_POLICY", None),
+        )
+
+    # Issue #122 M11.3: structured documentcache routes through
+    # DocumentCacheBuilder (mirrors the processproperty branch above).
+    if comp.type == "documentcache" and not payload.get("xml"):
+        builder_class = get_document_cache_builder(comp.type)
+        if builder_class is None:
+            return {
+                "_success": False,
+                "error_code": "DOCUMENT_CACHE_VALIDATION_FAILED",
+                "error": (
+                    f"No DocumentCacheBuilder registered for {comp.type!r}."
+                ),
+                "field": "component_type",
+            }
+        try:
+            built_xml = builder_class().build(**payload)
+        except BuilderValidationError as exc:
+            return {
+                "_success": False,
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "field": exc.field,
+                "hint": exc.hint,
+            }
+        envelope = {"xml": built_xml, "component_type": "documentcache"}
+        if comp.action == "create":
+            return create_component(boomi_client, profile, envelope)
+        if not target_id:
+            return {
+                "_success": False,
+                "error": (
+                    f"Missing component_id for update of documentcache '{comp.key}'"
                 ),
             }
         return _apply_structured_update(
@@ -5317,6 +5394,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         is_script_mapping_component = comp.type == "script.mapping"
         is_transform_function_wrapper = comp.type == "transform.function"
         is_process_property_component = comp.type == "processproperty"
+        is_document_cache_component = comp.type == "documentcache"
         if is_generated_json_profile:
             gen_profile_scanner_cls = JSONGeneratedProfileBuilder
         elif is_generated_xml_profile:
@@ -5329,6 +5407,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             gen_profile_scanner_cls = TransformFunctionWrapperBuilder
         elif is_process_property_component:
             gen_profile_scanner_cls = ProcessPropertyBuilder
+        elif is_document_cache_component:
+            gen_profile_scanner_cls = DocumentCacheBuilder
 
         if (
             gen_profile_scanner_cls is not None
@@ -5421,6 +5501,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     # like script.mapping — run the builder's structured
                     # config validator, no profile threading.
                     gen_profile_err = ProcessPropertyBuilder.validate_config(
+                        effective_config
+                    )
+                elif is_document_cache_component:
+                    # Issue #122 M11.3: documentcache carries its profile
+                    # binding as plain config (profile_id may be a $ref
+                    # resolved at apply) — run the structured validator.
+                    gen_profile_err = DocumentCacheBuilder.validate_config(
                         effective_config
                     )
                 elif is_transform_function_wrapper:

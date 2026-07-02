@@ -2303,3 +2303,53 @@ def test_processproperty_encrypted_values_and_unknown_siblings_survive():
     assert root.get("futureAttr") == "keep-me"
     # bns:processOverrides survives (always-preserved path).
     assert root.find("bns:processOverrides", NS) is not None
+
+
+# ---------------------------------------------------------------------------
+# Issue #122 M11.3 — documentcache read-merge-write preservation
+# ---------------------------------------------------------------------------
+
+_CURRENT_DOCUMENT_CACHE = (
+    '<bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+    'xmlns:bns="http://api.platform.boomi.com/" componentId="DC-1" version="2" '
+    'type="documentcache" name="Lookup Cache">'
+    '<bns:encryptedValues/>'
+    '<bns:description>old</bns:description>'
+    '<bns:object>'
+    '<DocumentCache xmlns="" enforceSingleLucene="true" '
+    'profile="00000000-0000-0000-0000-000000000001" profileType="profile.json">'
+    '<CacheIndex indexId="1" indexName="legacy index">'
+    '<cacheKey alias="a" elementKey="9" id="4" name="a" taglistKey="0" '
+    'xsi:type="ProfileElementKeyConfig"/>'
+    '</CacheIndex>'
+    '</DocumentCache>'
+    '<FutureCacheSibling keep="true"/>'
+    '</bns:object>'
+    '</bns:Component>'
+)
+
+
+def test_documentcache_owned_subtree_replaced_and_siblings_survive():
+    from boomi_mcp.categories.components.builders.document_cache_builder import (
+        DocumentCacheBuilder,
+    )
+    desired = DocumentCacheBuilder().build(
+        component_name="Lookup Cache",
+        profile_type="profile.json",
+        profile_id="00000000-0000-0000-0000-000000000002",
+        indexes=[
+            {
+                "index_id": 1,
+                "index_name": "by id",
+                "keys": [{"id": 2, "element_key": "3", "name": "id (Root/id)"}],
+            }
+        ],
+    )
+    merged = merge_for_update(
+        _CURRENT_DOCUMENT_CACHE, desired, DocumentCacheBuilder.PRESERVATION_POLICY
+    )
+    root = ET.fromstring(merged)
+    cache = root.find("bns:object/DocumentCache", NS)
+    assert cache.get("profile") == "00000000-0000-0000-0000-000000000002"
+    assert [i.get("indexName") for i in cache.findall("CacheIndex")] == ["by id"]
+    assert root.find("bns:object/FutureCacheSibling", NS) is not None
