@@ -38,6 +38,13 @@ _XML_REST_SUBTYPE_RE = re.compile(
     r'\bsubType\s*=\s*["\']officialboomi-X3979C-rest-prod["\']'
 )
 
+# Issue #126 — same idea for SOAP Client raw XML: a connector_type-less raw
+# payload carrying `subType="wssoapclientsdk"` must still trigger the SOAP
+# secret scan / classification so credentials can't leak through the plan echo.
+_XML_SOAP_SUBTYPE_RE = re.compile(
+    r'\bsubType\s*=\s*["\']wssoapclientsdk["\']'
+)
+
 # Issue #93 (account_governance M4.5.8) — plan-time component-name governance
 # lint. Scope is NAMES on component create only; folder placement / roles /
 # locking stay GUI-only governance (no folder or role API in the typed
@@ -142,6 +149,9 @@ from .components.builders import (
     REST_CLIENT_SUBTYPE,
     RestClientConnectionBuilder,
     RestClientOperationBuilder,
+    SOAP_CLIENT_SUBTYPE,
+    SoapClientConnectionBuilder,
+    SoapClientOperationBuilder,
     ProcessFlowBuilder,
     WrapperSubprocessBuilder,
     SyncPipelineBuilder,
@@ -153,7 +163,10 @@ from .components.builders import (
     get_process_flow_builder,
     get_profile_builder,
 )
-from .components.builders.connector_builder import _resolve_rest_connector_type
+from .components.builders.connector_builder import (
+    _resolve_rest_connector_type,
+    _resolve_soap_client_connector_type,
+)
 from .components.builders.process_flow_builder import (
     _extract_process_extension_connections,
 )
@@ -950,6 +963,10 @@ def _classify_connector_settings(comp: IntegrationComponentSpec) -> Optional[str
         return "REST Client connector-settings"
     if _XML_REST_SUBTYPE_RE.search(xml_text):
         return "REST Client connector-settings"
+    if _resolve_soap_client_connector_type(connector_type) is not None:
+        return "SOAP Client connector-settings"
+    if _XML_SOAP_SUBTYPE_RE.search(xml_text):
+        return "SOAP Client connector-settings"
     return None
 
 
@@ -1003,6 +1020,12 @@ def _classify_connector_action(
             else None
         )
         return ("REST Client connector-action", method_upper)
+
+    # SOAP Client exposes a single EXECUTE action; there is no per-request HTTP
+    # method to compare, so the method slot is always None (the process-flow
+    # ref-type check only enforces the SOAP source/target family, not a verb).
+    if _resolve_soap_client_connector_type(connector_type) is not None:
+        return ("SOAP Client connector-action", None)
 
     return (None, None)
 
@@ -1145,6 +1168,8 @@ def _resolve_preservation_policy(
         canonical_rest = _resolve_rest_connector_type(connector_type)
         if canonical_rest is not None:
             return RestClientConnectionBuilder.PRESERVATION_POLICY
+        if _resolve_soap_client_connector_type(connector_type) is not None:
+            return SoapClientConnectionBuilder.PRESERVATION_POLICY
         if connector_type == "database":
             return DatabaseConnectorBuilder.PRESERVATION_POLICY
         return None
@@ -1155,6 +1180,8 @@ def _resolve_preservation_policy(
         connector_type = ct_raw.lower() if isinstance(ct_raw, str) else ""
         if _resolve_rest_connector_type(connector_type) is not None:
             return RestClientOperationBuilder.PRESERVATION_POLICY
+        if _resolve_soap_client_connector_type(connector_type) is not None:
+            return SoapClientOperationBuilder.PRESERVATION_POLICY
         if connector_type == "database":
             # Resolve the policy from the operation-mode-specific builder so a
             # Send update gets the Send policy (and Get the Get policy). An
@@ -1586,6 +1613,116 @@ def _check_rest_operation_dependencies(
     return None
 
 
+def _check_soap_operation_dependencies(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+    components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
+) -> Optional[BuilderValidationError]:
+    """Cross-step dependency checks specific to SOAP Client operations (#126).
+
+    Mirrors ``_check_rest_operation_dependencies``: Boomi binds the SOAP
+    connection to the operation at the process connector step, so plan-time we
+    require the caller to declare the connection (``connection_ref_key`` +
+    ``depends_on``) and any ``$ref:KEY`` XML request/response profiles. SOAP
+    profiles are XML-only, and cross-family refs (REST/database) are rejected.
+    """
+    depends_on = set(comp.depends_on or [])
+
+    connection_ref_key = raw_config.get("connection_ref_key")
+    if not connection_ref_key or not str(connection_ref_key).strip():
+        return BuilderValidationError(
+            "connection_ref_key is required for SOAP operations",
+            error_code="SOAP_CONNECTION_REF_REQUIRED",
+            field="connection_ref_key",
+            hint=(
+                "Declare the SOAP connector-settings key the operation will "
+                "bind to at process time, and add the same key to depends_on "
+                "so plan ordering is correct."
+            ),
+        )
+    if connection_ref_key not in depends_on:
+        return BuilderValidationError(
+            f"connection_ref_key {connection_ref_key!r} must also appear in depends_on",
+            error_code="SOAP_DEPENDENCY_REQUIRED",
+            field="depends_on",
+            hint=(
+                "Add the connector-settings key to depends_on so the execution "
+                "order creates the connection before the operation."
+            ),
+        )
+
+    if components_by_key is not None:
+        target = components_by_key.get(connection_ref_key)
+        if target is not None and _classify_connector_settings(target) != "SOAP Client connector-settings":
+            actual_role = _format_actual_role(target)
+            return BuilderValidationError(
+                f"connection_ref_key {connection_ref_key!r} must reference a "
+                f"SOAP Client connector-settings component (got {actual_role})",
+                error_code="SOAP_REF_TYPE_MISMATCH",
+                field="connection_ref_key",
+                hint=(
+                    "Point connection_ref_key at the SOAP Client "
+                    "connector-settings key; profile, connector-action, and "
+                    "REST/database connection keys are not valid here."
+                ),
+                details={
+                    "ref_key": connection_ref_key,
+                    "expected_role": "SOAP Client connector-settings",
+                    "actual_role": actual_role,
+                },
+            )
+
+    for ref_field in ("request_profile_id", "response_profile_id"):
+        value = raw_config.get(ref_field)
+        if isinstance(value, str) and value.startswith("$ref:"):
+            ref_key = value[5:]
+            if not ref_key:
+                return BuilderValidationError(
+                    f"{ref_field} $ref token is empty (expected '$ref:KEY')",
+                    error_code="SOAP_PROFILE_REF_UNRESOLVED",
+                    field=ref_field,
+                    hint=(
+                        "Use '$ref:<profile key>' to reference an XML profile "
+                        "component declared earlier in the same integration spec."
+                    ),
+                )
+            if ref_key not in depends_on:
+                return BuilderValidationError(
+                    f"{ref_field} $ref target {ref_key!r} must also appear in depends_on",
+                    error_code="SOAP_DEPENDENCY_REQUIRED",
+                    field="depends_on",
+                    hint=(
+                        "Add the profile key to depends_on so the execution "
+                        "order creates the profile before the operation."
+                    ),
+                )
+            if components_by_key is not None:
+                target = components_by_key.get(ref_key)
+                # SOAP messages are XML — the profile must be profile.xml. A
+                # profile.json / profile.db / connector / map / process is rejected.
+                if target is not None and _classify_profile(target) != "profile.xml":
+                    actual_role = _format_actual_role(target)
+                    return BuilderValidationError(
+                        f"{ref_field} $ref target {ref_key!r} must reference a "
+                        f"profile.xml component (got {actual_role})",
+                        error_code="SOAP_REF_TYPE_MISMATCH",
+                        field=ref_field,
+                        hint=(
+                            "Point the profile ref at a profile.xml component; "
+                            "SOAP request/response profiles are XML-only. "
+                            "profile.json, profile.db, connector-settings, and "
+                            "connector-action are not valid here."
+                        ),
+                        details={
+                            "ref_key": ref_key,
+                            "expected_role": "profile.xml",
+                            "actual_role": actual_role,
+                        },
+                    )
+
+    return None
+
+
 def _check_process_flow_ref_types(
     comp: IntegrationComponentSpec,
     raw_config: Dict[str, Any],
@@ -1617,8 +1754,17 @@ def _check_process_flow_ref_types(
     # source slot rules on source.connector_type so a REST fetch source's $refs are
     # type-checked against REST Client roles, not the DB roles. database_to_api_sync
     # only ever emits a database source, so its source stays DB-checked.
+    # M5.10 #126: a sync_pipeline fetch source can also be a SOAP Client
+    # (soap_fetch) — dispatch its $refs against the SOAP Client roles before the
+    # REST/DB fallbacks.
+    source_is_soap = _resolve_soap_client_connector_type(source.get("connector_type")) is not None
     source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
-    if source_is_rest:
+    if source_is_soap:
+        source_rules = [
+            ("source.connection_id", source.get("connection_id"), "SOAP Client connector-settings"),
+            ("source.operation_id", source.get("operation_id"), "SOAP Client connector-action"),
+        ]
+    elif source_is_rest:
         source_rules = [
             ("source.connection_id", source.get("connection_id"), "REST Client connector-settings"),
             ("source.operation_id", source.get("operation_id"), "REST Client connector-action"),
@@ -1633,8 +1779,16 @@ def _check_process_flow_ref_types(
     # slot rules on target.connector_type so a DB write target's $refs are
     # type-checked against the database roles, not the REST roles. A REST target
     # (database_to_api_sync, api_to_api_sync) stays REST-checked.
+    # M5.10 #126: a sync_pipeline send target can also be a SOAP Client
+    # (soap_send) — dispatch its $refs against the SOAP Client roles first.
+    target_is_soap = _resolve_soap_client_connector_type(target.get("connector_type")) is not None
     target_is_rest = _resolve_rest_connector_type(target.get("connector_type")) is not None
-    if target_is_rest:
+    if target_is_soap:
+        target_rules = [
+            ("target.connection_id", target.get("connection_id"), "SOAP Client connector-settings"),
+            ("target.operation_id", target.get("operation_id"), "SOAP Client connector-action"),
+        ]
+    elif target_is_rest:
         target_rules = [
             ("target.connection_id", target.get("connection_id"), "REST Client connector-settings"),
             ("target.operation_id", target.get("operation_id"), "REST Client connector-action"),
@@ -1784,6 +1938,13 @@ def _check_process_flow_ref_types(
                     source_op_ref_component = target_comp
                 else:
                     target_op_ref_component = target_comp
+        elif expected_role == "SOAP Client connector-settings":
+            ok = _classify_connector_settings(target_comp) == expected_role
+        elif expected_role == "SOAP Client connector-action":
+            # SOAP Client is EXECUTE-only, so there is no HTTP-method/action_type
+            # consistency capture (unlike REST) — the role check is sufficient.
+            role, _ = _classify_connector_action(target_comp)
+            ok = role == expected_role
         elif expected_role == "Document Cache":
             # Issue #51: the DLQ document-cache catch leg must point at a
             # Document Cache component (type "documentcache"), never a swapped
@@ -2299,6 +2460,15 @@ _REST_SENSITIVE_FIELD_PATHS = (
     "oauth2.access_token_parameters",
 )
 
+# SOAP config fields known to carry credential-like values. When ANY SOAP
+# validation error fires, these paths are scrubbed from the plan echo
+# regardless of which validator won (same discipline as _REST_SENSITIVE_FIELD_PATHS).
+# The SOAP builder never emits credential_ref into XML, but a raw value could
+# still echo through the plan payload on a validation error, so scrub it.
+_SOAP_SENSITIVE_FIELD_PATHS = (
+    "credential_ref",               # raw value when it should be credential://
+)
+
 # Cert refs are handled separately by `_redact_malformed_cert_refs` (below)
 # because their redaction is conditional on shape: PEM/key/garbage gets
 # scrubbed, but a valid GUID cert ref MUST survive so the caller can fix
@@ -2635,6 +2805,10 @@ def build_structured_update_xml(
         rest_canonical = _resolve_rest_connector_type(payload.get("connector_type"))
         if rest_canonical is not None:
             payload["connector_type"] = rest_canonical
+        else:
+            soap_canonical = _resolve_soap_client_connector_type(payload.get("connector_type"))
+            if soap_canonical is not None:
+                payload["connector_type"] = soap_canonical
         connector_type = payload.get("connector_type")
         if connector_type:
             try:
@@ -2997,6 +3171,12 @@ def _execute_component(
         rest_canonical = _resolve_rest_connector_type(payload.get("connector_type"))
         if rest_canonical is not None:
             payload["connector_type"] = rest_canonical
+        else:
+            # SOAP Client aliases (soap_client / web_services_soap_client) map to
+            # the canonical Boomi subtype `wssoapclientsdk` (#126).
+            soap_canonical = _resolve_soap_client_connector_type(payload.get("connector_type"))
+            if soap_canonical is not None:
+                payload["connector_type"] = soap_canonical
         connector_type = payload.get("connector_type")
         if connector_type:
             try:
@@ -4657,6 +4837,83 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # errors without losing the cert binding. Codex review round-5 P2.
             _redact_malformed_cert_refs(raw_config)
 
+        # SOAP Client connector-settings / connector-action preflight (#126).
+        # Mirrors the REST block above and is guarded so it only runs when
+        # neither the database nor the REST family already produced an error for
+        # this step (a step is only one family at a time):
+        #   (a) scan_forbidden_secret_fields runs on EVERY SOAP step regardless
+        #       of apply path, so reuse/update/raw-XML configs cannot leak
+        #       plaintext secrets into the plan echo.
+        #   (b) validate_config + dependency check run only when the apply path
+        #       will actually invoke the builder (create / create_clone or a
+        #       structured update, no raw XML).
+        #   (c) Raw XML without connector_type still triggers (a) when the
+        #       payload carries the SOAP Client subType.
+        xml_says_soap = bool(
+            xml_payload and _XML_SOAP_SUBTYPE_RE.search(xml_payload)
+        )
+        is_soap_connector_settings = (
+            comp.type == "connector-settings"
+            and (
+                _resolve_soap_client_connector_type(raw_config.get("connector_type")) is not None
+                or xml_says_soap
+            )
+        )
+        is_soap_operation = (
+            comp.type == "connector-action"
+            and (
+                _resolve_soap_client_connector_type(raw_config.get("connector_type")) is not None
+                or xml_says_soap
+            )
+        )
+        will_invoke_soap_builder = (
+            (is_soap_connector_settings or is_soap_operation)
+            and not xml_payload
+            and (
+                planned_action in ("create", "create_clone")
+                or update_invokes_builder
+            )
+        )
+        soap_err: Optional[BuilderValidationError] = None
+        soap_scanner_cls = None
+        if is_soap_connector_settings:
+            soap_scanner_cls = SoapClientConnectionBuilder
+        elif is_soap_operation:
+            soap_scanner_cls = SoapClientOperationBuilder
+
+        if soap_scanner_cls is not None and db_err is None and rest_err is None:
+            soap_err = soap_scanner_cls.scan_forbidden_secret_fields(raw_config)
+            if soap_err is None and will_invoke_soap_builder:
+                effective_config = dict(raw_config)
+                if comp.name:
+                    effective_config.setdefault("component_name", comp.name)
+                if is_soap_connector_settings:
+                    soap_err = SoapClientConnectionBuilder.validate_config(effective_config)
+                else:  # is_soap_operation
+                    soap_err = SoapClientOperationBuilder.validate_config(effective_config)
+                    if soap_err is None:
+                        soap_err = _check_soap_operation_dependencies(
+                            comp, raw_config, components_by_key
+                        )
+
+        if soap_err is not None:
+            planned_action = "error_soap_validation"
+            validation_error = {
+                "error_code": soap_err.error_code,
+                "error": str(soap_err),
+                "field": soap_err.field,
+                "hint": soap_err.hint,
+            }
+            if soap_err.details is not None:
+                validation_error["details"] = soap_err.details
+            if soap_err.error_code == "PLAINTEXT_SECRET_REJECTED" and soap_scanner_cls is not None:
+                soap_scanner_cls.redact_forbidden_secret_fields_in_place(raw_config)
+            # Any SOAP validation error scrubs the documented sensitive fields,
+            # not just the one named in the winning error (same discipline as
+            # the REST block) so credential_ref can't leak on an earlier failure.
+            for sensitive_path in _SOAP_SENSITIVE_FIELD_PATHS:
+                _redact_dotted_field_path(raw_config, sensitive_path)
+
         # Codex r12 P2: plan-time guard for non-metadata connector updates
         # whose connector_type / operation_mode doesn't resolve to a
         # supported builder (e.g. connector_type="http" + base_url). The
@@ -4668,6 +4925,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             validation_error is None
             and db_err is None
             and rest_err is None
+            and soap_err is None
             and planned_action == "update"
             and not xml_payload
             and comp.type in ("connector-settings", "connector-action")
@@ -4687,6 +4945,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 planned_action = (
                     "error_rest_validation"
                     if _resolve_rest_connector_type(ct_lower) is not None
+                    else "error_soap_validation"
+                    if _resolve_soap_client_connector_type(ct_lower) is not None
                     else "error_database_validation"
                     if ct_lower == "database"
                     else "error_unsupported_structured_update"
@@ -5439,6 +5699,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             "error_missing_target",
             "error_database_validation",
             "error_rest_validation",
+            "error_soap_validation",
             "error_process_validation",
             "error_generated_profile_validation",
             # Codex r13 P2: unsupported-structured-update planned_action
@@ -5491,6 +5752,14 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
                     f"Component '{step.get('name') or step['key']}' failed "
                     f"REST validation: "
                     f"{ve.get('error_code', 'REST_CONNECTOR_VALIDATION_FAILED')} "
+                    f"on field {ve.get('field')!r}."
+                )
+            elif step["planned_action"] == "error_soap_validation":
+                ve = step.get("validation_error") or {}
+                errors.append(
+                    f"Component '{step.get('name') or step['key']}' failed "
+                    f"SOAP validation: "
+                    f"{ve.get('error_code', 'SOAP_CONNECTOR_VALIDATION_FAILED')} "
                     f"on field {ve.get('field')!r}."
                 )
             elif step["planned_action"] == "error_process_validation":

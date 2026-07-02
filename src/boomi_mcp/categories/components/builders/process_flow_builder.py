@@ -52,8 +52,10 @@ from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import (
     BuilderValidationError,
     REST_CLIENT_SUBTYPE,
+    SOAP_CLIENT_SUBTYPE,
     _escape_xml,
     _resolve_rest_connector_type,
+    _resolve_soap_client_connector_type,
 )
 
 
@@ -73,6 +75,11 @@ _DB_ACTION_TYPES = frozenset({"Get"})
 # write *component* builders supply the connector-action; this lowers a `write`
 # stage to a `database`/`Send` connector binding. Send only (Get is a source).
 _DB_TARGET_ACTION_TYPES = frozenset({"Send"})
+
+# SOAP Client connector-action types (#126). The SOAP Client exposes a single
+# outbound EXECUTE action, used for both a soap_fetch source and a soap_send
+# target — there is no GET/SEND/verb split like REST/DB.
+_SOAP_ACTION_TYPES = frozenset({"EXECUTE"})
 
 _SUPPORTED_TRANSFORM_MODES = frozenset(
     {"passthrough", "message", "map_ref", "dataprocess", "doccacheretrieve", "doccacheremove"}
@@ -564,6 +571,8 @@ class ProcessFlowBuilder:
         depends_on: Optional[Iterable[str]] = None,
         allow_rest_source: bool = False,
         allow_db_target: bool = False,
+        allow_soap_source: bool = False,
+        allow_soap_target: bool = False,
     ) -> Optional[BuilderValidationError]:
         """Validate structured process config; return error or None.
 
@@ -576,6 +585,12 @@ class ProcessFlowBuilder:
         SyncPipelineBuilder passes True so a lowered ``write`` stage's database
         Send target is accepted (#74 M5.8). A hand-authored database_to_api_sync
         with a database target therefore stays rejected.
+
+        ``allow_soap_source`` / ``allow_soap_target`` are False for the base
+        protocol; SyncPipelineBuilder passes True so a lowered ``soap_fetch``
+        source / ``soap_send`` target's SOAP Client EXECUTE binding is accepted
+        (#126). A hand-authored database_to_api_sync with a SOAP source/target
+        therefore stays rejected.
 
         Validation order is intentional — surface the most-specific
         actionable error first:
@@ -626,7 +641,9 @@ class ProcessFlowBuilder:
             return _validate_ref_reachability(config, set(depends_on or []))
 
         source_err = _validate_source_binding(
-            config.get("source"), allow_rest_source=allow_rest_source
+            config.get("source"),
+            allow_rest_source=allow_rest_source,
+            allow_soap_source=allow_soap_source,
         )
         if source_err is not None:
             return source_err
@@ -672,7 +689,9 @@ class ProcessFlowBuilder:
             return decision_err
 
         target_err = _validate_target_binding(
-            config.get("target"), allow_db_target=allow_db_target
+            config.get("target"),
+            allow_db_target=allow_db_target,
+            allow_soap_target=allow_soap_target,
         )
         if target_err is not None:
             return target_err
@@ -1447,7 +1466,7 @@ def _assemble_process_component_xml(
 # ----------------------------------------------------------------------
 
 def _validate_source_binding(
-    source: Any, *, allow_rest_source: bool = False
+    source: Any, *, allow_rest_source: bool = False, allow_soap_source: bool = False
 ) -> Optional[BuilderValidationError]:
     if not isinstance(source, dict):
         return BuilderValidationError(
@@ -1461,18 +1480,22 @@ def _validate_source_binding(
     # base database_to_api_sync protocol. A REST Client GET source is ONLY valid
     # through the sync_pipeline fetch lowering (M5.4 #72), which passes
     # allow_rest_source=True — so a hand-authored database_to_api_sync stays
-    # DB-source-only, exactly as the #72 plan intends.
+    # DB-source-only, exactly as the #72 plan intends. A SOAP Client EXECUTE
+    # source is likewise valid only through the sync_pipeline soap_fetch lowering
+    # (#126), gated by allow_soap_source.
     raw_connector_type = source.get("connector_type")
     connector_type = str(raw_connector_type or "").strip().lower()
     rest_source = allow_rest_source and _resolve_rest_connector_type(raw_connector_type) is not None
-    if connector_type != "database" and not rest_source:
-        if allow_rest_source:
+    soap_source = allow_soap_source and _resolve_soap_client_connector_type(raw_connector_type) is not None
+    if connector_type != "database" and not rest_source and not soap_source:
+        if allow_rest_source or allow_soap_source:
             return BuilderValidationError(
-                f"source.connector_type must be 'database' (db_read) or a REST Client "
-                f"connector (rest_fetch); got {connector_type!r}.",
+                f"source.connector_type must be 'database' (db_read), a REST Client "
+                f"connector (rest_fetch), or a SOAP Client connector (soap_fetch); "
+                f"got {connector_type!r}.",
                 error_code="PROCESS_CONNECTOR_BINDING_INVALID",
                 field="source.connector_type",
-                hint="Database (db_read Get) and REST Client (rest_fetch GET) are the supported source connectors.",
+                hint="Database (db_read Get), REST Client (rest_fetch GET), and SOAP Client (soap_fetch EXECUTE) are the supported source connectors.",
             )
         return BuilderValidationError(
             f"source.connector_type must be 'database' for "
@@ -1482,7 +1505,17 @@ def _validate_source_binding(
             hint="Database is the only source connector for database_to_api_sync; a REST source is expressed via a sync_pipeline fetch stage (rest_fetch).",
         )
     action_type = str(source.get("action_type") or "").strip()
-    if rest_source:
+    if soap_source:
+        # SOAP Client is EXECUTE-only (#126) — reject any other action.
+        if action_type.upper() != "EXECUTE":
+            return BuilderValidationError(
+                f"source.action_type must be 'EXECUTE' for a SOAP fetch source; "
+                f"got {action_type!r}.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field="source.action_type",
+                hint="soap_fetch is EXECUTE-only (#126); the SOAP Client exposes a single EXECUTE action.",
+            )
+    elif rest_source:
         # REST fetch is GET-only in M5.4 — reject any other verb so a source-side
         # write can never be modeled here.
         if action_type.upper() != "GET":
@@ -1564,10 +1597,49 @@ def _validate_db_target_binding(
     return _validate_runtime_bindings_gate(target, field_prefix)
 
 
-def _validate_target_binding(
-    target: Any, field_prefix: str = "target", *, allow_db_target: bool = False
+def _validate_soap_target_binding(
+    target: Dict[str, Any], field_prefix: str
 ) -> Optional[BuilderValidationError]:
-    """Validate one connector target binding (REST, or DB Send when allowed).
+    """Validate a SOAP Client EXECUTE target binding (#126).
+
+    A ``soap_send`` stage lowers to a ``wssoapclientsdk``/``EXECUTE`` target. The
+    action_type must be EXECUTE (the SOAP Client's only action). connection_id /
+    operation_id are required; a SOAP target carries no dynamic_path (REST
+    path-binding only), so the runtime-binding gate still applies.
+    """
+    action_type = str(target.get("action_type") or "").strip().upper()
+    if action_type not in _SOAP_ACTION_TYPES:
+        return BuilderValidationError(
+            f"{field_prefix}.action_type must be 'EXECUTE' for a SOAP target; "
+            f"got {target.get('action_type')!r}.",
+            error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+            field=f"{field_prefix}.action_type",
+            hint="A SOAP Client target is a single EXECUTE operation (soap_send).",
+        )
+    for required in ("connection_id", "operation_id"):
+        value = target.get(required)
+        if not isinstance(value, str) or not value.strip():
+            return BuilderValidationError(
+                f"{field_prefix}.{required} is required.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field=f"{field_prefix}.{required}",
+                hint=(
+                    "Pass the component_id of the already-built SOAP "
+                    "connector-settings / connector-action EXECUTE, or a "
+                    "$ref:KEY token pointing at it (and add KEY to depends_on)."
+                ),
+            )
+    return _validate_runtime_bindings_gate(target, field_prefix)
+
+
+def _validate_target_binding(
+    target: Any,
+    field_prefix: str = "target",
+    *,
+    allow_db_target: bool = False,
+    allow_soap_target: bool = False,
+) -> Optional[BuilderValidationError]:
+    """Validate one connector target binding (REST, or DB Send / SOAP when allowed).
 
     ``field_prefix`` scopes every emitted ``field``/message to the binding's
     location in the config tree — ``"target"`` for the top-level target (leg 1)
@@ -1577,7 +1649,9 @@ def _validate_target_binding(
     ``allow_db_target`` (#74 M5.8) accepts a ``database``/``Send`` target in
     addition to REST — only the sync_pipeline path (api_to_database_sync) opts in,
     so a hand-authored database_to_api_sync target and every Branch leg stay
-    REST-only (the default).
+    REST-only (the default). ``allow_soap_target`` (#126) likewise accepts a
+    ``wssoapclientsdk``/``EXECUTE`` SOAP target only through the sync_pipeline
+    soap_send lowering.
     """
     if not isinstance(target, dict):
         return BuilderValidationError(
@@ -1597,6 +1671,12 @@ def _validate_target_binding(
             and raw_connector_type.strip().lower() == "database"
         ):
             return _validate_db_target_binding(target, field_prefix)
+        # #126: a sync_pipeline soap_send target lowers to a SOAP EXECUTE binding.
+        if (
+            allow_soap_target
+            and _resolve_soap_client_connector_type(raw_connector_type) is not None
+        ):
+            return _validate_soap_target_binding(target, field_prefix)
         return BuilderValidationError(
             f"{field_prefix}.connector_type must be 'rest', 'rest_client', or "
             f"{REST_CLIENT_SUBTYPE!r}; got {raw_connector_type!r}.",
@@ -5538,17 +5618,21 @@ def _emit_processcall(
 # ----------------------------------------------------------------------
 
 def _canonical_connector_type(value: Optional[str]) -> str:
-    """Resolve REST aliases to canonical subtype; pass others through.
+    """Resolve REST/SOAP aliases to their canonical subtype; pass others through.
 
-    REST Client's three accepted spellings (rest, rest_client, canonical)
-    all map to the same Boomi subtype string used in XML. Database and
-    any future connector types are emitted verbatim.
+    REST Client's three spellings (rest, rest_client, canonical) map to the
+    canonical REST Client subtype; SOAP Client's spellings (soap_client,
+    web_services_soap_client, wssoapclientsdk) map to `wssoapclientsdk` (#126).
+    Database and any future connector types are emitted verbatim.
     """
     if not isinstance(value, str):
         return ""
     canonical = _resolve_rest_connector_type(value)
     if canonical is not None:
         return canonical
+    soap_canonical = _resolve_soap_client_connector_type(value)
+    if soap_canonical is not None:
+        return soap_canonical
     return value.strip()
 
 
@@ -5882,7 +5966,8 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
 # owned by M10 (#103, e.g. Flow Control M10.7 #111)).
 _SYNC_PIPELINE_SUPPORTED_KINDS = frozenset({"read", "fetch", "map", "send", "write"})
 
-# The primitive discriminator each supported stage must declare in config.
+# The primitive discriminator each supported stage must declare in config. This
+# is the PRIMARY (default) primitive per kind.
 _SYNC_PIPELINE_STAGE_PRIMITIVE: Dict[str, str] = {
     "read": "db_read",
     "fetch": "rest_fetch",
@@ -5890,6 +5975,17 @@ _SYNC_PIPELINE_STAGE_PRIMITIVE: Dict[str, str] = {
     "send": "rest_send",
     "write": "db_write",
 }
+
+# #126: a fetch/send stage additionally accepts the SOAP Client primitive
+# (soap_fetch / soap_send) as a thin adapter over the same source/target slot —
+# the declared primitive selects the REST-vs-SOAP connector family.
+_SYNC_PIPELINE_STAGE_ALT_PRIMITIVE: Dict[str, str] = {
+    "fetch": "soap_fetch",
+    "send": "soap_send",
+}
+
+# The SOAP primitive that lowers each fetch/send stage to a SOAP Client binding.
+_SYNC_PIPELINE_SOAP_PRIMITIVES = frozenset({"soap_fetch", "soap_send"})
 
 # Hints for reserved stage *kinds* (rejected by the kind gate).
 _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
@@ -6122,11 +6218,23 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         target_stage = stage_by_key[order[-1]]
         map_stage = stage_by_key[order[1]] if len(order) == 3 else None
 
-        # A read source lowers to a DB connector binding; a fetch source to REST.
-        source_default_connector = "database" if source_stage.kind == "read" else "rest"
-        # A send target lowers to a REST binding; a write target to a database
+        # A read source lowers to a DB connector binding; a fetch source to REST
+        # (rest_fetch) or SOAP (soap_fetch, #126) per the declared primitive.
+        if source_stage.kind == "read":
+            source_default_connector = "database"
+        elif source_stage.config.get("primitive") == "soap_fetch":
+            source_default_connector = "soap_client"
+        else:
+            source_default_connector = "rest"
+        # A send target lowers to a REST (rest_send) or SOAP (soap_send, #126)
+        # binding per the declared primitive; a write target to a database
         # (db_write) Send binding (#74 M5.8).
-        target_default_connector = "database" if target_stage.kind == "write" else "rest"
+        if target_stage.kind == "write":
+            target_default_connector = "database"
+        elif target_stage.config.get("primitive") == "soap_send":
+            target_default_connector = "soap_client"
+        else:
+            target_default_connector = "rest"
         lowered: Dict[str, Any] = {
             "process_kind": ProcessFlowBuilder.PROCESS_KIND,
             "source": cls._lower_binding_stage(
@@ -6208,26 +6316,33 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
 
     @classmethod
     def _check_stage_primitive(cls, stage: "StageSpec") -> None:
-        """Enforce config.primitive matches the stage kind (raises otherwise)."""
+        """Enforce config.primitive matches the stage kind (raises otherwise).
+
+        A fetch/send stage accepts EITHER its REST primitive (rest_fetch/
+        rest_send) OR its SOAP alternate (soap_fetch/soap_send, #126).
+        """
         expected = _SYNC_PIPELINE_STAGE_PRIMITIVE[stage.kind]
+        alt = _SYNC_PIPELINE_STAGE_ALT_PRIMITIVE.get(stage.kind)
+        accepted = (expected, alt) if alt is not None else (expected,)
         primitive = stage.config.get("primitive")
-        if primitive == expected:
+        if primitive in accepted:
             return
+        accepted_label = " or ".join(repr(p) for p in accepted)
         if primitive is None:
             raise BuilderValidationError(
                 f"sync_pipeline {stage.kind} stage {stage.key!r} must declare "
-                f"config.primitive={expected!r}.",
+                f"config.primitive={accepted_label}.",
                 error_code="SYNC_PIPELINE_CONFIG_INVALID",
                 field=f"pipeline.stages[{stage.key}].config.primitive",
-                hint=f"A {stage.kind!r} stage is backed by the {expected!r} primitive.",
+                hint=f"A {stage.kind!r} stage is backed by the {accepted_label} primitive.",
             )
         raise BuilderValidationError(
             f"sync_pipeline {stage.kind} stage {stage.key!r} has primitive "
-            f"{primitive!r}; expected {expected!r}.",
+            f"{primitive!r}; expected {accepted_label}.",
             error_code="SYNC_PIPELINE_STAGE_UNSUPPORTED",
             field=f"pipeline.stages[{stage.key}].config.primitive",
             hint=_SYNC_PIPELINE_RESERVED_PRIMITIVE_HINTS.get(
-                primitive, f"A {stage.kind!r} stage must use primitive {expected!r}."
+                primitive, f"A {stage.kind!r} stage must use primitive {accepted_label}."
             ),
         )
 
@@ -6248,6 +6363,7 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         if explicit is None:
             return
         is_rest = _resolve_rest_connector_type(explicit) is not None
+        is_soap = _resolve_soap_client_connector_type(explicit) is not None
         is_database = isinstance(explicit, str) and explicit.strip().lower() == "database"
         if stage.kind == "read" and not is_database:
             raise BuilderValidationError(
@@ -6255,16 +6371,30 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                 f"'database' (a read stage is a db_read source); got {explicit!r}.",
                 error_code="SYNC_PIPELINE_CONFIG_INVALID",
                 field=f"pipeline.stages[{stage.key}].config.connector_type",
-                hint="Use a 'fetch' stage (rest_fetch) for a REST source; a read stage is DB-only.",
+                hint="Use a 'fetch' stage (rest_fetch/soap_fetch) for an API source; a read stage is DB-only.",
             )
-        if stage.kind == "fetch" and not is_rest:
-            raise BuilderValidationError(
-                f"sync_pipeline fetch stage {stage.key!r} connector_type must be a "
-                f"REST Client connector (a fetch stage is a rest_fetch source); got {explicit!r}.",
-                error_code="SYNC_PIPELINE_CONFIG_INVALID",
-                field=f"pipeline.stages[{stage.key}].config.connector_type",
-                hint="Use a 'read' stage (db_read) for a database source; a fetch stage is REST-only.",
-            )
+        if stage.kind == "fetch":
+            # The declared primitive selects the family: soap_fetch -> SOAP,
+            # otherwise rest_fetch -> REST. An explicit connector_type may restate
+            # that family but must not flip it (#126).
+            if stage.config.get("primitive") == "soap_fetch":
+                if not is_soap:
+                    raise BuilderValidationError(
+                        f"sync_pipeline fetch stage {stage.key!r} declares primitive "
+                        f"'soap_fetch' but connector_type is not a SOAP Client connector; "
+                        f"got {explicit!r}.",
+                        error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                        field=f"pipeline.stages[{stage.key}].config.connector_type",
+                        hint="A soap_fetch source requires a SOAP Client connector_type (soap_client / wssoapclientsdk).",
+                    )
+            elif not is_rest:
+                raise BuilderValidationError(
+                    f"sync_pipeline fetch stage {stage.key!r} connector_type must be a "
+                    f"REST Client connector (a rest_fetch source); got {explicit!r}.",
+                    error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                    field=f"pipeline.stages[{stage.key}].config.connector_type",
+                    hint="Use a 'read' stage (db_read) for a database source, or declare primitive='soap_fetch' for a SOAP source.",
+                )
 
     @classmethod
     def _check_target_connector_family(cls, stage: "StageSpec") -> None:
@@ -6285,15 +6415,30 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         if explicit is None:
             return
         is_rest = _resolve_rest_connector_type(explicit) is not None
+        is_soap = _resolve_soap_client_connector_type(explicit) is not None
         is_database = isinstance(explicit, str) and explicit.strip().lower() == "database"
-        if stage.kind == "send" and not is_rest:
-            raise BuilderValidationError(
-                f"sync_pipeline send stage {stage.key!r} connector_type must be a "
-                f"REST Client connector (a send stage is a rest_send target); got {explicit!r}.",
-                error_code="SYNC_PIPELINE_CONFIG_INVALID",
-                field=f"pipeline.stages[{stage.key}].config.connector_type",
-                hint="Use a 'write' stage (db_write) for a database target; a send stage is REST-only.",
-            )
+        if stage.kind == "send":
+            # The declared primitive selects the family: soap_send -> SOAP,
+            # otherwise rest_send -> REST. An explicit connector_type may restate
+            # that family but must not flip it (#126).
+            if stage.config.get("primitive") == "soap_send":
+                if not is_soap:
+                    raise BuilderValidationError(
+                        f"sync_pipeline send stage {stage.key!r} declares primitive "
+                        f"'soap_send' but connector_type is not a SOAP Client connector; "
+                        f"got {explicit!r}.",
+                        error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                        field=f"pipeline.stages[{stage.key}].config.connector_type",
+                        hint="A soap_send target requires a SOAP Client connector_type (soap_client / wssoapclientsdk).",
+                    )
+            elif not is_rest:
+                raise BuilderValidationError(
+                    f"sync_pipeline send stage {stage.key!r} connector_type must be a "
+                    f"REST Client connector (a rest_send target); got {explicit!r}.",
+                    error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                    field=f"pipeline.stages[{stage.key}].config.connector_type",
+                    hint="Use a 'write' stage (db_write) for a database target, or declare primitive='soap_send' for a SOAP target.",
+                )
         if stage.kind == "write" and not is_database:
             raise BuilderValidationError(
                 f"sync_pipeline write stage {stage.key!r} connector_type must be "
@@ -6332,16 +6477,21 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                     "runtime binding on the rest_fetch/rest_send operation config."
                 ),
             )
-        # A read (db_read) source is always a Get; a fetch (rest_fetch) source is
-        # always a GET (M5.4 #72, GET-only); a write (db_write) target is always a
-        # Send (#74 M5.8); a send (rest_send) target carries an explicit HTTP
-        # method (no default).
+        # A read (db_read) source is always a Get; a fetch source is a GET
+        # (rest_fetch, M5.4 #72) or EXECUTE (soap_fetch, #126); a write (db_write)
+        # target is always a Send (#74 M5.8); a send target is an explicit HTTP
+        # method (rest_send, no default) or EXECUTE (soap_send, #126).
+        primitive = stage.config.get("primitive")
+        is_soap_source = stage.kind == "fetch" and primitive == "soap_fetch"
+        is_soap_target = stage.kind == "send" and primitive == "soap_send"
         if stage.kind == "read":
             default_action_type: Optional[str] = "Get"
         elif stage.kind == "fetch":
-            default_action_type = "GET"
+            default_action_type = "EXECUTE" if is_soap_source else "GET"
         elif stage.kind == "write":
             default_action_type = "Send"
+        elif is_soap_target:
+            default_action_type = "EXECUTE"
         else:
             default_action_type = None
         # An explicit connector_type on a SOURCE stage must agree with the stage
@@ -6367,8 +6517,15 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         # actionType="". A send (rest_send) target has NO default: it requires an
         # explicit HTTP method (enforced by the send guard below).
         action_type = stage.config.get("action_type", default_action_type)
-        if stage.kind in ("fetch", "write") and action_type is None:
-            action_type = default_action_type  # fetch -> "GET", write -> "Send"
+        # A fetch source, a write target, and a soap_send target all have a
+        # kind/primitive-derived default verb, so an explicit action_type=None
+        # (present key, null value) resolves to that default rather than leaking a
+        # None that build() would emit as actionType="". Only a rest_send target
+        # has NO default (its explicit-HTTP-method requirement is enforced below).
+        if action_type is None and (
+            stage.kind in ("fetch", "write") or is_soap_target
+        ):
+            action_type = default_action_type  # fetch->GET/EXECUTE, write->Send, soap_send->EXECUTE
         binding: Dict[str, Any] = {
             "connector_type": stage.config.get("connector_type", default_connector_type),
             "action_type": action_type,
@@ -6385,7 +6542,17 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         # is defensive — null already resolved to GET above.
         if stage.kind == "fetch":
             action_value = binding["action_type"]
-            if action_value is None or str(action_value).strip().upper() != "GET":
+            if is_soap_source:
+                # A soap_fetch source is EXECUTE-only (#126).
+                if action_value is None or str(action_value).strip().upper() != "EXECUTE":
+                    raise BuilderValidationError(
+                        f"sync_pipeline fetch stage {stage.key!r} action_type must be "
+                        f"'EXECUTE' (soap_fetch is EXECUTE-only, #126); got {action_value!r}.",
+                        error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                        field=f"pipeline.stages[{stage.key}].config.action_type",
+                        hint="A SOAP fetch source is a single EXECUTE action; there is no verb split.",
+                    )
+            elif action_value is None or str(action_value).strip().upper() != "GET":
                 raise BuilderValidationError(
                     f"sync_pipeline fetch stage {stage.key!r} action_type must be "
                     f"'GET' (rest_fetch is GET-only, M5.4 #72); got {action_value!r}.",
@@ -6425,7 +6592,18 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         # _validate_target_binding, which the archetype->plan->apply path exercises.
         if stage.kind == "send":
             action_value = binding["action_type"]
-            if action_value is None or str(action_value).strip() == "":
+            if is_soap_target:
+                # A soap_send target is EXECUTE-only (#126) — unlike rest_send it
+                # has a default verb, so this both defaults and enforces EXECUTE.
+                if action_value is None or str(action_value).strip().upper() != "EXECUTE":
+                    raise BuilderValidationError(
+                        f"sync_pipeline send stage {stage.key!r} action_type must be "
+                        f"'EXECUTE' (soap_send is EXECUTE-only, #126); got {action_value!r}.",
+                        error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                        field=f"pipeline.stages[{stage.key}].config.action_type",
+                        hint="A SOAP send target is a single EXECUTE action; there is no HTTP verb.",
+                    )
+            elif action_value is None or str(action_value).strip() == "":
                 raise BuilderValidationError(
                     f"sync_pipeline send stage {stage.key!r} requires an explicit "
                     f"action_type (rest_send has no default HTTP method); got {action_value!r}.",
@@ -6511,6 +6689,8 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             depends_on=depends_on,
             allow_rest_source=True,
             allow_db_target=True,
+            allow_soap_source=True,
+            allow_soap_target=True,
         )
 
     @classmethod

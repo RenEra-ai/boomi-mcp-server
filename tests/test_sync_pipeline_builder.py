@@ -981,3 +981,129 @@ def test_write_stage_forced_to_rest_connector_type_rejected():
     assert err is not None
     assert err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
     assert "write stage" in str(err)
+
+
+# ---------------------------------------------------------------------------
+# Issue #126 M5.10 — SOAP Client fetch/send stages
+# ---------------------------------------------------------------------------
+
+_SOAP_FETCH_DEPS = ["soap_src_conn", "soap_src_op", "field_map", "rest_conn", "rest_op"]
+_SOAP_SEND_DEPS = ["rest_src_conn", "rest_src_op", "field_map", "soap_conn", "soap_op"]
+
+
+def _soap_fetch_stage(key="source", **cfg):
+    config = {
+        "primitive": "soap_fetch",
+        "connection_id": "$ref:soap_src_conn",
+        "operation_id": "$ref:soap_src_op",
+    }
+    config.update(cfg)
+    return {"key": key, "kind": "fetch", "config": config}
+
+
+def _soap_send_stage(key="target", **cfg):
+    config = {
+        "primitive": "soap_send",
+        "connection_id": "$ref:soap_conn",
+        "operation_id": "$ref:soap_op",
+    }
+    config.update(cfg)
+    return {"key": key, "kind": "send", "config": config}
+
+
+def test_soap_fetch_source_lowers_to_soap_execute():
+    cfg = _sync_config(
+        [_soap_fetch_stage("s"), _send_stage("t", method="POST")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    deps = ["soap_src_conn", "soap_src_op", "rest_conn", "rest_op"]
+    assert SyncPipelineBuilder.validate_config(cfg, depends_on=deps) is None
+    lowered = SyncPipelineBuilder.lower_config(cfg)
+    assert lowered["source"]["connector_type"] == "soap_client"
+    assert lowered["source"]["action_type"] == "EXECUTE"
+
+
+def test_soap_send_target_lowers_to_soap_execute():
+    cfg = _sync_config(
+        [_read_stage("s"), _soap_send_stage("t")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    deps = ["db_conn", "db_op", "soap_conn", "soap_op"]
+    assert SyncPipelineBuilder.validate_config(cfg, depends_on=deps) is None
+    lowered = SyncPipelineBuilder.lower_config(cfg)
+    assert lowered["target"]["connector_type"] == "soap_client"
+    assert lowered["target"]["action_type"] == "EXECUTE"
+
+
+def test_soap_fetch_to_soap_send_full_chain_emits_wssoapclientsdk():
+    cfg = _sync_config(
+        [_soap_fetch_stage("s"), _map_stage("m"), _soap_send_stage("t")],
+        [{"from_stage": "s", "to_stage": "m"}, {"from_stage": "m", "to_stage": "t"}],
+    )
+    deps = ["soap_src_conn", "soap_src_op", "field_map", "soap_conn", "soap_op"]
+    assert SyncPipelineBuilder.validate_config(cfg, depends_on=deps) is None
+    xml = SyncPipelineBuilder.build(cfg, name="SOAP Sync", folder_name="Test")
+    assert xml.count('connectorType="wssoapclientsdk"') == 2
+    assert xml.count('actionType="EXECUTE"') == 2
+
+
+def test_soap_fetch_defaults_execute_action_type():
+    # action_type omitted -> defaults to EXECUTE for a soap_fetch source.
+    cfg = _sync_config(
+        [_soap_fetch_stage("s"), _send_stage("t", method="POST")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    deps = ["soap_src_conn", "soap_src_op", "rest_conn", "rest_op"]
+    lowered = SyncPipelineBuilder.lower_config(cfg)
+    assert lowered["source"]["action_type"] == "EXECUTE"
+
+
+def test_soap_fetch_rejects_non_execute_action():
+    cfg = _sync_config(
+        [_soap_fetch_stage("s", action_type="GET"), _send_stage("t", method="POST")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    deps = ["soap_src_conn", "soap_src_op", "rest_conn", "rest_op"]
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=deps)
+    assert err is not None and err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+    assert "EXECUTE" in str(err)
+
+
+def test_soap_send_rejects_non_execute_action():
+    cfg = _sync_config(
+        [_read_stage("s"), _soap_send_stage("t", action_type="POST")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    deps = ["db_conn", "db_op", "soap_conn", "soap_op"]
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=deps)
+    assert err is not None and err.error_code == "PROCESS_CONNECTOR_BINDING_INVALID"
+    assert "EXECUTE" in str(err)
+
+
+def test_soap_fetch_primitive_with_rest_connector_type_rejected():
+    # A soap_fetch primitive whose explicit connector_type is REST is rejected.
+    cfg = _sync_config(
+        [_soap_fetch_stage("s", connector_type="rest"), _send_stage("t", method="POST")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    deps = ["soap_src_conn", "soap_src_op", "rest_conn", "rest_op"]
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=deps)
+    assert err is not None and err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
+
+
+def test_rest_fetch_primitive_with_soap_connector_type_rejected():
+    # A rest_fetch primitive forced to a SOAP connector_type is rejected.
+    cfg = _sync_config(
+        [_fetch_stage("s", connector_type="soap_client"), _send_stage("t", method="POST")],
+        [{"from_stage": "s", "to_stage": "t"}],
+    )
+    deps = ["rest_src_conn", "rest_src_op", "rest_conn", "rest_op"]
+    err = SyncPipelineBuilder.validate_config(cfg, depends_on=deps)
+    assert err is not None and err.error_code == "SYNC_PIPELINE_CONFIG_INVALID"
+
+
+def test_existing_rest_pipeline_unchanged_regression():
+    # The REST-only pipeline still lowers to REST (no SOAP leakage).
+    lowered = SyncPipelineBuilder.lower_config(_linear_with_map())
+    assert lowered["target"]["connector_type"] == "rest"
+    assert lowered["source"]["connector_type"] == "database"

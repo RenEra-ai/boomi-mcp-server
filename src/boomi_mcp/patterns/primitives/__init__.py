@@ -36,6 +36,8 @@ from .operational import (
 from .rest_fetch import RestFetchPrimitive
 from .rest_send import RestSendWithRetryPrimitive
 from .return_documents import ReturnDocumentsPrimitive
+from .soap_fetch import SoapFetchPrimitive
+from .soap_send import SoapSendPrimitive
 from .throw_exception import ThrowExceptionPrimitive
 from .xml_json_convert import XmlJsonConvertPrimitive
 
@@ -53,6 +55,8 @@ __all__ = [
     "RestFetchPrimitive",
     "RestSendWithRetryPrimitive",
     "ReturnDocumentsPrimitive",
+    "SoapFetchPrimitive",
+    "SoapSendPrimitive",
     "ThrowExceptionPrimitive",
     "ScheduleEnvelopePrimitive",
     "WatermarkStatePrimitive",

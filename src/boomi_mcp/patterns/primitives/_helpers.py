@@ -57,6 +57,15 @@ ROLE_REST_SOURCE_OPERATION = "rest_source_operation"
 ROLE_DB_WRITE_PROFILE = "db_write_profile"
 ROLE_DB_WRITE_OPERATION = "db_write_operation"
 
+# Issue #126 — SOAP Client component roles. ``soap_fetch`` (SOURCE) and
+# ``soap_send`` (TARGET) get distinct role tokens so an API-to-API flow emitting
+# both a SOAP source and a SOAP target under one ``key_prefix`` stays
+# collision-free (mirrors the rest_fetch/rest_send source/target role split).
+ROLE_SOAP_SOURCE_CONNECTION = "soap_source_connection"
+ROLE_SOAP_SOURCE_OPERATION = "soap_source_operation"
+ROLE_SOAP_CONNECTION = "soap_connection"
+ROLE_SOAP_OPERATION = "soap_operation"
+
 
 # Error code raised when a source field data type has no script.mapping input
 # equivalent. Lives here (not in profile_generation) because the bridge is a

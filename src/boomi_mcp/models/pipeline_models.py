@@ -41,12 +41,16 @@ XML: the ``sync_pipeline`` process builder (``SyncPipelineBuilder`` in
 ``process_flow_builder.py``) lowers the verified-linear, all-``ordering`` subset
 into the proven ``database_to_api_sync`` source/transform/target config. The
 source stage is either ``read(db_read)`` (a DB Get) or — as of #72 (M5.4) —
-``fetch(rest_fetch)`` (a static REST GET source), followed by an optional
-``map`` and a target stage that is either ``send(rest_send)`` (a REST target) or
-— as of #74 (M5.8), from a ``fetch`` source — ``write(db_write)`` (a database
-Send/write target, built on the #32 component builders):
-``read(db_read) | fetch(rest_fetch) -> [map] -> send(rest_send)`` and
-``fetch(rest_fetch) -> [map] -> write(db_write)``. Every other
+``fetch(rest_fetch)`` (a static REST GET source), or — as of #126 (M5.10) —
+``fetch(soap_fetch)`` (a SOAP Client EXECUTE source), followed by an optional
+``map`` and a target stage that is either ``send(rest_send)`` (a REST target),
+``send(soap_send)`` (a SOAP Client EXECUTE target, #126), or — as of #74 (M5.8),
+from a ``fetch`` source — ``write(db_write)`` (a database Send/write target,
+built on the #32 component builders):
+``read(db_read) | fetch(rest_fetch|soap_fetch) -> [map] -> send(rest_send|soap_send)``
+and ``fetch(rest_fetch) -> [map] -> write(db_write)``. A ``fetch`` source and a
+``send`` target select the REST-vs-SOAP connector family from the declared
+``config.primitive`` (rest_fetch/soap_fetch, rest_send/soap_send). Every other
 stage kind (``lookup`` / ``combine`` / ``flow_control`` /
 ``branch`` / ``decision`` / ``dataprocess`` / ``exception`` /
 ``doccacheretrieve`` / ``doccacheremove``) still has NO PipelineSpec->XML emitter
@@ -64,9 +68,15 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 PipelineStageKind = Literal[
     "read",
+    # M5.4 (#72) / M5.10 (#126): API source stage. Lowered by SyncPipelineBuilder
+    # to a REST Client GET (config.primitive='rest_fetch') or a SOAP Client
+    # EXECUTE (config.primitive='soap_fetch') source binding.
     "fetch",
     "lookup",
     "map",
+    # M2.5 / M5.10 (#126): API target stage. Lowered to a REST Client target
+    # (config.primitive='rest_send') or a SOAP Client EXECUTE target
+    # (config.primitive='soap_send') binding.
     "send",
     # M5.8 (issue #74): the database Send/write target stage. Lowered by
     # SyncPipelineBuilder (fetch -> [map] -> write) to a database connector

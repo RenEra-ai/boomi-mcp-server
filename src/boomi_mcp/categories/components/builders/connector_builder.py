@@ -131,6 +131,23 @@ def _escape_xml(text: str) -> str:
     return text
 
 
+def _escape_xml_text(text: str) -> str:
+    """Escape a string for XML *text content* (between element tags).
+
+    Unlike ``_escape_xml`` (attribute-value escaping), this escapes only
+    ``&``, ``<`` and ``>`` — quotes stay literal. This matches how Boomi
+    stores a serialized inner XML document inside the SOAP operation's
+    ``<cookie><value>…</value></cookie>`` element (issue #126): the live
+    3E SOAP Ping export keeps ``operationName="Ping"`` with literal quotes
+    inside the escaped value, escaping only the angle brackets. ``&`` is
+    escaped first so an already-escaped ``&lt;`` in the inner document
+    round-trips through the two parse levels correctly.
+    """
+    if not text:
+        return ""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 # Canonical attribute order + defaults for <AdapterPoolInfo>. Two-default-column
 # form: when pooling is omitted entirely (or enabled=false), use the
 # default_when_disabled value; when pooling.enabled=true and a key is omitted,
@@ -3406,6 +3423,888 @@ class RestClientOperationBuilder:
 
 
 # ============================================================================
+# SOAP Client (Web Services SOAP Client — subType wssoapclientsdk), issue #126
+# ============================================================================
+#
+# Typed outbound SOAP Client support, a sibling of the REST Client builders.
+# All XML shapes are byte-locked against verified live `work`-account exports:
+#   connection  2dc6f20a-3bb8-45c8-b50d-5c753364ad08 ("3E SOAP")
+#   connection  456db4ba-a391-47f2-be9f-5e9092a4f756 ("[Intapp Walls] Walls SOAP API")
+#   operation   0131372a-4805-4e7d-b592-5193e2f862da ("3E SOAP Ping", EXECUTE)
+#
+# SOAP Client exposes a single outbound EXECUTE action (request/response); there
+# is no GET/SEND split like the HTTP/REST Client. Only NETWORK_AUTH security and
+# XML request/response profiles are structurally buildable for v1 — everything
+# else falls back to the raw-XML escape hatch with a structured error.
+
+SOAP_CLIENT_SUBTYPE = "wssoapclientsdk"
+# Only unambiguous outbound-client aliases. Deliberately NOT `soap`, `wss`,
+# `web_services`, or `soap_server` — those could mean the inbound Web Services
+# Server connector (out of scope for #126).
+_SOAP_CLIENT_ALIASES = ("soap_client", "web_services_soap_client", SOAP_CLIENT_SUBTYPE.lower())
+
+# Non-secret extension-bound SOAP connection fields for which SET_BY_EXTENSION is
+# a valid fail-fast placeholder (mirrors _REST_EXTENSION_BOUND_PLACEHOLDER_FIELDS).
+# Live connection B ("Walls SOAP API") stores url/endpoint/username as
+# externalized extension values, so the placeholder is legitimate on these three.
+_SOAP_EXTENSION_BOUND_PLACEHOLDER_FIELDS = frozenset({"wsdl_url", "endpoint_url", "username"})
+
+# The 8 live GenericConnectionConfig field ids the SOAP connection builder owns
+# (fixed order, verified against both live connection exports).
+_SOAP_CLIENT_CONNECTION_OWNED_FIELD_IDS = (
+    "url",
+    "endpoint",
+    "security",
+    "username",
+    "password",
+    "clientsslalias",
+    "trustsslalias",
+    "wsssecurityOptions",
+)
+
+
+def _resolve_soap_client_connector_type(value: Any) -> Optional[str]:
+    """Map `soap_client`, `web_services_soap_client`, or the canonical
+    `wssoapclientsdk` subtype (case-insensitive) to the canonical subtype.
+    Returns None for anything else — including the ambiguous `soap` / `wss` /
+    `web_services` / `soap_server` tokens, which are intentionally NOT accepted
+    so an inbound Web Services Server request can never be misrouted here."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in _SOAP_CLIENT_ALIASES:
+        return SOAP_CLIENT_SUBTYPE
+    return None
+
+
+_SOAP_CLIENT_CONNECTION_POLICY = PreservationPolicy(
+    component_type="connector-settings",
+    subtype=SOAP_CLIENT_SUBTYPE,
+    owned_paths=(
+        # Field-id-keyed merge over GenericConnectionConfig: builder-owned ids
+        # replace; an owned id absent from desired is cleared; unknown ids and
+        # unknown siblings are preserved.
+        OwnedPath(
+            path="bns:object/GenericConnectionConfig",
+            mode="key_merge",
+            key_attr="id",
+            owned_keys=_SOAP_CLIENT_CONNECTION_OWNED_FIELD_IDS,
+        ),
+    ),
+    # No owned_encrypted_paths for v1: the live SOAP connection exports carry an
+    # EMPTY <bns:encryptedValues/> (password is externalized via NETWORK_AUTH
+    # extension, never stored in the component), and no verified encrypted SOAP
+    # password shape exists yet. Owning the password xpath would PRUNE a
+    # UI/extension-set credential marker on every structured update — so we
+    # preserve existing encrypted values by default instead (architect note).
+)
+
+_SOAP_CLIENT_OPERATION_POLICY = PreservationPolicy(
+    component_type="connector-action",
+    subtype=SOAP_CLIENT_SUBTYPE,
+    owned_paths=(
+        # Operation envelope owns returnApplicationErrors + trackResponse
+        # (the builder always emits both).
+        OwnedPath(
+            path="bns:object/Operation",
+            mode="attrs_only",
+            owned_attrs=("returnApplicationErrors", "trackResponse"),
+        ),
+        # GenericOperationConfig: owns operationType (always EXECUTE) and all
+        # four profile attrs (always emitted for v1's XML-only profiles), plus
+        # the three <field> ids, the INPUT <cookie>, and the <Options> subtree.
+        # A key absent from desired is cleared. The generated cookie/Options are
+        # fully regenerated from wsdl_metadata on every structured update, while
+        # unknown siblings the builder never emits are preserved.
+        OwnedPath(
+            path="bns:object/Operation/Configuration/GenericOperationConfig",
+            mode="key_merge",
+            key_attr="id",
+            owned_attrs=(
+                "objectTypeId",
+                "objectTypeName",
+                "operationType",
+                "requestProfile",
+                "requestProfileType",
+                "responseProfile",
+                "responseProfileType",
+            ),
+            owned_keys=(
+                "exposeRequestEnvelope",
+                "exposeResponseEnvelope",
+                "attachmentCache",
+                "cookie",
+                "Options",
+            ),
+        ),
+    ),
+)
+
+
+class SoapClientConnectionBuilder:
+    """Builder for Boomi Web Services SOAP Client connector-settings (#126).
+
+    Emits the live `GenericConnectionConfig` shape (8 fields, fixed order):
+    url, endpoint, security, username, password, clientsslalias, trustsslalias,
+    wsssecurityOptions. Verified against live `work`-account exports
+    2dc6f20a (concrete WSDL url) and 456db4ba (all SET BY EXTENSION).
+
+    Config keys:
+        connector_type:   "soap_client" | "web_services_soap_client" |
+                          "wssoapclientsdk". Consumed by the dispatcher.
+        component_name:   required.
+        wsdl_url:         required → GenericConnectionConfig field `url`
+                          (the ...?wsdl endpoint). Extension-bound: may be
+                          the SET_BY_EXTENSION placeholder.
+        endpoint_url:     required → field `endpoint` (the SOAP service URL,
+                          distinct from the WSDL url). Extension-bound.
+        security:         optional, defaults NETWORK_AUTH; only NETWORK_AUTH is
+                          structurally buildable for v1.
+        username:         required for NETWORK_AUTH. Extension-bound.
+        credential_ref:   required for NETWORK_AUTH; must start "credential://".
+                          The password ciphertext is NEVER emitted — the field
+                          is emitted empty and the credential lives in an
+                          environment extension / the Boomi UI.
+        client_ssl_alias: optional Boomi certificate component id (UUID) →
+                          field `clientsslalias`.
+        trust_ssl_alias:  optional Boomi certificate component id (UUID) →
+                          field `trustsslalias`.
+        wss_security_options: WS-Security is deferred for v1 — a non-empty value
+                          is rejected with UNSUPPORTED_SOAP_WSS_SECURITY. The
+                          builder emits an empty <WSSecurityOptions/>.
+        folder_name / description: optional component-level fields.
+    """
+
+    SUPPORTED_SECURITY_MODES = ("NETWORK_AUTH",)
+    _CERT_REF_FIELDS = ("client_ssl_alias", "trust_ssl_alias")
+    _CERT_FIELD_IDS = {
+        "client_ssl_alias": ("clientsslalias", "privatecertificate"),
+        "trust_ssl_alias": ("trustsslalias", "publiccertificate"),
+    }
+    _BOOMI_COMPONENT_ID_RE = RestClientConnectionBuilder._BOOMI_COMPONENT_ID_RE
+    FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
+    _ALLOWED_FIELDS = frozenset({
+        # Framework routing keys that legitimately flow into the builder
+        # (create dispatch / integration spec) — tolerated, not user fields.
+        "component_type",
+        "connector_type",
+        "component_name",
+        "folder_name",
+        "description",
+        "wsdl_url",
+        "endpoint_url",
+        "security",
+        "username",
+        "credential_ref",
+        "client_ssl_alias",
+        "trust_ssl_alias",
+        "wss_security_options",
+    })
+    _ESCAPE_HATCH_HINT = (
+        "This field is not part of the verified SOAP Client builder field set. "
+        "For an unsupported SOAP field, use the raw-XML escape hatch: "
+        "manage_connector action='create' config={\"xml\": \"...\"} (or "
+        "build_integration with config.xml=...) sourced from a live export."
+    )
+
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+            config, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate a SOAP Client connection config without building XML."""
+        # 1) Plaintext secret-shaped keys.
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        # 1b) SET_BY_EXTENSION only on the non-secret extension-bound fields.
+        placeholder_err = _reject_misplaced_set_by_extension(
+            config, _SOAP_EXTENSION_BOUND_PLACEHOLDER_FIELDS, "SOAP"
+        )
+        if placeholder_err is not None:
+            return placeholder_err
+
+        # 2) Unknown field rejection (closed allowlist) with escape-hatch hint.
+        for key in config:
+            if key not in cls._ALLOWED_FIELDS:
+                return BuilderValidationError(
+                    f"'{key}' is not a supported SOAP Client connection field",
+                    error_code="SOAP_UNSUPPORTED_FIELD",
+                    field=key,
+                    hint=cls._ESCAPE_HATCH_HINT,
+                )
+
+        # 3) component_name required.
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required for SOAP Client connectors",
+                error_code="SOAP_CONNECTOR_VALIDATION_FAILED",
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        # 4) wsdl_url required.
+        wsdl_url = config.get("wsdl_url")
+        if not wsdl_url or not str(wsdl_url).strip():
+            return BuilderValidationError(
+                "wsdl_url is required for SOAP Client connectors",
+                error_code="SOAP_WSDL_URL_REQUIRED",
+                field="wsdl_url",
+                hint=(
+                    "Provide the SOAP service WSDL URL (typically ...?wsdl). It "
+                    "maps to the connection's `url` field. Externalize it via an "
+                    "environment extension with the SET_BY_EXTENSION placeholder "
+                    "if the value differs per environment."
+                ),
+            )
+
+        # 5) endpoint_url required (the concrete SOAP service URL, distinct from
+        #    the WSDL url — both live exports carry a non-empty endpoint).
+        endpoint_url = config.get("endpoint_url")
+        if not endpoint_url or not str(endpoint_url).strip():
+            return BuilderValidationError(
+                "endpoint_url is required for SOAP Client connectors",
+                error_code="SOAP_ENDPOINT_URL_REQUIRED",
+                field="endpoint_url",
+                hint=(
+                    "Provide the SOAP service endpoint URL (the address the "
+                    "request is POSTed to; distinct from the WSDL url). It maps "
+                    "to the connection's `endpoint` field and may use the "
+                    "SET_BY_EXTENSION placeholder."
+                ),
+            )
+
+        # 6) security: only NETWORK_AUTH is buildable for v1.
+        security = config.get("security", "NETWORK_AUTH")
+        if security not in cls.SUPPORTED_SECURITY_MODES:
+            return BuilderValidationError(
+                f"security {security!r} is not supported by the SOAP Client "
+                f"builder (only {', '.join(cls.SUPPORTED_SECURITY_MODES)})",
+                error_code="SOAP_UNSUPPORTED_SECURITY",
+                field="security",
+                hint=(
+                    "Use security='NETWORK_AUTH' (the only verified SOAP Client "
+                    "security mode). " + cls._ESCAPE_HATCH_HINT
+                ),
+            )
+
+        # 7) username required for NETWORK_AUTH.
+        username = config.get("username")
+        if not isinstance(username, str) or not username.strip():
+            return BuilderValidationError(
+                "username is required (non-empty string) for SOAP Client "
+                "NETWORK_AUTH",
+                error_code="SOAP_CONNECTOR_VALIDATION_FAILED",
+                field="username",
+                hint=(
+                    "Provide username as a non-empty string. NETWORK_AUTH sends "
+                    "the credential during the transport handshake; the password "
+                    "is supplied via an environment extension / the Boomi UI."
+                ),
+            )
+
+        # 8) credential_ref required, opaque, never emitted.
+        credential_ref = config.get("credential_ref")
+        if not credential_ref or not str(credential_ref).strip():
+            return BuilderValidationError(
+                "credential_ref is required for SOAP Client NETWORK_AUTH",
+                error_code="MISSING_CREDENTIAL_REF",
+                field="credential_ref",
+                hint=(
+                    "Pass credential_ref='credential://<vendor>/<role>' as an "
+                    "opaque reference. Boomi stores the actual password as "
+                    "ciphertext; the builder never writes it into XML."
+                ),
+            )
+        if not str(credential_ref).strip().startswith("credential://"):
+            return BuilderValidationError(
+                "credential_ref must begin with 'credential://'",
+                error_code="SOAP_SECRET_VALUE_FORBIDDEN",
+                field="credential_ref",
+                hint=(
+                    "Pass an opaque credential_ref string starting with "
+                    "'credential://'; the builder never writes raw secret "
+                    "values into XML."
+                ),
+            )
+
+        # 9) Optional certificate aliases must be UUID-shaped component ids.
+        for cert_field in cls._CERT_REF_FIELDS:
+            if cert_field in config and config[cert_field] not in (None, ""):
+                value = config[cert_field]
+                if not isinstance(value, str) or not cls._BOOMI_COMPONENT_ID_RE.match(
+                    value.strip()
+                ):
+                    return BuilderValidationError(
+                        f"{cert_field} must be a Boomi certificate component id "
+                        "(canonical UUID 8-4-4-4-12 hex form)",
+                        error_code="SOAP_CONNECTOR_VALIDATION_FAILED",
+                        field=cert_field,
+                        hint=(
+                            "Pass the GUID-shaped Boomi component id — NOT PEM "
+                            "content, NOT a credential:// reference. Create the "
+                            "certificate component first, then reference its id."
+                        ),
+                    )
+
+        # 10) WS-Security is deferred: reject a non-empty wss_security_options.
+        wss = config.get("wss_security_options")
+        if wss not in (None, "", {}, []):
+            return BuilderValidationError(
+                "wss_security_options is not yet supported by the SOAP Client "
+                "builder (WS-Security is deferred for v1)",
+                error_code="UNSUPPORTED_SOAP_WSS_SECURITY",
+                field="wss_security_options",
+                hint=(
+                    "Omit wss_security_options (the builder emits an empty "
+                    "<WSSecurityOptions/>). " + cls._ESCAPE_HATCH_HINT
+                ),
+            )
+
+        return None
+
+    @staticmethod
+    def _field(field_id: str, value: Any, field_type: str = "string") -> str:
+        return RestClientConnectionBuilder._field(field_id, value, field_type)
+
+    @staticmethod
+    def _cert_field(field_id: str, value: Any, field_type: str) -> str:
+        """Emit a certificate field: self-closing when empty (matches the live
+        clientsslalias/trustsslalias shape), value-bearing when a ref is set."""
+        return RestClientConnectionBuilder._field_self_closing_when_empty(
+            field_id, value, field_type
+        )
+
+    def build(self, **params) -> str:
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        component_name = params["component_name"]
+        wsdl_url = params["wsdl_url"]
+        endpoint_url = params["endpoint_url"]
+        security = params.get("security", "NETWORK_AUTH")
+        username = params["username"]
+        client_ssl_alias = params.get("client_ssl_alias", "")
+        trust_ssl_alias = params.get("trust_ssl_alias", "")
+        folder_name = params.get("folder_name", "Home")
+        description = params.get("description", "")
+
+        safe_name = _escape_xml(component_name)
+        safe_folder = _escape_xml(folder_name)
+        safe_desc = _escape_xml(description)
+
+        fields = []
+        fields.append(self._field("url", wsdl_url))
+        fields.append(self._field("endpoint", endpoint_url))
+        fields.append(self._field("security", security))
+        fields.append(self._field("username", username))
+        # password is always emitted empty — the credential lives in an
+        # environment extension (NETWORK_AUTH), never in the component XML.
+        fields.append(self._field("password", "", "password"))
+        fields.append(self._cert_field("clientsslalias", client_ssl_alias, "privatecertificate"))
+        fields.append(self._cert_field("trustsslalias", trust_ssl_alias, "publiccertificate"))
+        # WS-Security wrapper: an empty <WSSecurityOptions/> inside the field
+        # (verified live shape; WS-Security config is deferred for v1).
+        fields.append(
+            '            <field id="wsssecurityOptions" type="wssecurity">'
+            '<WSSecurityOptions/></field>\n'
+        )
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
+            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+            f'               type="connector-settings" subType="{SOAP_CLIENT_SUBTYPE}"\n'
+            f'               name="{safe_name}"\n'
+            f'               folderName="{safe_folder}">\n'
+            '    <bns:encryptedValues/>\n'
+            f'    <bns:description>{safe_desc}</bns:description>\n'
+            '    <bns:object>\n'
+            '        <GenericConnectionConfig xmlns="">\n'
+            f'{"".join(fields)}'
+            '        </GenericConnectionConfig>\n'
+            '    </bns:object>\n'
+            '</bns:Component>'
+        )
+
+
+class SoapClientOperationBuilder:
+    """Builder for Boomi Web Services SOAP Client connector-action (#126).
+
+    SOAP Client exposes a single outbound EXECUTE action. The operation carries
+    XML request/response profiles, envelope-exposure flags, and an INPUT
+    ``<cookie>`` whose ``<value>`` holds a serialized WSDL-metadata document
+    generated from the structured ``wsdl_metadata`` config. Byte-locked against
+    live operation 0131372a ("3E SOAP Ping").
+
+    Config keys:
+        connector_type:        consumed by the dispatcher.
+        component_name:        required.
+        operation_mode:        "execute" only (SOAP Client is EXECUTE-only).
+        connection_ref_key:    required; the SOAP connector-settings key bound
+                               at process time (cross-step depends_on check in
+                               integration_builder._check_soap_operation_dependencies).
+        request_profile_id:    required; XML request profile id or $ref token.
+        response_profile_id:   required; XML response profile id or $ref token.
+        request_profile_type:  optional, "xml" only (default "xml").
+        response_profile_type: optional, "xml" only (default "xml").
+        object_type_id / object_type_name: optional; default to the WSDL
+                               operation name.
+        return_application_errors: optional bool, default False.
+        track_response:        optional bool, default False.
+        expose_request_envelope:  optional bool, default True.
+        expose_response_envelope: optional bool, default False.
+        attachment_cache_id:   optional Boomi documentcache component id.
+        wsdl_metadata:         required dict of caller-provided WSDL-derived
+                               values (see _REQUIRED_WSDL_METADATA_FIELDS). No
+                               canned SOAP envelope / payload is ever accepted.
+    """
+
+    SUPPORTED_OPERATION_MODES = ("execute",)
+    SUPPORTED_PROFILE_TYPES = ("xml",)
+    # Canned SOAP payload / envelope inputs are out of scope (M5 keeps SOAP
+    # operation inputs task-specific) — reject them with the escape-hatch hint.
+    _FORBIDDEN_PAYLOAD_FIELDS = (
+        "soap_body",
+        "soap_envelope",
+        "raw_envelope",
+        "request_payload",
+        "headers",
+    )
+    _REQUIRED_WSDL_METADATA_FIELDS = (
+        "operation_name",
+        "soap_action",
+        "metadata_connection_url",
+        "service_name",
+        "service_namespace",
+        "port_name",
+        "binding_style",
+        "binding_use",
+        "binding_protocol",
+        "operation_style",
+        "operation_use",
+        "input_message_name",
+        "input_message_namespace",
+        "output_message_name",
+        "output_message_namespace",
+    )
+    FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
+    _ALLOWED_FIELDS = frozenset({
+        # Framework routing keys that legitimately flow into the builder
+        # (create dispatch / integration spec) — tolerated, not user fields.
+        "component_type",
+        "connector_type",
+        "component_name",
+        "folder_name",
+        "description",
+        "operation_mode",
+        "connection_ref_key",
+        "object_type_id",
+        "object_type_name",
+        "request_profile_id",
+        "response_profile_id",
+        "request_profile_type",
+        "response_profile_type",
+        "return_application_errors",
+        "track_response",
+        "expose_request_envelope",
+        "expose_response_envelope",
+        "attachment_cache_id",
+        "wsdl_metadata",
+    })
+    _ESCAPE_HATCH_HINT = SoapClientConnectionBuilder._ESCAPE_HATCH_HINT
+
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+            config, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+
+    @classmethod
+    def _validate_profile_ref(
+        cls, value: Any, field: str
+    ) -> Optional[BuilderValidationError]:
+        if not isinstance(value, str):
+            return None
+        if value.startswith("$ref:") and not value[5:]:
+            return BuilderValidationError(
+                f"{field} $ref token is empty (expected '$ref:KEY')",
+                error_code="SOAP_PROFILE_REF_UNRESOLVED",
+                field=field,
+                hint=(
+                    "Use '$ref:<profile key>' to reference an XML profile "
+                    "component declared earlier in the same integration spec."
+                ),
+            )
+        return None
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate a SOAP Client operation config without building XML."""
+        # 1) Plaintext secret-shaped keys.
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        # 2) Reject canned SOAP payload/envelope fields (out of scope).
+        for forbidden in cls._FORBIDDEN_PAYLOAD_FIELDS:
+            if forbidden in config:
+                return BuilderValidationError(
+                    f"'{forbidden}' is not supported: the SOAP Client builder "
+                    "does not accept canned SOAP envelopes or payloads",
+                    error_code="SOAP_UNSUPPORTED_FIELD",
+                    field=forbidden,
+                    hint=(
+                        "The request body is supplied by the surrounding "
+                        "map/pipeline stage via the XML request profile — not "
+                        "as a canned envelope. " + cls._ESCAPE_HATCH_HINT
+                    ),
+                )
+
+        # 3) Unknown field rejection (closed allowlist) with escape-hatch hint.
+        for key in config:
+            if key not in cls._ALLOWED_FIELDS:
+                return BuilderValidationError(
+                    f"'{key}' is not a supported SOAP Client operation field",
+                    error_code="SOAP_UNSUPPORTED_FIELD",
+                    field=key,
+                    hint=cls._ESCAPE_HATCH_HINT,
+                )
+
+        # 4) operation_mode must be 'execute'.
+        raw_mode = config.get("operation_mode")
+        operation_mode = raw_mode.lower() if isinstance(raw_mode, str) else ""
+        if operation_mode not in cls.SUPPORTED_OPERATION_MODES:
+            return BuilderValidationError(
+                "operation_mode must be 'execute' for SOAP Client operations",
+                error_code="UNSUPPORTED_SOAP_OPERATION_MODE",
+                field="operation_mode",
+                hint=(
+                    "SOAP Client exposes a single EXECUTE action (request/"
+                    "response). Use operation_mode='execute'."
+                ),
+            )
+
+        # 5) component_name required.
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required",
+                error_code="SOAP_OPERATION_VALIDATION_FAILED",
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        # 6) connection_ref_key required (cross-step depends_on check lives in
+        #    integration_builder._check_soap_operation_dependencies).
+        connection_ref_key = config.get("connection_ref_key")
+        if not connection_ref_key or not str(connection_ref_key).strip():
+            return BuilderValidationError(
+                "connection_ref_key is required for SOAP operations",
+                error_code="SOAP_CONNECTION_REF_REQUIRED",
+                field="connection_ref_key",
+                hint=(
+                    "Declare the SOAP connector-settings key the operation binds "
+                    "to at process time, and add the same key to depends_on so "
+                    "plan ordering is correct."
+                ),
+            )
+
+        # 7) request/response profiles required, XML-only.
+        for id_field, type_field in (
+            ("request_profile_id", "request_profile_type"),
+            ("response_profile_id", "response_profile_type"),
+        ):
+            profile_id = config.get(id_field)
+            if not profile_id or not str(profile_id).strip():
+                return BuilderValidationError(
+                    f"{id_field} is required for SOAP Client operations",
+                    error_code="SOAP_OPERATION_VALIDATION_FAILED",
+                    field=id_field,
+                    hint=(
+                        "Provide the XML profile component id, or a "
+                        "'$ref:<profile key>' token resolving to an XML profile "
+                        "created earlier in the integration plan."
+                    ),
+                )
+            ref_err = cls._validate_profile_ref(config.get(id_field), id_field)
+            if ref_err is not None:
+                return ref_err
+            profile_type = config.get(type_field, "xml")
+            if str(profile_type).lower() not in cls.SUPPORTED_PROFILE_TYPES:
+                return BuilderValidationError(
+                    f"{type_field} must be 'xml' for SOAP Client operations",
+                    error_code="UNSUPPORTED_SOAP_PROFILE_TYPE",
+                    field=type_field,
+                    hint=(
+                        "SOAP messages are XML — only XML request/response "
+                        "profiles are supported. " + cls._ESCAPE_HATCH_HINT
+                    ),
+                )
+
+        # 8) wsdl_metadata required and structurally complete.
+        wsdl_metadata = config.get("wsdl_metadata")
+        if not isinstance(wsdl_metadata, dict) or not wsdl_metadata:
+            return BuilderValidationError(
+                "wsdl_metadata is required for SOAP Client operations",
+                error_code="SOAP_WSDL_METADATA_REQUIRED",
+                field="wsdl_metadata",
+                hint=(
+                    "Provide the structured WSDL-derived metadata (operation "
+                    "name, soap action, service/port/binding, input/output "
+                    "message names + namespaces, and parameters). WSDL discovery "
+                    "is out of scope (#126) — pass caller-provided or "
+                    "live-exported values."
+                ),
+            )
+        for meta_field in cls._REQUIRED_WSDL_METADATA_FIELDS:
+            value = wsdl_metadata.get(meta_field)
+            if not isinstance(value, str) or not value.strip():
+                return BuilderValidationError(
+                    f"wsdl_metadata.{meta_field} is required (non-empty string)",
+                    error_code="SOAP_WSDL_METADATA_INCOMPLETE",
+                    field=f"wsdl_metadata.{meta_field}",
+                    hint=(
+                        "Every scalar WSDL-metadata field must be supplied so "
+                        "the operation cookie is complete. Derive these from the "
+                        "WSDL (or a live export)."
+                    ),
+                )
+        for params_field in ("input_parameters", "output_parameters"):
+            params_value = wsdl_metadata.get(params_field)
+            if not isinstance(params_value, list) or not params_value:
+                return BuilderValidationError(
+                    f"wsdl_metadata.{params_field} must be a non-empty list",
+                    error_code="SOAP_WSDL_METADATA_INCOMPLETE",
+                    field=f"wsdl_metadata.{params_field}",
+                    hint=(
+                        "Provide at least one parameter object with name, "
+                        "element_name, and element_ns for the SOAP body."
+                    ),
+                )
+            for idx, param in enumerate(params_value):
+                if not isinstance(param, dict):
+                    return BuilderValidationError(
+                        f"wsdl_metadata.{params_field}[{idx}] must be an object",
+                        error_code="SOAP_WSDL_METADATA_INCOMPLETE",
+                        field=f"wsdl_metadata.{params_field}[{idx}]",
+                        hint="Each parameter is an object with name/element_name/element_ns.",
+                    )
+                for param_key in ("name", "element_name", "element_ns"):
+                    param_val = param.get(param_key)
+                    if not isinstance(param_val, str) or not param_val.strip():
+                        return BuilderValidationError(
+                            f"wsdl_metadata.{params_field}[{idx}].{param_key} is "
+                            "required (non-empty string)",
+                            error_code="SOAP_WSDL_METADATA_INCOMPLETE",
+                            field=f"wsdl_metadata.{params_field}[{idx}].{param_key}",
+                            hint="Provide the SOAP body parameter name/element/namespace.",
+                        )
+
+        # 9) attachment_cache_id, when present, must be a UUID component id.
+        cache_id = config.get("attachment_cache_id")
+        if cache_id not in (None, ""):
+            if not isinstance(
+                cache_id, str
+            ) or not SoapClientConnectionBuilder._BOOMI_COMPONENT_ID_RE.match(
+                cache_id.strip()
+            ):
+                return BuilderValidationError(
+                    "attachment_cache_id must be a Boomi document-cache "
+                    "component id (canonical UUID 8-4-4-4-12 hex form)",
+                    error_code="SOAP_OPERATION_VALIDATION_FAILED",
+                    field="attachment_cache_id",
+                    hint="Pass the GUID-shaped document-cache component id.",
+                )
+
+        return None
+
+    @staticmethod
+    def _param_xml(param: Dict[str, Any]) -> str:
+        """Build a single <Parameter> element for the WSDL-metadata cookie."""
+        hidden = param.get("hidden", False)
+        soap_location = param.get("soap_location", "body")
+        name = _escape_xml_text(str(param["name"]))
+        element_name = _escape_xml_text(str(param["element_name"]))
+        element_ns = _escape_xml_text(str(param["element_ns"]))
+        return (
+            f'<Parameter hidden="{_format_xml_value(bool(hidden))}" '
+            f'soapLocation="{_escape_xml(str(soap_location))}">'
+            f'<name>{name}</name>'
+            f'<elementName>{element_name}</elementName>'
+            f'<elementNS>{element_ns}</elementNS>'
+            '</Parameter>'
+        )
+
+    @classmethod
+    def _build_cookie_document(cls, meta: Dict[str, Any]) -> str:
+        """Serialize the WSDL-metadata document that lives inside the operation
+        cookie's <value> (byte-locked to live op 0131372a). Attribute values are
+        attribute-escaped; the whole document is later text-escaped for <value>."""
+        op_name = _escape_xml(str(meta["operation_name"]))
+        soap_action = _escape_xml(str(meta["soap_action"]))
+        conn_url = _escape_xml(str(meta["metadata_connection_url"]))
+        service_name = _escape_xml(str(meta["service_name"]))
+        service_ns = _escape_xml(str(meta["service_namespace"]))
+        port_name = _escape_xml(str(meta["port_name"]))
+        binding_style = _escape_xml(str(meta["binding_style"]))
+        binding_use = _escape_xml(str(meta["binding_use"]))
+        binding_protocol = _escape_xml(str(meta["binding_protocol"]))
+        op_use = _escape_xml(str(meta["operation_use"]))
+        op_style = _escape_xml(str(meta["operation_style"]))
+        in_msg = _escape_xml(str(meta["input_message_name"]))
+        in_msg_ns = _escape_xml(str(meta["input_message_namespace"]))
+        out_msg = _escape_xml(str(meta["output_message_name"]))
+        out_msg_ns = _escape_xml(str(meta["output_message_namespace"]))
+        rpc_optional = bool(meta.get("rpc_optional_parameters", True))
+        using_envelope = bool(meta.get("using_envelope", True))
+
+        inputs = "".join(cls._param_xml(p) for p in meta["input_parameters"])
+        outputs = "".join(cls._param_xml(p) for p in meta["output_parameters"])
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            f'<WebServiceOperation operationName="{op_name}" soapAction="{soap_action}">'
+            f'<WebServiceConnection url="{conn_url}"/>'
+            '<WebServiceMetaData>'
+            f'<WebServiceDescription serviceName="{service_name}" '
+            f'serviceNamespace="{service_ns}" portName="{port_name}" '
+            f'bindingStyle="{binding_style}" bindingUse="{binding_use}" '
+            f'bindingProtocol="{binding_protocol}">'
+            '<Operations>'
+            f'<WebServiceOperation operationName="{op_name}" '
+            f'soapAction="{soap_action}" operationUse="{op_use}" '
+            f'operationStyle="{op_style}">'
+            f'<Inputs messageName="{in_msg}" messageNamespace="{in_msg_ns}">'
+            f'{inputs}'
+            '</Inputs>'
+            f'<Outputs messageName="{out_msg}" messageNamespace="{out_msg_ns}">'
+            f'{outputs}'
+            '</Outputs>'
+            '<CustomConfiguration>'
+            f'<comBoomiWsRpcOptionalParameters>{_format_xml_value(rpc_optional)}'
+            '</comBoomiWsRpcOptionalParameters>'
+            f'<comBoomiWsUsingEnvelope>{_format_xml_value(using_envelope)}'
+            '</comBoomiWsUsingEnvelope>'
+            '</CustomConfiguration>'
+            '</WebServiceOperation>'
+            '</Operations>'
+            '</WebServiceDescription>'
+            '</WebServiceMetaData>'
+            '</WebServiceOperation>'
+        )
+
+    def build(self, **params) -> str:
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        component_name = params["component_name"]
+        folder_name = params.get("folder_name", "Home")
+        description = params.get("description", "")
+        wsdl_metadata = params["wsdl_metadata"]
+        operation_name = str(wsdl_metadata["operation_name"])
+
+        object_type_id = str(params.get("object_type_id") or operation_name)
+        object_type_name = str(params.get("object_type_name") or operation_name)
+
+        request_profile_id = str(params["request_profile_id"])
+        response_profile_id = str(params["response_profile_id"])
+        request_profile_type = str(params.get("request_profile_type", "xml")).lower()
+        response_profile_type = str(params.get("response_profile_type", "xml")).lower()
+
+        rae = bool(params.get("return_application_errors", False))
+        track_response = bool(params.get("track_response", False))
+        expose_request = bool(params.get("expose_request_envelope", True))
+        expose_response = bool(params.get("expose_response_envelope", False))
+        attachment_cache_id = params.get("attachment_cache_id", "")
+
+        safe_name = _escape_xml(component_name)
+        safe_folder = _escape_xml(folder_name)
+        safe_desc = _escape_xml(description)
+
+        op_envelope_attrs = (
+            f'returnApplicationErrors="{_format_xml_value(rae)}"'
+            f' trackResponse="{_format_xml_value(track_response)}"'
+        )
+        goc_attrs = (
+            f'objectTypeId="{_escape_xml(object_type_id)}"'
+            f' objectTypeName="{_escape_xml(object_type_name)}"'
+            ' operationType="EXECUTE"'
+            f' requestProfile="{_escape_xml(request_profile_id)}"'
+            f' requestProfileType="{_escape_xml(request_profile_type)}"'
+            f' responseProfile="{_escape_xml(response_profile_id)}"'
+            f' responseProfileType="{_escape_xml(response_profile_type)}"'
+        )
+
+        cookie_value = _escape_xml_text(self._build_cookie_document(wsdl_metadata))
+        # attachmentCache is self-closing when empty (matches the live op export);
+        # value-bearing only when a document-cache component id is supplied.
+        if attachment_cache_id:
+            attachment_field = (
+                '                    <field id="attachmentCache" type="component" '
+                f'value="{_escape_xml(str(attachment_cache_id))}"/>\n'
+            )
+        else:
+            attachment_field = (
+                '                    <field id="attachmentCache" type="component"/>\n'
+            )
+        query_object_name = _escape_xml(object_type_name)
+
+        body_inner = (
+            f'                <GenericOperationConfig {goc_attrs}>\n'
+            f'                    <field id="exposeRequestEnvelope" type="boolean" value="{_format_xml_value(expose_request)}"/>\n'
+            f'                    <field id="exposeResponseEnvelope" type="boolean" value="{_format_xml_value(expose_response)}"/>\n'
+            f'{attachment_field}'
+            f'                    <cookie role="INPUT"><value>{cookie_value}</value></cookie>\n'
+            '                    <Options><QueryOptions>'
+            f'<Fields><ConnectorObject name="{query_object_name}"><FieldList/></ConnectorObject></Fields>'
+            '<Inputs/></QueryOptions></Options>\n'
+            '                </GenericOperationConfig>\n'
+        )
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
+            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+            f'               type="connector-action" subType="{SOAP_CLIENT_SUBTYPE}"\n'
+            f'               name="{safe_name}"\n'
+            f'               folderName="{safe_folder}">\n'
+            '    <bns:encryptedValues/>\n'
+            f'    <bns:description>{safe_desc}</bns:description>\n'
+            '    <bns:object>\n'
+            f'        <Operation xmlns="" {op_envelope_attrs}>\n'
+            '            <Archiving directory="" enabled="false"/>\n'
+            '            <Configuration>\n'
+            f'{body_inner}'
+            '            </Configuration>\n'
+            '            <Tracking><TrackedFields/></Tracking>\n'
+            '            <Caching/>\n'
+            '        </Operation>\n'
+            '    </bns:object>\n'
+            '</bns:Component>'
+        )
+
+
+# ============================================================================
 # Registry
 # ============================================================================
 
@@ -3414,6 +4313,9 @@ CONNECTOR_BUILDERS: Dict[str, type] = {
     "rest": RestClientConnectionBuilder,
     "rest_client": RestClientConnectionBuilder,
     REST_CLIENT_SUBTYPE.lower(): RestClientConnectionBuilder,
+    "soap_client": SoapClientConnectionBuilder,
+    "web_services_soap_client": SoapClientConnectionBuilder,
+    SOAP_CLIENT_SUBTYPE.lower(): SoapClientConnectionBuilder,
 }
 
 
@@ -3425,6 +4327,8 @@ DatabaseGetOperationBuilder.PRESERVATION_POLICY = _DATABASE_GET_OPERATION_POLICY
 DatabaseSendOperationBuilder.PRESERVATION_POLICY = _DATABASE_SEND_OPERATION_POLICY
 RestClientConnectionBuilder.PRESERVATION_POLICY = _REST_CLIENT_CONNECTION_POLICY
 RestClientOperationBuilder.PRESERVATION_POLICY = _REST_CLIENT_OPERATION_POLICY
+SoapClientConnectionBuilder.PRESERVATION_POLICY = _SOAP_CLIENT_CONNECTION_POLICY
+SoapClientOperationBuilder.PRESERVATION_POLICY = _SOAP_CLIENT_OPERATION_POLICY
 
 
 def get_connector_builder(connector_type: str):
@@ -3444,6 +4348,9 @@ CONNECTOR_ACTION_BUILDERS: Dict[tuple, type] = {
     ("rest", "execute"): RestClientOperationBuilder,
     ("rest_client", "execute"): RestClientOperationBuilder,
     (REST_CLIENT_SUBTYPE.lower(), "execute"): RestClientOperationBuilder,
+    ("soap_client", "execute"): SoapClientOperationBuilder,
+    ("web_services_soap_client", "execute"): SoapClientOperationBuilder,
+    (SOAP_CLIENT_SUBTYPE.lower(), "execute"): SoapClientOperationBuilder,
 }
 
 

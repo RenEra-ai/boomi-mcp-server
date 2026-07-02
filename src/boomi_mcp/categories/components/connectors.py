@@ -38,7 +38,9 @@ from ._shared import (
 from .builders.connector_builder import (
     BuilderValidationError,
     RestClientOperationBuilder,
+    SoapClientOperationBuilder,
     _resolve_rest_connector_type,
+    _resolve_soap_client_connector_type,
     get_connector_builder, CONNECTOR_BUILDERS,
     get_connector_action_builder, CONNECTOR_ACTION_BUILDERS,
 )
@@ -58,6 +60,15 @@ def _missing_component_name_hint(connector_type: str) -> str:
             '"client_id": "<<client id>>", '
             '"client_secret_ref": "credential://<<vendor>>/oauth-client-secret", '
             '"access_token_url": "https://api.example.com/oauth/token"}}'
+        )
+    if _resolve_soap_client_connector_type(connector_type) is not None:
+        return (
+            f'Provide config: {{"connector_type": "{connector_type}", '
+            '"component_name": "My SOAP Connection", '
+            '"wsdl_url": "https://host/service.asmx?wsdl", '
+            '"endpoint_url": "https://host/service.asmx", '
+            '"security": "NETWORK_AUTH", "username": "svc_user", '
+            '"credential_ref": "credential://<<vendor>>/soap/password"}}'
         )
     if connector_type and connector_type.lower() == "database":
         return (
@@ -146,6 +157,10 @@ def get_connector_type(
     rest_canonical = _resolve_rest_connector_type(connector_type)
     if rest_canonical is not None:
         connector_type = rest_canonical
+    else:
+        soap_canonical = _resolve_soap_client_connector_type(connector_type)
+        if soap_canonical is not None:
+            connector_type = soap_canonical
     try:
         result = boomi_client.connector.get_connector(connector_type)
 
@@ -271,6 +286,10 @@ def list_connectors(
             rest_canonical = _resolve_rest_connector_type(connector_type_filter)
             if rest_canonical is not None:
                 connector_type_filter = rest_canonical
+            else:
+                soap_canonical = _resolve_soap_client_connector_type(connector_type_filter)
+                if soap_canonical is not None:
+                    connector_type_filter = soap_canonical
             expressions.append(ComponentMetadataSimpleExpression(
                 operator=ComponentMetadataSimpleExpressionOperator.EQUALS,
                 property=ComponentMetadataSimpleExpressionProperty.SUBTYPE,
@@ -420,6 +439,10 @@ def create_connector(
                     rest_err = RestClientOperationBuilder.validate_config(config)
                     if rest_err is not None:
                         raise rest_err
+                if _resolve_soap_client_connector_type(connector_type) is not None:
+                    soap_err = SoapClientOperationBuilder.validate_config(config)
+                    if soap_err is not None:
+                        raise soap_err
                 supported_pairs = ', '.join(
                     f"{ct}.{om}" for (ct, om) in sorted(CONNECTOR_ACTION_BUILDERS.keys())
                 )

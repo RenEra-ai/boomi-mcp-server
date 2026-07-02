@@ -1654,6 +1654,83 @@ _COMPONENT_CREATE_CONNECTOR_REST_CLIENT = {
 }
 
 
+_COMPONENT_CREATE_CONNECTOR_SOAP_CLIENT = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-settings",
+    "protocol": "soap.client",
+    "boomi_subtype": "wssoapclientsdk",
+    "public_aliases": ["soap_client", "web_services_soap_client", "wssoapclientsdk"],
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "Boomi Web Services SOAP Client connector-settings (connection) for "
+        "calling outbound SOAP web services (#126). Models the WSDL URL plus a "
+        "distinct service endpoint and NETWORK_AUTH transport credentials. Only "
+        "NETWORK_AUTH security is structurally buildable for v1; other security "
+        "modes and WS-Security return a structured error with a raw-XML "
+        "escape-hatch hint. This is the OUTBOUND SOAP CLIENT — not the inbound "
+        "Web Services Server. Use connector_type='soap_client'. The password is "
+        "never written to XML — supply credential_ref and set the secret via an "
+        "environment extension / the Boomi UI."
+    ),
+    "template": {
+        "connector_type": "soap_client",
+        "component_name": "<<target SOAP connection>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "wsdl_url": "https://<<host>>/<<service>>.asmx?wsdl",
+        "endpoint_url": "https://<<host>>/<<service>>.asmx",
+        "security": "NETWORK_AUTH",
+        "username": "<<service username>>",
+        "credential_ref": "credential://<<vendor>>/<<role>>",
+    },
+    "required": [
+        "connector_type",
+        "component_name",
+        "wsdl_url",
+        "endpoint_url",
+        "username",
+        "credential_ref",
+    ],
+    "defaults": {
+        "connector_type": "soap_client",
+        "security": "NETWORK_AUTH",
+        "folder_name": "Home",
+    },
+    "supported_security_modes": ["NETWORK_AUTH"],
+    "independent_options": {
+        "client_ssl_alias": (
+            "Optional client (private) certificate Boomi component id (GUID) for "
+            "mutual TLS. Maps to the connection `clientsslalias` field."
+        ),
+        "trust_ssl_alias": (
+            "Optional trust (public) certificate Boomi component id (GUID). Maps "
+            "to the connection `trustsslalias` field."
+        ),
+    },
+    "unsupported": {
+        "wss_security_options": (
+            "WS-Security is deferred for v1 — a non-empty value returns "
+            "UNSUPPORTED_SOAP_WSS_SECURITY. Use the raw-XML escape hatch "
+            "(config.xml) if you need WS-Security today."
+        ),
+        "other_security_modes": (
+            "Only NETWORK_AUTH is verified/buildable; other modes return "
+            "SOAP_UNSUPPORTED_SECURITY with a raw-XML escape-hatch hint."
+        ),
+    },
+    "extension_placeholder": (
+        "wsdl_url / endpoint_url / username may be set to the literal "
+        "'SET_BY_EXTENSION' to defer their value to an environment extension."
+    ),
+    "escape_hatch": (
+        "For any unsupported SOAP field, create the connection via the raw-XML "
+        "escape hatch: manage_connector(action='create', config={'xml': '...'}) "
+        "sourced from a live SOAP Client export."
+    ),
+}
+
+
 _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
     "resource_type": "component",
     "operation": "create",
@@ -1665,7 +1742,7 @@ _COMPONENT_CREATE_CONNECTOR_SETTINGS_OVERVIEW = {
         "for a fully-shaped template, or use the raw-XML escape hatch for unsupported "
         "connector types."
     ),
-    "available_protocols": ["database.sqlserver", "rest.client"],
+    "available_protocols": ["database.sqlserver", "rest.client", "soap.client"],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
         "component_type='connector-settings', protocol='<protocol>') for the chosen "
@@ -4501,6 +4578,105 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION = {
 }
 
 
+_COMPONENT_CREATE_CONNECTOR_ACTION_SOAP_OPERATION = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "connector-action",
+    "protocol": "soap.operation",
+    "boomi_subtype": "wssoapclientsdk",
+    "public_aliases": ["soap_client", "web_services_soap_client", "wssoapclientsdk"],
+    "tool": "manage_connector (action='create')",
+    "note": (
+        "Boomi Web Services SOAP Client operation (#126). Wraps a single SOAP "
+        "call in an Operation envelope with GenericOperationConfig "
+        "operationType=EXECUTE. The SOAP Client exposes ONLY the EXECUTE action "
+        "(there is no GET/SEND/verb split) — operation_mode must be 'execute'. "
+        "Request/response profiles are XML-only. The connection is bound at the "
+        "process connector step, not in the operation XML — connection_ref_key is "
+        "plan-only metadata for dependency ordering. The operation's WSDL "
+        "metadata is caller-provided WSDL-derived data (WSDL discovery is out of "
+        "scope, M7); NO canned SOAP envelope or request payload is accepted — the "
+        "request body comes from the surrounding map/pipeline stage via the XML "
+        "request profile."
+    ),
+    "template": {
+        "component_type": "connector-action",
+        "connector_type": "soap_client",
+        "operation_mode": "execute",
+        "component_name": "<<operation name>>",
+        "folder_name": "<<folder>>",
+        "description": "<<optional description>>",
+        "connection_ref_key": "<<soap connection key>>",
+        "request_profile_type": "xml",
+        "request_profile_id": "$ref:<<request profile key>>",
+        "response_profile_type": "xml",
+        "response_profile_id": "$ref:<<response profile key>>",
+        "expose_request_envelope": True,
+        "expose_response_envelope": False,
+        "wsdl_metadata": {
+            "operation_name": "<<WSDL operation name>>",
+            "soap_action": "<<SOAP action URI>>",
+            "metadata_connection_url": "https://<<host>>/<<service>>.asmx",
+            "service_name": "<<WSDL service name>>",
+            "service_namespace": "<<service namespace URI>>",
+            "port_name": "<<WSDL port name>>",
+            "binding_style": "document",
+            "binding_use": "literal",
+            "binding_protocol": "soap_1_1",
+            "operation_style": "document",
+            "operation_use": "literal",
+            "input_message_name": "<<input message name>>",
+            "input_message_namespace": "<<input message namespace>>",
+            "output_message_name": "<<output message name>>",
+            "output_message_namespace": "<<output message namespace>>",
+            "input_parameters": [
+                {"name": "<<param>>", "element_name": "<<element>>", "element_ns": "<<namespace>>"}
+            ],
+            "output_parameters": [
+                {"name": "<<param>>", "element_name": "<<element>>", "element_ns": "<<namespace>>"}
+            ],
+            "rpc_optional_parameters": True,
+            "using_envelope": True,
+        },
+    },
+    "required": [
+        "connector_type",
+        "operation_mode",
+        "component_name",
+        "connection_ref_key",
+        "request_profile_id",
+        "response_profile_id",
+        "wsdl_metadata",
+    ],
+    "defaults": {
+        "connector_type": "soap_client",
+        "operation_mode": "execute",
+        "request_profile_type": "xml",
+        "response_profile_type": "xml",
+        "expose_request_envelope": True,
+        "expose_response_envelope": False,
+        "return_application_errors": False,
+        "track_response": False,
+        "object_type_id": "<<defaults to wsdl_metadata.operation_name>>",
+        "object_type_name": "<<defaults to wsdl_metadata.operation_name>>",
+    },
+    "constraints": {
+        "operation_mode": "Must be 'execute' (SOAP Client is EXECUTE-only).",
+        "profile_types": "request/response profiles are XML-only.",
+        "no_canned_payload": (
+            "Fields like soap_body / soap_envelope / raw_envelope / request_payload "
+            "/ headers are rejected (SOAP_UNSUPPORTED_FIELD). The request body is "
+            "supplied by the map/pipeline stage via the request profile."
+        ),
+    },
+    "escape_hatch": (
+        "For any unsupported SOAP operation field, create the operation via the "
+        "raw-XML escape hatch (manage_connector action='create' config={'xml': "
+        "'...'}) sourced from a live SOAP Client operation export."
+    ),
+}
+
+
 _COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW = {
     "resource_type": "component",
     "operation": "create",
@@ -4508,10 +4684,10 @@ _COMPONENT_CREATE_CONNECTOR_ACTION_OVERVIEW = {
     "tool": "manage_connector (action='create')",
     "note": (
         "Connector-action (operation) builders. Available: database.get "
-        "(issue #23), database.send (issue #32), and rest.operation "
-        "(issue #24)."
+        "(issue #23), database.send (issue #32), rest.operation (issue #24), "
+        "and soap.operation (issue #126, SOAP Client EXECUTE)."
     ),
-    "available_protocols": ["database.get", "database.send", "rest.operation"],
+    "available_protocols": ["database.get", "database.send", "rest.operation", "soap.operation"],
     "hint": (
         "Re-call get_schema_template(resource_type='component', operation='create', "
         "component_type='connector-action', protocol='<protocol>') for the chosen "
@@ -6926,10 +7102,11 @@ _PROCESS_FLOW_PROTOCOLS = {
         },
         "field_notes": {
             "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
-            "pipeline.stages[].kind": "One of read/fetch/map/send/write. The source is exactly one of read (DB Get) or fetch (REST GET); the target is send (REST) or write (DB Send, M5.8 #74 — from a fetch source); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
-            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' for a fetch stage, 'map' for a map stage, 'rest_send' for a send stage, 'db_write' for a write stage (M5.8 #74). A primitive on the wrong stage (e.g. 'db_write' on a 'send' stage, or 'rest_fetch' on a non-fetch stage) is rejected with a hint pointing at the right stage.",
+            "pipeline.stages[].kind": "One of read/fetch/map/send/write. The source is read (DB Get), fetch(rest_fetch) (REST GET), or fetch(soap_fetch) (SOAP EXECUTE, #126); the target is send(rest_send) (REST), send(soap_send) (SOAP EXECUTE, #126), or write (DB Send, M5.8 #74 — from a fetch source); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
+            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' OR 'soap_fetch' for a fetch stage (#126), 'map' for a map stage, 'rest_send' OR 'soap_send' for a send stage (#126), 'db_write' for a write stage (M5.8 #74). A fetch/send stage's declared primitive selects the REST-vs-SOAP connector family. A primitive on the wrong stage (e.g. 'db_write' on a 'send' stage, or 'rest_fetch' on a non-fetch stage) is rejected with a hint pointing at the right stage.",
             "pipeline.stages[].config": "read/fetch/send/write carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
-            "fetch": "A fetch stage (config.primitive='rest_fetch') is a static REST GET source (M5.4 #72). It carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body). The operation's param/header/path SLOTS are modeled on the rest_fetch primitive; the runtime binding that fills those slots with per-document values via dynamicProperties is owned by #96 (M5.4a). action_type defaults to 'GET' and must be 'GET' (GET-only in M5.4).",
+            "fetch": "A fetch stage is a REST GET source (config.primitive='rest_fetch', M5.4 #72) or a SOAP Client EXECUTE source (config.primitive='soap_fetch', #126). A rest_fetch carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body); action_type defaults to 'GET' and must be 'GET'. A soap_fetch lowers to connectorType='wssoapclientsdk'; action_type defaults to 'EXECUTE' and must be 'EXECUTE' (SOAP Client is EXECUTE-only).",
+            "send": "A send stage is a REST target (config.primitive='rest_send') carrying an explicit HTTP method, or a SOAP Client EXECUTE target (config.primitive='soap_send', #126) which lowers to connectorType='wssoapclientsdk' with action_type defaulting to (and required to be) 'EXECUTE'.",
             "write": "A write stage (config.primitive='db_write') is a database Send/write target (M5.8 #74, api_to_database_sync) — supported only from a fetch source. It lowers to a database connector binding (connectorType='database', actionType='Send'); action_type defaults to 'Send'. The write profile + Send operation are built by the confirmed #32 builders, so unconfirmed write-profile statement_type variants (e.g. 'upsert') are rejected (UNSUPPORTED_DB_STATEMENT_TYPE) when the components are built.",
             "pipeline.stages[].config.map_ref": "The map component id or a $ref:KEY token. Its reachability is enforced (MISSING_PROCESS_DEPENDENCY if the $ref key is not in depends_on), but its component TYPE is not type-checked at plan time — matching database_to_api_sync's transform.map_ref. A shared map-ref role check is a future concern.",
             "pipeline.dependencies": "Typed edges; sync_pipeline requires every edge to be edge_kind='ordering' (the default). The chain must be a single read -> [map] -> send path with no fan-out/fan-in.",
@@ -7122,6 +7299,8 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_DATABASE_SQLSERVER}
             if protocol == "rest.client":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_REST_CLIENT}
+            if protocol == "soap.client":
+                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_SOAP_CLIENT}
             if protocol:
                 return {
                     "_success": False,
@@ -7195,6 +7374,8 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_SEND}
             if protocol == "rest.operation":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_REST_OPERATION}
+            if protocol == "soap.operation":
+                return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_SOAP_OPERATION}
             if protocol:
                 return {
                     "_success": False,
