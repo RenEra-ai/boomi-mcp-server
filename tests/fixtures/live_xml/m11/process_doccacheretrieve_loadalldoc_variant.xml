@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?><bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bns="http://api.platform.boomi.com/" folderFullPath="acct-sandbox/zDevelopment/DevOne/Import" componentId="62c6cedb-d16f-468c-8e21-a9857e8bd468" version="1" name="[Client Time 3E Reverse Sync] Process Patches from Cache" type="process" createdDate="2026-04-15T18:20:47Z" createdBy="dev.one@client.example" modifiedDate="2026-04-15T18:20:47Z" modifiedBy="dev.one@client.example" deleted="false" currentVersion="true" folderName="Import" folderId="Rjo3ODQ1MjU4" copiedFromComponentId="f6a52407-85f4-442c-b22f-83851738021d" copiedFromComponentVersion="6" branchName="main" branchId="QjoyODc5NDg"><bns:encryptedValues/><bns:description></bns:description><bns:object><process xmlns="" allowSimultaneous="false" enableUserLog="false" processLogOnErrorOnly="false" purgeDataImmediately="false" updateRunDates="false" workload="general"><shapes><shape image="start" name="shape1" shapetype="start" userlabel="Process Patches from Cache" x="48.0" y="48.0"><configuration><passthroughaction/></configuration><dragpoints><dragpoint name="shape1.dragpoint1" toShape="shape18" x="224.0" y="56.0"/></dragpoints></shape><shape image="connectoraction_icon" name="shape5" shapetype="connectoraction" userlabel="Calling Client Time Patch TimeEntries" x="2160.0" y="208.0"><configuration><connectoraction actionType="PATCH" allowDynamicCredentials="NONE" connectionId="13ed2fc2-f8e9-4d67-a0b8-d521ecb257a2" connectorType="clientoemprod-X3ABOD-client-dev" hideSettings="false" operationId="79bf108a-adda-47ac-b098-ea7a83a5f92d" parameter-profile="941a3043-4d37-42f2-b727-007382c456df"><parameters/><dynamicProperties/></connectoraction></configuration><dragpoints><dragpoint name="shape5.dragpoint1" toShape="shape8" x="2336.0" y="216.0"/></dragpoints></shape><shape image="documentproperties_icon" name="shape7" shapetype="documentproperties" userlabel="Store Original Document(s) set DDP_ORIGINAL_DOCUMENT" x="1392.0" y="208.0"><configuration><documentproperties><documentproperty defaultValue="" isDynamicCredential="false" isTradingPartner="false" name="Dynamic Document Property - DDP_ORIGINAL_DOCUMENT" persist="false" propertyId="dynamicdocument.DDP_ORIGINAL_DOCUMENT" shouldEncrypt="false"><sourcevalues><parametervalue key="1" valueType="current"/></sourcevalues></documentproperty></documentproperties></configuration><dragpoints><dragpoint name="shape7.dragpoint1" toShape="shape9" x="1568.0" y="216.0"/></dragpoints></shape><shape image="decision_icon" name="shape3" shapetype="decision" userlabel="if DPP_TEST_INSTALLATION is false, go ahead and POST" x="1776.0" y="208.0"><configuration><decision comparison="equals" name="if DPP_TEST_INSTALLATION is false, go ahead and POST"><decisionvalue valueType="process"><processparameter processproperty="DPP_TEST_INSTALLATION" processpropertydefaultvalue=""/></decisionvalue><decisionvalue valueType="static"><staticparameter staticproperty="false"/></decisionvalue></decision></configuration><dragpoints><dragpoint identifier="true" name="shape3.dragpoint1" text="True" toShape="shape6" x="1952.0" y="216.0"/><dragpoint identifier="false" name="shape3.dragpoint2" text="False" toShape="shape14" x="1952.0" y="536.0"/></dragpoints></shape><shape image="processcall_icon" name="shape4" shapetype="processcall" userlabel="" x="2160.0" y="368.0"><configuration><processcall abort="true" processId="c2692a60-5b71-4a30-ba84-1c6023c9b196" wait="true"><parameters/><returnpaths/></processcall></configuration><dragpoints/></shape><shape image="stop_icon" name="shape2" shapetype="stop" userlabel="" x="2736.0" y="208.0"><configuration><stop continue="true"/></configuration><dragpoints/></shape><shape image="catcherrors_icon" name="shape6" shapetype="catcherrors" userlabel="Try/Catch Document Errors.- All Error codes Retried by Default in the Connector" x="1968.0" y="208.0"><configuration><catcherrors catchAll="false" retryCount="0"/></configuration><dragpoints><dragpoint identifier="default" name="shape6.dragpoint1" text="Try" toShape="shape5" x="2144.0" y="216.0"/><dragpoint identifier="error" name="shape6.dragpoint2" text="Catch" toShape="shape4" x="2143.0" y="376.0"/></dragpoints></shape><shape image="dataprocess_icon" name="shape8" shapetype="dataprocess" userlabel="Log responses to Live/User Log" x="2352.0" y="208.0"><configuration><dataprocess><step index="1" key="1" name="Custom Scripting" processtype="12"><dataprocessscript componentId="58f089bc-7702-4deb-99ca-39d832eb604a" language="groovy2" useCache="true" useComponent="true"><script>import java.util.Properties;
+import java.io.InputStream;
+
+for( int i = 0; i &lt; dataContext.getDataCount(); i++ ) {
+    InputStream is = dataContext.getStream(i);
+    Properties props = dataContext.getProperties(i);
+
+    dataContext.storeStream(is, props);
+}</script></dataprocessscript></step></dataprocess></configuration><dragpoints><dragpoint name="shape8.dragpoint1" toShape="shape10" x="2527.0" y="216.0"/></dragpoints></shape><shape image="dataprocess_icon" name="shape9" shapetype="dataprocess" userlabel="Log Payloads to Live/User Log" x="1584.0" y="208.0"><configuration><dataprocess><step index="1" key="1" name="Custom Scripting" processtype="12"><dataprocessscript componentId="2fe60918-f7a7-4cc0-9666-c8163f8d9b35" language="groovy2" useCache="true" useComponent="true"><script>import java.util.Properties;
+import java.io.InputStream;
+
+for( int i = 0; i &lt; dataContext.getDataCount(); i++ ) {
+    InputStream is = dataContext.getStream(i);
+    Properties props = dataContext.getProperties(i);
+
+    dataContext.storeStream(is, props);
+}</script></dataprocessscript></step></dataprocess></configuration><dragpoints><dragpoint name="shape9.dragpoint1" toShape="shape3" x="1760.0" y="216.0"/></dragpoints></shape><shape image="processcall_icon" name="shape10" shapetype="processcall" userlabel="" x="2544.0" y="208.0"><configuration><processcall abort="false" processId="eb772b23-e0c1-4f98-bb11-76d00e0d20c5" wait="true"><parameters/><returnpaths><returnpaths childShapeName="shape233" returnLabel=""/></returnpaths></processcall></configuration><dragpoints><dragpoint identifier="shape233" name="shape10.dragpoint1" toShape="shape2" x="2720.0" y="216.0"/></dragpoints></shape><shape image="doccacheload_icon" name="shape12" shapetype="doccacheload" userlabel="For TESTING ONLY, Adding to Cache to see what would have been done" x="2160.0" y="528.0"><configuration><doccacheload docCache="ffe4f507-bb1e-4906-a6d0-62a743976a65"/></configuration><dragpoints/></shape><shape image="doccacheretrieve_icon" name="shape13" shapetype="doccacheretrieve" userlabel="Retrieve from Patching Cache" x="624.0" y="208.0"><configuration><doccacheretrieve docCache="69cc312c-4124-44e1-99e0-6e097eed02c7" emptyCacheBehavior="stopprocess" loadAllDoc="true"><cacheKeyValues/></doccacheretrieve></configuration><dragpoints><dragpoint name="shape13.dragpoint1" toShape="shape32" x="800.0" y="216.0"/></dragpoints></shape><shape image="documentproperties_icon" name="shape14" shapetype="documentproperties" userlabel="Set DDP_ALL" x="1968.0" y="528.0"><configuration><documentproperties><documentproperty defaultValue="" isDynamicCredential="false" isTradingPartner="false" name="Dynamic Document Property - DDP_ALL" persist="false" propertyId="dynamicdocument.DDP_ALL" shouldEncrypt="false"><sourcevalues><parametervalue key="1" valueType="static"><staticparameter staticproperty="ALL"/></parametervalue></sourcevalues></documentproperty></documentproperties></configuration><dragpoints><dragpoint name="shape14.dragpoint1" toShape="shape12" x="2144.0" y="536.0"/></dragpoints></shape><shape image="documentproperties_icon" name="shape15" shapetype="documentproperties" userlabel="set DPP_PROCESS_NAME" x="624.0" y="688.0"><configuration><documentproperties><documentproperty defaultValue="" isDynamicCredential="false" isTradingPartner="false" name="Dynamic Process Property - DPP_PROCESS_NAME" persist="false" propertyId="process.DPP_PROCESS_NAME" shouldEncrypt="false"><sourcevalues><parametervalue key="1" valueType="execution"><executionparameter executionproperty="Process Name"/></parametervalue></sourcevalues></documentproperty></documentproperties></configuration><dragpoints><dragpoint name="shape15.dragpoint1" toShape="shape34" x="815.0" y="696.0"/></dragpoints></shape><shape image="documentproperties_icon" name="shape18" shapetype="documentproperties" userlabel="set DPP_PROCESS_NAME" x="240.0" y="48.0"><configuration><documentproperties><documentproperty defaultValue="" isDynamicCredential="false" isTradingPartner="false" name="Dynamic Process Property - DPP_PROCESS_NAME" persist="false" propertyId="process.DPP_PROCESS_NAME" shouldEncrypt="false"><sourcevalues><parametervalue key="1" valueType="execution"><executionparameter executionproperty="Process Name"/></parametervalue></sourcevalues></documentproperty></documentproperties></configuration><dragpoints><dragpoint name="shape18.dragpoint1" toShape="shape17" x="416.0" y="56.0"/></dragpoints></shape><shape image="branch_icon" name="shape17" shapetype="branch" userlabel="" x="432.0" y="48.0"><configuration><branch numBranches="3"/></configuration><dragpoints><dragpoint identifier="1" name="shape17.dragpoint1" text="1" toShape="shape33" x="623.0" y="56.0"/><dragpoint identifier="2" name="shape17.dragpoint2" text="2" toShape="shape13" x="608.0" y="216.0"/><dragpoint identifier="3" name="shape17.dragpoint3" text="3" toShape="shape15" x="608.0" y="696.0"/></dragpoints></shape><shape image="message_icon" name="shape25" shapetype="message" userlabel="Test Successful Patch" x="224.0" y="320.0"><configuration><message combined="false"><msgTxt>'{
+    "billed": false,
+    "clientId": "10013",
+    "durationSeconds": 360,
+    "externalId": "207642",
+    "matterId": "003",
+    "narrative": "Test Data Generated",
+    "statusMessage": "Convert Oct/08/2022 07:04:40 (PDT)",
+    "syncData": {
+      "synced": true,
+      "status": "ConversionSuccessful"
+    },
+    "timeEntryId": 294202,
+    "timekeeperId": "1051",
+    "userCodeReferences": [
+      {
+        "id": "&lt;Local Admin Account&gt;&lt;10/8/2022&gt;",
+        "index": 5
+      }
+    ],
+    "workDate": "2018-04-17 00:00:00.0"
+  }</msgTxt><msgParameters/></message></configuration><dragpoints><dragpoint name="shape25.dragpoint1" toShape="shape30" x="384.0" y="328.0"/></dragpoints></shape><shape image="dataprocess_icon" name="shape27" shapetype="dataprocess" userlabel="Combine using Groovy - a bit quicker and less steps, using external = true, remove reason" x="1200.0" y="208.0"><configuration><dataprocess><step index="1" key="1" name="Custom Scripting" processtype="12"><dataprocessscript componentId="2f0ac2e4-c2bd-49c3-9fdf-f031defdf703" language="groovy" useCache="true" useComponent="true"><script>import java.util.Properties;
+import java.io.InputStream;
+
+for( int i = 0; i &lt; dataContext.getDataCount(); i++ ) {
+    InputStream is = dataContext.getStream(i);
+    Properties props = dataContext.getProperties(i);
+
+    dataContext.storeStream(is, props);
+}</script></dataprocessscript></step></dataprocess></configuration><dragpoints><dragpoint name="shape27.dragpoint1" toShape="shape7" x="1376.0" y="216.0"/></dragpoints></shape><shape image="flowcontrol_icon" name="shape28" shapetype="flowcontrol" userlabel="" x="1008.0" y="208.0"><configuration><flowcontrol chunkStyle="threadOnly" chunks="5" forEachCount="500"/></configuration><dragpoints><dragpoint name="shape28.dragpoint1" toShape="shape27" x="1184.0" y="216.0"/></dragpoints></shape><shape image="branch_icon" name="shape29" shapetype="branch" userlabel="FOR TESTING" x="64.0" y="320.0"><configuration><branch numBranches="3"/></configuration><dragpoints><dragpoint identifier="1" name="shape29.dragpoint1" text="1" toShape="shape25" x="208.0" y="328.0"/><dragpoint identifier="2" name="shape29.dragpoint2" text="2" toShape="shape31" x="208.0" y="392.0"/><dragpoint identifier="3" name="shape29.dragpoint3" text="3" toShape="unset" x="211.0" y="370.0"/></dragpoints></shape><shape image="doccacheload_icon" name="shape30" shapetype="doccacheload" userlabel="" x="400.0" y="320.0"><configuration><doccacheload docCache="69cc312c-4124-44e1-99e0-6e097eed02c7"/></configuration><dragpoints/></shape><shape image="message_icon" name="shape31" shapetype="message" userlabel="Test Successful Patch" x="224.0" y="384.0"><configuration><message combined="false"><msgTxt>'{
+    "billed": false,
+    "clientId": "10013",
+    "durationSeconds": 360,
+    "externalId": "207642",
+    "matterId": "003",
+    "narrative": "Test Data Generated",
+    "statusMessage": "Convert Oct/08/2022 07:04:40 (PDT)",
+    "syncData": {
+      "synced": true,
+      "status": "ConversionSuccessful"
+    },
+    "timeEntryId": 294202,
+    "timekeeperId": "1051",
+    "userCodeReferences": [
+      {
+        "id": "&lt;Local Admin Account&gt;&lt;10/8/2022&gt;",
+        "index": 5
+      }
+    ],
+    "workDate": "2018-04-17 00:00:00.0"
+  }</msgTxt><msgParameters/></message></configuration><dragpoints><dragpoint name="shape31.dragpoint1" toShape="shape30" x="384.0" y="328.0"/></dragpoints></shape><shape image="dataprocess_icon" name="shape32" shapetype="dataprocess" userlabel="Process at most DPP_MAX_ENTRIES_TO_PATCH ON ARROW" x="816.0" y="208.0"><configuration><dataprocess><step index="1" key="1" name="Custom Scripting" processtype="12"><dataprocessscript language="groovy2" useCache="true"><script>import java.util.Properties;
+import java.io.InputStream;
+
+import com.boomi.execution.ExecutionUtil
+import com.boomi.execution.ExecutionManager
+
+//Examples:
+//  def splitPath = props.getProperty("document.dynamic.userdefined.DDP_jsonSplitPath")
+//  ExecutionUtil.setDynamicProcessProperty("DPP_countTotal", Integer.toString(intCountTotal), false);
+
+void logger(String message) {
+ ExecutionManager.getCurrent().getBaseLogger().info(message)
+ //println(message)
+}
+
+def maxToProcess
+def maxToProcessStr = ExecutionUtil.getDynamicProcessProperty("DPP_MAX_ENTRIES_TO_PATCH")
+
+if (maxToProcessStr == null || maxToProcessStr == '') {
+    maxToProcess = dataContext.getDataCount()
+}
+else {
+    maxToProcess = maxToProcessStr as Integer
+    if (maxToProcess &gt; dataContext.getDataCount()) {
+        maxToProcess = dataContext.getDataCount()
+    }
+}
+
+
+for( int i = 0; i &lt; maxToProcess; i++ ) {
+    InputStream is = dataContext.getStream(i);
+    Properties props = dataContext.getProperties(i);
+
+    dataContext.storeStream(is, props);
+}</script></dataprocessscript></step></dataprocess></configuration><dragpoints><dragpoint name="shape32.dragpoint1" toShape="shape28" x="992.0" y="216.0"/></dragpoints></shape><shape image="processcall_icon" name="shape33" shapetype="processcall" userlabel="" x="640.0" y="48.0"><configuration><processcall abort="true" processId="19cec4b1-4d69-4f00-a1a3-d5dd1465b78a" wait="true"><parameters/><returnpaths/></processcall></configuration><dragpoints/></shape><shape image="processcall_icon" name="shape34" shapetype="processcall" userlabel="" x="832.0" y="688.0"><configuration><processcall abort="false" processId="753ad1ab-8551-4e65-8fbf-dcbb08f9ad62" wait="true"><parameters/><returnpaths/></processcall></configuration><dragpoints/></shape></shapes></process></bns:object><bns:processOverrides/></bns:Component>

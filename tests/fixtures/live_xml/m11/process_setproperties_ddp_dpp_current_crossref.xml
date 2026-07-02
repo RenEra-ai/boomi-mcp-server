@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?><bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bns="http://api.platform.boomi.com/" folderFullPath="acct-sandbox/Process Library/CDS" componentId="cdbc887c-64ce-4b65-b975-94a6ab2d5aae" version="1" name="[Client CDS] (sub) Copy SQL CrossRef for SQL Version to Json and Cache FULL" type="process" createdDate="2026-03-04T14:33:20Z" createdBy="dev.two@client.example" modifiedDate="2026-03-04T14:33:20Z" modifiedBy="dev.two@client.example" deleted="false" currentVersion="true" folderName="CDS" folderId="Rjo4MzcyNTEx" copiedFromComponentId="5d9f2316-ad83-4f3d-94ec-144ddf172560" copiedFromComponentVersion="1" branchName="main" branchId="QjoyODc5NDg"><bns:encryptedValues/><bns:description></bns:description><bns:object><process xmlns="" allowSimultaneous="false" enableUserLog="false" processLogOnErrorOnly="false" purgeDataImmediately="false" updateRunDates="false" workload="general"><shapes><shape image="start" name="shape1" shapetype="start" userlabel="" x="48.0" y="48.0"><configuration><passthroughaction/></configuration><dragpoints><dragpoint name="shape1.dragpoint1" toShape="shape3" x="224.0" y="57.0"><linesegment length="0" name="shape1.dragpoint1.lineseg1" orient="horizontal" x="82.0" y="63.0"/><linesegment length="0" name="shape1.dragpoint1.lineseg2" orient="vertical" x="82.0" y="63.0"/><linesegment length="79" name="shape1.dragpoint1.lineseg3" orient="horizontal" x="82.0" y="63.0"/><linesegment length="0" name="shape1.dragpoint1.lineseg4" orient="vertical" x="161.0" y="63.0"/><linesegment length="63" name="shape1.dragpoint1.lineseg5" orient="horizontal" x="161.0" y="63.0"/></dragpoint></dragpoints></shape><shape image="dataprocess_icon" name="shape3" shapetype="dataprocess" userlabel="Loop 1 to DPP_MAX_CROSSREF_VALUES output id" x="240.0" y="48.0"><configuration><dataprocess><step index="1" key="1" name="Custom Scripting" processtype="12"><dataprocessscript language="groovy2" useCache="true"><script>import java.util.Properties;
+import java.io.InputStream;
+
+import com.boomi.execution.ExecutionUtil
+import com.boomi.execution.ExecutionManager;
+//Examples:
+//  def splitPath = props.getProperty("document.dynamic.userdefined.DDP_jsonSplitPath")
+//
+
+
+void logger(String message) {
+  ExecutionManager.getCurrent().getBaseLogger().info(message)
+  //println(message)
+}
+
+def cnt = ExecutionUtil.getDynamicProcessProperty("DPP_MAX_CROSSREF_VALUES") as Integer
+
+Properties props = new Properties()
+
+for( int i = 1; i &lt;= cnt; i++ ) {
+    def y = i as String
+    is = new ByteArrayInputStream(y.getBytes("UTF-8"));
+    dataContext.storeStream(is, props);
+}</script></dataprocessscript></step></dataprocess></configuration><dragpoints><dragpoint name="shape3.dragpoint1" toShape="shape26" x="416.0" y="57.0"><linesegment length="0" name="shape3.dragpoint1.lineseg1" orient="horizontal" x="274.0" y="63.0"/><linesegment length="0" name="shape3.dragpoint1.lineseg2" orient="vertical" x="274.0" y="63.0"/><linesegment length="79" name="shape3.dragpoint1.lineseg3" orient="horizontal" x="274.0" y="63.0"/><linesegment length="0" name="shape3.dragpoint1.lineseg4" orient="vertical" x="353.0" y="63.0"/><linesegment length="63" name="shape3.dragpoint1.lineseg5" orient="horizontal" x="353.0" y="63.0"/></dragpoint></dragpoints></shape><shape image="doccacheload_icon" name="shape14" shapetype="doccacheload" userlabel="" x="1200.0" y="48.0"><configuration><doccacheload docCache="52777807-28b1-4e4c-9982-9a942334fa1c"/></configuration><dragpoints/></shape><shape image="dataprocess_icon" name="shape15" shapetype="dataprocess" userlabel="Replace ][ with ," x="1392.0" y="208.0"><configuration><dataprocess><step index="1" key="1" name="Search/Replace" processtype="1"><dataprocessreplace replacewith="," searchType="document" texttofind="\]\["/></step></dataprocess></configuration><dragpoints><dragpoint name="shape15.dragpoint1" toShape="shape19" x="1568.0" y="217.0"><linesegment length="0" name="shape15.dragpoint1.lineseg1" orient="horizontal" x="1426.0" y="223.0"/><linesegment length="0" name="shape15.dragpoint1.lineseg2" orient="vertical" x="1426.0" y="223.0"/><linesegment length="79" name="shape15.dragpoint1.lineseg3" orient="horizontal" x="1426.0" y="223.0"/><linesegment length="0" name="shape15.dragpoint1.lineseg4" orient="vertical" x="1505.0" y="223.0"/><linesegment length="63" name="shape15.dragpoint1.lineseg5" orient="horizontal" x="1505.0" y="223.0"/></dragpoint></dragpoints></shape><shape image="branch_icon" name="shape16" shapetype="branch" userlabel="" x="1024.0" y="48.0"><configuration><branch numBranches="2"/></configuration><dragpoints><dragpoint identifier="1" name="shape16.dragpoint1" text="1" toShape="shape14" x="1184.0" y="57.0"><linesegment length="0" name="shape16.dragpoint1.lineseg1" orient="horizontal" x="1058.0" y="63.0"/><linesegment length="0" name="shape16.dragpoint1.lineseg2" orient="vertical" x="1058.0" y="63.0"/><linesegment length="71" name="shape16.dragpoint1.lineseg3" orient="horizontal" x="1058.0" y="63.0"/><linesegment length="0" name="shape16.dragpoint1.lineseg4" orient="vertical" x="1129.0" y="63.0"/><linesegment label="1" length="55" name="shape16.dragpoint1.lineseg5" orient="horizontal" x="1129.0" y="63.0"/></dragpoint><dragpoint identifier="2" name="shape16.dragpoint2" text="2" toShape="shape17" x="1184.0" y="217.0"><linesegment length="0" name="shape16.dragpoint2.lineseg1" orient="horizontal" x="1058.0" y="63.0"/><linesegment length="0" name="shape16.dragpoint2.lineseg2" orient="vertical" x="1058.0" y="63.0"/><linesegment length="71" name="shape16.dragpoint2.lineseg3" orient="horizontal" x="1058.0" y="63.0"/><linesegment length="160" name="shape16.dragpoint2.lineseg4" orient="vertical" x="1129.0" y="63.0"/><linesegment label="2" length="55" name="shape16.dragpoint2.lineseg5" orient="horizontal" x="1129.0" y="223.0"/></dragpoint></dragpoints></shape><shape image="message_icon" name="shape17" shapetype="message" userlabel="Set CurrentData" x="1200.0" y="208.0"><configuration><message combined="true"><msgTxt>'['{1}']</msgTxt><msgParameters><parametervalue key="0" valueType="current"/></msgParameters></message></configuration><dragpoints><dragpoint name="shape17.dragpoint1" toShape="shape15" x="1376.0" y="217.0"><linesegment length="0" name="shape17.dragpoint1.lineseg1" orient="horizontal" x="1234.0" y="223.0"/><linesegment length="0" name="shape17.dragpoint1.lineseg2" orient="vertical" x="1234.0" y="223.0"/><linesegment length="79" name="shape17.dragpoint1.lineseg3" orient="horizontal" x="1234.0" y="223.0"/><linesegment length="0" name="shape17.dragpoint1.lineseg4" orient="vertical" x="1313.0" y="223.0"/><linesegment length="63" name="shape17.dragpoint1.lineseg5" orient="horizontal" x="1313.0" y="223.0"/></dragpoint></dragpoints></shape><shape image="documentproperties_icon" name="shape19" shapetype="documentproperties" userlabel="set DPP_DYNAMIC_SQL_STATEMENTS to currentData" x="1584.0" y="208.0"><configuration><documentproperties><documentproperty defaultValue="" isDynamicCredential="false" isTradingPartner="false" name="Dynamic Process Property - DPP_DYNAMIC_SQL_STATEMENTS" persist="false" propertyId="process.DPP_DYNAMIC_SQL_STATEMENTS" shouldEncrypt="false"><sourcevalues><parametervalue key="1" valueType="current"><staticparameter staticproperty="10"/></parametervalue></sourcevalues></documentproperty></documentproperties></configuration><dragpoints><dragpoint name="shape19.dragpoint1" toShape="shape20" x="1952.0" y="217.0"><linesegment length="0" name="shape19.dragpoint1.lineseg1" orient="horizontal" x="1618.0" y="223.0"/><linesegment length="0" name="shape19.dragpoint1.lineseg2" orient="vertical" x="1618.0" y="223.0"/><linesegment length="175" name="shape19.dragpoint1.lineseg3" orient="horizontal" x="1618.0" y="223.0"/><linesegment length="0" name="shape19.dragpoint1.lineseg4" orient="vertical" x="1793.0" y="223.0"/><linesegment length="159" name="shape19.dragpoint1.lineseg5" orient="horizontal" x="1793.0" y="223.0"/></dragpoint></dragpoints></shape><shape image="stop_icon" name="shape20" shapetype="stop" userlabel="" x="1968.0" y="208.0"><configuration><stop continue="true"/></configuration><dragpoints/></shape><shape image="documentproperties_icon" name="shape26" shapetype="documentproperties" userlabel="set DDP_LSQL and DDP_LOBJ from CrossReference" x="432.0" y="48.0"><configuration><documentproperties><documentproperty defaultValue="" isDynamicCredential="false" isTradingPartner="false" name="Dynamic Document Property - DDP_LOBJ" persist="false" propertyId="dynamicdocument.DDP_LOBJ" shouldEncrypt="false"><sourcevalues><parametervalue key="1" valueType="crossref"><crossrefparameter crossRefTableId="0226e3a0-1adc-4429-93df-78f8da140ef9" outputParamId="2" outputParamName="Object"><inputs><parametervalue elementToSetId="1" elementToSetName="id" key="0" valueType="current"/></inputs></crossrefparameter></parametervalue></sourcevalues></documentproperty><documentproperty defaultValue="" isDynamicCredential="false" isTradingPartner="false" name="Dynamic Document Property - DDP_LSQL" persist="false" propertyId="dynamicdocument.DDP_LSQL" shouldEncrypt="false"><sourcevalues><parametervalue key="2" valueType="crossref"><crossrefparameter crossRefTableId="0226e3a0-1adc-4429-93df-78f8da140ef9" outputParamId="3" outputParamName="SqlStatement"><inputs><parametervalue elementToSetId="1" elementToSetName="id" key="0" valueType="current"/></inputs></crossrefparameter></parametervalue></sourcevalues></documentproperty></documentproperties></configuration><dragpoints><dragpoint name="shape26.dragpoint1" toShape="shape27" x="688.0" y="57.0"><linesegment length="0" name="shape26.dragpoint1.lineseg1" orient="horizontal" x="466.0" y="63.0"/><linesegment length="0" name="shape26.dragpoint1.lineseg2" orient="vertical" x="466.0" y="63.0"/><linesegment length="119" name="shape26.dragpoint1.lineseg3" orient="horizontal" x="466.0" y="63.0"/><linesegment length="0" name="shape26.dragpoint1.lineseg4" orient="vertical" x="585.0" y="63.0"/><linesegment length="103" name="shape26.dragpoint1.lineseg5" orient="horizontal" x="585.0" y="63.0"/></dragpoint></dragpoints></shape><shape image="dataprocess_icon" name="shape27" shapetype="dataprocess" userlabel="Escape SQL to store properly in JSON and replace tabs with spaces" x="704.0" y="48.0"><configuration><dataprocess><step index="1" key="1" name="Custom Scripting" processtype="12"><dataprocessscript language="groovy2" useCache="true"><script>import java.util.Properties
+import java.io.InputStream
+import groovy.json.StringEscapeUtils
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+import com.boomi.execution.ExecutionUtil
+import com.boomi.execution.ExecutionManager
+
+//Examples:
+//  def splitPath = props.getProperty("document.dynamic.userdefined.DDP_jsonSplitPath")
+//  ExecutionUtil.setDynamicProcessProperty("DPP_countTotal", Integer.toString(intCountTotal), false);
+
+void logger(String message) {
+ ExecutionManager.getCurrent().getBaseLogger().info(message)
+ //println(message)
+}
+
+void loggerSevere(String message) {
+ ExecutionManager.getCurrent().getBaseLogger().severe(message)
+ //println(message)
+}
+
+for( int i = 0; i &lt; dataContext.getDataCount(); i++ ) {
+    InputStream is = dataContext.getStream(i);
+    Properties props = dataContext.getProperties(i);
+
+    def rawObj = props.getProperty("document.dynamic.userdefined.DDP_LOBJ")
+    def rawSql = props.getProperty("document.dynamic.userdefined.DDP_LSQL")
+
+    //logger("rawSql:" + rawSql)
+    //logger("rawObj:" + rawObj)
+
+    if (rawObj != null &amp;&amp; rawObj != "" &amp;&amp; rawSql != "" &amp;&amp; rawSql != null) {
+
+        //logger("rawSql:" + rawSql)
+        //logger("rawObj:" + rawObj)
+
+        rawObj = rawObj.replaceAll("\t"," ")
+        rawSql = rawSql.replaceAll("\t"," ")
+
+        //logger("rawSql after tab:" + rawSql)
+        //logger("rawObj after tab:" + rawObj)
+
+        def json = [:]
+        json.putAt("Object", rawObj)
+        json.putAt("SqlStatement", rawSql)
+
+        def output =  JsonOutput.toJson(json)
+       // logger("SqlStatement:" + output)
+        is = new ByteArrayInputStream(output.getBytes("UTF-8"))
+        props = new Properties()
+        dataContext.storeStream(is, props)
+    } //if rawObj != null
+} //for</script></dataprocessscript></step></dataprocess></configuration><dragpoints><dragpoint name="shape27.dragpoint1" toShape="shape16" x="1008.0" y="57.0"><linesegment length="0" name="shape27.dragpoint1.lineseg1" orient="horizontal" x="738.0" y="63.0"/><linesegment length="0" name="shape27.dragpoint1.lineseg2" orient="vertical" x="738.0" y="63.0"/><linesegment length="143" name="shape27.dragpoint1.lineseg3" orient="horizontal" x="738.0" y="63.0"/><linesegment length="0" name="shape27.dragpoint1.lineseg4" orient="vertical" x="881.0" y="63.0"/><linesegment length="127" name="shape27.dragpoint1.lineseg5" orient="horizontal" x="881.0" y="63.0"/></dragpoint></dragpoints></shape></shapes></process></bns:object><bns:processOverrides/></bns:Component>
