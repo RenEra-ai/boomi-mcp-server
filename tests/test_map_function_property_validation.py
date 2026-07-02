@@ -132,3 +132,46 @@ def test_mappings_from_map_config_tolerates_missing_target_path():
     assert len(records) == 1
     assert records[0]["target_paths"] == []
     assert records[0]["source_paths"] == ["rows/row[]/name"]
+
+
+def test_defined_property_green_path_with_builder_backed_component():
+    """Issue #131 M11.7: the MAP_FUNCTION_COMPONENT_REF_REQUIRED green path is
+    now reachable end-to-end — the referenced processproperty is a REAL
+    builder-backed config (previously unsatisfiable without hand-authored raw
+    XML), and the explicit property key declared in the component is the same
+    UUID the map function passes as process_property_key."""
+    from boomi_mcp.categories.components.builders.process_property_builder import (
+        ProcessPropertyBuilder,
+    )
+
+    pp_config = {
+        "component_type": "processproperty",
+        "component_name": "New Process Property",
+        "properties": [
+            {
+                "key": _DEFINED_PARAMS["process_property_key"],
+                "name": _DEFINED_PARAMS["process_property_name"],
+                "type": "string",
+            }
+        ],
+    }
+    # (a) The component config itself validates through the new builder.
+    assert ProcessPropertyBuilder.validate_config(pp_config) is None
+    # (b) The referencing function map passes the component-ref check with
+    #     the builder-backed component in scope.
+    cfg = _function_map_config(
+        dict(_DEFINED_PARAMS),
+        source_profile_id="$ref:src",
+        target_profile_id="$ref:tgt",
+    )
+    components = {
+        "src": _comp("profile.json", config=_json_profile_config("Src")),
+        "tgt": _comp("profile.json", config=_json_profile_config("Tgt")),
+        "pp": _comp("processproperty", config=pp_config),
+    }
+    err = validate_transform_map(cfg, ["src", "tgt", "pp"], components)
+    assert err is None
+    # (c) The key coupling holds: the key the map references is declared in
+    #     the component config verbatim.
+    declared_keys = {p["key"] for p in pp_config["properties"]}
+    assert _DEFINED_PARAMS["process_property_key"] in declared_keys

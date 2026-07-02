@@ -7540,3 +7540,105 @@ class TestBuildPlanFlowSequenceRefTypes:
         assert process_step["validation_error"]["error_code"] == "PROCESS_REF_TYPE_MISMATCH"
         # leg steps[0] = the dataprocess step; its internal steps[0] = the split op.
         assert "flow_sequence[0].legs[0].steps[0].steps[0].profile_id" in process_step["validation_error"]["field"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #131 M11.7 — processproperty component plan/apply dispatch
+# ---------------------------------------------------------------------------
+
+_PP_KEY_UUID = "0e89ebf1-cd46-46df-904e-94c7e7ade31e"
+
+
+def _process_property_comp(
+    key="runtime_props",
+    name="Runtime Settings",
+    **config_overrides,
+):
+    cfg = {
+        "component_type": "processproperty",
+        "component_name": name,
+        "properties": [
+            {"key": _PP_KEY_UUID, "name": "Example Property", "type": "string"},
+        ],
+    }
+    cfg.update(config_overrides)
+    return IntegrationComponentSpec(
+        key=key, type="processproperty", action="create", name=name, config=cfg,
+    )
+
+
+class TestBuildPlanProcessPropertyComponent:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_processproperty_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config([_process_property_comp()]))
+        step = next(s for s in plan["steps"] if s["key"] == "runtime_props")
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_unsupported_property_type_errors_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _process_property_comp()
+        bad.config["properties"] = [
+            {"key": _PP_KEY_UUID, "name": "P", "type": "character"},
+        ]
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = next(s for s in plan["steps"] if s["key"] == "runtime_props")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "PROCESS_PROPERTY_TYPE_UNSUPPORTED"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_secret_shaped_key_redacted(self, mock_pag):
+        mock_pag.return_value = []
+        bad = _process_property_comp()
+        bad.config["client_secret"] = "leaked"
+        plan = _build_plan(MagicMock(), _build_config([bad]))
+        step = next(s for s in plan["steps"] if s["key"] == "runtime_props")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        )
+        emitted = plan["integration_spec"]["components"][0]["config"]
+        assert emitted["client_secret"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_component_name_falls_back_to_spec_name(self, mock_pag):
+        # comp.name is injected as component_name at plan time (name-primary
+        # type) — a spec with only the top-level name plans clean.
+        mock_pag.return_value = []
+        comp = _process_property_comp()
+        del comp.config["component_name"]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = next(s for s in plan["steps"] if s["key"] == "runtime_props")
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    def test_structured_update_xml_resolves_builder_and_policy(self):
+        from src.boomi_mcp.categories.integration_builder import (
+            build_structured_update_xml,
+        )
+        comp = _process_property_comp()
+        comp.action = "update"
+        comp.component_id = "dddddddd-4444-4444-4444-444444444444"
+        result = build_structured_update_xml(MagicMock(), comp, dict(comp.config))
+        assert result["_success"] is True
+        assert 'type="processproperty"' in result["built_xml"]
+        assert result["policy"] is not None
+        assert [p.path for p in result["policy"].owned_paths] == [
+            "bns:object/DefinedProcessProperties"
+        ]
+
+    def test_clone_suffix_applies_to_processproperty(self):
+        from src.boomi_mcp.categories.integration_builder import _apply_clone_suffix
+        comp = _process_property_comp()
+        cloned = _apply_clone_suffix(comp, dict(comp.config))
+        assert cloned["component_name"] == "Runtime Settings-clone"
+
+    def test_metadata_type_map_includes_processproperty(self):
+        from src.boomi_mcp.categories.integration_builder import _METADATA_TYPE_MAP
+        assert _METADATA_TYPE_MAP["processproperty"] == "processproperty"

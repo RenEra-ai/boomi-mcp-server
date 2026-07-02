@@ -3722,6 +3722,134 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
 }
 
 
+# Issue #131 M11.7 (epic #118): typed processproperty create template.
+_COMPONENT_CREATE_PROCESS_PROPERTY = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "processproperty",
+    "tool": "manage_component (action='create')",
+    "tool_note": (
+        "Standalone Process Property components can be created via "
+        "manage_component directly, or declared as an in-spec component in "
+        "build_integration alongside the transform.map (map_type='function') "
+        "whose defined_process_property_get/set functions reference it via "
+        "parameters.process_property_component_id='$ref:<key>' (#131)."
+    ),
+    "note": (
+        "Declares the component's Defined Process Property slots. Each "
+        "property carries an EXPLICIT stable UUID 'key' (v1 contract): the "
+        "same UUID is emitted into the component XML and handed to the "
+        "referencing map function as parameters.process_property_key — no "
+        "generated-key token mechanism exists. 'name' becomes the property "
+        "<label> (the display name the map function's property_name shows)."
+    ),
+    "update_note": (
+        "Structured updates use read-merge-write (issue #45 semantics): the "
+        "builder-owned <DefinedProcessProperties> subtree is REPLACED as a "
+        "whole while bns:encryptedValues, bns:processOverrides, and unknown "
+        "siblings survive. WARNING: v1 always emits empty <allowedValues/>, "
+        "so a structured update of a legacy component clears any populated "
+        "allowedValueSet entries — use the raw-XML escape hatch to preserve "
+        "them until constrained value sets ship."
+    ),
+    "template": {
+        "component_type": "processproperty",
+        "component_name": "<<component display name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "properties": [
+            {
+                "key": "<<stable UUID, e.g. 0e89ebf1-cd46-46df-904e-94c7e7ade31e>>",
+                "name": "<<property label>>",
+                "type": "<<string | number | boolean | date>>",
+                "default_value": "<<optional default>>",
+                "help_text": "<<optional operator help>>",
+                "persisted": False,
+            },
+        ],
+    },
+    "required": ["component_type", "component_name", "properties"],
+    "optional": ["folder_path", "description"],
+    "property_required": ["key", "name", "type"],
+    "property_optional": ["default_value", "help_text", "persisted"],
+    "defaults": {"component_type": "processproperty", "persisted": False},
+    "supported_property_types": ["string", "number", "boolean", "date"],
+    "property_type_evidence_note": (
+        "string/number/boolean are live-verified (#119 census); date is "
+        "companion+docs-corroborated. character and password are rejected — "
+        "no evidence exists for either as a Defined Process Property type."
+    ),
+    "map_function_cross_link": (
+        "transform.map map_type='function' defined_process_property_get/set "
+        "reference this component: parameters.process_property_component_id="
+        "'$ref:<component key>' (declared in the map's depends_on) plus "
+        "parameters.process_property_key=<the property 'key' UUID declared "
+        "here> and parameters.process_property_name=<the property 'name'>."
+    ),
+    "no_encrypted_field_note": (
+        "There is NO per-property encrypted flag — no live capture carries "
+        "one. Component-level <bns:encryptedValues/> is emitted empty and "
+        "preserved on update."
+    ),
+    "raw_xml_exposed": False,
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+        "api_key",
+        "credentials",
+        "authorization",
+        "bearer",
+    ],
+    "error_codes": {
+        "PROCESS_PROPERTY_VALIDATION_FAILED": (
+            "shape / unknown-key / type-check failure not covered by a more "
+            "specific code (including the rejected 'encrypted' and "
+            "'allowed_values' property keys)"
+        ),
+        "PROCESS_PROPERTY_NAME_REQUIRED": "component_name or a property name missing/blank",
+        "PROCESS_PROPERTY_PROPERTY_REQUIRED": "properties list missing or empty",
+        "PROCESS_PROPERTY_KEY_REQUIRED": "a property is missing its explicit stable UUID key",
+        "PROCESS_PROPERTY_KEY_INVALID": "a property key is not a lowercase canonical UUID",
+        "PROCESS_PROPERTY_TYPE_UNSUPPORTED": "property type not in (string, number, boolean, date)",
+        "PROCESS_PROPERTY_DUPLICATE_KEY": "two properties share a key UUID",
+        "PROCESS_PROPERTY_DUPLICATE_NAME": "two properties share a label",
+        "PROCESS_PROPERTY_DEFAULT_INVALID": "default_value / help_text is not a string",
+        "PROCESS_PROPERTY_RAW_XML_UNSUPPORTED": (
+            "raw DefinedProcessProperties subtree keys are not accepted; the "
+            "raw escape hatch is config.xml"
+        ),
+        "PLAINTEXT_SECRET_REJECTED": "a dict key inside the config matches a secret-shaped name",
+    },
+    "example": {
+        "key": "<<props_key>>",
+        "type": "processproperty",
+        "action": "create",
+        "name": "<<component display name>>",
+        "config": {
+            "component_type": "processproperty",
+            "component_name": "<<component display name>>",
+            "properties": [
+                {
+                    "key": "<<stable UUID>>",
+                    "name": "<<property label>>",
+                    "type": "string",
+                    "default_value": "",
+                    "persisted": False,
+                },
+            ],
+        },
+        "_example_note": (
+            "Placeholder values only. Generate a UUID per property once and "
+            "keep it stable across updates — map functions reference it."
+        ),
+    },
+}
+
+
 _COMPONENT_CREATE_SCRIPT_MAPPING = {
     "resource_type": "component",
     "operation": "create",
@@ -5620,6 +5748,7 @@ def _valid_schema_names() -> list:
         "script_dataprocess",
         "script_mapping",
         "cache_property_authoring",
+        "process_property",
     ]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
     # design_doctrine / account_governance are stdlib-only static modules —
@@ -5775,13 +5904,27 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
     },
     "get_property": {
         "meaning": "Read a property value into a flow (map function today; Set Properties definedparameter source once verified)",
-        "capability_status": "reserved_not_executable",
+        "capability_status": "executable",
         "owning_issue": "#121 (M11.2) / #131 (M11.7)",
+        "surface": (
+            "build_integration transform.map map_type='function' "
+            "defined_process_property_get referencing an in-spec "
+            "processproperty component ($ref + explicit property key). The "
+            "Set Properties definedparameter source stays gated (no verified "
+            "wire shape, #119 census)."
+        ),
     },
     "set_process_property": {
         "meaning": "Write a Process Property component slot at runtime (definedprocess.<componentId>@<propertyKey>)",
-        "capability_status": "reserved_not_executable",
-        "owning_issue": "#121 (M11.2) — gated pending verified wire shape",
+        "capability_status": "executable",
+        "owning_issue": "#121 (M11.2) / #131 (M11.7)",
+        "surface": (
+            "build_integration transform.map map_type='function' "
+            "defined_process_property_set referencing an in-spec "
+            "processproperty component. The Set Properties shape write "
+            "variant (propertyId='definedprocess.<id>@<key>') stays gated "
+            "(companion-only wire shape, #119 census)."
+        ),
     },
     "cache_put": {
         "meaning": "Write current documents into a Document Cache (success-path Add to Cache)",
@@ -5800,8 +5943,14 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
     },
     "processproperty_component": {
         "meaning": "Typed create/update of a standalone Process Property component (definedProcessProperty slots)",
-        "capability_status": "reserved_not_executable",
+        "capability_status": "executable",
         "owning_issue": "#131 (M11.7)",
+        "surface": (
+            "manage_component(action='create', config={component_type:"
+            "'processproperty', ...}) or an in-spec build_integration "
+            "component; template at get_schema_template(component_type="
+            "'processproperty', operation='create')"
+        ),
     },
     "documentcache_component": {
         "meaning": "Typed create/update of a Document Cache component (profile/index/key modeling)",
@@ -5855,6 +6004,37 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
     """
     if schema_name == "cache_property_authoring":
         return _cache_property_authoring_schema()
+
+    if schema_name == "process_property":
+        # Issue #131 M11.7: read-only authoring reference for the Process
+        # Property component <-> map-function key/label coupling.
+        return {
+            "_success": True,
+            "schema_name": "process_property",
+            "surface": "process_property",
+            "read_only": True,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "create_template_pointer": (
+                "get_schema_template(resource_type='component', "
+                "operation='create', component_type='processproperty')"
+            ),
+            "key_label_coupling": (
+                "Each definedProcessProperty carries an explicit stable UUID "
+                "'key' plus a 'name' (the <label>). A referencing map "
+                "function must pass process_property_component_id "
+                "('$ref:<component key>' declared in depends_on), "
+                "process_property_key (that UUID), and process_property_name "
+                "(that label). Keys are caller-supplied in v1 — keep them "
+                "stable across updates or map references break."
+            ),
+            "scopes_note": (
+                "Process Property component values are deploy-time defaults "
+                "readable at runtime (execution scope) — use them for "
+                "operator-tunable settings; use set_dpp for run-computed "
+                "state and set_ddp for per-document state."
+            ),
+        }
 
     if schema_name == "IntegrationSpecV1":
         return {
@@ -7476,6 +7656,10 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
             return {"_success": True, **_COMPONENT_CREATE_TRANSFORM_MAP_DIRECT}
         if component_type == "script.mapping":
             return {"_success": True, **_COMPONENT_CREATE_SCRIPT_MAPPING}
+        if component_type == "processproperty":
+            # Issue #131 M11.7: typed template replaces the generic raw-XML
+            # fallback, making the list_capabilities advertisement truthful.
+            return {"_success": True, **_COMPONENT_CREATE_PROCESS_PROPERTY}
         if component_type == "connector-action":
             if protocol == "database.get":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}

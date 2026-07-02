@@ -66,9 +66,16 @@ def test_surface_is_read_only_and_xml_free():
 
 
 # Flipped to "executable" by the child that ships each term's emitter/builder
-# (#121 set_ddp/set_dpp; #122 cache terms; #131 processproperty) — updated in
-# lockstep with the implementation, per the #120 plan.
-_EXECUTABLE_TERMS = {"set_ddp", "set_dpp"}
+# (#121 set_ddp/set_dpp; #122 cache terms; #131 processproperty + the map-
+# function property read/write) — updated in lockstep with the
+# implementation, per the #120 plan.
+_EXECUTABLE_TERMS = {
+    "set_ddp",
+    "set_dpp",
+    "get_property",
+    "set_process_property",
+    "processproperty_component",
+}
 
 
 def test_all_m11_terms_present_with_honest_statuses():
@@ -84,7 +91,8 @@ def test_all_m11_terms_present_with_honest_statuses():
         assert term["meaning"]
         assert term["owning_issue"].startswith("#")
     for name in _EXECUTABLE_TERMS:
-        assert terms[name]["surface"].startswith("build_integration")
+        # Every executable term must name its concrete authoring surface.
+        assert terms[name]["surface"].strip()
 
 
 def test_source_value_contract_rendered_from_models():

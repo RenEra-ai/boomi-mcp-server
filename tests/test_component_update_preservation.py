@@ -2224,3 +2224,82 @@ def test_clear_when_value_no_clear_when_attr_absent_from_desired():
     )
     assert cfg.attrib["requestProfile"] == "live-id"
     assert cfg.attrib["requestProfileType"] == "json"
+
+
+# ---------------------------------------------------------------------------
+# Issue #131 M11.7 — processproperty read-merge-write preservation
+# ---------------------------------------------------------------------------
+
+_CURRENT_PROCESS_PROPERTY = (
+    '<bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+    'xmlns:bns="http://api.platform.boomi.com/" componentId="PP-1" version="4" '
+    'type="processproperty" name="Runtime Settings" futureAttr="keep-me">'
+    '<bns:encryptedValues>'
+    '<bns:encryptedValue path="//secret" isSet="true"/>'
+    '</bns:encryptedValues>'
+    '<bns:description>old desc</bns:description>'
+    '<bns:object>'
+    '<DefinedProcessProperties xmlns="">'
+    '<definedProcessProperty key="cfa10de5-455c-4e31-b43d-4b457d3aef4c">'
+    '<helpText/><label>Legacy Prop</label><type>string</type>'
+    '<defaultValue>x</defaultValue>'
+    '<allowedValues><allowedValueSet label="A" value="a"/></allowedValues>'
+    '<persisted>true</persisted>'
+    '</definedProcessProperty>'
+    '</DefinedProcessProperties>'
+    '<FutureSibling keep="true"/>'
+    '</bns:object>'
+    '<bns:processOverrides><Overrides xmlns=""/></bns:processOverrides>'
+    '</bns:Component>'
+)
+
+
+def _desired_process_property():
+    from boomi_mcp.categories.components.builders.process_property_builder import (
+        ProcessPropertyBuilder,
+    )
+    return ProcessPropertyBuilder().build(
+        component_name="Runtime Settings",
+        properties=[
+            {
+                "key": "0e89ebf1-cd46-46df-904e-94c7e7ade31e",
+                "name": "New Prop",
+                "type": "boolean",
+                "default_value": "true",
+            }
+        ],
+    )
+
+
+def _pp_policy():
+    from boomi_mcp.categories.components.builders.process_property_builder import (
+        ProcessPropertyBuilder,
+    )
+    return ProcessPropertyBuilder.PRESERVATION_POLICY
+
+
+def test_processproperty_owned_subtree_replaced():
+    merged = merge_for_update(
+        _CURRENT_PROCESS_PROPERTY, _desired_process_property(), _pp_policy()
+    )
+    root = ET.fromstring(merged)
+    props = root.findall(
+        "bns:object/DefinedProcessProperties/definedProcessProperty", NS
+    )
+    assert [p.find("label").text for p in props] == ["New Prop"]
+    assert props[0].get("key") == "0e89ebf1-cd46-46df-904e-94c7e7ade31e"
+
+
+def test_processproperty_encrypted_values_and_unknown_siblings_survive():
+    merged = merge_for_update(
+        _CURRENT_PROCESS_PROPERTY, _desired_process_property(), _pp_policy()
+    )
+    root = ET.fromstring(merged)
+    # bns:encryptedValues entries survive the structured update.
+    entries = root.findall("bns:encryptedValues/bns:encryptedValue", NS)
+    assert len(entries) == 1 and entries[0].get("path") == "//secret"
+    # Unknown bns:object sibling and unknown root attribute survive.
+    assert root.find("bns:object/FutureSibling", NS) is not None
+    assert root.get("futureAttr") == "keep-me"
+    # bns:processOverrides survives (always-preserved path).
+    assert root.find("bns:processOverrides", NS) is not None

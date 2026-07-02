@@ -68,6 +68,9 @@ _COMPONENT_NAME_PRIMARY_TYPES = frozenset({
     "transform.map",
     "script.mapping",
     "transform.function",
+    # Issue #131 M11.7: standalone processproperty components are generated
+    # builder components too — component_name is the emitted-name source.
+    "processproperty",
 })
 # Copy-induced numeric suffix: a display name ending in whitespace then 1 or 2
 # (Integration's "... 1"/"... 2" clone artifacts).
@@ -177,6 +180,10 @@ from .components.builders.transform_map_validation import (
     resolve_map_profile_index,
     validate_transform_map,
 )
+from .components.builders.process_property_builder import (
+    ProcessPropertyBuilder,
+    get_process_property_builder,
+)
 from .components.builders.script_mapping_builder import (
     ScriptMappingBuilder,
     get_script_mapping_builder,
@@ -232,6 +239,10 @@ _METADATA_TYPE_MAP = {
     # participate in metadata lookup so repeated plan runs reuse the
     # same wrapper component instead of leaking duplicates.
     "transform.function": "transform.function",
+    # Issue #131 M11.7: standalone processproperty components participate in
+    # metadata lookup so conflict_policy=reuse/fail and update-by-name resolve
+    # (mirrors the script.mapping wiring).
+    "processproperty": "processproperty",
 }
 
 
@@ -1213,6 +1224,9 @@ def _resolve_preservation_policy(
         return ScriptMappingBuilder.PRESERVATION_POLICY
     if comp.type == "transform.function":
         return TransformFunctionWrapperBuilder.PRESERVATION_POLICY
+    if comp.type == "processproperty":
+        # Issue #131 M11.7: owns bns:object/DefinedProcessProperties.
+        return ProcessPropertyBuilder.PRESERVATION_POLICY
     return None
 
 
@@ -2615,8 +2629,9 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
             cloned["component_name"] = f"{base}{suffix}"
         return cloned
 
-    # Issue #26 + #41: generated profile.json/profile.xml, transform.map,
-    # script.mapping, and synthesized transform.function wrappers all
+    # Issue #26 + #41 (+ #131 processproperty): generated profile.json/
+    # profile.xml, transform.map, script.mapping, synthesized
+    # transform.function wrappers, and processproperty components all
     # participate in metadata lookup and need the clone-suffix safeguard
     # so a second plan run can't see an identical duplicate as an
     # ambiguous match.
@@ -2626,6 +2641,7 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
         "transform.map",
         "script.mapping",
         "transform.function",
+        "processproperty",
     ):
         base = cloned.get("component_name") or comp.name
         if base:
@@ -2912,6 +2928,27 @@ def build_structured_update_xml(
             "policy": getattr(builder_class, "PRESERVATION_POLICY", None),
         }
 
+    if comp.type == "processproperty":
+        # Issue #131 M11.7: structured processproperty update (read-merge-write
+        # over the DefinedProcessProperties owned subtree).
+        builder_class = get_process_property_builder(comp.type)
+        if builder_class is None:
+            return {
+                "_success": False,
+                "error_code": "PROCESS_PROPERTY_VALIDATION_FAILED",
+                "error": f"No ProcessPropertyBuilder registered for {comp.type!r}.",
+                "field": "component_type",
+            }
+        try:
+            built_xml = builder_class().build(**payload)
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(builder_class, "PRESERVATION_POLICY", None),
+        }
+
     if comp.type == "profile.db":
         profile_type = _safe_lower(payload.get("profile_type"))
         builder_instance = get_profile_builder("profile.db", profile_type)
@@ -3053,6 +3090,7 @@ def _execute_component(
         "transform.map",
         "script.mapping",
         "transform.function",
+        "processproperty",
     ):
         payload.setdefault("component_type", comp.type)
     if comp.name:
@@ -3070,6 +3108,7 @@ def _execute_component(
             "transform.map",
             "script.mapping",
             "transform.function",
+            "processproperty",
         ):
             # Mirror plan-time validation, which injects comp.name into
             # effective_config["component_name"] before calling validate_config.
@@ -3361,6 +3400,50 @@ def _execute_component(
                 "_success": False,
                 "error": (
                     f"Missing component_id for update of script '{comp.key}'"
+                ),
+            }
+        return _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            comp,
+            built_xml,
+            getattr(builder_class, "PRESERVATION_POLICY", None),
+        )
+
+    # Issue #131 M11.7: structured processproperty routes through
+    # ProcessPropertyBuilder (mirrors the script.mapping branch above).
+    # Raw-XML bypass preserved — when payload['xml'] is set, the build()
+    # call is skipped and the raw XML is used verbatim by create_component.
+    if comp.type == "processproperty" and not payload.get("xml"):
+        builder_class = get_process_property_builder(comp.type)
+        if builder_class is None:
+            return {
+                "_success": False,
+                "error_code": "PROCESS_PROPERTY_VALIDATION_FAILED",
+                "error": (
+                    f"No ProcessPropertyBuilder registered for {comp.type!r}."
+                ),
+                "field": "component_type",
+            }
+        try:
+            built_xml = builder_class().build(**payload)
+        except BuilderValidationError as exc:
+            return {
+                "_success": False,
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "field": exc.field,
+                "hint": exc.hint,
+            }
+        envelope = {"xml": built_xml, "component_type": "processproperty"}
+        if comp.action == "create":
+            return create_component(boomi_client, profile, envelope)
+        if not target_id:
+            return {
+                "_success": False,
+                "error": (
+                    f"Missing component_id for update of processproperty '{comp.key}'"
                 ),
             }
         return _apply_structured_update(
@@ -5233,6 +5316,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         is_direct_map = comp.type == "transform.map"
         is_script_mapping_component = comp.type == "script.mapping"
         is_transform_function_wrapper = comp.type == "transform.function"
+        is_process_property_component = comp.type == "processproperty"
         if is_generated_json_profile:
             gen_profile_scanner_cls = JSONGeneratedProfileBuilder
         elif is_generated_xml_profile:
@@ -5243,6 +5327,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             gen_profile_scanner_cls = ScriptMappingBuilder
         elif is_transform_function_wrapper:
             gen_profile_scanner_cls = TransformFunctionWrapperBuilder
+        elif is_process_property_component:
+            gen_profile_scanner_cls = ProcessPropertyBuilder
 
         if (
             gen_profile_scanner_cls is not None
@@ -5328,6 +5414,13 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     # refs to thread — it is profile-agnostic. Just run the
                     # builder's structured config validator.
                     gen_profile_err = ScriptMappingBuilder.validate_config(
+                        effective_config
+                    )
+                elif is_process_property_component:
+                    # Issue #131 M11.7: processproperty is profile-agnostic
+                    # like script.mapping — run the builder's structured
+                    # config validator, no profile threading.
+                    gen_profile_err = ProcessPropertyBuilder.validate_config(
                         effective_config
                     )
                 elif is_transform_function_wrapper:
