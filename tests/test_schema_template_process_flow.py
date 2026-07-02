@@ -757,6 +757,9 @@ def test_template_documents_flow_sequence_surface(template):
         "doccacheload",
         "doccacheretrieve",
         "doccacheremove",
+        # Issue #121 M11.2: generic DDP/DPP Set Properties steps.
+        "set_ddp",
+        "set_dpp",
         "decision",
         "branch",
         "exception",

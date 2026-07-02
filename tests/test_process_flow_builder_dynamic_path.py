@@ -420,3 +420,41 @@ def test_source_without_dynamic_path_emits_empty_source_connectoraction():
     assert not [s for s in root.iter("shape") if s.get("shapetype") == "documentproperties"]
     actions = {c.get("actionType"): c for c in root.iter("connectoraction")}
     assert actions["GET"].findall(".//dynamicProperties/propertyvalue") == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #121 M11.2 — the dynamic-path emitter is now an adapter over the
+# generic set_ddp machinery; both paths must produce identical inner XML.
+# ---------------------------------------------------------------------------
+
+
+def test_dynamic_path_adapter_matches_generic_set_ddp_emission():
+    from boomi_mcp.categories.components.builders.process_flow_builder import (
+        _emit_setproperties,
+        _emit_setproperties_step,
+    )
+
+    params = _dynamic_path()
+    adapter_xml = _emit_setproperties("shapeX", params, "shapeY", 3)
+    generic_xml = _emit_setproperties_step(
+        "shapeX",
+        {
+            "scope": "ddp",
+            "name": params["ddp_name"],
+            "source_values": [
+                {"value_type": "static", "value": "/admin/cdscm/api/v1/clients/"},
+                {
+                    "value_type": "profile",
+                    "element_id": "3",
+                    "element_name": "clientId (Root/Object/clientId)",
+                    "profile_id": params["request_profile_id"],
+                    "profile_type": params["profile_type"],
+                },
+            ],
+            "persist": False,
+            "userlabel": "",
+        },
+        "shapeY",
+        3,
+    )
+    assert adapter_xml == generic_xml

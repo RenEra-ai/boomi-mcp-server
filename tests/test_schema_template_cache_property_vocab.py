@@ -65,15 +65,26 @@ def test_surface_is_read_only_and_xml_free():
     assert result["boomi_mutation"] is False
 
 
-def test_all_m11_terms_present_and_reserved():
-    # #120 ships vocabulary only: every term starts reserved_not_executable.
-    # Later children flip their own terms; this test is updated in lockstep.
+# Flipped to "executable" by the child that ships each term's emitter/builder
+# (#121 set_ddp/set_dpp; #122 cache terms; #131 processproperty) — updated in
+# lockstep with the implementation, per the #120 plan.
+_EXECUTABLE_TERMS = {"set_ddp", "set_dpp"}
+
+
+def test_all_m11_terms_present_with_honest_statuses():
+    # #120 ships vocabulary only: every term starts reserved_not_executable and
+    # is flipped ONLY by the child that ships its emitter/builder.
     terms = _schema()["terms"]
     assert set(terms) == set(_M11_TERMS)
     for name, term in terms.items():
-        assert term["capability_status"] == "reserved_not_executable", name
+        expected = (
+            "executable" if name in _EXECUTABLE_TERMS else "reserved_not_executable"
+        )
+        assert term["capability_status"] == expected, name
         assert term["meaning"]
         assert term["owning_issue"].startswith("#")
+    for name in _EXECUTABLE_TERMS:
+        assert terms[name]["surface"].startswith("build_integration")
 
 
 def test_source_value_contract_rendered_from_models():
@@ -168,12 +179,31 @@ def _seq_config(flow_sequence):
     }
 
 
-def test_reserved_kind_set_ddp_still_rejected_by_process_builder():
-    # Reserving vocabulary (#120) must NOT make it executable: the process
-    # builder keeps rejecting the kind until #121 ships its emitter.
+def test_reserved_kind_still_rejected_by_process_builder():
+    # Reserving vocabulary (#120) must NOT make it executable: a term stays
+    # rejected by the process builder until its child ships the emitter.
+    # set_process_property is gated for all of M11 v1 (no verified wire
+    # shape), so it is the permanent guard here; set_ddp/set_dpp graduated to
+    # executable flow_sequence kinds in #121.
     err = ProcessFlowBuilder.validate_config(
-        _seq_config([{"kind": "set_ddp", "label": "reserved"}])
+        _seq_config([{"kind": "set_process_property", "label": "reserved"}])
     )
     assert isinstance(err, BuilderValidationError)
     assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
-    assert "set_ddp" in str(err)
+    assert "set_process_property" in str(err)
+
+
+def test_executable_set_ddp_step_now_validates_clean():
+    # The #121 graduation: a well-formed set_ddp step passes validation.
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_ddp",
+                    "name": "DDP_ORDER_ID",
+                    "source_values": [{"value_type": "static", "value": "A-1"}],
+                }
+            ]
+        )
+    )
+    assert err is None

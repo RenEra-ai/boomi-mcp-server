@@ -265,6 +265,10 @@ def test_flow_dispatch_ladder_keys():
         "doccacheremove",
         "returndocuments",
         "setproperties",
+        # Issue #121 M11.2: the generic set_ddp/set_dpp step dispatch key. It
+        # emits the SAME documentproperties shapetype as "setproperties" (the
+        # dynamic-path adapter), so PINNED_EMITTABLE is unchanged.
+        "setproperties_step",
         "processcall",
         "stop",
     }

@@ -47,6 +47,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from pydantic import ValidationError
 
+from ....models.cache_property_models import PROPERTY_SOURCE_FIELD_CONTRACT
 from ....models.pipeline_models import PipelineSpec, StageSpec
 from ._preservation_policy import OwnedPath, PreservationPolicy
 from .connector_builder import (
@@ -260,6 +261,11 @@ _FLOW_SEQUENCE_LINEAR_KINDS = frozenset(
         "doccacheload",
         "doccacheretrieve",
         "doccacheremove",
+        # Issue #121 M11.2 (epic #118): generic DDP/DPP Set Properties steps.
+        # Both lower to the same documentproperties shape the REST dynamic-path
+        # helper emits, via the shared generic emitters below.
+        "set_ddp",
+        "set_dpp",
     }
 )
 _FLOW_SEQUENCE_CONTROL_KINDS = frozenset({"decision", "branch"})
@@ -280,6 +286,12 @@ _FLOW_SEQUENCE_STEP_KEYS: Dict[str, frozenset] = {
     | {"document_cache_id", "empty_cache_behavior", "load_all_documents"},
     "doccacheremove": _FLOW_SEQUENCE_STEP_COMMON_KEYS
     | {"document_cache_id", "remove_all_documents"},
+    # Issue #121 M11.2: DDP/DPP Set Properties steps. `name` is the bare
+    # property name (no dynamicdocument./process. prefix); `source_values` is
+    # the ordered value-source list (#120 PropertySourceValue contract);
+    # `persist` (DPP only) persists the value at atom level.
+    "set_ddp": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"name", "source_values"},
+    "set_dpp": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"name", "source_values", "persist"},
     "decision": frozenset(
         {"kind", "label", "comparison", "left", "right", "true_steps", "false_steps"}
     ),
@@ -3776,6 +3788,141 @@ def _emit_returndocuments(
     )
 
 
+def _emit_property_source_value(key: int, source: Dict[str, Any]) -> str:
+    """Emit one ``<parametervalue>`` for a property assignment (issue #121).
+
+    ``static`` / ``profile`` / ``ddp`` (track) / ``dpp`` (process) are
+    byte-identical to the pre-#121 dynamic-path segment emission (#100/#96
+    live captures); ``current`` is transcribed from the #119 fixtures
+    (``process_doccacheretrieve_loadalldoc_variant.xml`` DDP_ORIGINAL_DOCUMENT).
+    ``definedparameter`` is rejected by validation before emission (gated —
+    no verified wire shape; #119 census Outcome B).
+    """
+    value_type = str(source.get("value_type") or "").strip()
+    if value_type == "static":
+        value = _escape_xml(str(source.get("value") or ""))
+        return (
+            f'<parametervalue key="{key}" usesEncryption="false" valueType="static">'
+            f'<staticparameter staticproperty="{value}"/>'
+            '</parametervalue>'
+        )
+    if value_type == "current":
+        # Current-document content source (#119 live capture: bare element).
+        return f'<parametervalue key="{key}" usesEncryption="false" valueType="current"/>'
+    if value_type == "profile":
+        element_id = _escape_xml(str(source.get("element_id") or ""))
+        element_name = _escape_xml(str(source.get("element_name") or ""))
+        profile_id = _escape_xml(str(source.get("profile_id") or "").strip())
+        profile_type = _escape_xml(str(source.get("profile_type") or "profile.json").strip())
+        return (
+            f'<parametervalue key="{key}" usesEncryption="false" valueType="profile">'
+            f'<profileelement elementId="{element_id}" '
+            f'elementName="{element_name}" '
+            f'profileId="{profile_id}" profileType="{profile_type}"/>'
+            '</parametervalue>'
+        )
+    if value_type == "ddp":
+        # Dynamic Document Property value source (#96 §H). SAME valueType="track"
+        # + <trackparameter> shape as the connector-step Path reference (§C1).
+        name = _escape_xml(str(source.get("property_name") or "").strip())
+        default = _escape_xml(str(source.get("default_value") or ""))
+        return (
+            f'<parametervalue key="{key}" usesEncryption="false" valueType="track">'
+            f'<trackparameter defaultValue="{default}" propertyId="dynamicdocument.{name}" '
+            f'propertyName="Dynamic Document Property - {name}"/>'
+            '</parametervalue>'
+        )
+    if value_type == "dpp":
+        # Dynamic Process Property value source (#96 §H live capture).
+        name = _escape_xml(str(source.get("property_name") or "").strip())
+        default = _escape_xml(str(source.get("default_value") or ""))
+        return (
+            f'<parametervalue key="{key}" usesEncryption="false" valueType="process">'
+            f'<processparameter processproperty="{name}" processpropertydefaultvalue="{default}"/>'
+            '</parametervalue>'
+        )
+    raise BuilderValidationError(  # pragma: no cover — validators reject first
+        f"Unknown property source value_type {value_type!r}.",
+        error_code="PROCESS_PROPERTY_SOURCE_INVALID",
+        field="source_values",
+        hint="Internal builder bug — please report.",
+    )
+
+
+def _emit_documentproperty_assignment(
+    scope: str, name: str, persist: bool, sourcevalues_xml: str
+) -> str:
+    """Emit one ``<documentproperty>`` assignment (issue #121).
+
+    DDP: ``propertyId="dynamicdocument.<name>"``, always ``persist="false"``.
+    DPP: ``propertyId="process.<name>"``, ``persist`` caller-controlled. The
+    attribute set/order is the #100 live-capture shape, cross-checked against
+    the #119 fixtures (both DDP and DPP writes).
+    """
+    esc = _escape_xml(str(name or "").strip())
+    if scope == "ddp":
+        display = f"Dynamic Document Property - {esc}"
+        property_id = f"dynamicdocument.{esc}"
+        persist_text = "false"
+    else:
+        display = f"Dynamic Process Property - {esc}"
+        property_id = f"process.{esc}"
+        persist_text = "true" if persist else "false"
+    return (
+        '<documentproperty defaultValue="" isDynamicCredential="false" '
+        f'isTradingPartner="false" name="{display}" '
+        f'persist="{persist_text}" propertyId="{property_id}" shouldEncrypt="false">'
+        f'<sourcevalues>{sourcevalues_xml}</sourcevalues>'
+        '</documentproperty>'
+    )
+
+
+def _emit_setproperties_shape(
+    shape_name: str,
+    properties_xml: str,
+    next_name: Optional[str],
+    shape_index: int,
+    userlabel: str = "",
+) -> str:
+    """Emit the ``documentproperties`` shape wrapper around assignment(s)."""
+    dragpoints = _emit_dragpoints([next_name], shape_index)
+    return (
+        f'<shape image="documentproperties_icon" name="{shape_name}" '
+        f'shapetype="documentproperties" userlabel="{_escape_xml(userlabel)}" '
+        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
+        f'<configuration><documentproperties>{properties_xml}'
+        '</documentproperties></configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
+def _emit_setproperties_step(
+    shape_name: str,
+    params: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit a generic ``set_ddp`` / ``set_dpp`` flow-sequence step (issue #121)."""
+    sources = params.get("source_values") or []
+    sourcevalues = "".join(
+        _emit_property_source_value(i, src) for i, src in enumerate(sources, start=1)
+    )
+    prop = _emit_documentproperty_assignment(
+        str(params.get("scope") or "ddp"),
+        str(params.get("name") or ""),
+        bool(params.get("persist", False)),
+        sourcevalues,
+    )
+    return _emit_setproperties_shape(
+        shape_name,
+        prop,
+        next_name,
+        shape_index,
+        userlabel=str(params.get("userlabel") or ""),
+    )
+
+
 def _emit_setproperties(
     shape_name: str,
     params: Dict[str, Any],
@@ -3793,50 +3940,37 @@ def _emit_setproperties(
     from the live REST Client export (see ``.codex/plans/issue-100-live-captures.md``)
     — the ``<profileelement>`` ``elementId`` / ``elementName`` come from the same
     JSON profile field index the map uses, so they match the generated profile.
+
+    Since #121 this is a thin adapter over the generic property emitters above;
+    its output stays byte-identical to the pre-#121 inline emission.
     """
-    dragpoints = _emit_dragpoints([next_name], shape_index)
-    ddp_name = _escape_xml(str(params.get("ddp_name") or "").strip())
-    profile_id = _escape_xml(str(params.get("request_profile_id") or "").strip())
-    profile_type = _escape_xml(str(params.get("profile_type") or "profile.json").strip())
+    ddp_name = str(params.get("ddp_name") or "").strip()
+    profile_id = str(params.get("request_profile_id") or "").strip()
+    profile_type = str(params.get("profile_type") or "profile.json").strip()
     segments = params.get("segments") or []
 
-    parametervalues: List[str] = []
-    for i, seg in enumerate(segments, start=1):
+    sources: List[Dict[str, Any]] = []
+    for seg in segments:
         seg_type = str(seg.get("type") or "").strip()
         if seg_type == "static":
-            value = _escape_xml(str(seg.get("value") or ""))
-            parametervalues.append(
-                f'<parametervalue key="{i}" usesEncryption="false" valueType="static">'
-                f'<staticparameter staticproperty="{value}"/>'
-                '</parametervalue>'
-            )
+            sources.append({"value_type": "static", "value": str(seg.get("value") or "")})
         elif seg_type == "profile":
-            element_id = _escape_xml(str(seg.get("element_id") or ""))
-            element_name = _escape_xml(str(seg.get("element_name") or ""))
-            parametervalues.append(
-                f'<parametervalue key="{i}" usesEncryption="false" valueType="profile">'
-                f'<profileelement elementId="{element_id}" '
-                f'elementName="{element_name}" '
-                f'profileId="{profile_id}" profileType="{profile_type}"/>'
-                '</parametervalue>'
+            sources.append(
+                {
+                    "value_type": "profile",
+                    "element_id": str(seg.get("element_id") or ""),
+                    "element_name": str(seg.get("element_name") or ""),
+                    "profile_id": profile_id,
+                    "profile_type": profile_type,
+                }
             )
         elif seg_type == "ddp":
-            # Dynamic Document Property value source (#96 §H). SAME valueType="track"
-            # + <trackparameter> shape as the connector-step Path reference (§C1).
-            name = _escape_xml(str(seg.get("property_name") or "").strip())
-            parametervalues.append(
-                f'<parametervalue key="{i}" usesEncryption="false" valueType="track">'
-                f'<trackparameter defaultValue="" propertyId="dynamicdocument.{name}" '
-                f'propertyName="Dynamic Document Property - {name}"/>'
-                '</parametervalue>'
+            sources.append(
+                {"value_type": "ddp", "property_name": str(seg.get("property_name") or "").strip()}
             )
         elif seg_type == "dpp":
-            # Dynamic Process Property value source (#96 §H live capture).
-            name = _escape_xml(str(seg.get("property_name") or "").strip())
-            parametervalues.append(
-                f'<parametervalue key="{i}" usesEncryption="false" valueType="process">'
-                f'<processparameter processproperty="{name}" processpropertydefaultvalue=""/>'
-                '</parametervalue>'
+            sources.append(
+                {"value_type": "dpp", "property_name": str(seg.get("property_name") or "").strip()}
             )
         else:  # pragma: no cover — _validate_dynamic_path rejects other types
             raise BuilderValidationError(
@@ -3846,20 +3980,11 @@ def _emit_setproperties(
                 hint="Internal builder bug — please report.",
             )
 
-    return (
-        f'<shape image="documentproperties_icon" name="{shape_name}" '
-        f'shapetype="documentproperties" userlabel="" '
-        f'x="{_shape_x(shape_index)}" y="{_SHAPE_Y}">'
-        '<configuration><documentproperties>'
-        '<documentproperty defaultValue="" isDynamicCredential="false" '
-        f'isTradingPartner="false" name="Dynamic Document Property - {ddp_name}" '
-        f'persist="false" propertyId="dynamicdocument.{ddp_name}" shouldEncrypt="false">'
-        f'<sourcevalues>{"".join(parametervalues)}</sourcevalues>'
-        '</documentproperty>'
-        '</documentproperties></configuration>'
-        f'<dragpoints>{dragpoints}</dragpoints>'
-        '</shape>'
+    sourcevalues = "".join(
+        _emit_property_source_value(i, src) for i, src in enumerate(sources, start=1)
     )
+    prop = _emit_documentproperty_assignment("ddp", ddp_name, False, sourcevalues)
+    return _emit_setproperties_shape(shape_name, prop, next_name, shape_index)
 
 
 def _emit_stop(shape_name: str, params: Dict[str, Any], y: float = _SHAPE_Y) -> str:
@@ -3945,6 +4070,9 @@ def _emit_flow_shape(
         return _emit_doccacheremove(shape_name, params, next_name, shape_index)
     if kind == "setproperties":
         return _emit_setproperties(shape_name, params, next_name, shape_index)
+    if kind == "setproperties_step":
+        # Issue #121 M11.2: generic set_ddp / set_dpp flow-sequence step.
+        return _emit_setproperties_step(shape_name, params, next_name, shape_index)
     if kind == "processcall":
         # Standalone main-flow Process Call (issue #90 wrapper_subprocess):
         # main-flow geometry, abort defaults False (parent continues past a
@@ -4491,6 +4619,8 @@ def _validate_flow_sequence_step(step: Any, field: str) -> Optional[BuilderValid
             )
     if kind == "doccacheload":
         return _validate_sequence_doccacheload_step(step, field)
+    if kind in ("set_ddp", "set_dpp"):
+        return _validate_sequence_set_properties_step(step, field, kind)
     if kind in _FLOW_SEQUENCE_LINEAR_KINDS:
         return _validate_sequence_linear_step(step, field, kind)
     if kind == "decision":
@@ -4562,6 +4692,145 @@ def _validate_sequence_doccacheload_step(
                 "in depends_on) to add the current documents to."
             ),
         )
+    return None
+
+
+# Issue #121 M11.2: property names are bare — the emitter owns the wire prefix
+# and the display-name convention, so a caller-supplied prefix would double up.
+_PROPERTY_NAME_FORBIDDEN_PREFIXES = (
+    "dynamicdocument.",
+    "process.",
+    "document.dynamic.userdefined.",
+)
+
+
+def _validate_property_source_value(
+    source: Any, field: str
+) -> Optional[BuilderValidationError]:
+    """Validate one ``source_values[]`` entry against the #120 contract.
+
+    ``definedparameter`` (read a Process Property component field) is
+    vocabulary but GATED: the #119 census found no live Set Properties capture
+    of its wire shape (companion-only), so it is rejected here until a
+    verified capture exists.
+    """
+    if not isinstance(source, dict):
+        return BuilderValidationError(
+            f"{field} must be a JSON object with a 'value_type'.",
+            error_code="PROCESS_PROPERTY_SOURCE_INVALID",
+            field=field,
+            hint='Each source value is {"value_type": "static|current|profile|ddp|dpp", ...}.',
+        )
+    value_type = str(source.get("value_type") or "").strip()
+    if value_type == "definedparameter":
+        return BuilderValidationError(
+            f"{field}.value_type 'definedparameter' has no verified wire shape yet.",
+            error_code="PROCESS_PROPERTY_SOURCE_INVALID",
+            field=f"{field}.value_type",
+            hint=(
+                "Reading a Process Property component inside Set Properties is "
+                "gated (companion-documented only; #119 census Outcome B). Read "
+                "it via the defined_process_property_get map function instead."
+            ),
+        )
+    if value_type not in PROPERTY_SOURCE_FIELD_CONTRACT:
+        supported = sorted(set(PROPERTY_SOURCE_FIELD_CONTRACT) - {"definedparameter"})
+        return BuilderValidationError(
+            f"{field}.value_type {value_type!r} is not supported.",
+            error_code="PROCESS_PROPERTY_SOURCE_INVALID",
+            field=f"{field}.value_type",
+            hint=f"Supported source value types: {supported}.",
+        )
+    required, optional = PROPERTY_SOURCE_FIELD_CONTRACT[value_type]
+    allowed = {"value_type", *required, *optional}
+    extra = set(source) - allowed
+    if extra:
+        return BuilderValidationError(
+            f"{field} has unsupported key(s) for value_type={value_type!r}: {sorted(extra)}.",
+            error_code="PROCESS_PROPERTY_SOURCE_INVALID",
+            field=field,
+            hint=f"Allowed keys for {value_type!r}: {sorted(allowed)}.",
+        )
+    for key in required:
+        value = source.get(key)
+        blank_ok = value_type == "static" and key == "value"
+        if not isinstance(value, str) or (not blank_ok and not value.strip()):
+            return BuilderValidationError(
+                f"{field}.{key} is required (a string) for value_type={value_type!r}.",
+                error_code="PROCESS_PROPERTY_SOURCE_INVALID",
+                field=f"{field}.{key}",
+                hint=f"value_type={value_type!r} requires: {sorted(required)}.",
+            )
+    for key in optional:
+        value = source.get(key)
+        if value is not None and not isinstance(value, str):
+            return BuilderValidationError(
+                f"{field}.{key} must be a string when provided.",
+                error_code="PROCESS_PROPERTY_SOURCE_INVALID",
+                field=f"{field}.{key}",
+                hint="Pass a string value, or omit the key.",
+            )
+    return None
+
+
+def _validate_sequence_set_properties_step(
+    step: Dict[str, Any], field: str, kind: str
+) -> Optional[BuilderValidationError]:
+    """Validate a ``set_ddp`` / ``set_dpp`` flow-sequence step (issue #121).
+
+    ``name`` is the bare property name (the emitter owns the
+    ``dynamicdocument.`` / ``process.`` prefix); ``source_values`` is the
+    ordered value-source list (concatenated by Boomi at runtime); ``persist``
+    (DPP only — enforced by the per-kind key allow-list) persists the value at
+    atom level.
+    """
+    name = step.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return BuilderValidationError(
+            f"{field}.name is required for a {kind} step.",
+            error_code="PROCESS_PROPERTY_NAME_INVALID",
+            field=f"{field}.name",
+            hint="Pass the bare property name (no dynamicdocument./process. prefix).",
+        )
+    stripped = name.strip()
+    for prefix in _PROPERTY_NAME_FORBIDDEN_PREFIXES:
+        if stripped.startswith(prefix):
+            return BuilderValidationError(
+                f"{field}.name must not carry the {prefix!r} prefix — the emitter owns it.",
+                error_code="PROCESS_PROPERTY_NAME_INVALID",
+                field=f"{field}.name",
+                hint=f"Use the bare name, e.g. {stripped[len(prefix):]!r}.",
+            )
+    if any(ch.isspace() for ch in stripped):
+        return BuilderValidationError(
+            f"{field}.name must not contain whitespace.",
+            error_code="PROCESS_PROPERTY_NAME_INVALID",
+            field=f"{field}.name",
+            hint="Use UPPER_SNAKE names like DDP_ORDER_ID / DPP_RUN_FLAG.",
+        )
+    source_values = step.get("source_values")
+    if not isinstance(source_values, list) or not source_values:
+        return BuilderValidationError(
+            f"{field}.source_values must be a non-empty list for a {kind} step.",
+            error_code="PROCESS_SET_PROPERTIES_CONFIG_INVALID",
+            field=f"{field}.source_values",
+            hint="Boomi concatenates the ordered source values into the property.",
+        )
+    for j, source in enumerate(source_values):
+        source_err = _validate_property_source_value(
+            source, f"{field}.source_values[{j}]"
+        )
+        if source_err is not None:
+            return source_err
+    if kind == "set_dpp":
+        persist = step.get("persist")
+        if persist is not None and not isinstance(persist, bool):
+            return BuilderValidationError(
+                f"{field}.persist must be a boolean when provided.",
+                error_code="PROCESS_SET_PROPERTIES_CONFIG_INVALID",
+                field=f"{field}.persist",
+                hint="true persists the DPP at atom level; default false.",
+            )
     return None
 
 
@@ -4737,6 +5006,18 @@ def _seq_step_to_flow_entry(step: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             {
                 "document_cache_id": str(step.get("document_cache_id") or "").strip(),
                 "remove_all_documents": step.get("remove_all_documents", True),
+                "userlabel": label,
+            },
+        )
+    if kind in ("set_ddp", "set_dpp"):
+        # Issue #121 M11.2: generic DDP/DPP Set Properties step.
+        return (
+            "setproperties_step",
+            {
+                "scope": "ddp" if kind == "set_ddp" else "dpp",
+                "name": str(step.get("name") or "").strip(),
+                "source_values": step.get("source_values") or [],
+                "persist": bool(step.get("persist", False)),
                 "userlabel": label,
             },
         )

@@ -1189,3 +1189,57 @@ def test_disposition_table_covers_every_catalog_item():
     assert dispositions.count("disputed-owned-elsewhere") == 0  # REST profile-type resolved by #50
     assert dispositions.count("fixed-here") == 3  # two script lints + REST conditional emission (#50)
     assert dispositions.count("guaranteed-by-construction") >= 15
+
+
+def test_inv_set_properties_steps_prefix_and_persist_invariants():
+    # Issue #121 M11.2: the generic set_ddp/set_dpp steps keep the live-locked
+    # documentproperties invariants — DDP propertyId prefix `dynamicdocument.`
+    # with persist always "false"; DPP prefix `process.` with caller persist;
+    # display names follow the "Dynamic Document/Process Property - <name>"
+    # convention; shouldEncrypt stays "false".
+    cfg = {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "database",
+            "connection_id": "11111111-1111-1111-1111-111111111111",
+            "operation_id": "22222222-2222-2222-2222-222222222222",
+            "action_type": "Get",
+        },
+        "transform": {"mode": "passthrough"},
+        "target": {
+            "connector_type": "rest",
+            "connection_id": "33333333-3333-3333-3333-333333333333",
+            "operation_id": "44444444-4444-4444-4444-444444444444",
+            "action_type": "POST",
+        },
+        "flow_sequence": [
+            {
+                "kind": "set_ddp",
+                "name": "DDP_A",
+                "source_values": [{"value_type": "static", "value": "x"}],
+            },
+            {
+                "kind": "set_dpp",
+                "name": "DPP_B",
+                "persist": True,
+                "source_values": [{"value_type": "current"}],
+            },
+        ],
+    }
+    xml = ProcessFlowBuilder.build(cfg, name="P")
+    shapes = _parse_process_shapes(xml)
+    props = [
+        s.find("configuration/documentproperties/documentproperty")
+        for s in shapes
+        if s.attrib["shapetype"] == "documentproperties"
+    ]
+    assert len(props) == 2
+    ddp, dpp = props
+    assert ddp.attrib["propertyId"] == "dynamicdocument.DDP_A"
+    assert ddp.attrib["name"] == "Dynamic Document Property - DDP_A"
+    assert ddp.attrib["persist"] == "false"
+    assert ddp.attrib["shouldEncrypt"] == "false"
+    assert dpp.attrib["propertyId"] == "process.DPP_B"
+    assert dpp.attrib["name"] == "Dynamic Process Property - DPP_B"
+    assert dpp.attrib["persist"] == "true"
+    assert dpp.attrib["shouldEncrypt"] == "false"

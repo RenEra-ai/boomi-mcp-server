@@ -5763,13 +5763,15 @@ _SCRIPT_MAPPING_AUTHORING_SCHEMA = {
 _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
     "set_ddp": {
         "meaning": "Set a Dynamic Document Property (per-document scope) via a Set Properties step",
-        "capability_status": "reserved_not_executable",
+        "capability_status": "executable",
         "owning_issue": "#121 (M11.2)",
+        "surface": "build_integration process config flow_sequence[].kind='set_ddp' (name + source_values)",
     },
     "set_dpp": {
         "meaning": "Set a Dynamic Process Property (execution scope; optional persist) via a Set Properties step",
-        "capability_status": "reserved_not_executable",
+        "capability_status": "executable",
         "owning_issue": "#121 (M11.2)",
+        "surface": "build_integration process config flow_sequence[].kind='set_dpp' (name + source_values + persist?)",
     },
     "get_property": {
         "meaning": "Read a property value into a flow (map function today; Set Properties definedparameter source once verified)",
@@ -6528,6 +6530,13 @@ _PROCESS_FLOW_PROTOCOLS = {
             "flow_sequence[].message_template",
             "flow_sequence[].stop_single_document",
             "flow_sequence[].parameter_source",
+            # Issue #121 M11.2: generic DDP/DPP Set Properties steps (set_ddp /
+            # set_dpp). `name` is the bare property name; `source_values` is the
+            # ordered value-source list (static/current/profile/ddp/dpp per the
+            # cache_property_authoring source_value_contract); `persist` is DPP-only.
+            "flow_sequence[].name",
+            "flow_sequence[].source_values",
+            "flow_sequence[].persist",
             # Issue #92 M4.5.7: declare connection fields as per-environment
             # override points on the deployed process (see notes for the
             # CREATE-only behavior and the connection_id / fields shape).
@@ -6607,6 +6616,9 @@ _PROCESS_FLOW_PROTOCOLS = {
             "doccacheload",
             "doccacheretrieve",
             "doccacheremove",
+            # Issue #121 M11.2 (epic #118): generic DDP/DPP Set Properties steps.
+            "set_ddp",
+            "set_dpp",
             "decision",
             "branch",
             "exception",

@@ -3950,3 +3950,284 @@ def test_flow_sequence_branch_step_without_label_stays_empty_userlabel():
     _, _, shapes = _parse_process(ProcessFlowBuilder.build(cfg, name="X"))
     branch = next(s for s in shapes if s.attrib["shapetype"] == "branch")
     assert branch.attrib["userlabel"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Issue #121 M11.2 (epic #118) — generic DDP/DPP Set Properties steps
+# ---------------------------------------------------------------------------
+
+_SET_PROPERTIES_GOLDEN = _GOLDEN_DIR / "set_properties_ddp_dpp_flow_sequence.xml"
+
+
+def _set_properties_seq_config():
+    """One set_ddp (static+profile+ddp sources) + one set_dpp (current+dpp,
+    persisted) — the #121 golden graph."""
+    return _seq_config(
+        [
+            {
+                "kind": "set_ddp",
+                "name": "DDP_ORDER_PATH",
+                "label": "Build order path",
+                "source_values": [
+                    {"value_type": "static", "value": "/orders/"},
+                    {
+                        "value_type": "profile",
+                        "element_id": "7",
+                        "element_name": "id (Root/Object/id)",
+                        "profile_id": "77777777-7777-7777-7777-777777777777",
+                        "profile_type": "profile.json",
+                    },
+                    {"value_type": "ddp", "property_name": "DDP_SUFFIX", "default_value": "0"},
+                ],
+            },
+            {
+                "kind": "set_dpp",
+                "name": "DPP_LAST_PAYLOAD",
+                "label": "Carry payload",
+                "persist": True,
+                "source_values": [
+                    {"value_type": "current"},
+                    {"value_type": "dpp", "property_name": "DPP_RUN_ID"},
+                ],
+            },
+        ]
+    )
+
+
+def test_set_properties_sequence_matches_golden_fixture():
+    cfg = _set_properties_seq_config()
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    emitted = ProcessFlowBuilder.build(cfg, name="Flow Sequence Set Properties DDP DPP")
+    assert emitted == _SET_PROPERTIES_GOLDEN.read_text()
+
+
+def test_set_properties_sequence_verifies_clean():
+    from src.boomi_mcp.categories.components.process_graph_verifier import verify_process_graph
+
+    xml = ProcessFlowBuilder.build(_set_properties_seq_config(), name="Composed")
+    result = verify_process_graph(xml)
+    assert result["errors"] == []
+    assert result["warnings"] == []
+
+
+def test_set_ddp_step_emits_ddp_assignment_shape():
+    xml = ProcessFlowBuilder.build(_set_properties_seq_config(), name="X")
+    _, _, shapes = _parse_process(xml)
+    assert [s.attrib["shapetype"] for s in shapes] == [
+        "start", "connectoraction", "documentproperties", "documentproperties",
+        "connectoraction", "stop",
+    ]
+    ddp_shape = shapes[2]
+    assert ddp_shape.attrib["userlabel"] == "Build order path"
+    prop = ddp_shape.find("configuration/documentproperties/documentproperty")
+    assert prop.attrib["propertyId"] == "dynamicdocument.DDP_ORDER_PATH"
+    assert prop.attrib["name"] == "Dynamic Document Property - DDP_ORDER_PATH"
+    assert prop.attrib["persist"] == "false"
+    assert prop.attrib["shouldEncrypt"] == "false"
+    values = prop.findall("sourcevalues/parametervalue")
+    assert [v.attrib["valueType"] for v in values] == ["static", "profile", "track"]
+    assert [v.attrib["key"] for v in values] == ["1", "2", "3"]
+    assert values[0].find("staticparameter").attrib["staticproperty"] == "/orders/"
+    profile_el = values[1].find("profileelement")
+    assert profile_el.attrib["elementId"] == "7"
+    assert profile_el.attrib["profileId"] == "77777777-7777-7777-7777-777777777777"
+    assert profile_el.attrib["profileType"] == "profile.json"
+    track = values[2].find("trackparameter")
+    assert track.attrib["propertyId"] == "dynamicdocument.DDP_SUFFIX"
+    assert track.attrib["defaultValue"] == "0"
+    assert track.attrib["propertyName"] == "Dynamic Document Property - DDP_SUFFIX"
+
+
+def test_set_dpp_step_emits_process_assignment_with_persist():
+    xml = ProcessFlowBuilder.build(_set_properties_seq_config(), name="X")
+    _, _, shapes = _parse_process(xml)
+    dpp_shape = shapes[3]
+    assert dpp_shape.attrib["userlabel"] == "Carry payload"
+    prop = dpp_shape.find("configuration/documentproperties/documentproperty")
+    assert prop.attrib["propertyId"] == "process.DPP_LAST_PAYLOAD"
+    assert prop.attrib["name"] == "Dynamic Process Property - DPP_LAST_PAYLOAD"
+    assert prop.attrib["persist"] == "true"
+    values = prop.findall("sourcevalues/parametervalue")
+    assert [v.attrib["valueType"] for v in values] == ["current", "process"]
+    # `current` is the bare live-captured element (no child parameter).
+    assert list(values[0]) == []
+    process_param = values[1].find("processparameter")
+    assert process_param.attrib["processproperty"] == "DPP_RUN_ID"
+    assert process_param.attrib["processpropertydefaultvalue"] == ""
+
+
+def test_set_dpp_defaults_to_non_persisted():
+    cfg = _seq_config(
+        [
+            {
+                "kind": "set_dpp",
+                "name": "DPP_FLAG",
+                "source_values": [{"value_type": "static", "value": "on"}],
+            }
+        ]
+    )
+    xml = ProcessFlowBuilder.build(cfg, name="X")
+    _, _, shapes = _parse_process(xml)
+    prop = next(
+        s for s in shapes if s.attrib["shapetype"] == "documentproperties"
+    ).find("configuration/documentproperties/documentproperty")
+    assert prop.attrib["persist"] == "false"
+
+
+def test_set_properties_step_name_missing_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config([{"kind": "set_ddp", "source_values": [{"value_type": "current"}]}])
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_PROPERTY_NAME_INVALID"
+
+
+def test_set_properties_step_prefixed_name_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_ddp",
+                    "name": "dynamicdocument.DDP_X",
+                    "source_values": [{"value_type": "current"}],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_PROPERTY_NAME_INVALID"
+    assert "prefix" in str(err)
+
+
+def test_set_properties_step_whitespace_name_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_dpp",
+                    "name": "DPP BAD NAME",
+                    "source_values": [{"value_type": "current"}],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_PROPERTY_NAME_INVALID"
+
+
+def test_set_properties_step_empty_source_values_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config([{"kind": "set_ddp", "name": "DDP_X", "source_values": []}])
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_SET_PROPERTIES_CONFIG_INVALID"
+
+
+def test_set_properties_step_unknown_value_type_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_ddp",
+                    "name": "DDP_X",
+                    "source_values": [{"value_type": "bogus"}],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_PROPERTY_SOURCE_INVALID"
+
+
+def test_set_properties_step_definedparameter_source_gated():
+    # #119 census Outcome B: no live Set Properties capture of the
+    # definedparameter wire shape — rejected until verified.
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_ddp",
+                    "name": "DDP_X",
+                    "source_values": [
+                        {
+                            "value_type": "definedparameter",
+                            "component_id": "99999999-9999-9999-9999-999999999999",
+                            "property_key": "0e89ebf1-cd46-46df-904e-94c7e7ade31e",
+                        }
+                    ],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_PROPERTY_SOURCE_INVALID"
+    assert "verified wire shape" in str(err)
+
+
+def test_set_properties_step_profile_source_requires_all_fields():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_ddp",
+                    "name": "DDP_X",
+                    "source_values": [{"value_type": "profile", "element_id": "3"}],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_PROPERTY_SOURCE_INVALID"
+
+
+def test_set_properties_step_source_extra_key_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_ddp",
+                    "name": "DDP_X",
+                    "source_values": [
+                        {"value_type": "static", "value": "x", "property_name": "nope"}
+                    ],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_PROPERTY_SOURCE_INVALID"
+
+
+def test_set_ddp_step_rejects_persist_key():
+    # persist is DPP-only; on set_ddp it is an unknown step key.
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_ddp",
+                    "name": "DDP_X",
+                    "persist": True,
+                    "source_values": [{"value_type": "current"}],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+
+
+def test_set_dpp_step_non_bool_persist_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "set_dpp",
+                    "name": "DPP_X",
+                    "persist": "yes",
+                    "source_values": [{"value_type": "current"}],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_SET_PROPERTIES_CONFIG_INVALID"

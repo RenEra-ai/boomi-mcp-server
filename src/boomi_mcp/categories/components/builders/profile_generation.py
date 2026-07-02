@@ -75,6 +75,12 @@ SCRIPT_MAPPING_VARIABLE_INVALID = "SCRIPT_MAPPING_VARIABLE_INVALID"
 SCRIPT_MAPPING_LANGUAGE_UNSUPPORTED = "SCRIPT_MAPPING_LANGUAGE_UNSUPPORTED"
 SCRIPT_MAPPING_REF_REQUIRED = "SCRIPT_MAPPING_REF_REQUIRED"
 
+# Issue #121 M11.2 additions (epic #118) — consumed by the generic DDP/DPP
+# Set Properties flow-sequence steps in process_flow_builder.py.
+PROCESS_SET_PROPERTIES_CONFIG_INVALID = "PROCESS_SET_PROPERTIES_CONFIG_INVALID"
+PROCESS_PROPERTY_SOURCE_INVALID = "PROCESS_PROPERTY_SOURCE_INVALID"
+PROCESS_PROPERTY_NAME_INVALID = "PROCESS_PROPERTY_NAME_INVALID"
+
 
 # Supported data type sets — kept in sync with the matching Pydantic Literal
 # definitions in src/boomi_mcp/patterns/archetypes/database_to_api_sync.py.

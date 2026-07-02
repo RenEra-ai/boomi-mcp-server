@@ -108,6 +108,9 @@ EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     "connectoraction": {"emittable": True, "emitter_kind": "connectoraction_source"},
     "message": {"emittable": True, "emitter_kind": "message"},
     "map": {"emittable": True, "emitter_kind": "map"},
+    # #100 dynamic path; generalized by #121 M11.2 into first-class set_ddp /
+    # set_dpp flow-sequence steps (same shapetype, same setproperties emitter
+    # family — no new registry key).
     "documentproperties": {"emittable": True, "emitter_kind": "setproperties"},
     "stop": {"emittable": True, "emitter_kind": "stop"},
     "catcherrors": {"emittable": True, "emitter_kind": "catcherrors"},
