@@ -184,6 +184,48 @@ def test_soap_ref_type_mismatch_rejected(mock_pag):
 
 
 @patch(_PATCH_TARGET, return_value=[])
+def test_malformed_cert_alias_redacted_when_earlier_error_fires(mock_pag):
+    """Codex #126 architect review (high): a PEM/key pasted into client_ssl_alias
+    must not leak in the plan echo when an EARLIER SOAP error (security=OAUTH2)
+    fires first. A valid GUID would be preserved (conditional redaction)."""
+    pem = "-----BEGIN PRIVATE KEY-----\nMIIBVg...\n-----END PRIVATE KEY-----"
+    comp = _soap_conn_comp(security="OAUTH2", client_ssl_alias=pem)
+    plan = _build_plan(None, _build_config([comp]))
+    step = _step_for(plan, "soap_connection")
+    assert step["planned_action"] == "error_soap_validation"
+    dumped = str(plan["integration_spec"]["components"])
+    assert "BEGIN PRIVATE KEY" not in dumped
+    assert "[REDACTED]" in dumped
+
+
+@patch(_PATCH_TARGET, return_value=[])
+def test_valid_cert_alias_preserved_on_unrelated_error(mock_pag):
+    """A valid GUID cert alias survives an unrelated SOAP error so the caller can
+    correct and resubmit without re-entering the cert binding."""
+    guid = "21f598a6-1d90-4578-a35a-d0350c50b747"
+    comp = _soap_conn_comp(security="OAUTH2", client_ssl_alias=guid)
+    plan = _build_plan(None, _build_config([comp]))
+    step = _step_for(plan, "soap_connection")
+    assert step["planned_action"] == "error_soap_validation"
+    dumped = str(plan["integration_spec"]["components"])
+    assert guid in dumped  # preserved (it is not secret-bearing)
+
+
+@patch(_PATCH_TARGET, return_value=[])
+def test_wss_security_options_redacted_on_validation_error(mock_pag):
+    """Codex #126 architect review (high): a non-empty wss_security_options is
+    rejected (WS-Security deferred) and its (potentially secret-bearing) content
+    must be scrubbed from the plan echo even under a non-forbidden key."""
+    comp = _soap_conn_comp(wss_security_options={"binary_token": "c2VjcmV0LXRva2Vu"})
+    plan = _build_plan(None, _build_config([comp]))
+    step = _step_for(plan, "soap_connection")
+    assert step["planned_action"] == "error_soap_validation"
+    assert step["validation_error"]["error_code"] == "UNSUPPORTED_SOAP_WSS_SECURITY"
+    dumped = str(plan["integration_spec"]["components"])
+    assert "c2VjcmV0LXRva2Vu" not in dumped
+
+
+@patch(_PATCH_TARGET, return_value=[])
 def test_raw_xml_escape_hatch_available_for_soap_subtype(mock_pag):
     raw = (
         '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '

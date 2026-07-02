@@ -2467,7 +2467,14 @@ _REST_SENSITIVE_FIELD_PATHS = (
 # still echo through the plan payload on a validation error, so scrub it.
 _SOAP_SENSITIVE_FIELD_PATHS = (
     "credential_ref",               # raw value when it should be credential://
+    "wss_security_options",         # rejected whole (WS-Security deferred); a
+                                    # UsernameToken/binary-token value could carry
+                                    # secret material under a non-forbidden key.
 )
+# SOAP certificate-alias fields (component-id GUIDs, not uniformly secret) — a
+# malformed value (PEM / key material) is scrubbed by `_redact_malformed_cert_refs`,
+# the SAME conditional-redaction discipline REST uses for its cert refs (#126).
+_SOAP_CERT_REF_FIELDS = ("client_ssl_alias", "trust_ssl_alias")
 
 # Cert refs are handled separately by `_redact_malformed_cert_refs` (below)
 # because their redaction is conditional on shape: PEM/key/garbage gets
@@ -2495,7 +2502,12 @@ def _redact_malformed_cert_refs(config: Any) -> None:
     """
     if not isinstance(config, dict):
         return
-    for field in _REST_CERT_REF_FIELDS:
+    # REST (private/public_certificate_ref) and SOAP (client/trust_ssl_alias)
+    # cert-alias fields share the identical GUID-shape discipline (#126): a
+    # value already in the documented GUID shape is preserved; PEM / key /
+    # garbage is scrubbed. A config only ever carries its own family's fields,
+    # so iterating both tuples is a no-op for the absent ones.
+    for field in _REST_CERT_REF_FIELDS + _SOAP_CERT_REF_FIELDS:
         value = config.get(field)
         if value in (None, ""):
             continue
@@ -4910,9 +4922,14 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 soap_scanner_cls.redact_forbidden_secret_fields_in_place(raw_config)
             # Any SOAP validation error scrubs the documented sensitive fields,
             # not just the one named in the winning error (same discipline as
-            # the REST block) so credential_ref can't leak on an earlier failure.
+            # the REST block) so credential_ref / wss_security_options can't leak
+            # on an earlier failure.
             for sensitive_path in _SOAP_SENSITIVE_FIELD_PATHS:
                 _redact_dotted_field_path(raw_config, sensitive_path)
+            # Cert aliases: conditional redaction — scrub PEM/key material but
+            # preserve a valid GUID so the caller can fix unrelated errors
+            # without losing the cert binding (mirrors the REST block).
+            _redact_malformed_cert_refs(raw_config)
 
         # Codex r12 P2: plan-time guard for non-metadata connector updates
         # whose connector_type / operation_mode doesn't resolve to a
