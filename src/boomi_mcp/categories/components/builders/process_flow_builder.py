@@ -50,6 +50,7 @@ from pydantic import ValidationError
 from ....models.cache_property_models import PROPERTY_SOURCE_FIELD_CONTRACT
 from ....models.pipeline_models import PipelineSpec, StageSpec
 from ._preservation_policy import OwnedPath, PreservationPolicy
+from .cache_property_lineage import validate_config_lineage
 from .connector_builder import (
     BuilderValidationError,
     REST_CLIENT_SUBTYPE,
@@ -305,7 +306,7 @@ _FLOW_SEQUENCE_STEP_KEYS: Dict[str, frozenset] = {
     # generic unknown-key message.
     "cache_put": _FLOW_SEQUENCE_STEP_COMMON_KEYS | {"document_cache_id"},
     "cache_get": _FLOW_SEQUENCE_STEP_COMMON_KEYS
-    | {"document_cache_id", "empty_cache_behavior", "doc_cache_index", "cache_key_values", "load_all_documents"},
+    | {"document_cache_id", "empty_cache_behavior", "doc_cache_index", "cache_key_values", "load_all_documents", "external_writer"},
     "decision": frozenset(
         {"kind", "label", "comparison", "left", "right", "true_steps", "false_steps"}
     ),
@@ -660,6 +661,13 @@ class ProcessFlowBuilder:
             seq_err = _validate_flow_sequence_config(config)
             if seq_err is not None:
                 return seq_err
+            # Issue #123 M11.4: cache/property lineage runs AFTER structural
+            # validation (well-formed steps only) and only on the composed
+            # path — the authored M11 kinds are the opt-in surface; legacy
+            # single-slot configs stay exempt for backward compatibility.
+            lineage_err = validate_config_lineage(config)
+            if lineage_err is not None:
+                return lineage_err
             try:
                 _extract_process_extension_connections(config)
             except BuilderValidationError as exc:
@@ -4904,6 +4912,18 @@ def _validate_sequence_cache_get_step(
             field=f"{field}.load_all_documents",
             hint="Omit the key or pass true; keyed mode needs a live capture.",
         )
+    external_writer = step.get("external_writer")
+    if external_writer is not None and not isinstance(external_writer, bool):
+        return BuilderValidationError(
+            f"{field}.external_writer must be a boolean when provided.",
+            error_code="PROCESS_DOCCACHE_RETRIEVE_CONFIG_INVALID",
+            field=f"{field}.external_writer",
+            hint=(
+                "true declares the cache is populated outside this process "
+                "(e.g. by the parent execution) — the #123 lineage check "
+                "then accepts the read without an in-process writer."
+            ),
+        )
     transform: Dict[str, Any] = {
         "mode": "doccacheretrieve",
         "document_cache_id": step.get("document_cache_id"),
@@ -5405,6 +5425,9 @@ def _build_composed_process_flow(
     seq_err = _validate_flow_sequence_config(config)
     if seq_err is not None:
         raise seq_err
+    lineage_err = validate_config_lineage(config)
+    if lineage_err is not None:
+        raise lineage_err
     prefix = _source_prefix_flow_entries(config)
     shape_xml_parts = _emit_composed_flow_shapes(prefix, config.get("flow_sequence") or [], config)
     process_overrides_xml = ""

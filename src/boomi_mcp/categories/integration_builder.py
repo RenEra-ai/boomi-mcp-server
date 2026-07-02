@@ -2251,7 +2251,7 @@ def _check_flow_sequence_steps_ref_types(
             continue
         kind = str(step.get("kind") or "").strip()
         step_field = f"{field}[{i}]"
-        if kind in ("doccacheload", "doccacheretrieve", "doccacheremove"):
+        if kind in ("doccacheload", "doccacheretrieve", "doccacheremove", "cache_put", "cache_get"):
             # A cache step's document_cache_id $ref must resolve to a Document Cache
             # component — the SAME discipline the top-level doccacheretrieve/remove
             # binding and the DLQ catch-leg cache binding enforce.

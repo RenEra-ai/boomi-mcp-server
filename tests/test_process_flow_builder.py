@@ -3987,7 +3987,7 @@ def _set_properties_seq_config():
                 "persist": True,
                 "source_values": [
                     {"value_type": "current"},
-                    {"value_type": "dpp", "property_name": "DPP_RUN_ID"},
+                    {"value_type": "dpp", "property_name": "DPP_RUN_ID", "default_value": ""},
                 ],
             },
         ]
@@ -4297,6 +4297,8 @@ def test_cache_get_keyed_mode_gated_with_named_error():
 
 
 def test_cache_get_load_all_documents_true_allowed():
+    # Standalone cache_get (no in-process writer) needs external_writer=true
+    # since #123 — the live subprocess pattern reads a parent-populated cache.
     err = ProcessFlowBuilder.validate_config(
         _seq_config(
             [
@@ -4304,6 +4306,7 @@ def test_cache_get_load_all_documents_true_allowed():
                     "kind": "cache_get",
                     "document_cache_id": "CACHE-1",
                     "load_all_documents": True,
+                    "external_writer": True,
                 }
             ]
         )
