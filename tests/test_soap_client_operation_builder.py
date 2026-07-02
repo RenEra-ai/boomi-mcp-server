@@ -32,7 +32,7 @@ _LIVE_OP_OBJECT = (
     '<cookie role="INPUT"><value>'
     '&lt;?xml version="1.0" encoding="UTF-8" standalone="yes"?&gt;'
     '&lt;WebServiceOperation operationName="Ping" soapAction="http://tempuri.org//ServiceExecuteProcess/TransactionService/Ping"&gt;'
-    '&lt;WebServiceConnection url="http://elite3x.intapp.net/te_3e_sample303/Web/TransactionService.asmx"/&gt;'
+    '&lt;WebServiceConnection url="http://elite3x.client.example/te_3e_sample303/Web/TransactionService.asmx"/&gt;'
     '&lt;WebServiceMetaData&gt;&lt;WebServiceDescription serviceName="TransactionService" '
     'serviceNamespace="http://tempuri.org//ServiceExecuteProcess" portName="TransactionServiceSoap_soap" '
     'bindingStyle="document" bindingUse="literal" bindingProtocol="soap_1_1"&gt;&lt;Operations&gt;'
@@ -62,7 +62,7 @@ def _wsdl_metadata():
     return {
         "operation_name": "Ping",
         "soap_action": "http://tempuri.org//ServiceExecuteProcess/TransactionService/Ping",
-        "metadata_connection_url": "http://elite3x.intapp.net/te_3e_sample303/Web/TransactionService.asmx",
+        "metadata_connection_url": "http://elite3x.client.example/te_3e_sample303/Web/TransactionService.asmx",
         "service_name": "TransactionService",
         "service_namespace": "http://tempuri.org//ServiceExecuteProcess",
         "port_name": "TransactionServiceSoap_soap",

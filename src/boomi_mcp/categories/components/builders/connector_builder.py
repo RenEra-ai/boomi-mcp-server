@@ -3429,7 +3429,7 @@ class RestClientOperationBuilder:
 # Typed outbound SOAP Client support, a sibling of the REST Client builders.
 # All XML shapes are byte-locked against verified live `work`-account exports:
 #   connection  2dc6f20a-3bb8-45c8-b50d-5c753364ad08 ("3E SOAP")
-#   connection  456db4ba-a391-47f2-be9f-5e9092a4f756 ("[Intapp Walls] Walls SOAP API")
+#   connection  456db4ba-a391-47f2-be9f-5e9092a4f756 ("[Client Walls] Walls SOAP API")
 #   operation   0131372a-4805-4e7d-b592-5193e2f862da ("3E SOAP Ping", EXECUTE)
 #
 # SOAP Client exposes a single outbound EXECUTE action (request/response); there
