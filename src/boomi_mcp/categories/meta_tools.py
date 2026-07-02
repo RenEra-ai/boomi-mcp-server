@@ -5619,6 +5619,7 @@ def _valid_schema_names() -> list:
         "account_governance",
         "script_dataprocess",
         "script_mapping",
+        "cache_property_authoring",
     ]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
     # design_doctrine / account_governance are stdlib-only static modules —
@@ -5752,11 +5753,107 @@ _SCRIPT_MAPPING_AUTHORING_SCHEMA = {
 }
 
 
+# M11.1 (issue #120, epic #118): the cache/property authoring vocabulary
+# surface. Read-only. capability_status is the honesty contract: every term
+# starts 'reserved_not_executable' and is flipped to 'executable' ONLY by the
+# child that ships its emitter/builder (#121 set_ddp/set_dpp, #131
+# processproperty component, #122 cache_put/cache_get/cache_join); terms whose
+# wire shape lacks live/corroborated evidence stay 'gated_no_verified_wire_shape'
+# (#119 census records each gate outcome).
+_CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
+    "set_ddp": {
+        "meaning": "Set a Dynamic Document Property (per-document scope) via a Set Properties step",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#121 (M11.2)",
+    },
+    "set_dpp": {
+        "meaning": "Set a Dynamic Process Property (execution scope; optional persist) via a Set Properties step",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#121 (M11.2)",
+    },
+    "get_property": {
+        "meaning": "Read a property value into a flow (map function today; Set Properties definedparameter source once verified)",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#121 (M11.2) / #131 (M11.7)",
+    },
+    "set_process_property": {
+        "meaning": "Write a Process Property component slot at runtime (definedprocess.<componentId>@<propertyKey>)",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#121 (M11.2) — gated pending verified wire shape",
+    },
+    "cache_put": {
+        "meaning": "Write current documents into a Document Cache (success-path Add to Cache)",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#122 (M11.3)",
+    },
+    "cache_get": {
+        "meaning": "Retrieve documents from a Document Cache (all-document; keyed mode gated on live evidence)",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#122 (M11.3)",
+    },
+    "cache_join": {
+        "meaning": "Join cached documents into a map by cache index/key (DocumentCacheJoins)",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#122 (M11.3)",
+    },
+    "processproperty_component": {
+        "meaning": "Typed create/update of a standalone Process Property component (definedProcessProperty slots)",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#131 (M11.7)",
+    },
+    "documentcache_component": {
+        "meaning": "Typed create/update of a Document Cache component (profile/index/key modeling)",
+        "capability_status": "reserved_not_executable",
+        "owning_issue": "#122 (M11.3)",
+    },
+}
+
+
+def _cache_property_authoring_schema() -> Dict[str, Any]:
+    """The read-only cache_property_authoring vocabulary surface (#120)."""
+    from ..models.cache_property_models import PROPERTY_SOURCE_FIELD_CONTRACT
+
+    return {
+        "_success": True,
+        "schema_name": "cache_property_authoring",
+        "surface": "cache_property_authoring",
+        "read_only": True,
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "epic": "#118 (M11: Cache + Dynamic Properties Authoring)",
+        "terms": _CACHE_PROPERTY_AUTHORING_TERMS,
+        "source_value_contract": {
+            value_type: {
+                "required": list(required),
+                "optional": list(optional),
+            }
+            for value_type, (required, optional) in sorted(
+                PROPERTY_SOURCE_FIELD_CONTRACT.items()
+            )
+        },
+        "scopes": {
+            "ddp": "per-document; copies with the document across branch legs; not visible to sibling-leg documents",
+            "dpp": "per-execution; visible across branch legs; last-write-wins so write order matters",
+            "processproperty": "component-backed deploy-time defaults; runtime reads via map functions (#131)",
+            "documentcache": "execution-scoped store; write (cache_put/doccacheload) must precede read (cache_get/cache_join)",
+        },
+        "hint": (
+            "Vocabulary only: a term listed here is NOT executable until its "
+            "capability_status says 'executable'. Attempting a reserved term in "
+            "build_integration fails structural validation in the process "
+            "builders, before any Boomi mutation."
+        ),
+    }
+
+
 def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
     """Dispatch get_schema_template(schema_name=...) requests (issue #10).
 
     Read-only reference data — never calls Boomi, never emits raw XML.
     """
+    if schema_name == "cache_property_authoring":
+        return _cache_property_authoring_schema()
+
     if schema_name == "IntegrationSpecV1":
         return {
             "_success": True,

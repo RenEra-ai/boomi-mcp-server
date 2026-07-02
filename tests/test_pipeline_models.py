@@ -143,6 +143,33 @@ def test_flow_control_stage_kind_is_reserved_and_accepted():
     assert kinds["c"] == "flow_control"
 
 
+def test_m11_cache_property_stage_kinds_are_reserved_and_accepted():
+    # Issue #120 M11.1 (epic #118): the cache/property authoring stage kinds
+    # are reserved in the vocabulary (no PipelineSpec lowering; emitters attach
+    # to process-config flow_sequence steps as #121/#122/#131 ship them).
+    m11_kinds = [
+        "set_ddp",
+        "set_dpp",
+        "get_property",
+        "set_process_property",
+        "cache_put",
+        "cache_get",
+        "cache_join",
+    ]
+    stages = [StageSpec(key="r", kind="read")]
+    deps = []
+    prev = "r"
+    for i, kind in enumerate(m11_kinds):
+        key = f"s{i}"
+        stages.append(StageSpec(key=key, kind=kind))
+        deps.append(PipelineEdgeSpec(from_stage=prev, to_stage=key))
+        prev = key
+    spec = PipelineSpec(stages=stages, dependencies=deps)
+    kinds = {s.key: s.kind for s in spec.stages}
+    for i, kind in enumerate(m11_kinds):
+        assert kinds[f"s{i}"] == kind
+
+
 def test_invalid_stage_kind_is_rejected():
     # Out-of-Literal value is rejected natively by pydantic before the
     # model_validator runs, so we only assert the exception type.

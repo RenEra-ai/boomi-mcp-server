@@ -107,6 +107,21 @@ PipelineStageKind = Literal[
     # lowering yet, like branch/decision/dataprocess); the M10.6 emitter attaches
     # to the transform.mode='doccacheremove' block, not to PipelineSpec.
     "doccacheremove",
+    # M11.1 (issue #120): reserved stage kinds for the cache/property authoring
+    # vocabulary (epic #118). Reserved only (no PipelineSpec lowering; emitters
+    # attach to process-config flow_sequence steps as they ship): set_ddp /
+    # set_dpp land with the M11.2 (#121) Set Properties emitters; cache_put /
+    # cache_get land with the M11.3 (#122) Document Cache authoring; cache_join
+    # is the map-time Document Cache join intent (#122, map-side);
+    # get_property / set_process_property are the Process Property component
+    # read/write intents (#121/#131) — gated until a verified wire shape exists.
+    "set_ddp",
+    "set_dpp",
+    "get_property",
+    "set_process_property",
+    "cache_put",
+    "cache_get",
+    "cache_join",
 ]
 
 PipelineEdgeKind = Literal[
