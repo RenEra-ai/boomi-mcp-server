@@ -5410,6 +5410,21 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         process_flow_err = _check_process_flow_ref_types(
                             comp, lowered_config, components_by_key
                         )
+                        # Scoped re-review P2: a sync_pipeline map stage lowers
+                        # to the legacy transform.mode='map_ref' — run the
+                        # context lineage pass on the LOWERED config (like the
+                        # ref-type check above) so an in-spec joined map cannot
+                        # plan clean against a never-written cache.
+                        if process_flow_err is None:
+                            lowered_transform = lowered_config.get("transform")
+                            if (
+                                isinstance(lowered_transform, dict)
+                                and str(lowered_transform.get("mode") or "").strip()
+                                == "map_ref"
+                            ):
+                                process_flow_err = validate_config_lineage(
+                                    lowered_config, components_by_key
+                                )
 
                 # Companion review P2 (#123 follow-up) + QA Bug #145: re-run
                 # the lineage pass WITH component context on composed configs

@@ -7994,3 +7994,57 @@ class TestLegacyTransformMapJoinLineage:
         plan = _build_plan(MagicMock(), _build_config(comps))
         step = next(s for s in plan["steps"] if s["key"] == "legacy_process")
         assert step["planned_action"] == "create", step.get("validation_error")
+
+
+class TestSyncPipelineJoinedMapLineage:
+    """Scoped re-review round 2: a sync_pipeline map stage lowers to the
+    legacy transform.mode='map_ref' — the joined-map cache-reader lineage
+    must run on the LOWERED config."""
+
+    def _spec_components(self, external_writer=None):
+        cache = _document_cache_comp(
+            key="lookup_cache", profile_id="$ref:cache_profile"
+        )
+        cache.depends_on = ["cache_profile"]
+        joined = _joined_map_comp(key="field_map", external_writer=external_writer)
+        joined.config["source_profile_id"] = "$ref:cache_profile"
+        joined.config["target_profile_id"] = "$ref:cache_profile"
+        joined.depends_on = ["cache_profile", "lookup_cache"]
+        pipeline = _sync_pipeline_comp(
+            depends_on=(
+                "db_connection",
+                "db_query_operation",
+                "field_map",
+                "target_rest_connection",
+                "target_rest_operation",
+            ),
+        )
+        # _sync_deps() ships its own field_map stub — replace it with the
+        # joined map so the pipeline's map stage resolves to it.
+        deps = [c for c in _sync_deps() if c.key != "field_map"]
+        return deps + [
+            _json_profile_for_cache(),
+            cache,
+            joined,
+            pipeline,
+        ]
+
+    @patch(_PATCH_TARGET)
+    def test_sync_pipeline_joined_map_without_writer_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(self._spec_components()))
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "error_process_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "PROCESS_LINEAGE_CACHE_WRITER_MISSING"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_sync_pipeline_joined_map_external_writer_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(
+            MagicMock(), _build_config(self._spec_components(external_writer=True))
+        )
+        step = next(s for s in plan["steps"] if s["key"] == "main_process")
+        assert step["planned_action"] == "create", step.get("validation_error")

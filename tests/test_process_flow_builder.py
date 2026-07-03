@@ -4430,3 +4430,59 @@ def test_branch_staging_leg_emits_terminal_doccacheload():
     )
     result = verify_process_graph(xml)
     assert result["errors"] == []
+
+
+# --- scoped re-review (round 2): doccacheload joins the starvation gates -----
+
+
+def test_doccacheload_followed_by_non_retrieve_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {"kind": "doccacheload", "document_cache_id": "CACHE-1"},
+                {"kind": "message", "message_text": "starved"},
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert "doccacheload consumes" in str(err)
+
+
+def test_top_level_trailing_doccacheload_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config([{"kind": "doccacheload", "document_cache_id": "CACHE-1"}])
+    )
+    assert err is not None
+    assert "END in a doccacheload" in str(err)
+
+
+def test_m10_load_retrieve_remove_chain_still_valid():
+    # The byte-locked #117 composition stays green: a load followed by a
+    # stream-replacing retrieve satisfies the consumption contract.
+    cfg = _cache_crud_config()
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+
+
+def test_branch_staging_leg_doccacheload_target_rules():
+    base = {
+        "kind": "branch",
+        "legs": [
+            {"steps": [{"kind": "doccacheload", "document_cache_id": "CACHE-1"}]},
+            {"steps": [], "target": _rest_target(label="B")},
+        ],
+    }
+    assert ProcessFlowBuilder.validate_config(_seq_config([base])) is None
+    with_target = {
+        "kind": "branch",
+        "legs": [
+            {
+                "steps": [{"kind": "doccacheload", "document_cache_id": "CACHE-1"}],
+                "target": _rest_target(label="starved"),
+            },
+            {"steps": [], "target": _rest_target(label="B")},
+        ],
+    }
+    err = ProcessFlowBuilder.validate_config(_seq_config([with_target]))
+    assert err is not None
+    assert "omitted" in str(err)

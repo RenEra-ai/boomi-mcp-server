@@ -4535,15 +4535,29 @@ def _validate_flow_sequence_config(config: Dict[str, Any]) -> Optional[BuilderVa
                 "return_documents only on a purely linear flow_sequence."
             ),
         )
+    steps_err = _validate_flow_sequence_steps(
+        seq,
+        "flow_sequence",
+        allowed_terminal_controls=_FLOW_SEQUENCE_CONTROL_KINDS | _FLOW_SEQUENCE_TERMINAL_KINDS,
+        allow_empty=False,
+    )
+    if steps_err is not None:
+        return steps_err
     last_step = seq[-1]
-    if isinstance(last_step, dict) and str(last_step.get("kind") or "").strip() == "cache_put":
-        # Companion review P1: the top-level sequence falls through to the
-        # target connector, which would receive an empty document stream after
-        # an Add to Cache (it consumes the documents it stores).
+    last_kind = (
+        str(last_step.get("kind") or "").strip() if isinstance(last_step, dict) else ""
+    )
+    if last_kind in ("cache_put", "doccacheload"):
+        # Companion review P1 (+ scoped re-review): the top-level sequence
+        # falls through to the target connector, which would receive an empty
+        # document stream after an Add to Cache (it consumes the documents it
+        # stores) — both the authored cache_put and the legacy doccacheload
+        # kind emit the same shape. Runs AFTER the per-step validators so the
+        # more specific body errors (e.g. a missing document_cache_id) win.
         return BuilderValidationError(
-            "flow_sequence must not END in a cache_put — the top-level target "
-            "would receive an empty document stream (Add to Cache consumes "
-            "the documents).",
+            f"flow_sequence must not END in a {last_kind} — the top-level "
+            "target would receive an empty document stream (Add to Cache "
+            "consumes the documents).",
             error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
             field=f"flow_sequence[{len(seq) - 1}].kind",
             hint=(
@@ -4551,12 +4565,7 @@ def _validate_flow_sequence_config(config: Dict[str, Any]) -> Optional[BuilderVa
                 "stage inside a target-less branch leg instead."
             ),
         )
-    return _validate_flow_sequence_steps(
-        seq,
-        "flow_sequence",
-        allowed_terminal_controls=_FLOW_SEQUENCE_CONTROL_KINDS | _FLOW_SEQUENCE_TERMINAL_KINDS,
-        allow_empty=False,
-    )
+    return None
 
 
 def _validate_flow_sequence_steps(
@@ -4618,7 +4627,10 @@ def _validate_flow_sequence_steps(
         # documents it stores, so a cache_put may only be followed (same
         # path) by a stream-REPLACING retrieve — anything else would run on
         # an empty document stream while validation reported success.
-        if isinstance(step, dict) and str(step.get("kind") or "").strip() == "cache_put":
+        consuming_kind = (
+            str(step.get("kind") or "").strip() if isinstance(step, dict) else ""
+        )
+        if consuming_kind in ("cache_put", "doccacheload"):
             if i < len(steps) - 1:
                 nxt = steps[i + 1]
                 next_kind = (
@@ -4626,8 +4638,8 @@ def _validate_flow_sequence_steps(
                 )
                 if next_kind not in ("cache_get", "doccacheretrieve"):
                     return BuilderValidationError(
-                        f"{field}[{i}] cache_put consumes the documents it "
-                        f"stores — the following step ({next_kind!r}) would "
+                        f"{field}[{i}] {consuming_kind} consumes the documents "
+                        f"it stores — the following step ({next_kind!r}) would "
                         "receive an empty stream.",
                         error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
                         field=f"{field}[{i + 1}].kind",
@@ -5010,18 +5022,20 @@ def _validate_sequence_decision_step(
     if true_err is not None:
         return true_err
     true_steps = step.get("true_steps") or []
-    if (
-        isinstance(true_steps, list)
+    true_last_kind = (
+        str(true_steps[-1].get("kind") or "").strip()
+        if isinstance(true_steps, list)
         and true_steps
         and isinstance(true_steps[-1], dict)
-        and str(true_steps[-1].get("kind") or "").strip() == "cache_put"
-    ):
+        else ""
+    )
+    if true_last_kind in ("cache_put", "doccacheload"):
         # Companion review P1: the TRUE leg falls through to the top-level
         # target, which would starve after an Add to Cache. (The FALSE leg
-        # falls through to a Stop, so a trailing cache_put is harmless there.)
+        # falls through to a Stop, so a trailing cache write is harmless there.)
         return BuilderValidationError(
-            f"{field}.true_steps must not end in a cache_put — the leg falls "
-            "through to the target, which would receive an empty stream.",
+            f"{field}.true_steps must not end in a {true_last_kind} — the leg "
+            "falls through to the target, which would receive an empty stream.",
             error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
             field=f"{field}.true_steps[{len(true_steps) - 1}].kind",
             hint="Follow it with cache_get, or stage in a target-less branch leg.",
@@ -5084,15 +5098,16 @@ def _validate_sequence_branch_step(
             and isinstance(leg_steps_list[-1], dict)
             else ""
         )
-        if leg_last_kind == "cache_put":
+        if leg_last_kind in ("cache_put", "doccacheload"):
             # Companion review P1: a staging leg ends AT the Add to Cache
             # (the live-captured terminal pattern) — a leg target after it
-            # would receive an empty stream, so it must be omitted.
+            # would receive an empty stream, so it must be omitted. Applies
+            # to the legacy doccacheload kind too (same emitted shape).
             if leg_target is not None:
                 return BuilderValidationError(
                     f"{leg_field}.target must be omitted when the leg ends in "
-                    "a cache_put — Add to Cache consumes the documents, so a "
-                    "leg target after it would receive an empty stream.",
+                    f"a {leg_last_kind} — Add to Cache consumes the documents, "
+                    "so a leg target after it would receive an empty stream.",
                     error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
                     field=f"{leg_field}.target",
                     hint=(
