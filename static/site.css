@@ -205,7 +205,7 @@ main {
 }
 .wrap--narrow { max-width: 760px; }
 
-section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
+section { position: relative; padding: clamp(48px, 8vh, 96px) 0; }
 .section__label {
     display: flex;
     align-items: center;
@@ -307,7 +307,7 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
 
 /* ---------------------------- Hero / auth ---------------------------- */
 
-.hero { padding-top: clamp(56px, 8vh, 104px); padding-bottom: clamp(40px, 7vh, 96px); }
+.hero { padding-top: clamp(40px, 6vh, 80px); padding-bottom: clamp(48px, 8vh, 96px); }
 .eyebrow {
     display: inline-flex;
     align-items: center;
@@ -343,6 +343,7 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
     font-family: var(--sans);
     font-weight: 700;
     letter-spacing: -0.04em;
+    padding-bottom: 0.2em;
     background: linear-gradient(180deg, #fdf4ff 0%, #c084fc 75%, #a855f7 100%);
     -webkit-background-clip: text;
     background-clip: text;
@@ -350,7 +351,7 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
 }
 .hero__period { color: var(--magenta); -webkit-text-fill-color: var(--magenta); }
 .hero__lead {
-    max-width: 60ch;
+    max-width: none;
     color: var(--ink-soft);
     font-size: clamp(16px, 1.5vw, 19px);
     line-height: 1.6;
@@ -370,7 +371,6 @@ section { position: relative; padding: clamp(64px, 10vh, 130px) 0; }
     margin: 40px 0 0;
     padding: 22px 0 0;
     border-top: 1px solid var(--line);
-    max-width: 720px;
 }
 .stats > div { padding: 4px 22px 0 0; border-right: 1px solid var(--line); }
 .stats > div:last-child { border-right: 0; padding-right: 0; }
