@@ -234,6 +234,79 @@ def test_compose_fanout_components_bind_shared_profile_and_labels():
     assert by_key["target_rest_operation"]["name"] == "DEMO Orders REST Send"
 
 
+def test_first_target_without_label_gets_humanized_key_names():
+    parts = _parts()
+    del parts[2]["label"]  # first target: derived label falls back to the key
+    spec = _compose(parts=parts)["integration_spec"]
+    by_key = {c["key"]: c for c in spec["components"]}
+    assert by_key["target_rest_connection"]["name"] == "DEMO Orders REST Connection"
+    assert by_key["target_rest_operation"]["name"] == "DEMO Orders REST Send"
+
+
+def test_explicit_component_name_overrides_beat_derived_labels():
+    options = _options()
+    options["naming"]["component_names"] = {
+        "rest_connection": "Custom First Connection",
+    }
+    spec = _compose(options=options)["integration_spec"]
+    by_key = {c["key"]: c for c in spec["components"]}
+    assert by_key["target_rest_connection"]["name"] == "Custom First Connection"
+    # The non-overridden role still gets the derived-label default.
+    assert by_key["target_rest_operation"]["name"] == "DEMO Orders REST Send"
+
+
+def test_invalid_component_name_override_still_fails_validation():
+    """A malformed role-keyed override (non-string) must reach NamingConfig
+    validation and fail — the derived-label default must never overwrite a
+    present caller value (compose behaves like the standalone archetype)."""
+    options = _options()
+    options["naming"]["component_names"] = {"rest_connection": 123}
+    result = _compose(options=options)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+@pytest.mark.parametrize("malformed", ["bad", 0, [], ["a"]])
+def test_non_dict_component_names_still_fails_validation(malformed):
+    """A present non-dict component_names must flow verbatim to NamingConfig
+    and fail PARAM_VALIDATION_FAILED — never be silently replaced by derived
+    defaults (0, []) or crash the pre-validation copy ('bad')."""
+    options = _options()
+    options["naming"]["component_names"] = malformed
+    result = _compose(options=options)
+    assert result["_success"] is False
+    assert result["error_code"] == "PARAM_VALIDATION_FAILED"
+
+
+def test_emitted_key_component_name_overrides_beat_derived_labels():
+    """The prefixed emitted key ('target_rest_connection') is a documented
+    override fallback (_component_names) — the derived-label default must not
+    shadow it by populating the higher-precedence role key."""
+    options = _options()
+    options["naming"]["component_names"] = {
+        "target_rest_connection": "Emitted-Key Connection Name",
+        "target_rest_operation": "Emitted-Key Operation Name",
+    }
+    spec = _compose(options=options)["integration_spec"]
+    by_key = {c["key"]: c for c in spec["components"]}
+    assert by_key["target_rest_connection"]["name"] == "Emitted-Key Connection Name"
+    assert by_key["target_rest_operation"]["name"] == "Emitted-Key Operation Name"
+
+
+def test_fanout_create_default_headers_recorded_as_deferred_intent():
+    parts = _parts()
+    parts[3]["parameters"]["binding"]["settings"]["default_headers"] = {
+        "<<header name>>": "<<header value>>",
+    }
+    result = _compose(parts=parts)
+    assert result["_success"] is True
+    legs = result["integration_spec"]["validation_rules"]["composition"]["fanout_legs"]
+    deferred = legs[0]["deferred"]["default_headers"]
+    assert deferred["count"] == 1
+    # Counts only — the caller-authored header keys/values are never echoed.
+    assert "<<header name>>" not in json.dumps(deferred)
+
+
 def test_compose_registry_and_archetype_list_unchanged():
     listed = list_integration_archetypes_action()
     assert listed["_success"] is True

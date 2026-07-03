@@ -56,6 +56,7 @@ from ..models.integration_models import (
 from .archetypes.database_to_api_sync import (
     _MAIN_PROCESS_KEY,
     _REST_CREATE_AUTH_MAP,
+    _TARGET_PREFIX,
     _TRANSFORM_PREFIX,
     DatabaseSource,
     DatabaseToApiSyncArchetype,
@@ -531,15 +532,37 @@ def _base_parameters_payload(
     reliability surface, so nothing the caller supplied is dropped here.
     """
     naming = dict(options.naming or {})
-    if first_target.label and first_target.label.strip():
-        component_names = dict(naming.get("component_names") or {})
-        label = first_target.label.strip()
-        component_names.setdefault(
-            ROLE_REST_CONNECTION, f"{component_prefix_hint} {label} REST Connection"
-        )
-        component_names.setdefault(
-            ROLE_REST_OPERATION, f"{component_prefix_hint} {label} REST Send"
-        )
+    # The first target's derived label (explicit label, else humanized part
+    # key — the SAME default every fanout leg gets) drives the base REST
+    # pair's display names, so leg 1 stays as uniquely named as legs 2..N and
+    # cannot accidentally match an existing generic component under
+    # conflict_policy='reuse'. Explicit caller overrides win — under EITHER
+    # supported key form (_named checks the role key 'rest_connection' before
+    # the prefixed emitted key 'target_rest_connection', so populating the
+    # role key when only the emitted key is set would shadow the caller's
+    # override).
+    # Inject defaults only when component_names is absent or a real dict — a
+    # PRESENT malformed value (a string, int, list, ...) must flow VERBATIM
+    # into NamingConfig validation and fail as PARAM_VALIDATION_FAILED,
+    # exactly as it would on the standalone archetype, never be replaced (0 /
+    # []) or crash the copy ('bad' -> ARCHETYPE_BUILD_FAILED).
+    raw_component_names = naming.get("component_names")
+    if raw_component_names is None or isinstance(raw_component_names, dict):
+        component_names = dict(raw_component_names or {})
+        label = _derived_label(first_target)
+        for role, default_name in (
+            (ROLE_REST_CONNECTION, f"{component_prefix_hint} {label} REST Connection"),
+            (ROLE_REST_OPERATION, f"{component_prefix_hint} {label} REST Send"),
+        ):
+            emitted_key = primitive_component_key(_TARGET_PREFIX, role)
+            emitted_value = component_names.get(emitted_key)
+            emitted_override = isinstance(emitted_value, str) and emitted_value.strip()
+            # Never overwrite a PRESENT role-key value — even a malformed one
+            # (e.g. an int) must reach NamingConfig validation. Only a
+            # genuinely absent role key gets the derived default, and only
+            # when no non-blank emitted-key override would be shadowed.
+            if role not in component_names and not emitted_override:
+                component_names[role] = default_name
         naming["component_names"] = component_names
     return {
         "naming": naming,
@@ -812,6 +835,26 @@ def compose_archetypes(
             summary["expected_status_codes"] = list(
                 target_model.send_request.expected_status_codes
             )
+        # Mirror the base archetype's _deferred_intent policy for headers the
+        # builders cannot emit: record the intent (counts only — never the
+        # caller-authored keys/values) instead of silently dropping it. The
+        # base target's own default_headers are already recorded under
+        # operational_intent.deferred by the archetype emission.
+        if (
+            binding_mode == "create"
+            and target_model.binding.settings is not None
+            and target_model.binding.settings.default_headers
+        ):
+            summary["deferred"] = {
+                "default_headers": {
+                    "count": len(target_model.binding.settings.default_headers),
+                    "note": (
+                        "REST default headers are not emitted onto the "
+                        "created connection; use binding.mode='reuse' for a "
+                        "connection needing them."
+                    ),
+                }
+            }
         fanout_summaries.append(summary)
 
     _rewrite_process_for_fanout(
