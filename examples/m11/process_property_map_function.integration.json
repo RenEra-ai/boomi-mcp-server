@@ -1,0 +1,108 @@
+{
+  "example_not_template": true,
+  "is_template": false,
+  "template_status": "example_only_not_reusable_template",
+  "purpose": "M11 (#125): explicit processproperty component with a stable property key, referenced by a transform.map (map_type=function) through defined_process_property_get — the #131 green path (component $ref in depends_on + verbatim property key coupling).",
+  "do_not_reuse": "Concrete values below are demo-grade so the spec plans clean in tests; generate your own stable property-key UUID once and keep it across updates.",
+  "integration_spec": {
+    "naming": {"integration_name": "M11 Process Property Map Demo"},
+    "components": [
+      {
+        "key": "src_profile",
+        "type": "profile.json",
+        "action": "create",
+        "name": "M11 Demo Source Profile",
+        "config": {
+          "component_type": "profile.json",
+          "profile_type": "json.generated",
+          "component_name": "M11 Demo Source Profile",
+          "root": {
+            "name": "Root",
+            "kind": "object",
+            "children": [
+              {
+                "name": "list",
+                "kind": "array",
+                "children": [
+                  {"name": "status", "kind": "simple", "data_type": "character"}
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "key": "tgt_profile",
+        "type": "profile.json",
+        "action": "create",
+        "name": "M11 Demo Target Profile",
+        "config": {
+          "component_type": "profile.json",
+          "profile_type": "json.generated",
+          "component_name": "M11 Demo Target Profile",
+          "root": {
+            "name": "Root",
+            "kind": "object",
+            "children": [
+              {
+                "name": "list",
+                "kind": "array",
+                "children": [
+                  {"name": "status", "kind": "simple", "data_type": "character"}
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "key": "runtime_props",
+        "type": "processproperty",
+        "action": "create",
+        "name": "M11 Runtime Settings",
+        "config": {
+          "component_type": "processproperty",
+          "component_name": "M11 Runtime Settings",
+          "properties": [
+            {
+              "key": "0e89ebf1-cd46-46df-904e-94c7e7ade31e",
+              "name": "Default Status",
+              "type": "string",
+              "default_value": "NEW",
+              "help_text": "Fallback status grafted into outbound records"
+            }
+          ]
+        }
+      },
+      {
+        "key": "status_map",
+        "type": "transform.map",
+        "action": "create",
+        "name": "M11 Status Graft Map",
+        "depends_on": ["src_profile", "tgt_profile", "runtime_props"],
+        "config": {
+          "component_type": "transform.map",
+          "map_type": "function",
+          "component_name": "M11 Status Graft Map",
+          "source_profile_id": "$ref:src_profile",
+          "source_profile_type": "profile.json",
+          "target_profile_id": "$ref:tgt_profile",
+          "target_profile_type": "profile.json",
+          "function_mappings": [
+            {
+              "function_type": "defined_process_property_get",
+              "inputs": [],
+              "target_path": "Root/list[]/status",
+              "parameters": {
+                "process_property_component_id": "$ref:runtime_props",
+                "process_property_component_name": "M11 Runtime Settings",
+                "process_property_key": "0e89ebf1-cd46-46df-904e-94c7e7ade31e",
+                "process_property_name": "Default Status"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
