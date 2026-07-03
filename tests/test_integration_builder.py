@@ -7996,6 +7996,58 @@ class TestLegacyTransformMapJoinLineage:
         assert step["planned_action"] == "create", step.get("validation_error")
 
 
+class TestWrapperSubprocessLineageExempt:
+    """#125 Codex review P2: transform / flow_sequence are ignored fields on
+    wrapper_subprocess (its validate_config and build never read them), so
+    the component-context lineage pass must not reject a wrapper on a stray
+    copy whose emitted XML never executes the referenced map."""
+
+    def _components(self, stray_config):
+        cache = _document_cache_comp(
+            key="lookup_cache", profile_id="$ref:cache_profile"
+        )
+        cache.depends_on = ["cache_profile"]
+        wrapper_config = {
+            "process_kind": "wrapper_subprocess",
+            "process_calls": [
+                {"process_id": "99999999-9999-9999-9999-999999999999"}
+            ],
+        }
+        wrapper_config.update(stray_config)
+        wrapper = IntegrationComponentSpec(
+            key="wrapper", type="process", action="create",
+            name="Wrapper Facade",
+            depends_on=["join_map"],
+            config=wrapper_config,
+        )
+        return [
+            _json_profile_for_cache(),
+            cache,
+            _joined_map_comp(),
+            wrapper,
+        ]
+
+    @patch(_PATCH_TARGET)
+    def test_wrapper_with_stray_joined_map_transform_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(self._components(
+            {"transform": {"mode": "map_ref", "map_ref": "$ref:join_map"}}
+        )))
+        step = next(s for s in plan["steps"] if s["key"] == "wrapper")
+        assert step["planned_action"] == "create", step.get("validation_error")
+
+    @patch(_PATCH_TARGET)
+    def test_wrapper_with_stray_flow_sequence_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(self._components(
+            {"flow_sequence": [
+                {"kind": "cache_get", "document_cache_id": "$ref:lookup_cache"}
+            ]}
+        )))
+        step = next(s for s in plan["steps"] if s["key"] == "wrapper")
+        assert step["planned_action"] == "create", step.get("validation_error")
+
+
 class TestSyncPipelineJoinedMapLineage:
     """Scoped re-review round 2: a sync_pipeline map stage lowers to the
     legacy transform.mode='map_ref' — the joined-map cache-reader lineage

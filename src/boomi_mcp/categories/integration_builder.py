@@ -5434,17 +5434,28 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                 # see. On the legacy surface no in-process writer is even
                 # possible (transform excludes flow_sequence in v1), so a
                 # joined cache there must declare external_writer: true.
+                # Gated to the base builder (#125 review): transform /
+                # flow_sequence are executed fields only on
+                # database_to_api_sync — wrapper_subprocess ignores them in
+                # validate_config and build, so lineage-checking a stray copy
+                # there rejects a plan whose emitted XML never runs the map;
+                # sync_pipeline is covered by the lowered-config pass above
+                # (its validate_config rejects these keys at top level).
                 legacy_transform = raw_config.get("transform")
                 legacy_map_ref = (
                     isinstance(legacy_transform, dict)
                     and str(legacy_transform.get("mode") or "").strip() == "map_ref"
                 )
-                if process_flow_err is None and (
-                    (
-                        isinstance(raw_config.get("flow_sequence"), list)
-                        and raw_config.get("flow_sequence")
+                if (
+                    process_flow_err is None
+                    and builder_cls is ProcessFlowBuilder
+                    and (
+                        (
+                            isinstance(raw_config.get("flow_sequence"), list)
+                            and raw_config.get("flow_sequence")
+                        )
+                        or legacy_map_ref
                     )
-                    or legacy_map_ref
                 ):
                     process_flow_err = validate_config_lineage(
                         raw_config, components_by_key
