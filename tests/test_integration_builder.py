@@ -7650,6 +7650,33 @@ class TestBuildPlanProcessPropertyComponent:
         assert "hunter2" not in json.dumps(plan, default=str)
 
     @patch(_PATCH_TARGET)
+    def test_password_default_redacted_even_with_other_validation_error(
+        self, mock_pag
+    ):
+        # Codex review finding (#131): an invalid UUID key used to win the
+        # validation race with a non-redacting error code, echoing the
+        # plaintext password default. The pre-scan guard must fire first.
+        import json
+
+        mock_pag.return_value = []
+        comp = _process_property_comp()
+        comp.config["properties"] = [
+            {
+                "key": "not-a-uuid",
+                "name": "API Key",
+                "type": "password",
+                "default_value": "hunter2",
+            },
+        ]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = next(s for s in plan["steps"] if s["key"] == "runtime_props")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        )
+        assert "hunter2" not in json.dumps(plan, default=str)
+
+    @patch(_PATCH_TARGET)
     def test_missing_component_name_falls_back_to_spec_name(self, mock_pag):
         # comp.name is injected as component_name at plan time (name-primary
         # type) — a spec with only the top-level name plans clean.

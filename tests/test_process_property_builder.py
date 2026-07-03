@@ -380,18 +380,52 @@ def test_password_nonempty_default_rejected_plaintext():
         assert "s3cret!" not in hint
 
 
-def test_password_nonstring_default_still_default_invalid():
-    # Pins the guard's placement AFTER the string-type check: a non-string
-    # default on a password property is a shape error, not a secret echo.
-    err = ProcessPropertyBuilder.validate_config(
+def test_password_default_guard_precedes_every_other_validation_return():
+    # The plan layer redacts the echoed spec only for
+    # PLAINTEXT_SECRET_REJECTED, so the guard must win over any co-present
+    # validation failure — otherwise the secret default would be echoed
+    # unredacted alongside the other error (Codex review finding, #131).
+    cases = [
+        # (a) non-string default shapes can carry secrets too
+        {"key": _KEY_1, "name": "P", "type": "password", "default_value": 5},
         {
-            "component_name": "X",
-            "properties": [
-                {"key": _KEY_1, "name": "P", "type": "password", "default_value": 5}
-            ],
-        }
-    )
-    assert err.error_code == "PROCESS_PROPERTY_DEFAULT_INVALID"
+            "key": _KEY_1,
+            "name": "P",
+            "type": "password",
+            "default_value": {"pw": "hunter2"},
+        },
+        # (b) invalid UUID key would otherwise return KEY_INVALID first
+        {
+            "key": "not-a-uuid",
+            "name": "P",
+            "type": "password",
+            "default_value": "s3cret!",
+        },
+        # (c) hidden type would otherwise return TYPE_UNSUPPORTED first
+        {
+            "key": _KEY_1,
+            "name": "P",
+            "type": "hidden",
+            "default_value": "s3cret!",
+        },
+        # (d) unknown property key would otherwise fail first
+        {
+            "key": _KEY_1,
+            "name": "P",
+            "type": "password",
+            "default_value": "s3cret!",
+            "bogus": True,
+        },
+    ]
+    for prop in cases:
+        err = ProcessPropertyBuilder.validate_config(
+            {"component_name": "X", "properties": [prop]}
+        )
+        assert err is not None, prop
+        assert err.error_code == "PLAINTEXT_SECRET_REJECTED", prop
+        assert err.field == "properties[0].default_value", prop
+        assert "s3cret!" not in str(err)
+        assert "hunter2" not in str(err)
 
 
 def test_encrypted_property_key_rejected_with_evidence_hint():

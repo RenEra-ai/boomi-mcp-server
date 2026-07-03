@@ -265,6 +265,39 @@ class ProcessPropertyBuilder:
         if secret_err is not None:
             return secret_err
 
+        # 1.5. Password/hidden plaintext-default guard — MUST precede every
+        # other validation return: the plan layer redacts the echoed spec
+        # only for PLAINTEXT_SECRET_REJECTED, so this error has to win
+        # whenever a secret-bearing default is present, or a co-present
+        # validation failure (bad key, hidden type, unknown property key)
+        # would echo the secret unredacted. Any non-empty default counts —
+        # non-string shapes (dict/list/number) can carry secrets too. The
+        # message deliberately never echoes the supplied value.
+        maybe_properties = config.get("properties")
+        if isinstance(maybe_properties, list):
+            for index, entry in enumerate(maybe_properties):
+                if not isinstance(entry, Mapping):
+                    continue
+                prop_type = entry.get("type")
+                if (
+                    isinstance(prop_type, str)
+                    and prop_type.strip().lower() in ("password", "hidden")
+                    and entry.get("default_value") not in (None, "")
+                ):
+                    return BuilderValidationError(
+                        f"properties[{index}].default_value must be omitted "
+                        "or empty for password-type (UI 'Hidden') properties "
+                        "— Boomi stores Defined Process Property defaults in "
+                        "plaintext component XML",
+                        error_code="PLAINTEXT_SECRET_REJECTED",
+                        field=f"properties[{index}].default_value",
+                        hint=(
+                            "Leave the default empty; supply the real value "
+                            "via environment extensions / runtime overrides, "
+                            "never in component XML."
+                        ),
+                    )
+
         # 2. Unknown top-level keys (raw-XML subtree smuggling gets the
         # dedicated error code so the hint can point at the escape hatch).
         for key in config.keys():
@@ -425,26 +458,6 @@ class ProcessPropertyBuilder:
                         error_code=PROCESS_PROPERTY_DEFAULT_INVALID,
                         field=f"{field_prefix}.{str_key}",
                         hint="Pass a string (may be empty), or omit the key.",
-                    )
-
-            # password default guard — the platform stores a password-type
-            # defaultValue in PLAINTEXT component XML (live-verified
-            # 2026-07-03), so only omitted/None/"" are accepted. The message
-            # deliberately never echoes the supplied value.
-            if prop_type.strip() == "password":
-                default_value = entry.get("default_value")
-                if default_value is not None and default_value != "":
-                    return BuilderValidationError(
-                        f"{field_prefix}.default_value must be omitted or "
-                        "empty for type='password' — Boomi stores Defined "
-                        "Process Property defaults in plaintext component XML",
-                        error_code="PLAINTEXT_SECRET_REJECTED",
-                        field=f"{field_prefix}.default_value",
-                        hint=(
-                            "Leave the default empty; supply the real value "
-                            "via environment extensions / runtime overrides, "
-                            "never in component XML."
-                        ),
                     )
 
             # persisted — bool when provided.
