@@ -34,6 +34,7 @@ from ..patterns import (
     PatternRegistryError,
     pattern_validation_error,
 )
+from ..patterns.composition import compose_archetypes
 
 
 def _reliability_downgrade_hints(spec: Any) -> list[str]:
@@ -243,6 +244,86 @@ def build_from_archetype_action(
     return response
 
 
+def compose_archetypes_action(
+    parts: list | str | None = None,
+    options: dict[str, Any] | str | None = None,
+) -> dict[str, Any]:
+    """Compose archetype parts into ONE IntegrationSpecV1 (M8 / issue #14).
+
+    Read-only: no Boomi call, no raw XML, no credentials. Cross-part contract
+    validation (COMPOSITION_* codes) runs before any spec is emitted, so an
+    invalid composition fails before any path that could reach a Boomi
+    mutation.
+    """
+    try:
+        parts_list = _normalize_parts(parts)
+        options_dict = _normalize_parameters(options) if options is not None else None
+    except (ValueError, TypeError) as exc:
+        return PatternError(
+            error_code=PARAM_VALIDATION_FAILED,
+            error=str(exc),
+            suggestion=(
+                "Provide parts as a JSON array of part objects and options as "
+                "a JSON object (dict or JSON-encoded string)."
+            ),
+            retryable=False,
+        ).to_dict()
+
+    try:
+        spec = compose_archetypes(parts_list, options_dict)
+    except ValidationError as exc:
+        return pattern_validation_error(
+            exc,
+            suggestion="Inspect field_errors[] for per-field problems.",
+        ).to_dict()
+    except BuilderValidationError as exc:
+        # Composition/builder rejections (COMPOSITION_CONTRACT_MISMATCH,
+        # COMPOSITION_UNSUPPORTED_TOPOLOGY, COMPOSITION_COMPONENT_KEY_COLLISION,
+        # UNSUPPORTED_REST_AUTH_MODE, ...) are already structured and
+        # secret-safe — surface them verbatim.
+        context: dict[str, Any] = {"surface": "compose_archetypes"}
+        if exc.field:
+            context["field"] = exc.field
+        if exc.details:
+            context["details"] = exc.details
+        return PatternError(
+            error_code=exc.error_code or ARCHETYPE_BUILD_VALIDATION_FAILED,
+            error=str(exc),
+            suggestion=exc.hint
+            or "Adjust the composition parts/options to satisfy the validator.",
+            retryable=False,
+            context=context,
+        ).to_dict()
+    except Exception as exc:  # noqa: BLE001 — last-line defense; do not leak parts
+        return PatternError(
+            error_code=ARCHETYPE_BUILD_FAILED,
+            error=f"compose_archetypes() failed unexpectedly: {exc}",
+            suggestion="Inspect the composition implementation.",
+            retryable=False,
+            context={
+                "surface": "compose_archetypes",
+                "exception_type": type(exc).__name__,
+            },
+        ).to_dict()
+
+    composition = dict(spec.validation_rules.get("composition") or {})
+    return {
+        "_success": True,
+        "composition": {
+            "topology": composition.get("topology"),
+            "handoff": composition.get("handoff"),
+            "fanout_targets": composition.get("fanout_targets"),
+        },
+        "integration_spec": spec.model_dump(mode="json"),
+        "raw_xml_exposed": False,
+        "boomi_mutation": False,
+        "next_steps": (
+            "Pass integration_spec to build_integration(action='plan', "
+            "config=...) to preview steps before applying."
+        ),
+    }
+
+
 # ---- private input normalizers ------------------------------------------
 
 
@@ -262,6 +343,27 @@ def _normalize_tags(tags: list[str] | str | None) -> list[str] | None:
                 return [str(t).strip() for t in parsed if str(t).strip()]
         return [t.strip() for t in stripped.split(",") if t.strip()]
     return [str(t) for t in tags]
+
+
+def _normalize_parts(parts: list | str | None) -> list:
+    """Accept a list of part objects or a JSON-encoded array string."""
+    if parts is None:
+        return []
+    if isinstance(parts, list):
+        return parts
+    if isinstance(parts, str):
+        try:
+            parsed = json.loads(parts)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"parts must be valid JSON: {exc}") from exc
+        if not isinstance(parsed, list):
+            raise ValueError(
+                "parts JSON must be an array, not " + type(parsed).__name__
+            )
+        return parsed
+    raise TypeError(
+        f"parts must be a list, JSON string, or None; got {type(parts).__name__}"
+    )
 
 
 def _normalize_parameters(parameters: dict[str, Any] | str | None) -> dict[str, Any]:

@@ -554,3 +554,69 @@ def test_safe_edit_workflow_preserved_when_all_tools_present():
     }
     catalog = list_capabilities_action(available_tools=only)
     assert "safe_edit_existing_component" in catalog["workflows"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #14 (M8) — compose_archetypes discoverability
+# ---------------------------------------------------------------------------
+
+
+def test_compose_archetypes_in_capabilities():
+    tools = list_capabilities_action()["tools"]
+    assert "compose_archetypes" in tools
+    entry = tools["compose_archetypes"]
+    assert entry["category"] == "Integration Authoring"
+    assert entry["read_only"] is True
+    assert entry["no_boomi_mutation"] is True
+    assert "parts" in entry["parameters"]
+    assert "options" in entry["parameters"]
+
+
+def test_compose_workflow_routes_through_compose_to_orchestrate_deploy():
+    wf = list_capabilities_action()["workflows"]["compose_multi_target_integration"]
+    steps = wf["steps"]
+    referenced = []
+    for step in steps:
+        m = re.match(r"\d+\.\s+(\w+)\(", step)
+        if m:
+            referenced.append(m.group(1))
+    assert referenced == [
+        "get_schema_template",
+        "get_integration_archetype",
+        "compose_archetypes",
+        "build_integration",
+        "build_integration",
+        "orchestrate_deploy",
+    ]
+
+
+def test_compose_workflow_leaves_description_chain_untouched():
+    """The compose guidance ships as its OWN workflow — the pinned
+    build_integration_from_description chain must not gain a compose step."""
+    wf = list_capabilities_action()["workflows"]["build_integration_from_description"]
+    assert not any("compose_archetypes" in s for s in wf["steps"])
+
+
+def test_compose_workflow_dropped_when_compose_tool_absent():
+    only = {
+        "list_boomi_profiles",
+        "get_schema_template",
+        "get_integration_archetype",
+        "build_integration",
+        "orchestrate_deploy",
+    }
+    catalog = list_capabilities_action(available_tools=only)
+    assert "compose_archetypes" not in catalog["tools"]
+    assert "compose_multi_target_integration" not in catalog["workflows"]
+
+
+def test_compose_workflow_preserved_when_all_referenced_tools_present():
+    only = {
+        "get_schema_template",
+        "get_integration_archetype",
+        "compose_archetypes",
+        "build_integration",
+        "orchestrate_deploy",
+    }
+    catalog = list_capabilities_action(available_tools=only)
+    assert "compose_multi_target_integration" in catalog["workflows"]

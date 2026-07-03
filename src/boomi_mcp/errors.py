@@ -41,6 +41,11 @@ SCHEMA_NAME_UNSUPPORTED = "SCHEMA_NAME_UNSUPPORTED"
 SCHEMA_LOOKUP_FAILED = "SCHEMA_LOOKUP_FAILED"
 WORKFLOW_SEQUENCE_NOT_FOUND = "WORKFLOW_SEQUENCE_NOT_FOUND"
 
+# --- Archetype composition (M8 / issue #14) ----------------------------------
+COMPOSITION_CONTRACT_MISMATCH = "COMPOSITION_CONTRACT_MISMATCH"
+COMPOSITION_UNSUPPORTED_TOPOLOGY = "COMPOSITION_UNSUPPORTED_TOPOLOGY"
+COMPOSITION_COMPONENT_KEY_COLLISION = "COMPOSITION_COMPONENT_KEY_COLLISION"
+
 # --- Safe existing-component edit workflow (M9.7 / issue #97) -----------------
 COMPONENT_EDIT_RAW_XML_UNSUPPORTED = "COMPONENT_EDIT_RAW_XML_UNSUPPORTED"
 COMPONENT_EDIT_CONFIRMATION_REQUIRED = "COMPONENT_EDIT_CONFIRMATION_REQUIRED"
@@ -178,6 +183,36 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary="Unknown workflow sequence name; see valid_workflows.",
             owner="#10",
+        ),
+        ErrorCodeSpec(
+            code=COMPOSITION_CONTRACT_MISMATCH,
+            category="authoring",
+            retryable=False,
+            summary=(
+                "A composed part's output contract does not match the next "
+                "part's input contract (source fields / profile leaves / media type)."
+            ),
+            owner="#14",
+        ),
+        ErrorCodeSpec(
+            code=COMPOSITION_UNSUPPORTED_TOPOLOGY,
+            category="authoring",
+            retryable=False,
+            summary=(
+                "The requested part graph is outside the v1 composed topology "
+                "(one db_source -> one transform -> 2..25 rest_target fanout)."
+            ),
+            owner="#14",
+        ),
+        ErrorCodeSpec(
+            code=COMPOSITION_COMPONENT_KEY_COLLISION,
+            category="authoring",
+            retryable=False,
+            summary=(
+                "Two composition parts collide on a key, derived component-key "
+                "prefix, or derived component display name."
+            ),
+            owner="#14",
         ),
         ErrorCodeSpec(
             code=COMPONENT_EDIT_RAW_XML_UNSUPPORTED,

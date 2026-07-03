@@ -5815,6 +5815,22 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
                 ],
             },
         },
+        "compose_multi_target_integration": {
+            "description": (
+                "Compose a multi-target integration (M8 / issue #14): one DB "
+                "source feeding a shared transform that fans out to 2..25 REST "
+                "targets via a Branch — use this when the requested shape "
+                "exceeds one linear archetype preset."
+            ),
+            "steps": [
+                "1. get_schema_template(schema_name='compose_archetypes') → inspect the part-kind vocabulary, v1 topology, and handoff modes",
+                "2. get_integration_archetype(name='database_to_api_sync') → inspect the source/transform/target sub-contracts the parts reuse",
+                "3. compose_archetypes(parts=[...], options={...}) → emit ONE coherent IntegrationSpecV1 (no Boomi mutation; invalid contract links fail here)",
+                "4. build_integration(action='plan', config='{\"integration_spec\": <spec from step 3>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
+                "5. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 3>}') → execute ordered component creation",
+                "6. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind; re-run with dry_run=false to execute",
+            ],
+        },
         "set_up_b2b_trading_partner": {
             "description": "Create a trading partner for EDI/B2B integration",
             "steps": [
@@ -5876,6 +5892,7 @@ def _valid_schema_names() -> list:
         "cache_property_authoring",
         "process_property",
         "document_cache",
+        "compose_archetypes",
     ]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
     # design_doctrine / account_governance are stdlib-only static modules —
@@ -6238,6 +6255,111 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
                 "readable at runtime (execution scope) — use them for "
                 "operator-tunable settings; use set_dpp for run-computed "
                 "state and set_ddp for per-document state."
+            ),
+        }
+
+    if schema_name == "compose_archetypes":
+        # Issue #14 (M8): read-only authoring reference for archetype
+        # composition — the compose_archetypes(parts, options) surface.
+        return {
+            "_success": True,
+            "schema_name": "compose_archetypes",
+            "surface": "compose_archetypes(parts, options)",
+            "read_only": True,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "topology": (
+                "v1 composes exactly: one db_source part -> one transform "
+                "part -> 2..25 rest_target parts. The shared transform feeds "
+                "a Branch fan-out with one REST target per leg; each leg "
+                "sends the SAME mapped payload, so every rest_target "
+                "payload_profile must declare identical leaf paths, data "
+                "types, and required flags."
+            ),
+            "part_kinds": {
+                "db_source": (
+                    "archetype 'source' payload (DatabaseSource): binding + "
+                    "read_operation with a caller-declared result_schema"
+                ),
+                "transform": (
+                    "archetype 'transform' payload (TransformConfig): typed "
+                    "direct / map_function / map_script operations"
+                ),
+                "rest_target": (
+                    "archetype 'target' payload (RestTarget): binding + "
+                    "send_request + payload_profile; the FIRST rest_target "
+                    "part is Branch leg 1, later parts become legs 2..N with "
+                    "component keys target_<part key>_rest_connection / "
+                    "_rest_operation"
+                ),
+            },
+            "handoff_modes": {
+                "document_stream": (
+                    "executable (default): documents flow down the single "
+                    "process stream (source -> shared map -> branch legs)"
+                ),
+                "document_cache": (
+                    "gated: reserved until it lowers onto the M11 cache_put/"
+                    "cache_get steps — see get_schema_template("
+                    "schema_name='cache_property_authoring')"
+                ),
+            },
+            "error_codes": [
+                "COMPOSITION_CONTRACT_MISMATCH",
+                "COMPOSITION_UNSUPPORTED_TOPOLOGY",
+                "COMPOSITION_COMPONENT_KEY_COLLISION",
+            ],
+            "validation_note": (
+                "Cross-part contract validation (source-field coverage, "
+                "target-leaf resolution, payload-profile leaf equality across "
+                "fanout targets) runs BEFORE any spec is emitted, and the "
+                "composed process config re-runs the same builder validation "
+                "build_integration uses — invalid contract links fail before "
+                "any Boomi mutation."
+            ),
+            "v1_limits": (
+                "Per-target divergent transforms, joins, nested branches, "
+                "dynamic paths (send_request.path_replacements), Try/Catch "
+                "reliability, watermark-sourced query parameters on fanout "
+                "(non-first) targets, and arbitrary graph composition are out "
+                "of scope for v1."
+            ),
+            "example": {
+                "parts": [
+                    {
+                        "key": "db",
+                        "kind": "db_source",
+                        "parameters": "<<archetype source payload>>",
+                    },
+                    {
+                        "key": "shape",
+                        "kind": "transform",
+                        "parameters": "<<archetype transform payload>>",
+                    },
+                    {
+                        "key": "orders",
+                        "kind": "rest_target",
+                        "label": "Orders",
+                        "parameters": "<<archetype target payload>>",
+                    },
+                    {
+                        "key": "billing",
+                        "kind": "rest_target",
+                        "label": "Billing",
+                        "parameters": "<<archetype target payload>>",
+                    },
+                ],
+                "options": {
+                    "naming": {
+                        "integration_name": "<<integration name>>",
+                        "component_prefix": "<<component prefix>>",
+                    },
+                },
+            },
+            "next_steps": (
+                "Pass the returned integration_spec to build_integration("
+                "action='plan', config=...) to preview, then apply and "
+                "orchestrate_deploy as usual."
             ),
         }
 
@@ -9174,6 +9296,29 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "examples": [
                 'build_from_archetype(name="stub_minimal_integration", parameters={"integration_name": "demo"})',
                 'build_from_archetype(name="database_to_api_sync", parameters={...}) → executable spec for build_integration(action=\'plan\')',
+            ],
+        },
+        "compose_archetypes": {
+            "category": "Integration Authoring",
+            "description": (
+                "Compose archetype parts into ONE coherent IntegrationSpecV1 WITHOUT calling Boomi "
+                "(M8 / issue #14). v1 topology: one db_source -> one shared transform -> 2..25 "
+                "rest_target parts lowered onto a verified Branch fan-out. Cross-part contract "
+                "validation (COMPOSITION_* error codes) fails before any spec is emitted; the "
+                "composed spec deploys through build_integration(plan/apply) -> orchestrate_deploy. "
+                "Use this after inspecting the standalone archetypes when the requested shape "
+                "exceeds one linear preset."
+            ),
+            "actions": ["(single action — emits an IntegrationSpecV1 only)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "parts": "list (required) — part objects {key, kind: db_source|transform|rest_target, label?, parameters}",
+                "options": "dict (optional) — {naming: {integration_name, component_prefix, ...}, execution?, links?}",
+            },
+            "examples": [
+                "compose_archetypes(parts=[{\"key\": \"db\", \"kind\": \"db_source\", \"parameters\": {...}}, {\"key\": \"shape\", \"kind\": \"transform\", \"parameters\": {...}}, {\"key\": \"orders\", \"kind\": \"rest_target\", \"parameters\": {...}}, {\"key\": \"billing\", \"kind\": \"rest_target\", \"parameters\": {...}}], options={\"naming\": {\"integration_name\": \"demo\", \"component_prefix\": \"DEMO\"}})",
+                "# Inspect the contract first: get_schema_template(schema_name='compose_archetypes')",
             ],
         },
         "review_transformation": {

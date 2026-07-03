@@ -473,6 +473,7 @@ try:
         list_integration_archetypes_action,
         get_integration_archetype_action,
         build_from_archetype_action,
+        compose_archetypes_action,
     )
     print("[INFO] Integration authoring tools loaded successfully")
 except ImportError as e:
@@ -480,6 +481,7 @@ except ImportError as e:
     list_integration_archetypes_action = None
     get_integration_archetype_action = None
     build_from_archetype_action = None
+    compose_archetypes_action = None
 
 # --- Transformation Review Tool (Issue #46) ---
 try:
@@ -2226,6 +2228,29 @@ if list_integration_archetypes_action:
         return build_from_archetype_action(name=name, parameters=parameters)
 
     print("[INFO] build_from_archetype tool registered successfully")
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def compose_archetypes(parts: list, options: dict = None):
+        """Compose archetype parts into ONE IntegrationSpecV1 WITHOUT calling Boomi.
+
+        Read-only. Does not mutate Boomi. v1 composes the topology
+        db_source -> transform -> rest_fanout (2..25 REST targets): the shared
+        transform feeds a Branch with one REST target per leg. Cross-part
+        contract validation (COMPOSITION_* error codes) fails BEFORE any spec
+        is emitted; the returned `integration_spec` deploys through the normal
+        build_integration(action='plan'/'apply') -> orchestrate_deploy path.
+
+        Args:
+            parts: List of part objects {key, kind, label?, parameters}. Kinds:
+                db_source (archetype 'source' payload), transform (archetype
+                'transform' payload), rest_target (archetype 'target' payload).
+            options: {naming: {integration_name, component_prefix, ...},
+                execution?: {...}, links?: [{from_part, to_part, handoff?}]}.
+                See get_schema_template(schema_name='compose_archetypes').
+        """
+        return compose_archetypes_action(parts=parts, options=options)
+
+    print("[INFO] compose_archetypes tool registered successfully")
 
 
 # --- Transformation Review MCP Tool (Issue #46) ---

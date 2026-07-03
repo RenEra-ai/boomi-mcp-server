@@ -34,6 +34,7 @@ TOOL_NAMES = (
     "list_integration_archetypes",
     "get_integration_archetype",
     "build_from_archetype",
+    "compose_archetypes",
 )
 
 
@@ -164,7 +165,7 @@ def test_wrappers_do_not_call_boomi_or_credentials():
 # ===========================================================================
 
 
-def test_list_tools_reports_all_three_authoring_tools():
+def test_list_tools_reports_all_authoring_tools():
     tools = _listed_tools()
     listed = {t.name for t in tools}
     for name in TOOL_NAMES:
@@ -205,6 +206,17 @@ def test_list_tools_schemas_use_native_types_no_stale_args():
     # Python callers.
     assert build_props["parameters"]["type"] == "object"
     assert "name" in build_schema.get("required", [])
+
+    compose_tool = by_name["compose_archetypes"]
+    compose_schema = compose_tool.parameters
+    assert compose_schema["type"] == "object"
+    compose_props = compose_schema["properties"]
+    assert set(compose_props.keys()) == {"parts", "options"}, (
+        "compose_archetypes must expose only parts + options — no profile arg"
+    )
+    assert compose_props["parts"]["type"] == "array"
+    assert compose_props["options"]["type"] == "object"
+    assert "parts" in compose_schema.get("required", [])
 
 
 # ===========================================================================
@@ -329,6 +341,127 @@ def test_call_tool_paths_do_not_call_boomi_or_credentials():
     assert r_build["_success"] is True
     assert r_missing["_success"] is False
 
+    m_user.assert_not_called()
+    m_secret.assert_not_called()
+    m_boomi.assert_not_called()
+
+
+# ===========================================================================
+# Issue #14 (M8) — compose_archetypes MCP wrapper smoke
+# ===========================================================================
+
+
+def _compose_smoke_args():
+    def _target(key, label, base_url, path):
+        return {
+            "key": key,
+            "kind": "rest_target",
+            "label": label,
+            "parameters": {
+                "binding": {
+                    "mode": "create",
+                    "settings": {"base_url": base_url, "auth_mode": "none"},
+                },
+                "send_request": {"method": "POST", "path": path},
+                "payload_profile": {
+                    "format": "json",
+                    "root": {
+                        "name": "Root",
+                        "kind": "object",
+                        "children": [
+                            {
+                                "name": "target_a",
+                                "kind": "simple",
+                                "data_type": "character",
+                            },
+                        ],
+                    },
+                },
+            },
+        }
+
+    return {
+        "parts": [
+            {
+                "key": "db",
+                "kind": "db_source",
+                "parameters": {
+                    "binding": {
+                        "mode": "create",
+                        "settings": {
+                            "driver": "microsoft_jdbc",
+                            "auth_mode": "username_password",
+                            "host": "db.example.invalid",
+                            "database": "AppDB",
+                            "username": "<<db user>>",
+                            "credential_ref": "<<opaque credential reference>>",
+                        },
+                    },
+                    "read_operation": {
+                        "sql": "<<user-authored DB read statement>>",
+                        "result_schema": {
+                            "fields": [
+                                {"name": "source_a", "data_type": "character"},
+                            ],
+                        },
+                    },
+                },
+            },
+            {
+                "key": "shape",
+                "kind": "transform",
+                "parameters": {
+                    "operations": [
+                        {
+                            "operation_type": "direct",
+                            "source_field": "source_a",
+                            "target_path": "Root/target_a",
+                        },
+                    ],
+                },
+            },
+            _target("orders", "Orders", "https://orders.example.invalid", "/v1/orders"),
+            _target("billing", "Billing", "https://billing.example.invalid", "/v1/billing"),
+        ],
+        "options": {
+            "naming": {
+                "integration_name": "demo-composed-fanout",
+                "component_prefix": "DEMO",
+            },
+        },
+    }
+
+
+def test_call_tool_compose_returns_structured_success():
+    result = _call_tool("compose_archetypes", _compose_smoke_args())
+    payload = _payload(result)
+    assert payload["_success"] is True
+    assert payload["raw_xml_exposed"] is False
+    assert payload["boomi_mutation"] is False
+    assert payload["composition"]["fanout_targets"] == 2
+    keys = [c["key"] for c in payload["integration_spec"]["components"]]
+    assert "main_process" in keys
+    assert "target_billing_rest_operation" in keys
+
+
+def test_call_tool_compose_contract_mismatch_returns_structured_failure():
+    args = _compose_smoke_args()
+    args["parts"][1]["parameters"]["operations"][0]["source_field"] = "not_declared"
+    payload = _payload(_call_tool("compose_archetypes", args))
+    assert payload["_success"] is False
+    assert payload["error_code"] == "COMPOSITION_CONTRACT_MISMATCH"
+    assert "integration_spec" not in payload
+
+
+def test_compose_wrapper_does_not_call_boomi_or_credentials():
+    with (
+        patch.object(server, "get_current_user") as m_user,
+        patch.object(server, "get_secret") as m_secret,
+        patch.object(server, "Boomi") as m_boomi,
+    ):
+        payload = _payload(_call_tool("compose_archetypes", _compose_smoke_args()))
+
+    assert payload["_success"] is True
     m_user.assert_not_called()
     m_secret.assert_not_called()
     m_boomi.assert_not_called()

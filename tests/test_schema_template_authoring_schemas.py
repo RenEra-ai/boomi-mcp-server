@@ -237,3 +237,36 @@ def test_script_schemas_listed_and_in_unknown_envelope():
     envelope = get_schema_template_action(schema_name="__bogus__")
     assert "script_dataprocess" in envelope["valid_schema_names"]
     assert "script_mapping" in envelope["valid_schema_names"]
+
+
+# ---------------------------------------------------------------------------
+# compose_archetypes (issue #14 / M8)
+# ---------------------------------------------------------------------------
+
+
+def test_compose_archetypes_schema_returns_authoring_contract():
+    result = get_schema_template_action(schema_name="compose_archetypes")
+    assert result["_success"] is True
+    assert result["schema_name"] == "compose_archetypes"
+    assert result["read_only"] is True
+    assert result["raw_xml_exposed"] is False
+    assert result["boomi_mutation"] is False
+    assert set(result["part_kinds"]) == {"db_source", "transform", "rest_target"}
+    assert set(result["handoff_modes"]) == {"document_stream", "document_cache"}
+    assert "cache_property_authoring" in result["handoff_modes"]["document_cache"]
+    assert result["error_codes"] == [
+        "COMPOSITION_CONTRACT_MISMATCH",
+        "COMPOSITION_UNSUPPORTED_TOPOLOGY",
+        "COMPOSITION_COMPONENT_KEY_COLLISION",
+    ]
+    # Placeholder-only example — sentinel part payloads, no canned SQL/payloads.
+    blob = str(result["example"])
+    assert "<<" in blob
+    assert "select" not in blob.lower()
+
+
+def test_compose_archetypes_listed_and_in_unknown_envelope():
+    names = _valid_schema_names()
+    assert "compose_archetypes" in names
+    envelope = get_schema_template_action(schema_name="__bogus__")
+    assert "compose_archetypes" in envelope["valid_schema_names"]
