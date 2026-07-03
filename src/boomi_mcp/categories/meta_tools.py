@@ -5777,7 +5777,7 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
                 # tool is absent rather than advertising an unusable consult.
                 # Routing lives in this response payload, never in a tool
                 # description (MCP-conformance, issue #86).
-                "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing an archetype; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Also consult get_schema_template(schema_name='account_governance') for folder placement, component naming, and role/write-restriction governance (fetch one with get_schema_template(schema_name='governance_pattern:<name>')). Select entries from BOTH surfaces by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / propose for GUI apply), or guidance_only (GUI/handoff).",
+                "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing an archetype; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Also consult get_schema_template(schema_name='account_governance') for folder placement, component naming, and role/write-restriction governance (fetch one with get_schema_template(schema_name='governance_pattern:<name>')). Select entries from BOTH surfaces by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / propose for GUI apply), or guidance_only (GUI/handoff). For cache / dynamic-property / state-handoff intents also consult get_schema_template(schema_name='cache_property_authoring') (per-term capability_status + provenance, #124) — plan-time lineage validation rejects unprovable cache/property reads before any mutation.",
                 "3. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
                 "4. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
                 "5. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
@@ -6001,18 +6001,21 @@ _SCRIPT_MAPPING_AUTHORING_SCHEMA = {
 # (#119 census records each gate outcome).
 _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
     "set_ddp": {
+        "provenance": "live_verified",
         "meaning": "Set a Dynamic Document Property (per-document scope) via a Set Properties step",
         "capability_status": "executable",
         "owning_issue": "#121 (M11.2)",
         "surface": "build_integration process config flow_sequence[].kind='set_ddp' (name + source_values)",
     },
     "set_dpp": {
+        "provenance": "live_verified",
         "meaning": "Set a Dynamic Process Property (execution scope; optional persist) via a Set Properties step",
         "capability_status": "executable",
         "owning_issue": "#121 (M11.2)",
         "surface": "build_integration process config flow_sequence[].kind='set_dpp' (name + source_values + persist?)",
     },
     "get_property": {
+        "provenance": "live_verified",
         "meaning": "Read a property value into a flow (map function today; Set Properties definedparameter source once verified)",
         "capability_status": "executable",
         "owning_issue": "#121 (M11.2) / #131 (M11.7)",
@@ -6025,6 +6028,7 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
         ),
     },
     "set_process_property": {
+        "provenance": "live_verified",
         "meaning": "Write a Process Property component slot at runtime (definedprocess.<componentId>@<propertyKey>)",
         "capability_status": "executable",
         "owning_issue": "#121 (M11.2) / #131 (M11.7)",
@@ -6037,12 +6041,14 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
         ),
     },
     "cache_put": {
+        "provenance": "live_verified",
         "meaning": "Write current documents into a Document Cache (success-path Add to Cache)",
         "capability_status": "executable",
         "owning_issue": "#122 (M11.3)",
         "surface": "build_integration process config flow_sequence[].kind='cache_put' (document_cache_id)",
     },
     "cache_get": {
+        "provenance": "live_verified",
         "meaning": "Retrieve documents from a Document Cache (all-document; keyed mode gated on live evidence)",
         "capability_status": "executable",
         "owning_issue": "#122 (M11.3)",
@@ -6054,6 +6060,7 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
         ),
     },
     "cache_join": {
+        "provenance": "live_verified",
         "meaning": "Join cached documents into a map by cache index/key (DocumentCacheJoins)",
         "capability_status": "executable",
         "owning_issue": "#122 (M11.3)",
@@ -6064,6 +6071,7 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
         ),
     },
     "processproperty_component": {
+        "provenance": "live_verified",
         "meaning": "Typed create/update of a standalone Process Property component (definedProcessProperty slots)",
         "capability_status": "executable",
         "owning_issue": "#131 (M11.7)",
@@ -6075,6 +6083,7 @@ _CACHE_PROPERTY_AUTHORING_TERMS: Dict[str, Dict[str, str]] = {
         ),
     },
     "documentcache_component": {
+        "provenance": "live_verified",
         "meaning": "Typed create/update of a Document Cache component (profile/index/key modeling)",
         "capability_status": "executable",
         "owning_issue": "#122 (M11.3)",
@@ -6116,11 +6125,27 @@ def _cache_property_authoring_schema() -> Dict[str, Any]:
             "processproperty": "component-backed deploy-time defaults; runtime reads via map functions (#131)",
             "documentcache": "execution-scoped store; write (cache_put/doccacheload) must precede read (cache_get/cache_join)",
         },
+        # Issue #124 M11.5: the honesty ledger — what each provenance label
+        # means and which shapes remain gated, sourced from the #119 census.
+        "provenance_labels": {
+            "live_verified": "wire shape captured from live account components/processes",
+            "docs_corroborated": "official docs + companion agree; no byte-level live capture",
+            "companion_unverified": "companion-only claim; treat as hypothesis",
+        },
+        "evidence_gates": {
+            "keyed_cache_get": "gated — no live capture of a populated key-values retrieve",
+            "definedparameter_source": "gated — property-component read inside a property step is companion-only",
+            "set_process_property_step": "gated — property-component write inside a property step is companion-only",
+            "document_property_cache_key": "gated — document-property cache key kind has no live capture",
+            "non_profiled_caches": "gated — only profiled JSON/XML caches are live-verified",
+        },
         "hint": (
             "Vocabulary only: a term listed here is NOT executable until its "
             "capability_status says 'executable'. Attempting a reserved term in "
             "build_integration fails structural validation in the process "
-            "builders, before any Boomi mutation."
+            "builders, before any Boomi mutation. Provenance labels what the "
+            "evidence actually is — never treat a companion_unverified claim "
+            "as authoritative."
         ),
     }
 
@@ -8119,6 +8144,14 @@ _PLAN_INTENT_KEYWORD_EXPANSIONS: Dict[str, frozenset] = {
     "routing": frozenset({"routing", "route", "fanout", "dispatch", "branch"}),
     "security": frozenset({"security", "auth", "credential", "secret", "encryption"}),
     "testing": frozenset({"testing", "test", "verification", "mock", "stub"}),
+    # Issue #124 M11.5: cache/property/state intents route to the M11 doctrine
+    # entries (state_scope_selection, caching_lookup_join, ...).
+    "cache": frozenset({"cache", "caching", "lookup", "join", "enrichment", "handoff", "scope"}),
+    "enrichment": frozenset({"enrichment", "enrich", "lookup", "cache", "join", "property"}),
+    "state": frozenset({"state", "property", "scope", "handoff", "execution", "persist", "watermark"}),
+    "property": frozenset({"property", "properties", "state", "scope", "handoff", "configuration"}),
+    "branch_handoff": frozenset({"branch", "handoff", "cache", "property", "scope", "state"}),
+    "join": frozenset({"join", "joins", "cache", "lookup", "merge", "enrichment"}),
 }
 
 # Generic decision-point keywords — a parameter_schema field whose leaf name OR

@@ -372,3 +372,17 @@ def test_generic_dropped_document_does_not_route_to_storestream():
     assert "groovy_dataprocess_storestream_required" not in triage_symptoms(
         "the transcript step dropped a document"
     )
+
+
+def test_process_building_category_and_m11_entries_present():
+    # Issue #124 M11.5: the cache/property authoring traps from the #119
+    # census ship as first-class gotchas under the process_building facet.
+    assert "process_building" in CATEGORIES
+    for gid in (
+        "document_cache_zero_id_silent_noop",
+        "document_cache_missing_profile_type_crash",
+        "add_to_cache_consumes_documents",
+        "ddp_not_visible_across_branch_legs",
+    ):
+        assert gid in OPERATIONAL_GOTCHA_ENTRIES, gid
+        assert OPERATIONAL_GOTCHA_ENTRIES[gid]["category"] == "process_building"

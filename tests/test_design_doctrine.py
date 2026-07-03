@@ -138,12 +138,12 @@ def _served_prose_blob():
 # ---------------------------------------------------------------------------
 
 
-def test_catalog_returns_38_entries_with_safety_flags():
+def test_catalog_returns_39_entries_with_safety_flags():
     result = get_schema_template_action(schema_name="design_doctrine")
     assert result["_success"] is True
     assert result["schema_name"] == "design_doctrine"
-    assert result["entry_count"] == 38
-    assert len(result["entries"]) == 38
+    assert result["entry_count"] == 39
+    assert len(result["entries"]) == 39
     assert result["raw_xml_exposed"] is False
     assert result["boomi_mutation"] is False
     assert result["read_only"] is True
@@ -151,13 +151,14 @@ def test_catalog_returns_38_entries_with_safety_flags():
 
 
 def test_entry_count_partition_14_16_8():
+    # 38 pre-M11 (14 seed + 16 net-new + 8 testing) + state_scope_selection (#124).
     names = set(DESIGN_DOCTRINE_ENTRIES)
-    assert len(names) == 38
+    assert len(names) == 39
     assert SEED_14 <= names
     assert NET_NEW_16 <= names
     assert TESTING_8 <= names
-    # The three sources are disjoint and together account for all 38.
-    assert SEED_14 | NET_NEW_16 | TESTING_8 == names
+    # The three pre-M11 sources are disjoint; #124 adds state_scope_selection.
+    assert SEED_14 | NET_NEW_16 | TESTING_8 | {"state_scope_selection"} == names
     assert not (SEED_14 & NET_NEW_16)
     assert not (NET_NEW_16 & TESTING_8)
     assert not (SEED_14 & TESTING_8)
@@ -218,7 +219,7 @@ def test_valid_schema_names_includes_design_doctrine_and_patterns():
     names = _valid_schema_names()
     assert "design_doctrine" in names
     pattern_names = [n for n in names if n.startswith("design_pattern:")]
-    assert len(pattern_names) == 38
+    assert len(pattern_names) == 39
     assert "design_pattern:wrapper_subprocess_separation" in names
 
 
@@ -402,10 +403,10 @@ def test_list_capabilities_compact_index():
     catalog = list_capabilities_action()
     assert "design_doctrine" in catalog
     dd = catalog["design_doctrine"]
-    assert dd["entry_count"] == 38
+    assert dd["entry_count"] == 39
     assert "get_schema_template" in dd["surface"]
     assert "design_pattern:<name>" in dd["pattern_surface"]
-    assert len(dd["index"]) == 38
+    assert len(dd["index"]) == 39
     # Index rows are compact — name/category/capability_status only, no prose.
     for row in dd["index"]:
         assert set(row.keys()) == {"name", "category", "capability_status"}
@@ -414,7 +415,7 @@ def test_list_capabilities_compact_index():
 def test_design_doctrine_index_survives_available_tools_filtering():
     catalog = list_capabilities_action(available_tools={"build_integration"})
     assert "design_doctrine" in catalog
-    assert catalog["design_doctrine"]["entry_count"] == 38
+    assert catalog["design_doctrine"]["entry_count"] == 39
 
 
 # ---------------------------------------------------------------------------

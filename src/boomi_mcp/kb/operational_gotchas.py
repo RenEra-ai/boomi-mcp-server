@@ -86,6 +86,9 @@ CATEGORIES = frozenset(
         "process_serialization",
         "marketplace",
         "scripting",
+        # Issue #124 M11.5: process-building step/component behaviors (cache
+        # and dynamic-property authoring traps surfaced by the #119 census).
+        "process_building",
     }
 )
 
@@ -149,6 +152,7 @@ GOTCHA_ENTRY_SCHEMA: Dict[str, Any] = {
 _COMPANION_DOCS = "OfficialBoomi Companion catalog, corroborated via search_boomi_docs (#77 verification pass)"
 _COMPANION_ONLY = "OfficialBoomi Companion catalog (#77), not independently corroborated"
 _COURSE = "Boomi architect course triage (#77 comment)"
+_M11_CENSUS = "M11 #119 live census (work-account captures) + official cache/property docs"
 
 _ENTRIES: List[Dict[str, Any]] = [
     # ===================================================================
@@ -959,6 +963,134 @@ _ENTRIES: List[Dict[str, Any]] = [
         "provenance": {"source_label": _COMPANION_DOCS, "retrieval_date": "2026-06-30"},
         "verification_status": "docs_corroborated",
         "category": "scripting",
+    },
+    # ===================================================================
+    # Process building — cache / dynamic-property authoring (4) (#124 M11.5)
+    # ===================================================================
+    {
+        "id": "document_cache_zero_id_silent_noop",
+        "title": "Document Cache index or key id of 0 silently indexes nothing",
+        "symptom": (
+            "Add to Cache reports success and the process runs green, but every "
+            "retrieve and map join against the cache finds no documents."
+        ),
+        "detection": "silent",
+        "frequency": "medium",
+        "root_cause": (
+            "The platform API accepts a cache index id or cache key id of 0 in "
+            "the component, but the runtime indexer treats 0 as unassigned, so "
+            "entries are written without a retrievable index."
+        ),
+        "wrong_pattern": (
+            "Generating cache components programmatically with zero-based index "
+            "or key ids because the API accepted them on create."
+        ),
+        "correct_pattern": (
+            "Use 1-based sequential index ids and any non-zero key id — the "
+            "typed cache builder rejects zeros at validation time."
+        ),
+        "remediation": (
+            "Recreate or update the cache component with non-zero ids and rerun; "
+            "no cached data is recoverable from the zero-id runs."
+        ),
+        "applies_to": ["documentcache", "build_integration", "manage_component"],
+        "provenance": {"source_label": _M11_CENSUS, "retrieval_date": "2026-07-02"},
+        "verification_status": "docs_corroborated",
+        "category": "process_building",
+    },
+    {
+        "id": "document_cache_missing_profile_type_crash",
+        "title": "A Document Cache without a profile type crashes at runtime",
+        "symptom": (
+            "A process using a programmatically created cache fails at run time "
+            "with a data-parser error about a component that does not exist, "
+            "even though the cache component looks fine in the GUI."
+        ),
+        "detection": "runtime_error",
+        "frequency": "medium",
+        "root_cause": (
+            "The cache indexer always parses documents through the declared "
+            "profile binding; omitting the profile type on the component leaves "
+            "the parser unresolvable at execution."
+        ),
+        "wrong_pattern": (
+            "Emitting a cache component without the profile-type attribute "
+            "because the create API accepted it."
+        ),
+        "correct_pattern": (
+            "Always declare the profile type; the typed cache builder makes it "
+            "a required field."
+        ),
+        "remediation": "Update the cache component with the profile binding and redeploy.",
+        "applies_to": ["documentcache", "build_integration"],
+        "provenance": {"source_label": _M11_CENSUS, "retrieval_date": "2026-07-02"},
+        "verification_status": "docs_corroborated",
+        "category": "process_building",
+    },
+    {
+        "id": "add_to_cache_consumes_documents",
+        "title": "Add to Cache consumes the documents it stores",
+        "symptom": (
+            "Steps placed after an Add to Cache step never receive documents — "
+            "the flow appears to stop at the cache write."
+        ),
+        "detection": "silent",
+        "frequency": "high",
+        "root_cause": (
+            "The Add to Cache step is a terminal sink on its path: documents "
+            "flow INTO the cache, not through it."
+        ),
+        "wrong_pattern": (
+            "Chaining business steps after an Add to Cache on the same path and "
+            "expecting the documents to continue."
+        ),
+        "correct_pattern": (
+            "Put the cache write on its own branch path (the live pattern: an "
+            "earlier branch path writes, a later path retrieves), or retrieve "
+            "the cached set back when the documents are needed again."
+        ),
+        "remediation": (
+            "Restructure with a branch so the write path terminates in the "
+            "cache and the continuation path retrieves or re-reads its input."
+        ),
+        "applies_to": ["documentcache", "cache_put", "flow_sequence"],
+        "provenance": {"source_label": _M11_CENSUS, "retrieval_date": "2026-07-02"},
+        "verification_status": "live_verified",
+        "category": "process_building",
+    },
+    {
+        "id": "ddp_not_visible_across_branch_legs",
+        "title": "Dynamic document properties never cross sibling branch paths",
+        "symptom": (
+            "A dynamic document property set inside one branch path reads back "
+            "empty in a sibling path, while the same handoff works when the set "
+            "happens before the branch."
+        ),
+        "detection": "silent",
+        "frequency": "high",
+        "root_cause": (
+            "Each branch path processes its own copy of the pre-branch "
+            "documents; a document property set on one path's copy never "
+            "reaches the copies flowing through sibling paths."
+        ),
+        "wrong_pattern": (
+            "Handing a value from branch path 1 to branch path 2 through a "
+            "dynamic document property."
+        ),
+        "correct_pattern": (
+            "Set the document property on the trunk before the branch, or use "
+            "an execution-scoped dynamic process property or a typed document "
+            "cache for cross-path handoff — the plan-time lineage validation "
+            "rejects the sibling-path read before any mutation."
+        ),
+        "remediation": (
+            "Move the property write to the trunk or switch the handoff to "
+            "execution scope, then re-plan."
+        ),
+        "applies_to": ["set_ddp", "set_dpp", "flow_sequence", "branch"],
+        "provenance": {"source_label": _M11_CENSUS, "retrieval_date": "2026-07-02"},
+        "verification_status": "docs_corroborated",
+        "category": "process_building",
     },
 ]
 

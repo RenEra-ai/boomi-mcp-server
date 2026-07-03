@@ -17,7 +17,7 @@ This module is intentionally stdlib-only (``copy`` is the sole import) so it is
 safe to import on every server start — it must never pull in the heavy docs-KB
 ML stack that lives in ``boomi_mcp.kb.service``.
 
-Catalog size: **38 entries** = 14 seed + 16 net-new design patterns + 8
+Catalog size: **39 entries** = 14 seed + 16 net-new design patterns + 8
 testing/observability. The 11 seed enrichments fold into the seed entries as
 extra clauses; they are NOT separate rows. ``account_governance`` is the
 separate child #93 and is deliberately out of scope here.
@@ -215,7 +215,7 @@ DESIGN_DOCTRINE_ENTRY_SCHEMA: Dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# The catalog — 38 entries. Defined as an ordered list; indexed by name below.
+# The catalog — 39 entries (38 pre-M11 + state_scope_selection, #124). Defined as an ordered list; indexed by name below.
 # ---------------------------------------------------------------------------
 
 _ENTRIES: List[Dict[str, Any]] = [
@@ -533,11 +533,13 @@ _ENTRIES: List[Dict[str, Any]] = [
             "destination set; shared across parent and subprocesses; a "
             "multi-row join uses a richer cached profile, a single-row "
             "lookup a scalar one. Acts as a cross-branch aggregator keyed by "
-            "id rather than process properties. Retrieving the cached set back "
-            "into a process (all-document) and removing the cached set "
-            "(all-document) are builder-emittable today; populating the cache, "
-            "indexed lookups/removes, and map-based joins remain design "
-            "guidance, not yet builder-emitted."
+            "id rather than process properties. Populating the cache on the "
+            "success path, retrieving the cached set back into a process "
+            "(all-document), removing the cached set (all-document), typed "
+            "cache components with index and key modeling, and map-level "
+            "joins by cache index and key are all builder-emittable today; "
+            "keyed single-record retrieval and indexed removes remain gated "
+            "pending live evidence."
         ),
         "when_to_use": (
             "When the same reference data is read many times in a run, or to "
@@ -555,13 +557,73 @@ _ENTRIES: List[Dict[str, Any]] = [
         # 64e5397b-3583-42c9-8fe3-08ccefb0da6c, so the capability/verification flip
         # from guidance_only/companion_unverified. Issue #110 M10.6 adds the
         # Document Cache Remove (delete) step, live-verified against work component
-        # 6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0 — the rest of the pattern (populate,
-        # indexed lookups/removes, map joins) stays guidance, per the prose.
+        # 6e56df6a-1fc0-43f6-8db2-1b9e4eefa7a0. Issue #122 M11.3 adds the typed
+        # documentcache component builder, success-path cache_put, authored
+        # all-document cache_get, and map-level DocumentCacheJoins (live-captured
+        # in the #119 census); keyed retrieval stays gated, per the prose.
         "verification_status": "live_verified",
         "capability_status": "emittable_today",
         "category": "decomposition",
         "mutual_exclusion": [],
         "cross_refs": ["error_routing_and_dlq", "idempotency_and_duplicates"],
+        "provenance": "live_verified",
+    },
+    {
+        # Issue #124 M11.5 (epic #118): the state-scope rationale pattern —
+        # WHY a flow picks document-scoped properties, execution-scoped
+        # properties, a process property component, or a document cache for a
+        # given handoff. Grounded in the #119 live census (work-account
+        # processes and components) plus official cache/property docs.
+        "name": "state_scope_selection",
+        "problem": (
+            "Runtime state must live somewhere — with the document, with the "
+            "execution, in deploy-time configuration, or in a document store. "
+            "Choosing the wrong scope produces silent empty reads (a value "
+            "that never crosses a branch path or run) rather than errors."
+        ),
+        "boomi_shape_mapping": (
+            "Dynamic document properties travel with each document copy: use "
+            "them for per-document state on one path — a value set inside one "
+            "branch path never reaches sibling paths, while a value set on "
+            "the trunk reaches every path's copies. Dynamic process "
+            "properties are execution-wide with last-write-wins ordering "
+            "(branch paths run sequentially in path order): use them for run "
+            "flags, counters, and cross-path scalars, and persist them only "
+            "for deliberate cross-run watermarks. A process property "
+            "component holds operator-tunable deploy-time defaults readable "
+            "at runtime through map property functions — configuration, not "
+            "run state. A document cache carries whole documents across "
+            "steps and paths within one execution and joins into maps by "
+            "index and key — the cross-path payload handoff. All four are "
+            "typed-authorable today, and plan-time lineage validation "
+            "rejects a read whose writer is missing, sits in a sibling "
+            "branch path, runs later in the flow, or lives on a mutually "
+            "exclusive decision path."
+        ),
+        "when_to_use": (
+            "Choosing the state or property scope for enrichment "
+            "carry-forward, cross-branch handoff of ids or payloads, cache "
+            "joins, run-level flags, or operator configuration: pick "
+            "document scope for same-path per-document values, execution "
+            "scope for cross-path scalars, a process property component for "
+            "tunable settings, and a document cache for cross-path document "
+            "sets and keyed joins."
+        ),
+        "when_not_to_use": (
+            "None of these scopes is durable cross-run storage: caches and "
+            "plain dynamic properties reset every execution, and persisted "
+            "process properties are a narrow watermark tool, not a database. "
+            "For durable state, land it in an external system of record."
+        ),
+        "verification_status": "live_verified",
+        "capability_status": "emittable_today",
+        "category": "decomposition",
+        "mutual_exclusion": [],
+        "cross_refs": [
+            "caching_lookup_join",
+            "config_externalization",
+            "incremental_watermark",
+        ],
         "provenance": "live_verified",
     },
     {
