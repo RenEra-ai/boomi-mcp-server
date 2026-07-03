@@ -681,6 +681,7 @@ def _validate_document_cache_joins(
             for key in (index_entry.get("keys") or [])
             if isinstance(key, Mapping)
         }
+        provided_key_ids = []
         for j, kv in enumerate(join.get("key_values") or []):
             if kv.get("cache_key_id") not in declared_key_ids:
                 return BuilderValidationError(
@@ -696,4 +697,31 @@ def _validate_document_cache_joins(
                         ),
                     },
                 )
+            provided_key_ids.append(kv.get("cache_key_id"))
+        # A join must bind EVERY key of the chosen index exactly once — a
+        # composite index joined on a subset (or with duplicates) emits an
+        # incomplete CacheKeyJoinValues block that finds nothing at runtime.
+        if len(provided_key_ids) != len(set(provided_key_ids)) or set(
+            provided_key_ids
+        ) != declared_key_ids:
+            return BuilderValidationError(
+                f"{join_field}.key_values must bind every key of index "
+                f"{join.get('cache_index')!r} of {ref_key!r} exactly once "
+                f"(declared {sorted(k for k in declared_key_ids if k is not None)}, "
+                f"provided {provided_key_ids})",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.key_values",
+                hint=(
+                    "Add one key_values entry per cacheKey id in the joined "
+                    "index — a partial or duplicated binding silently matches "
+                    "no cached documents."
+                ),
+                details={
+                    "ref_key": ref_key,
+                    "declared_key_ids": sorted(
+                        k for k in declared_key_ids if k is not None
+                    ),
+                    "provided_key_ids": provided_key_ids,
+                },
+            )
     return None

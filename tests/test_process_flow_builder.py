@@ -4312,3 +4312,121 @@ def test_cache_get_load_all_documents_true_allowed():
         )
     )
     assert err is None
+
+
+# --- companion review P1 (#122 follow-up): cache_put consumes documents ------
+
+
+def test_cache_put_followed_by_non_retrieve_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {"kind": "cache_put", "document_cache_id": "CACHE-1"},
+                {"kind": "message", "message_text": "starved"},
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert "consumes" in str(err)
+
+
+def test_top_level_trailing_cache_put_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config([{"kind": "cache_put", "document_cache_id": "CACHE-1"}])
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert "END in a cache_put" in str(err)
+
+
+def test_decision_true_leg_trailing_cache_put_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "decision",
+                    "comparison": "equals",
+                    "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_S"},
+                    "right": {"value_type": "static", "static_value": "GO"},
+                    "true_steps": [{"kind": "cache_put", "document_cache_id": "CACHE-1"}],
+                    "false_steps": [{"kind": "message", "message_text": "no"}],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert "true_steps" in str(err)
+
+
+def test_decision_false_leg_trailing_cache_put_allowed():
+    # The FALSE leg falls through to a Stop — no document consumer after the
+    # write, so the staging pattern is harmless there.
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "decision",
+                    "comparison": "equals",
+                    "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_S"},
+                    "right": {"value_type": "static", "static_value": "GO"},
+                    "true_steps": [],
+                    "false_steps": [{"kind": "cache_put", "document_cache_id": "CACHE-1"}],
+                }
+            ]
+        )
+    )
+    assert err is None
+
+
+def test_branch_staging_leg_with_target_rejected():
+    err = ProcessFlowBuilder.validate_config(
+        _seq_config(
+            [
+                {
+                    "kind": "branch",
+                    "legs": [
+                        {
+                            "steps": [{"kind": "cache_put", "document_cache_id": "CACHE-1"}],
+                            "target": _rest_target(label="starved"),
+                        },
+                        {"steps": [], "target": _rest_target(label="B")},
+                    ],
+                }
+            ]
+        )
+    )
+    assert err is not None
+    assert err.error_code == "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID"
+    assert "omitted" in str(err)
+
+
+def test_branch_staging_leg_emits_terminal_doccacheload():
+    cfg = _seq_config(
+        [
+            {
+                "kind": "branch",
+                "legs": [
+                    {"steps": [{"kind": "cache_put", "document_cache_id": "CACHE-1"}]},
+                    {
+                        "steps": [
+                            {"kind": "cache_get", "document_cache_id": "CACHE-1"}
+                        ],
+                        "target": _rest_target(label="consume"),
+                    },
+                ],
+            }
+        ]
+    )
+    assert ProcessFlowBuilder.validate_config(cfg, depends_on=[]) is None
+    xml = ProcessFlowBuilder.build(cfg, name="Staging Leg")
+    _, _, shapes = _parse_process(xml)
+    load = next(s for s in shapes if s.attrib["shapetype"] == "doccacheload")
+    # The live staging pattern: the cache write terminates its leg.
+    assert load.find("dragpoints/dragpoint") is None
+    from src.boomi_mcp.categories.components.process_graph_verifier import (
+        verify_process_graph,
+    )
+    result = verify_process_graph(xml)
+    assert result["errors"] == []

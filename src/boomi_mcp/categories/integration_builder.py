@@ -182,6 +182,7 @@ from .components.builders.transform_map_validation import (
     resolve_map_profile_index,
     validate_transform_map,
 )
+from .components.builders.cache_property_lineage import validate_config_lineage
 from .components.builders.document_cache_builder import (
     DocumentCacheBuilder,
     get_document_cache_builder,
@@ -2236,6 +2237,50 @@ def _check_flow_sequence_ref_types(
     if not isinstance(seq, list):
         return None
     return _check_flow_sequence_steps_ref_types(seq, "flow_sequence", components_by_key)
+
+
+def _check_document_cache_profile_ref(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+    components_by_key: Dict[str, IntegrationComponentSpec],
+) -> Optional[BuilderValidationError]:
+    """Reachability + type check for a documentcache profile binding (#122,
+    companion review P2). Literal profile ids (existing account profiles)
+    pass through untouched."""
+    profile_id = raw_config.get("profile_id")
+    if not (isinstance(profile_id, str) and profile_id.startswith("$ref:")):
+        return None
+    ref_key = profile_id[len("$ref:"):]
+    declared = set(comp.depends_on or [])
+    if ref_key not in declared:
+        return BuilderValidationError(
+            "profile_id $ref target must also appear in depends_on so the "
+            "profile builds before the cache",
+            error_code="DOCUMENT_CACHE_PROFILE_REQUIRED",
+            field="depends_on",
+            hint=f"Add {ref_key!r} to the documentcache component's depends_on.",
+            details={"ref_key": ref_key},
+        )
+    target = components_by_key.get(ref_key)
+    expected_type = str(raw_config.get("profile_type") or "").strip()
+    actual_type = _effective_component_type(target) if target is not None else None
+    if target is None or actual_type != expected_type:
+        return BuilderValidationError(
+            f"profile_id $ref must resolve to an in-spec {expected_type} "
+            f"component (got {actual_type!r})",
+            error_code="DOCUMENT_CACHE_PROFILE_REQUIRED",
+            field="profile_id",
+            hint=(
+                "The cache parses documents through this profile — bind it to "
+                "the profile component whose type matches profile_type."
+            ),
+            details={
+                "ref_key": ref_key,
+                "expected_component_type": expected_type,
+                "target_component_type": actual_type,
+            },
+        )
+    return None
 
 
 def _check_flow_sequence_steps_ref_types(
@@ -5366,6 +5411,30 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                             comp, lowered_config, components_by_key
                         )
 
+                # Companion review P2 (#123 follow-up) + QA Bug #145: re-run
+                # the lineage pass WITH component context on composed configs
+                # AND on legacy configs whose transform slot references a map
+                # — an in-spec map's document_cache_joins are cache READS,
+                # which the process-local pass (no components_by_key) cannot
+                # see. On the legacy surface no in-process writer is even
+                # possible (transform excludes flow_sequence in v1), so a
+                # joined cache there must declare external_writer: true.
+                legacy_transform = raw_config.get("transform")
+                legacy_map_ref = (
+                    isinstance(legacy_transform, dict)
+                    and str(legacy_transform.get("mode") or "").strip() == "map_ref"
+                )
+                if process_flow_err is None and (
+                    (
+                        isinstance(raw_config.get("flow_sequence"), list)
+                        and raw_config.get("flow_sequence")
+                    )
+                    or legacy_map_ref
+                ):
+                    process_flow_err = validate_config_lineage(
+                        raw_config, components_by_key
+                    )
+
         if process_flow_err is not None:
             planned_action = "error_process_validation"
             validation_error = {
@@ -5510,6 +5579,15 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                     gen_profile_err = DocumentCacheBuilder.validate_config(
                         effective_config
                     )
+                    if gen_profile_err is None:
+                        # Companion review P2: a $ref profile binding must be
+                        # declared in depends_on and resolve to a profile of
+                        # the declared profile_type — otherwise apply would
+                        # push a literal '$ref:...' (or a wrong component id)
+                        # into the DocumentCache profile attribute.
+                        gen_profile_err = _check_document_cache_profile_ref(
+                            comp, effective_config, components_by_key
+                        )
                 elif is_transform_function_wrapper:
                     # Issue #41 r3: transform.function wrappers are auto-
                     # synthesized by _synthesize_script_function_wrappers,

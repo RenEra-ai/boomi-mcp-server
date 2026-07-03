@@ -5,7 +5,9 @@
   "purpose": "M11 (#125): cross-branch handoff via a typed Document Cache — branch leg 1 stages documents with cache_put, leg 2 consumes them with cache_get (sequential leg order satisfies the #123 lineage contract), and a map declares a DocumentCacheJoins entry against the same cache (live-captured #119 wire shape).",
   "do_not_reuse": "Concrete values below are demo-grade so the spec plans clean in tests; model real cache indexes/keys on your actual profile elements.",
   "integration_spec": {
-    "naming": {"integration_name": "M11 Cache Join Demo"},
+    "naming": {
+      "integration_name": "M11 Cache Join Demo"
+    },
     "components": [
       {
         "key": "cache_profile",
@@ -20,8 +22,16 @@
             "name": "Root",
             "kind": "object",
             "children": [
-              {"name": "id", "kind": "simple", "data_type": "character"},
-              {"name": "payload", "kind": "simple", "data_type": "character"}
+              {
+                "name": "id",
+                "kind": "simple",
+                "data_type": "character"
+              },
+              {
+                "name": "payload",
+                "kind": "simple",
+                "data_type": "character"
+              }
             ]
           }
         }
@@ -31,7 +41,9 @@
         "type": "documentcache",
         "action": "create",
         "name": "M11 Handoff Cache",
-        "depends_on": ["cache_profile"],
+        "depends_on": [
+          "cache_profile"
+        ],
         "config": {
           "component_type": "documentcache",
           "component_name": "M11 Handoff Cache",
@@ -42,7 +54,11 @@
               "index_id": 1,
               "index_name": "by id",
               "keys": [
-                {"id": 2, "element_key": "2", "name": "id (Root/id)"}
+                {
+                  "id": 2,
+                  "element_key": "2",
+                  "name": "id (Root/id)"
+                }
               ]
             }
           ]
@@ -53,7 +69,9 @@
         "type": "process",
         "action": "create",
         "name": "M11 Cross Branch Handoff Flow",
-        "depends_on": ["handoff_cache"],
+        "depends_on": [
+          "handoff_cache"
+        ],
         "config": {
           "process_kind": "database_to_api_sync",
           "source": {
@@ -62,7 +80,9 @@
             "operation_id": "22222222-2222-2222-2222-222222222222",
             "action_type": "Get"
           },
-          "transform": {"mode": "passthrough"},
+          "transform": {
+            "mode": "passthrough"
+          },
           "target": {
             "connector_type": "rest",
             "connection_id": "33333333-3333-3333-3333-333333333333",
@@ -76,18 +96,20 @@
               "legs": [
                 {
                   "steps": [
-                    {"kind": "cache_put", "document_cache_id": "$ref:handoff_cache", "label": "Stage rows"}
-                  ],
-                  "target": {
-                    "connector_type": "rest",
-                    "connection_id": "33333333-3333-3333-3333-333333333333",
-                    "operation_id": "44444444-4444-4444-4444-444444444444",
-                    "action_type": "POST"
-                  }
+                    {
+                      "kind": "cache_put",
+                      "document_cache_id": "$ref:handoff_cache",
+                      "label": "Stage rows"
+                    }
+                  ]
                 },
                 {
                   "steps": [
-                    {"kind": "cache_get", "document_cache_id": "$ref:handoff_cache", "label": "Consume staged rows"}
+                    {
+                      "kind": "cache_get",
+                      "document_cache_id": "$ref:handoff_cache",
+                      "label": "Consume staged rows"
+                    }
                   ],
                   "target": {
                     "connector_type": "rest",
@@ -106,7 +128,10 @@
         "type": "transform.map",
         "action": "create",
         "name": "M11 Cache Join Map",
-        "depends_on": ["cache_profile", "handoff_cache"],
+        "depends_on": [
+          "cache_profile",
+          "handoff_cache"
+        ],
         "config": {
           "component_type": "transform.map",
           "map_type": "direct",
@@ -116,7 +141,10 @@
           "target_profile_id": "$ref:cache_profile",
           "target_profile_type": "profile.json",
           "field_mappings": [
-            {"source_path": "Root/id", "target_path": "Root/id"}
+            {
+              "source_path": "Root/id",
+              "target_path": "Root/id"
+            }
           ],
           "document_cache_joins": [
             {
@@ -125,7 +153,11 @@
               "join_id": 8,
               "src_parent_key": "1",
               "key_values": [
-                {"cache_key_id": 2, "cache_key_name": "id (Root/id)", "src_link_key": "2"}
+                {
+                  "cache_key_id": 2,
+                  "cache_key_name": "id (Root/id)",
+                  "src_link_key": "2"
+                }
               ]
             }
           ]

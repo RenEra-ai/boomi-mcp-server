@@ -4535,6 +4535,22 @@ def _validate_flow_sequence_config(config: Dict[str, Any]) -> Optional[BuilderVa
                 "return_documents only on a purely linear flow_sequence."
             ),
         )
+    last_step = seq[-1]
+    if isinstance(last_step, dict) and str(last_step.get("kind") or "").strip() == "cache_put":
+        # Companion review P1: the top-level sequence falls through to the
+        # target connector, which would receive an empty document stream after
+        # an Add to Cache (it consumes the documents it stores).
+        return BuilderValidationError(
+            "flow_sequence must not END in a cache_put — the top-level target "
+            "would receive an empty document stream (Add to Cache consumes "
+            "the documents).",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=f"flow_sequence[{len(seq) - 1}].kind",
+            hint=(
+                "Follow the cache_put with cache_get/doccacheretrieve, or "
+                "stage inside a target-less branch leg instead."
+            ),
+        )
     return _validate_flow_sequence_steps(
         seq,
         "flow_sequence",
@@ -4598,6 +4614,30 @@ def _validate_flow_sequence_steps(
                     field=f"{field}[{i}].kind",
                     hint="A branch leg is linear in v1; a nested decision is a follow-up.",
                 )
+        # Companion review P1 (#122 follow-up): Add to Cache CONSUMES the
+        # documents it stores, so a cache_put may only be followed (same
+        # path) by a stream-REPLACING retrieve — anything else would run on
+        # an empty document stream while validation reported success.
+        if isinstance(step, dict) and str(step.get("kind") or "").strip() == "cache_put":
+            if i < len(steps) - 1:
+                nxt = steps[i + 1]
+                next_kind = (
+                    str(nxt.get("kind") or "").strip() if isinstance(nxt, dict) else ""
+                )
+                if next_kind not in ("cache_get", "doccacheretrieve"):
+                    return BuilderValidationError(
+                        f"{field}[{i}] cache_put consumes the documents it "
+                        f"stores — the following step ({next_kind!r}) would "
+                        "receive an empty stream.",
+                        error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                        field=f"{field}[{i + 1}].kind",
+                        hint=(
+                            "Follow a cache_put with cache_get/doccacheretrieve "
+                            "(which refills the stream from the cache), or make "
+                            "the cache_put the terminal step of a target-less "
+                            "branch leg (the live staging pattern)."
+                        ),
+                    )
         step_err = _validate_flow_sequence_step(step, f"{field}[{i}]")
         if step_err is not None:
             return step_err
@@ -4969,6 +5009,23 @@ def _validate_sequence_decision_step(
     )
     if true_err is not None:
         return true_err
+    true_steps = step.get("true_steps") or []
+    if (
+        isinstance(true_steps, list)
+        and true_steps
+        and isinstance(true_steps[-1], dict)
+        and str(true_steps[-1].get("kind") or "").strip() == "cache_put"
+    ):
+        # Companion review P1: the TRUE leg falls through to the top-level
+        # target, which would starve after an Add to Cache. (The FALSE leg
+        # falls through to a Stop, so a trailing cache_put is harmless there.)
+        return BuilderValidationError(
+            f"{field}.true_steps must not end in a cache_put — the leg falls "
+            "through to the target, which would receive an empty stream.",
+            error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+            field=f"{field}.true_steps[{len(true_steps) - 1}].kind",
+            hint="Follow it with cache_get, or stage in a target-less branch leg.",
+        )
     return _validate_flow_sequence_steps(
         step.get("false_steps"),
         f"{field}.false_steps",
@@ -5019,17 +5076,42 @@ def _validate_sequence_branch_step(
                 hint=f"Allowed leg keys: {sorted(_FLOW_SEQUENCE_BRANCH_LEG_KEYS)}.",
             )
         leg_target = leg.get("target")
-        if isinstance(leg_target, dict) and leg_target.get("dynamic_path") is not None:
-            return BuilderValidationError(
-                f"{leg_field}.target.dynamic_path is not supported in a flow_sequence "
-                "branch leg in v1.",
-                error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
-                field=f"{leg_field}.target.dynamic_path",
-                hint="Branch legs are plain REST targets in v1; remove the per-leg dynamic_path.",
-            )
-        target_err = _validate_target_binding(leg_target, field_prefix=f"{leg_field}.target")
-        if target_err is not None:
-            return target_err
+        leg_steps_list = leg.get("steps") or []
+        leg_last_kind = (
+            str(leg_steps_list[-1].get("kind") or "").strip()
+            if isinstance(leg_steps_list, list)
+            and leg_steps_list
+            and isinstance(leg_steps_list[-1], dict)
+            else ""
+        )
+        if leg_last_kind == "cache_put":
+            # Companion review P1: a staging leg ends AT the Add to Cache
+            # (the live-captured terminal pattern) — a leg target after it
+            # would receive an empty stream, so it must be omitted.
+            if leg_target is not None:
+                return BuilderValidationError(
+                    f"{leg_field}.target must be omitted when the leg ends in "
+                    "a cache_put — Add to Cache consumes the documents, so a "
+                    "leg target after it would receive an empty stream.",
+                    error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                    field=f"{leg_field}.target",
+                    hint=(
+                        "Drop the target (the staging leg terminates at the "
+                        "cache write), or follow the cache_put with cache_get."
+                    ),
+                )
+        else:
+            if isinstance(leg_target, dict) and leg_target.get("dynamic_path") is not None:
+                return BuilderValidationError(
+                    f"{leg_field}.target.dynamic_path is not supported in a flow_sequence "
+                    "branch leg in v1.",
+                    error_code="PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+                    field=f"{leg_field}.target.dynamic_path",
+                    hint="Branch legs are plain REST targets in v1; remove the per-leg dynamic_path.",
+                )
+            target_err = _validate_target_binding(leg_target, field_prefix=f"{leg_field}.target")
+            if target_err is not None:
+                return target_err
         steps_err = _validate_flow_sequence_steps(
             leg.get("steps") if leg.get("steps") is not None else [],
             f"{leg_field}.steps",
@@ -5283,10 +5365,15 @@ def _append_path(
             terminal_step = steps[-1]
 
     idx = start_index
-    for step in linear_prefix:
+    has_continuation = terminal_step is not None or bool(fallthrough)
+    for j, step in enumerate(linear_prefix):
         emit_kind, params = _seq_step_to_flow_entry(step)
         name = f"shape{idx}"
-        nxt = f"shape{idx + 1}"  # last linear shape -> first terminal/fallthrough shape
+        # Last linear shape forwards into the first terminal/fallthrough shape;
+        # with NO continuation (a target-less staging leg, companion review P1)
+        # it is emitted terminal — the live doccacheload pattern.
+        is_last = j == len(linear_prefix) - 1
+        nxt = None if (is_last and not has_continuation) else f"shape{idx + 1}"
         parts.append(_emit_seq_linear(emit_kind, params, name, nxt, idx))
         idx += 1
 
@@ -5374,10 +5461,15 @@ def _append_branch(
     cur = branch_index + 1
     for leg in legs:
         leg_first_names.append(f"shape{cur}")
-        fallthrough = [
-            ("connectoraction_target", _branch_target_params(leg.get("target") or {})),
-            ("stop", {"continue_": True}),
-        ]
+        if leg.get("target") is None:
+            # Companion review P1: a staging leg (ends in cache_put) has no
+            # target — the path terminates at the cache write.
+            fallthrough: List[Tuple[str, Dict[str, Any]]] = []
+        else:
+            fallthrough = [
+                ("connectoraction_target", _branch_target_params(leg.get("target") or {})),
+                ("stop", {"continue_": True}),
+            ]
         cur = _append_path(
             leg_parts, leg.get("steps") or [], cur, fallthrough=fallthrough, config=config
         )

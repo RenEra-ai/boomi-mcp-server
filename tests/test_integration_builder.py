@@ -7730,3 +7730,267 @@ class TestBuildPlanDocumentCacheComponent:
     def test_metadata_type_map_includes_documentcache(self):
         from src.boomi_mcp.categories.integration_builder import _METADATA_TYPE_MAP
         assert _METADATA_TYPE_MAP["documentcache"] == "documentcache"
+
+
+# ---------------------------------------------------------------------------
+# Companion review P2 fixes (#122/#123 follow-ups)
+# ---------------------------------------------------------------------------
+
+
+def _json_profile_for_cache(key="cache_profile", name="Cache Profile"):
+    return IntegrationComponentSpec(
+        key=key, type="profile.json", action="create", name=name,
+        config={
+            "component_type": "profile.json",
+            "profile_type": "json.generated",
+            "component_name": name,
+            "root": {
+                "name": "Root",
+                "kind": "object",
+                "children": [
+                    {"name": "id", "kind": "simple", "data_type": "character"},
+                ],
+            },
+        },
+    )
+
+
+class TestDocumentCacheProfileRefChecks:
+
+    @patch(_PATCH_TARGET)
+    def test_ref_profile_in_depends_on_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        cache = _document_cache_comp(profile_id="$ref:cache_profile")
+        cache.depends_on = ["cache_profile"]
+        plan = _build_plan(
+            MagicMock(), _build_config([_json_profile_for_cache(), cache])
+        )
+        step = next(s for s in plan["steps"] if s["key"] == "lookup_cache")
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_ref_profile_missing_from_depends_on_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        cache = _document_cache_comp(profile_id="$ref:cache_profile")
+        plan = _build_plan(
+            MagicMock(), _build_config([_json_profile_for_cache(), cache])
+        )
+        step = next(s for s in plan["steps"] if s["key"] == "lookup_cache")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "DOCUMENT_CACHE_PROFILE_REQUIRED"
+        )
+        assert step["validation_error"]["field"] == "depends_on"
+
+    @patch(_PATCH_TARGET)
+    def test_ref_profile_type_mismatch_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        wrong = _process_property_comp(key="cache_profile", name="Not A Profile")
+        cache = _document_cache_comp(profile_id="$ref:cache_profile")
+        cache.depends_on = ["cache_profile"]
+        plan = _build_plan(MagicMock(), _build_config([wrong, cache]))
+        step = next(s for s in plan["steps"] if s["key"] == "lookup_cache")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "DOCUMENT_CACHE_PROFILE_REQUIRED"
+        )
+        assert (
+            step["validation_error"]["details"]["target_component_type"]
+            == "processproperty"
+        )
+
+
+def _joined_map_comp(key="join_map", external_writer=None):
+    join = {
+        "document_cache_id": "$ref:lookup_cache",
+        "cache_index": 1,
+        "join_id": 8,
+        "src_parent_key": "1",
+        "key_values": [
+            {"cache_key_id": 2, "cache_key_name": "id (Root/id)", "src_link_key": "2"}
+        ],
+    }
+    if external_writer is not None:
+        join["external_writer"] = external_writer
+    return IntegrationComponentSpec(
+        key=key, type="transform.map", action="create", name="Join Map",
+        depends_on=["cache_profile", "lookup_cache"],
+        config={
+            "component_type": "transform.map",
+            "map_type": "direct",
+            "component_name": "Join Map",
+            "source_profile_id": "$ref:cache_profile",
+            "source_profile_type": "profile.json",
+            "target_profile_id": "$ref:cache_profile",
+            "target_profile_type": "profile.json",
+            "field_mappings": [{"source_path": "Root/id", "target_path": "Root/id"}],
+            "document_cache_joins": [join],
+        },
+    )
+
+
+def _map_ref_process_comp(flow_sequence, key="join_process", depends_on=None):
+    return IntegrationComponentSpec(
+        key=key, type="process", action="create", name="Join Process",
+        depends_on=depends_on or ["join_map"],
+        config={
+            "process_kind": "database_to_api_sync",
+            "source": {
+                "connector_type": "database",
+                "connection_id": "11111111-1111-1111-1111-111111111111",
+                "operation_id": "22222222-2222-2222-2222-222222222222",
+                "action_type": "Get",
+            },
+            "transform": {"mode": "passthrough"},
+            "target": {
+                "connector_type": "rest",
+                "connection_id": "33333333-3333-3333-3333-333333333333",
+                "operation_id": "44444444-4444-4444-4444-444444444444",
+                "action_type": "POST",
+            },
+            "flow_sequence": flow_sequence,
+        },
+    )
+
+
+class TestMapJoinCacheReaderLineage:
+
+    def _components(self, flow_sequence, external_writer=None, process_deps=None):
+        cache = _document_cache_comp(
+            key="lookup_cache", profile_id="$ref:cache_profile"
+        )
+        cache.depends_on = ["cache_profile"]
+        return [
+            _json_profile_for_cache(),
+            cache,
+            _joined_map_comp(external_writer=external_writer),
+            _map_ref_process_comp(flow_sequence, depends_on=process_deps),
+        ]
+
+    @patch(_PATCH_TARGET)
+    def test_joined_map_without_cache_writer_rejected(self, mock_pag):
+        # Companion P2: the map's document_cache_joins READ the cache — a
+        # flow that map_refs it with no upstream cache_put must fail.
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(self._components(
+            [{"kind": "map_ref", "map_ref": "$ref:join_map"}]
+        )))
+        step = next(s for s in plan["steps"] if s["key"] == "join_process")
+        assert step["planned_action"] == "error_process_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "PROCESS_LINEAGE_CACHE_WRITER_MISSING"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_joined_map_with_upstream_cache_put_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(self._components(
+            [
+                {"kind": "cache_put", "document_cache_id": "$ref:lookup_cache"},
+                {"kind": "cache_get", "document_cache_id": "$ref:lookup_cache"},
+                {"kind": "map_ref", "map_ref": "$ref:join_map"},
+            ],
+            process_deps=["join_map", "lookup_cache"],
+        )))
+        step = next(s for s in plan["steps"] if s["key"] == "join_process")
+        assert step["planned_action"] == "create", step.get("validation_error")
+
+    @patch(_PATCH_TARGET)
+    def test_joined_map_external_writer_opt_out_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(self._components(
+            [{"kind": "map_ref", "map_ref": "$ref:join_map"}],
+            external_writer=True,
+        )))
+        step = next(s for s in plan["steps"] if s["key"] == "join_process")
+        assert step["planned_action"] == "create", step.get("validation_error")
+
+
+class TestLegacyTransformMapJoinLineage:
+    """QA Bug #145: the legacy transform.mode='map_ref' surface is the same
+    joined-map read surface — and can never host an in-process writer."""
+
+    def _components(self, external_writer=None):
+        cache = _document_cache_comp(
+            key="lookup_cache", profile_id="$ref:cache_profile"
+        )
+        cache.depends_on = ["cache_profile"]
+        process = IntegrationComponentSpec(
+            key="legacy_process", type="process", action="create",
+            name="Legacy Join Process",
+            depends_on=["join_map"],
+            config={
+                "process_kind": "database_to_api_sync",
+                "source": {
+                    "connector_type": "database",
+                    "connection_id": "11111111-1111-1111-1111-111111111111",
+                    "operation_id": "22222222-2222-2222-2222-222222222222",
+                    "action_type": "Get",
+                },
+                "transform": {"mode": "map_ref", "map_ref": "$ref:join_map"},
+                "target": {
+                    "connector_type": "rest",
+                    "connection_id": "33333333-3333-3333-3333-333333333333",
+                    "operation_id": "44444444-4444-4444-4444-444444444444",
+                    "action_type": "POST",
+                },
+            },
+        )
+        return [
+            _json_profile_for_cache(),
+            cache,
+            _joined_map_comp(external_writer=external_writer),
+            process,
+        ]
+
+    @patch(_PATCH_TARGET)
+    def test_legacy_joined_map_without_external_writer_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(self._components()))
+        step = next(s for s in plan["steps"] if s["key"] == "legacy_process")
+        assert step["planned_action"] == "error_process_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "PROCESS_LINEAGE_CACHE_WRITER_MISSING"
+        )
+        assert "transform.map_ref" in step["validation_error"]["field"]
+
+    @patch(_PATCH_TARGET)
+    def test_legacy_joined_map_with_external_writer_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(
+            MagicMock(), _build_config(self._components(external_writer=True))
+        )
+        step = next(s for s in plan["steps"] if s["key"] == "legacy_process")
+        assert step["planned_action"] == "create", step.get("validation_error")
+
+    @patch(_PATCH_TARGET)
+    def test_legacy_plain_map_without_joins_unaffected(self, mock_pag):
+        # Regression guard: a legacy map_ref WITHOUT joins keeps planning
+        # clean (the surface itself is not newly lineage-gated).
+        mock_pag.return_value = []
+        comps = self._components()
+        plain_map = IntegrationComponentSpec(
+            key="join_map", type="transform.map", action="create", name="Plain Map",
+            depends_on=["cache_profile"],
+            config={
+                "component_type": "transform.map",
+                "map_type": "direct",
+                "component_name": "Plain Map",
+                "source_profile_id": "$ref:cache_profile",
+                "source_profile_type": "profile.json",
+                "target_profile_id": "$ref:cache_profile",
+                "target_profile_type": "profile.json",
+                "field_mappings": [
+                    {"source_path": "Root/id", "target_path": "Root/id"}
+                ],
+            },
+        )
+        comps[2] = plain_map
+        plan = _build_plan(MagicMock(), _build_config(comps))
+        step = next(s for s in plan["steps"] if s["key"] == "legacy_process")
+        assert step["planned_action"] == "create", step.get("validation_error")

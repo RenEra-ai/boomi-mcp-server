@@ -102,6 +102,10 @@ class LineageEvent:
 class _Walker:
     events: List[LineageEvent] = field(default_factory=list)
     seq: int = 0
+    # Optional in-spec component context (integration-level pass): lets the
+    # walker read a $ref'd map's document_cache_joins. None on the
+    # process-local pass inside ProcessFlowBuilder.validate_config.
+    components_by_key: Optional[Dict[str, Any]] = None
 
     def add(self, **kwargs: Any) -> None:
         self.events.append(LineageEvent(seq=self.seq, **kwargs))
@@ -178,6 +182,46 @@ def _walk_set_properties_step(
     )
 
 
+def _add_map_join_reads(
+    walker: _Walker,
+    map_ref_value: Any,
+    branch_path: Tuple[Tuple[int, int], ...],
+    excl_path: Tuple[Tuple[int, str], ...],
+    step_field: str,
+) -> None:
+    """Record the cache READS an in-spec joined map performs (companion P2).
+
+    Requires the walker's component context; the seq of the reads is the map
+    position itself (walker.seq was already advanced past the map's wildcard
+    write, so anchor one back).
+    """
+    if walker.components_by_key is None:
+        return
+    map_ref = str(map_ref_value or "").strip()
+    if not map_ref.startswith("$ref:"):
+        return
+    target = walker.components_by_key.get(map_ref[len("$ref:"):])
+    target_config = getattr(target, "config", None) or {}
+    joins = target_config.get("document_cache_joins")
+    if not isinstance(joins, list):
+        return
+    for join in joins:
+        if not isinstance(join, dict):
+            continue
+        walker.events.append(
+            LineageEvent(
+                event="read",
+                scope="cache",
+                name=str(join.get("document_cache_id") or "").strip(),
+                seq=walker.seq - 1,  # at the map step's position
+                branch_path=branch_path,
+                excl_path=excl_path,
+                step_field=f"{step_field} -> document_cache_joins",
+                external=bool(join.get("external_writer", False)),
+            )
+        )
+
+
 def _walk_steps(
     walker: _Walker,
     steps: Any,
@@ -226,6 +270,18 @@ def _walk_steps(
                 excl_path=excl_path,
                 step_field=step_field,
             )
+            # Companion review P2 (#123 follow-up): an in-spec map that
+            # declares document_cache_joins READS those caches at map time —
+            # count each join as a cache read at this step's position so a
+            # join against a never-written cache fails like any other read.
+            if kind == "map_ref":
+                _add_map_join_reads(
+                    walker,
+                    step.get("map_ref"),
+                    branch_path,
+                    excl_path,
+                    f"{step_field}.map_ref",
+                )
         elif kind == "decision":
             decision_ordinal = walker.seq
             for side in ("left", "right"):
@@ -270,7 +326,10 @@ def _walk_steps(
             walker.tick()
 
 
-def collect_lineage_events(config: Dict[str, Any]) -> List[LineageEvent]:
+def collect_lineage_events(
+    config: Dict[str, Any],
+    components_by_key: Optional[Dict[str, Any]] = None,
+) -> List[LineageEvent]:
     """Collect DDP/DPP/cache lineage events from a process config.
 
     Walks the executable order: the legacy transform slot, then the composed
@@ -280,13 +339,19 @@ def collect_lineage_events(config: Dict[str, Any]) -> List[LineageEvent]:
     writes are deliberately NOT collected — the catch leg executes only on
     failure, so it can never be a main-row read's provable writer.
     """
-    walker = _Walker()
+    walker = _Walker(components_by_key=components_by_key)
 
     transform = config.get("transform")
     if isinstance(transform, dict):
         mode = str(transform.get("mode") or "").strip()
         if mode in ("dataprocess", "map_ref"):
             walker.add(event="write", scope="wildcard", name="*", step_field="transform")
+            # QA Bug #145: the legacy single-slot map is the SAME joined-map
+            # read surface — and since transform cannot combine with a
+            # flow_sequence in v1, no in-process cache writer can exist
+            # there, so a joined cache must declare external_writer: true.
+            if mode == "map_ref":
+                _add_map_join_reads(walker, transform.get("map_ref"), (), (), "transform.map_ref")
         else:
             # doccacheretrieve / doccacheremove stay legacy-exempt; other
             # modes carry no lineage events.
@@ -463,6 +528,14 @@ def validate_cache_property_lineage(
 
 def validate_config_lineage(
     config: Dict[str, Any],
+    components_by_key: Optional[Dict[str, Any]] = None,
 ) -> Optional[BuilderValidationError]:
-    """Collect + validate in one call (the ProcessFlowBuilder entry point)."""
-    return validate_cache_property_lineage(collect_lineage_events(config))
+    """Collect + validate in one call.
+
+    ProcessFlowBuilder calls it context-less (process-local pass);
+    integration_builder._build_plan calls it again WITH components_by_key so
+    in-spec map document_cache_joins count as cache readers (companion P2).
+    """
+    return validate_cache_property_lineage(
+        collect_lineage_events(config, components_by_key)
+    )

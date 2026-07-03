@@ -518,6 +518,10 @@ _ALLOWED_JOIN_KEYS = (
     "join_id",
     "src_parent_key",
     "key_values",
+    # Companion review P2: declares the joined cache is populated outside
+    # this process (e.g. by the parent execution) — the #123 lineage pass
+    # then accepts the join without an in-process cache_put. Not rendered.
+    "external_writer",
 )
 
 _ALLOWED_JOIN_KEY_VALUE_KEYS = ("cache_key_id", "cache_key_name", "src_link_key")
@@ -581,6 +585,13 @@ def validate_document_cache_joins_structure(
                 "documentcache component id or a $ref:KEY token)",
                 error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
                 field=f"{join_field}.document_cache_id",
+            )
+        external_writer = join.get("external_writer")
+        if external_writer is not None and not isinstance(external_writer, bool):
+            return BuilderValidationError(
+                f"{join_field}.external_writer must be a boolean when provided",
+                error_code=MAP_DOCUMENT_CACHE_JOINS_INVALID,
+                field=f"{join_field}.external_writer",
             )
         cache_index = _positive_int_or_none(join.get("cache_index"))
         if cache_index is None:

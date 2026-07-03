@@ -220,3 +220,41 @@ def test_ref_join_unknown_cache_key_id_rejected():
     assert err is not None
     assert err.field.endswith("cache_key_id")
     assert err.details.get("declared_key_ids") == [2]
+
+
+def test_ref_join_partial_composite_index_rejected():
+    # Companion P2: a composite index joined on a subset of its keys emits an
+    # incomplete CacheKeyJoinValues block that silently matches nothing.
+    components = _components()
+    components["cache"].config["indexes"][0]["keys"].append(
+        {"id": 3, "element_key": "4", "name": "second (Root/second)"}
+    )
+    err = validate_transform_map(
+        _map_config(_ref_join()), ["src", "tgt", "cache"], components
+    )
+    assert err is not None
+    assert err.error_code == "MAP_DOCUMENT_CACHE_JOINS_INVALID"
+    assert err.field.endswith("key_values")
+    assert err.details.get("declared_key_ids") == [2, 3]
+
+
+def test_ref_join_duplicate_key_binding_rejected():
+    join = _ref_join()
+    join["key_values"].append(dict(join["key_values"][0]))
+    err = validate_transform_map(
+        _map_config(join), ["src", "tgt", "cache"], _components()
+    )
+    assert err is not None
+    assert err.error_code == "MAP_DOCUMENT_CACHE_JOINS_INVALID"
+    assert err.field.endswith("key_values")
+
+
+def test_join_external_writer_flag_accepted_and_not_rendered():
+    join = dict(_LIVE_JOIN, external_writer=True)
+    assert validate_document_cache_joins_structure([join]) is None
+    # The flag is lineage metadata, never wire XML.
+    assert "external_writer" not in _render_document_cache_joins([join])
+    bad = dict(_LIVE_JOIN, external_writer="yes")
+    err = validate_document_cache_joins_structure([bad])
+    assert err is not None
+    assert err.field.endswith("external_writer")

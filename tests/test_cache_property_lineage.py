@@ -77,13 +77,21 @@ def _read_dpp(via_name, dpp_name, **source_extra):
 
 
 def _branch(*leg_step_lists):
-    return {
-        "kind": "branch",
-        "legs": [
-            {"steps": list(steps), "target": dict(_REST_TARGET)}
-            for steps in leg_step_lists
-        ],
-    }
+    # Per the companion-review P1 contract: a leg ending in cache_put is a
+    # target-less staging leg (Add to Cache consumes the documents).
+    legs = []
+    for steps in leg_step_lists:
+        steps = list(steps)
+        last_kind = (
+            str(steps[-1].get("kind") or "").strip()
+            if steps and isinstance(steps[-1], dict)
+            else ""
+        )
+        leg = {"steps": steps}
+        if last_kind != "cache_put":
+            leg["target"] = dict(_REST_TARGET)
+        legs.append(leg)
+    return {"kind": "branch", "legs": legs}
 
 
 def _err(flow_sequence):
