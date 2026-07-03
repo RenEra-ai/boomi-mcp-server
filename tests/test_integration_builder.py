@@ -7607,6 +7607,49 @@ class TestBuildPlanProcessPropertyComponent:
         assert emitted["client_secret"] == "[REDACTED]"
 
     @patch(_PATCH_TARGET)
+    def test_password_property_empty_default_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        comp = _process_property_comp()
+        comp.config["properties"] = [
+            {
+                "key": _PP_KEY_UUID,
+                "name": "API Key",
+                "type": "password",
+                "default_value": "",
+            },
+        ]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = next(s for s in plan["steps"] if s["key"] == "runtime_props")
+        assert step["planned_action"] == "create"
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_password_nonempty_default_rejected_and_redacted(self, mock_pag):
+        import json
+
+        mock_pag.return_value = []
+        comp = _process_property_comp()
+        comp.config["properties"] = [
+            {
+                "key": _PP_KEY_UUID,
+                "name": "API Key",
+                "type": "password",
+                "default_value": "hunter2",
+            },
+        ]
+        plan = _build_plan(MagicMock(), _build_config([comp]))
+        step = next(s for s in plan["steps"] if s["key"] == "runtime_props")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        )
+        assert step["validation_error"]["field"] == "properties[0].default_value"
+        emitted = plan["integration_spec"]["components"][0]["config"]
+        assert emitted["properties"][0]["default_value"] == "[REDACTED]"
+        # The secret must not survive anywhere in the echoed plan.
+        assert "hunter2" not in json.dumps(plan, default=str)
+
+    @patch(_PATCH_TARGET)
     def test_missing_component_name_falls_back_to_spec_name(self, mock_pag):
         # comp.name is injected as component_name at plan time (name-primary
         # type) — a spec with only the top-level name plans clean.

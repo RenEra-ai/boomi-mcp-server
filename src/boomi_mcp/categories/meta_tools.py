@@ -3870,7 +3870,7 @@ _COMPONENT_CREATE_PROCESS_PROPERTY = {
             {
                 "key": "<<stable UUID, e.g. 0e89ebf1-cd46-46df-904e-94c7e7ade31e>>",
                 "name": "<<property label>>",
-                "type": "<<string | number | boolean | date>>",
+                "type": "<<string | number | boolean | date | password>>",
                 "default_value": "<<optional default>>",
                 "help_text": "<<optional operator help>>",
                 "persisted": False,
@@ -3882,11 +3882,21 @@ _COMPONENT_CREATE_PROCESS_PROPERTY = {
     "property_required": ["key", "name", "type"],
     "property_optional": ["default_value", "help_text", "persisted"],
     "defaults": {"component_type": "processproperty", "persisted": False},
-    "supported_property_types": ["string", "number", "boolean", "date"],
+    "supported_property_types": ["string", "number", "boolean", "date", "password"],
     "property_type_evidence_note": (
-        "string/number/boolean are live-verified (#119 census); date is "
-        "companion+docs-corroborated. character and password are rejected — "
-        "no evidence exists for either as a Defined Process Property type."
+        "The allow-list is the exact platform XSD enumeration, live-verified "
+        "2026-07-03 via a renera create probe: [string, number, boolean, "
+        "date, password]. 'hidden' and 'character' are rejected — the UI's "
+        "'Hidden' data type serializes as XML token 'password'."
+    ),
+    "password_default_note": (
+        "type='password' (the UI's 'Hidden' data type) is accepted only with "
+        "an omitted or empty default_value: Boomi stores Defined Process "
+        "Property defaults in PLAINTEXT component XML (a password default "
+        "round-trips in cleartext and is NOT moved into bns:encryptedValues; "
+        "live-verified 2026-07-03). Supply real values via environment "
+        "extensions / runtime overrides. Non-empty password defaults are "
+        "rejected with PLAINTEXT_SECRET_REJECTED and redacted in plan echoes."
     ),
     "map_function_cross_link": (
         "transform.map map_type='function' defined_process_property_get/set "
@@ -3923,7 +3933,10 @@ _COMPONENT_CREATE_PROCESS_PROPERTY = {
         "PROCESS_PROPERTY_PROPERTY_REQUIRED": "properties list missing or empty",
         "PROCESS_PROPERTY_KEY_REQUIRED": "a property is missing its explicit stable UUID key",
         "PROCESS_PROPERTY_KEY_INVALID": "a property key is not a lowercase canonical UUID",
-        "PROCESS_PROPERTY_TYPE_UNSUPPORTED": "property type not in (string, number, boolean, date)",
+        "PROCESS_PROPERTY_TYPE_UNSUPPORTED": (
+            "property type not in (string, number, boolean, date, password); "
+            "'hidden' is rejected — the UI's 'Hidden' serializes as 'password'"
+        ),
         "PROCESS_PROPERTY_DUPLICATE_KEY": "two properties share a key UUID",
         "PROCESS_PROPERTY_DUPLICATE_NAME": "two properties share a label",
         "PROCESS_PROPERTY_DEFAULT_INVALID": "default_value / help_text is not a string",
@@ -3931,7 +3944,11 @@ _COMPONENT_CREATE_PROCESS_PROPERTY = {
             "raw DefinedProcessProperties subtree keys are not accepted; the "
             "raw escape hatch is config.xml"
         ),
-        "PLAINTEXT_SECRET_REJECTED": "a dict key inside the config matches a secret-shaped name",
+        "PLAINTEXT_SECRET_REJECTED": (
+            "a dict key inside the config matches a secret-shaped name, or a "
+            "type='password' property carries a non-empty default_value "
+            "(plaintext-XML policy)"
+        ),
     },
     "example": {
         "key": "<<props_key>>",

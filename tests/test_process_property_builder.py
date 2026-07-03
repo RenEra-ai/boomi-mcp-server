@@ -5,7 +5,8 @@ the live renera capture (tests/fixtures/live_xml/m11/processproperty_minimal.xml
 — live exports self-close empty elements, so the round-trip compares parsed
 tag/attr/text structure, not bytes). Exercises the full validate_config
 matrix including the intentionally-rejected 'encrypted' / 'allowed_values'
-keys and the character/password type rejections (#119 census evidence).
+keys, the character/hidden type rejections, and the password
+plaintext-default guard (live XSD + round-trip evidence, 2026-07-03).
 """
 
 from __future__ import annotations
@@ -74,6 +75,14 @@ def test_registry_and_lookup():
     assert get_process_property_builder("processproperty") is ProcessPropertyBuilder
     assert get_process_property_builder("script.mapping") is None
     assert ProcessPropertyBuilder.SUPPORTED_COMPONENT_TYPES == ("processproperty",)
+    # The platform XSD enumeration, live-verified 2026-07-03.
+    assert ProcessPropertyBuilder.SUPPORTED_PROPERTY_TYPES == (
+        "string",
+        "number",
+        "boolean",
+        "date",
+        "password",
+    )
 
 
 def test_preservation_policy_owns_defined_process_properties():
@@ -292,8 +301,8 @@ def test_duplicate_key_and_name_rejected():
     assert err.error_code == "PROCESS_PROPERTY_DUPLICATE_NAME"
 
 
-def test_unsupported_types_rejected_including_character_and_password():
-    for bad_type in ("character", "password", "integer", "", None):
+def test_unsupported_types_rejected_including_character_and_hidden():
+    for bad_type in ("character", "integer", "", None):
         err = ProcessPropertyBuilder.validate_config(
             {
                 "component_name": "X",
@@ -302,6 +311,87 @@ def test_unsupported_types_rejected_including_character_and_password():
         )
         assert err is not None, bad_type
         assert err.error_code == "PROCESS_PROPERTY_TYPE_UNSUPPORTED", bad_type
+    # 'hidden' is the docs' UI data type, not an XML token — the rejection
+    # carries the exact mapping hint (any casing).
+    for hidden_spelling in ("hidden", "Hidden"):
+        err = ProcessPropertyBuilder.validate_config(
+            {
+                "component_name": "X",
+                "properties": [
+                    {"key": _KEY_1, "name": "P", "type": hidden_spelling}
+                ],
+            }
+        )
+        assert err is not None, hidden_spelling
+        assert err.error_code == "PROCESS_PROPERTY_TYPE_UNSUPPORTED", hidden_spelling
+        assert err.hint == "UI type 'Hidden' serializes as XML token 'password'"
+
+
+def test_password_type_accepted_with_omitted_or_empty_default():
+    for prop in (
+        {"key": _KEY_1, "name": "Secret", "type": "password"},
+        {"key": _KEY_1, "name": "Secret", "type": "password", "default_value": ""},
+        {"key": _KEY_1, "name": "Secret", "type": "password", "default_value": None},
+    ):
+        err = ProcessPropertyBuilder.validate_config(
+            {"component_name": "X", "properties": [prop]}
+        )
+        assert err is None, prop
+
+
+def test_password_type_emits_password_token_and_empty_default():
+    xml = ProcessPropertyBuilder().build(
+        component_name="Secrets",
+        properties=[
+            {"key": _KEY_1, "name": "API Key", "type": "password"},
+        ],
+    )
+    assert "<type>password</type>" in xml
+    assert "<defaultValue></defaultValue>" in xml
+    props = ET.fromstring(xml).findall(
+        "bns:object/DefinedProcessProperties/definedProcessProperty", NS
+    )
+    assert [p.find("type").text for p in props] == ["password"]
+    assert [p.find("defaultValue").text for p in props] == [None]
+
+
+def test_password_nonempty_default_rejected_plaintext():
+    for secret_default in ("s3cret!", "   "):
+        err = ProcessPropertyBuilder.validate_config(
+            {
+                "component_name": "X",
+                "properties": [
+                    {
+                        "key": _KEY_1,
+                        "name": "P",
+                        "type": "password",
+                        "default_value": secret_default,
+                    }
+                ],
+            }
+        )
+        assert err is not None, secret_default
+        assert err.error_code == "PLAINTEXT_SECRET_REJECTED", secret_default
+        assert err.field == "properties[0].default_value"
+        hint = err.hint or ""
+        assert "extensions" in hint or "runtime" in hint
+        # The secret value must never be echoed in the error surface.
+        assert "s3cret!" not in str(err)
+        assert "s3cret!" not in hint
+
+
+def test_password_nonstring_default_still_default_invalid():
+    # Pins the guard's placement AFTER the string-type check: a non-string
+    # default on a password property is a shape error, not a secret echo.
+    err = ProcessPropertyBuilder.validate_config(
+        {
+            "component_name": "X",
+            "properties": [
+                {"key": _KEY_1, "name": "P", "type": "password", "default_value": 5}
+            ],
+        }
+    )
+    assert err.error_code == "PROCESS_PROPERTY_DEFAULT_INVALID"
 
 
 def test_encrypted_property_key_rejected_with_evidence_hint():
@@ -392,3 +482,21 @@ def test_redact_forbidden_secret_fields_in_place():
     ProcessPropertyBuilder.redact_forbidden_secret_fields_in_place(cfg)
     assert cfg["api_key"] == "[REDACTED]"
     assert cfg["properties"][0]["secret"] == "[REDACTED]"
+
+
+def test_redact_scrubs_password_type_default_values():
+    cfg = {
+        "component_name": "X",
+        "properties": [
+            {"key": _KEY_1, "name": "A", "type": "password", "default_value": "leak"},
+            {"key": _KEY_2, "name": "B", "type": "string", "default_value": "keep"},
+            {"key": _KEY_3, "name": "C", "type": "password", "default_value": ""},
+            {"key": _KEY_4, "name": "D", "type": "hidden", "default_value": "leak2"},
+        ],
+    }
+    ProcessPropertyBuilder.redact_forbidden_secret_fields_in_place(cfg)
+    props = cfg["properties"]
+    assert props[0]["default_value"] == "[REDACTED]"
+    assert props[1]["default_value"] == "keep"  # non-secret type untouched
+    assert props[2]["default_value"] == ""  # empty stays empty
+    assert props[3]["default_value"] == "[REDACTED]"  # defensive: hidden too

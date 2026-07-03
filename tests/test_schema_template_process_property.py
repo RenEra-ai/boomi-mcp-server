@@ -51,6 +51,7 @@ def test_template_required_and_property_contract():
         "number",
         "boolean",
         "date",
+        "password",
     ]
 
 
@@ -62,6 +63,22 @@ def test_template_documents_key_coupling_and_update_warning():
     assert "allowedValueSet" in result["update_note"]
     # No per-property encrypted flag exists.
     assert "encrypted" in result["no_encrypted_field_note"]
+
+
+def test_template_documents_password_policy_and_hidden_mapping():
+    result = _create_template()
+    # Password defaults must be empty (plaintext-XML policy), values belong
+    # in environment extensions / runtime overrides.
+    note = result["password_default_note"]
+    assert "empty" in note
+    assert "PLAINTEXT" in note or "plaintext" in note.lower()
+    assert "extensions" in note
+    # The UI 'Hidden' -> XML 'password' mapping is documented.
+    evidence = result["property_type_evidence_note"]
+    assert "Hidden" in evidence
+    assert "password" in evidence
+    # The type-unsupported error text reflects the five-token set.
+    assert "password" in result["error_codes"]["PROCESS_PROPERTY_TYPE_UNSUPPORTED"]
 
 
 def test_template_error_codes_cover_builder_matrix():

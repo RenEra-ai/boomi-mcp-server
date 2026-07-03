@@ -50,9 +50,15 @@ Key shape facts (from live XML — do not invent):
 * Child order inside ``definedProcessProperty`` is fixed: ``helpText``,
   ``label``, ``type``, ``defaultValue``, ``allowedValues``, ``persisted``.
 * The property ``key`` is a UUID distinct from the ``label``.
-* Live ``<type>`` values observed: ``string`` / ``number`` / ``boolean``;
-  ``date`` is companion+docs-corroborated and admitted; ``character`` and
-  ``password`` have no evidence and are rejected (#119 census).
+* The ``<type>`` allow-list is XSD-validated: a live create probe (renera,
+  2026-07-03) shows the platform enforces the enumeration
+  ``[string, number, boolean, date, password]``. ``hidden`` is NOT a valid
+  token — the docs' UI data type "Hidden" serializes as ``password`` — and
+  is rejected with that mapping hint; ``character`` remains rejected.
+* A ``password``-type ``defaultValue`` round-trips in PLAINTEXT component
+  XML (it is NOT moved into ``bns:encryptedValues``; live-verified
+  2026-07-03), so a non-empty ``default_value`` on ``type='password'`` is
+  rejected with ``PLAINTEXT_SECRET_REJECTED`` and redacted in plan echoes.
 * There is NO per-property ``encrypted`` element (the intake brief's
   ``encrypted`` flag does not exist in any live capture) — configs carrying
   one are rejected with an explicit hint.
@@ -85,12 +91,20 @@ from .profile_generation import (
 )
 
 
-# v1 allow-list (#119 census): string/number/boolean are live-verified;
-# date is companion+official-docs corroborated. character and password have
-# no live or docs evidence as a Defined Process Property <type> and are
-# rejected (password additionally because its secret/default-value policy is
-# unresolved — see the architect plan).
-_SUPPORTED_PROPERTY_TYPES: Tuple[str, ...] = ("string", "number", "boolean", "date")
+# Allow-list = the exact platform XSD enumeration, live-verified 2026-07-03
+# via a renera create probe: '[string, number, boolean, date, password]'.
+# 'hidden' is not a valid token (the UI's "Hidden" data type serializes as
+# 'password'); 'character' is not in the enumeration. Because the platform
+# stores a password-type defaultValue in PLAINTEXT component XML (not in
+# bns:encryptedValues), type='password' additionally requires an empty
+# default_value — see the guard in validate_config.
+_SUPPORTED_PROPERTY_TYPES: Tuple[str, ...] = (
+    "string",
+    "number",
+    "boolean",
+    "date",
+    "password",
+)
 
 
 # Mirrors ScriptMappingBuilder's secret-shaped key set so one audit covers
@@ -220,6 +234,17 @@ class ProcessPropertyBuilder:
             for key in cls.FORBIDDEN_SECRET_FIELDS:
                 if key in config:
                     config[key] = "[REDACTED]"
+            # A password-type property's secret lives in the VALUE of the
+            # allowed 'default_value' key — scrub it too so a rejected spec's
+            # plan echo never leaks it ('hidden' covered defensively: the
+            # entry is invalid, but its default may still be secret-shaped).
+            prop_type = config.get("type")
+            if (
+                isinstance(prop_type, str)
+                and prop_type.strip().lower() in ("password", "hidden")
+                and config.get("default_value") not in (None, "")
+            ):
+                config["default_value"] = "[REDACTED]"
             for value in config.values():
                 cls.redact_forbidden_secret_fields_in_place(value)
         elif isinstance(config, list):
@@ -363,8 +388,17 @@ class ProcessPropertyBuilder:
                 )
             seen_names[name_key] = f"{field_prefix}.name"
 
-            # type — v1 allow-list.
+            # type — the platform XSD enumeration (live-verified 2026-07-03).
             prop_type = entry.get("type")
+            if isinstance(prop_type, str) and prop_type.strip().lower() == "hidden":
+                # The docs' UI data type "Hidden" is not an XML token — the
+                # platform serializes it as 'password'.
+                return BuilderValidationError(
+                    f"{field_prefix}.type 'hidden' is not a valid XML type token",
+                    error_code=PROCESS_PROPERTY_TYPE_UNSUPPORTED,
+                    field=f"{field_prefix}.type",
+                    hint="UI type 'Hidden' serializes as XML token 'password'",
+                )
             if (
                 not isinstance(prop_type, str)
                 or prop_type.strip() not in _SUPPORTED_PROPERTY_TYPES
@@ -375,9 +409,10 @@ class ProcessPropertyBuilder:
                     error_code=PROCESS_PROPERTY_TYPE_UNSUPPORTED,
                     field=f"{field_prefix}.type",
                     hint=(
-                        "string/number/boolean are live-verified; date is "
-                        "docs-corroborated. character/password have no "
-                        "evidence as Defined Process Property types (#119)."
+                        "Live XSD-validated set (2026-07-03): string/number/"
+                        "boolean/date/password. 'character' is not a valid "
+                        "token; the UI's 'Hidden' data type maps to "
+                        "'password'."
                     ),
                 )
 
@@ -390,6 +425,26 @@ class ProcessPropertyBuilder:
                         error_code=PROCESS_PROPERTY_DEFAULT_INVALID,
                         field=f"{field_prefix}.{str_key}",
                         hint="Pass a string (may be empty), or omit the key.",
+                    )
+
+            # password default guard — the platform stores a password-type
+            # defaultValue in PLAINTEXT component XML (live-verified
+            # 2026-07-03), so only omitted/None/"" are accepted. The message
+            # deliberately never echoes the supplied value.
+            if prop_type.strip() == "password":
+                default_value = entry.get("default_value")
+                if default_value is not None and default_value != "":
+                    return BuilderValidationError(
+                        f"{field_prefix}.default_value must be omitted or "
+                        "empty for type='password' — Boomi stores Defined "
+                        "Process Property defaults in plaintext component XML",
+                        error_code="PLAINTEXT_SECRET_REJECTED",
+                        field=f"{field_prefix}.default_value",
+                        hint=(
+                            "Leave the default empty; supply the real value "
+                            "via environment extensions / runtime overrides, "
+                            "never in component XML."
+                        ),
                     )
 
             # persisted — bool when provided.
