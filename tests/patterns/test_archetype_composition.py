@@ -541,6 +541,26 @@ def test_all_cache_handoff_full_staged_fanout():
     }
 
 
+def test_cache_component_follows_integration_folder_placement():
+    """The handoff cache must land in the SAME folder as every other emitted
+    component — DocumentCacheBuilder emits folderFullPath from
+    config['folder_path'], so dropping it would strand the cache in the
+    account root (Codex review P2)."""
+    options = _options()
+    options["naming"]["folder_path"] = "Integrations/Demo/Fanout"
+    options["links"] = _cache_links("orders", "billing")
+    spec = _compose(options=options)["integration_spec"]
+    by_key = {c["key"]: c for c in spec["components"]}
+    cache_config = by_key["handoff_document_cache"]["config"]
+    assert cache_config["folder_path"] == "Integrations/Demo/Fanout"
+    # Folderless naming stays folderless (the golden example shape).
+    options = _options()
+    options["links"] = _cache_links("orders", "billing")
+    spec = _compose(options=options)["integration_spec"]
+    by_key = {c["key"]: c for c in spec["components"]}
+    assert "folder_path" not in by_key["handoff_document_cache"]["config"]
+
+
 def test_cache_handoff_spec_plans_clean_and_emits_cache_xml():
     options = _options()
     options["links"] = _cache_links("orders", "billing")

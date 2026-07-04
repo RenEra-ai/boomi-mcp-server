@@ -792,30 +792,36 @@ def _emit_handoff_cache_component(
             ),
         )
     name = f"{naming.component_prefix} Handoff Cache"
+    config: Dict[str, Any] = {
+        "component_type": "documentcache",
+        "component_name": name,
+        "profile_type": "profile.json",
+        "profile_id": f"$ref:{profile_key}",
+        "indexes": [
+            {
+                "index_id": 1,
+                "index_name": f"by {leaf['name']}",
+                "keys": [
+                    {
+                        "id": int(leaf["key"]),
+                        "element_key": str(leaf["key"]),
+                        "name": f"{leaf['name']} ({leaf['path']})",
+                    }
+                ],
+            }
+        ],
+    }
+    # The cache follows the integration's folder placement like every other
+    # emitted component (DocumentCacheBuilder emits folderFullPath from
+    # config['folder_path']; without it the cache lands in the account root).
+    if naming.folder_path:
+        config["folder_path"] = naming.folder_path
     return IntegrationComponentSpec(
         key=_HANDOFF_CACHE_KEY,
         type="documentcache",
         action="create",
         name=name,
-        config={
-            "component_type": "documentcache",
-            "component_name": name,
-            "profile_type": "profile.json",
-            "profile_id": f"$ref:{profile_key}",
-            "indexes": [
-                {
-                    "index_id": 1,
-                    "index_name": f"by {leaf['name']}",
-                    "keys": [
-                        {
-                            "id": int(leaf["key"]),
-                            "element_key": str(leaf["key"]),
-                            "name": f"{leaf['name']} ({leaf['path']})",
-                        }
-                    ],
-                }
-            ],
-        },
+        config=config,
         depends_on=[profile_key],
     )
 
