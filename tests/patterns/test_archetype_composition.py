@@ -445,21 +445,256 @@ def test_missing_transform_part_is_unsupported_topology():
     assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
 
 
-def test_document_cache_handoff_is_gated_unsupported_topology():
+def _cache_links(*cache_targets: str) -> List[Dict[str, Any]]:
+    """The explicit star with document_cache declared on the given targets."""
+    links: List[Dict[str, Any]] = [{"from_part": "db", "to_part": "shape"}]
+    for target in ("orders", "billing"):
+        link: Dict[str, Any] = {"from_part": "shape", "to_part": target}
+        if target in cache_targets:
+            link["handoff"] = {"mode": "document_cache"}
+        links.append(link)
+    return links
+
+
+def test_document_cache_handoff_composes_staged_fanout():
+    """M8.1 (#132): the formerly gated mixed-mode input now composes — the
+    cache-mode target leg re-reads staged documents behind a target-less
+    cache_put staging leg, backed by an auto-emitted in-spec Document Cache."""
+    options = _options()
+    options["links"] = _cache_links("billing")
+    result = _compose(options=options)
+    assert result["_success"] is True
+    assert result["composition"]["handoff"] == "mixed"
+
+    spec = result["integration_spec"]
+    by_key = {c["key"]: c for c in spec["components"]}
+    cache = by_key["handoff_document_cache"]
+    assert cache["type"] == "documentcache"
+    assert cache["config"]["profile_id"] == "$ref:transform_target_profile"
+    assert cache["config"]["profile_type"] == "profile.json"
+    assert cache["depends_on"] == ["transform_target_profile"]
+    indexes = cache["config"]["indexes"]
+    assert indexes and indexes[0]["keys"]
+    # The index key references a REAL generated-profile element key (the
+    # first mappable simple leaf), never an invented constant.
+    key_entry = indexes[0]["keys"][0]
+    assert key_entry["element_key"] == str(key_entry["id"])
+    assert "target_a" in key_entry["name"]
+
+    process = spec["components"][-1]
+    assert process["key"] == "main_process"
+    assert "handoff_document_cache" in process["depends_on"]
+    legs = process["config"]["flow_sequence"][1]["legs"]
+    assert len(legs) == 3
+    # Leg 1: the stream-mode orders target, untouched.
+    assert legs[0] == {
+        "target": {
+            "connector_type": "rest",
+            "action_type": "POST",
+            "connection_id": "$ref:target_rest_connection",
+            "operation_id": "$ref:target_rest_operation",
+        }
+    }
+    # Leg 2: target-less cache_put staging (Add to Cache consumes the stream).
+    assert "target" not in legs[1]
+    assert [s["kind"] for s in legs[1]["steps"]] == ["cache_put"]
+    assert legs[1]["steps"][0]["document_cache_id"] == "$ref:handoff_document_cache"
+    # Leg 3: cache_get before the billing REST send.
+    assert [s["kind"] for s in legs[2]["steps"]] == ["cache_get"]
+    assert legs[2]["steps"][0]["document_cache_id"] == "$ref:handoff_document_cache"
+    assert legs[2]["target"]["operation_id"] == "$ref:target_billing_rest_operation"
+
+    composition = spec["validation_rules"]["composition"]
+    assert composition["handoff"] == "mixed"
+    assert composition["cache_component_key"] == "handoff_document_cache"
+    assert composition["staging_leg"] == 2
+    assert composition["handoff_modes"] == {
+        "orders": "document_stream",
+        "billing": "document_cache",
+    }
+    assert composition["fanout_legs"][0]["leg"] == 3
+    assert composition["fanout_legs"][0]["handoff"] == "document_cache"
+    assert spec["validation_rules"]["component_count"] == len(spec["components"])
+
+
+def test_all_cache_handoff_full_staged_fanout():
+    options = _options()
+    options["links"] = _cache_links("orders", "billing")
+    result = _compose(options=options)
+    assert result["_success"] is True
+    assert result["composition"]["handoff"] == "document_cache"
+
+    spec = result["integration_spec"]
+    legs = spec["components"][-1]["config"]["flow_sequence"][1]["legs"]
+    assert len(legs) == 3
+    # Staging leg first, then BOTH consumers re-read before their sends.
+    assert "target" not in legs[0]
+    assert [s["kind"] for s in legs[0]["steps"]] == ["cache_put"]
+    for leg in legs[1:]:
+        assert [s["kind"] for s in leg["steps"]] == ["cache_get"]
+        assert leg["target"]
+    composition = spec["validation_rules"]["composition"]
+    assert composition["staging_leg"] == 1
+    assert composition["handoff_modes"] == {
+        "orders": "document_cache",
+        "billing": "document_cache",
+    }
+
+
+def test_cache_handoff_spec_plans_clean_and_emits_cache_xml():
+    options = _options()
+    options["links"] = _cache_links("orders", "billing")
+    spec = _compose(options=options)["integration_spec"]
+    with patch(_PAGINATE_TARGET, return_value=[]):
+        plan = _build_plan(
+            MagicMock(),
+            {"integration_spec": spec, "conflict_policy": "reuse"},
+        )
+    assert plan.get("_success", True) is not False
+    for step in plan["steps"]:
+        assert "validation_error" not in step, (step["key"], step.get("validation_error"))
+        assert step["planned_action"] in ("create", "reuse")
+
+    process = spec["components"][-1]
+    xml = ProcessFlowBuilder.build(process["config"], name=process["name"])
+    shapes = [s.get("shapetype") for s in ET.fromstring(xml).iter("shape")]
+    assert shapes.count("branch") == 1
+    assert shapes.count("doccacheload") == 1  # one staging Add to Cache
+    assert shapes.count("doccacheretrieve") == 2  # one retrieve per consumer
+    # DB Get source + one REST send per consuming leg.
+    assert shapes.count("connectoraction") == 3
+    assert shapes.count("map") == 1
+
+
+def test_document_cache_on_source_link_is_unsupported_topology():
     options = _options()
     options["links"] = [
-        {"from_part": "db", "to_part": "shape"},
-        {"from_part": "shape", "to_part": "orders"},
         {
-            "from_part": "shape",
-            "to_part": "billing",
+            "from_part": "db",
+            "to_part": "shape",
             "handoff": {"mode": "document_cache"},
         },
+        {"from_part": "shape", "to_part": "orders"},
+        {"from_part": "shape", "to_part": "billing"},
     ]
     result = _compose(options=options)
     assert result["_success"] is False
     assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
-    assert "cache_property_authoring" in result["suggestion"]
+    assert "transform -> rest_target" in result["error"]
+    assert "integration_spec" not in result
+
+
+def test_keyed_cache_handoff_fields_stay_gated():
+    for gated_field, value in (
+        ("doc_cache_index", 1),
+        ("cache_key_values", [{"cache_key_id": 2}]),
+    ):
+        options = _options()
+        options["links"] = _cache_links("billing")
+        options["links"][2]["handoff"][gated_field] = value
+        result = _compose(options=options)
+        assert result["_success"] is False
+        assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
+        assert "cache_property_authoring" in result["suggestion"]
+        assert "integration_spec" not in result
+
+
+def _many_target_compose(count: int, cache: bool) -> Dict[str, Any]:
+    parts = _parts()[:2]
+    template = _parts()[2]
+    links: List[Dict[str, Any]] = [{"from_part": "db", "to_part": "shape"}]
+    for i in range(count):
+        part = copy.deepcopy(template)
+        part["key"] = f"t{i}"
+        part["label"] = f"Leg {chr(ord('A') + i)}"
+        parts.append(part)
+        link: Dict[str, Any] = {"from_part": "shape", "to_part": part["key"]}
+        if cache and i == 0:
+            link["handoff"] = {"mode": "document_cache"}
+        links.append(link)
+    options = _options()
+    options["links"] = links
+    return _compose(parts=parts, options=options)
+
+
+def test_cache_handoff_with_25_targets_exceeds_leg_budget():
+    result = _many_target_compose(25, cache=True)
+    assert result["_success"] is False
+    assert result["error_code"] == COMPOSITION_UNSUPPORTED_TOPOLOGY
+    assert "24" in result["error"]
+    # The same 25 targets compose fine when every handoff streams.
+    assert _many_target_compose(25, cache=False)["_success"] is True
+
+
+def test_cache_handoff_with_24_targets_fits_leg_budget():
+    result = _many_target_compose(24, cache=True)
+    assert result["_success"] is True
+    legs = result["integration_spec"]["components"][-1]["config"][
+        "flow_sequence"
+    ][1]["legs"]
+    assert len(legs) == 25  # staging leg + 24 targets = full Branch budget
+
+
+def test_reversed_cache_legs_fail_before_mutation():
+    """The #123 lineage gate rejects a read-before-write leg order at
+    compose/plan time — a tampered spec never reaches a Boomi mutation."""
+    options = _options()
+    options["links"] = _cache_links("orders", "billing")
+    spec = _compose(options=options)["integration_spec"]
+    process = spec["components"][-1]
+    legs = process["config"]["flow_sequence"][1]["legs"]
+    # Move the cache_put staging leg AFTER both consuming legs.
+    legs.append(legs.pop(0))
+
+    residual = ProcessFlowBuilder.validate_config(
+        process["config"], depends_on=process["depends_on"]
+    )
+    assert residual is not None
+    assert residual.error_code == "PROCESS_LINEAGE_BRANCH_ORDER_INVALID"
+
+    with patch(_PAGINATE_TARGET, return_value=[]):
+        plan = _build_plan(
+            MagicMock(),
+            {"integration_spec": spec, "conflict_policy": "reuse"},
+        )
+    flagged = [s for s in plan["steps"] if s.get("validation_error")]
+    assert flagged, "the tampered process step must carry a validation_error"
+
+
+_CACHE_EXAMPLE_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "examples"
+    / "m8"
+    / "cache_handoff_staged_fanout.integration.json"
+)
+
+
+def test_cache_handoff_golden_example_round_trips():
+    payload = json.loads(_CACHE_EXAMPLE_PATH.read_text(encoding="utf-8"))
+    assert payload["example_not_template"] is True
+    assert payload["is_template"] is False
+    assert payload["template_status"] == "example_only_not_reusable_template"
+    request = payload["compose_request"]
+    result = compose_archetypes_action(
+        parts=request["parts"], options=request["options"]
+    )
+    assert result["_success"] is True
+    assert result["integration_spec"] == payload["integration_spec"]
+
+
+def test_cache_handoff_golden_example_plans_clean():
+    payload = json.loads(_CACHE_EXAMPLE_PATH.read_text(encoding="utf-8"))
+    with patch(_PAGINATE_TARGET, return_value=[]):
+        plan = _build_plan(
+            MagicMock(),
+            {
+                "integration_spec": payload["integration_spec"],
+                "conflict_policy": "reuse",
+            },
+        )
+    assert plan.get("_success", True) is not False
+    for step in plan["steps"]:
+        assert "validation_error" not in step, (step["key"], step.get("validation_error"))
 
 
 def test_explicit_star_links_accepted_and_wrong_links_rejected():

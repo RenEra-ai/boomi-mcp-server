@@ -5820,10 +5820,14 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
                 "Compose a multi-target integration (M8 / issue #14): one DB "
                 "source feeding a shared transform that fans out to 2..25 REST "
                 "targets via a Branch — use this when the requested shape "
-                "exceeds one linear archetype preset."
+                "exceeds one linear archetype preset. Links may stage the "
+                "fan-out through a Document Cache (M8.1 / #132: "
+                "handoff.mode='document_cache' lowers onto M11 cache_put/"
+                "cache_get; write-before-read leg order is validated at "
+                "compose/plan time, before any Boomi mutation)."
             ),
             "steps": [
-                "1. get_schema_template(schema_name='compose_archetypes') → inspect the part-kind vocabulary, v1 topology, and handoff modes",
+                "1. get_schema_template(schema_name='compose_archetypes') → inspect the part-kind vocabulary, v1 topology, and handoff modes; for document_cache handoffs also consult get_schema_template(schema_name='cache_property_authoring')",
                 "2. get_integration_archetype(name='database_to_api_sync') → inspect the source/transform/target sub-contracts the parts reuse",
                 "3. compose_archetypes(parts=[...], options={...}) → emit ONE coherent IntegrationSpecV1 (no Boomi mutation; invalid contract links fail here)",
                 "4. build_integration(action='plan', config='{\"integration_spec\": <spec from step 3>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
@@ -6299,8 +6303,22 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
                     "process stream (source -> shared map -> branch legs)"
                 ),
                 "document_cache": (
-                    "gated: reserved until it lowers onto the M11 cache_put/"
-                    "cache_get steps — see get_schema_template("
+                    "executable (M8.1 / #132): declared per link on "
+                    "options.links[].handoff.mode for transform -> "
+                    "rest_target edges only. Lowers onto the M11 cache "
+                    "steps: ONE target-less cache_put staging leg (inserted "
+                    "before the first consuming leg — Add to Cache consumes "
+                    "the document stream) writes the mapped documents into "
+                    "an auto-emitted in-spec Document Cache "
+                    "(handoff_document_cache, $ref-bound to the shared "
+                    "transform_target_profile), and each cache-mode target "
+                    "leg re-reads them with an all-documents cache_get "
+                    "before its REST send. Write-before-read leg order is "
+                    "validated at compose time (#123 lineage). The staging "
+                    "leg spends one Branch leg, so at most 24 rest_target "
+                    "parts fit. Keyed retrieval (doc_cache_index / "
+                    "cache_key_values) stays gated (#119 census) — see "
+                    "get_schema_template("
                     "schema_name='cache_property_authoring')"
                 ),
             },
@@ -6321,8 +6339,9 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
                 "Per-target divergent transforms, joins, nested branches, "
                 "dynamic paths (send_request.path_replacements), Try/Catch "
                 "reliability, watermark-sourced query parameters on fanout "
-                "(non-first) targets, and arbitrary graph composition are out "
-                "of scope for v1."
+                "(non-first) targets, keyed cache retrieval "
+                "(doc_cache_index / cache_key_values), and arbitrary graph "
+                "composition are out of scope for v1."
             ),
             "example": {
                 "parts": [
@@ -6354,6 +6373,15 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
                         "integration_name": "<<integration name>>",
                         "component_prefix": "<<component prefix>>",
                     },
+                    "links": [
+                        {"from_part": "db", "to_part": "shape"},
+                        {"from_part": "shape", "to_part": "orders"},
+                        {
+                            "from_part": "shape",
+                            "to_part": "billing",
+                            "handoff": {"mode": "document_cache"},
+                        },
+                    ],
                 },
             },
             "next_steps": (
@@ -9303,7 +9331,11 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "description": (
                 "Compose archetype parts into ONE coherent IntegrationSpecV1 WITHOUT calling Boomi "
                 "(M8 / issue #14). v1 topology: one db_source -> one shared transform -> 2..25 "
-                "rest_target parts lowered onto a verified Branch fan-out. Cross-part contract "
+                "rest_target parts lowered onto a verified Branch fan-out. Links may declare "
+                "handoff.mode='document_cache' per transform->rest_target edge (M8.1 / #132): the "
+                "composed Branch stages mapped documents through an auto-emitted in-spec Document "
+                "Cache (target-less cache_put staging leg + all-documents cache_get before each "
+                "consuming REST send; keyed retrieval stays gated per #119). Cross-part contract "
                 "validation (COMPOSITION_* error codes) fails before any spec is emitted; the "
                 "composed spec deploys through build_integration(plan/apply) -> orchestrate_deploy. "
                 "Use this after inspecting the standalone archetypes when the requested shape "

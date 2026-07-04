@@ -2235,9 +2235,14 @@ if list_integration_archetypes_action:
 
         Read-only. Does not mutate Boomi. v1 composes the topology
         db_source -> transform -> rest_fanout (2..25 REST targets): the shared
-        transform feeds a Branch with one REST target per leg. Cross-part
-        contract validation (COMPOSITION_* error codes) fails BEFORE any spec
-        is emitted; the returned `integration_spec` deploys through the normal
+        transform feeds a Branch with one REST target per leg. Links may
+        declare handoff.mode='document_cache' on transform -> rest_target
+        edges (M8.1 / #132): the Branch then stages mapped documents through
+        an auto-emitted in-spec Document Cache (target-less cache_put staging
+        leg + all-documents cache_get before each consuming REST send; keyed
+        retrieval stays gated). Cross-part contract validation (COMPOSITION_*
+        error codes) fails BEFORE any spec is emitted; the returned
+        `integration_spec` deploys through the normal
         build_integration(action='plan'/'apply') -> orchestrate_deploy path.
 
         Args:

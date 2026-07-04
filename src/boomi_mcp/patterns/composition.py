@@ -13,11 +13,17 @@ rewritten onto the shipped ``flow_sequence`` composition surface (#117): a
 ``map_ref`` step for the shared transform followed by a terminal ``branch``
 (#112) with one REST target per leg.
 
-Document handoff between parts is a first-class link property; v1 executes
-``document_stream`` only (documents flow down the process stream). The
-``document_cache`` mode is reserved until it lowers onto the M11 ``cache_put``
-/ ``cache_get`` steps and is rejected with a pointer at the M11 authoring
-surface.
+Document handoff between parts is a first-class link property on the
+``transform -> rest_target`` edges. ``document_stream`` (default) flows
+documents down the single process stream; ``document_cache`` (M8.1 / issue
+#132) lowers onto the M11 ``cache_put`` / ``cache_get`` steps: one
+target-less staging Branch leg writes the mapped documents into an
+auto-emitted in-spec Document Cache (Add to Cache consumes the stream — the
+#122/#131 consumption contract), and every cache-mode target leg re-reads
+them with an all-documents ``cache_get`` before its REST send. The staging
+leg always precedes the first consuming leg, so the #123 write-before-read
+lineage gate (run by the pre-emission self-check below) holds by
+construction. Keyed retrieval stays gated (#119 census Outcome B).
 
 Deterministic cross-part contract validation (COMPOSITION_* error codes) runs
 BEFORE any spec is emitted, and the rewritten process config is re-validated
@@ -40,6 +46,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..categories.components.builders.connector_builder import (
     BuilderValidationError,
+)
+from ..categories.components.builders.json_profile_builder import (
+    JSONGeneratedProfileBuilder,
 )
 from ..categories.components.builders.process_flow_builder import (
     ProcessFlowBuilder,
@@ -96,12 +105,22 @@ _PART_KINDS = ("db_source", "transform", "rest_target")
 # derived prefix must never collide with them.
 _RESERVED_PREFIXES = frozenset({"source", "transform", "target"})
 
-_HANDOFF_GATED_HINT = (
-    "v1 composition executes handoff mode 'document_stream' only. "
-    "'document_cache' is reserved until it lowers onto the M11 cache_put/"
-    "cache_get steps — see get_schema_template("
-    "schema_name='cache_property_authoring')."
+_KEYED_HANDOFF_GATED_HINT = (
+    "Composed document_cache handoffs retrieve ALL cached documents in v1; "
+    "keyed cache retrieval has no live-captured wire shape (#119 census) — "
+    "see get_schema_template(schema_name='cache_property_authoring')."
 )
+
+# The composition-owned Document Cache emitted for staged handoffs. Never
+# collides with the base assembly keys (source_*/transform_*/target_*/
+# main_process) or the fanout keys (target_<slug>_*: 'document' never
+# slugifies out of a part key into this exact form because the emitted
+# fanout keys always end in _rest_connection/_rest_operation).
+_HANDOFF_CACHE_KEY = "handoff_document_cache"
+
+# A staged handoff spends one of Boomi Branch's 25 legs on the cache_put
+# staging leg, so the target budget drops by one.
+_MAX_FANOUT_TARGETS_WITH_CACHE = _MAX_FANOUT_TARGETS - 1
 
 
 # ---------------------------------------------------------------------------
@@ -159,10 +178,17 @@ class CompositionPart(BaseModel):
 class DocumentHandoff(BaseModel):
     """How documents move from one part to the next.
 
-    ``document_stream`` (default) is the only executable v1 mode: documents
-    flow down the single process stream (source -> map -> branch legs).
-    ``document_cache`` parses but is rejected at composition validation with
-    COMPOSITION_UNSUPPORTED_TOPOLOGY until it lowers onto the M11 cache steps.
+    ``document_stream`` (default): documents flow down the single process
+    stream (source -> map -> branch legs). ``document_cache`` (M8.1 / issue
+    #132, transform -> rest_target links only): the composed Branch stages
+    the mapped documents into an auto-emitted in-spec Document Cache via a
+    target-less ``cache_put`` leg, and each cache-mode target leg re-reads
+    them with an all-documents ``cache_get`` before its REST send. The keyed
+    retrieval fields (``doc_cache_index`` / ``cache_key_values``) are
+    allow-listed only so composition validation can reject them with the
+    NAMED gated error (mirrors the builder's cache_get gate) — any value
+    fails with COMPOSITION_UNSUPPORTED_TOPOLOGY until the #119 census
+    captures a populated cacheKeyValues wire shape.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -170,9 +196,24 @@ class DocumentHandoff(BaseModel):
     mode: Literal["document_stream", "document_cache"] = Field(
         default="document_stream",
         description=(
-            "Handoff mode. 'document_stream' executes today; 'document_cache' "
-            "is reserved (rejected) until it lowers onto the M11 cache_put/"
-            "cache_get steps."
+            "Handoff mode. 'document_stream' flows documents down the "
+            "process stream; 'document_cache' stages them through an "
+            "auto-emitted Document Cache (target-less cache_put staging leg "
+            "+ all-documents cache_get before each consuming REST send)."
+        ),
+    )
+    doc_cache_index: Optional[int] = Field(
+        default=None,
+        description=(
+            "GATED (#119 census): keyed cache retrieval has no live-captured "
+            "wire shape; any value is rejected at composition validation."
+        ),
+    )
+    cache_key_values: Optional[List[Any]] = Field(
+        default=None,
+        description=(
+            "GATED (#119 census): keyed cache retrieval has no live-captured "
+            "wire shape; any value is rejected at composition validation."
         ),
     )
 
@@ -279,12 +320,30 @@ def _validate_links(
                     field=f"options.links[{i}].{endpoint_field}",
                     hint="Every link endpoint must be a declared parts[].key.",
                 )
-        if link.handoff.mode != "document_stream":
+        for gated_field in ("doc_cache_index", "cache_key_values"):
+            if getattr(link.handoff, gated_field) is not None:
+                raise _topology_error(
+                    f"options.links[{i}].handoff.{gated_field} is gated — "
+                    "keyed cache retrieval has no live-captured wire shape "
+                    "(#119 census).",
+                    field=f"options.links[{i}].handoff.{gated_field}",
+                    hint=_KEYED_HANDOFF_GATED_HINT,
+                )
+        if link.handoff.mode == "document_cache" and not (
+            link.from_part == transform_part.key
+            and link.to_part != db_part.key
+            and link.to_part != transform_part.key
+        ):
             raise _topology_error(
-                f"options.links[{i}].handoff.mode "
-                f"{link.handoff.mode!r} is not executable in v1.",
+                f"options.links[{i}].handoff.mode 'document_cache' is only "
+                "supported on transform -> rest_target links.",
                 field=f"options.links[{i}].handoff.mode",
-                hint=_HANDOFF_GATED_HINT,
+                hint=(
+                    "The staged cache handoff lowers onto the Branch fan-out "
+                    "(a target-less cache_put staging leg + cache_get "
+                    "consuming legs); the db_source -> transform edge always "
+                    "streams."
+                ),
             )
     expected = {(db_part.key, transform_part.key)} | {
         (transform_part.key, p.key) for p in target_parts
@@ -297,6 +356,23 @@ def _validate_links(
             "(no duplicates, no extra or missing edges).",
             field="options.links",
         )
+
+
+def _handoff_modes(
+    links: Optional[List[CompositionLink]],
+    transform_part: CompositionPart,
+    target_parts: List[CompositionPart],
+) -> Dict[str, str]:
+    """Per-rest_target handoff mode map (part key -> mode).
+
+    Omitted links mean the inferred all-``document_stream`` star. Assumes the
+    link set has already passed :func:`_validate_links`.
+    """
+    modes = {part.key: "document_stream" for part in target_parts}
+    for link in links or []:
+        if link.from_part == transform_part.key and link.to_part in modes:
+            modes[link.to_part] = link.handoff.mode
+    return modes
 
 
 def validate_composition(
@@ -394,6 +470,24 @@ def validate_composition(
     # 3. Explicit links (when given) must match the inferred star.
     if options.links is not None:
         _validate_links(options.links, db_part, transform_part, target_parts)
+        modes = _handoff_modes(options.links, transform_part, target_parts)
+        if (
+            any(mode == "document_cache" for mode in modes.values())
+            and len(target_parts) > _MAX_FANOUT_TARGETS_WITH_CACHE
+        ):
+            raise _topology_error(
+                "a document_cache handoff composes a target-less cache_put "
+                "staging leg in addition to the target legs, so at most "
+                f"{_MAX_FANOUT_TARGETS_WITH_CACHE} rest_target parts fit "
+                f"the {_MAX_FANOUT_TARGETS}-leg Branch budget; got "
+                f"{len(target_parts)}.",
+                field="options.links",
+                hint=(
+                    f"Drop to {_MAX_FANOUT_TARGETS_WITH_CACHE} rest_target "
+                    "parts, or use document_stream handoffs (no staging "
+                    "leg)."
+                ),
+            )
 
     # 4. Per-part parameter validation via the archetype sub-contracts.
     #    A pydantic ValidationError propagates to the action layer, which maps
@@ -661,21 +755,90 @@ def _leg_binding_from_keys(conn_key: str, op_key: str, method: str) -> Dict[str,
     }
 
 
+def _emit_handoff_cache_component(
+    naming: Any, profile_component: IntegrationComponentSpec
+) -> IntegrationComponentSpec:
+    """Emit the composition-owned Document Cache for staged handoffs.
+
+    The cache binds (``$ref`` + ``depends_on``) to the SAME shared target
+    profile every fanout leg sends, so staged and streamed documents carry
+    one contract. The index key derives from the profile's own generated
+    field index (first mappable simple leaf in deterministic pre-order) —
+    the ``element_key`` always references a real emitted profile element,
+    mirroring examples/m11/cache_property_authoring_join.integration.json.
+    """
+    profile_key = profile_component.key
+    field_index = JSONGeneratedProfileBuilder.build_field_index(
+        dict(profile_component.config)
+    )
+    leaf = next(
+        (
+            entry
+            for entry in field_index.values()
+            if entry.get("mappable") and entry.get("kind") == "simple"
+        ),
+        None,
+    )
+    if leaf is None:  # pragma: no cover — the composition contract requires
+        # at least one transform-mapped simple leaf on the shared profile.
+        raise BuilderValidationError(
+            "the shared target profile declares no mappable simple leaf to "
+            "key the handoff Document Cache index on.",
+            error_code=COMPOSITION_UNSUPPORTED_TOPOLOGY,
+            field="parts",
+            hint=(
+                "Declare at least one simple leaf on the rest_target "
+                "payload_profile."
+            ),
+        )
+    name = f"{naming.component_prefix} Handoff Cache"
+    return IntegrationComponentSpec(
+        key=_HANDOFF_CACHE_KEY,
+        type="documentcache",
+        action="create",
+        name=name,
+        config={
+            "component_type": "documentcache",
+            "component_name": name,
+            "profile_type": "profile.json",
+            "profile_id": f"$ref:{profile_key}",
+            "indexes": [
+                {
+                    "index_id": 1,
+                    "index_name": f"by {leaf['name']}",
+                    "keys": [
+                        {
+                            "id": int(leaf["key"]),
+                            "element_key": str(leaf["key"]),
+                            "name": f"{leaf['name']} ({leaf['path']})",
+                        }
+                    ],
+                }
+            ],
+        },
+        depends_on=[profile_key],
+    )
+
+
 def _rewrite_process_for_fanout(
     process: IntegrationComponentSpec,
     map_key: str,
-    leg_bindings: List[Dict[str, Any]],
+    legs: List[Dict[str, Any]],
     extra_dep_keys: List[str],
     extra_extension_connections: List[Dict[str, Any]],
 ) -> None:
     """Rewrite the base main process onto the flow_sequence Branch surface.
 
-    The top-level ``target`` stays as emitted — ``flow_sequence`` requires it
-    as the default success terminal even though the terminal ``branch`` means
-    it is never emitted as a shape (#117). The no-op reliability block is
-    dropped (disabled DLQ / retry 0 emits nothing on either path), and the
-    transform moves from the top-level slot into the sequence's ``map_ref``
-    step so the composed validator's passthrough gate holds.
+    ``legs`` are pre-built branch leg dicts (``{steps?, target?}``) so the
+    caller controls the per-leg shape: plain ``{"target": ...}`` for stream
+    legs, a target-less ``cache_put`` staging leg, and ``cache_get`` +
+    target consuming legs for staged handoffs. The top-level ``target``
+    stays as emitted — ``flow_sequence`` requires it as the default success
+    terminal even though the terminal ``branch`` means it is never emitted
+    as a shape (#117). The no-op reliability block is dropped (disabled DLQ
+    / retry 0 emits nothing on either path), and the transform moves from
+    the top-level slot into the sequence's ``map_ref`` step so the composed
+    validator's passthrough gate holds.
     """
     config = process.config
     config["transform"] = {"mode": "passthrough"}
@@ -689,7 +852,7 @@ def _rewrite_process_for_fanout(
         {
             "kind": "branch",
             "label": "Fan out",
-            "legs": [{"target": binding} for binding in leg_bindings],
+            "legs": legs,
         },
     ]
     for dep_key in extra_dep_keys:
@@ -764,7 +927,10 @@ def compose_archetypes(
         for key, value in process.config["target"].items()
         if key in ("connector_type", "connection_id", "operation_id", "action_type")
     }
-    leg_bindings: List[Dict[str, Any]] = [base_target_binding]
+    target_bindings: List[Dict[str, Any]] = [base_target_binding]
+
+    modes = _handoff_modes(options_model.links, transform_part, target_parts)
+    staged = any(mode == "document_cache" for mode in modes.values())
 
     extra_components: List[IntegrationComponentSpec] = []
     extra_dep_keys: List[str] = []
@@ -786,7 +952,7 @@ def compose_archetypes(
         conn_key = primitive_component_key(prefix, ROLE_REST_CONNECTION)
         op_key = primitive_component_key(prefix, ROLE_REST_OPERATION)
         extra_dep_keys.extend([conn_key, op_key])
-        leg_bindings.append(
+        target_bindings.append(
             _leg_binding_from_keys(
                 conn_key, op_key, target_model.send_request.method
             )
@@ -857,8 +1023,66 @@ def compose_archetypes(
             }
         fanout_summaries.append(summary)
 
+    # Lower per-target handoff modes onto pre-built branch legs. A staged
+    # handoff inserts ONE target-less cache_put staging leg immediately
+    # before the FIRST consuming leg (branch legs run sequentially, so the
+    # #123 write-before-read lineage gate holds for every later cache_get),
+    # and each cache-mode leg re-reads the staged documents before its send.
+    cache_ref = f"$ref:{_HANDOFF_CACHE_KEY}"
+    legs: List[Dict[str, Any]] = []
+    leg_positions: Dict[str, int] = {}
+    staging_leg_position: Optional[int] = None
+    for part, binding in zip(target_parts, target_bindings):
+        if modes[part.key] == "document_cache":
+            if staging_leg_position is None:
+                legs.append(
+                    {
+                        "steps": [
+                            {
+                                "kind": "cache_put",
+                                "document_cache_id": cache_ref,
+                                "label": "Stage mapped documents",
+                            }
+                        ]
+                    }
+                )
+                staging_leg_position = len(legs)
+            leg: Dict[str, Any] = {
+                "steps": [
+                    {
+                        "kind": "cache_get",
+                        "document_cache_id": cache_ref,
+                        "label": "Consume staged documents",
+                    }
+                ],
+                "target": binding,
+            }
+        else:
+            leg = {"target": binding}
+        legs.append(leg)
+        leg_positions[part.key] = len(legs)
+
+    if staged:
+        profile_key = primitive_component_key(
+            _TRANSFORM_PREFIX, ROLE_TARGET_PROFILE
+        )
+        profile_component = next(
+            component
+            for component in spec.components
+            if component.key == profile_key
+        )
+        extra_components.insert(
+            0, _emit_handoff_cache_component(naming, profile_component)
+        )
+        extra_dep_keys.append(_HANDOFF_CACHE_KEY)
+        # Staged branch legs shift the raw positions: re-point each fanout
+        # summary at its ACTUAL branch leg and record its handoff mode.
+        for summary in fanout_summaries:
+            summary["leg"] = leg_positions[summary["part_key"]]
+            summary["handoff"] = modes[summary["part_key"]]
+
     _rewrite_process_for_fanout(
-        process, map_key, leg_bindings, extra_dep_keys, extra_extension_connections
+        process, map_key, legs, extra_dep_keys, extra_extension_connections
     )
 
     # Pre-emission self-check: the rewritten config must pass the SAME
@@ -886,16 +1110,28 @@ def compose_archetypes(
             "target": "rest_target",
             "operation": "branch",
             "executable": False,
-            "legs": len(leg_bindings),
+            "legs": len(legs),
         }
     )
+    handoff_mode = "document_stream"
+    if staged:
+        handoff_mode = (
+            "document_cache"
+            if all(mode == "document_cache" for mode in modes.values())
+            else "mixed"
+        )
     spec.validation_rules["component_count"] = len(spec.components)
-    spec.validation_rules["composition"] = {
+    composition_rules: Dict[str, Any] = {
         "topology": "db_source->transform->rest_fanout",
-        "handoff": "document_stream",
+        "handoff": handoff_mode,
         "fanout_targets": len(target_parts),
         "parts": [{"key": p.key, "kind": p.kind} for p in part_models],
         "first_target_part": target_parts[0].key,
         "fanout_legs": fanout_summaries,
     }
+    if staged:
+        composition_rules["cache_component_key"] = _HANDOFF_CACHE_KEY
+        composition_rules["staging_leg"] = staging_leg_position
+        composition_rules["handoff_modes"] = dict(modes)
+    spec.validation_rules["composition"] = composition_rules
     return spec

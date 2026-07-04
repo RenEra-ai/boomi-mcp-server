@@ -1,0 +1,882 @@
+{
+  "example_not_template": true,
+  "is_template": false,
+  "template_status": "example_only_not_reusable_template",
+  "purpose": "M8.1 (#132): staged Branch fan-out via a document_cache handoff \u2014 compose_archetypes lowers handoff.mode='document_cache' onto the M11 cache steps: a target-less cache_put staging leg writes the mapped documents into the auto-emitted in-spec Document Cache (Add to Cache consumes the stream, the #122/#131 consumption contract), and every consuming leg re-reads them with an all-documents cache_get before its REST send (write-before-read leg order satisfies the #123 lineage contract).",
+  "do_not_reuse": "Concrete values below are demo-grade placeholders (example.invalid endpoints, <<...>> sentinels) so the spec plans clean in tests; author real bindings from actual requirements.",
+  "compose_request": {
+    "parts": [
+      {
+        "key": "db",
+        "kind": "db_source",
+        "parameters": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "driver": "microsoft_jdbc",
+              "auth_mode": "username_password",
+              "host": "db.example.invalid",
+              "database": "AppDB",
+              "username": "<<db user>>",
+              "credential_ref": "<<opaque credential reference>>"
+            }
+          },
+          "read_operation": {
+            "sql": "<<user-authored DB read statement>>",
+            "result_schema": {
+              "fields": [
+                {
+                  "name": "source_a",
+                  "data_type": "character"
+                },
+                {
+                  "name": "source_b",
+                  "data_type": "character"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "key": "shape",
+        "kind": "transform",
+        "parameters": {
+          "operations": [
+            {
+              "operation_type": "direct",
+              "source_field": "source_a",
+              "target_path": "Root/target_a"
+            },
+            {
+              "operation_type": "direct",
+              "source_field": "source_b",
+              "target_path": "Root/target_b"
+            }
+          ]
+        }
+      },
+      {
+        "key": "orders",
+        "kind": "rest_target",
+        "label": "Orders",
+        "parameters": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "base_url": "https://orders.example.invalid",
+              "auth_mode": "none"
+            }
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "/v1/orders"
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "name": "Root",
+              "kind": "object",
+              "children": [
+                {
+                  "name": "target_a",
+                  "kind": "simple",
+                  "data_type": "character"
+                },
+                {
+                  "name": "target_b",
+                  "kind": "simple",
+                  "data_type": "character"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "key": "billing",
+        "kind": "rest_target",
+        "label": "Billing",
+        "parameters": {
+          "binding": {
+            "mode": "create",
+            "settings": {
+              "base_url": "https://billing.example.invalid",
+              "auth_mode": "none"
+            }
+          },
+          "send_request": {
+            "method": "POST",
+            "path": "/v1/billing"
+          },
+          "payload_profile": {
+            "format": "json",
+            "root": {
+              "name": "Root",
+              "kind": "object",
+              "children": [
+                {
+                  "name": "target_a",
+                  "kind": "simple",
+                  "data_type": "character"
+                },
+                {
+                  "name": "target_b",
+                  "kind": "simple",
+                  "data_type": "character"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "naming": {
+        "integration_name": "M8 Staged Cache Handoff Fanout Demo",
+        "component_prefix": "M8CACHE"
+      },
+      "links": [
+        {
+          "from_part": "db",
+          "to_part": "shape"
+        },
+        {
+          "from_part": "shape",
+          "to_part": "orders",
+          "handoff": {
+            "mode": "document_cache"
+          }
+        },
+        {
+          "from_part": "shape",
+          "to_part": "billing",
+          "handoff": {
+            "mode": "document_cache"
+          }
+        }
+      ]
+    }
+  },
+  "integration_spec": {
+    "version": "1.0",
+    "name": "M8 Staged Cache Handoff Fanout Demo",
+    "mode": "redesign",
+    "components": [
+      {
+        "key": "source_db_connection",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "M8CACHE DB Connection",
+        "component_id": null,
+        "config": {
+          "connector_type": "database",
+          "component_name": "M8CACHE DB Connection",
+          "driver_id": "microsoft_jdbc",
+          "auth_mode": "username_password",
+          "username": "<<db user>>",
+          "credential_ref": "<<opaque credential reference>>",
+          "host": "db.example.invalid",
+          "port": 1433,
+          "dbname": "AppDB"
+        },
+        "depends_on": []
+      },
+      {
+        "key": "source_db_read_profile",
+        "type": "profile.db",
+        "action": "create",
+        "name": "M8CACHE DB Read Profile",
+        "component_id": null,
+        "config": {
+          "profile_type": "database.read",
+          "component_name": "M8CACHE DB Read Profile",
+          "query": "<<user-authored DB read statement>>",
+          "output_fields": [
+            {
+              "name": "source_a",
+              "data_type": "character",
+              "mandatory": false,
+              "enforce_unique": false
+            },
+            {
+              "name": "source_b",
+              "data_type": "character",
+              "mandatory": false,
+              "enforce_unique": false
+            }
+          ]
+        },
+        "depends_on": []
+      },
+      {
+        "key": "source_db_get_operation",
+        "type": "connector-action",
+        "action": "create",
+        "name": "M8CACHE DB Get",
+        "component_id": null,
+        "config": {
+          "connector_type": "database",
+          "operation_mode": "get",
+          "component_name": "M8CACHE DB Get",
+          "read_profile_id": "$ref:source_db_read_profile",
+          "connection_ref_key": "source_db_connection"
+        },
+        "depends_on": [
+          "source_db_connection",
+          "source_db_read_profile"
+        ]
+      },
+      {
+        "key": "transform_target_profile",
+        "type": "profile.json",
+        "action": "create",
+        "name": "M8CACHE Target Profile",
+        "component_id": null,
+        "config": {
+          "profile_type": "json.generated",
+          "component_name": "M8CACHE Target Profile",
+          "root": {
+            "name": "Root",
+            "kind": "object",
+            "data_type": null,
+            "required": false,
+            "description": null,
+            "children": [
+              {
+                "name": "target_a",
+                "kind": "simple",
+                "data_type": "character",
+                "required": false,
+                "description": null,
+                "children": null
+              },
+              {
+                "name": "target_b",
+                "kind": "simple",
+                "data_type": "character",
+                "required": false,
+                "description": null,
+                "children": null
+              }
+            ]
+          }
+        },
+        "depends_on": []
+      },
+      {
+        "key": "transform_transform_map",
+        "type": "transform.map",
+        "action": "create",
+        "name": "M8CACHE Field Map",
+        "component_id": null,
+        "config": {
+          "component_name": "M8CACHE Field Map",
+          "source_profile_id": "$ref:source_db_read_profile",
+          "source_profile_type": "profile.db",
+          "target_profile_id": "$ref:transform_target_profile",
+          "target_profile_type": "profile.json",
+          "map_type": "direct",
+          "field_mappings": [
+            {
+              "source_path": "source_a",
+              "target_path": "Root/target_a"
+            },
+            {
+              "source_path": "source_b",
+              "target_path": "Root/target_b"
+            }
+          ]
+        },
+        "depends_on": [
+          "transform_target_profile",
+          "source_db_read_profile"
+        ]
+      },
+      {
+        "key": "target_rest_connection",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "M8CACHE Orders REST Connection",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "component_name": "M8CACHE Orders REST Connection",
+          "base_url": "https://orders.example.invalid",
+          "auth": "NONE"
+        },
+        "depends_on": []
+      },
+      {
+        "key": "target_rest_operation",
+        "type": "connector-action",
+        "action": "create",
+        "name": "M8CACHE Orders REST Send",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "M8CACHE Orders REST Send",
+          "connection_ref_key": "target_rest_connection",
+          "method": "POST",
+          "path": "/v1/orders",
+          "request_profile_id": "$ref:transform_target_profile",
+          "request_profile_type": "json"
+        },
+        "depends_on": [
+          "target_rest_connection",
+          "transform_target_profile"
+        ]
+      },
+      {
+        "key": "handoff_document_cache",
+        "type": "documentcache",
+        "action": "create",
+        "name": "M8CACHE Handoff Cache",
+        "component_id": null,
+        "config": {
+          "component_type": "documentcache",
+          "component_name": "M8CACHE Handoff Cache",
+          "profile_type": "profile.json",
+          "profile_id": "$ref:transform_target_profile",
+          "indexes": [
+            {
+              "index_id": 1,
+              "index_name": "by target_a",
+              "keys": [
+                {
+                  "id": 3,
+                  "element_key": "3",
+                  "name": "target_a (Root/target_a)"
+                }
+              ]
+            }
+          ]
+        },
+        "depends_on": [
+          "transform_target_profile"
+        ]
+      },
+      {
+        "key": "target_billing_rest_connection",
+        "type": "connector-settings",
+        "action": "create",
+        "name": "M8CACHE Billing REST Connection",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "component_name": "M8CACHE Billing REST Connection",
+          "base_url": "https://billing.example.invalid",
+          "auth": "NONE"
+        },
+        "depends_on": []
+      },
+      {
+        "key": "target_billing_rest_operation",
+        "type": "connector-action",
+        "action": "create",
+        "name": "M8CACHE Billing REST Send",
+        "component_id": null,
+        "config": {
+          "connector_type": "rest",
+          "operation_mode": "execute",
+          "component_name": "M8CACHE Billing REST Send",
+          "connection_ref_key": "target_billing_rest_connection",
+          "method": "POST",
+          "path": "/v1/billing",
+          "request_profile_id": "$ref:transform_target_profile",
+          "request_profile_type": "json"
+        },
+        "depends_on": [
+          "target_billing_rest_connection",
+          "transform_target_profile"
+        ]
+      },
+      {
+        "key": "main_process",
+        "type": "process",
+        "action": "create",
+        "name": "M8CACHE DB to API Sync",
+        "component_id": null,
+        "config": {
+          "process_kind": "database_to_api_sync",
+          "source": {
+            "connector_type": "database",
+            "action_type": "Get",
+            "connection_id": "$ref:source_db_connection",
+            "operation_id": "$ref:source_db_get_operation"
+          },
+          "transform": {
+            "mode": "passthrough"
+          },
+          "target": {
+            "connector_type": "rest",
+            "action_type": "POST",
+            "connection_id": "$ref:target_rest_connection",
+            "operation_id": "$ref:target_rest_operation"
+          },
+          "process_extensions": {
+            "connections": [
+              {
+                "connection_id": "$ref:source_db_connection",
+                "connector_type": "database",
+                "fields": [
+                  {
+                    "id": "username",
+                    "label": "User",
+                    "xpath": "DatabaseConnectionSettings/@username"
+                  },
+                  {
+                    "id": "password",
+                    "label": "Password",
+                    "xpath": "DatabaseConnectionSettings/@password"
+                  }
+                ]
+              }
+            ]
+          },
+          "flow_sequence": [
+            {
+              "kind": "map_ref",
+              "map_ref": "$ref:transform_transform_map",
+              "label": "Shared transform"
+            },
+            {
+              "kind": "branch",
+              "label": "Fan out",
+              "legs": [
+                {
+                  "steps": [
+                    {
+                      "kind": "cache_put",
+                      "document_cache_id": "$ref:handoff_document_cache",
+                      "label": "Stage mapped documents"
+                    }
+                  ]
+                },
+                {
+                  "steps": [
+                    {
+                      "kind": "cache_get",
+                      "document_cache_id": "$ref:handoff_document_cache",
+                      "label": "Consume staged documents"
+                    }
+                  ],
+                  "target": {
+                    "connector_type": "rest",
+                    "action_type": "POST",
+                    "connection_id": "$ref:target_rest_connection",
+                    "operation_id": "$ref:target_rest_operation"
+                  }
+                },
+                {
+                  "steps": [
+                    {
+                      "kind": "cache_get",
+                      "document_cache_id": "$ref:handoff_document_cache",
+                      "label": "Consume staged documents"
+                    }
+                  ],
+                  "target": {
+                    "connector_type": "rest",
+                    "connection_id": "$ref:target_billing_rest_connection",
+                    "operation_id": "$ref:target_billing_rest_operation",
+                    "action_type": "POST"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "depends_on": [
+          "source_db_connection",
+          "source_db_get_operation",
+          "transform_transform_map",
+          "target_rest_connection",
+          "target_rest_operation",
+          "target_billing_rest_connection",
+          "target_billing_rest_operation",
+          "handoff_document_cache"
+        ]
+      }
+    ],
+    "goals": [
+      "Replicate data from a SQL Server source to a REST target on a manual or scheduled trigger.",
+      "Emit executable component specs (DB source, JSON transform, REST target, structured process) for build_integration(action='plan'); a verified Try/Catch + DLQ catch path is emitted for DLQ modes document_cache_ref / error_subprocess_ref, with caller retry (max_attempts 1..6 \u2192 platform-timed retry_count 0..5) wired through (#51 M3.R1a / #88 M4.5.3). Deployment and schedule activation remain M3."
+    ],
+    "endpoints": [
+      {
+        "key": "db_source",
+        "type": "database",
+        "direction": "source",
+        "binding_mode": "create",
+        "executable": false,
+        "driver": "microsoft_jdbc",
+        "auth_mode": "username_password"
+      },
+      {
+        "key": "rest_target",
+        "type": "rest",
+        "direction": "target",
+        "binding_mode": "create",
+        "method": "POST",
+        "executable": false,
+        "auth_mode": "none"
+      },
+      {
+        "key": "rest_target_billing",
+        "type": "rest",
+        "direction": "target",
+        "binding_mode": "create",
+        "method": "POST",
+        "executable": false,
+        "auth_mode": "none"
+      }
+    ],
+    "flows": [
+      {
+        "key": "extract",
+        "name": "Read from database",
+        "source": "db_source",
+        "target": null,
+        "operation": "db_get",
+        "executable": false
+      },
+      {
+        "key": "transform",
+        "name": "Map source to JSON payload",
+        "source": "extract",
+        "target": null,
+        "operation": "transform",
+        "executable": false,
+        "source_schema": {
+          "field_count": 2,
+          "fields": [
+            {
+              "name": "source_a",
+              "data_type": "character",
+              "required": false
+            },
+            {
+              "name": "source_b",
+              "data_type": "character",
+              "required": false
+            }
+          ]
+        },
+        "target_payload_profile": {
+          "format": "json",
+          "root_name": "Root",
+          "leaf_count": 2,
+          "leaves": [
+            {
+              "path": "Root/target_a",
+              "data_type": "character"
+            },
+            {
+              "path": "Root/target_b",
+              "data_type": "character"
+            }
+          ]
+        },
+        "operations": [
+          {
+            "operation_type": "direct",
+            "future_builder_issue": "#26",
+            "source_field": "source_a",
+            "target_path": "Root/target_a"
+          },
+          {
+            "operation_type": "direct",
+            "future_builder_issue": "#26",
+            "source_field": "source_b",
+            "target_path": "Root/target_b"
+          }
+        ],
+        "source_profile_generation": {
+          "generation_mode": "profile_from_db_read_fields",
+          "component_type": "profile.db",
+          "profile_type": "database.read",
+          "component_name": null,
+          "profile_config": {
+            "output_fields": [
+              {
+                "name": "source_a",
+                "data_type": "character",
+                "mandatory": false,
+                "enforce_unique": false
+              },
+              {
+                "name": "source_b",
+                "data_type": "character",
+                "mandatory": false,
+                "enforce_unique": false
+              }
+            ]
+          },
+          "field_index_by_path": {
+            "source_a": {
+              "path": "source_a",
+              "name": "source_a",
+              "data_type": "character",
+              "mappable": true,
+              "profile_component_type": "profile.db",
+              "source": "db_read_fields"
+            },
+            "source_b": {
+              "path": "source_b",
+              "name": "source_b",
+              "data_type": "character",
+              "mappable": true,
+              "profile_component_type": "profile.db",
+              "source": "db_read_fields"
+            }
+          },
+          "mappable_paths": [
+            "source_a",
+            "source_b"
+          ]
+        },
+        "target_profile_generation": {
+          "generation_mode": "profile_from_json_schema",
+          "component_type": "profile.json",
+          "profile_type": "json.generated",
+          "component_name": null,
+          "profile_config": {
+            "format": "json",
+            "root": {
+              "name": "Root",
+              "kind": "object",
+              "required": false,
+              "children": [
+                {
+                  "name": "target_a",
+                  "kind": "simple",
+                  "data_type": "character",
+                  "required": false
+                },
+                {
+                  "name": "target_b",
+                  "kind": "simple",
+                  "data_type": "character",
+                  "required": false
+                }
+              ]
+            }
+          },
+          "field_index_by_path": {
+            "Root": {
+              "path": "Root",
+              "name": "Root",
+              "kind": "object",
+              "data_type": null,
+              "required": false,
+              "mappable": false,
+              "profile_component_type": "profile.json",
+              "source": "json_schema"
+            },
+            "Root/target_a": {
+              "path": "Root/target_a",
+              "name": "target_a",
+              "kind": "simple",
+              "data_type": "character",
+              "required": false,
+              "mappable": true,
+              "profile_component_type": "profile.json",
+              "source": "json_schema"
+            },
+            "Root/target_b": {
+              "path": "Root/target_b",
+              "name": "target_b",
+              "kind": "simple",
+              "data_type": "character",
+              "required": false,
+              "mappable": true,
+              "profile_component_type": "profile.json",
+              "source": "json_schema"
+            }
+          },
+          "mappable_paths": [
+            "Root/target_a",
+            "Root/target_b"
+          ]
+        },
+        "direct_field_mappings": [
+          {
+            "route": "direct",
+            "source_path": "source_a",
+            "target_path": "Root/target_a",
+            "source_data_type": "character",
+            "target_data_type": "character"
+          },
+          {
+            "route": "direct",
+            "source_path": "source_b",
+            "target_path": "Root/target_b",
+            "source_data_type": "character",
+            "target_data_type": "character"
+          }
+        ]
+      },
+      {
+        "key": "send",
+        "name": "Send to REST target",
+        "source": "transform",
+        "target": "rest_target",
+        "operation": "rest_send",
+        "executable": false
+      },
+      {
+        "key": "reliability",
+        "name": "Retry / DLQ",
+        "source": "send",
+        "target": null,
+        "operation": "reliability",
+        "executable": false
+      },
+      {
+        "key": "fanout",
+        "name": "Fan out to REST targets",
+        "source": "transform",
+        "target": "rest_target",
+        "operation": "branch",
+        "executable": false,
+        "legs": 3
+      }
+    ],
+    "naming": {
+      "archetype": "database_to_api_sync",
+      "integration_name": "M8 Staged Cache Handoff Fanout Demo",
+      "component_prefix": "M8CACHE",
+      "component_names": {
+        "rest_connection": "M8CACHE Orders REST Connection",
+        "rest_operation": "M8CACHE Orders REST Send"
+      }
+    },
+    "folders": {},
+    "runtime": {},
+    "validation_rules": {
+      "contract_only": false,
+      "component_count": 11,
+      "raw_xml_exposed": false,
+      "boomi_mutation": false,
+      "metadata_version": "0.5.0",
+      "operational_intent": {
+        "execution": {
+          "trigger": {
+            "mode": "manual"
+          }
+        },
+        "watermark": {
+          "enabled": false
+        },
+        "reliability": {
+          "error_classifier": {
+            "retriable_status_codes": [
+              502,
+              503,
+              504
+            ],
+            "terminal_status_codes": [
+              400,
+              401,
+              403,
+              404,
+              422
+            ],
+            "custom_rules": []
+          },
+          "retry": {
+            "requested_max_attempts": 1,
+            "backoff": "platform",
+            "process_retry_count": 0
+          },
+          "dlq": {
+            "mode": "disabled"
+          }
+        },
+        "expected_status_codes": [
+          200,
+          201,
+          202
+        ]
+      },
+      "transform_review": {
+        "supported_actions": [
+          "list_fields",
+          "validate_unmapped",
+          "mapping_diff",
+          "generate_test_payload",
+          "compare_expected_actual"
+        ],
+        "recommended_before_apply": [
+          "validate_unmapped",
+          "generate_test_payload"
+        ]
+      },
+      "limitations": {
+        "schedule_activation": "M3 (deploy to a runtime first)",
+        "process_dlq": "emitted for document_cache_ref / error_subprocess_ref (#51 M3.R1a)",
+        "process_retry": "max_attempts 1..6 wired as platform-timed Try/Catch retry_count 0..5 (#88 M4.5.3); requires a wired DLQ catch path; no caller-selected backoff",
+        "process_notify": "optional log-only Notify on the catch path (reliability.catch_notify, #89 M4.5.4); requires a wired DLQ; email/SMS channels out of scope",
+        "watermark_update": "#51 (dynamic operation-property wiring)",
+        "db_create_auth": "username_password only; windows_integrated requires reuse",
+        "environment_extensions": "create-mode username_password AND reuse-mode DB sources declare credential connection fields (username/password) as per-environment override points by default; host/port opt-in via environment_extensions.endpoint_connection_fields; the REST target also declares reuse-mode credentials by default and the base URL on opt-in (rest_endpoint_connection_fields). DB overrides are xpath-keyed, REST overrides are id-keyed (no xpath). processOverrides is unowned so UI-populated override values survive updates; runtime override availability is live_QA_required (#92 / #102 B1)",
+        "rest_create_auth": "auth='none' only; secured auth requires reuse",
+        "jdbc_options_and_default_headers": "metadata-deferred; no builder field in M2 (use reuse)"
+      },
+      "profile_schema_strategy": "M2 uses caller-declared DB read result fields and a caller-supplied JSON profile tree for the REST target; no SQL parsing, DB metadata introspection, row sampling, or Boomi browse is performed by this archetype. Issue #43 generates deterministic source/target profile field indexes and normalized direct mapping metadata on the transform flow for downstream profile/map builders (issue #26); metadata/sample inference is available separately via infer_profile_fields (issue #47).",
+      "transform_routes": {
+        "direct": "#26",
+        "map_function": "#40",
+        "map_script": "#41",
+        "xslt": "#42 (rejected in M2)"
+      },
+      "composition": {
+        "topology": "db_source->transform->rest_fanout",
+        "handoff": "document_cache",
+        "fanout_targets": 2,
+        "parts": [
+          {
+            "key": "db",
+            "kind": "db_source"
+          },
+          {
+            "key": "shape",
+            "kind": "transform"
+          },
+          {
+            "key": "orders",
+            "kind": "rest_target"
+          },
+          {
+            "key": "billing",
+            "kind": "rest_target"
+          }
+        ],
+        "first_target_part": "orders",
+        "fanout_legs": [
+          {
+            "part_key": "billing",
+            "leg": 3,
+            "method": "POST",
+            "binding_mode": "create",
+            "expected_status_codes": [
+              200,
+              201,
+              202
+            ],
+            "handoff": "document_cache"
+          }
+        ],
+        "cache_component_key": "handoff_document_cache",
+        "staging_leg": 1,
+        "handoff_modes": {
+          "orders": "document_cache",
+          "billing": "document_cache"
+        }
+      }
+    },
+    "pipeline": null
+  }
+}
