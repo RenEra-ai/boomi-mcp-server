@@ -280,11 +280,35 @@ def test_injected_framework_keys_accepted():
     assert root.attrib["folderName"] == "Integrations/Listeners"
 
 
-def test_preservation_policy_owns_listen_action_attrs():
+def test_preservation_policy_replaces_listen_action_element():
+    """The builder owns the ENTIRE WebServicesServerListenAction element, so the
+    policy must be mode='replace' — attrs_only would leave a stale
+    requestProfile/responseProfile on the live component when a structured
+    update drops it (Codex review, M6 #12)."""
     policy = WssListenerOperationBuilder.PRESERVATION_POLICY
     assert policy.component_type == "connector-action"
     assert policy.subtype == "wss"
     (owned,) = policy.owned_paths
     assert owned.path.endswith("WebServicesServerListenAction")
-    assert "objectName" in owned.owned_attrs
-    assert "requestProfile" in owned.owned_attrs
+    assert owned.mode == "replace"
+
+
+def test_structured_update_clears_dropped_profile_binding():
+    """Regression (Codex review): a structured update that removes the request
+    profile (input_type json -> singledata) must CLEAR the stale requestProfile
+    attribute on the merged XML, while unknown siblings survive."""
+    from boomi_mcp.categories.components.component_update_preservation import (
+        merge_for_update,
+    )
+
+    current = _build(input_type="singlejson", request_profile="REQ-OLD")
+    # Inject an unknown future sibling the builder never emits — it must survive.
+    current = current.replace(
+        "<Caching/>", "<Caching/>\n            <FutureBlock keep=\"me\"/>"
+    )
+    desired = _build(input_type="singledata")
+    merged = merge_for_update(current, desired, WssListenerOperationBuilder.PRESERVATION_POLICY)
+    action = ET.fromstring(merged).find(".//WebServicesServerListenAction")
+    assert "requestProfile" not in action.attrib
+    assert action.attrib["inputType"] == "singledata"
+    assert ET.fromstring(merged).find(".//FutureBlock") is not None

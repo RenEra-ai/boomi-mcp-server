@@ -207,6 +207,7 @@ def _patch_real_run(
     server_info,
     probe,
     execution_records,
+    baseline_records=None,
     collision_deployments=None,
     component_xml=None,
 ):
@@ -230,7 +231,12 @@ def _patch_real_run(
     )
     sch = _FakeAction({}, label="schedules")
     shared = _FakeAction({"get_server_info": server_info}, label="shared_resources")
-    monitor = _FakeAction({"execution_records": execution_records}, label="monitoring")
+    # The monitoring fake serves the PRE-PROBE baseline snapshot first, then the
+    # post-probe readback (queued-list semantics: last response repeats).
+    monitor = _FakeAction(
+        {"execution_records": [baseline_records or _RECORD_EMPTY, execution_records]},
+        label="monitoring",
+    )
     monkeypatch.setattr(orchestration, "manage_deployment_action", dep)
     monkeypatch.setattr(orchestration, "manage_environments_action", env)
     monkeypatch.setattr(orchestration, "manage_runtimes_action", rt)
@@ -324,9 +330,10 @@ def test_non_listener_build_reports_not_required_and_skips_stage(registry, monke
     assert result["listener_verify"]["status"] == "not_required"
 
 
-def test_fallback_detection_from_wss_component_config(registry):
-    """A hand-authored spec without validation_rules.listener is still detected
-    via its WSS Listen connector-action config."""
+def _hand_authored_entry(*, process_references_op: bool):
+    """A hand-authored spec (no validation_rules.listener) carrying a WSS Listen
+    operation component; the process SOURCE binding references it only when
+    process_references_op is True."""
     entry = _listener_entry()
     del entry["spec"]["validation_rules"]["listener"]
     entry["spec"]["components"].append(
@@ -346,7 +353,23 @@ def test_fallback_detection_from_wss_component_config(registry):
             "depends_on": [],
         }
     )
-    bid = registry("b-hand", entry)
+    if process_references_op:
+        entry["spec"]["components"][0]["config"] = {
+            "process_kind": "database_to_api_sync",
+            "source": {
+                "connector_type": "wss",
+                "action_type": "Listen",
+                "operation_id": "$ref:wss_op",
+            },
+        }
+    return entry
+
+
+def test_fallback_detection_from_process_source_binding(registry):
+    """A hand-authored spec without validation_rules.listener is detected via
+    the deploy-target process's OWN Listen source binding, resolved to the
+    referenced operation component."""
+    bid = registry("b-hand", _hand_authored_entry(process_references_op=True))
     result = orchestrate_deploy_action(
         build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True
     )
@@ -355,6 +378,58 @@ def test_fallback_detection_from_wss_component_config(registry):
     assert stage["endpoint_path"] == "/ws/simple/createHandRolled"
     # input_type=none -> GET.
     assert stage["http_method"] == "GET"
+
+
+def test_unreferenced_wss_op_is_not_a_listener_build(registry):
+    """Codex review (M6 #12): a spec that merely CONTAINS a WSS Listen operation
+    the deployed process does not use must NOT be classified as a listener
+    build (no skipped Test mode, no listener_verify against an unserved route)."""
+    bid = registry("b-hand-neg", _hand_authored_entry(process_references_op=False))
+    result = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True, run_test=True
+    )
+    assert result["listener_verify"]["status"] == "not_required"
+    # The Test-mode execution stage is NOT suppressed for a non-listener build.
+    assert result["execution"]["status"] == "planned"
+
+
+def test_sync_pipeline_listener_stage_detected(registry):
+    """The fallback also recognizes a sync_pipeline listener stage binding."""
+    entry = _hand_authored_entry(process_references_op=False)
+    entry["spec"]["components"][0]["config"] = {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+            "stages": [
+                {"key": "listen", "kind": "listener",
+                 "config": {"primitive": "wss_listen", "operation_id": "$ref:wss_op"}},
+                {"key": "send", "kind": "send",
+                 "config": {"primitive": "rest_send", "action_type": "POST",
+                            "connection_id": "C1", "operation_id": "O1"}},
+            ],
+            "dependencies": [{"from_stage": "listen", "to_stage": "send"}],
+        },
+    }
+    bid = registry("b-hand-sp", entry)
+    result = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True
+    )
+    assert result["listener_verify"]["status"] == "planned"
+    assert result["listener_verify"]["endpoint_path"] == "/ws/simple/createHandRolled"
+
+
+def test_external_literal_operation_ref_returns_non_listener(registry):
+    """A listener process referencing an EXTERNAL (literal, out-of-spec) WSS
+    operation cannot be endpoint-derived — no listener_verify rather than a
+    wrong probe."""
+    entry = _hand_authored_entry(process_references_op=True)
+    entry["spec"]["components"][0]["config"]["source"]["operation_id"] = (
+        "11111111-2222-3333-4444-555555555555"
+    )
+    bid = registry("b-hand-ext", entry)
+    result = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True
+    )
+    assert result["listener_verify"]["status"] == "not_required"
 
 
 # ---------------------------------------------------------------------------
@@ -784,7 +859,9 @@ def _patch_fresh_deploy_run(monkeypatch, *, probe, execution_records):
     )
     sch = _FakeAction({}, label="schedules")
     shared = _FakeAction({"get_server_info": _server_info()}, label="shared_resources")
-    monitor = _FakeAction({"execution_records": execution_records}, label="monitoring")
+    monitor = _FakeAction(
+        {"execution_records": [_RECORD_EMPTY, execution_records]}, label="monitoring"
+    )
     monkeypatch.setattr(orchestration, "manage_deployment_action", dep)
     monkeypatch.setattr(orchestration, "manage_environments_action", env)
     monkeypatch.setattr(orchestration, "manage_runtimes_action", rt)
@@ -850,3 +927,76 @@ def test_reused_deployment_never_retries(registry, monkeypatch):
     assert result["error_code"] == "LISTENER_PROBE_FAILED"
     # Exactly one primary + one verbatim-fallback probe, no retry loop.
     assert len(probe.calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# Readback baseline (probe must trigger a NEW execution)
+# ---------------------------------------------------------------------------
+
+
+def _records(*pairs):
+    return {
+        "_success": True,
+        "total_count": len(pairs),
+        "execution_records": [
+            {"execution_id": rid, "status": status, "execution_type": "exec_listener"}
+            for rid, status in pairs
+        ],
+    }
+
+
+def test_stale_pre_probe_record_does_not_verify(registry, monkeypatch):
+    """Codex review (M6 #12): a record that already existed BEFORE the probe
+    (recent listener traffic) must not count as proof the probe triggered an
+    execution — the stage fails with LISTENER_EXECUTION_RECORD_MISSING."""
+    bid = registry("b-l-stale", _listener_entry())
+    probe = _FakeProbe([(200, None)])
+    _patch_real_run(
+        monkeypatch,
+        server_info=_server_info(),
+        probe=probe,
+        baseline_records=_records(("exec-old", "COMPLETE")),
+        execution_records=_records(("exec-old", "COMPLETE")),
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_EXECUTION_RECORD_MISSING"
+    assert result["listener_verify"]["execution_record_found"] is False
+
+
+def test_new_record_among_stale_verifies(registry, monkeypatch):
+    """A NEW execution id appearing alongside pre-probe traffic is the positive
+    signal; the matched id is the new one, not the stale one."""
+    bid = registry("b-l-new", _listener_entry())
+    probe = _FakeProbe([(200, None)])
+    _patch_real_run(
+        monkeypatch,
+        server_info=_server_info(),
+        probe=probe,
+        baseline_records=_records(("exec-old", "COMPLETE")),
+        execution_records=_records(("exec-old", "COMPLETE"), ("exec-new", "COMPLETE")),
+    )
+    result = _run(bid)
+    assert result["_success"] is True
+    stage = result["listener_verify"]
+    assert stage["status"] == "completed"
+    assert stage["execution_id"] == "exec-new"
+
+
+def test_baseline_query_failure_degrades_with_warning(registry, monkeypatch):
+    """When the pre-probe baseline query itself fails, the readback degrades to
+    accept-any-record but flags the weaker evidence explicitly."""
+    bid = registry("b-l-nobase", _listener_entry())
+    probe = _FakeProbe([(200, None)])
+    _patch_real_run(
+        monkeypatch,
+        server_info=_server_info(),
+        probe=probe,
+        baseline_records={"_success": False, "error": "query exploded"},
+        execution_records=_RECORD_OK,
+    )
+    result = _run(bid)
+    assert result["_success"] is True
+    stage = result["listener_verify"]
+    assert stage["status"] == "completed"
+    assert any("LISTENER_READBACK_BASELINE_UNAVAILABLE" in w for w in stage["warnings"])

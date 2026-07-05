@@ -727,14 +727,54 @@ _LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS = 240
 _LISTENER_ROUTE_REGISTRATION_POLL_SECONDS = 15
 
 
+def _listener_operation_ref_from_process(process_config: Any) -> Optional[str]:
+    """The WSS Listen operation reference the process's SOURCE binding carries.
+
+    Returns the operation_id token ('$ref:KEY' or a literal id) when the process
+    is listener-sourced, else None. Two recognized shapes: a sync_pipeline
+    ``listener`` stage, and a lowered/hand-authored ``source`` binding with a
+    WSS connector_type + Listen action.
+    """
+    if not isinstance(process_config, dict):
+        return None
+    pipeline = process_config.get("pipeline")
+    if isinstance(pipeline, dict):
+        for stage in pipeline.get("stages") or []:
+            if not isinstance(stage, dict):
+                continue
+            if str(stage.get("kind") or "").strip().lower() != "listener":
+                continue
+            stage_config = stage.get("config")
+            if isinstance(stage_config, dict):
+                operation_id = stage_config.get("operation_id")
+                if isinstance(operation_id, str) and operation_id.strip():
+                    return operation_id.strip()
+            return None
+    source = process_config.get("source")
+    if isinstance(source, dict):
+        connector_type = str(source.get("connector_type") or "").strip().lower()
+        action_type = str(source.get("action_type") or "").strip()
+        if connector_type in _WSS_CONNECTOR_ALIASES and action_type == "Listen":
+            operation_id = source.get("operation_id")
+            if isinstance(operation_id, str) and operation_id.strip():
+                return operation_id.strip()
+    return None
+
+
 def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Read the recorded build's WSS listener metadata, or None for non-listener builds.
 
     Primary source: the archetype-emitted ``spec.validation_rules.listener`` block
     (object_name / operation_type / input_type / http_method / endpoint_path).
-    Fallback for hand-authored specs: scan the spec components for a WSS Listen
-    connector-action config and derive the same fields. Read-only registry
-    inspection; tolerant of a missing/malformed entry (returns None).
+    Fallback for hand-authored specs: classification keys off the single
+    deploy-target PROCESS's own source binding (a sync_pipeline ``listener``
+    stage or a lowered WSS/Listen source), then resolves the referenced Listen
+    operation component in-spec for the endpoint fields. A spec that merely
+    CONTAINS a WSS operation the deployed process does not listen on is NOT a
+    listener build (Codex review, M6 #12) — and a listener process whose
+    operation is an external literal id cannot be endpoint-derived, so it also
+    returns None (no listener_verify rather than a wrong probe). Read-only
+    registry inspection; tolerant of a missing/malformed entry (returns None).
     """
     entry = integration_builder._BUILD_REGISTRY.get(build_id)
     if not isinstance(entry, dict):
@@ -750,30 +790,67 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
     components = spec.get("components")
     if not isinstance(components, list):
         return None
-    for comp in components:
-        if not isinstance(comp, dict):
-            continue
-        config = comp.get("config")
-        if not isinstance(config, dict):
-            continue
-        connector_type = str(config.get("connector_type") or "").strip().lower()
-        operation_mode = str(config.get("operation_mode") or "").strip().lower()
-        if connector_type not in _WSS_CONNECTOR_ALIASES or operation_mode != "listen":
-            continue
-        object_name = str(config.get("object_name") or "").strip()
-        if not object_name:
-            continue
-        operation_type = str(config.get("operation_type") or "EXECUTE").strip().upper()
-        input_type = str(config.get("input_type") or "singlejson").strip().lower()
-        return {
-            "object_name": object_name,
-            "operation_type": operation_type,
-            "input_type": input_type,
-            "output_type": str(config.get("output_type") or "none").strip().lower(),
-            "http_method": wss_http_method(input_type),
-            "endpoint_path": compute_wss_endpoint(operation_type, object_name),
-        }
-    return None
+
+    # 1. The deploy target is the spec's single process (mirrors
+    #    _resolve_build_deployment_target; ambiguous/multi-process specs are
+    #    rejected there anyway).
+    process_comps = [
+        comp
+        for comp in components
+        if isinstance(comp, dict) and _effective_component_type(comp) == "process"
+    ]
+    if len(process_comps) != 1:
+        return None
+    operation_ref = _listener_operation_ref_from_process(process_comps[0].get("config"))
+    if not operation_ref:
+        return None
+
+    # 2. Resolve the referenced Listen operation component in-spec ($ref:KEY by
+    #    component key; a literal id by recorded/declared component_id).
+    op_comp: Optional[Dict[str, Any]] = None
+    if operation_ref.startswith("$ref:"):
+        ref_key = operation_ref[5:].strip()
+        for comp in components:
+            if isinstance(comp, dict) and comp.get("key") == ref_key:
+                op_comp = comp
+                break
+    else:
+        results = entry.get("results")
+        results = results if isinstance(results, dict) else {}
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            comp_key = comp.get("key")
+            result_entry = results.get(comp_key) if isinstance(comp_key, str) else None
+            recorded_id = (
+                result_entry.get("component_id") if isinstance(result_entry, dict) else None
+            )
+            if operation_ref in (comp.get("component_id"), recorded_id):
+                op_comp = comp
+                break
+    if op_comp is None:
+        return None
+
+    config = op_comp.get("config")
+    if not isinstance(config, dict):
+        return None
+    connector_type = str(config.get("connector_type") or "").strip().lower()
+    operation_mode = str(config.get("operation_mode") or "").strip().lower()
+    if connector_type not in _WSS_CONNECTOR_ALIASES or operation_mode != "listen":
+        return None
+    object_name = str(config.get("object_name") or "").strip()
+    if not object_name:
+        return None
+    operation_type = str(config.get("operation_type") or "EXECUTE").strip().upper()
+    input_type = str(config.get("input_type") or "singlejson").strip().lower()
+    return {
+        "object_name": object_name,
+        "operation_type": operation_type,
+        "input_type": input_type,
+        "output_type": str(config.get("output_type") or "none").strip().lower(),
+        "http_method": wss_http_method(input_type),
+        "endpoint_path": compute_wss_endpoint(operation_type, object_name),
+    }
 
 
 def _listener_probe(
@@ -1027,7 +1104,40 @@ def _run_listener_verify_stage(
         basic = base64.b64encode(f"{auth_username}:{auth_token}".encode("utf-8")).decode("ascii")
         headers["Authorization"] = f"Basic {basic}"
 
+    # Baseline execution-id snapshot BEFORE the probe: the readback must prove
+    # the probe itself triggered an execution, so a record that already existed
+    # (listener traffic shortly before verification) must not count (Codex
+    # review, M6 #12). Ids in this window are excluded from the readback match.
     probe_started_at = datetime.now(timezone.utc)
+    window_start = (probe_started_at - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    baseline_execution_ids: set = set()
+    baseline_unavailable: Optional[str] = None
+    try:
+        baseline_result = monitor_platform_action(
+            boomi_client,
+            profile,
+            "execution_records",
+            config_data={
+                "process_id": target.process_component_id,
+                "start_date": window_start,
+                "limit": 50,
+            },
+        )
+    except Exception as exc:
+        baseline_result = {"_success": False, "error": str(exc)}
+    if isinstance(baseline_result, dict) and baseline_result.get("_success"):
+        for record in baseline_result.get("execution_records") or []:
+            if isinstance(record, dict) and record.get("execution_id"):
+                baseline_execution_ids.add(record["execution_id"])
+    else:
+        baseline_unavailable = str((baseline_result or {}).get("error") or "unknown error")
+        stage.warnings.append(
+            "[LISTENER_READBACK_BASELINE_UNAVAILABLE] the pre-probe execution-record "
+            f"baseline query failed ({baseline_unavailable}); the readback cannot "
+            "distinguish the probe's execution from listener traffic in the last "
+            "2 minutes — treat execution_record_found as weaker evidence."
+        )
+
     url = base_url.rstrip("/") + endpoint_path
     # A FRESHLY CREATED deployment registers its WSS route asynchronously —
     # live-observed 2026-07-04: ~1 min on a local atom after a first-time
@@ -1127,12 +1237,13 @@ def _run_listener_verify_stage(
 
     # 5. Execution-record readback: HTTP 200 is only the ack (with outputType=
     #    none it is fully decoupled from process outcome — live-proven via an
-    #    ERROR execution behind a 200). Require a listener execution record in
-    #    the probe window; surface its status.
+    #    ERROR execution behind a 200). Require a record NOT in the pre-probe
+    #    baseline, so pre-existing listener traffic can never stand in for the
+    #    probe's own execution (degraded to any-record + warning only when the
+    #    baseline query itself failed above).
     record_found = False
     execution_id: Optional[str] = None
     execution_status: Optional[str] = None
-    window_start = (probe_started_at - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     readback_deadline = time.monotonic() + 60
     readback_error: Optional[str] = None
     while time.monotonic() < readback_deadline:
@@ -1144,7 +1255,7 @@ def _run_listener_verify_stage(
                 config_data={
                     "process_id": target.process_component_id,
                     "start_date": window_start,
-                    "limit": 10,
+                    "limit": 50,
                 },
             )
         except Exception as exc:
@@ -1154,8 +1265,14 @@ def _run_listener_verify_stage(
             for record in records_result.get("execution_records") or []:
                 if not isinstance(record, dict):
                     continue
+                record_id = record.get("execution_id")
+                if baseline_unavailable is None:
+                    # Strict mode: only an id-bearing record OUTSIDE the
+                    # baseline proves the probe triggered an execution.
+                    if not record_id or record_id in baseline_execution_ids:
+                        continue
                 record_found = True
-                execution_id = record.get("execution_id") or execution_id
+                execution_id = record_id or execution_id
                 execution_status = record.get("status") or execution_status
             if record_found:
                 break

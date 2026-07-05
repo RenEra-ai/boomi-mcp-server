@@ -4391,22 +4391,16 @@ _WSS_OPERATION_POLICY = PreservationPolicy(
     component_type="connector-action",
     subtype=WSS_SUBTYPE,
     owned_paths=(
-        # The builder owns every WebServicesServerListenAction attribute it
-        # emits; an owned attr absent from desired is cleared (e.g. dropping a
-        # requestProfile). Unknown siblings (Archiving/Tracking/Caching bodies)
-        # are preserved.
+        # The builder owns the ENTIRE WebServicesServerListenAction element —
+        # every attribute is builder-emitted and the live element carries no
+        # children — so `replace` (not attrs_only) is required: an attr absent
+        # from desired must be CLEARED (e.g. dropping a requestProfile after
+        # switching input_type to none). attrs_only would leave the stale
+        # profile binding on the live component (Codex review, M6 #12).
+        # Unknown siblings (Archiving/Tracking/Caching bodies) are preserved.
         OwnedPath(
             path="bns:object/Operation/Configuration/WebServicesServerListenAction",
-            mode="attrs_only",
-            owned_attrs=(
-                "inputType",
-                "objectName",
-                "operationType",
-                "outputType",
-                "requestProfile",
-                "responseContentType",
-                "responseProfile",
-            ),
+            mode="replace",
         ),
     ),
 )
