@@ -45,6 +45,14 @@ _XML_SOAP_SUBTYPE_RE = re.compile(
     r'\bsubType\s*=\s*["\']wssoapclientsdk["\']'
 )
 
+# M6 (#12) — inbound Web Services Server raw XML: a connector_type-less raw
+# payload carrying `subType="wss"` still classifies as a WSS Listen operation
+# for the ref-type checks (no secrets exist in a WSS listen op, but the
+# classification keeps swapped-ref rejection uniform).
+_XML_WSS_SUBTYPE_RE = re.compile(
+    r'\bsubType\s*=\s*["\']wss["\']'
+)
+
 # Issue #93 (account_governance M4.5.8) — plan-time component-name governance
 # lint. Scope is NAMES on component create only; folder placement / roles /
 # locking stay GUI-only governance (no folder or role API in the typed
@@ -157,6 +165,7 @@ from .components.builders import (
     SOAP_CLIENT_SUBTYPE,
     SoapClientConnectionBuilder,
     SoapClientOperationBuilder,
+    WssListenerOperationBuilder,
     ProcessFlowBuilder,
     WrapperSubprocessBuilder,
     SyncPipelineBuilder,
@@ -171,6 +180,7 @@ from .components.builders import (
 from .components.builders.connector_builder import (
     _resolve_rest_connector_type,
     _resolve_soap_client_connector_type,
+    _resolve_wss_connector_type,
 )
 from .components.builders.process_flow_builder import (
     _extract_process_extension_connections,
@@ -1047,6 +1057,15 @@ def _classify_connector_action(
     if _resolve_soap_client_connector_type(connector_type) is not None:
         return ("SOAP Client connector-action", None)
 
+    # M6 (#12): inbound Web Services Server Listen operation. Like SOAP there
+    # is no HTTP method on the operation (Boomi derives it from inputType), so
+    # the method slot is always None. Raw XML with subType="wss" classifies too.
+    if _resolve_wss_connector_type(connector_type) is not None:
+        return ("WSS Server connector-action", None)
+    xml_payload = raw_config.get("xml")
+    if isinstance(xml_payload, str) and _XML_WSS_SUBTYPE_RE.search(xml_payload):
+        return ("WSS Server connector-action", None)
+
     return (None, None)
 
 
@@ -1202,6 +1221,8 @@ def _resolve_preservation_policy(
             return RestClientOperationBuilder.PRESERVATION_POLICY
         if _resolve_soap_client_connector_type(connector_type) is not None:
             return SoapClientOperationBuilder.PRESERVATION_POLICY
+        if _resolve_wss_connector_type(connector_type) is not None:
+            return WssListenerOperationBuilder.PRESERVATION_POLICY
         if connector_type == "database":
             # Resolve the policy from the operation-mode-specific builder so a
             # Send update gets the Send policy (and Get the Get policy). An
@@ -1749,6 +1770,76 @@ def _check_soap_operation_dependencies(
     return None
 
 
+def _check_wss_operation_dependencies(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+    components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
+) -> Optional[BuilderValidationError]:
+    """Cross-step dependency checks specific to WSS Listen operations (M6 #12).
+
+    Unlike REST/SOAP there is NO connection to declare (the listener binds
+    inside the process start shape), so only the optional ``$ref:KEY``
+    request/response profiles are checked: the ref must be non-empty, appear in
+    ``depends_on``, and resolve to a profile component whose kind matches the
+    declared input/output type (json types -> profile.json, xml types ->
+    profile.xml).
+    """
+    depends_on = set(comp.depends_on or [])
+
+    for ref_field, type_field in (
+        ("request_profile", "input_type"),
+        ("response_profile", "output_type"),
+    ):
+        value = raw_config.get(ref_field)
+        if not (isinstance(value, str) and value.startswith("$ref:")):
+            continue
+        ref_key = value[5:]
+        if not ref_key:
+            return BuilderValidationError(
+                f"{ref_field} $ref token is empty (expected '$ref:KEY')",
+                error_code="WSS_PROFILE_REF_UNRESOLVED",
+                field=ref_field,
+                hint=(
+                    "Use '$ref:<profile key>' to reference a profile component "
+                    "declared earlier in the same integration spec."
+                ),
+            )
+        if ref_key not in depends_on:
+            return BuilderValidationError(
+                f"{ref_field} $ref target {ref_key!r} must also appear in depends_on",
+                error_code="WSS_DEPENDENCY_REQUIRED",
+                field="depends_on",
+                hint=(
+                    "Add the profile key to depends_on so the execution "
+                    "order creates the profile before the operation."
+                ),
+            )
+        if components_by_key is not None:
+            declared_type = str(raw_config.get(type_field) or "").strip().lower()
+            expected_role = "profile.xml" if declared_type.endswith("xml") else "profile.json"
+            target = components_by_key.get(ref_key)
+            if target is not None and _classify_profile(target) != expected_role:
+                actual_role = _format_actual_role(target)
+                return BuilderValidationError(
+                    f"{ref_field} $ref target {ref_key!r} must reference a "
+                    f"{expected_role} component (got {actual_role})",
+                    error_code="WSS_REF_TYPE_MISMATCH",
+                    field=ref_field,
+                    hint=(
+                        f"The declared {type_field} is {declared_type!r}, so the "
+                        f"profile must be a {expected_role} component. Connector, "
+                        "map, and process refs are not valid here."
+                    ),
+                    details={
+                        "ref_key": ref_key,
+                        "expected_role": expected_role,
+                        "actual_role": actual_role,
+                    },
+                )
+
+    return None
+
+
 def _check_process_flow_ref_types(
     comp: IntegrationComponentSpec,
     raw_config: Dict[str, Any],
@@ -1785,7 +1876,14 @@ def _check_process_flow_ref_types(
     # REST/DB fallbacks.
     source_is_soap = _resolve_soap_client_connector_type(source.get("connector_type")) is not None
     source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
-    if source_is_soap:
+    # M6 (#12): a sync_pipeline listener source is a WSS Listen binding — one
+    # operation ref, NO connection (the listener binds inside the start shape).
+    source_is_wss = _resolve_wss_connector_type(source.get("connector_type")) is not None
+    if source_is_wss:
+        source_rules = [
+            ("source.operation_id", source.get("operation_id"), "WSS Server connector-action"),
+        ]
+    elif source_is_soap:
         source_rules = [
             ("source.connection_id", source.get("connection_id"), "SOAP Client connector-settings"),
             ("source.operation_id", source.get("operation_id"), "SOAP Client connector-action"),
@@ -1969,6 +2067,11 @@ def _check_process_flow_ref_types(
         elif expected_role == "SOAP Client connector-action":
             # SOAP Client is EXECUTE-only, so there is no HTTP-method/action_type
             # consistency capture (unlike REST) — the role check is sufficient.
+            role, _ = _classify_connector_action(target_comp)
+            ok = role == expected_role
+        elif expected_role == "WSS Server connector-action":
+            # M6 (#12): the listener source is Listen-only — no HTTP method on
+            # the operation (derived from inputType), so the role check suffices.
             role, _ = _classify_connector_action(target_comp)
             ok = role == expected_role
         elif expected_role == "Document Cache":
@@ -2894,6 +2997,12 @@ def build_structured_update_xml(
             soap_canonical = _resolve_soap_client_connector_type(payload.get("connector_type"))
             if soap_canonical is not None:
                 payload["connector_type"] = soap_canonical
+            else:
+                # WSS listener aliases (web_services / web_services_server) map
+                # to the canonical Boomi subtype `wss` (M6 #12).
+                wss_canonical = _resolve_wss_connector_type(payload.get("connector_type"))
+                if wss_canonical is not None:
+                    payload["connector_type"] = wss_canonical
         connector_type = payload.get("connector_type")
         if connector_type:
             try:
@@ -3308,6 +3417,12 @@ def _execute_component(
             soap_canonical = _resolve_soap_client_connector_type(payload.get("connector_type"))
             if soap_canonical is not None:
                 payload["connector_type"] = soap_canonical
+            else:
+                # WSS listener aliases (web_services / web_services_server) map
+                # to the canonical Boomi subtype `wss` (M6 #12).
+                wss_canonical = _resolve_wss_connector_type(payload.get("connector_type"))
+                if wss_canonical is not None:
+                    payload["connector_type"] = wss_canonical
         connector_type = payload.get("connector_type")
         if connector_type:
             try:
@@ -5136,6 +5251,54 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             # without losing the cert binding (mirrors the REST block).
             _redact_malformed_cert_refs(raw_config)
 
+        # WSS Listen operation preflight (M6 #12). Mirrors the SOAP block
+        # (guarded so it only runs when no other family already produced an
+        # error for this step). WSS has no connection component and no secret
+        # fields, but the uniform scan keeps the preflight discipline; the
+        # dependency check gates the optional $ref request/response profiles.
+        is_wss_operation = (
+            comp.type == "connector-action"
+            and (
+                _resolve_wss_connector_type(raw_config.get("connector_type")) is not None
+                or bool(xml_payload and _XML_WSS_SUBTYPE_RE.search(xml_payload))
+            )
+        )
+        will_invoke_wss_builder = (
+            is_wss_operation
+            and not xml_payload
+            and (
+                planned_action in ("create", "create_clone")
+                or update_invokes_builder
+            )
+        )
+        wss_err: Optional[BuilderValidationError] = None
+        if is_wss_operation and db_err is None and rest_err is None and soap_err is None:
+            wss_err = WssListenerOperationBuilder.scan_forbidden_secret_fields(raw_config)
+            if wss_err is None and will_invoke_wss_builder:
+                effective_config = dict(raw_config)
+                if comp.name:
+                    effective_config.setdefault("component_name", comp.name)
+                wss_err = WssListenerOperationBuilder.validate_config(effective_config)
+                if wss_err is None:
+                    wss_err = _check_wss_operation_dependencies(
+                        comp, raw_config, components_by_key
+                    )
+
+        if wss_err is not None:
+            planned_action = "error_wss_validation"
+            validation_error = {
+                "error_code": wss_err.error_code,
+                "error": str(wss_err),
+                "field": wss_err.field,
+                "hint": wss_err.hint,
+            }
+            if wss_err.details is not None:
+                validation_error["details"] = wss_err.details
+            if wss_err.error_code == "PLAINTEXT_SECRET_REJECTED":
+                WssListenerOperationBuilder.redact_forbidden_secret_fields_in_place(
+                    raw_config
+                )
+
         # Codex r12 P2: plan-time guard for non-metadata connector updates
         # whose connector_type / operation_mode doesn't resolve to a
         # supported builder (e.g. connector_type="http" + base_url). The
@@ -5148,6 +5311,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             and db_err is None
             and rest_err is None
             and soap_err is None
+            and wss_err is None
             and planned_action == "update"
             and not xml_payload
             and comp.type in ("connector-settings", "connector-action")

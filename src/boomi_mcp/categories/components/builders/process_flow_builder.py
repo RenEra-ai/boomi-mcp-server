@@ -55,9 +55,11 @@ from .connector_builder import (
     BuilderValidationError,
     REST_CLIENT_SUBTYPE,
     SOAP_CLIENT_SUBTYPE,
+    WSS_SUBTYPE,
     _escape_xml,
     _resolve_rest_connector_type,
     _resolve_soap_client_connector_type,
+    _resolve_wss_connector_type,
 )
 
 
@@ -600,6 +602,7 @@ class ProcessFlowBuilder:
         allow_db_target: bool = False,
         allow_soap_source: bool = False,
         allow_soap_target: bool = False,
+        allow_listener_source: bool = False,
     ) -> Optional[BuilderValidationError]:
         """Validate structured process config; return error or None.
 
@@ -618,6 +621,11 @@ class ProcessFlowBuilder:
         source / ``soap_send`` target's SOAP Client EXECUTE binding is accepted
         (#126). A hand-authored database_to_api_sync with a SOAP source/target
         therefore stays rejected.
+
+        ``allow_listener_source`` is False for the base protocol;
+        SyncPipelineBuilder passes True so a lowered ``listener`` stage's WSS
+        Listen source is accepted (M6 #12). A hand-authored
+        database_to_api_sync with a WSS source therefore stays rejected.
 
         Validation order is intentional — surface the most-specific
         actionable error first:
@@ -678,9 +686,18 @@ class ProcessFlowBuilder:
             config.get("source"),
             allow_rest_source=allow_rest_source,
             allow_soap_source=allow_soap_source,
+            allow_listener_source=allow_listener_source,
         )
         if source_err is not None:
             return source_err
+
+        # M6 (#12): a WSS listener source composes ONLY with the verified-linear
+        # chain (listener start -> [transform] -> target -> stop). Reject any
+        # control-flow / reliability sibling before its own validator runs so the
+        # caller gets the listener-specific error, not a generic composition one.
+        listener_comp_err = _listener_composition_error(config)
+        if listener_comp_err is not None:
+            return listener_comp_err
 
         # Issue #111 M10.7: validate the optional Flow Control (per-document
         # batching) block AFTER the source binding and BEFORE Branch/Decision.
@@ -846,55 +863,80 @@ class ProcessFlowBuilder:
         # Build shapes in deterministic flow order: start, source,
         # [transform], target, stop. transform is omitted entirely when
         # mode=passthrough.
-        flow: List[Tuple[str, Dict[str, Any]]] = []
-        flow.append(("start_noaction", {}))
-        # Canonicalize the source connector subtype + verb before emission. Boomi
-        # expects exact case on both sides. A DATABASE source is `database` /
-        # `Get` — the validator accepts case-insensitive input, so lowercase the
-        # subtype (Codex review r6 P2.2). A REST fetch source (M5.4 #72) keeps the
-        # canonical mixed-case REST Client subtype (officialboomi-X3979C-rest-prod —
-        # an unconditional .lower() would corrupt the uppercase 'X') and the
-        # uppercased verb, matching the REST target emission convention.
-        source_canonical_type = _canonical_connector_type(source.get("connector_type"))
-        source_action_raw = str(source.get("action_type") or "").strip()
-        source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
-        if source_is_rest:
-            source_connector_type = source_canonical_type
-            source_action_type = source_action_raw.upper()
-        else:
-            source_connector_type = source_canonical_type.lower()
-            source_action_type = source_action_raw
-        # Issue #96 M5.4a: a REST source carrying a dynamic_path block (lowered from
-        # a rest_fetch path runtime_binding) gets a Set Properties shape building the
-        # path DDP BEFORE the source connector, and the source connectoraction emits
-        # the matching "Path" dynamic operation property — the same proven mechanism
-        # the #100 target path uses, applied to the source connectoraction (which
-        # otherwise emits empty <parameters/><dynamicProperties/>). Absent dynamic_
-        # path, the source flow is byte-for-byte unchanged.
-        source_dynamic_path = (
-            source.get("dynamic_path") if isinstance(source.get("dynamic_path"), dict) else None
+        #
+        # M6 (#12): a WSS listener source collapses the start + source pair into
+        # ONE Listen start shape (the connectoraction lives INSIDE the start
+        # shape; there is no separate source connector shape and no connection).
+        # The composition guard runs first — shared with validate_config — so a
+        # direct build() with listener + reliability/branch/decision/flow_control/
+        # return_documents raises instead of emitting a mis-wrapped flow.
+        source_is_listener = (
+            _resolve_wss_connector_type(source.get("connector_type")) is not None
         )
-        if source_is_rest and source_dynamic_path:
+        if source_is_listener:
+            listener_comp_err = _listener_composition_error(config)
+            if listener_comp_err is not None:
+                raise listener_comp_err
+        flow: List[Tuple[str, Dict[str, Any]]] = []
+        source_dynamic_path: Optional[Dict[str, Any]] = None
+        source_is_rest = False
+        if source_is_listener:
             flow.append((
-                "setproperties",
+                "start_listen",
                 {
-                    "ddp_name": str(source_dynamic_path.get("ddp_name") or "").strip(),
-                    "request_profile_id": str(source_dynamic_path.get("request_profile_id") or "").strip(),
-                    "profile_type": str(source_dynamic_path.get("profile_type") or "profile.json").strip(),
-                    "segments": source_dynamic_path.get("segments") or [],
+                    "operation_id": str(source.get("operation_id") or "").strip(),
+                    "userlabel": str(source.get("label") or ""),
                 },
             ))
-        flow.append((
-            "connectoraction_source",
-            {
-                "connector_type": source_connector_type,
-                "action_type": source_action_type,
-                "connection_id": str(source.get("connection_id") or "").strip(),
-                "operation_id": str(source.get("operation_id") or "").strip(),
-                "userlabel": str(source.get("label") or ""),
-                "dynamic_path": source_dynamic_path if source_is_rest else None,
-            },
-        ))
+        else:
+            flow.append(("start_noaction", {}))
+            # Canonicalize the source connector subtype + verb before emission. Boomi
+            # expects exact case on both sides. A DATABASE source is `database` /
+            # `Get` — the validator accepts case-insensitive input, so lowercase the
+            # subtype (Codex review r6 P2.2). A REST fetch source (M5.4 #72) keeps the
+            # canonical mixed-case REST Client subtype (officialboomi-X3979C-rest-prod —
+            # an unconditional .lower() would corrupt the uppercase 'X') and the
+            # uppercased verb, matching the REST target emission convention.
+            source_canonical_type = _canonical_connector_type(source.get("connector_type"))
+            source_action_raw = str(source.get("action_type") or "").strip()
+            source_is_rest = _resolve_rest_connector_type(source.get("connector_type")) is not None
+            if source_is_rest:
+                source_connector_type = source_canonical_type
+                source_action_type = source_action_raw.upper()
+            else:
+                source_connector_type = source_canonical_type.lower()
+                source_action_type = source_action_raw
+            # Issue #96 M5.4a: a REST source carrying a dynamic_path block (lowered from
+            # a rest_fetch path runtime_binding) gets a Set Properties shape building the
+            # path DDP BEFORE the source connector, and the source connectoraction emits
+            # the matching "Path" dynamic operation property — the same proven mechanism
+            # the #100 target path uses, applied to the source connectoraction (which
+            # otherwise emits empty <parameters/><dynamicProperties/>). Absent dynamic_
+            # path, the source flow is byte-for-byte unchanged.
+            source_dynamic_path = (
+                source.get("dynamic_path") if isinstance(source.get("dynamic_path"), dict) else None
+            )
+            if source_is_rest and source_dynamic_path:
+                flow.append((
+                    "setproperties",
+                    {
+                        "ddp_name": str(source_dynamic_path.get("ddp_name") or "").strip(),
+                        "request_profile_id": str(source_dynamic_path.get("request_profile_id") or "").strip(),
+                        "profile_type": str(source_dynamic_path.get("profile_type") or "profile.json").strip(),
+                        "segments": source_dynamic_path.get("segments") or [],
+                    },
+                ))
+            flow.append((
+                "connectoraction_source",
+                {
+                    "connector_type": source_connector_type,
+                    "action_type": source_action_type,
+                    "connection_id": str(source.get("connection_id") or "").strip(),
+                    "operation_id": str(source.get("operation_id") or "").strip(),
+                    "userlabel": str(source.get("label") or ""),
+                    "dynamic_path": source_dynamic_path if source_is_rest else None,
+                },
+            ))
         # Issue #111 M10.7: Flow Control (per-document batching) shape. Run the
         # SAME validator validate_config uses, UNCONDITIONALLY (it returns None
         # when flow_control is absent or disabled), so a malformed flow_control —
@@ -1203,6 +1245,11 @@ class ProcessFlowBuilder:
             description=description,
             folder_name=folder_name,
             process_overrides_xml=process_overrides_xml,
+            # M6 (#12): a listener process carries the live-captured listener
+            # options (allowSimultaneous=true / updateRunDates=false), derived
+            # from the Listen source — never caller-overridable. Non-listener
+            # output stays byte-for-byte on the scheduled default.
+            process_options=_LISTENER_PROCESS_OPTIONS if source_is_listener else None,
         )
 
 
@@ -1416,6 +1463,34 @@ def _emit_process_overrides(connections: List[Dict[str, Any]]) -> str:
     )
 
 
+# Default (scheduled) process options — byte-for-byte the pre-M6 hard-coded
+# attribute string, so every existing process emission is unchanged.
+_DEFAULT_PROCESS_OPTIONS = (
+    'allowSimultaneous="false" '
+    'enableUserLog="false" '
+    'processLogOnErrorOnly="false" '
+    'purgeDataImmediately="false" '
+    'stopProcessingIfZeroDocuments="true" '
+    'updateRunDates="true" '
+    'workload="general"'
+)
+
+# Listener process options — the exact live-captured attribute set from the
+# Process Library `Weblistener to Slack` process (a5d9f624, 2026-07-04):
+# allowSimultaneous="true" (concurrent inbound requests; false causes HTTP 500
+# / queued requests under concurrency) and updateRunDates="false" (listener
+# performance recommendation). NOTE: the live listener capture omits
+# stopProcessingIfZeroDocuments entirely — do not add it here.
+_LISTENER_PROCESS_OPTIONS = (
+    'allowSimultaneous="true" '
+    'enableUserLog="false" '
+    'processLogOnErrorOnly="false" '
+    'purgeDataImmediately="false" '
+    'updateRunDates="false" '
+    'workload="general"'
+)
+
+
 def _assemble_process_component_xml(
     shape_xml_parts: List[str],
     *,
@@ -1423,6 +1498,7 @@ def _assemble_process_component_xml(
     description: str = "",
     folder_name: Optional[str] = None,
     process_overrides_xml: str = "",
+    process_options: Optional[str] = None,
 ) -> str:
     """Wrap emitted shapes in the ``<process>`` / ``<bns:Component>`` envelope.
 
@@ -1433,6 +1509,11 @@ def _assemble_process_component_xml(
     folderName is the writable folder attribute on Component create/update;
     folderFullPath is response-only metadata Boomi ignores on writes. Other
     builders emit folderName for placement — match them (Codex review r8 F2).
+
+    ``process_options`` (M6, #12) is the ``<process>`` attribute string; None
+    keeps the scheduled default byte-for-byte. A WSS listener build passes
+    ``_LISTENER_PROCESS_OPTIONS`` — derived by the builder from the Listen
+    source, never caller-supplied.
     """
     name = str(name) if name is not None else ""
     if not name or not name.strip():
@@ -1444,13 +1525,7 @@ def _assemble_process_component_xml(
         )
     process_inner = (
         '<process xmlns="" '
-        'allowSimultaneous="false" '
-        'enableUserLog="false" '
-        'processLogOnErrorOnly="false" '
-        'purgeDataImmediately="false" '
-        'stopProcessingIfZeroDocuments="true" '
-        'updateRunDates="true" '
-        'workload="general">'
+        f'{process_options or _DEFAULT_PROCESS_OPTIONS}>'
         '<shapes>'
         f"{''.join(shape_xml_parts)}"
         '</shapes>'
@@ -1500,7 +1575,11 @@ def _assemble_process_component_xml(
 # ----------------------------------------------------------------------
 
 def _validate_source_binding(
-    source: Any, *, allow_rest_source: bool = False, allow_soap_source: bool = False
+    source: Any,
+    *,
+    allow_rest_source: bool = False,
+    allow_soap_source: bool = False,
+    allow_listener_source: bool = False,
 ) -> Optional[BuilderValidationError]:
     if not isinstance(source, dict):
         return BuilderValidationError(
@@ -1516,11 +1595,58 @@ def _validate_source_binding(
     # allow_rest_source=True — so a hand-authored database_to_api_sync stays
     # DB-source-only, exactly as the #72 plan intends. A SOAP Client EXECUTE
     # source is likewise valid only through the sync_pipeline soap_fetch lowering
-    # (#126), gated by allow_soap_source.
+    # (#126), gated by allow_soap_source. A WSS Listen source (M6 #12) is valid
+    # only through the sync_pipeline wss_listen lowering, gated by
+    # allow_listener_source.
     raw_connector_type = source.get("connector_type")
     connector_type = str(raw_connector_type or "").strip().lower()
     rest_source = allow_rest_source and _resolve_rest_connector_type(raw_connector_type) is not None
     soap_source = allow_soap_source and _resolve_soap_client_connector_type(raw_connector_type) is not None
+    listener_source = (
+        allow_listener_source and _resolve_wss_connector_type(raw_connector_type) is not None
+    )
+    if listener_source:
+        # A WSS listener binds INSIDE the start shape: Listen action, one
+        # operation component, NO connection component, and none of the REST
+        # runtime-binding machinery.
+        action_type = str(source.get("action_type") or "").strip()
+        if action_type != "Listen":
+            return BuilderValidationError(
+                f"source.action_type must be 'Listen' for a WSS listener source; "
+                f"got {action_type!r}.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field="source.action_type",
+                hint="The inbound Web Services Server exposes a single Listen action (M6 #12).",
+            )
+        connection_id = source.get("connection_id")
+        if isinstance(connection_id, str) and connection_id.strip():
+            return BuilderValidationError(
+                "source.connection_id must not be set for a WSS listener source — "
+                "the Web Services Server has no connection component.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field="source.connection_id",
+                hint="Remove connection_id; the Listen binding carries only operation_id.",
+            )
+        operation_id = source.get("operation_id")
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            return BuilderValidationError(
+                "source.operation_id is required.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field="source.operation_id",
+                hint=(
+                    "Pass the component_id of the already-built WSS Listen "
+                    "connector-action, or a $ref:KEY token pointing at it "
+                    "(and add KEY to depends_on)."
+                ),
+            )
+        if source.get("dynamic_path") is not None:
+            return BuilderValidationError(
+                "source.dynamic_path is not supported on a WSS listener source.",
+                error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                field="source.dynamic_path",
+                hint="Dynamic path binding is a REST Client mechanism (#96); listeners have no outbound path.",
+            )
+        return _validate_runtime_bindings_gate(source, "source")
     if connector_type != "database" and not rest_source and not soap_source:
         if allow_rest_source or allow_soap_source:
             return BuilderValidationError(
@@ -1590,6 +1716,38 @@ def _validate_source_binding(
     if dyn_err is not None:
         return dyn_err
     return _validate_runtime_bindings_gate(source, "source")
+
+
+def _listener_composition_error(
+    config: Dict[str, Any],
+) -> Optional[BuilderValidationError]:
+    """Reject control-flow / reliability blocks composed with a WSS listener source.
+
+    M6 (#12) ships the listener as verified-linear only: Listen start ->
+    [transform] -> target -> stop. Try/Catch (reliability), Branch, Decision,
+    Flow Control, and Return Documents all assume a no-action start (or are
+    gated for sync_pipeline anyway), so any such sibling is rejected with a
+    listener-specific error. Shared by validate_config and build() so a
+    validate bypass stays total. A non-listener source returns None immediately.
+    """
+    source = config.get("source")
+    if not isinstance(source, dict):
+        return None
+    if _resolve_wss_connector_type(source.get("connector_type")) is None:
+        return None
+    for key in ("reliability", "flow_control", "branch", "decision", "return_documents"):
+        if config.get(key) is not None:
+            return BuilderValidationError(
+                f"{key!r} is not supported together with a WSS listener source in M6.",
+                error_code="PROCESS_LISTENER_COMPOSITION_UNSUPPORTED",
+                field=key,
+                hint=(
+                    "A listener process is verified-linear in M6 (#12): Listen "
+                    "start -> [transform] -> target -> stop. Remove the "
+                    f"{key} block; listener retry/DLQ parity is a follow-up."
+                ),
+            )
+    return None
 
 
 def _validate_db_target_binding(
@@ -3269,6 +3427,51 @@ def _emit_start_noaction(
     )
 
 
+def _emit_start_listen(
+    shape_name: str,
+    params: Dict[str, Any],
+    next_name: Optional[str],
+    shape_index: int,
+) -> str:
+    """Emit the WSS Listen start shape (M6, #12).
+
+    The connectoraction is embedded INSIDE the start shape — there is no
+    separate source connector shape and no connectionId attribute (WSS has no
+    connection component). Transcribed from the live Process Library capture
+    (`Weblistener to Slack`, a5d9f624, 2026-07-04):
+
+        <shape image="start" ... shapetype="start">
+          <configuration>
+            <connectoraction actionType="Listen" allowDynamicCredentials="NONE"
+                connectorType="wss" hideSettings="true"
+                operationId="..."><parameters/></connectoraction>
+          </configuration>
+          ...
+        </shape>
+
+    Note ``hideSettings="true"`` — unlike the mid-flow connectoraction shape
+    (``hideSettings="false"``) — and the bare ``<parameters/>`` body.
+    """
+    dragpoints = _emit_dragpoints([next_name], shape_index)
+    userlabel = _escape_xml(params.get("userlabel") or "")
+    operation_id = _escape_xml(str(params.get("operation_id") or "").strip())
+    return (
+        f'<shape image="start" name="{shape_name}" shapetype="start" '
+        f'userlabel="{userlabel}" x="{_START_SHAPE_X}" y="{_START_SHAPE_Y}">'
+        '<configuration>'
+        '<connectoraction actionType="Listen" '
+        'allowDynamicCredentials="NONE" '
+        f'connectorType="{WSS_SUBTYPE}" '
+        'hideSettings="true" '
+        f'operationId="{operation_id}">'
+        '<parameters/>'
+        '</connectoraction>'
+        '</configuration>'
+        f'<dragpoints>{dragpoints}</dragpoints>'
+        '</shape>'
+    )
+
+
 def _emit_connectoraction(
     shape_name: str,
     params: Dict[str, Any],
@@ -4076,6 +4279,9 @@ def _emit_flow_shape(
     """Emit one linear-flow shape with an outgoing edge to next_name."""
     if kind == "start_noaction":
         return _emit_start_noaction(shape_name, next_name, shape_index)
+    if kind == "start_listen":
+        # M6 (#12): WSS Listen start — connectoraction embedded in the start shape.
+        return _emit_start_listen(shape_name, params, next_name, shape_index)
     if kind in ("connectoraction_source", "connectoraction_target"):
         return _emit_connectoraction(shape_name, params, next_name, shape_index)
     if kind == "message":
@@ -6477,7 +6683,9 @@ class WrapperSubprocessBuilder(ProcessFlowBuilder):
 # reserved — modeled in the contract, no PipelineSpec->XML lowering yet — and is
 # rejected with a hint pointing at its owning issue (combine/lookup/control-flow
 # owned by M10 (#103, e.g. Flow Control M10.7 #111)).
-_SYNC_PIPELINE_SUPPORTED_KINDS = frozenset({"read", "fetch", "map", "send", "write"})
+_SYNC_PIPELINE_SUPPORTED_KINDS = frozenset(
+    {"read", "fetch", "map", "send", "write", "listener"}
+)
 
 # The primitive discriminator each supported stage must declare in config. This
 # is the PRIMARY (default) primitive per kind.
@@ -6487,6 +6695,8 @@ _SYNC_PIPELINE_STAGE_PRIMITIVE: Dict[str, str] = {
     "map": "map",
     "send": "rest_send",
     "write": "db_write",
+    # M6 (#12): inbound WSS Listen source stage.
+    "listener": "wss_listen",
 }
 
 # #126: a fetch/send stage additionally accepts the SOAP Client primitive
@@ -6522,6 +6732,7 @@ _SYNC_PIPELINE_RESERVED_KIND_HINTS: Dict[str, str] = {
 _SYNC_PIPELINE_RESERVED_PRIMITIVE_HINTS: Dict[str, str] = {
     "rest_fetch": "rest_fetch is the REST source primitive — declare it on a 'fetch' stage (M5.4 #72), not this one.",
     "db_write": "db_write is the DB 'write' target primitive — declare it on a 'write' stage (#74, #32 builders), not this one.",
+    "wss_listen": "wss_listen is the inbound WSS listener source primitive — declare it on a 'listener' stage (M6 #12), not this one.",
 }
 
 # Config keys allowed on a read/send (connector-binding) stage. Anything else —
@@ -6529,6 +6740,12 @@ _SYNC_PIPELINE_RESERVED_PRIMITIVE_HINTS: Dict[str, str] = {
 # gated sub-block can never be silently dropped into the lowered config.
 _SYNC_PIPELINE_BINDING_KEYS = frozenset(
     {"primitive", "connector_type", "action_type", "connection_id", "operation_id", "label"}
+)
+# Config keys allowed on a listener (WSS Listen) source stage (M6 #12). No
+# connection_id (WSS has no connection component) and no action_type (the
+# lowering always emits 'Listen'); anything else is rejected, never dropped.
+_SYNC_PIPELINE_LISTENER_KEYS = frozenset(
+    {"primitive", "connector_type", "operation_id", "label"}
 )
 # Config keys allowed on a map stage.
 _SYNC_PIPELINE_MAP_KEYS = frozenset({"primitive", "map_ref", "map_id", "label"})
@@ -6714,16 +6931,23 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             ["fetch", "map", "send"],
             ["fetch", "write"],
             ["fetch", "map", "write"],
+            # M6 (#12): inbound WSS listener source chains — the listener feeds
+            # a REST/SOAP send target or a database write target.
+            ["listener", "send"],
+            ["listener", "map", "send"],
+            ["listener", "write"],
+            ["listener", "map", "write"],
         ):
             raise BuilderValidationError(
-                f"sync_pipeline must be read|fetch -> [map] -> send, or "
-                f"fetch -> [map] -> write; got stage kinds {kinds}.",
+                f"sync_pipeline must be read|fetch|listener -> [map] -> send, or "
+                f"fetch|listener -> [map] -> write; got stage kinds {kinds}.",
                 error_code="SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED",
                 field="pipeline.stages",
                 hint=(
-                    "Exactly one db_read or rest_fetch source, an optional map, and "
-                    "one target — a rest_send REST target, or (from a rest_fetch "
-                    "source) a db_write database target."
+                    "Exactly one source — db_read, rest_fetch, or wss_listen "
+                    "(listener) — an optional map, and one target: a rest_send "
+                    "REST target, or (from a fetch/listener source) a db_write "
+                    "database target."
                 ),
             )
 
@@ -6732,9 +6956,12 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         map_stage = stage_by_key[order[1]] if len(order) == 3 else None
 
         # A read source lowers to a DB connector binding; a fetch source to REST
-        # (rest_fetch) or SOAP (soap_fetch, #126) per the declared primitive.
+        # (rest_fetch) or SOAP (soap_fetch, #126) per the declared primitive; a
+        # listener source (M6 #12) to the WSS Listen start-shape binding.
         if source_stage.kind == "read":
             source_default_connector = "database"
+        elif source_stage.kind == "listener":
+            source_default_connector = WSS_SUBTYPE
         elif source_stage.config.get("primitive") == "soap_fetch":
             source_default_connector = "soap_client"
         else:
@@ -6870,7 +7097,7 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         by :meth:`_check_target_connector_family`, so this is a no-op for non-source
         kinds.
         """
-        if stage.kind not in ("read", "fetch"):
+        if stage.kind not in ("read", "fetch", "listener"):
             return
         explicit = stage.config.get("connector_type")
         if explicit is None:
@@ -6878,6 +7105,22 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
         is_rest = _resolve_rest_connector_type(explicit) is not None
         is_soap = _resolve_soap_client_connector_type(explicit) is not None
         is_database = isinstance(explicit, str) and explicit.strip().lower() == "database"
+        # M6 (#12): a listener stage is a WSS Listen source; an explicit
+        # connector_type may restate the WSS family but must not flip it.
+        if stage.kind == "listener":
+            if _resolve_wss_connector_type(explicit) is None:
+                raise BuilderValidationError(
+                    f"sync_pipeline listener stage {stage.key!r} connector_type must "
+                    f"be a Web Services Server connector (wss); got {explicit!r}.",
+                    error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                    field=f"pipeline.stages[{stage.key}].config.connector_type",
+                    hint=(
+                        "A listener stage is the inbound WSS Listen source. Use a "
+                        "'read' stage (db_read) or 'fetch' stage (rest_fetch/"
+                        "soap_fetch) for outbound sources."
+                    ),
+                )
+            return
         if stage.kind == "read" and not is_database:
             raise BuilderValidationError(
                 f"sync_pipeline read stage {stage.key!r} connector_type must be "
@@ -6975,6 +7218,47 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
                 hint="Provide the connector binding via config (component reuse stages are not lowered in M5.2).",
             )
         cls._check_stage_primitive(stage)
+        # M6 (#12): a listener stage has its own (smaller) key set — no
+        # connection_id (WSS has no connection component) and no action_type
+        # (the lowering always emits 'Listen'). Handle it before the generic
+        # binding path so a stray connection binding is rejected, not lowered.
+        if stage.kind == "listener":
+            extra = set(stage.config) - _SYNC_PIPELINE_LISTENER_KEYS
+            if extra:
+                raise BuilderValidationError(
+                    f"sync_pipeline listener stage {stage.key!r} has unsupported "
+                    f"config key(s) {sorted(extra)}.",
+                    error_code="SYNC_PIPELINE_CONFIG_INVALID",
+                    field=f"pipeline.stages[{stage.key}].config",
+                    hint=(
+                        "Allowed keys: "
+                        f"{sorted(_SYNC_PIPELINE_LISTENER_KEYS)}. A WSS listener "
+                        "has no connection component and a fixed 'Listen' action; "
+                        "the operation shape (objectName/inputType/...) lives on "
+                        "the wss connector-action component."
+                    ),
+                )
+            cls._check_source_connector_family(stage)
+            operation_id = stage.config.get("operation_id")
+            if not isinstance(operation_id, str) or not operation_id.strip():
+                raise BuilderValidationError(
+                    f"sync_pipeline listener stage {stage.key!r} requires a "
+                    "non-empty config.operation_id.",
+                    error_code="PROCESS_CONNECTOR_BINDING_INVALID",
+                    field=f"pipeline.stages[{stage.key}].config.operation_id",
+                    hint=(
+                        "Pass the component_id of the WSS Listen connector-action, "
+                        "or a $ref:KEY token pointing at it."
+                    ),
+                )
+            listener_binding: Dict[str, Any] = {
+                "connector_type": stage.config.get("connector_type", default_connector_type),
+                "action_type": "Listen",
+                "operation_id": operation_id,
+            }
+            if "label" in stage.config:
+                listener_binding["label"] = stage.config["label"]
+            return listener_binding
         extra = set(stage.config) - _SYNC_PIPELINE_BINDING_KEYS
         if extra:
             raise BuilderValidationError(
@@ -7193,8 +7477,9 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             lowered = cls.lower_config(config)
         except BuilderValidationError as exc:
             return exc
-        # A lowered fetch stage carries a REST GET source and a lowered write stage
-        # carries a database Send target; allow both here (only the sync_pipeline
+        # A lowered fetch stage carries a REST GET source, a lowered listener
+        # stage carries a WSS Listen source (M6 #12), and a lowered write stage
+        # carries a database Send target; allow all here (only the sync_pipeline
         # path does). The base database_to_api_sync validation stays DB-source-only
         # and REST-target-only.
         return ProcessFlowBuilder.validate_config(
@@ -7204,6 +7489,7 @@ class SyncPipelineBuilder(ProcessFlowBuilder):
             allow_db_target=True,
             allow_soap_source=True,
             allow_soap_target=True,
+            allow_listener_source=True,
         )
 
     @classmethod

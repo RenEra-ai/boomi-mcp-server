@@ -66,6 +66,10 @@ ROLE_SOAP_SOURCE_OPERATION = "soap_source_operation"
 ROLE_SOAP_CONNECTION = "soap_connection"
 ROLE_SOAP_OPERATION = "soap_operation"
 
+# M6 (#12) — inbound Web Services Server listener operation role (wss_listen).
+# The listener has NO connection component, so there is no connection role.
+ROLE_WSS_LISTENER_OPERATION = "wss_listener_operation"
+
 
 # Error code raised when a source field data type has no script.mapping input
 # equivalent. Lives here (not in profile_generation) because the bridge is a

@@ -3199,6 +3199,11 @@ _ORCH_CONFIG_KEYS = (
     "require_test_logs",
     # Issue #102 B4 — process-overrides inspected by the empty-overrides deploy guard.
     "process_overrides",
+    # M6 (#12) — listener_verify stage inputs (WSS listener builds only).
+    "listener_test_payload",
+    "listener_base_url",
+    "listener_probe_timeout_seconds",
+    "listener_auth_username",
 )
 
 
@@ -3234,6 +3239,14 @@ def _orchestrate_next_steps(result: dict) -> list:
             "This was a dry-run plan; no Boomi resources were created.",
             "Re-run with dry_run=false to package -> deploy -> bind the runtime, then optionally "
             "apply the schedule and run a test.",
+        ]
+    listener_summary = (result.get("summary") or {}).get("listener")
+    if listener_summary:
+        return [
+            "Deployment + listener verification complete: the WSS endpoint answered the live "
+            "probe and an execution record was found.",
+            "Review summary.listener (endpoint_url, probe_status_code, execution_status) — an "
+            "HTTP 2xx ack does NOT imply process success; check the execution status/log.",
         ]
     ran_test = bool((result.get("summary") or {}).get("test"))
     if not ran_test:
@@ -3316,12 +3329,19 @@ if orchestrate_deploy_action:
                 build_id, environment_id, runtime_id, schedule_override, run_test, dry_run,
                 package_version, cleanup_on_failure, test_timeout_seconds,
                 test_dynamic_properties, test_process_properties, test_log_level, test_fetch_logs,
-                test_fetch_artifacts, test_log_fetch_content, require_test_logs. Top-level args
+                test_fetch_artifacts, test_log_fetch_content, require_test_logs,
+                listener_test_payload, listener_base_url, listener_probe_timeout_seconds,
+                listener_auth_username. Top-level args
                 override the matching config values. cleanup_on_failure=false (default) returns a
                 dry-run cleanup PLAN on a failed real run; true executes the planned cleanup
                 (destructive). require_test_logs=false (default) keeps a failed test-log fetch
                 diagnostic-only; true fails the run (TEST_LOGS_UNAVAILABLE) when a test ran but its
-                logs were absent/unavailable.
+                logs were absent/unavailable. For a WSS LISTENER build (M6) a listener_verify
+                stage runs after schedule (apiType preflight, collision check, live probe,
+                execution readback) and the Test-mode execution stage is not_required — listeners
+                have no Test mode; listener_base_url overrides the probe base URL (e.g.
+                http://localhost:9090 for a docker atom), listener_test_payload the probe body,
+                and listener_auth_username the Basic username (cloud instance-id).
 
         Credential behavior:
             dry_run=true (the default) makes NO Boomi SDK call and reads no credentials. A real

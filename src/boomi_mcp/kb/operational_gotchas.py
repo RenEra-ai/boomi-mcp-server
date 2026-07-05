@@ -202,8 +202,13 @@ _ENTRIES: List[Dict[str, Any]] = [
         "category": "listener_wss",
     },
     {
+        # Stable id kept from the original (mis-titled) entry — external
+        # cross-links reference it. The content was CORRECTED after M6 live QA
+        # (2026-07-04, renera local atom, intermediate apiType) disproved the
+        # verbatim claim: the platform sentence-cases the object name's first
+        # letter on the served bare-WSS path.
         "id": "wss_path_objectname_verbatim",
-        "title": "WSS listener endpoint path appends the object name verbatim",
+        "title": "WSS listener endpoint path sentence-cases the object name's first letter",
         "symptom": (
             "A deployed Web Services Server listener returns HTTP 404 for every "
             "request even though the process deployed cleanly, because the "
@@ -214,32 +219,43 @@ _ENTRIES: List[Dict[str, Any]] = [
         "frequency": "medium",
         "root_cause": (
             "The simple-path endpoint is the fixed prefix ws/simple followed by "
-            "the lowercased operation type and the object name appended exactly "
-            "as written; the object name is NOT sentence-cased by the platform "
-            "(sentence-casing is only a naming convention some teams adopt)."
+            "the lowercased operation type and the object name with its FIRST "
+            "letter upper-cased (the rest of the casing preserved). The object "
+            "name is stored verbatim on the operation component, but the served "
+            "path re-cases its first letter — live-verified 2026-07-04: "
+            "objectName 'qaM6IntakeA' with EXECUTE serves "
+            "/ws/simple/executeQaM6IntakeA (200) while the verbatim "
+            "/ws/simple/executeqaM6IntakeA returns 404."
         ),
         "wrong_pattern": (
-            "Assuming the listener URL re-cases the object name, or that the "
-            "operation type is preserved in mixed case, and publishing a caller "
-            "URL that the runtime never serves."
+            "Publishing the verbatim-cased URL (or assuming the operation type "
+            "keeps mixed case), so callers hit a path the runtime never serves."
         ),
         "correct_pattern": (
             "Derive the route from the actual rule: lowercase the operation "
-            "type, append the object name byte-for-byte as configured, and "
-            "confirm the live path before publishing it. The valid operation "
-            "types are Get, Query, Create, Update, Upsert, Delete, and Execute."
+            "type, then append the object name with its first letter "
+            "upper-cased, and confirm the live path before publishing it. The "
+            "valid operation types are Get, Query, Create, Update, Upsert, "
+            "Delete, and Execute."
         ),
         "remediation": (
-            "Read the deployed listener's reported path rather than "
-            "reconstructing it from the object's display name."
+            "Use the endpoint recorded by the listener build/verify tooling "
+            "(validation_rules.listener.endpoint_path / the listener_verify "
+            "stage's endpoint_url) rather than reconstructing it by hand."
         ),
         "applies_to": [
             "web_services_server",
             "listener_connector",
             "shared_web_server",
         ],
-        "provenance": {"source_label": _COMPANION_DOCS, "retrieval_date": "2026-06-10"},
-        "verification_status": "docs_corroborated",
+        "provenance": {
+            "source_label": (
+                "M6 live QA on the renera local atom (issue #12, intermediate "
+                "apiType) — supersedes the earlier docs-corroborated verbatim claim"
+            ),
+            "retrieval_date": "2026-07-04",
+        },
+        "verification_status": "live_verified",
         "category": "listener_wss",
     },
     {

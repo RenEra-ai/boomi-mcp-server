@@ -5835,6 +5835,26 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
                 "6. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind; re-run with dry_run=false to execute",
             ],
         },
+        "build_and_verify_http_listener": {
+            "description": (
+                "Author an inbound HTTP (Web Services Server) listener integration "
+                "and verify the deployed route (M6 / issue #12). Bare WSS serves "
+                "basic/intermediate apiType runtimes; 'advanced' needs an API "
+                "Service Component (#133). Listener processes have NO Test mode — "
+                "verification is the orchestrate_deploy listener_verify stage "
+                "(apiType preflight, collision check, live probe, execution "
+                "readback; ListenerStatus does not cover WSS routes)."
+            ),
+            "steps": [
+                "1. get_integration_archetype(name='http_listener_to_db') or get_integration_archetype(name='http_listener_to_rest') → inspect the listener parameter contract (objectName, operationType, JSON payload profile, optional inbound_validation)",
+                "2. build_from_archetype(name='http_listener_to_db'|'http_listener_to_rest', parameters={...}) → emit IntegrationSpecV1 (listener -> map -> write|send sync_pipeline; endpoint metadata recorded in validation_rules.listener)",
+                "3. build_integration(action='plan', config='{\"integration_spec\": <spec>, \"conflict_policy\": \"reuse\"}') → preview the deterministic plan",
+                "4. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec>}') → create the components",
+                "5. manage_shared_resources(action='get_server_info', resource_id='<runtime-id>') → confirm apiType is basic/intermediate (advanced 404s bare /ws/simple routes) and whether auth requires a Basic token",
+                "6. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=false, config='{\"listener_test_payload\": \"<json>\", \"listener_base_url\": \"<override when the runtime url is not reachable from here>\"}') → deploy + listener_verify (probe the /ws/simple endpoint, read back the execution record)",
+                "7. monitor_platform(action='execution_records', config='{\"process_id\": \"...\"}') → inspect the triggered execution — an HTTP 2xx ack does NOT imply process success",
+            ],
+        },
         "set_up_b2b_trading_partner": {
             "description": "Create a trading partner for EDI/B2B integration",
             "steps": [
@@ -7737,7 +7757,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "pipeline.stages[].config.map_ref",
             "pipeline.stages[].config.label",
         ],
-        "supported_stage_kinds": ["read", "fetch", "map", "send", "write"],
+        "supported_stage_kinds": ["read", "fetch", "listener", "map", "send", "write"],
         "supported_edge_kinds": ["ordering"],
         "supported_terminal_shapes": ["stop"],
         "reserved_stage_kinds": {
@@ -7753,8 +7773,9 @@ _PROCESS_FLOW_PROTOCOLS = {
         },
         "field_notes": {
             "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
-            "pipeline.stages[].kind": "One of read/fetch/map/send/write. The source is read (DB Get), fetch(rest_fetch) (REST GET), or fetch(soap_fetch) (SOAP EXECUTE, #126); the target is send(rest_send) (REST), send(soap_send) (SOAP EXECUTE, #126), or write (DB Send, M5.8 #74 — from a fetch source); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
-            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' OR 'soap_fetch' for a fetch stage (#126), 'map' for a map stage, 'rest_send' OR 'soap_send' for a send stage (#126), 'db_write' for a write stage (M5.8 #74). A fetch/send stage's declared primitive selects the REST-vs-SOAP connector family. A primitive on the wrong stage (e.g. 'db_write' on a 'send' stage, or 'rest_fetch' on a non-fetch stage) is rejected with a hint pointing at the right stage.",
+            "pipeline.stages[].kind": "One of read/fetch/listener/map/send/write. The source is read (DB Get), fetch(rest_fetch) (REST GET), fetch(soap_fetch) (SOAP EXECUTE, #126), or listener(wss_listen) (inbound WSS Listen, M6 #12); the target is send(rest_send) (REST), send(soap_send) (SOAP EXECUTE, #126), or write (DB Send, M5.8 #74 — from a fetch/listener source); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
+            "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' OR 'soap_fetch' for a fetch stage (#126), 'wss_listen' for a listener stage (M6 #12), 'map' for a map stage, 'rest_send' OR 'soap_send' for a send stage (#126), 'db_write' for a write stage (M5.8 #74). A fetch/send stage's declared primitive selects the REST-vs-SOAP connector family. A primitive on the wrong stage (e.g. 'db_write' on a 'send' stage, or 'rest_fetch' on a non-fetch stage) is rejected with a hint pointing at the right stage.",
+            "listener": "A listener stage (config.primitive='wss_listen', M6 #12) is the inbound Web Services Server Listen source: it lowers to the Listen START SHAPE (connectoraction actionType='Listen' connectorType='wss' embedded in the start shape) — no separate source connector shape and NO connection component, so the stage config carries ONLY primitive/operation_id/label (+ optional connector_type='wss'). The emitted process locks the listener options allowSimultaneous='true' / updateRunDates='false'. Bare-WSS endpoint = /ws/simple/{lowercase(operationType)}{SentenceCase(objectName)} — the objectName is stored verbatim on the operation but Boomi upper-cases its FIRST letter on the served path (live-settled 2026-07-04); HTTP method derives from the operation's input_type (none -> GET, else POST). Serves basic/intermediate apiType runtimes; 'advanced' requires an API Service Component (#133). Listener processes have no Test mode — orchestrate_deploy runs a listener_verify stage (apiType preflight, collision check, live probe, execution readback) instead.",
             "pipeline.stages[].config": "read/fetch/send/write carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
             "fetch": "A fetch stage is a REST GET source (config.primitive='rest_fetch', M5.4 #72) or a SOAP Client EXECUTE source (config.primitive='soap_fetch', #126). A rest_fetch carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body); action_type defaults to 'GET' and must be 'GET'. A soap_fetch lowers to connectorType='wssoapclientsdk'; action_type defaults to 'EXECUTE' and must be 'EXECUTE' (SOAP Client is EXECUTE-only).",
             "send": "A send stage is a REST target (config.primitive='rest_send') carrying an explicit HTTP method, or a SOAP Client EXECUTE target (config.primitive='soap_send', #126) which lowers to connectorType='wssoapclientsdk' with action_type defaulting to (and required to be) 'EXECUTE'.",

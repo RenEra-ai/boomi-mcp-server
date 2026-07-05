@@ -104,6 +104,10 @@ CATEGORIES = frozenset(
 #: Each later M10 shape issue flips/adds an entry here as part of making its shape
 #: emittable, updating the consistency test in lockstep.
 EMITTABLE_SHAPE_REGISTRY: Dict[str, Dict[str, Any]] = {
+    # M6 (#12) adds a second start-shape dispatch kind, ``start_listen`` (the WSS
+    # Listen start with the connectoraction embedded in the start shape). Same
+    # ``start`` shapetype, so no new registry key — mirrors how setproperties_step
+    # shares the documentproperties key.
     "start": {"emittable": True, "emitter_kind": "start_noaction"},
     "connectoraction": {"emittable": True, "emitter_kind": "connectoraction_source"},
     "message": {"emittable": True, "emitter_kind": "message"},

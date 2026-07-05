@@ -81,6 +81,9 @@ PINNED_EMITTABLE = frozenset(
 # connector keys are mandatory; the rest read via ``params.get(...)``).
 _FLOW_PARAMS = {
     "start_noaction": {},
+    # M6 (#12): the WSS Listen start shape needs only the operation id (the
+    # userlabel reads via params.get(...)).
+    "start_listen": {"operation_id": "OP-1"},
     "connectoraction_source": {
         "connector_type": "database",
         "action_type": "Get",
@@ -255,6 +258,10 @@ def test_flow_dispatch_ladder_keys():
     dispatch branch')."""
     assert _flow_dispatch_kinds() == {
         "start_noaction",
+        # M6 (#12): the WSS Listen start shape — the connectoraction is embedded
+        # in the start shape, so it emits the SAME "start" shapetype as
+        # start_noaction and PINNED_EMITTABLE is unchanged.
+        "start_listen",
         "connectoraction_source",
         "connectoraction_target",
         "message",

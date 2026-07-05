@@ -6,6 +6,15 @@ Provides 4 listener management actions:
 - pause: Pause listeners on a container
 - resume: Resume listeners on a container
 - restart: Restart listeners on a container
+
+SCOPE NOTE (M6 #12, live-proven 2026-07-04 on both a cloud attachment and a
+local atom): ``ListenerStatus`` does NOT cover Web Services Server (WSS) or API
+Service Component routes — it stays EMPTY even while a WSS listener is deployed
+and serving. It appears to report connector listeners (JMS / Solace / AS2 /
+Salesforce-style event sources) only. Do not use this tool to verify a WSS
+listener route; that verification (apiType preflight, collision check, live
+probe, execution readback) is owned by ``orchestrate_deploy``'s
+``listener_verify`` stage.
 """
 
 from typing import Dict, Any, Optional

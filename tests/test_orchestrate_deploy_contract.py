@@ -733,10 +733,14 @@ def test_full_success_contract(registry):
     expected_keys = {
         "_success", "profile", "build_id", "dry_run", "plan_only", "behavior_verified",
         "integration_name", "target", "component_summary", "package", "deployment",
-        "runtime_attachment", "schedule", "execution", "logs", "cleanup", "summary",
+        # M6 (#12): listener_verify is on every full envelope (not_required for
+        # non-listener builds).
+        "runtime_attachment", "schedule", "listener_verify", "execution", "logs",
+        "cleanup", "summary",
         "warnings", "errors",
     }
     assert set(result.keys()) == expected_keys
+    assert result["listener_verify"]["status"] == "not_required"
 
     # Additive behavioral-verification marker (issue #81): a dry-run is never verified.
     assert result["behavior_verified"] == {

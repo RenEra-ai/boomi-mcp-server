@@ -54,6 +54,7 @@ from boomi_mcp.categories.components.builders.json_profile_builder import (
 from boomi_mcp.categories.components.builders.map_builder import MapFunctionBuilder
 from boomi_mcp.categories.components.builders.process_flow_builder import (
     ProcessFlowBuilder,
+    SyncPipelineBuilder,
 )
 from boomi_mcp.categories.components.builders.profile_builder import (
     DatabaseReadProfileBuilder,
@@ -1058,10 +1059,10 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
     },
     {
         "id": "listener_shapes",
-        "invariant": 'Listener start actionType="Listen"; allowSimultaneous=true/updateRunDates=false process options',
-        "emitter": "(M6 owns listener work)",
-        "disposition": "not-applicable-yet",
-        "test": "table-only (no listener builder yet)",
+        "invariant": 'Listener start actionType="Listen" connectorType="wss" embedded in the start shape (no connectionId, no separate source shape); allowSimultaneous=true/updateRunDates=false process options (no stopProcessingIfZeroDocuments)',
+        "emitter": "process_flow_builder._emit_start_listen (M6 issue #12)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_listener_start_and_process_options",
     },
     {
         "id": "dataprocessscript_attrs",
@@ -1243,3 +1244,58 @@ def test_inv_set_properties_steps_prefix_and_persist_invariants():
     assert dpp.attrib["name"] == "Dynamic Process Property - DPP_B"
     assert dpp.attrib["persist"] == "true"
     assert dpp.attrib["shouldEncrypt"] == "false"
+
+
+def test_inv_listener_start_and_process_options():
+    # M6 (issue #12): the WSS listener invariants, live-locked against the
+    # Process Library `Weblistener to Slack` capture (a5d9f624, 2026-07-04):
+    # the Listen connectoraction is EMBEDDED in the start shape with
+    # actionType="Listen" connectorType="wss" hideSettings="true" and NO
+    # connectionId (WSS has no connection component); no separate source shape
+    # follows; the process options flip to allowSimultaneous="true" /
+    # updateRunDates="false" and OMIT stopProcessingIfZeroDocuments. Guaranteed
+    # by construction: _emit_start_listen emits exactly this form and build()
+    # derives the options from the Listen source (never caller-supplied).
+    cfg = {
+        "process_kind": "sync_pipeline",
+        "pipeline": {
+            "stages": [
+                {
+                    "key": "listen",
+                    "kind": "listener",
+                    "config": {"primitive": "wss_listen", "operation_id": "WSSOP-1"},
+                },
+                {
+                    "key": "send",
+                    "kind": "send",
+                    "config": {
+                        "primitive": "rest_send",
+                        "action_type": "POST",
+                        "connection_id": "CONN-1",
+                        "operation_id": "OP-1",
+                    },
+                },
+            ],
+            "dependencies": [{"from_stage": "listen", "to_stage": "send"}],
+        },
+    }
+    xml = SyncPipelineBuilder.build(cfg, name="P")
+    process = ET.fromstring(xml).find(".//process")
+    assert process.attrib["allowSimultaneous"] == "true"
+    assert process.attrib["updateRunDates"] == "false"
+    assert "stopProcessingIfZeroDocuments" not in process.attrib
+    shapes = _parse_process_shapes(xml)
+    start = shapes[0]
+    assert start.attrib["shapetype"] == "start"
+    connectoraction = start.find("configuration/connectoraction")
+    assert connectoraction is not None
+    assert connectoraction.attrib["actionType"] == "Listen"
+    assert connectoraction.attrib["connectorType"] == "wss"
+    assert connectoraction.attrib["hideSettings"] == "true"
+    assert "connectionId" not in connectoraction.attrib
+    # ONE connector shape total (the target) — the listener never emits a
+    # separate source connectoraction shape, and no wss connector-settings
+    # reference exists anywhere in the process XML.
+    connector_shapes = [s for s in shapes if s.attrib["shapetype"] == "connectoraction"]
+    assert len(connector_shapes) == 1
+    assert 'connectorType="wss"' not in ET.tostring(connector_shapes[0], encoding="unicode")

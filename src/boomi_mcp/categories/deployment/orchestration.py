@@ -40,6 +40,12 @@ the same registry object as its caller; an absolute import silently binds a *dif
 registry and breaks build resolution.
 """
 
+import base64
+import time
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, StrictBool, ValidationError
@@ -52,6 +58,13 @@ from ..runtimes import manage_runtimes_action  # runtime verify + runtime<->env 
 from ..schedules import manage_schedules_action  # schedule update/delete/enable/disable
 from ..execution import execute_process_action  # test-run execution (issue #63)
 from ..monitoring import monitor_platform_action  # test-run log/artifact retrieval (issue #63)
+from ..shared_resources import manage_shared_resources_action  # listener apiType/auth preflight (M6 #12)
+from ..components._shared import component_get_xml  # listener collision check component reads (M6 #12)
+from ...patterns.primitives.wss_listen import (  # single-source WSS endpoint formula (M6 #12)
+    compute_wss_endpoint,
+    sentence_case_object_name,
+    wss_http_method,
+)
 
 StageStatus = Literal[
     "planned",
@@ -128,6 +141,16 @@ TEST_LOGS_UNAVAILABLE = "TEST_LOGS_UNAVAILABLE"
 # override). Rejected before any SDK call.
 EMPTY_PROCESS_OVERRIDES_REJECTED = "EMPTY_PROCESS_OVERRIDES_REJECTED"
 
+# M6 (#12) — listener_verify stage error codes. The stage runs only for a build
+# whose process is a WSS listener (validation_rules.listener in the build
+# registry), between schedule and execution.
+LISTENER_SERVER_INFO_FAILED = "LISTENER_SERVER_INFO_FAILED"
+LISTENER_APITYPE_UNSUPPORTED = "LISTENER_APITYPE_UNSUPPORTED"
+LISTENER_DEPLOYMENT_INACTIVE = "LISTENER_DEPLOYMENT_INACTIVE"
+LISTENER_PATH_COLLISION = "LISTENER_PATH_COLLISION"
+LISTENER_PROBE_FAILED = "LISTENER_PROBE_FAILED"
+LISTENER_EXECUTION_RECORD_MISSING = "LISTENER_EXECUTION_RECORD_MISSING"
+
 # Failure-hardening + cleanup-planning codes (issue #65).
 # LOG_RETRIEVAL_FAILED / ARTIFACT_RETRIEVAL_FAILED are *diagnostic* — they annotate the logs
 # stage but never flip ``_success`` to False. CLEANUP_OPERATION_FAILED is recorded only when
@@ -186,6 +209,16 @@ class OrchestrateDeployRequest(BaseModel):
     # process that declares extensions is rejected (EMPTY_PROCESS_OVERRIDES_REJECTED) because it
     # would orphan those extension values. Inspected only — this issue does not mutate extensions.
     process_overrides: Optional[Dict[str, Any]] = None
+    # M6 (#12) — listener_verify stage inputs. Only consulted on a real run of a build whose
+    # process is a WSS listener (validation_rules.listener in the build registry).
+    # listener_base_url overrides the probe base URL (e.g. http://localhost:9090 for a
+    # docker-hosted local atom whose SharedServerInformation url is container-internal).
+    listener_test_payload: Optional[str] = None
+    listener_base_url: Optional[str] = None
+    listener_probe_timeout_seconds: int = 30
+    # Basic-auth username override for the probe (cloud attachments use an instance-id
+    # username `accountId.suffix`; the default is the platform account_id from creds).
+    listener_auth_username: Optional[str] = None
 
 
 class ComponentSummaryEntry(BaseModel):
@@ -278,6 +311,39 @@ class ScheduleStage(BaseModel):
     enabled: Optional[bool] = None
     reused: bool = False
     changed: bool = False
+    warnings: List[str] = Field(default_factory=list)
+
+
+class ListenerVerifyStage(BaseModel):
+    """M6 (#12): post-deploy verification of a WSS listener route.
+
+    ListenerStatus is deliberately NOT used — live-proven (2026-07-04, both
+    runtimes) to stay empty for WSS/ASC routes; it covers connector listeners
+    (JMS/Solace/...) only. Verification is: SharedServerInformation preflight
+    (apiType + auth), deployment-active check, component-query collision check
+    (never a pre-probe — Boomi-managed clouds answer a uniform 401 pre-route),
+    an authenticated live probe of the computed endpoint, and an
+    execution-record readback (HTTP 200 is an ack, not process success).
+    """
+
+    status: StageStatus
+    api_type: Optional[str] = None
+    auth: Optional[str] = None
+    endpoint_path: Optional[str] = None
+    endpoint_url: Optional[str] = None
+    http_method: Optional[str] = None
+    probe_status_code: Optional[int] = None
+    # Which objectName casing the runtime served ('sentence_case' — the
+    # live-settled 2026-07-04 default — or 'verbatim' via the defensive
+    # fallback probe, which would contradict that finding).
+    served_object_name_casing: Optional[str] = None
+    deployment_active: Optional[bool] = None
+    collision_count: Optional[int] = None
+    execution_record_found: Optional[bool] = None
+    execution_id: Optional[str] = None
+    execution_status: Optional[str] = None
+    error: Optional[str] = None
+    error_code: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -649,6 +715,475 @@ def _build_declares_process_extensions(build_id: str) -> bool:
         ):
             return True
     return False
+
+
+_WSS_CONNECTOR_ALIASES = frozenset({"wss", "web_services", "web_services_server"})
+
+# M6 (#12): how long listener_verify re-probes a freshly created deployment
+# whose route still answers the no-route signal (404 local / 401 cloud), and
+# the pause between attempts. Live-observed registration lag: ~1 min after a
+# first-time deploy on a local atom, up to ~4 min after an apiType flip.
+_LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS = 240
+_LISTENER_ROUTE_REGISTRATION_POLL_SECONDS = 15
+
+
+def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Read the recorded build's WSS listener metadata, or None for non-listener builds.
+
+    Primary source: the archetype-emitted ``spec.validation_rules.listener`` block
+    (object_name / operation_type / input_type / http_method / endpoint_path).
+    Fallback for hand-authored specs: scan the spec components for a WSS Listen
+    connector-action config and derive the same fields. Read-only registry
+    inspection; tolerant of a missing/malformed entry (returns None).
+    """
+    entry = integration_builder._BUILD_REGISTRY.get(build_id)
+    if not isinstance(entry, dict):
+        return None
+    spec = entry.get("spec")
+    if not isinstance(spec, dict):
+        return None
+    validation_rules = spec.get("validation_rules")
+    if isinstance(validation_rules, dict):
+        listener = validation_rules.get("listener")
+        if isinstance(listener, dict) and listener.get("endpoint_path"):
+            return dict(listener)
+    components = spec.get("components")
+    if not isinstance(components, list):
+        return None
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+        config = comp.get("config")
+        if not isinstance(config, dict):
+            continue
+        connector_type = str(config.get("connector_type") or "").strip().lower()
+        operation_mode = str(config.get("operation_mode") or "").strip().lower()
+        if connector_type not in _WSS_CONNECTOR_ALIASES or operation_mode != "listen":
+            continue
+        object_name = str(config.get("object_name") or "").strip()
+        if not object_name:
+            continue
+        operation_type = str(config.get("operation_type") or "EXECUTE").strip().upper()
+        input_type = str(config.get("input_type") or "singlejson").strip().lower()
+        return {
+            "object_name": object_name,
+            "operation_type": operation_type,
+            "input_type": input_type,
+            "output_type": str(config.get("output_type") or "none").strip().lower(),
+            "http_method": wss_http_method(input_type),
+            "endpoint_path": compute_wss_endpoint(operation_type, object_name),
+        }
+    return None
+
+
+def _listener_probe(
+    url: str,
+    *,
+    method: str,
+    payload: Optional[bytes],
+    headers: Dict[str, str],
+    timeout_seconds: int,
+) -> Tuple[Optional[int], Optional[str]]:
+    """One bounded HTTP probe; returns (status_code, error_text).
+
+    4xx/5xx come back as (status, None) — they are triage signals, not
+    transport failures. Only a network/URL error yields (None, error_text).
+    """
+    request = urllib.request.Request(url, data=payload, method=method)
+    for header_name, header_value in headers.items():
+        request.add_header(header_name, header_value)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            return int(response.status), None
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), None
+    except Exception as exc:  # URLError / timeout / SSL
+        return None, str(exc)
+
+
+def _run_listener_verify_stage(
+    boomi_client: Any,
+    profile: Optional[str],
+    request: "OrchestrateDeployRequest",
+    *,
+    target: ResolvedBuildTarget,
+    environment_id: Optional[str],
+    runtime_id: Optional[str],
+    listener_meta: Dict[str, Any],
+    deployment_stage: DeploymentStage,
+    creds: Optional[Dict[str, str]] = None,
+) -> Tuple[ListenerVerifyStage, Optional[OrchestrateDeployError]]:
+    """Verify a deployed WSS listener route (M6 #12).
+
+    Order: SharedServerInformation preflight (apiType/auth) -> deployment-active
+    check -> component-query collision check -> authenticated live probe (with a
+    one-shot objectName-casing fallback on 404) -> execution-record readback.
+    ``ListenerStatus`` is never consulted (live-proven empty for WSS routes).
+    """
+    object_name = str(listener_meta.get("object_name") or "").strip()
+    operation_type = str(listener_meta.get("operation_type") or "").strip().upper()
+    input_type = str(listener_meta.get("input_type") or "singlejson").strip().lower()
+    http_method = str(
+        listener_meta.get("http_method") or wss_http_method(input_type)
+    ).strip().upper()
+    endpoint_path = str(
+        listener_meta.get("endpoint_path")
+        or compute_wss_endpoint(operation_type, object_name)
+    )
+    stage = ListenerVerifyStage(
+        status="failed",
+        endpoint_path=endpoint_path,
+        http_method=http_method,
+    )
+
+    def _fail(code: str, message: str, **details: Any) -> Tuple[ListenerVerifyStage, OrchestrateDeployError]:
+        stage.error = message
+        stage.error_code = code
+        return stage, _error(code, message, details=details or None)
+
+    # 1. Shared Web Server preflight: apiType decides the listener pattern; auth
+    #    decides the probe credentials.
+    try:
+        info_result = manage_shared_resources_action(
+            boomi_client, profile, "get_server_info", {"resource_id": runtime_id}
+        )
+    except Exception as exc:
+        return _fail(
+            LISTENER_SERVER_INFO_FAILED,
+            f"SharedServerInformation preflight failed for runtime {runtime_id}: {exc}",
+            runtime_id=runtime_id,
+        )
+    if not isinstance(info_result, dict) or not info_result.get("_success"):
+        detail = (info_result or {}).get("error") if isinstance(info_result, dict) else None
+        return _fail(
+            LISTENER_SERVER_INFO_FAILED,
+            "SharedServerInformation preflight failed for runtime "
+            f"{runtime_id}: {detail or 'no server_info returned'}",
+            runtime_id=runtime_id,
+        )
+    server_info = info_result.get("server_info") or {}
+    api_type = str(server_info.get("api_type") or "").strip().lower()
+    auth = str(server_info.get("auth") or server_info.get("min_auth") or "none").strip().lower()
+    stage.api_type = api_type or None
+    stage.auth = auth or None
+    if api_type == "advanced":
+        return _fail(
+            LISTENER_APITYPE_UNSUPPORTED,
+            "The runtime's Shared Web Server apiType is 'advanced', which does not "
+            "serve bare /ws/simple WSS routes — an API Service Component is required "
+            "(issue #133, deferred out of M6). Switch the runtime to "
+            "basic/intermediate or wait for #133 ASC support.",
+            runtime_id=runtime_id,
+            api_type=api_type,
+        )
+
+    # 2. Deployment-active check (reuses this run's deployment stage result —
+    #    the deploy stage already confirmed/reused the active deployment).
+    deployment_active = bool(deployment_stage.active)
+    stage.deployment_active = deployment_active
+    if not deployment_active:
+        return _fail(
+            LISTENER_DEPLOYMENT_INACTIVE,
+            "The listener process deployment is not active in the target environment, "
+            "so no route can be registered.",
+            environment_id=environment_id,
+            deployment_id=deployment_stage.deployment_id,
+        )
+
+    # 3. Collision check — component/deployment-query based, NEVER a pre-probe:
+    #    on Boomi-managed clouds every unregistered path answers a uniform 401,
+    #    so probing is uninformative (live-confirmed 2026-07-04). Read each other
+    #    active deployed process (bounded), resolve its Listen operation, and
+    #    compare lowercase(operationType)+objectName. Case-insensitive compare —
+    #    the served path re-cases the first objectName letter (live-settled
+    #    2026-07-04), so a case-only difference IS the same served path.
+    collision_count = 0
+    _COLLISION_SCAN_CAP = 25
+    try:
+        deployments_result = manage_deployment_action(
+            boomi_client,
+            profile=profile,
+            action="list_deployments",
+            config_data={"environment_id": environment_id, "active_only": True},
+        )
+    except Exception as exc:
+        deployments_result = {"_success": False, "error": str(exc)}
+    if isinstance(deployments_result, dict) and deployments_result.get("_success"):
+        my_path_key = f"{operation_type.lower()}{object_name}".casefold()
+        deployed = deployments_result.get("deployments") or []
+        other_process_ids = []
+        for dep in deployed:
+            if not isinstance(dep, dict):
+                continue
+            comp_id = dep.get("component_id")
+            comp_type = str(dep.get("component_type") or "").strip().lower()
+            if not comp_id or comp_id == target.process_component_id:
+                continue
+            if comp_type and comp_type != "process":
+                continue
+            if comp_id not in other_process_ids:
+                other_process_ids.append(comp_id)
+        if len(other_process_ids) > _COLLISION_SCAN_CAP:
+            stage.warnings.append(
+                f"[LISTENER_COLLISION_SCAN_CAPPED] {len(other_process_ids)} other deployed "
+                f"processes in the environment; only the first {_COLLISION_SCAN_CAP} were "
+                "scanned for WSS path collisions."
+            )
+            other_process_ids = other_process_ids[:_COLLISION_SCAN_CAP]
+        for comp_id in other_process_ids:
+            try:
+                process_read = component_get_xml(boomi_client, comp_id)
+                process_root = ET.fromstring(process_read["xml"])
+            except Exception:
+                stage.warnings.append(
+                    f"[LISTENER_COLLISION_SCAN_INCOMPLETE] could not read deployed process "
+                    f"{comp_id}; its WSS path (if any) was not collision-checked."
+                )
+                continue
+            listen_op_ids = [
+                ca.get("operationId")
+                for ca in process_root.iter("connectoraction")
+                if ca.get("actionType") == "Listen"
+                and str(ca.get("connectorType") or "").lower() == "wss"
+                and ca.get("operationId")
+            ]
+            for op_id in listen_op_ids:
+                try:
+                    op_read = component_get_xml(boomi_client, op_id)
+                    op_root = ET.fromstring(op_read["xml"])
+                except Exception:
+                    stage.warnings.append(
+                        f"[LISTENER_COLLISION_SCAN_INCOMPLETE] could not read WSS operation "
+                        f"{op_id} referenced by deployed process {comp_id}."
+                    )
+                    continue
+                for action in op_root.iter("WebServicesServerListenAction"):
+                    other_key = (
+                        f"{str(action.get('operationType') or '').lower()}"
+                        f"{str(action.get('objectName') or '')}"
+                    ).casefold()
+                    if other_key and other_key == my_path_key:
+                        collision_count += 1
+    else:
+        stage.warnings.append(
+            "[LISTENER_COLLISION_SCAN_UNAVAILABLE] active-deployment listing failed; "
+            "WSS path collisions were not checked: "
+            + str((deployments_result or {}).get("error") or "unknown error")
+        )
+    stage.collision_count = collision_count
+    if collision_count:
+        return _fail(
+            LISTENER_PATH_COLLISION,
+            f"{collision_count} other deployed process(es) in this environment serve the "
+            f"same WSS endpoint path ({endpoint_path}); Boomi routes duplicate paths "
+            "unpredictably. Use a unique objectName or undeploy the colliding process.",
+            endpoint_path=endpoint_path,
+            collision_count=collision_count,
+        )
+
+    # 4. Live probe of the computed endpoint. Base URL: explicit override first
+    #    (e.g. a docker atom reachable on localhost), else the server-info url.
+    base_url = (request.listener_base_url or "").strip() or str(server_info.get("url") or "").strip()
+    if not base_url:
+        return _fail(
+            LISTENER_PROBE_FAILED,
+            "No probe base URL: SharedServerInformation returned no url and no "
+            "listener_base_url override was supplied.",
+            runtime_id=runtime_id,
+        )
+    headers: Dict[str, str] = {}
+    payload: Optional[bytes] = None
+    if http_method != "GET":
+        payload_text = request.listener_test_payload
+        if payload_text is None and input_type.endswith("json"):
+            payload_text = "{}"
+        if payload_text is None:
+            payload_text = ""
+        payload = payload_text.encode("utf-8")
+        if input_type.endswith("json"):
+            headers["Content-Type"] = "application/json"
+        elif input_type.endswith("xml"):
+            headers["Content-Type"] = "application/xml"
+        else:
+            headers["Content-Type"] = "text/plain"
+    if auth != "none":
+        auth_token = str(server_info.get("auth_token") or "").strip()
+        auth_username = (
+            (request.listener_auth_username or "").strip()
+            or str((creds or {}).get("account_id") or "").strip()
+        )
+        if not auth_token or not auth_username:
+            return _fail(
+                LISTENER_PROBE_FAILED,
+                "The runtime requires Basic auth but no usable credentials were "
+                "resolved: the Shared Web Server auth token is generated once in the "
+                "runtime's Shared Web Server panel (UI-only step); after that it is "
+                "readable via get_server_info. Provide listener_auth_username for an "
+                "instance-id user (cloud attachments) if the account id is not the "
+                "expected username.",
+                runtime_id=runtime_id,
+                auth=auth,
+            )
+        basic = base64.b64encode(f"{auth_username}:{auth_token}".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {basic}"
+
+    probe_started_at = datetime.now(timezone.utc)
+    url = base_url.rstrip("/") + endpoint_path
+    # A FRESHLY CREATED deployment registers its WSS route asynchronously —
+    # live-observed 2026-07-04: ~1 min on a local atom after a first-time
+    # deploy, up to ~4 min after an apiType flip — during which the runtime
+    # answers the no-route signal (404 locally; uniform 401 on Boomi-managed
+    # clouds). Retry those signals within a bounded window so the headline
+    # deploy-then-verify call does not fail on registration lag. A REUSED
+    # active deployment serves immediately, so it keeps single-probe behavior.
+    registration_wait = deployment_stage.status == "deployed"
+    registration_deadline = time.monotonic() + _LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS
+    probe_attempts = 0
+    while True:
+        probe_attempts += 1
+        status_code, probe_error = _listener_probe(
+            url,
+            method=http_method,
+            payload=payload,
+            headers=headers,
+            timeout_seconds=request.listener_probe_timeout_seconds,
+        )
+        stage.endpoint_url = url
+        stage.probe_status_code = status_code
+        served_casing: Optional[str] = None
+        if status_code is not None and 200 <= status_code < 300:
+            # The primary path carries the sentence-cased objectName (live-settled
+            # 2026-07-04: Boomi upper-cases the first letter on the served path).
+            served_casing = "sentence_case"
+        elif status_code == 404:
+            # Defensive verbatim fallback: sentence-casing was settled live on one
+            # runtime/tier; if a runtime ever serves the verbatim spelling instead,
+            # one retry keeps the verify green and records the contradiction.
+            verbatim_path = f"/ws/simple/{operation_type.lower()}{object_name}"
+            if verbatim_path != endpoint_path:
+                alt_url = base_url.rstrip("/") + verbatim_path
+                alt_status, _alt_error = _listener_probe(
+                    alt_url,
+                    method=http_method,
+                    payload=payload,
+                    headers=headers,
+                    timeout_seconds=request.listener_probe_timeout_seconds,
+                )
+                if alt_status is not None and 200 <= alt_status < 300:
+                    stage.endpoint_path = verbatim_path
+                    stage.endpoint_url = alt_url
+                    stage.probe_status_code = alt_status
+                    status_code = alt_status
+                    served_casing = "verbatim"
+                    stage.warnings.append(
+                        "[LISTENER_OBJECT_NAME_VERBATIM] the runtime served the "
+                        f"verbatim path {verbatim_path!r}, not the sentence-cased "
+                        f"{endpoint_path!r} — this contradicts the live-settled "
+                        "/ws/simple casing (2026-07-04); record the runtime/tier."
+                    )
+        stage.served_object_name_casing = served_casing
+        if (
+            status_code in (401, 404)
+            and registration_wait
+            and time.monotonic() < registration_deadline
+        ):
+            time.sleep(_LISTENER_ROUTE_REGISTRATION_POLL_SECONDS)
+            continue
+        break
+    if probe_attempts > 1 and status_code is not None and 200 <= status_code < 300:
+        stage.warnings.append(
+            f"[LISTENER_ROUTE_REGISTRATION_LAG] the route answered only on probe "
+            f"attempt {probe_attempts} — a fresh deploy registers its WSS route "
+            "asynchronously (~1-4 min observed live); no action needed."
+        )
+
+    if status_code is None:
+        return _fail(
+            LISTENER_PROBE_FAILED,
+            f"Listener endpoint probe could not reach {url}: {probe_error}",
+            endpoint_url=url,
+        )
+    if not (200 <= status_code < 300):
+        if status_code == 401:
+            triage = (
+                "401 with the supplied credentials means either no route is registered "
+                "for this tenant yet (the no-route baseline on Boomi-managed clouds — "
+                "token sync can lag a fresh deploy) or the credentials are wrong."
+            )
+        elif status_code == 404:
+            triage = (
+                "404 after authentication means the request reached the runtime but no "
+                "route matches this path — check apiType, the objectName, and that the "
+                "listener process (not just a parent component) is deployed."
+            )
+        else:
+            triage = "Unexpected status from the listener endpoint."
+        return _fail(
+            LISTENER_PROBE_FAILED,
+            f"Listener endpoint probe returned HTTP {status_code} for {url}. {triage}",
+            endpoint_url=url,
+            probe_status_code=status_code,
+        )
+
+    # 5. Execution-record readback: HTTP 200 is only the ack (with outputType=
+    #    none it is fully decoupled from process outcome — live-proven via an
+    #    ERROR execution behind a 200). Require a listener execution record in
+    #    the probe window; surface its status.
+    record_found = False
+    execution_id: Optional[str] = None
+    execution_status: Optional[str] = None
+    window_start = (probe_started_at - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    readback_deadline = time.monotonic() + 60
+    readback_error: Optional[str] = None
+    while time.monotonic() < readback_deadline:
+        try:
+            records_result = monitor_platform_action(
+                boomi_client,
+                profile,
+                "execution_records",
+                config_data={
+                    "process_id": target.process_component_id,
+                    "start_date": window_start,
+                    "limit": 10,
+                },
+            )
+        except Exception as exc:
+            records_result = {"_success": False, "error": str(exc)}
+        if isinstance(records_result, dict) and records_result.get("_success"):
+            readback_error = None
+            for record in records_result.get("execution_records") or []:
+                if not isinstance(record, dict):
+                    continue
+                record_found = True
+                execution_id = record.get("execution_id") or execution_id
+                execution_status = record.get("status") or execution_status
+            if record_found:
+                break
+        else:
+            readback_error = str((records_result or {}).get("error") or "unknown error")
+        time.sleep(5)
+    stage.execution_record_found = record_found
+    stage.execution_id = execution_id
+    stage.execution_status = execution_status
+    if not record_found:
+        detail = f" (record query error: {readback_error})" if readback_error else ""
+        return _fail(
+            LISTENER_EXECUTION_RECORD_MISSING,
+            "The listener endpoint acknowledged the probe but no execution record "
+            "appeared for the process within the readback window — the HTTP ack is "
+            f"decoupled from process execution, so this run is unverified{detail}.",
+            endpoint_url=url,
+            probe_status_code=status_code,
+        )
+    if execution_status and execution_status.upper() not in ("COMPLETE",):
+        stage.warnings.append(
+            f"[LISTENER_EXECUTION_{execution_status.upper()}] the probe returned HTTP "
+            f"{status_code} but the triggered execution finished {execution_status} — "
+            "HTTP 200 is an ack, not process success; inspect the execution log."
+        )
+
+    stage.status = "completed"
+    return stage, None
 
 
 def _error_response(
@@ -2100,6 +2635,7 @@ def _stage_summary(
     *,
     execution: Optional[ExecutionStage] = None,
     logs: Optional[LogsStage] = None,
+    listener_verify: Optional[ListenerVerifyStage] = None,
 ) -> Dict[str, Any]:
     """Flat summary of the package/deploy/runtime/schedule outcome at the top of the response.
 
@@ -2147,6 +2683,22 @@ def _stage_summary(
             "schedule": list(schedule.warnings),
         },
     }
+    if listener_verify is not None:
+        summary["stage_statuses"]["listener_verify"] = listener_verify.status
+        summary["listener"] = {
+            "api_type": listener_verify.api_type,
+            "auth": listener_verify.auth,
+            "endpoint_path": listener_verify.endpoint_path,
+            "endpoint_url": listener_verify.endpoint_url,
+            "http_method": listener_verify.http_method,
+            "probe_status_code": listener_verify.probe_status_code,
+            "served_object_name_casing": listener_verify.served_object_name_casing,
+            "deployment_active": listener_verify.deployment_active,
+            "collision_count": listener_verify.collision_count,
+            "execution_record_found": listener_verify.execution_record_found,
+            "execution_id": listener_verify.execution_id,
+            "execution_status": listener_verify.execution_status,
+        }
     if execution is not None and logs is not None:
         summary["stage_statuses"]["execution"] = execution.status
         summary["stage_statuses"]["logs"] = logs.status
@@ -2191,6 +2743,11 @@ def _behavior_verified_marker(
         return {"verified": False, "reason": "dry_run", "logs_status": logs_status}
     if execution.status == "skipped":
         return {"verified": False, "reason": "test_not_run", "logs_status": logs_status}
+    if execution.status == "not_required":
+        # M6 (#12): listener builds have no Test mode — the listener_verify
+        # probe + execution readback is the behavioral check; read
+        # summary.listener instead of the test stage.
+        return {"verified": False, "reason": "test_not_supported", "logs_status": logs_status}
     if execution.status == "blocked":
         return {"verified": False, "reason": "test_blocked", "logs_status": logs_status}
     if execution.status == "completed":
@@ -2246,6 +2803,12 @@ _ERROR_CODE_STAGES: Dict[str, str] = {
     SCHEDULE_ENABLE_FAILED: "schedule",
     SCHEDULE_DISABLE_FAILED: "schedule",
     SCHEDULE_ID_MISSING: "schedule",
+    LISTENER_SERVER_INFO_FAILED: "listener_verify",
+    LISTENER_APITYPE_UNSUPPORTED: "listener_verify",
+    LISTENER_DEPLOYMENT_INACTIVE: "listener_verify",
+    LISTENER_PATH_COLLISION: "listener_verify",
+    LISTENER_PROBE_FAILED: "listener_verify",
+    LISTENER_EXECUTION_RECORD_MISSING: "listener_verify",
     TEST_EXECUTION_FAILED: "execution",
     TEST_EXECUTION_TIMEOUT: "execution",
     TEST_REQUEST_ID_MISSING: "execution",
@@ -2255,7 +2818,17 @@ _ERROR_CODE_STAGES: Dict[str, str] = {
 }
 
 # Stage execution order — used to derive the "prior stages" a retry can rely on.
-_STAGE_ORDER = ["package", "deployment", "runtime_attachment", "schedule", "execution", "logs"]
+# listener_verify (M6 #12) runs after schedule and before the test execution:
+# a listener build has no Test mode, so the probe IS its behavioral test.
+_STAGE_ORDER = [
+    "package",
+    "deployment",
+    "runtime_attachment",
+    "schedule",
+    "listener_verify",
+    "execution",
+    "logs",
+]
 
 
 def _failed_stage_for_error_code(code: Optional[str]) -> str:
@@ -2271,6 +2844,7 @@ def _prior_stage_summary(
     schedule: Optional[ScheduleStage],
     *,
     execution: Optional[ExecutionStage] = None,
+    listener_verify: Optional[ListenerVerifyStage] = None,
 ) -> Dict[str, Any]:
     """Compact status + ids of the stages that ran BEFORE ``failed_stage``.
 
@@ -2282,6 +2856,7 @@ def _prior_stage_summary(
         "deployment": deployment,
         "runtime_attachment": runtime_attachment,
         "schedule": schedule,
+        "listener_verify": listener_verify,
         "execution": execution,
     }
     try:
@@ -2307,6 +2882,9 @@ def _prior_stage_summary(
             entry["process_runtime_attachment_id"] = stage.process_runtime_attachment_id
         elif name == "schedule":
             entry["schedule_id"] = stage.schedule_id
+        elif name == "listener_verify":
+            entry["endpoint_path"] = stage.endpoint_path
+            entry["probe_status_code"] = stage.probe_status_code
         elif name == "execution":
             entry["execution_id"] = stage.execution_id
         summary[name] = entry
@@ -2348,6 +2926,34 @@ def _next_step_for_failure(error: OrchestrateDeployError, failed_stage: str) -> 
         return (
             "Fix the schedule_override (or schedule permissions) and re-run orchestrate_deploy; "
             "package, deploy, and runtime bindings already succeeded and will be reused."
+        )
+    if failed_stage == "listener_verify":
+        if code == LISTENER_APITYPE_UNSUPPORTED:
+            return (
+                "The runtime's Shared Web Server apiType is 'advanced', which does not serve "
+                "bare /ws/simple WSS routes — it requires an API Service Component (issue #133, "
+                "out of M6 scope). Switch the runtime's apiType to basic/intermediate in the "
+                "Shared Web Server panel, or wait for #133 ASC support, then re-run."
+            )
+        if code == LISTENER_PATH_COLLISION:
+            return (
+                "Another deployed process in this environment serves the same WSS endpoint path "
+                "(operationType+objectName) — Boomi routes duplicate paths unpredictably. Give "
+                "this listener a unique objectName (rebuild) or undeploy the colliding process, "
+                "then re-run."
+            )
+        if code == LISTENER_PROBE_FAILED:
+            return (
+                "The deploy succeeded but the live endpoint probe did not return 2xx. 401 with a "
+                "known-good token means no route is registered (or credentials are wrong); 404 "
+                "after authentication means the path is wrong. Check the runtime's Shared Web "
+                "Server auth/token (Basic tokens are UI-provisioned once, then readable via "
+                "get_server_info) and re-run; prior stages are reused."
+            )
+        return (
+            "The deploy succeeded but listener verification failed; inspect the listener_verify "
+            "stage (api_type/auth/endpoint/probe/execution readback), fix the cause, and re-run "
+            "orchestrate_deploy — prior stages are reused."
         )
     if failed_stage == "execution":
         if code == TEST_EXECUTION_TIMEOUT:
@@ -2660,8 +3266,37 @@ def _attach_failure_metadata(
     return response
 
 
-def _execution_log_cleanup_stages(run_test: bool, *, blocked: bool) -> Dict[str, Any]:
-    """Execution/log/cleanup stages — still M3.4 placeholders (planned/skipped) or ``blocked``."""
+def _listener_no_test_warning() -> str:
+    return (
+        "[LISTENER_NO_TEST_MODE] listener processes cannot run in Test mode — the "
+        "listener_verify live probe + execution-record readback is the behavioral test."
+    )
+
+
+def _listener_placeholder_stage(
+    listener_meta: Optional[Dict[str, Any]], *, blocked: bool
+) -> ListenerVerifyStage:
+    """listener_verify placeholder: not_required (non-listener), planned, or blocked."""
+    if not listener_meta:
+        return ListenerVerifyStage(status="not_required")
+    if blocked:
+        return ListenerVerifyStage(status="blocked")
+    return ListenerVerifyStage(
+        status="planned",
+        endpoint_path=listener_meta.get("endpoint_path"),
+        http_method=listener_meta.get("http_method"),
+    )
+
+
+def _execution_log_cleanup_stages(
+    run_test: bool, *, blocked: bool, listener: bool = False
+) -> Dict[str, Any]:
+    """Execution/log/cleanup stages — still M3.4 placeholders (planned/skipped) or ``blocked``.
+
+    M6 (#12): a listener build has no Test mode, so ``run_test=True`` resolves
+    the execution/logs stages to ``not_required`` with an explanatory warning —
+    the listener_verify probe is the behavioral test.
+    """
     if blocked:
         return {
             "execution": ExecutionStage(status="blocked", run_test=bool(run_test)),
@@ -2669,6 +3304,16 @@ def _execution_log_cleanup_stages(run_test: bool, *, blocked: bool) -> Dict[str,
             "cleanup": CleanupStage(status="blocked"),
         }
     run_test_flag = bool(run_test)
+    if listener and run_test_flag:
+        return {
+            "execution": ExecutionStage(
+                status="not_required",
+                run_test=True,
+                warnings=[_listener_no_test_warning()],
+            ),
+            "logs": LogsStage(status="not_required"),
+            "cleanup": CleanupStage(status="not_required"),
+        }
     return {
         "execution": ExecutionStage(
             status="planned" if run_test_flag else "skipped",
@@ -2683,6 +3328,7 @@ def _placeholder_downstream_stages(
     runtime_id: Optional[str],
     schedule_override: Optional[Dict[str, Any]],
     run_test: bool,
+    listener_meta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Runtime/schedule/execution/log/cleanup stages as plan placeholders (dry-run / M3.4)."""
     schedule_planned = schedule_override is not None
@@ -2692,7 +3338,10 @@ def _placeholder_downstream_stages(
             status="planned" if schedule_planned else "not_required",
             schedule_override=schedule_override,
         ),
-        **_execution_log_cleanup_stages(run_test, blocked=False),
+        "listener_verify": _listener_placeholder_stage(listener_meta, blocked=False),
+        **_execution_log_cleanup_stages(
+            run_test, blocked=False, listener=bool(listener_meta)
+        ),
     }
 
 
@@ -2700,11 +3349,13 @@ def _blocked_downstream_stages(
     runtime_id: Optional[str],
     schedule_override: Optional[Dict[str, Any]],
     run_test: bool,
+    listener_meta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """All later stages marked ``blocked`` after a package/deploy failure short-circuit."""
     return {
         "runtime_attachment": RuntimeAttachmentStage(status="blocked", runtime_id=runtime_id),
         "schedule": ScheduleStage(status="blocked", schedule_override=schedule_override),
+        "listener_verify": _listener_placeholder_stage(listener_meta, blocked=True),
         **_execution_log_cleanup_stages(run_test, blocked=True),
     }
 
@@ -2745,6 +3396,11 @@ def _assemble_response(
         "deployment": deployment.model_dump(),
         "runtime_attachment": downstream["runtime_attachment"].model_dump(),
         "schedule": downstream["schedule"].model_dump(),
+        # M6 (#12): not_required for every non-listener build; downstream dicts
+        # built before the listener stage existed default safely.
+        "listener_verify": (
+            downstream.get("listener_verify") or ListenerVerifyStage(status="not_required")
+        ).model_dump(),
         "execution": downstream["execution"].model_dump(),
         "logs": downstream["logs"].model_dump(),
         "cleanup": downstream["cleanup"].model_dump(),
@@ -2767,6 +3423,7 @@ def _plan_response(
     schedule_override: Optional[Dict[str, Any]],
     run_test: bool,
     package_version: Optional[str],
+    listener_meta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Dry-run plan: every stage reported as it *would* run; no SDK calls were made."""
     effective_version = _effective_package_version(package_version, build_id)
@@ -2777,7 +3434,9 @@ def _plan_response(
         package_version=effective_version,
     )
     deployment = DeploymentStage(status="planned", environment_id=environment_id)
-    downstream = _placeholder_downstream_stages(runtime_id, schedule_override, run_test)
+    downstream = _placeholder_downstream_stages(
+        runtime_id, schedule_override, run_test, listener_meta
+    )
     return _assemble_response(
         success=True,
         profile=profile,
@@ -2789,7 +3448,8 @@ def _plan_response(
         deployment=deployment,
         downstream=downstream,
         summary=_stage_summary(
-            package, deployment, downstream["runtime_attachment"], downstream["schedule"]
+            package, deployment, downstream["runtime_attachment"], downstream["schedule"],
+            listener_verify=downstream.get("listener_verify") if listener_meta else None,
         ),
         errors=[],
     )
@@ -2805,14 +3465,18 @@ def _real_run_response(
     runtime_attachment: RuntimeAttachmentStage,
     schedule: ScheduleStage,
     run_test: bool,
+    listener_verify: Optional[ListenerVerifyStage] = None,
 ) -> Dict[str, Any]:
     """Successful real-run response after package, deploy, runtime binding, and schedule."""
     downstream = {
         "runtime_attachment": runtime_attachment,
         "schedule": schedule,
-        **_execution_log_cleanup_stages(run_test, blocked=False),
+        "listener_verify": listener_verify or ListenerVerifyStage(status="not_required"),
+        **_execution_log_cleanup_stages(
+            run_test, blocked=False, listener=listener_verify is not None
+        ),
     }
-    return _assemble_response(
+    response = _assemble_response(
         success=True,
         profile=profile,
         build_id=build_id,
@@ -2822,9 +3486,15 @@ def _real_run_response(
         package=package,
         deployment=deployment,
         downstream=downstream,
-        summary=_stage_summary(package, deployment, runtime_attachment, schedule),
+        summary=_stage_summary(
+            package, deployment, runtime_attachment, schedule,
+            listener_verify=listener_verify,
+        ),
         errors=[],
     )
+    if listener_verify is not None and listener_verify.warnings:
+        response.setdefault("warnings", []).extend(listener_verify.warnings)
+    return response
 
 
 def _blocked_real_run_response(
@@ -2841,6 +3511,7 @@ def _blocked_real_run_response(
     error: OrchestrateDeployError,
     cleanup_on_failure: bool = False,
     boomi_client: Any = None,
+    listener_meta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Failed real-run response: the failing stage is marked, all later stages ``blocked``.
 
@@ -2848,7 +3519,9 @@ def _blocked_real_run_response(
     so the cleanup plan considers package + deployment only — typically just ``delete_package``
     when a package was created before the deploy failed (issue #65).
     """
-    downstream = _blocked_downstream_stages(runtime_id, schedule_override, run_test)
+    downstream = _blocked_downstream_stages(
+        runtime_id, schedule_override, run_test, listener_meta
+    )
     downstream["cleanup"] = _cleanup_stage_for_failure(
         package, deployment, None,
         environment_id=environment_id,
@@ -2889,17 +3562,24 @@ def _runtime_or_schedule_failed_response(
     environment_id: Optional[str] = None,
     cleanup_on_failure: bool = False,
     boomi_client: Any = None,
+    listener_verify: Optional[ListenerVerifyStage] = None,
+    listener_meta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Failed real-run after deploy: a runtime/schedule stage failed; execution onward blocked.
+    """Failed real-run after deploy: a runtime/schedule/listener stage failed; later blocked.
 
     The runtime and schedule stages are passed through verbatim so the response shows exactly
     how far binding got (a failed runtime stage with schedule blocked, or a completed runtime
-    stage with a failed schedule stage). The cleanup plan names exactly the attachment legs /
-    deployment / package this attempt created, in reverse creation order (issue #65).
+    stage with a failed schedule stage). M6 (#12): a failed listener_verify stage is passed
+    through the same way (runtime + schedule already succeeded). The cleanup plan names exactly
+    the attachment legs / deployment / package this attempt created, in reverse creation order
+    (issue #65).
     """
     downstream = {
         "runtime_attachment": runtime_attachment,
         "schedule": schedule,
+        "listener_verify": (
+            listener_verify or _listener_placeholder_stage(listener_meta, blocked=True)
+        ),
         **_execution_log_cleanup_stages(run_test, blocked=True),
     }
     downstream["cleanup"] = _cleanup_stage_for_failure(
@@ -2919,10 +3599,15 @@ def _runtime_or_schedule_failed_response(
         package=package,
         deployment=deployment,
         downstream=downstream,
-        summary=_stage_summary(package, deployment, runtime_attachment, schedule),
+        summary=_stage_summary(
+            package, deployment, runtime_attachment, schedule,
+            listener_verify=listener_verify,
+        ),
         errors=[error],
         error_message=error.message,
     )
+    if listener_verify is not None and listener_verify.warnings:
+        response.setdefault("warnings", []).extend(listener_verify.warnings)
     return _attach_failure_metadata(
         response, error, package, deployment, runtime_attachment, schedule
     )
@@ -3022,6 +3707,10 @@ def orchestrate_deploy_action(
     test_log_fetch_content: bool = True,
     require_test_logs: bool = False,
     process_overrides: Optional[Dict[str, Any]] = None,
+    listener_test_payload: Optional[str] = None,
+    listener_base_url: Optional[str] = None,
+    listener_probe_timeout_seconds: int = 30,
+    listener_auth_username: Optional[str] = None,
     creds: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Resolve a build, then plan (dry-run) or package/deploy/bind/schedule it (#60/#61/#62).
@@ -3075,6 +3764,10 @@ def orchestrate_deploy_action(
             test_log_fetch_content=test_log_fetch_content,
             require_test_logs=require_test_logs,
             process_overrides=process_overrides,
+            listener_test_payload=listener_test_payload,
+            listener_base_url=listener_base_url,
+            listener_probe_timeout_seconds=listener_probe_timeout_seconds,
+            listener_auth_username=listener_auth_username,
         )
     except ValidationError as exc:
         # ``request`` never bound — echo the RAW inputs; the builder sanitizes mistyped values.
@@ -3169,6 +3862,9 @@ def orchestrate_deploy_action(
     # 2c. Build-basics deploy guards (issue #102). Read-only registry inspection, before any
     #     SDK call, in BOTH dry-run and real-run.
     declares_extensions = _build_declares_process_extensions(build_id)
+    # M6 (#12): listener detection — a WSS listener build gets the listener_verify stage
+    # (planned in dry-run, executed after schedule on a real run) and no test execution.
+    listener_meta = _resolve_listener_metadata(build_id)
     process_overrides = request.process_overrides
     # B4 — an EXPLICITLY empty process-overrides set over a process that declares extensions
     #      would orphan those values. Reject fail-fast. (None = "not supplied" is fine — it
@@ -3229,6 +3925,7 @@ def orchestrate_deploy_action(
             schedule_override=schedule_override,
             run_test=run_test,
             package_version=package_version,
+            listener_meta=listener_meta,
         )
         if steering_warnings:
             plan.setdefault("warnings", []).extend(steering_warnings)
@@ -3256,6 +3953,7 @@ def orchestrate_deploy_action(
             run_test=run_test,
             cleanup_on_failure=cleanup_on_failure,
             boomi_client=boomi_client,
+            listener_meta=listener_meta,
             error=_error(
                 BOOMI_CLIENT_REQUIRED,
                 "A Boomi client is required to run package/deploy (dry_run=False).",
@@ -3290,6 +3988,7 @@ def orchestrate_deploy_action(
             run_test=run_test,
             cleanup_on_failure=cleanup_on_failure,
             boomi_client=boomi_client,
+            listener_meta=listener_meta,
             error=package_error,
         )
 
@@ -3319,6 +4018,7 @@ def orchestrate_deploy_action(
             run_test=run_test,
             cleanup_on_failure=cleanup_on_failure,
             boomi_client=boomi_client,
+            listener_meta=listener_meta,
             error=deployment_error,
         )
 
@@ -3353,6 +4053,7 @@ def orchestrate_deploy_action(
             environment_id=environment_id,
             cleanup_on_failure=cleanup_on_failure,
             boomi_client=boomi_client,
+            listener_meta=listener_meta,
         )
 
     # 3f. Schedule activation stage (issue #62): only after deploy + runtime binding succeed,
@@ -3380,6 +4081,54 @@ def orchestrate_deploy_action(
             environment_id=environment_id,
             cleanup_on_failure=cleanup_on_failure,
             boomi_client=boomi_client,
+            listener_meta=listener_meta,
+        )
+
+    # 3f½. Listener verification stage (M6 #12): only for a WSS listener build, after
+    #      deploy + runtime binding + schedule succeed. apiType preflight, deployment-active
+    #      check, component-query collision check, authenticated live probe, and
+    #      execution-record readback. A failure blocks execution/log/cleanup like a
+    #      runtime/schedule failure. A listener build never runs the Test-mode execution
+    #      stage — listeners have no Test mode; the probe IS the behavioral test.
+    if listener_meta is not None:
+        listener_stage, listener_error = _run_listener_verify_stage(
+            boomi_client,
+            profile,
+            request,
+            target=target,
+            environment_id=environment_id,
+            runtime_id=runtime_id,
+            listener_meta=listener_meta,
+            deployment_stage=deployment_stage,
+            creds=creds,
+        )
+        if listener_error is not None:
+            return _runtime_or_schedule_failed_response(
+                profile=profile,
+                build_id=build_id,
+                target=target,
+                package=package_stage,
+                deployment=deployment_stage,
+                runtime_attachment=runtime_attachment,
+                schedule=schedule_stage,
+                run_test=run_test,
+                error=listener_error,
+                environment_id=environment_id,
+                cleanup_on_failure=cleanup_on_failure,
+                boomi_client=boomi_client,
+                listener_verify=listener_stage,
+                listener_meta=listener_meta,
+            )
+        return _real_run_response(
+            profile=profile,
+            build_id=build_id,
+            target=target,
+            package=package_stage,
+            deployment=deployment_stage,
+            runtime_attachment=runtime_attachment,
+            schedule=schedule_stage,
+            run_test=run_test,
+            listener_verify=listener_stage,
         )
 
     # 3g. Success: package, deploy, runtime binding, and schedule all resolved. Without run_test

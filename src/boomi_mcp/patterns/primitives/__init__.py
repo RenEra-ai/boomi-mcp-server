@@ -28,6 +28,7 @@ from .document_cache_remove import DocumentCacheRemovePrimitive
 from .document_cache_retrieve import DocumentCacheRetrievePrimitive
 from .field_map import FieldMapPrimitive
 from .flow_control import FlowControlPrimitive
+from .inbound_validate import InboundValidatePrimitive
 from .operational import (
     DlqWriterPrimitive,
     ErrorClassifierPrimitive,
@@ -41,6 +42,7 @@ from .return_documents import ReturnDocumentsPrimitive
 from .soap_fetch import SoapFetchPrimitive
 from .soap_send import SoapSendPrimitive
 from .throw_exception import ThrowExceptionPrimitive
+from .wss_listen import WssListenPrimitive
 from .xml_json_convert import XmlJsonConvertPrimitive
 
 __all__ = [
@@ -55,6 +57,8 @@ __all__ = [
     "DocumentCacheRetrievePrimitive",
     "FieldMapPrimitive",
     "FlowControlPrimitive",
+    "InboundValidatePrimitive",
+    "WssListenPrimitive",
     "XmlJsonConvertPrimitive",
     "RestFetchPrimitive",
     "RestSendWithRetryPrimitive",

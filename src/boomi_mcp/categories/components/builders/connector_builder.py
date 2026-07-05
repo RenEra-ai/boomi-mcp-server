@@ -4346,6 +4346,395 @@ class SoapClientOperationBuilder:
 
 
 # ============================================================================
+# Web Services Server (WSS) listener operation builder — M6, issue #12
+# ============================================================================
+
+WSS_SUBTYPE = "wss"
+# Inbound Web Services Server aliases. Deliberately NOT `soap`, `soap_client`,
+# or `web_services_soap_client` — those route to the outbound SOAP Client
+# (#126). `wss` / `web_services` / `web_services_server` were left unclaimed by
+# the SOAP resolver precisely so M6 could claim them for the inbound listener.
+_WSS_ALIASES = ("wss", "web_services", "web_services_server")
+
+# WebServicesServerListenAction vocabulary (companion fixture, live-verified
+# against renera op 601cf5a3 "Configure a Web Listener", 2026-07-04).
+# operationType is a case-sensitive wire enum; the HTTP verb is NEVER set on
+# the operation — Boomi derives it from inputType (none -> GET, else POST).
+_WSS_OPERATION_TYPES = frozenset(
+    {"GET", "QUERY", "CREATE", "UPDATE", "UPSERT", "DELETE", "EXECUTE"}
+)
+_WSS_REJECTED_HTTP_VERBS = frozenset({"POST", "PUT", "PATCH"})
+_WSS_INPUT_TYPES = frozenset(
+    {"none", "singledata", "singlejson", "multijson", "singlexml", "multixml"}
+)
+_WSS_OUTPUT_TYPES = _WSS_INPUT_TYPES
+_WSS_JSON_XML_TYPES = frozenset({"singlejson", "multijson", "singlexml", "multixml"})
+_WSS_RESPONSE_CONTENT_TYPES = frozenset(
+    {"application/json", "application/xml", "text/plain"}
+)
+
+
+def _resolve_wss_connector_type(value: Any) -> Optional[str]:
+    """Map `wss`, `web_services`, or `web_services_server` (case-insensitive)
+    to the canonical `wss` subtype. Returns None for anything else — including
+    `soap`, `soap_client`, `rest`, and `http`, so an outbound-client request
+    can never be misrouted to the inbound listener builder."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in _WSS_ALIASES:
+        return WSS_SUBTYPE
+    return None
+
+
+_WSS_OPERATION_POLICY = PreservationPolicy(
+    component_type="connector-action",
+    subtype=WSS_SUBTYPE,
+    owned_paths=(
+        # The builder owns every WebServicesServerListenAction attribute it
+        # emits; an owned attr absent from desired is cleared (e.g. dropping a
+        # requestProfile). Unknown siblings (Archiving/Tracking/Caching bodies)
+        # are preserved.
+        OwnedPath(
+            path="bns:object/Operation/Configuration/WebServicesServerListenAction",
+            mode="attrs_only",
+            owned_attrs=(
+                "inputType",
+                "objectName",
+                "operationType",
+                "outputType",
+                "requestProfile",
+                "responseContentType",
+                "responseProfile",
+            ),
+        ),
+    ),
+)
+
+
+class WssListenerOperationBuilder:
+    """Builder for Boomi Web Services Server (WSS) Listen operations (M6, #12).
+
+    Emits the live-verified `WebServicesServerListenAction` operation XML
+    (renera op 601cf5a3 "Configure a Web Listener", captured 2026-07-04):
+
+        <bns:Component type="connector-action" subType="wss" name="..." folderName="...">
+          <bns:encryptedValues/>
+          <bns:description>...</bns:description>
+          <bns:object>
+            <Operation xmlns="">
+              <Archiving directory="" enabled="false"/>
+              <Configuration>
+                <WebServicesServerListenAction inputType="singlejson"
+                    objectName="generalListener" operationType="CREATE"
+                    outputType="none" responseContentType="text/plain"/>
+              </Configuration>
+              <Tracking><TrackedFields/></Tracking>
+              <Caching/>
+            </Operation>
+          </bns:object>
+        </bns:Component>
+
+    WSS has NO connection component — the listener binds inside the process
+    start shape (`connectoraction actionType="Listen"` with no connectionId),
+    so this registry entry has no CONNECTOR_BUILDERS sibling and a
+    `connection_ref_key` in the config is rejected.
+
+    Config keys:
+        component_name:         required for top-level component naming.
+        operation_mode:         required, must be "listen".
+        object_name:            required; stored VERBATIM on the component (the
+                                builder never case-folds it). The served bare-WSS
+                                endpoint sentence-cases its first letter:
+                                `/ws/simple/{lowercase(operationType)}{SentenceCase(objectName)}`
+                                (live-settled 2026-07-04, M6 QA).
+        operation_type:         optional, default "EXECUTE". One of GET / QUERY /
+                                CREATE / UPDATE / UPSERT / DELETE / EXECUTE
+                                (canonicalized to uppercase). HTTP verbs
+                                (POST/PUT/PATCH) are rejected — the HTTP method
+                                derives from input_type (none -> GET, else POST)
+                                and is never set on the operation.
+        input_type:             optional, default "singlejson". One of none /
+                                singledata / singlejson / multijson / singlexml /
+                                multixml.
+        output_type:            optional, default "none". Same vocabulary.
+        response_content_type:  optional, default "text/plain". One of
+                                application/json / application/xml / text/plain.
+        request_profile:        optional profile component ID or "$ref:KEY"
+                                token; only valid when input_type is a JSON/XML
+                                type. NOT required even for JSON input — the
+                                live Process Library listener serves singlejson
+                                with no requestProfile (payload read via DDP).
+        response_profile:       optional; only valid when output_type is a
+                                JSON/XML type.
+        folder_name:            optional; defaults to "Home".
+        description:            optional.
+        connector_type, component_type, key, action, depends_on, name:
+                                caller/framework routing context, not emitted.
+    """
+
+    SUPPORTED_OPERATION_MODES = ("listen",)
+    DEFAULT_OPERATION_TYPE = "EXECUTE"
+    DEFAULT_INPUT_TYPE = "singlejson"
+    DEFAULT_OUTPUT_TYPE = "none"
+    DEFAULT_RESPONSE_CONTENT_TYPE = "text/plain"
+    # No secrets exist in a WSS listen op config, but mirror the scan so the
+    # integration_builder preflight stays uniform across connector families.
+    FORBIDDEN_SECRET_FIELDS = DatabaseConnectorBuilder.FORBIDDEN_SECRET_FIELDS
+
+    @classmethod
+    def scan_forbidden_secret_fields(
+        cls, config: Any, _path_prefix: str = ""
+    ) -> Optional[BuilderValidationError]:
+        return DatabaseConnectorBuilder.scan_forbidden_secret_fields(
+            config, _path_prefix=_path_prefix
+        )
+
+    @classmethod
+    def redact_forbidden_secret_fields_in_place(cls, config: Any) -> None:
+        DatabaseConnectorBuilder.redact_forbidden_secret_fields_in_place(config)
+
+    @staticmethod
+    def _normalized(value: Any) -> str:
+        return value.strip() if isinstance(value, str) else ""
+
+    @classmethod
+    def validate_config(cls, config: Dict[str, Any]) -> Optional[BuilderValidationError]:
+        """Validate a WSS Listen operation config without building XML."""
+        secret_err = cls.scan_forbidden_secret_fields(config)
+        if secret_err is not None:
+            return secret_err
+
+        _om_raw = config.get("operation_mode")
+        operation_mode = _om_raw.lower() if isinstance(_om_raw, str) else ""
+        if operation_mode not in cls.SUPPORTED_OPERATION_MODES:
+            return BuilderValidationError(
+                "operation_mode is required and must be 'listen' for the "
+                "Web Services Server operation builder",
+                error_code="UNSUPPORTED_WSS_OPERATION_MODE",
+                field="operation_mode",
+                hint=(
+                    "The inbound WSS listener exposes a single Listen action. "
+                    "Use operation_mode='listen'."
+                ),
+            )
+
+        component_name = config.get("component_name")
+        if not component_name or not str(component_name).strip():
+            return BuilderValidationError(
+                "component_name is required",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="component_name",
+                hint="Provide a non-empty component_name string.",
+            )
+
+        # WSS has no connection component; a connection binding here signals a
+        # misrouted config (e.g. a SOAP/REST payload sent to the listener).
+        if cls._normalized(config.get("connection_ref_key")) or cls._normalized(
+            config.get("connection_id")
+        ):
+            return BuilderValidationError(
+                "The Web Services Server listener has no connection component; "
+                "connection_ref_key/connection_id must not be set",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="connection_ref_key",
+                hint=(
+                    "Remove the connection binding — a WSS listener binds inside "
+                    "the process start shape (actionType='Listen') and Boomi "
+                    "defines no wss connector-settings component."
+                ),
+            )
+
+        object_name = cls._normalized(config.get("object_name"))
+        if not object_name:
+            return BuilderValidationError(
+                "object_name is required for WSS Listen operations",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="object_name",
+                hint=(
+                    "object_name becomes the listener endpoint path suffix "
+                    "(/ws/simple/{operationtype}{SentenceCase(objectName)} — Boomi "
+                    "upper-cases its first letter on the served path); use a "
+                    "unique, project-specific name to avoid path collisions."
+                ),
+            )
+        if re.search(r"[\s/\\?#%]", object_name):
+            return BuilderValidationError(
+                f"object_name {object_name!r} contains whitespace or URL-reserved "
+                "characters",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="object_name",
+                hint=(
+                    "object_name becomes a URL path segment; avoid spaces and "
+                    "/ \\ ? # % characters (e.g. use 'orderIntake')."
+                ),
+            )
+
+        _ot_raw = config.get("operation_type", cls.DEFAULT_OPERATION_TYPE)
+        operation_type = _ot_raw.strip().upper() if isinstance(_ot_raw, str) else ""
+        if operation_type in _WSS_REJECTED_HTTP_VERBS:
+            return BuilderValidationError(
+                f"operation_type {operation_type!r} is an HTTP verb, not a WSS "
+                "operation type",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="operation_type",
+                hint=(
+                    "The HTTP method is never set on a WSS operation — Boomi "
+                    "derives it from input_type (none -> GET, anything else -> "
+                    "POST). Choose the semantic operationType instead: "
+                    + ", ".join(sorted(_WSS_OPERATION_TYPES))
+                    + "."
+                ),
+            )
+        if operation_type not in _WSS_OPERATION_TYPES:
+            return BuilderValidationError(
+                f"operation_type must be one of "
+                f"{', '.join(sorted(_WSS_OPERATION_TYPES))}; got {_ot_raw!r}",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="operation_type",
+                hint="operationType is a case-sensitive wire enum; the builder uppercases input.",
+            )
+
+        _it_raw = config.get("input_type", cls.DEFAULT_INPUT_TYPE)
+        input_type = _it_raw.strip().lower() if isinstance(_it_raw, str) else ""
+        if input_type not in _WSS_INPUT_TYPES:
+            return BuilderValidationError(
+                f"input_type must be one of {', '.join(sorted(_WSS_INPUT_TYPES))}; "
+                f"got {_it_raw!r}",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="input_type",
+                hint=(
+                    "input_type selects the inbound document shape AND the HTTP "
+                    "method (none -> GET, anything else -> POST)."
+                ),
+            )
+
+        _out_raw = config.get("output_type", cls.DEFAULT_OUTPUT_TYPE)
+        output_type = _out_raw.strip().lower() if isinstance(_out_raw, str) else ""
+        if output_type not in _WSS_OUTPUT_TYPES:
+            return BuilderValidationError(
+                f"output_type must be one of {', '.join(sorted(_WSS_OUTPUT_TYPES))}; "
+                f"got {_out_raw!r}",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="output_type",
+                hint="Use output_type='none' for an ack-only listener (HTTP 200 with no body).",
+            )
+
+        _rct_raw = config.get(
+            "response_content_type", cls.DEFAULT_RESPONSE_CONTENT_TYPE
+        )
+        response_content_type = (
+            _rct_raw.strip().lower() if isinstance(_rct_raw, str) else ""
+        )
+        if response_content_type not in _WSS_RESPONSE_CONTENT_TYPES:
+            return BuilderValidationError(
+                f"response_content_type must be one of "
+                f"{', '.join(sorted(_WSS_RESPONSE_CONTENT_TYPES))}; got {_rct_raw!r}",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="response_content_type",
+            )
+
+        # Profile refs are only meaningful for JSON/XML document types. They are
+        # OPTIONAL even then — the live Process Library listener serves
+        # singlejson with NO requestProfile (payload read via DDP) — but a
+        # profile on a none/singledata type is a contradiction, not a no-op.
+        request_profile = cls._normalized(config.get("request_profile"))
+        if request_profile and input_type not in _WSS_JSON_XML_TYPES:
+            return BuilderValidationError(
+                f"request_profile is only valid when input_type is a JSON/XML "
+                f"type; input_type is {input_type!r}",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="request_profile",
+                hint=(
+                    "Set input_type to singlejson/multijson/singlexml/multixml "
+                    "to bind a request profile, or drop the profile."
+                ),
+            )
+        response_profile = cls._normalized(config.get("response_profile"))
+        if response_profile and output_type not in _WSS_JSON_XML_TYPES:
+            return BuilderValidationError(
+                f"response_profile is only valid when output_type is a JSON/XML "
+                f"type; output_type is {output_type!r}",
+                error_code="WSS_OPERATION_CONFIG_INVALID",
+                field="response_profile",
+                hint=(
+                    "Set output_type to singlejson/multijson/singlexml/multixml "
+                    "to bind a response profile, or drop the profile."
+                ),
+            )
+
+        return None
+
+    def build(self, **params) -> str:
+        error = self.validate_config(params)
+        if error is not None:
+            raise error
+
+        component_name = params["component_name"]
+        object_name = self._normalized(params.get("object_name"))
+        operation_type = str(
+            params.get("operation_type", self.DEFAULT_OPERATION_TYPE)
+        ).strip().upper()
+        input_type = str(
+            params.get("input_type", self.DEFAULT_INPUT_TYPE)
+        ).strip().lower()
+        output_type = str(
+            params.get("output_type", self.DEFAULT_OUTPUT_TYPE)
+        ).strip().lower()
+        response_content_type = str(
+            params.get(
+                "response_content_type", self.DEFAULT_RESPONSE_CONTENT_TYPE
+            )
+        ).strip().lower()
+        request_profile = self._normalized(params.get("request_profile"))
+        response_profile = self._normalized(params.get("response_profile"))
+        folder_name = params.get("folder_name", "Home")
+        description = params.get("description", "")
+
+        safe_name = _escape_xml(component_name)
+        safe_folder = _escape_xml(str(folder_name))
+        safe_desc = _escape_xml(str(description))
+
+        # Attribute order matches the live capture (alphabetical): inputType,
+        # objectName, operationType, outputType, [requestProfile],
+        # responseContentType, [responseProfile]. Profile attrs are emitted
+        # only when set (#50-style conditional emission).
+        attrs = (
+            f'inputType="{_escape_xml(input_type)}" '
+            f'objectName="{_escape_xml(object_name)}" '
+            f'operationType="{_escape_xml(operation_type)}" '
+            f'outputType="{_escape_xml(output_type)}"'
+        )
+        if request_profile:
+            attrs += f' requestProfile="{_escape_xml(request_profile)}"'
+        attrs += f' responseContentType="{_escape_xml(response_content_type)}"'
+        if response_profile:
+            attrs += f' responseProfile="{_escape_xml(response_profile)}"'
+
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/"\n'
+            '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+            f'               type="connector-action" subType="{WSS_SUBTYPE}"\n'
+            f'               name="{safe_name}"\n'
+            f'               folderName="{safe_folder}">\n'
+            '    <bns:encryptedValues/>\n'
+            f'    <bns:description>{safe_desc}</bns:description>\n'
+            '    <bns:object>\n'
+            '        <Operation xmlns="">\n'
+            '            <Archiving directory="" enabled="false"/>\n'
+            '            <Configuration>\n'
+            f'                <WebServicesServerListenAction {attrs}/>\n'
+            '            </Configuration>\n'
+            '            <Tracking><TrackedFields/></Tracking>\n'
+            '            <Caching/>\n'
+            '        </Operation>\n'
+            '    </bns:object>\n'
+            '</bns:Component>'
+        )
+
+
+# ============================================================================
 # Registry
 # ============================================================================
 
@@ -4370,6 +4759,7 @@ RestClientConnectionBuilder.PRESERVATION_POLICY = _REST_CLIENT_CONNECTION_POLICY
 RestClientOperationBuilder.PRESERVATION_POLICY = _REST_CLIENT_OPERATION_POLICY
 SoapClientConnectionBuilder.PRESERVATION_POLICY = _SOAP_CLIENT_CONNECTION_POLICY
 SoapClientOperationBuilder.PRESERVATION_POLICY = _SOAP_CLIENT_OPERATION_POLICY
+WssListenerOperationBuilder.PRESERVATION_POLICY = _WSS_OPERATION_POLICY
 
 
 def get_connector_builder(connector_type: str):
@@ -4392,6 +4782,11 @@ CONNECTOR_ACTION_BUILDERS: Dict[tuple, type] = {
     ("soap_client", "execute"): SoapClientOperationBuilder,
     ("web_services_soap_client", "execute"): SoapClientOperationBuilder,
     (SOAP_CLIENT_SUBTYPE.lower(), "execute"): SoapClientOperationBuilder,
+    # M6 (#12): inbound Web Services Server listener — Listen-only, and no
+    # CONNECTOR_BUILDERS sibling (WSS has no connection component).
+    ("wss", "listen"): WssListenerOperationBuilder,
+    ("web_services", "listen"): WssListenerOperationBuilder,
+    ("web_services_server", "listen"): WssListenerOperationBuilder,
 }
 
 

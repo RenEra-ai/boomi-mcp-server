@@ -606,10 +606,10 @@ def test_sync_pipeline_protocol_documented():
         "pipeline.stages[].config.primitive",
     ):
         assert field in result["required_fields"], field
-    # The verified-linear surface: read|fetch source -> [map] -> send|write (issue
-    # #72 M5.4 added the REST fetch source; issue #74 M5.8 added the db_write DB
-    # target).
-    assert result["supported_stage_kinds"] == ["read", "fetch", "map", "send", "write"]
+    # The verified-linear surface: read|fetch|listener source -> [map] -> send|write
+    # (issue #72 M5.4 added the REST fetch source; issue #74 M5.8 added the db_write
+    # DB target; M6 #12 added the inbound WSS listener source).
+    assert result["supported_stage_kinds"] == ["read", "fetch", "listener", "map", "send", "write"]
     assert result["supported_edge_kinds"] == ["ordering"]
     assert result["supported_terminal_shapes"] == ["stop"]
     # fetch and write are now supported (not reserved); the remaining reserved

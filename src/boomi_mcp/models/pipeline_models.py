@@ -72,6 +72,11 @@ PipelineStageKind = Literal[
     # to a REST Client GET (config.primitive='rest_fetch') or a SOAP Client
     # EXECUTE (config.primitive='soap_fetch') source binding.
     "fetch",
+    # M6 (#12): inbound WSS listener source stage. Lowered by SyncPipelineBuilder
+    # (config.primitive='wss_listen') to the WSS Listen start-shape binding —
+    # the connectoraction is embedded in the process start shape with no
+    # connection component.
+    "listener",
     "lookup",
     "map",
     # M2.5 / M5.10 (#126): API target stage. Lowered to a REST Client target

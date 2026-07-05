@@ -12,6 +12,14 @@ from .database_to_api_sync import (
     DatabaseToApiSyncArchetype,
     DatabaseToApiSyncParameters,
 )
+from .http_listener_to_db import (
+    HttpListenerToDbArchetype,
+    HttpListenerToDbParameters,
+)
+from .http_listener_to_rest import (
+    HttpListenerToRestArchetype,
+    HttpListenerToRestParameters,
+)
 from .stub_minimal import (
     StubMinimalIntegrationArchetype,
     StubMinimalIntegrationParameters,
@@ -24,6 +32,10 @@ __all__ = [
     "ApiToDatabaseSyncParameters",
     "DatabaseToApiSyncArchetype",
     "DatabaseToApiSyncParameters",
+    "HttpListenerToDbArchetype",
+    "HttpListenerToDbParameters",
+    "HttpListenerToRestArchetype",
+    "HttpListenerToRestParameters",
     "StubMinimalIntegrationArchetype",
     "StubMinimalIntegrationParameters",
 ]
