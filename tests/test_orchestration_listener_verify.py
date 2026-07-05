@@ -479,7 +479,8 @@ def test_real_run_success_probe_and_readback(registry, monkeypatch):
     assert result["summary"]["listener"]["probe_status_code"] == 200
     assert result["summary"]["stage_statuses"]["listener_verify"] == "completed"
     # Architect review (M6 #12): a completed listener_verify with a COMPLETE
-    # execution IS the behavioral verification.
+    # execution IS the behavioral verification (strict baseline only).
+    assert stage["readback_baseline_available"] is True
     assert result["behavior_verified"] == {
         "verified": True,
         "reason": "listener_probe_verified",
@@ -1024,6 +1025,14 @@ def test_baseline_query_failure_degrades_with_warning(registry, monkeypatch):
     stage = result["listener_verify"]
     assert stage["status"] == "completed"
     assert any("LISTENER_READBACK_BASELINE_UNAVAILABLE" in w for w in stage["warnings"])
+    # Codex review (M6 #12): degraded readback evidence must NEVER report
+    # behavioral verification — the record may predate the probe.
+    assert stage["readback_baseline_available"] is False
+    assert result["behavior_verified"] == {
+        "verified": False,
+        "reason": "listener_readback_degraded",
+        "logs_status": result["logs"]["status"],
+    }
 
 
 def test_validation_rules_listener_on_non_listener_process_ignored(registry):

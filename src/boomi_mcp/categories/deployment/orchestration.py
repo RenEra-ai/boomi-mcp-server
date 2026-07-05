@@ -340,6 +340,10 @@ class ListenerVerifyStage(BaseModel):
     deployment_active: Optional[bool] = None
     collision_count: Optional[int] = None
     execution_record_found: Optional[bool] = None
+    # False when the pre-probe baseline snapshot failed and the readback
+    # degraded to accept-any-record (weaker evidence — the matched record may
+    # predate the probe). behavior_verified requires True (Codex review, M6 #12).
+    readback_baseline_available: Optional[bool] = None
     execution_id: Optional[str] = None
     execution_status: Optional[str] = None
     error: Optional[str] = None
@@ -1143,6 +1147,7 @@ def _run_listener_verify_stage(
             "distinguish the probe's execution from listener traffic in the last "
             "2 minutes — treat execution_record_found as weaker evidence."
         )
+    stage.readback_baseline_available = baseline_unavailable is None
 
     url = base_url.rstrip("/") + endpoint_path
     # A FRESHLY CREATED deployment registers its WSS route asynchronously —
@@ -2819,6 +2824,7 @@ def _stage_summary(
             "deployment_active": listener_verify.deployment_active,
             "collision_count": listener_verify.collision_count,
             "execution_record_found": listener_verify.execution_record_found,
+            "readback_baseline_available": listener_verify.readback_baseline_available,
             "execution_id": listener_verify.execution_id,
             "execution_status": listener_verify.execution_status,
         }
@@ -2878,6 +2884,15 @@ def _behavior_verified_marker(
     if listener_verify is not None and listener_verify.status not in ("not_required",):
         if listener_verify.status == "completed":
             if (listener_verify.execution_status or "").upper() == "COMPLETE":
+                # Degraded readback (pre-probe baseline query failed) cannot
+                # prove the COMPLETE record was the probe's own execution —
+                # never report verified on weaker evidence (Codex review).
+                if listener_verify.readback_baseline_available is not True:
+                    return {
+                        "verified": False,
+                        "reason": "listener_readback_degraded",
+                        "logs_status": logs_status,
+                    }
                 return {
                     "verified": True,
                     "reason": "listener_probe_verified",
