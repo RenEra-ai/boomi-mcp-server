@@ -764,17 +764,20 @@ def _listener_operation_ref_from_process(process_config: Any) -> Optional[str]:
 def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Read the recorded build's WSS listener metadata, or None for non-listener builds.
 
-    Primary source: the archetype-emitted ``spec.validation_rules.listener`` block
-    (object_name / operation_type / input_type / http_method / endpoint_path).
-    Fallback for hand-authored specs: classification keys off the single
-    deploy-target PROCESS's own source binding (a sync_pipeline ``listener``
-    stage or a lowered WSS/Listen source), then resolves the referenced Listen
-    operation component in-spec for the endpoint fields. A spec that merely
-    CONTAINS a WSS operation the deployed process does not listen on is NOT a
-    listener build (Codex review, M6 #12) — and a listener process whose
-    operation is an external literal id cannot be endpoint-derived, so it also
-    returns None (no listener_verify rather than a wrong probe). Read-only
-    registry inspection; tolerant of a missing/malformed entry (returns None).
+    Classification ALWAYS keys off the single deploy-target PROCESS's own
+    source binding (a sync_pipeline ``listener`` stage or a lowered WSS/Listen
+    source) — ``validation_rules.listener`` is caller-suppliable metadata on a
+    hand-authored spec, so it is consulted only AFTER the binding confirms the
+    deployed process really listens (architect review, M6 #12). Once confirmed,
+    the archetype-emitted ``validation_rules.listener`` block is preferred (it
+    carries the richer field set); otherwise the referenced Listen operation
+    component is resolved in-spec and the endpoint fields derived from it. A
+    spec that merely CONTAINS a WSS operation the deployed process does not
+    listen on is NOT a listener build (Codex review, M6 #12) — and a confirmed
+    listener whose operation is an external literal id with no metadata block
+    cannot be endpoint-derived, so it returns None (no listener_verify rather
+    than a wrong probe). Read-only registry inspection; tolerant of a
+    missing/malformed entry (returns None).
     """
     entry = integration_builder._BUILD_REGISTRY.get(build_id)
     if not isinstance(entry, dict):
@@ -782,18 +785,13 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
     spec = entry.get("spec")
     if not isinstance(spec, dict):
         return None
-    validation_rules = spec.get("validation_rules")
-    if isinstance(validation_rules, dict):
-        listener = validation_rules.get("listener")
-        if isinstance(listener, dict) and listener.get("endpoint_path"):
-            return dict(listener)
     components = spec.get("components")
     if not isinstance(components, list):
         return None
 
-    # 1. The deploy target is the spec's single process (mirrors
+    # 1. Confirm the deploy target listens: the spec's single process (mirrors
     #    _resolve_build_deployment_target; ambiguous/multi-process specs are
-    #    rejected there anyway).
+    #    rejected there anyway) must carry a WSS Listen source binding.
     process_comps = [
         comp
         for comp in components
@@ -805,8 +803,16 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
     if not operation_ref:
         return None
 
-    # 2. Resolve the referenced Listen operation component in-spec ($ref:KEY by
-    #    component key; a literal id by recorded/declared component_id).
+    # 2. Binding confirmed — prefer the archetype-emitted metadata block.
+    validation_rules = spec.get("validation_rules")
+    if isinstance(validation_rules, dict):
+        listener = validation_rules.get("listener")
+        if isinstance(listener, dict) and listener.get("endpoint_path"):
+            return dict(listener)
+
+    # 3. No metadata block — resolve the referenced Listen operation component
+    #    in-spec ($ref:KEY by component key; a literal id by recorded/declared
+    #    component_id) and derive the endpoint fields from its config.
     op_comp: Optional[Dict[str, Any]] = None
     if operation_ref.startswith("$ref:"):
         ref_key = operation_ref[5:].strip()
@@ -2845,25 +2851,59 @@ def _stage_summary(
 
 
 def _behavior_verified_marker(
-    *, dry_run: bool, execution: ExecutionStage, logs: LogsStage
+    *,
+    dry_run: bool,
+    execution: ExecutionStage,
+    logs: LogsStage,
+    listener_verify: Optional[ListenerVerifyStage] = None,
 ) -> Dict[str, Any]:
     """Top-level marker making the "deploy-clean is not behavioral verification" gap explicit (#81).
 
-    ``verified`` is True ONLY when a test actually ran to a clean COMPLETE terminal status AND its
-    logs were retrieved — so an agent never has to re-derive that fact by parsing stage statuses.
-    Every other path (dry-run, run_test=false, a prior-stage block, COMPLETE_WARN/ERROR/timeout, or
-    completed-but-logs-unavailable) is ``verified=False`` with a ``reason`` it can branch on. The
-    marker is purely additive: it changes no existing stage field and never flips ``_success``.
+    ``verified`` is True ONLY when the behavioral check for the build actually
+    ran clean: a test execution reaching COMPLETE with logs retrieved — or, for
+    a LISTENER build (M6 #12, no Test mode), a completed ``listener_verify``
+    whose live probe triggered a NEW execution that finished COMPLETE. Every
+    other path (dry-run, run_test=false, a prior-stage block,
+    COMPLETE_WARN/ERROR/timeout, completed-but-logs-unavailable, or a listener
+    probe whose execution errored) is ``verified=False`` with a ``reason`` it
+    can branch on. The marker is purely additive: it changes no existing stage
+    field and never flips ``_success``.
     """
     logs_status = logs.status
     if dry_run:
         return {"verified": False, "reason": "dry_run", "logs_status": logs_status}
+    # M6 (#12): a listener build's behavioral check IS the listener_verify
+    # stage (probe + new-execution readback) — the Test-mode stages are
+    # not_required by design, so they must not decide the marker.
+    if listener_verify is not None and listener_verify.status not in ("not_required",):
+        if listener_verify.status == "completed":
+            if (listener_verify.execution_status or "").upper() == "COMPLETE":
+                return {
+                    "verified": True,
+                    "reason": "listener_probe_verified",
+                    "logs_status": logs_status,
+                }
+            return {
+                "verified": False,
+                "reason": "listener_execution_not_complete",
+                "logs_status": logs_status,
+            }
+        if listener_verify.status == "blocked":
+            return {
+                "verified": False,
+                "reason": "listener_verify_blocked",
+                "logs_status": logs_status,
+            }
+        return {
+            "verified": False,
+            "reason": "listener_verify_failed",
+            "logs_status": logs_status,
+        }
     if execution.status == "skipped":
         return {"verified": False, "reason": "test_not_run", "logs_status": logs_status}
     if execution.status == "not_required":
-        # M6 (#12): listener builds have no Test mode — the listener_verify
-        # probe + execution readback is the behavioral check; read
-        # summary.listener instead of the test stage.
+        # Defensive fallback (a not_required test stage without a listener
+        # stage in the response) — there is no behavioral check to report.
         return {"verified": False, "reason": "test_not_supported", "logs_status": logs_status}
     if execution.status == "blocked":
         return {"verified": False, "reason": "test_blocked", "logs_status": logs_status}
@@ -3501,10 +3541,12 @@ def _assemble_response(
         "plan_only": plan_only,
         # Additive behavioral-verification marker (issue #81) — present on every full envelope;
         # every terminal path routes through here, so dry-run/plan/blocked/test paths all carry it.
+        # M6 (#12): a listener build's marker keys off the listener_verify stage.
         "behavior_verified": _behavior_verified_marker(
             dry_run=dry_run,
             execution=downstream["execution"],
             logs=downstream["logs"],
+            listener_verify=downstream.get("listener_verify"),
         ),
         "integration_name": target.integration_name,
         "target": target.model_dump(),

@@ -129,7 +129,16 @@ def _listener_entry(*, process_id="CID-1", listener_meta=None):
                     "action": "create",
                     "name": "Listener Process",
                     "component_id": None,
-                    "config": {},
+                    # Classification keys off this Listen source binding; the
+                    # validation_rules.listener block below is metadata only.
+                    "config": {
+                        "process_kind": "database_to_api_sync",
+                        "source": {
+                            "connector_type": "wss",
+                            "action_type": "Listen",
+                            "operation_id": "WSSOP-LIT",
+                        },
+                    },
                     "depends_on": [],
                 }
             ],
@@ -469,6 +478,13 @@ def test_real_run_success_probe_and_readback(registry, monkeypatch):
     # The stage summary block is present for agents.
     assert result["summary"]["listener"]["probe_status_code"] == 200
     assert result["summary"]["stage_statuses"]["listener_verify"] == "completed"
+    # Architect review (M6 #12): a completed listener_verify with a COMPLETE
+    # execution IS the behavioral verification.
+    assert result["behavior_verified"] == {
+        "verified": True,
+        "reason": "listener_probe_verified",
+        "logs_status": result["logs"]["status"],
+    }
 
 
 def test_listener_base_url_override_wins(registry, monkeypatch):
@@ -538,7 +554,10 @@ def test_run_test_true_listener_marks_execution_not_required(registry, monkeypat
     assert result["_success"] is True
     assert result["execution"]["status"] == "not_required"
     assert any("LISTENER_NO_TEST_MODE" in w for w in result["execution"]["warnings"])
-    assert result["behavior_verified"]["reason"] == "test_not_supported"
+    # The listener probe verified the build — the marker reflects that even
+    # though the Test-mode stage is not_required (architect review, M6 #12).
+    assert result["behavior_verified"]["verified"] is True
+    assert result["behavior_verified"]["reason"] == "listener_probe_verified"
 
 
 def test_error_execution_record_surfaces_warning_but_passes(registry, monkeypatch):
@@ -566,6 +585,11 @@ def test_error_execution_record_surfaces_warning_but_passes(registry, monkeypatc
     assert stage["execution_status"] == "ERROR"
     assert any("LISTENER_EXECUTION_ERROR" in w for w in stage["warnings"])
     assert any("LISTENER_EXECUTION_ERROR" in w for w in result["warnings"])
+    assert result["behavior_verified"] == {
+        "verified": False,
+        "reason": "listener_execution_not_complete",
+        "logs_status": result["logs"]["status"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1000,3 +1024,43 @@ def test_baseline_query_failure_degrades_with_warning(registry, monkeypatch):
     stage = result["listener_verify"]
     assert stage["status"] == "completed"
     assert any("LISTENER_READBACK_BASELINE_UNAVAILABLE" in w for w in stage["warnings"])
+
+
+def test_validation_rules_listener_on_non_listener_process_ignored(registry):
+    """Architect review (M6 #12): a caller-supplied validation_rules.listener
+    block on a spec whose deploy-target process has NO Listen source binding
+    must not classify the build as a listener — Test mode stays available and
+    no listener_verify probe is planned."""
+    entry = _listener_entry()
+    # Strip the listener binding: a plain scheduled process, metadata intact.
+    entry["spec"]["components"][0]["config"] = {
+        "process_kind": "database_to_api_sync",
+        "source": {
+            "connector_type": "database",
+            "action_type": "Get",
+            "connection_id": "DBCONN-1",
+            "operation_id": "DBOP-1",
+        },
+    }
+    assert entry["spec"]["validation_rules"]["listener"]["endpoint_path"]
+    bid = registry("b-vr-nonlistener", entry)
+    result = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True, run_test=True
+    )
+    assert result["listener_verify"]["status"] == "not_required"
+    assert result["execution"]["status"] == "planned"
+
+
+def test_confirmed_binding_prefers_validation_rules_metadata(registry):
+    """Once the process binding confirms a listener, the archetype-emitted
+    metadata block (richer field set) is preferred over re-deriving from the
+    operation component — even when the operation ref is an external literal."""
+    bid = registry("b-vr-preferred", _listener_entry())
+    result = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True
+    )
+    stage = result["listener_verify"]
+    assert stage["status"] == "planned"
+    # Comes from _LISTENER_META (validation_rules), not an op component (the
+    # entry's operation_id is a literal with no matching in-spec component).
+    assert stage["endpoint_path"] == "/ws/simple/executeOrderIntake"
