@@ -293,7 +293,7 @@ def build_manifest(chunks):
         area_counts = dict(Counter(
             parts[1].strip()
             for parts in (c["breadcrumb"].split(" > ") for c in companion_chunks)
-            if len(parts) >= 2 and parts[1].strip()
+            if len(parts) >= 3 and parts[1].strip()
         ))
         file_count = len({c["source_path"] for c in companion_chunks})
         manifest["companion"] = {
