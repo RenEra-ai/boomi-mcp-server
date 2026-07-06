@@ -31,7 +31,12 @@ the SUPPORTED vocabulary only; a value is named only when it matches known
 vocabulary. Schema leaf paths (the identifiers ``infer_profile_fields``
 already surfaces) and component ids remain reportable. Plaintext
 secret-shaped auth keys are rejected as gaps and never copied into
-``preset_parameters``.
+``preset_parameters``; the same key-shape scan (``_scan_for_secret_shaped_keys``
+— names like ``authorization`` / ``api_key`` / ``bearer`` / ``token``) guards
+request headers and query parameters before they are copied into a draft, so a
+credential smuggled through ``request_headers``/``query_parameters`` is gapped,
+never echoed. (Consistent with the rest of the codebase, the scan is key-name
+based, not a deep value inspection.)
 """
 
 from __future__ import annotations
@@ -67,6 +72,10 @@ MIGRATION_IMPORT_UNKNOWN_PROTOCOL = "MIGRATION_IMPORT_UNKNOWN_PROTOCOL"
 MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM = "MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM"
 MIGRATION_IMPORT_AMBIGUOUS_MAPPING = "MIGRATION_IMPORT_AMBIGUOUS_MAPPING"
 MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED = "MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED"
+# Declared endpoint metadata the selected preset cannot faithfully EMIT (e.g.
+# database_to_api_sync target request headers, which the archetype defers and
+# drops). Blocking, so the tool never emits a draft that silently loses it.
+MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT = "MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT"
 
 # Delegated-layer marker for inferred schemas that need field confirmation
 # before the draft may feed a build (ready_for_builder=False upstream).
@@ -714,14 +723,50 @@ def _resolve_mapping_side(
 # ---------------------------------------------------------------------------
 
 
-def _headers_dict(endpoint: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    """Return declared static request headers ('request_headers' or 'headers')."""
+def _raw_headers(endpoint: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return the raw declared request-header dict ('request_headers' or
+    'headers'), unsanitized — the caller must secret-scan before echoing."""
     headers = endpoint.get("request_headers")
     if not isinstance(headers, dict):
         headers = endpoint.get("headers")
     if isinstance(headers, dict) and headers:
-        return {str(k): str(v) for k, v in headers.items()}
+        return headers
     return None
+
+
+def _sanitized_metadata(
+    raw: Any,
+    role: str,
+    field: str,
+    kind: str,
+    gaps: List[Dict[str, Any]],
+) -> Optional[Dict[str, str]]:
+    """Return a ``{str: str}`` copy of declared request metadata, or None.
+
+    Rejects (as a blocking MIGRATION_IMPORT_MISSING_CREDENTIAL gap) any dict
+    carrying a secret-shaped KEY at any depth, so a credential smuggled through
+    ``request_headers`` / ``query_parameters`` is never copied into the returned
+    draft. Neither the key nor the value is echoed in the gap. Non-secret
+    metadata is passed through stringified.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+    if _scan_for_secret_shaped_keys(raw):
+        gaps.append(
+            _gap(
+                MIGRATION_IMPORT_MISSING_CREDENTIAL,
+                field,
+                f"{role} declares a secret-shaped {kind} name; the import never "
+                "echoes plaintext credentials into a draft",
+                hint=(
+                    "Route credentials through an opaque auth.credential_ref or "
+                    "a reused connection; remove secret-bearing "
+                    f"{kind}s from the request metadata."
+                ),
+            )
+        )
+        return None
+    return {str(k): str(v) for k, v in raw.items()}
 
 
 def _derive_binding(
@@ -755,12 +800,16 @@ def _derive_preset_parameters(
     target: _EndpointAnalysis,
     operations: List[Dict[str, Any]],
     naming: Dict[str, Any],
+    gaps: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Best-effort semantic mapping onto the selected archetype's contract.
 
     Slots the import cannot derive are OMITTED — build_from_archetype's own
     validation then reports them as per-field gaps, so missing required values
-    always surface as blocking gaps naming the parameter field.
+    always surface as blocking gaps naming the parameter field. Declared
+    request metadata (query params / headers) is secret-scanned before it is
+    copied into the draft, and metadata the selected preset cannot faithfully
+    emit is gapped rather than silently dropped.
     """
     params: Dict[str, Any] = {"naming": naming}
     source_ep = flow.get("source") if isinstance(flow.get("source"), dict) else {}
@@ -775,10 +824,22 @@ def _derive_preset_parameters(
         fetch: Dict[str, Any] = {}
         if isinstance(source_ep.get("path"), str):
             fetch["path"] = source_ep["path"]
-        qp = source_ep.get("query_parameters")
-        if isinstance(qp, dict):
-            fetch["query_parameters"] = {str(k): str(v) for k, v in qp.items()}
-        headers = _headers_dict(source_ep)
+        qp = _sanitized_metadata(
+            source_ep.get("query_parameters"),
+            "source",
+            "source.query_parameters",
+            "query parameter",
+            gaps,
+        )
+        if qp is not None:
+            fetch["query_parameters"] = qp
+        headers = _sanitized_metadata(
+            _raw_headers(source_ep),
+            "source",
+            "source.request_headers",
+            "request header",
+            gaps,
+        )
         if headers is not None:
             fetch["request_headers"] = headers
         if fetch:
@@ -815,31 +876,71 @@ def _derive_preset_parameters(
         )
         if isinstance(target_ep.get("path"), str):
             send["path"] = target_ep["path"]
-        # Declared request metadata is never silently dropped: it is copied
-        # into the archetype's own send-request vocabulary, and any shape the
-        # selected preset cannot carry fails its contract validation → an
-        # honest blocking gap instead of a semantics-changing draft.
-        qp = target_ep.get("query_parameters")
-        if isinstance(qp, dict):
+        # Declared request metadata is secret-scanned first, then either copied
+        # into the archetype's own send-request vocabulary or — when the preset
+        # cannot faithfully emit it — surfaced as a blocking gap, never silently
+        # dropped or echoed.
+        qp = _sanitized_metadata(
+            target_ep.get("query_parameters"),
+            "target",
+            "target.query_parameters",
+            "query parameter",
+            gaps,
+        )
+        if qp is not None:
             if preset == "database_to_api_sync":
-                # RestSendRequest takes a typed literal list, not a dict.
+                # RestSendRequest takes a typed literal list, not a dict; the DB
+                # preset emits these literal query params onto the operation.
                 send["query_parameters"] = [
                     {
-                        "name": str(k),
+                        "name": k,
                         "value_source": "literal",
-                        "literal_value": str(v),
+                        "literal_value": v,
                     }
                     for k, v in qp.items()
                 ]
             else:
-                send["query_parameters"] = {str(k): str(v) for k, v in qp.items()}
-        headers = _headers_dict(target_ep)
-        if headers is not None:
-            if preset == "database_to_api_sync" and binding is not None and binding.get("mode") == "create":
-                # RestSendRequest has no request_headers; create-mode carries
-                # them as connection default_headers (applied to every send).
-                binding["settings"]["default_headers"] = headers
-            else:
+                send["query_parameters"] = qp
+        if preset == "database_to_api_sync":
+            # database_to_api_sync defers connection default_headers (they are
+            # NOT emitted onto the connection or operation — see the archetype's
+            # metadata-deferred note), so declared target headers cannot be
+            # faithfully carried. Secret-scan (so a secret-shaped header is a
+            # credential gap), then block on any remaining headers instead of
+            # storing them where they would be silently lost.
+            safe_headers = _sanitized_metadata(
+                _raw_headers(target_ep),
+                "target",
+                "target.request_headers",
+                "request header",
+                gaps,
+            )
+            if safe_headers is not None:
+                gaps.append(
+                    _gap(
+                        MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT,
+                        "target.request_headers",
+                        "the database_to_api_sync preset cannot emit target "
+                        "request headers (the REST connection default_headers "
+                        "are metadata-deferred and dropped by the archetype); "
+                        "these headers would be silently lost",
+                        hint=(
+                            "Reuse an existing REST connection that already "
+                            "carries the headers, or hand-author the integration "
+                            "via get_schema_template(schema_name="
+                            "'IntegrationSpecV1')."
+                        ),
+                    )
+                )
+        else:
+            headers = _sanitized_metadata(
+                _raw_headers(target_ep),
+                "target",
+                "target.request_headers",
+                "request header",
+                gaps,
+            )
+            if headers is not None:
                 send["request_headers"] = headers
         tgt["send_request"] = send
         if target.profile_tree is not None:
@@ -1177,7 +1278,7 @@ def import_integration_draft_action(
     preset_parameters: Optional[Dict[str, Any]] = None
     if selected_preset is not None:
         preset_parameters = _derive_preset_parameters(
-            selected_preset, flow, source, target, operations, naming
+            selected_preset, flow, source, target, operations, naming, gaps
         )
 
     # ---- gap ordering + build attempt -------------------------------------------

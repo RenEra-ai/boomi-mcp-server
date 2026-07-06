@@ -17,6 +17,7 @@ from boomi_mcp.categories.integration_import import (
     MIGRATION_IMPORT_MISSING_CREDENTIAL,
     MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED,
     MIGRATION_IMPORT_UNKNOWN_PROTOCOL,
+    MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT,
     MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM,
     import_integration_draft_action as act,
 )
@@ -408,20 +409,98 @@ def test_db_preset_target_query_params_use_literal_list_form():
                 "base_url": "https://t.example.com",
                 "path": "/orders",
                 "query_parameters": {"mode": "bulk"},
-                "request_headers": {"X-Api-Version": "2"},
                 "schema": {"profile": _TARGET_PROFILE},
             },
         },
     )
     send = r["preset_parameters"]["target"]["send_request"]
+    # The DB preset emits literal query params onto the operation (typed list).
     assert send["query_parameters"] == [
         {"name": "mode", "value_source": "literal", "literal_value": "bulk"}
     ]
-    # RestSendRequest has no request_headers slot; create-mode carries them as
-    # connection default_headers instead of dropping them.
-    binding = r["preset_parameters"]["target"]["binding"]
-    assert binding["settings"]["default_headers"] == {"X-Api-Version": "2"}
     assert "request_headers" not in send
+
+
+def test_db_preset_target_headers_block_not_silently_dropped():
+    # Codex review r2: database_to_api_sync defers connection default_headers
+    # (never emitted), so declared target headers must BLOCK, never be stashed
+    # where they would be silently lost.
+    r = act(
+        "generic_integration_description",
+        {
+            "name": "Orders Export",
+            "source": {"protocol": "database"},
+            "target": {
+                "protocol": "rest",
+                "base_url": "https://t.example.com",
+                "path": "/orders",
+                "request_headers": {"X-Api-Version": "2"},
+                "schema": {"profile": _TARGET_PROFILE},
+            },
+        },
+    )
+    assert MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT in _gap_codes(r)
+    gap = next(
+        g for g in r["gaps"] if g["code"] == MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT
+    )
+    assert gap["field"] == "target.request_headers"
+    assert gap["severity"] == "blocking"
+    # Never stashed in default_headers, never echoed.
+    binding = r["preset_parameters"]["target"]["binding"]
+    assert "default_headers" not in binding.get("settings", {})
+    assert r["ready_for_build"] is False
+
+
+def test_secret_shaped_header_rejected_not_echoed():
+    # Codex review r2: a credential smuggled through request_headers must be
+    # gapped, never copied into the returned draft.
+    artifact = _rest_to_rest_artifact()
+    artifact["target"]["request_headers"] = {"Authorization": "Bearer sk-live-xyz"}
+    r = act("generic_integration_description", artifact)
+    assert MIGRATION_IMPORT_MISSING_CREDENTIAL in _gap_codes(r)
+    gap = next(
+        g
+        for g in r["gaps"]
+        if g["code"] == MIGRATION_IMPORT_MISSING_CREDENTIAL
+        and g["field"] == "target.request_headers"
+    )
+    assert gap["severity"] == "blocking"
+    assert "sk-live-xyz" not in json.dumps(r)
+    assert "Bearer" not in json.dumps(r)
+    assert r["ready_for_build"] is False
+    assert "integration_spec_draft" not in r
+    # The safe payload_profile still made it through; only the header is dropped.
+    send = r["preset_parameters"]["target"]["send_request"]
+    assert "request_headers" not in send
+
+
+def test_secret_shaped_query_param_rejected_not_echoed():
+    artifact = _rest_to_rest_artifact()
+    artifact["source"]["query_parameters"] = {"api_key": "sk-secret-123"}
+    r = act("generic_integration_description", artifact)
+    codes_fields = [
+        (g["code"], g["field"]) for g in r["gaps"]
+    ]
+    assert (MIGRATION_IMPORT_MISSING_CREDENTIAL, "source.query_parameters") in codes_fields
+    assert "sk-secret-123" not in json.dumps(r)
+    fetch = r["preset_parameters"]["source"].get("fetch_request", {})
+    assert "query_parameters" not in fetch
+
+
+def test_non_secret_headers_and_query_still_propagate():
+    artifact = _rest_to_rest_artifact()
+    artifact["source"]["request_headers"] = {"Accept": "application/json"}
+    artifact["target"]["query_parameters"] = {"mode": "upsert"}
+    r = act("generic_integration_description", artifact)
+    assert r["ready_for_build"] is True
+    assert (
+        r["preset_parameters"]["source"]["fetch_request"]["request_headers"]
+        == {"Accept": "application/json"}
+    )
+    assert (
+        r["preset_parameters"]["target"]["send_request"]["query_parameters"]
+        == {"mode": "upsert"}
+    )
 
 
 def test_rejected_vocabulary_values_never_echoed_in_gaps():
