@@ -595,6 +595,38 @@ def test_transforms_wrong_type_gapped():
     assert gap["code"] == MIGRATION_IMPORT_INVALID_INPUT
 
 
+def test_singleton_transform_keeps_map_stage_like_list_form():
+    # Repo Codex review: the singleton-object form must not hide transform
+    # intent — the pipeline draft's map stage matches the list form exactly.
+    artifact = _rest_to_rest_artifact()
+    del artifact["mappings"]
+    artifact["transforms"] = {"kind": "xslt", "stylesheet": "<xsl/>"}
+    singleton_stages = [
+        s["kind"]
+        for s in act("generic_integration_description", artifact)["pipeline_draft"][
+            "stages"
+        ]
+    ]
+    artifact["transforms"] = [{"kind": "xslt", "stylesheet": "<xsl/>"}]
+    list_stages = [
+        s["kind"]
+        for s in act("generic_integration_description", artifact)["pipeline_draft"][
+            "stages"
+        ]
+    ]
+    assert singleton_stages == list_stages == ["fetch", "map", "send"]
+    # A flow with no transform at all correctly omits the map stage.
+    artifact2 = _rest_to_rest_artifact()
+    del artifact2["mappings"]
+    no_xform = [
+        s["kind"]
+        for s in act("generic_integration_description", artifact2)["pipeline_draft"][
+            "stages"
+        ]
+    ]
+    assert no_xform == ["fetch", "send"]
+
+
 def test_by_reference_index_unresolved_mapping_gapped():
     # Architect review: a #95-indexed existing profile has no inline profile for
     # the archetype to validate against, so an unindexed mapping path/leaf must

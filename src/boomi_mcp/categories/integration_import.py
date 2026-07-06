@@ -599,9 +599,17 @@ def _analyze_transforms(
     flow: Dict[str, Any],
     facts: List[Dict[str, str]],
     gaps: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """Validate transform entries; return declared mapping dicts from all
-    field-mapping transforms plus the top-level ``mappings`` list."""
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Validate transform entries.
+
+    Returns ``(mappings, transform_present)`` where ``mappings`` is every
+    declared mapping dict (top-level ``mappings`` plus each field-mapping
+    transform's ``mappings``) and ``transform_present`` is True when the flow
+    declares ANY transform intent — including a singleton-object or an
+    unsupported (e.g. XSLT) transform that yields no mappings. The caller uses
+    ``transform_present`` to keep the ``map`` stage in the pipeline draft so a
+    declared-but-unsupported transform is never hidden from the draft.
+    """
     mappings: List[Dict[str, Any]] = []
 
     raw_mappings = flow.get("mappings")
@@ -614,6 +622,12 @@ def _analyze_transforms(
     # {"kind": "xslt"}) would slip past the list guard undetected.
     if isinstance(transforms, dict):
         transforms = [transforms]
+    # A transform is "present" for pipeline-shape purposes whenever the flow
+    # declares mappings or any recognized transform-list entry (the malformed
+    # non-list/non-dict case below is gapped and contributes no map stage).
+    transform_present = bool(mappings) or (
+        isinstance(transforms, list) and bool(transforms)
+    )
     if transforms is not None and not isinstance(transforms, list):
         gaps.append(
             _gap(
@@ -665,7 +679,7 @@ def _analyze_transforms(
                         ),
                     )
                 )
-    return mappings
+    return mappings, transform_present
 
 
 def _resolve_mapping_side(
@@ -1186,7 +1200,7 @@ def import_integration_draft_action(
             )
         )
 
-    raw_mappings = _analyze_transforms(flow, facts, gaps)
+    raw_mappings, transform_present = _analyze_transforms(flow, facts, gaps)
 
     # Reliability / scheduling constructs the import does not map into any
     # preset's emitted parameters. Declaring them and still returning a
@@ -1334,10 +1348,9 @@ def import_integration_draft_action(
     # The map stage appears whenever the flow declares ANY transform intent —
     # even one the import cannot express (its specifics live in gaps[]) — so
     # the draft never hides that a transformation happens between endpoints.
-    transforms_declared = isinstance(flow.get("transforms"), list) and bool(
-        flow["transforms"]
-    )
-    has_map = bool(operations) or bool(raw_mappings) or transforms_declared
+    # ``transform_present`` comes from _analyze_transforms' normalized view, so
+    # a singleton-object transform counts here exactly as a list one does.
+    has_map = bool(operations) or bool(raw_mappings) or transform_present
     pipeline_draft: Optional[Dict[str, Any]] = None
     if stage_plan is not None:
         pipeline_draft = _build_pipeline_draft(stage_plan, has_map=has_map)
