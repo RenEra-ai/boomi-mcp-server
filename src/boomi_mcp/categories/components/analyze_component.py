@@ -286,11 +286,24 @@ def _analyze_api_service(
 
         effective = effective_api_service_route(base_url_path, overrides, wss_op_config)
         effective_key = f"{effective['method']} {effective['path']}"
-        if wss_op_config is None and not str(overrides.get("object_name") or "").strip():
-            # Inherit-dependent path whose WSS operation could not be resolved
-            # — the computed path is partial, don't collision-flag it.
+        # Inherit-dependent PATH (no explicit objectName) or METHOD (no
+        # explicit httpMethod and no explicit inputType to derive one from)
+        # whose WSS operation could not be resolved: the computed value is a
+        # guess — e.g. the method defaults to POST while the real op may be
+        # inputType='none' (GET) — so flag it unresolved and never
+        # collision-compare it (Codex review r1).
+        path_unresolved = wss_op_config is None and not str(
+            overrides.get("object_name") or ""
+        ).strip()
+        method_unresolved = wss_op_config is None and not (
+            str(overrides.get("http_method") or "").strip()
+            or str(overrides.get("input_type") or "").strip()
+        )
+        if path_unresolved:
             flags.append("effective_path_unresolved")
-        else:
+        if method_unresolved:
+            flags.append("effective_method_unresolved")
+        if not (path_unresolved or method_unresolved):
             if effective_key in seen_effective:
                 flags.append("duplicate_effective_path")
                 prior = routes_out[seen_effective[effective_key]]

@@ -1144,6 +1144,7 @@ def _asc_entry(*, process_id="CID-1", asc_id="ASC-1", extra_route=None, listener
 def _asc_deployment_responses(
     *,
     asc_deployment_active=True,
+    asc_fresh=False,
     collision_deployments=None,
     route_check_deployments=None,
 ):
@@ -1153,11 +1154,17 @@ def _asc_deployment_responses(
     deploy) -> list_packages (ASC pkg) -> list_deployments (ASC deploy)
     [-> list_deployments (route-process check, only for multi-route ASCs)]
     -> list_deployments (collision scan).
+
+    ``asc_fresh=True`` models a first-time ASC rollout: no existing package
+    (list empty -> create_package) and no existing deployment (list empty ->
+    deploy, active) — the created/deployed statuses drive the registration
+    retry window and the failure-cleanup plan (Codex review r1).
     """
     responses = _deployment_responses(collision_deployments=collision_deployments)
-    responses["list_packages"] = [
-        responses["list_packages"],
-        {
+    asc_packages = (
+        {"_success": True, "packages": []}
+        if asc_fresh
+        else {
             "_success": True,
             "packages": [
                 {
@@ -1168,10 +1175,26 @@ def _asc_deployment_responses(
                     "created_date": "2026-01-01T00:00:00Z",
                 }
             ],
-        },
-    ]
+        }
+    )
+    responses["list_packages"] = [responses["list_packages"], asc_packages]
+    if asc_fresh:
+        responses["create_package"] = {
+            "_success": True,
+            "package": {"package_id": "pkg-asc"},
+        }
     process_deploy, collision = responses["list_deployments"]
-    if asc_deployment_active:
+    if asc_fresh:
+        asc_deploy = {"_success": True, "deployments": []}
+        responses["deploy"] = {
+            "_success": True,
+            "deployment": {
+                "deployment_id": "dep-asc",
+                "active": bool(asc_deployment_active),
+                "current_version": "1",
+            },
+        }
+    elif asc_deployment_active:
         asc_deploy = {
             "_success": True,
             "deployments": [
@@ -1543,3 +1566,69 @@ def test_ensure_api_service_deployment_packages_as_webservice(monkeypatch):
     assert create_call["config_data"]["component_type"] == "webservice"
     assert create_call["config_data"]["component_id"] == "ASC-9"
     assert create_call["config_data"]["package_version"] == "v9"
+
+
+def test_fresh_asc_deploy_opens_registration_retry_window(registry, monkeypatch):
+    # Codex review r1: the /ws/rest route registration follows the ASC
+    # deployment. With the PROCESS deployment reused but the ASC freshly
+    # deployed, a transient no-route 401 must be retried within the bounded
+    # window rather than failing on the first probe.
+    bid = registry("b-asc-lag", _asc_entry())
+    probe = _FakeProbe([(401, None), (200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        deployment_responses=_asc_deployment_responses(asc_fresh=True),
+    )
+    result = _run(bid)
+    assert result["_success"] is True, result.get("error")
+    stage = result["listener_verify"]
+    assert stage["api_service_package_status"] == "created"
+    assert stage["api_service_deployment_status"] == "deployed"
+    assert len(probe.calls) == 2
+    assert any("LISTENER_ROUTE_REGISTRATION_LAG" in w for w in stage["warnings"])
+
+
+def test_asc_failure_cleanup_includes_fresh_asc_resources(registry, monkeypatch):
+    # Codex review r1: a listener_verify failure after THIS attempt created
+    # and deployed the ASC must name the ASC undeploy + package delete in the
+    # cleanup plan (FIRST — a leftover active ASC base-shadows the retry).
+    bid = registry("b-asc-clean", _asc_entry())
+    probe = _FakeProbe([(404, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        deployment_responses=_asc_deployment_responses(asc_fresh=True),
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_PROBE_FAILED"
+    cleanup = result["cleanup"]
+    assert cleanup["status"] == "planned"
+    ops = cleanup["operations"]
+    assert ops[0]["action"] == "undeploy"
+    assert ops[0]["resource_id"] == "dep-asc"
+    assert ops[0]["config"]["package_id"] == "pkg-asc"
+    assert ops[1]["action"] == "delete_package"
+    assert ops[1]["resource_id"] == "pkg-asc"
+    # A REUSED ASC deployment/package must NOT be listed for cleanup.
+    bid2 = registry("b-asc-clean2", _asc_entry())
+    probe2 = _FakeProbe([(404, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe2,
+        execution_records=_RECORD_OK,
+    )
+    result2 = _run(bid2)
+    assert result2["_success"] is False
+    asc_ops = [
+        op
+        for op in (result2["cleanup"].get("operations") or [])
+        if op["resource_id"] in ("dep-asc", "pkg-asc")
+    ]
+    assert asc_ops == []

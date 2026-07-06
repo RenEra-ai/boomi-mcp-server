@@ -1916,10 +1916,27 @@ def _check_api_service_route_dependencies(
         value = entry.get("process")
         if value is None:
             value = entry.get("process_id")
-        if not (isinstance(value, str) and value.strip().startswith("$ref:")):
-            continue
         field = f"routes[{index}].process"
-        ref_key = value.strip()[len("$ref:"):]
+        # Whitespace-padded / empty-key $ref tokens must be REJECTED here:
+        # apply-time _resolve_dependency_tokens only substitutes a value that
+        # starts with '$ref:' at byte 0, so ' $ref:KEY ' would plan clean,
+        # apply earlier components, then die unresolved inside
+        # ApiServiceBuilder.build() mid-apply (Codex review r1).
+        if _is_malformed_ref_token(value):
+            return BuilderValidationError(
+                f"{field} $ref token is malformed (whitespace-padded or "
+                f"empty key): {value!r}",
+                error_code="API_SERVICE_ROUTE_PROCESS_REF_INVALID",
+                field=field,
+                hint=(
+                    "Use exactly '$ref:<process key>' — no surrounding "
+                    "whitespace — referencing a process declared in the same "
+                    "integration spec."
+                ),
+            )
+        if not (isinstance(value, str) and value.startswith("$ref:")):
+            continue
+        ref_key = value[len("$ref:"):]
         if not ref_key:
             return BuilderValidationError(
                 f"{field} $ref token is empty (expected '$ref:KEY')",

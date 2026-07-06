@@ -372,7 +372,13 @@ class ListenerVerifyStage(BaseModel):
     publish_mode: Optional[str] = None
     api_service_component_id: Optional[str] = None
     api_service_package_id: Optional[str] = None
+    # created/reused — whether THIS attempt created the ASC package (drives
+    # the failure-cleanup plan, which only undoes what this attempt created).
+    api_service_package_status: Optional[str] = None
     api_service_deployment_id: Optional[str] = None
+    # deployed/reused — same cleanup rationale, plus the probe's
+    # route-registration retry window keys off a FRESH ASC deployment.
+    api_service_deployment_status: Optional[str] = None
     api_service_deployment_active: Optional[bool] = None
     route_process_ids: List[str] = Field(default_factory=list)
     route_deployments_active: Optional[bool] = None
@@ -1194,8 +1200,10 @@ def _run_listener_verify_stage(
         )
         if asc_package is not None:
             stage.api_service_package_id = asc_package.package_id
+            stage.api_service_package_status = asc_package.status
         if asc_deployment is not None:
             stage.api_service_deployment_id = asc_deployment.deployment_id
+            stage.api_service_deployment_status = asc_deployment.status
             stage.api_service_deployment_active = bool(asc_deployment.active)
         if asc_error is not None:
             return _fail(
@@ -1566,7 +1574,13 @@ def _run_listener_verify_stage(
     # clouds). Retry those signals within a bounded window so the headline
     # deploy-then-verify call does not fail on registration lag. A REUSED
     # active deployment serves immediately, so it keeps single-probe behavior.
-    registration_wait = deployment_stage.status == "deployed"
+    # ASC mode: the /ws/rest route registration follows the ASC deployment
+    # (live-observed ~75s after an ASC deploy, #133 QA), so a FRESH ASC
+    # deployment opens the retry window even when the process deployment was
+    # reused (Codex review r1).
+    registration_wait = deployment_stage.status == "deployed" or (
+        asc_mode and stage.api_service_deployment_status == "deployed"
+    )
     registration_deadline = time.monotonic() + _LISTENER_ROUTE_REGISTRATION_WINDOW_SECONDS
     probe_attempts = 0
     while True:
@@ -3667,6 +3681,7 @@ def _cleanup_operations_for_failure(
     runtime_attachment: Optional[RuntimeAttachmentStage],
     *,
     environment_id: Optional[str],
+    listener_verify: Optional[ListenerVerifyStage] = None,
 ) -> Tuple[List[CleanupOperation], List[str]]:
     """Destructive operations (reverse creation order) undoing what THIS attempt created, plus
     manual-intervention warnings for mutations that cannot be expressed as an executable op.
@@ -3682,9 +3697,52 @@ def _cleanup_operations_for_failure(
     An attachment leg that was ``attached`` (mutated the account) but returned no id (#129 D5)
     cannot be undone by a detach-by-id op — a ``resource_id=None`` op is rejected by the detach
     handler — so instead of emitting a bogus op, its manual-cleanup need is surfaced as a warning.
+
+    M6.1 (#133, Codex review r1): in ASC publish mode the listener stage
+    packages/deploys the API Service Component AFTER the process resources, so
+    a fresh ASC deployment/package recorded on ``listener_verify`` is undone
+    FIRST — a leftover active webservice deployment would base-shadow the next
+    attempt's ASC (LISTENER_ASC_COLLISION on retry).
     """
     ops: List[CleanupOperation] = []
     manual_warnings: List[str] = []
+
+    # 0. ASC deployment + package (created LAST, by the listener stage).
+    if listener_verify is not None:
+        if (
+            listener_verify.api_service_deployment_status == "deployed"
+            and listener_verify.api_service_deployment_id
+        ):
+            ops.append(CleanupOperation(
+                tool="manage_deployment",
+                action="undeploy",
+                resource_type="deployment",
+                resource_id=listener_verify.api_service_deployment_id,
+                config={
+                    "deployment_id": listener_verify.api_service_deployment_id,
+                    "package_id": listener_verify.api_service_package_id,
+                    "environment_id": environment_id,
+                },
+                reason=(
+                    "This run deployed the API Service Component package; undeploy it to undo "
+                    "the new ASC deployment (a leftover active ASC base-shadows a retry)."
+                ),
+            ))
+        if (
+            listener_verify.api_service_package_status == "created"
+            and listener_verify.api_service_package_id
+        ):
+            ops.append(CleanupOperation(
+                tool="manage_deployment",
+                action="delete_package",
+                resource_type="package",
+                resource_id=listener_verify.api_service_package_id,
+                config={"package_id": listener_verify.api_service_package_id},
+                reason=(
+                    "This run created the API Service Component package; delete it to undo "
+                    "the new package."
+                ),
+            ))
 
     # 1. process<->runtime attachment.
     if (
@@ -3807,6 +3865,7 @@ def _cleanup_stage_for_failure(
     cleanup_on_failure: bool,
     boomi_client: Any = None,
     profile: Optional[str] = None,
+    listener_verify: Optional[ListenerVerifyStage] = None,
 ) -> CleanupStage:
     """Plan (default) or, on explicit opt-in, execute cleanup of resources THIS attempt created.
 
@@ -3818,6 +3877,7 @@ def _cleanup_stage_for_failure(
     """
     operations, manual_warnings = _cleanup_operations_for_failure(
         package, deployment, runtime_attachment, environment_id=environment_id,
+        listener_verify=listener_verify,
     )
     if not operations:
         # No executable ops. If a mutation could not be expressed as one (attached-without-id,
@@ -4274,6 +4334,9 @@ def _runtime_or_schedule_failed_response(
         cleanup_on_failure=cleanup_on_failure,
         boomi_client=boomi_client,
         profile=profile,
+        # M6.1 (#133): a fresh ASC package/deployment recorded on the failed
+        # listener stage joins the cleanup plan (undone first).
+        listener_verify=listener_verify,
     )
     response = _assemble_response(
         success=False,

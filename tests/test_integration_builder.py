@@ -8434,3 +8434,20 @@ class TestBuildPlanApiServiceComponent:
         assert "webservice" in _COMPONENT_NAME_PRIMARY_TYPES
         assert _normalize_component_type("api_service") == "webservice"
         assert _normalize_component_type("api.service") == "webservice"
+
+    @patch(_PATCH_TARGET)
+    def test_padded_ref_route_rejected_at_plan(self, mock_pag):
+        # Codex review r1: apply-time _resolve_dependency_tokens only
+        # substitutes byte-0 '$ref:' tokens, so a whitespace-padded ref would
+        # plan clean, apply earlier components, then die unresolved inside
+        # the builder mid-apply. Plan-time must reject it.
+        mock_pag.return_value = []
+        for padded in (" $ref:main_process", "$ref:main_process ", "$ref:"):
+            comps = _asc_spec_components(routes=[{"process": padded}])
+            plan = _build_plan(MagicMock(), _build_config(comps))
+            step = next(s for s in plan["steps"] if s["key"] == "api_service")
+            assert step["planned_action"] == "error_generated_profile_validation", padded
+            assert (
+                step["validation_error"]["error_code"]
+                == "API_SERVICE_ROUTE_PROCESS_REF_INVALID"
+            ), padded

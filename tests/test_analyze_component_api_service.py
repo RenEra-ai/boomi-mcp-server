@@ -265,8 +265,42 @@ def test_unresolved_inherit_path_not_collision_flagged():
     result = _analyze(xml, reads)
     for route in result["routes"]:
         assert "effective_path_unresolved" in route["flags"]
+        # All-inherit routes leave the method unresolved too.
+        assert "effective_method_unresolved" in route["flags"]
         assert "duplicate_effective_path" not in route["flags"]
         assert "wss_operation_unreadable" in route["flags"]
+
+
+def test_unresolved_inherit_method_not_collision_flagged():
+    # Codex review r1: explicit objectName but inherited method (no explicit
+    # httpMethod, no explicit inputType) with an unreadable WSS operation —
+    # the POST default is a guess (the real op may be inputType='none' ->
+    # GET), so the route is method-unresolved and never collision-compared,
+    # even against another route with the same explicit path.
+    reads = {
+        _PROCESS_ID: {"type": "process", "xml": _LISTENER_PROCESS_XML},
+        # _OP_ID intentionally unreadable
+    }
+    xml = _asc_xml(
+        _route(_PROCESS_ID, objectName="intake")
+        + _route(_PROCESS_ID, objectName="intake")
+    )
+    result = _analyze(xml, reads)
+    for route in result["routes"]:
+        assert "effective_method_unresolved" in route["flags"]
+        assert "effective_path_unresolved" not in route["flags"]  # path IS explicit
+        assert "duplicate_effective_path" not in route["flags"]
+    # An explicit inputType pins the method (none -> GET) without the op:
+    # no method-unresolved flag, and the duplicate check applies again.
+    xml2 = _asc_xml(
+        _route(_PROCESS_ID, objectName="intake", inputType="none")
+        + _route(_PROCESS_ID, objectName="intake", inputType="none")
+    )
+    result2 = _analyze(xml2, reads)
+    assert result2["routes"][0]["effective_method"] == "GET"
+    for route in result2["routes"]:
+        assert "effective_method_unresolved" not in route["flags"]
+        assert "duplicate_effective_path" in route["flags"]
 
 
 def test_budget_exhaustion_flags_instead_of_reading():
