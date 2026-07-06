@@ -24,9 +24,12 @@ builder codes from archetype validation) plus the delegated
 ``PROFILE_INFERENCE_CONFIRMATION_REQUIRED`` marker for schemas inferred from
 samples that still need field confirmation.
 
-Secret safety: artifact VALUES are never echoed in gap messages (only field
-paths, protocol/kind vocabulary tokens, and schema leaf paths — the same
-identifiers ``infer_profile_fields`` already surfaces). Plaintext
+Secret safety: artifact VALUES are never echoed in gap messages or details —
+a value that failed vocabulary validation (protocol, transform kind, auth
+mode, method) is arbitrary caller content and is reported by field path plus
+the SUPPORTED vocabulary only; a value is named only when it matches known
+vocabulary. Schema leaf paths (the identifiers ``infer_profile_fields``
+already surfaces) and component ids remain reportable. Plaintext
 secret-shaped auth keys are rejected as gaps and never copied into
 ``preset_parameters``.
 """
@@ -125,6 +128,10 @@ _PRESET_TABLE: Dict[Tuple[str, str], Tuple[str, List[Tuple[str, str]]]] = {
 
 # Transform kinds the import can express as archetype transform operations.
 _SUPPORTED_TRANSFORM_KINDS = {"field_mapping", "mapping", "direct"}
+
+# REST auth-mode vocabulary (RestCreateSettings enum). Values outside it are
+# arbitrary caller content and are never echoed in messages.
+_KNOWN_AUTH_MODES = {"basic", "bearer_token", "oauth2_client_credentials"}
 
 _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -486,6 +493,8 @@ def _analyze_endpoint(
     analysis.raw_protocol = protocol if isinstance(protocol, str) else None
     analysis.kind = _classify_protocol(protocol)
     if analysis.kind is None:
+        # The rejected value is NOT echoed — it failed vocabulary validation,
+        # so it is arbitrary caller content (secret-safe contract).
         gaps.append(
             _gap(
                 MIGRATION_IMPORT_UNKNOWN_PROTOCOL,
@@ -500,7 +509,6 @@ def _analyze_endpoint(
                     + ". Unsupported transports need a hand-authored "
                     "IntegrationSpecV1 (get_schema_template)."
                 ),
-                details={"protocol": str(protocol)} if protocol is not None else None,
             )
         )
     else:
@@ -532,11 +540,18 @@ def _analyze_endpoint(
                 )
             )
         elif analysis.auth_mode and analysis.auth_mode != "none" and not analysis.credential_ref:
+            # The mode value is only named when it is known vocabulary; an
+            # unrecognized mode is arbitrary caller content and never echoed.
+            mode_label = (
+                f"'{analysis.auth_mode}'"
+                if analysis.auth_mode in _KNOWN_AUTH_MODES
+                else "a non-'none' value"
+            )
             gaps.append(
                 _gap(
                     MIGRATION_IMPORT_MISSING_CREDENTIAL,
                     f"{role}.auth.credential_ref",
-                    f"{role} auth mode '{analysis.auth_mode}' declares no "
+                    f"{role} auth mode is {mode_label} but declares no "
                     "credential reference; the import never invents credentials",
                     hint=(
                         "Supply auth.credential_ref (an opaque secret-store "
@@ -546,9 +561,14 @@ def _analyze_endpoint(
                 )
             )
         elif analysis.auth_mode and analysis.auth_mode != "none":
+            mode_label = (
+                f"'{analysis.auth_mode}'"
+                if analysis.auth_mode in _KNOWN_AUTH_MODES
+                else "a non-'none' mode"
+            )
             facts.append(
                 _fact(
-                    f"{role} auth mode '{analysis.auth_mode}' with credential by "
+                    f"{role} auth mode {mode_label} with credential by "
                     "reference",
                     f"artifact:{role}.auth",
                 )
@@ -604,6 +624,8 @@ def _analyze_transforms(
                     )
                 )
             else:
+                # The rejected kind is not echoed (arbitrary caller content);
+                # the supported vocabulary in the message localizes the fix.
                 gaps.append(
                     _gap(
                         MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM,
@@ -617,7 +639,6 @@ def _analyze_transforms(
                             "build_from_archetype transform operations, XSLT is "
                             "not — see issue #42)."
                         ),
-                        details={"kind": str(kind)} if kind is not None else None,
                     )
                 )
     return mappings
@@ -693,6 +714,16 @@ def _resolve_mapping_side(
 # ---------------------------------------------------------------------------
 
 
+def _headers_dict(endpoint: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Return declared static request headers ('request_headers' or 'headers')."""
+    headers = endpoint.get("request_headers")
+    if not isinstance(headers, dict):
+        headers = endpoint.get("headers")
+    if isinstance(headers, dict) and headers:
+        return {str(k): str(v) for k, v in headers.items()}
+    return None
+
+
 def _derive_binding(
     endpoint: Dict[str, Any], analysis: _EndpointAnalysis
 ) -> Optional[Dict[str, Any]]:
@@ -704,11 +735,14 @@ def _derive_binding(
             return {"mode": "reuse", "component_name": str(conn["component_name"])}
     base_url = endpoint.get("base_url") or endpoint.get("url")
     if isinstance(base_url, str) and base_url.strip():
-        settings: Dict[str, Any] = {
-            "base_url": base_url.strip(),
-            "auth_mode": analysis.auth_mode or "none",
-        }
-        if analysis.credential_ref and settings["auth_mode"] != "none":
+        settings: Dict[str, Any] = {"base_url": base_url.strip()}
+        auth_mode = analysis.auth_mode or "none"
+        # Only known vocabulary is propagated into the draft; an unrecognized
+        # mode is arbitrary caller content — omitted, so archetype validation
+        # reports the missing auth_mode instead of echoing the junk value.
+        if auth_mode == "none" or auth_mode in _KNOWN_AUTH_MODES:
+            settings["auth_mode"] = auth_mode
+        if analysis.credential_ref and settings.get("auth_mode") not in (None, "none"):
             settings["credential_ref"] = analysis.credential_ref
         return {"mode": "create", "settings": settings}
     return None
@@ -744,6 +778,9 @@ def _derive_preset_parameters(
         qp = source_ep.get("query_parameters")
         if isinstance(qp, dict):
             fetch["query_parameters"] = {str(k): str(v) for k, v in qp.items()}
+        headers = _headers_dict(source_ep)
+        if headers is not None:
+            fetch["request_headers"] = headers
         if fetch:
             src["fetch_request"] = fetch
         if source.profile_tree is not None:
@@ -778,6 +815,32 @@ def _derive_preset_parameters(
         )
         if isinstance(target_ep.get("path"), str):
             send["path"] = target_ep["path"]
+        # Declared request metadata is never silently dropped: it is copied
+        # into the archetype's own send-request vocabulary, and any shape the
+        # selected preset cannot carry fails its contract validation → an
+        # honest blocking gap instead of a semantics-changing draft.
+        qp = target_ep.get("query_parameters")
+        if isinstance(qp, dict):
+            if preset == "database_to_api_sync":
+                # RestSendRequest takes a typed literal list, not a dict.
+                send["query_parameters"] = [
+                    {
+                        "name": str(k),
+                        "value_source": "literal",
+                        "literal_value": str(v),
+                    }
+                    for k, v in qp.items()
+                ]
+            else:
+                send["query_parameters"] = {str(k): str(v) for k, v in qp.items()}
+        headers = _headers_dict(target_ep)
+        if headers is not None:
+            if preset == "database_to_api_sync" and binding is not None and binding.get("mode") == "create":
+                # RestSendRequest has no request_headers; create-mode carries
+                # them as connection default_headers (applied to every send).
+                binding["settings"]["default_headers"] = headers
+            else:
+                send["request_headers"] = headers
         tgt["send_request"] = send
         if target.profile_tree is not None:
             tgt["payload_profile"] = target.profile_tree
@@ -1005,6 +1068,33 @@ def import_integration_draft_action(
                 "inferred:listener_trigger_folds_source",
             )
         )
+
+    # A REST fetch source is GET-only (rest_fetch primitive; runtime request
+    # bodies are out of scope). A non-GET source request cannot be represented,
+    # so it blocks instead of silently changing the imported semantics.
+    if source_kind == "rest":
+        source_ep = flow.get("source") if isinstance(flow.get("source"), dict) else {}
+        method = source_ep.get("method")
+        if isinstance(method, str) and method.strip() and method.strip().upper() != "GET":
+            method_label = (
+                f"'{method.strip().upper()}'"
+                if method.strip().upper() in ("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
+                else "a non-GET value"
+            )
+            gaps.append(
+                _gap(
+                    MIGRATION_IMPORT_UNKNOWN_PROTOCOL,
+                    "source.method",
+                    f"source request method is {method_label}; a REST source is "
+                    "imported as a GET fetch and non-GET source requests are an "
+                    "unsupported source construct in the preset vocabulary",
+                    hint=(
+                        "Use a GET-readable source endpoint, or hand-author the "
+                        "integration via get_schema_template("
+                        "schema_name='IntegrationSpecV1')."
+                    ),
+                )
+            )
 
     selected_preset: Optional[str] = None
     stage_plan: Optional[List[Tuple[str, str]]] = None

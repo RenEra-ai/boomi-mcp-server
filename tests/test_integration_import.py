@@ -355,6 +355,101 @@ def test_inferred_schema_clean_sample_is_build_ready():
     assert any(a["source"].startswith("inferred:") for a in r["inferred_assumptions"])
 
 
+def test_non_get_rest_source_blocks_instead_of_silent_get():
+    # Codex review r1: a POST/PUT source cannot be represented by the GET-only
+    # rest_fetch primitive — it must block, never silently draft a GET.
+    artifact = _rest_to_rest_artifact()
+    artifact["source"]["method"] = "POST"
+    r = act("generic_integration_description", artifact)
+    assert MIGRATION_IMPORT_UNKNOWN_PROTOCOL in _gap_codes(r)
+    gap = next(g for g in r["gaps"] if g["code"] == MIGRATION_IMPORT_UNKNOWN_PROTOCOL)
+    assert gap["field"] == "source.method"
+    assert r["ready_for_build"] is False
+    assert "integration_spec_draft" not in r
+    # Explicit GET stays build-ready.
+    artifact["source"]["method"] = "GET"
+    r = act("generic_integration_description", artifact)
+    assert r["ready_for_build"] is True
+
+
+def test_non_get_source_unrecognized_method_value_not_echoed():
+    artifact = _rest_to_rest_artifact()
+    artifact["source"]["method"] = "s3cr3t-token-value"
+    r = act("generic_integration_description", artifact)
+    assert MIGRATION_IMPORT_UNKNOWN_PROTOCOL in _gap_codes(r)
+    assert "s3cr3t-token-value" not in json.dumps(r["gaps"])
+
+
+def test_target_query_and_headers_propagate_into_draft():
+    # Codex review r1: declared request metadata must reach the draft, not be
+    # silently dropped while ready_for_build stays true.
+    artifact = _rest_to_rest_artifact()
+    artifact["source"]["request_headers"] = {"Accept": "application/json"}
+    artifact["target"]["query_parameters"] = {"mode": "upsert"}
+    artifact["target"]["request_headers"] = {"X-Api-Version": "2"}
+    r = act("generic_integration_description", artifact)
+    assert r["ready_for_build"] is True
+    fetch = r["preset_parameters"]["source"]["fetch_request"]
+    send = r["preset_parameters"]["target"]["send_request"]
+    assert fetch["request_headers"] == {"Accept": "application/json"}
+    assert send["query_parameters"] == {"mode": "upsert"}
+    assert send["request_headers"] == {"X-Api-Version": "2"}
+    assert "upsert" in json.dumps(r["integration_spec_draft"])
+
+
+def test_db_preset_target_query_params_use_literal_list_form():
+    r = act(
+        "generic_integration_description",
+        {
+            "name": "Orders Export",
+            "source": {"protocol": "database"},
+            "target": {
+                "protocol": "rest",
+                "base_url": "https://t.example.com",
+                "path": "/orders",
+                "query_parameters": {"mode": "bulk"},
+                "request_headers": {"X-Api-Version": "2"},
+                "schema": {"profile": _TARGET_PROFILE},
+            },
+        },
+    )
+    send = r["preset_parameters"]["target"]["send_request"]
+    assert send["query_parameters"] == [
+        {"name": "mode", "value_source": "literal", "literal_value": "bulk"}
+    ]
+    # RestSendRequest has no request_headers slot; create-mode carries them as
+    # connection default_headers instead of dropping them.
+    binding = r["preset_parameters"]["target"]["binding"]
+    assert binding["settings"]["default_headers"] == {"X-Api-Version": "2"}
+    assert "request_headers" not in send
+
+
+def test_rejected_vocabulary_values_never_echoed_in_gaps():
+    # Codex review r1: values that FAILED vocabulary validation are arbitrary
+    # caller content — a secret misplaced there must not leak through gaps.
+    r = act(
+        "generic_integration_description",
+        {
+            "source": {"protocol": "hunter2-secret-protocol"},
+            "target": {"protocol": "rest", "base_url": "https://t.example.com"},
+            "transforms": [{"kind": "hunter2-secret-kind"}],
+        },
+    )
+    dumped = json.dumps(r["gaps"])
+    assert "hunter2" not in dumped
+    codes = _gap_codes(r)
+    assert MIGRATION_IMPORT_UNKNOWN_PROTOCOL in codes
+    assert MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM in codes
+
+
+def test_unrecognized_auth_mode_value_never_echoed():
+    artifact = _rest_to_rest_artifact()
+    artifact["source"]["auth"] = {"mode": "hunter2-mode"}
+    r = act("generic_integration_description", artifact)
+    assert MIGRATION_IMPORT_MISSING_CREDENTIAL in _gap_codes(r)
+    assert "hunter2" not in json.dumps(r)
+
+
 # ---------------------------------------------------------------------------
 # Facts vs assumptions separation
 # ---------------------------------------------------------------------------
