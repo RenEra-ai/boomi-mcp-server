@@ -529,6 +529,103 @@ def test_unrecognized_auth_mode_value_never_echoed():
     assert "hunter2" not in json.dumps(r)
 
 
+def test_declared_retry_dlq_schedule_block_not_silently_dropped():
+    # Architect review: reliability/schedule the preset can't emit must surface
+    # as blocking unsupported-construct gaps, never as build-ready confirmed
+    # facts that were never honored.
+    artifact = _rest_to_rest_artifact()
+    artifact["retry"] = {"max_attempts": 5}
+    artifact["error_handling"] = {"dlq": "route_to_queue"}
+    artifact["trigger"] = {"kind": "scheduled"}
+    r = act("generic_integration_description", artifact)
+    fields = {
+        (g["code"], g["field"])
+        for g in r["gaps"]
+        if g["code"] == MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT
+    }
+    assert (MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, "retry") in fields
+    assert (MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, "error_handling") in fields
+    assert (MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT, "trigger") in fields
+    assert r["ready_for_build"] is False
+    assert "integration_spec_draft" not in r
+    # Never recorded as a confirmed fact implying it was honored.
+    assert not any("retry" in f["source"] for f in r["confirmed_facts"])
+    assert not any(f["source"] == "artifact:trigger" for f in r["confirmed_facts"])
+
+
+def test_deployment_intent_is_assumption_not_blocking_gap():
+    # Deployment is a separate orchestrate_deploy lifecycle step, not part of
+    # the emitted IntegrationSpecV1 draft — it must NOT block build-readiness.
+    artifact = _rest_to_rest_artifact()
+    artifact["deployment"] = {"atom": "local-runtime", "environment": "dev"}
+    r = act("generic_integration_description", artifact)
+    assert r["ready_for_build"] is True
+    assert not any(
+        g["field"] == "deployment" for g in r["gaps"]
+    )
+    assert any(
+        "deployment" in a["source"] for a in r["inferred_assumptions"]
+    )
+
+
+def test_singleton_transform_dict_not_silently_dropped():
+    # Architect review: a transform expressed as a single object (not a list)
+    # must still be validated — an unsupported one blocks.
+    artifact = _rest_to_rest_artifact()
+    artifact["transforms"] = {"kind": "xslt", "stylesheet": "<xsl/>"}
+    r = act("generic_integration_description", artifact)
+    assert MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM in _gap_codes(r)
+    assert r["ready_for_build"] is False
+    # A supported singleton transform is accepted like a one-element list.
+    artifact["transforms"] = {
+        "kind": "field_mapping",
+        "mappings": [{"from": "id", "to": "customer_id"}],
+    }
+    r = act("generic_integration_description", artifact)
+    assert MIGRATION_IMPORT_UNSUPPORTED_TRANSFORM not in _gap_codes(r)
+
+
+def test_transforms_wrong_type_gapped():
+    artifact = _rest_to_rest_artifact()
+    artifact["transforms"] = "xslt"
+    r = act("generic_integration_description", artifact)
+    gap = next(
+        g for g in r["gaps"] if g["field"] == "transforms"
+    )
+    assert gap["code"] == MIGRATION_IMPORT_INVALID_INPUT
+
+
+def test_by_reference_index_unresolved_mapping_gapped():
+    # Architect review: a #95-indexed existing profile has no inline profile for
+    # the archetype to validate against, so an unindexed mapping path/leaf must
+    # gap here (never pass an invented key into the draft).
+    artifact = _rest_to_rest_artifact()
+    artifact["source"]["schema"] = {
+        "profile_component_id": "12345678-1234-1234-1234-123456789012",
+        "field_index": {
+            "produced_by": "index_profile_component",
+            "mappable_paths": ["Root/id"],
+        },
+    }
+    # Full path not in the index → PROFILE_INDEX_REQUIRED, not passed through.
+    artifact["mappings"] = [{"from": "Root/not_indexed", "to": "contact_email"}]
+    r = act("generic_integration_description", artifact)
+    assert (MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED, "mappings[0].from") in {
+        (g["code"], g["field"]) for g in r["gaps"]
+    }
+    assert "not_indexed" not in json.dumps(r.get("preset_parameters") or {})
+    # A bare leaf name not in the index also gaps (never invented).
+    artifact["mappings"] = [{"from": "ghost", "to": "contact_email"}]
+    r = act("generic_integration_description", artifact)
+    assert MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED in _gap_codes(r)
+    # An indexed path resolves cleanly.
+    artifact["mappings"] = [{"from": "Root/id", "to": "contact_email"}]
+    r = act("generic_integration_description", artifact)
+    assert not any(
+        g["code"] == MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED for g in r["gaps"]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Facts vs assumptions separation
 # ---------------------------------------------------------------------------

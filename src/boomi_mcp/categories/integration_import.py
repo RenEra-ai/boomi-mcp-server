@@ -609,6 +609,21 @@ def _analyze_transforms(
         mappings.extend(m for m in raw_mappings if isinstance(m, dict))
 
     transforms = flow.get("transforms")
+    # A singleton transform object is normalized to a one-element list so it is
+    # validated like a list — otherwise an unsupported dict transform (e.g.
+    # {"kind": "xslt"}) would slip past the list guard undetected.
+    if isinstance(transforms, dict):
+        transforms = [transforms]
+    if transforms is not None and not isinstance(transforms, list):
+        gaps.append(
+            _gap(
+                MIGRATION_IMPORT_INVALID_INPUT,
+                "transforms",
+                "transforms must be a transform object or a list of transform "
+                "objects",
+            )
+        )
+        transforms = []
     if isinstance(transforms, list):
         for idx, entry in enumerate(transforms):
             if not isinstance(entry, dict):
@@ -660,8 +675,19 @@ def _resolve_mapping_side(
     idx: int,
     assumptions: List[Dict[str, str]],
     gaps: List[Dict[str, Any]],
+    *,
+    strict_index: bool = False,
 ) -> Optional[str]:
-    """Resolve one side of a mapping to a leaf path (or pass a full path through)."""
+    """Resolve one side of a mapping to a leaf path.
+
+    When ``strict_index`` is True the endpoint schema is a #95-indexed existing
+    profile (``schema_status == 'by_reference'``): there is no inline profile
+    for archetype validation to check the mapping against, so every path/leaf
+    MUST resolve to the supplied index or a PROFILE_INDEX_REQUIRED gap is
+    emitted — the import never passes an unindexed path into the draft (never
+    invents map keys). For inline/inferred schemas an unresolved full path is
+    passed through and the archetype's own transform validator reports it.
+    """
     if not isinstance(value, str) or not value.strip():
         gaps.append(
             _gap(
@@ -691,6 +717,21 @@ def _resolve_mapping_side(
         )
         return None
     if "/" in token:
+        if strict_index and token not in leaves:
+            gaps.append(
+                _gap(
+                    MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED,
+                    f"mappings[{idx}].{side}",
+                    f"mapping {side} path does not resolve to the supplied #95 "
+                    "index for the referenced existing profile; the import never "
+                    "invents map keys against an indexed profile",
+                    hint=(
+                        "Use a leaf path present in schema.field_index, or "
+                        "re-run index_profile_component to cover it."
+                    ),
+                )
+            )
+            return None
         return token  # full path — archetype validation checks existence
     candidates = sorted(p for p in leaves if p.rsplit("/", 1)[-1] == token)
     if len(candidates) > 1:
@@ -715,6 +756,21 @@ def _resolve_mapping_side(
                 )
             )
         return candidates[0]
+    if strict_index:
+        gaps.append(
+            _gap(
+                MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED,
+                f"mappings[{idx}].{side}",
+                f"mapping {side} leaf name does not resolve to the supplied #95 "
+                "index for the referenced existing profile; the import never "
+                "invents map keys against an indexed profile",
+                hint=(
+                    "Use a leaf name/path present in schema.field_index, or "
+                    "re-run index_profile_component to cover it."
+                ),
+            )
+        )
+        return None
     return token  # unknown — archetype validation reports it against the profile
 
 
@@ -1115,9 +1171,13 @@ def import_integration_draft_action(
     target = _analyze_endpoint(flow, "target", facts, assumptions, gaps)
 
     trigger_kind, trigger_declared = _classify_trigger(flow.get("trigger"))
-    if trigger_declared:
+    if trigger_declared and trigger_kind in ("listener", "manual"):
+        # A listener trigger selects the listener preset and a manual trigger is
+        # the default no-op start — both are realized in the emitted draft, so
+        # they are genuine confirmed facts. A scheduled trigger is NOT emitted
+        # (handled as an unsupported-construct gap below).
         facts.append(_fact(f"trigger classified as '{trigger_kind}'", "artifact:trigger"))
-    else:
+    elif not trigger_declared:
         assumptions.append(
             _fact(
                 "no recognizable trigger declared; assuming manual/on-demand "
@@ -1128,15 +1188,69 @@ def import_integration_draft_action(
 
     raw_mappings = _analyze_transforms(flow, facts, gaps)
 
-    for block in ("error_handling", "retry", "deployment"):
-        if isinstance(flow.get(block), dict) and flow[block]:
-            facts.append(
-                _fact(
-                    f"{block} declared with keys: "
-                    + ", ".join(sorted(str(k) for k in flow[block])),
-                    f"artifact:{block}",
-                )
+    # Reliability / scheduling constructs the import does not map into any
+    # preset's emitted parameters. Declaring them and still returning a
+    # build-ready draft would silently drop the caller's reliability/schedule
+    # intent, so surface each as a blocking unsupported-construct gap rather
+    # than recording it as a confirmed fact that was never honored. Sub-keys are
+    # not echoed (only the field name), keeping the secret-safe contract.
+    if isinstance(flow.get("retry"), dict) and flow["retry"]:
+        gaps.append(
+            _gap(
+                MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT,
+                "retry",
+                "the artifact declares retry behavior, but the import does not "
+                "emit retry into the selected preset's output; it would be "
+                "silently lost",
+                hint=(
+                    "Remove retry to draft without it, or wire a verified retry "
+                    "after build (get_schema_template(schema_name="
+                    "'design_pattern:connector_retry_design'))."
+                ),
             )
+        )
+    if isinstance(flow.get("error_handling"), dict) and flow["error_handling"]:
+        gaps.append(
+            _gap(
+                MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT,
+                "error_handling",
+                "the artifact declares error-handling / dead-letter behavior, "
+                "but the import does not emit it into the selected preset's "
+                "output; it would be silently lost",
+                hint=(
+                    "Remove error_handling to draft without it, or wire a "
+                    "verified DLQ after build (get_schema_template(schema_name="
+                    "'design_pattern:error_routing_and_dlq'))."
+                ),
+            )
+        )
+    if trigger_declared and trigger_kind == "scheduled":
+        gaps.append(
+            _gap(
+                MIGRATION_IMPORT_UNSUPPORTED_CONSTRUCT,
+                "trigger",
+                "the artifact declares a scheduled trigger, but the import does "
+                "not emit scheduling into the selected preset's output; it would "
+                "be silently lost",
+                hint=(
+                    "Draft without scheduling, then attach a schedule at deploy "
+                    "time (manage_schedules / orchestrate_deploy)."
+                ),
+            )
+        )
+    if isinstance(flow.get("deployment"), dict) and flow["deployment"]:
+        # Deployment / runtime placement is a SEPARATE lifecycle step
+        # (orchestrate_deploy), not part of the IntegrationSpecV1 draft this
+        # tool emits — recorded as an informational assumption, not a blocking
+        # gap that would wrongly hold back an otherwise-valid draft.
+        assumptions.append(
+            _fact(
+                "deployment intent recorded; deployment/runtime activation is a "
+                "separate step (orchestrate_deploy) and is not represented in "
+                "the emitted draft",
+                "inferred:deployment_deferred_to_orchestrate",
+            )
+        )
 
     # ---- mapping resolution -------------------------------------------------
     operations: List[Dict[str, Any]] = []
@@ -1144,10 +1258,22 @@ def import_integration_draft_action(
         from_value = mapping.get("from") or mapping.get("source") or mapping.get("source_path")
         to_value = mapping.get("to") or mapping.get("target") or mapping.get("target_path")
         resolved_from = _resolve_mapping_side(
-            from_value, source.leaves, "from", idx, assumptions, gaps
+            from_value,
+            source.leaves,
+            "from",
+            idx,
+            assumptions,
+            gaps,
+            strict_index=source.schema_status == "by_reference",
         )
         resolved_to = _resolve_mapping_side(
-            to_value, target.leaves, "to", idx, assumptions, gaps
+            to_value,
+            target.leaves,
+            "to",
+            idx,
+            assumptions,
+            gaps,
+            strict_index=target.schema_status == "by_reference",
         )
         if resolved_from and resolved_to:
             operations.append(
