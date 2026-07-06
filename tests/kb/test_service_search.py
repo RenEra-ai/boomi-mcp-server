@@ -193,8 +193,10 @@ def test_search_official_hit_defaults_to_official_provenance():
     hit = db_hits[0]
     assert hit["source_type"] == "official"
     assert hit["verification_status"] == "official"
+    # All five extended provenance fields are blank for official docs.
     assert hit["upstream_repo"] == ""
     assert hit["upstream_commit"] == ""
+    assert hit["source_path"] == ""
     assert hit["raw_url"] == ""
     assert hit["latest_url"] == ""
 

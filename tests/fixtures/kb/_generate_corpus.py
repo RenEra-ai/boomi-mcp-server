@@ -162,19 +162,15 @@ def _chunk_id(page_key, index):
     return f"{slug}_{index:03d}"
 
 
-def _source_path(page_key):
-    """Official-doc source_path stand-in: the last URL path segment."""
-    return page_key.rstrip("/").rsplit("/", 1)[-1]
-
-
-def _official_provenance(page_key):
-    """Provenance metadata for an official chunk (mirrors build_index.py)."""
+def _official_provenance():
+    """Provenance metadata for an official chunk (mirrors build_index.py):
+    all five extended fields blank; source_url is the citation."""
     return {
         "source_type": "official",
         "verification_status": "official",
         "upstream_repo": "",
         "upstream_commit": "",
-        "source_path": _source_path(page_key),
+        "source_path": "",
         "raw_url": "",
         "latest_url": "",
     }
@@ -209,7 +205,7 @@ def build_chunks():
                 "content_html": f"<h2>{heading}</h2><p>{content}</p>",
                 "token_estimate": max(1, len(content) // 4),
                 "chunk_index": index,
-                **_official_provenance(page_key),
+                **_official_provenance(),
             })
 
     for index in range(BIG_PAGE_CHUNK_COUNT):
@@ -232,7 +228,7 @@ def build_chunks():
             "content_html": f"<h2>{heading}</h2><p>{content}</p>",
             "token_estimate": max(1, len(content) // 4),
             "chunk_index": index,
-            **_official_provenance(BIG_PAGE_KEY),
+            **_official_provenance(),
         })
 
     # Companion (supplemental) page. source_url is the github blob permalink,
