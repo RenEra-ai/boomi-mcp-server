@@ -153,10 +153,23 @@ _COMPANION_DOCS = "OfficialBoomi Companion catalog, corroborated via search_boom
 _COMPANION_ONLY = "OfficialBoomi Companion catalog (#77), not independently corroborated"
 _COURSE = "Boomi architect course triage (#77 comment)"
 _M11_CENSUS = "M11 #119 live census (work-account captures) + official cache/property docs"
+_M6_ASC_RECON = (
+    "M6.1 #133 pre-implementation recon on the renera advanced cloud "
+    "attachment (live ASC fixture serving POST /ws/rest/generalListener)"
+)
+_M6_ASC_COMPANION = (
+    "OfficialBoomi Companion api_service_component.md (#133), not "
+    "independently live-verified"
+)
+_M6_ASC_RECON_QA = (
+    "M6.1 #133 live QA A/B/A base-shadowing proof on the renera advanced "
+    "cloud attachment (2026-07-05), superseding the companion's per-path "
+    "granularity claim"
+)
 
 _ENTRIES: List[Dict[str, Any]] = [
     # ===================================================================
-    # Listener / WSS (3)
+    # Listener / WSS (9)
     # ===================================================================
     {
         "id": "listener_no_test_mode",
@@ -295,6 +308,285 @@ _ENTRIES: List[Dict[str, Any]] = [
         "applies_to": ["web_services_server", "shared_web_server", "manage_deployment"],
         "provenance": {"source_label": _COMPANION_DOCS, "retrieval_date": "2026-06-10"},
         "verification_status": "docs_corroborated",
+        "category": "listener_wss",
+    },
+    {
+        "id": "api_service_required_for_advanced_apitype",
+        "title": "On an apiType=advanced runtime, bare WSS listeners deploy clean but every route 404s",
+        "symptom": (
+            "A Web Services Server listener process deploys successfully to a "
+            "runtime whose Shared Web Server apiType is 'advanced', yet every "
+            "request to its /ws/simple path returns 404 — nothing in the deploy "
+            "response hints at a problem."
+        ),
+        "detection": "silent",
+        "frequency": "high",
+        "root_cause": (
+            "An 'advanced' Shared Web Server serves routes ONLY through a "
+            "deployed API Service Component (/ws/rest gateway); bare /ws/simple "
+            "WSS routes are not registered at all. The discriminator is "
+            "SharedServerInformation.apiType, NOT the Atom/runtime type — "
+            "live-confirmed 2026-07-04 on the renera cloud attachment (bare "
+            "path 404, ASC route 200 on the same runtime)."
+        ),
+        "wrong_pattern": (
+            "Treating a clean deploy as proof the listener serves, then "
+            "debugging the 404 as an auth or path-casing problem on a runtime "
+            "whose tier simply never serves bare WSS routes."
+        ),
+        "correct_pattern": (
+            "Read SharedServerInformation.apiType BEFORE choosing the listener "
+            "pattern: basic/intermediate -> bare WSS; advanced -> an API "
+            "Service Component routing to the WSS Listen process (listener "
+            "archetypes: asc_wrapper.enabled=true). orchestrate_deploy's "
+            "listener_verify preflight fails fast (LISTENER_ASC_REQUIRED) on "
+            "the wrong pairing."
+        ),
+        "remediation": (
+            "Rebuild with the ASC wrapper (or flip the runtime's apiType to "
+            "basic/intermediate where that is acceptable), redeploy, and "
+            "re-verify with an authenticated probe plus execution-record "
+            "readback."
+        ),
+        "applies_to": [
+            "web_services_server",
+            "shared_web_server",
+            "api_service_component",
+            "orchestrate_deploy",
+            "build_from_archetype",
+        ],
+        "provenance": {"source_label": _M6_ASC_RECON, "retrieval_date": "2026-07-04"},
+        "verification_status": "live_verified",
+        "category": "listener_wss",
+    },
+    {
+        "id": "api_service_not_for_basic_intermediate",
+        "title": "An API Service Component deployed to a basic/intermediate runtime does not serve its routes",
+        "symptom": (
+            "An API Service Component and its route process both deploy "
+            "successfully, but requests to the expected /ws/rest path on a "
+            "basic or intermediate apiType runtime never reach the process."
+        ),
+        "detection": "silent",
+        "frequency": "medium",
+        "root_cause": (
+            "The /ws/rest API-gateway routing that resolves API Service "
+            "Component routes is an 'advanced' Shared Web Server feature; on "
+            "basic/intermediate tiers the runtime serves bare /ws/simple WSS "
+            "paths instead and the deployed ASC's routes are never registered."
+        ),
+        "wrong_pattern": (
+            "Wrapping every listener in an API Service Component 'to be safe' "
+            "and assuming the wrapper is tier-neutral because it deploys "
+            "without error everywhere."
+        ),
+        "correct_pattern": (
+            "Match the publish pattern to the tier: bare WSS on "
+            "basic/intermediate, ASC only on advanced. listener_verify fails "
+            "the inverse pairing with LISTENER_ASC_UNSUPPORTED_FOR_APITYPE "
+            "before probing."
+        ),
+        "remediation": (
+            "Disable the asc_wrapper (bare WSS) for basic/intermediate "
+            "runtimes, or move the deployment to an advanced-tier attachment, "
+            "then re-verify the served route."
+        ),
+        "applies_to": [
+            "api_service_component",
+            "web_services_server",
+            "shared_web_server",
+            "orchestrate_deploy",
+        ],
+        "provenance": {"source_label": _M6_ASC_COMPANION, "retrieval_date": "2026-07-04"},
+        "verification_status": "companion_unverified",
+        "category": "listener_wss",
+    },
+    {
+        "id": "api_service_deploy_does_not_cascade",
+        "title": "Deploying an API Service Component does not deploy its route processes (and vice versa)",
+        "symptom": (
+            "An API Service Component is deployed and active, yet its route "
+            "returns 404 — or the listener process is deployed but the "
+            "/ws/rest path never registers — because only ONE of the two "
+            "components was actually deployed."
+        ),
+        "detection": "silent",
+        "frequency": "high",
+        "root_cause": (
+            "Packaging/deployment is per component: an ASC's PackagedComponent "
+            "does not include the processes its routes reference, and "
+            "deploying a route process does not pull in the ASC. Both must be "
+            "independently packaged and deployed to the SAME environment (the "
+            "live fixture keeps both active in one environment; companion "
+            "api_service_component.md states the no-cascade rule)."
+        ),
+        "wrong_pattern": (
+            "Deploying only the API Service Component (assuming it bundles its "
+            "routes like a packaged process bundles its dependencies) and "
+            "treating the resulting 404 as a path or auth problem."
+        ),
+        "correct_pattern": (
+            "Always deploy BOTH the ASC and every route process to the same "
+            "environment. orchestrate_deploy's api_service publish mode "
+            "packages and deploys the ASC alongside the process and verifies "
+            "both deployments are active before probing."
+        ),
+        "remediation": (
+            "Package and deploy the missing component to the same environment "
+            "(manage_deployment), confirm both active, and re-probe the route."
+        ),
+        "applies_to": [
+            "api_service_component",
+            "manage_deployment",
+            "orchestrate_deploy",
+            "packaged_component",
+        ],
+        "provenance": {"source_label": _M6_ASC_COMPANION, "retrieval_date": "2026-07-04"},
+        "verification_status": "docs_corroborated",
+        "category": "listener_wss",
+    },
+    {
+        "id": "api_service_first_deployed_wins_collision",
+        "title": "One deployed API Service Component serves per BASE urlPath — a later same-base ASC is shadowed in its entirety",
+        "symptom": (
+            "Two API Service Components sharing a base urlPath (both empty is "
+            "the common case) are deployed and both report active=true, but "
+            "every route of the later-deployed one answers 404 — even routes "
+            "whose effective paths are unique account-wide; undeploying the "
+            "winner does NOT make the loser start serving."
+        ),
+        "detection": "silent",
+        "frequency": "high",
+        "root_cause": (
+            "The /ws/rest perimeter binds exactly ONE deployed webservice "
+            "component per base urlPath, first-deployed wins for the ENTIRE "
+            "component — routes are NOT merged across ASCs sharing a base. "
+            "Live-proven A/B/A 2026-07-05 (renera advanced cloud): the same "
+            "component 404'd all routes on base '' while an earlier base-'' "
+            "ASC was deployed, served 200 within 75s on a distinct base, and "
+            "404'd again after reverting. There is no collision error at "
+            "deploy time and no API signal identifying the shadowed "
+            "component; registration does not re-run when the winner is "
+            "undeployed."
+        ),
+        "wrong_pattern": (
+            "Assuming shadowing is per effective route path (so unique "
+            "objectNames are safe under a shared base), or relying on deploy "
+            "success / a live pre-probe (the cloud perimeter answers a "
+            "uniform 401 before any route exists) to detect collisions."
+        ),
+        "correct_pattern": (
+            "Give every ASC a distinct base_url_path (the default '' collides "
+            "with any other default-base ASC in the environment), and detect "
+            "collisions from data, not probes: query active deployed "
+            "webservice packages and compare BASE urlPaths — "
+            "listener_verify's ASC collision scan does exactly this "
+            "(LISTENER_ASC_COLLISION), with per-route effective-path "
+            "comparison as a secondary signal."
+        ),
+        "remediation": (
+            "Choose a distinct base_url_path (asc_wrapper.base_url_path) or "
+            "undeploy the colliding ASC, then REDEPLOY the intended winner so "
+            "its routes register."
+        ),
+        "applies_to": [
+            "api_service_component",
+            "manage_deployment",
+            "orchestrate_deploy",
+            "build_from_archetype",
+        ],
+        "provenance": {"source_label": _M6_ASC_RECON_QA, "retrieval_date": "2026-07-05"},
+        "verification_status": "live_verified",
+        "category": "listener_wss",
+    },
+    {
+        "id": "api_service_cloud_401_404_triage",
+        "title": "Cloud listener triage: uniform 401 before any route exists; 404 with valid credentials means no matching route",
+        "symptom": (
+            "Probing a Boomi-managed cloud listener endpoint returns 401 even "
+            "with valid credentials, or 404 after authentication succeeds, and "
+            "the two signals get misread as each other."
+        ),
+        "detection": "runtime_error",
+        "frequency": "high",
+        "root_cause": (
+            "Before the FIRST route is registered for a tenant, the cloud "
+            "perimeter answers a uniform 401 for every path regardless of "
+            "credentials (live-confirmed 2026-07-04). Once at least one route "
+            "is registered, valid credentials get a 404 on unknown paths — so "
+            "401-vs-404 encodes registration state, not just auth."
+        ),
+        "wrong_pattern": (
+            "Treating a pre-first-route 401 as a credential problem and "
+            "rotating tokens, or using a live pre-probe as a collision/route "
+            "check (the uniform 401 makes it uninformative)."
+        ),
+        "correct_pattern": (
+            "Triage in order: 401 -> either no route registered for the "
+            "tenant yet (fresh deploy; registration can lag minutes) or bad "
+            "credentials; 404 after auth -> the request reached the runtime "
+            "but no route matches (check apiType tier, path segments, and "
+            "that BOTH the ASC and its route process are deployed)."
+        ),
+        "remediation": (
+            "Wait out route-registration lag on fresh deploys, verify the "
+            "apiType/publish-mode pairing, and read back execution records "
+            "instead of relying on the HTTP status alone."
+        ),
+        "applies_to": [
+            "web_services_server",
+            "api_service_component",
+            "shared_web_server",
+            "orchestrate_deploy",
+        ],
+        "provenance": {"source_label": _M6_ASC_RECON, "retrieval_date": "2026-07-04"},
+        "verification_status": "live_verified",
+        "category": "listener_wss",
+    },
+    {
+        "id": "listener_status_not_wss_asc",
+        "title": "ListenerStatus does not report WSS or API Service routes — an empty result does not mean the listener is down",
+        "symptom": (
+            "The async ListenerStatus query returns no entries for a Web "
+            "Services Server or API Service listener that is demonstrably "
+            "serving traffic, and the operator concludes the listener failed "
+            "to start (or a verifier concludes it is not deployed)."
+        ),
+        "detection": "silent",
+        "frequency": "medium",
+        "root_cause": (
+            "ListenerStatus covers connector listeners (JMS, AS2, Salesforce "
+            "and similar listen connectors); WSS/ASC HTTP routes are served by "
+            "the Shared Web Server and never appear in it — live-confirmed "
+            "2026-07-04 on both a local atom and the cloud attachment while "
+            "the routes were serving 200s."
+        ),
+        "wrong_pattern": (
+            "Using ListenerStatus (or ChangeListenerStatusRequest) as the "
+            "deploy/health verification for a WSS or API Service listener and "
+            "failing the rollout when the result is empty."
+        ),
+        "correct_pattern": (
+            "Verify WSS/ASC listeners behaviorally: authenticated probe of the "
+            "computed endpoint plus an execution-record readback (HTTP 200 "
+            "with outputType=none is an ack, not process success — an ERROR "
+            "execution behind a 200 is live-proven). Keep ListenerStatus for "
+            "connector listeners only."
+        ),
+        "remediation": (
+            "Switch the verification to orchestrate_deploy's listener_verify "
+            "stage (probe + readback) and disregard empty ListenerStatus "
+            "results for WSS/ASC routes."
+        ),
+        "applies_to": [
+            "manage_listeners",
+            "web_services_server",
+            "api_service_component",
+            "orchestrate_deploy",
+            "monitor_platform",
+        ],
+        "provenance": {"source_label": _M6_ASC_RECON, "retrieval_date": "2026-07-04"},
+        "verification_status": "live_verified",
         "category": "listener_wss",
     },
     # ===================================================================

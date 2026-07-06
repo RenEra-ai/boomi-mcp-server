@@ -81,6 +81,8 @@ _COMPONENT_NAME_PRIMARY_TYPES = frozenset({
     # component_name is the emitted-name source.
     "processproperty",
     "documentcache",
+    # Issue #133 M6.1: webservice (API Service Component) is builder-generated.
+    "webservice",
 })
 # Copy-induced numeric suffix: a display name ending in whitespace then 1 or 2
 # (Integration's "... 1"/"... 2" clone artifacts).
@@ -193,6 +195,10 @@ from .components.builders.transform_map_validation import (
     validate_transform_map,
 )
 from .components.builders.cache_property_lineage import validate_config_lineage
+from .components.builders.api_service_builder import (
+    ApiServiceBuilder,
+    get_api_service_builder,
+)
 from .components.builders.document_cache_builder import (
     DocumentCacheBuilder,
     get_document_cache_builder,
@@ -233,6 +239,11 @@ _TYPE_ALIASES = {
     "profile.json": "profile.json",
     "profile.xml": "profile.xml",
     "transform.map": "transform.map",
+    # Issue #133 M6.1: API Service Component (canonical Boomi type
+    # "webservice") with ergonomic aliases.
+    "webservice": "webservice",
+    "api_service": "webservice",
+    "api.service": "webservice",
 }
 
 _METADATA_TYPE_MAP = {
@@ -262,6 +273,8 @@ _METADATA_TYPE_MAP = {
     "processproperty": "processproperty",
     # Issue #122 M11.3: typed documentcache components participate too.
     "documentcache": "documentcache",
+    # Issue #133 M6.1: typed webservice (API Service Component) components.
+    "webservice": "webservice",
 }
 
 
@@ -1260,6 +1273,10 @@ def _resolve_preservation_policy(
     if comp.type == "documentcache":
         # Issue #122 M11.3: owns bns:object/DocumentCache.
         return DocumentCacheBuilder.PRESERVATION_POLICY
+    if comp.type == "webservice":
+        # Issue #133 M6.1: subtree_merge on bns:object/webservice —
+        # profileOverrides deliberately unowned (preserved).
+        return ApiServiceBuilder.PRESERVATION_POLICY
     return None
 
 
@@ -1836,6 +1853,132 @@ def _check_wss_operation_dependencies(
                         "actual_role": actual_role,
                     },
                 )
+
+    return None
+
+
+# WSS connector_type aliases accepted in lowered process source bindings —
+# mirrors orchestration's listener classification vocabulary (M6 #12) but
+# stays local so categories doesn't import from categories.deployment.
+_WSS_SOURCE_CONNECTOR_ALIASES = frozenset({"wss", "web_services", "web_services_server"})
+
+
+def _process_config_has_wss_listen(process_config: Any) -> bool:
+    """True when a process config carries a WSS Listen SOURCE binding.
+
+    Recognizes both authoring shapes (mirrors orchestration's
+    ``_listener_operation_ref_from_process``): a sync_pipeline ``listener``
+    stage, and a lowered/hand-authored ``source`` binding with a WSS
+    connector_type + Listen action.
+    """
+    if not isinstance(process_config, dict):
+        return False
+    pipeline = process_config.get("pipeline")
+    if isinstance(pipeline, dict):
+        for stage in pipeline.get("stages") or []:
+            if not isinstance(stage, dict):
+                continue
+            if str(stage.get("kind") or "").strip().lower() == "listener":
+                return True
+    source = process_config.get("source")
+    if isinstance(source, dict):
+        connector_type = str(source.get("connector_type") or "").strip().lower()
+        action_type = str(source.get("action_type") or "").strip()
+        if connector_type in _WSS_SOURCE_CONNECTOR_ALIASES and action_type == "Listen":
+            return True
+    return False
+
+
+def _check_api_service_route_dependencies(
+    comp: IntegrationComponentSpec,
+    raw_config: Dict[str, Any],
+    components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
+) -> Optional[BuilderValidationError]:
+    """Cross-step route checks specific to webservice / API Service Components
+    (M6.1 #133).
+
+    Every ``$ref:KEY`` route process must appear in ``depends_on`` (so the
+    topological order applies the process BEFORE the ASC and the token
+    resolves to a real component id), must resolve to an in-spec ``process``
+    component, and that process's config must carry a WSS Listen source
+    binding — an ASC route to a non-listener process deploys clean and 404s
+    at runtime. Literal component-id routes are outside-spec and validated at
+    analyze/orchestration time where live XML is readable.
+    """
+    depends_on = set(comp.depends_on or [])
+    routes = raw_config.get("routes")
+    if not isinstance(routes, list):
+        return None
+
+    for index, entry in enumerate(routes):
+        if not isinstance(entry, dict):
+            continue
+        value = entry.get("process")
+        if value is None:
+            value = entry.get("process_id")
+        if not (isinstance(value, str) and value.strip().startswith("$ref:")):
+            continue
+        field = f"routes[{index}].process"
+        ref_key = value.strip()[len("$ref:"):]
+        if not ref_key:
+            return BuilderValidationError(
+                f"{field} $ref token is empty (expected '$ref:KEY')",
+                error_code="API_SERVICE_ROUTE_PROCESS_REF_INVALID",
+                field=field,
+                hint=(
+                    "Use '$ref:<process key>' to reference a process "
+                    "declared in the same integration spec."
+                ),
+            )
+        if ref_key not in depends_on:
+            return BuilderValidationError(
+                f"{field} $ref target {ref_key!r} must also appear in depends_on",
+                error_code="API_SERVICE_ROUTE_PROCESS_REQUIRED",
+                field="depends_on",
+                hint=(
+                    "Add the route process key to the webservice component's "
+                    "depends_on so the process applies (and its component id "
+                    "resolves) before the API Service Component."
+                ),
+            )
+        if components_by_key is None:
+            continue
+        target = components_by_key.get(ref_key)
+        if target is None:
+            return BuilderValidationError(
+                f"{field} $ref target {ref_key!r} does not exist in the spec",
+                error_code="API_SERVICE_ROUTE_PROCESS_REF_INVALID",
+                field=field,
+                hint="Point the $ref at an in-spec process component key.",
+            )
+        if _effective_component_type(target) != "process":
+            actual_role = _format_actual_role(target)
+            return BuilderValidationError(
+                f"{field} $ref target {ref_key!r} must reference a process "
+                f"component (got {actual_role})",
+                error_code="API_SERVICE_ROUTE_PROCESS_NOT_LISTEN",
+                field=field,
+                hint=(
+                    "ASC routes publish WSS Listen processes. Point the $ref "
+                    "at the listener process, not its operation/profile."
+                ),
+                details={"ref_key": ref_key, "actual_role": actual_role},
+            )
+        if not _process_config_has_wss_listen(target.config):
+            return BuilderValidationError(
+                f"{field} $ref target {ref_key!r} is a process without a WSS "
+                "Listen source binding",
+                error_code="API_SERVICE_ROUTE_PROCESS_NOT_LISTEN",
+                field=field,
+                hint=(
+                    "Every ASC route process needs a Web Services Server "
+                    "Listen start (a sync_pipeline 'listener' stage or a "
+                    "source with connector_type='wss', action_type='Listen') "
+                    "— routing to a non-listener deploys clean but 404s at "
+                    "runtime."
+                ),
+                details={"ref_key": ref_key},
+            )
 
     return None
 
@@ -2802,6 +2945,7 @@ def _apply_clone_suffix(comp: IntegrationComponentSpec, config: Dict[str, Any]) 
         "transform.function",
         "processproperty",
         "documentcache",
+        "webservice",
     ):
         base = cloned.get("component_name") or comp.name
         if base:
@@ -3136,6 +3280,28 @@ def build_structured_update_xml(
             "policy": getattr(builder_class, "PRESERVATION_POLICY", None),
         }
 
+    if comp.type == "webservice":
+        # Issue #133 M6.1: structured webservice (API Service Component)
+        # update (subtree_merge over bns:object/webservice; profileOverrides
+        # preserved).
+        builder_class = get_api_service_builder(comp.type)
+        if builder_class is None:
+            return {
+                "_success": False,
+                "error_code": "API_SERVICE_VALIDATION_FAILED",
+                "error": f"No ApiServiceBuilder registered for {comp.type!r}.",
+                "field": "component_type",
+            }
+        try:
+            built_xml = builder_class().build(**payload)
+        except BuilderValidationError as exc:
+            return _builder_validation_envelope(exc)
+        return {
+            "_success": True,
+            "built_xml": built_xml,
+            "policy": getattr(builder_class, "PRESERVATION_POLICY", None),
+        }
+
     if comp.type == "profile.db":
         profile_type = _safe_lower(payload.get("profile_type"))
         builder_instance = get_profile_builder("profile.db", profile_type)
@@ -3279,6 +3445,7 @@ def _execute_component(
         "transform.function",
         "processproperty",
         "documentcache",
+        "webservice",
     ):
         payload.setdefault("component_type", comp.type)
     if comp.name:
@@ -3298,6 +3465,7 @@ def _execute_component(
             "transform.function",
             "processproperty",
             "documentcache",
+            "webservice",
         ):
             # Mirror plan-time validation, which injects comp.name into
             # effective_config["component_name"] before calling validate_config.
@@ -3681,6 +3849,51 @@ def _execute_component(
                 "_success": False,
                 "error": (
                     f"Missing component_id for update of documentcache '{comp.key}'"
+                ),
+            }
+        return _apply_structured_update(
+            boomi_client,
+            profile,
+            target_id,
+            comp,
+            built_xml,
+            getattr(builder_class, "PRESERVATION_POLICY", None),
+        )
+
+    # Issue #133 M6.1: structured webservice (API Service Component) routes
+    # through ApiServiceBuilder (mirrors the documentcache branch above).
+    # Route '$ref:KEY' process tokens were already resolved to component ids
+    # by _resolve_dependency_tokens — depends_on ordering guarantees the
+    # referenced processes applied first.
+    if comp.type == "webservice" and not payload.get("xml"):
+        builder_class = get_api_service_builder(comp.type)
+        if builder_class is None:
+            return {
+                "_success": False,
+                "error_code": "API_SERVICE_VALIDATION_FAILED",
+                "error": (
+                    f"No ApiServiceBuilder registered for {comp.type!r}."
+                ),
+                "field": "component_type",
+            }
+        try:
+            built_xml = builder_class().build(**payload)
+        except BuilderValidationError as exc:
+            return {
+                "_success": False,
+                "error_code": exc.error_code,
+                "error": str(exc),
+                "field": exc.field,
+                "hint": exc.hint,
+            }
+        envelope = {"xml": built_xml, "component_type": "webservice"}
+        if comp.action == "create":
+            return create_component(boomi_client, profile, envelope)
+        if not target_id:
+            return {
+                "_success": False,
+                "error": (
+                    f"Missing component_id for update of webservice '{comp.key}'"
                 ),
             }
         return _apply_structured_update(
@@ -5654,6 +5867,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         is_transform_function_wrapper = comp.type == "transform.function"
         is_process_property_component = comp.type == "processproperty"
         is_document_cache_component = comp.type == "documentcache"
+        is_api_service_component = comp.type == "webservice"
         if is_generated_json_profile:
             gen_profile_scanner_cls = JSONGeneratedProfileBuilder
         elif is_generated_xml_profile:
@@ -5668,6 +5882,8 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
             gen_profile_scanner_cls = ProcessPropertyBuilder
         elif is_document_cache_component:
             gen_profile_scanner_cls = DocumentCacheBuilder
+        elif is_api_service_component:
+            gen_profile_scanner_cls = ApiServiceBuilder
 
         if (
             gen_profile_scanner_cls is not None
@@ -5776,6 +5992,19 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         # push a literal '$ref:...' (or a wrong component id)
                         # into the DocumentCache profile attribute.
                         gen_profile_err = _check_document_cache_profile_ref(
+                            comp, effective_config, components_by_key
+                        )
+                elif is_api_service_component:
+                    # Issue #133 M6.1: webservice (API Service Component) —
+                    # run the builder's structured validator, then the
+                    # cross-component route checks ($ref routes must be
+                    # declared in depends_on and resolve to in-spec processes
+                    # with a WSS Listen source binding).
+                    gen_profile_err = ApiServiceBuilder.validate_config(
+                        effective_config
+                    )
+                    if gen_profile_err is None:
+                        gen_profile_err = _check_api_service_route_dependencies(
                             comp, effective_config, components_by_key
                         )
                 elif is_transform_function_wrapper:

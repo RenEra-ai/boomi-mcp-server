@@ -24,9 +24,11 @@ from .builders import (
     PROFILE_BUILDERS,
     get_profile_builder,
 )
+from .builders.api_service_builder import get_api_service_builder
 from .builders.document_cache_builder import get_document_cache_builder
 from .builders.process_property_builder import get_process_property_builder
 from .builders.script_mapping_builder import get_script_mapping_builder
+from .component_update_preservation import merge_for_update
 
 
 # ============================================================================
@@ -105,6 +107,21 @@ def create_component(
             dc_builder_cls = get_document_cache_builder(component_type)
             if dc_builder_cls is not None:
                 xml = dc_builder_cls().build(**config)
+                result = _create_component_raw(boomi_client, xml)
+                return {
+                    "_success": True,
+                    "message": f"Created {component_type} '{result['name']}'",
+                    "component_id": result['component_id'],
+                    "name": result['name'],
+                    "type": result['type'],
+                    "profile": profile,
+                }
+            # Issue #133 M6.1: standalone webservice (API Service Component)
+            # creation — routes must be literal process component UUIDs here
+            # ('$ref:' routes resolve only inside build_integration specs).
+            as_builder_cls = get_api_service_builder(component_type)
+            if as_builder_cls is not None:
+                xml = as_builder_cls().build(**config)
                 result = _create_component_raw(boomi_client, xml)
                 return {
                     "_success": True,
@@ -222,6 +239,28 @@ def update_component(
                 "profile": profile,
             }
 
+        # Issue #133 M6.1: typed webservice (API Service Component) structured
+        # update — read-merge-write with the builder's preservation policy
+        # (parity with the create dispatch above and build_integration's
+        # structured update). Without this branch the typed config fell
+        # through to the metadata smart-merge below, which applied only the
+        # name and SILENTLY discarded route changes while bumping the
+        # component version (#133 QA bug: success-no-op data-loss trap).
+        if config.get('component_type') == 'webservice' and 'routes' in config:
+            as_builder_cls = get_api_service_builder('webservice')
+            desired_xml = as_builder_cls().build(**config)
+            current = component_get_xml(boomi_client, component_id)
+            merged_xml = merge_for_update(
+                current['xml'], desired_xml, as_builder_cls.PRESERVATION_POLICY
+            )
+            boomi_client.component.update_component_raw(component_id, merged_xml)
+            return {
+                "_success": True,
+                "message": f"Updated webservice '{config.get('component_name') or current['name']}'",
+                "component_id": component_id,
+                "profile": profile,
+            }
+
         # Partial update: get current XML, modify, put back
         current = component_get_xml(boomi_client, component_id)
         raw_xml = current['xml']
@@ -268,6 +307,17 @@ def update_component(
 
     except ComponentGetDeadlineExceeded as e:
         return component_get_deadline_envelope(e)
+    except BuilderValidationError as e:
+        # Issue #133: the typed webservice update path surfaces the builder's
+        # structured validation envelope (same shape as create).
+        return {
+            "_success": False,
+            "error_code": e.error_code,
+            "error": str(e),
+            "field": e.field,
+            "hint": e.hint,
+            "profile": profile,
+        }
     except ApiError as e:
         return {
             "_success": False,

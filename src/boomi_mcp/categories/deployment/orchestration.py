@@ -60,8 +60,15 @@ from ..execution import execute_process_action  # test-run execution (issue #63)
 from ..monitoring import monitor_platform_action  # test-run log/artifact retrieval (issue #63)
 from ..shared_resources import manage_shared_resources_action  # listener apiType/auth preflight (M6 #12)
 from ..components._shared import component_get_xml  # listener collision check component reads (M6 #12)
+from ..components.analyze_component import (  # ASC route/XML extraction shared with the analyzer (M6.1 #133)
+    _extract_wss_listen_binding,
+    _extract_wss_operation_config,
+    _parse_api_service_xml,
+)
 from ...patterns.primitives.wss_listen import (  # single-source WSS endpoint formula (M6 #12)
     compute_wss_endpoint,
+    effective_api_service_route,
+    normalize_api_service_path_segment,
     sentence_case_object_name,
     wss_http_method,
 )
@@ -150,6 +157,18 @@ LISTENER_DEPLOYMENT_INACTIVE = "LISTENER_DEPLOYMENT_INACTIVE"
 LISTENER_PATH_COLLISION = "LISTENER_PATH_COLLISION"
 LISTENER_PROBE_FAILED = "LISTENER_PROBE_FAILED"
 LISTENER_EXECUTION_RECORD_MISSING = "LISTENER_EXECUTION_RECORD_MISSING"
+
+# M6.1 (#133) — API Service Component (ASC) publish-mode codes. On an
+# apiType=advanced runtime, routes exist ONLY through a deployed ASC — bare
+# WSS deploys clean but 404s (live-confirmed); on basic/intermediate the
+# inverse holds. Deploy does NOT cascade: the ASC and each route process
+# deploy independently to the same environment.
+LISTENER_ASC_REQUIRED = "LISTENER_ASC_REQUIRED"
+LISTENER_ASC_UNSUPPORTED_FOR_APITYPE = "LISTENER_ASC_UNSUPPORTED_FOR_APITYPE"
+LISTENER_ASC_DEPLOYMENT_INACTIVE = "LISTENER_ASC_DEPLOYMENT_INACTIVE"
+LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE = "LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE"
+LISTENER_ASC_ROUTE_INVALID = "LISTENER_ASC_ROUTE_INVALID"
+LISTENER_ASC_COLLISION = "LISTENER_ASC_COLLISION"
 
 # Failure-hardening + cleanup-planning codes (issue #65).
 # LOG_RETRIEVAL_FAILED / ARTIFACT_RETRIEVAL_FAILED are *diagnostic* — they annotate the logs
@@ -346,6 +365,18 @@ class ListenerVerifyStage(BaseModel):
     readback_baseline_available: Optional[bool] = None
     execution_id: Optional[str] = None
     execution_status: Optional[str] = None
+    # M6.1 (#133) — ASC publish-mode fields; all None/default on bare-WSS
+    # builds so pre-#133 model dumps stay shape-compatible.
+    # 'api_service' when the build publishes through an API Service Component;
+    # 'bare_wss' (or None on legacy builds) otherwise.
+    publish_mode: Optional[str] = None
+    api_service_component_id: Optional[str] = None
+    api_service_package_id: Optional[str] = None
+    api_service_deployment_id: Optional[str] = None
+    api_service_deployment_active: Optional[bool] = None
+    route_process_ids: List[str] = Field(default_factory=list)
+    route_deployments_active: Optional[bool] = None
+    collision_paths: List[str] = Field(default_factory=list)
     error: Optional[str] = None
     error_code: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
@@ -765,6 +796,85 @@ def _listener_operation_ref_from_process(process_config: Any) -> Optional[str]:
     return None
 
 
+def _recorded_component_id(entry: Dict[str, Any], comp: Dict[str, Any]) -> Optional[str]:
+    """The component id a build recorded for a spec component (apply result
+    first, declared component_id as fallback)."""
+    comp_key = comp.get("key")
+    results = entry.get("results")
+    if isinstance(results, dict) and isinstance(comp_key, str):
+        result_entry = results.get(comp_key)
+        if isinstance(result_entry, dict):
+            recorded = result_entry.get("component_id")
+            if isinstance(recorded, str) and recorded.strip():
+                return recorded.strip()
+    declared = comp.get("component_id")
+    if isinstance(declared, str) and declared.strip():
+        return declared.strip()
+    return None
+
+
+def _resolve_asc_binding(
+    entry: Dict[str, Any],
+    components: List[Any],
+    process_comp: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """The in-spec API Service Component routing to the deploy-target process
+    (M6.1 #133), or None for bare-WSS builds.
+
+    A webservice component binds the process when one of its ``routes[]``
+    references it by ``$ref:<process key>`` or by its recorded/declared
+    component id. Returns the ASC's spec key, recorded component id, config,
+    the matching route's overrides, and every route's resolved process id
+    (deploy-both verification needs all of them active).
+    """
+    process_key = process_comp.get("key")
+    process_id = _recorded_component_id(entry, process_comp)
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+        if str(comp.get("type") or "").strip().lower() != "webservice":
+            continue
+        config = comp.get("config")
+        if not isinstance(config, dict):
+            continue
+        routes = config.get("routes")
+        if not isinstance(routes, list):
+            continue
+        matched_route: Optional[Dict[str, Any]] = None
+        route_process_ids: List[str] = []
+        for route in routes:
+            if not isinstance(route, dict):
+                continue
+            ref = route.get("process")
+            if ref is None:
+                ref = route.get("process_id")
+            ref = str(ref or "").strip()
+            resolved: Optional[str] = None
+            if ref.startswith("$ref:"):
+                ref_key = ref[5:].strip()
+                for candidate in components:
+                    if isinstance(candidate, dict) and candidate.get("key") == ref_key:
+                        resolved = _recorded_component_id(entry, candidate)
+                        break
+                if ref_key and ref_key == process_key and matched_route is None:
+                    matched_route = route
+            else:
+                resolved = ref or None
+                if resolved and resolved == process_id and matched_route is None:
+                    matched_route = route
+            if resolved and resolved not in route_process_ids:
+                route_process_ids.append(resolved)
+        if matched_route is not None:
+            return {
+                "key": comp.get("key"),
+                "component_id": _recorded_component_id(entry, comp),
+                "config": config,
+                "route": matched_route,
+                "route_process_ids": route_process_ids,
+            }
+    return None
+
+
 def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Read the recorded build's WSS listener metadata, or None for non-listener builds.
 
@@ -807,12 +917,36 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
     if not operation_ref:
         return None
 
+    # 1.5. M6.1 (#133): detect an in-spec API Service Component routing to the
+    # confirmed listener process (publish_mode='api_service'). Detection keys
+    # off the ASC's own route references, not caller metadata.
+    asc_binding = _resolve_asc_binding(entry, components, process_comps[0])
+
+    def _attach_asc(meta: Dict[str, Any]) -> Dict[str, Any]:
+        if asc_binding is None:
+            meta.setdefault("publish_mode", "bare_wss")
+            return meta
+        meta["publish_mode"] = "api_service"
+        meta["api_service_component_key"] = asc_binding.get("key")
+        if asc_binding.get("component_id"):
+            meta["api_service_component_id"] = asc_binding["component_id"]
+        meta["route_process_ids"] = list(asc_binding.get("route_process_ids") or [])
+        # The ASC base urlPath — the platform's SHADOWING granularity: one
+        # deployed webservice component serves per base path, whole-component
+        # first-deployed-wins (live-proven A/B/A, #133 QA 2026-07-05). The
+        # verify stage's collision scan compares it against other deployed
+        # ASCs' bases.
+        meta["api_service_base_url_path"] = str(
+            asc_binding["config"].get("base_url_path") or ""
+        )
+        return meta
+
     # 2. Binding confirmed — prefer the archetype-emitted metadata block.
     validation_rules = spec.get("validation_rules")
     if isinstance(validation_rules, dict):
         listener = validation_rules.get("listener")
         if isinstance(listener, dict) and listener.get("endpoint_path"):
-            return dict(listener)
+            return _attach_asc(dict(listener))
 
     # 3. No metadata block — resolve the referenced Listen operation component
     #    in-spec ($ref:KEY by component key; a literal id by recorded/declared
@@ -853,7 +987,7 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
         return None
     operation_type = str(config.get("operation_type") or "EXECUTE").strip().upper()
     input_type = str(config.get("input_type") or "singlejson").strip().lower()
-    return {
+    meta = {
         "object_name": object_name,
         "operation_type": operation_type,
         "input_type": input_type,
@@ -861,6 +995,31 @@ def _resolve_listener_metadata(build_id: Optional[str]) -> Optional[Dict[str, An
         "http_method": wss_http_method(input_type),
         "endpoint_path": compute_wss_endpoint(operation_type, object_name),
     }
+    if asc_binding is not None:
+        # Hand-authored ASC spec without a metadata block: derive the
+        # effective /ws/rest route from the ASC config + the resolved WSS
+        # operation via the shared inherit formula (#133).
+        asc_config = asc_binding["config"]
+        route = asc_binding["route"]
+        effective = effective_api_service_route(
+            str(asc_config.get("base_url_path") or ""),
+            {
+                "http_method": route.get("http_method"),
+                "url_path": route.get("url_path"),
+                "object_name": route.get("object_name"),
+                "input_type": route.get("input_type"),
+                "output_type": route.get("output_type"),
+            },
+            {
+                "object_name": object_name,
+                "input_type": input_type,
+                "output_type": str(config.get("output_type") or "none").strip().lower(),
+            },
+        )
+        meta["http_method"] = effective["method"]
+        meta["endpoint_path"] = effective["path"]
+        meta["bare_wss_endpoint_path"] = compute_wss_endpoint(operation_type, object_name)
+    return _attach_asc(meta)
 
 
 def _listener_probe(
@@ -899,13 +1058,18 @@ def _run_listener_verify_stage(
     listener_meta: Dict[str, Any],
     deployment_stage: DeploymentStage,
     creds: Optional[Dict[str, str]] = None,
+    package_version: Optional[str] = None,
 ) -> Tuple[ListenerVerifyStage, Optional[OrchestrateDeployError]]:
-    """Verify a deployed WSS listener route (M6 #12).
+    """Verify a deployed WSS listener route (M6 #12; ASC publish mode M6.1 #133).
 
-    Order: SharedServerInformation preflight (apiType/auth) -> deployment-active
-    check -> component-query collision check -> authenticated live probe (with a
-    one-shot objectName-casing fallback on 404) -> execution-record readback.
-    ``ListenerStatus`` is never consulted (live-proven empty for WSS routes).
+    Order: SharedServerInformation preflight (apiType decides the publish
+    mode: bare WSS on basic/intermediate, API Service Component on advanced)
+    -> [ASC mode: package+deploy the ASC and check every route process active]
+    -> deployment-active check -> component-query collision check ->
+    authenticated live probe (bare mode keeps the one-shot objectName-casing
+    fallback on 404; /ws/rest paths are case-verbatim) -> execution-record
+    readback. ``ListenerStatus`` is never consulted (live-proven empty for
+    WSS/ASC routes).
     """
     object_name = str(listener_meta.get("object_name") or "").strip()
     operation_type = str(listener_meta.get("operation_type") or "").strip().upper()
@@ -913,20 +1077,40 @@ def _run_listener_verify_stage(
     http_method = str(
         listener_meta.get("http_method") or wss_http_method(input_type)
     ).strip().upper()
+    publish_mode = str(listener_meta.get("publish_mode") or "bare_wss").strip().lower()
+    asc_mode = publish_mode == "api_service"
     endpoint_path = str(
         listener_meta.get("endpoint_path")
-        or compute_wss_endpoint(operation_type, object_name)
+        or ("" if asc_mode else compute_wss_endpoint(operation_type, object_name))
     )
+    route_process_ids = [
+        str(pid).strip()
+        for pid in (listener_meta.get("route_process_ids") or [])
+        if isinstance(pid, str) and str(pid).strip()
+    ]
     stage = ListenerVerifyStage(
         status="failed",
-        endpoint_path=endpoint_path,
+        endpoint_path=endpoint_path or None,
         http_method=http_method,
+        publish_mode=publish_mode,
+        route_process_ids=route_process_ids,
     )
 
     def _fail(code: str, message: str, **details: Any) -> Tuple[ListenerVerifyStage, OrchestrateDeployError]:
         stage.error = message
         stage.error_code = code
         return stage, _error(code, message, details=details or None)
+
+    if asc_mode and not endpoint_path:
+        # A confirmed listener published through an ASC whose effective route
+        # could not be resolved (unreadable config) — fail structured rather
+        # than probing a wrong path.
+        return _fail(
+            LISTENER_ASC_ROUTE_INVALID,
+            "The build publishes through an API Service Component but its "
+            "effective /ws/rest route could not be resolved from the build "
+            "registry — cannot probe.",
+        )
 
     # 1. Shared Web Server preflight: apiType decides the listener pattern; auth
     #    decides the probe credentials.
@@ -953,16 +1137,130 @@ def _run_listener_verify_stage(
     auth = str(server_info.get("auth") or server_info.get("min_auth") or "none").strip().lower()
     stage.api_type = api_type or None
     stage.auth = auth or None
-    if api_type == "advanced":
+    if asc_mode:
+        # ASC routes exist only through the /ws/rest gateway of an
+        # apiType=advanced Shared Web Server; on basic/intermediate the ASC
+        # deploys clean but does not serve (live-confirmed, #133).
+        if api_type != "advanced":
+            return _fail(
+                LISTENER_ASC_UNSUPPORTED_FOR_APITYPE,
+                "The build publishes through an API Service Component, but the "
+                f"runtime's Shared Web Server apiType is {api_type or 'unknown'!r} "
+                "— ASC /ws/rest routes are served only on apiType='advanced'. "
+                "Switch the runtime to advanced or disable the asc_wrapper "
+                "(bare WSS serves basic/intermediate).",
+                runtime_id=runtime_id,
+                api_type=api_type,
+            )
+    elif api_type == "advanced":
         return _fail(
-            LISTENER_APITYPE_UNSUPPORTED,
+            LISTENER_ASC_REQUIRED,
             "The runtime's Shared Web Server apiType is 'advanced', which does not "
-            "serve bare /ws/simple WSS routes — an API Service Component is required "
-            "(issue #133, deferred out of M6). Switch the runtime to "
-            "basic/intermediate or wait for #133 ASC support.",
+            "serve bare /ws/simple WSS routes — the deploy succeeds but every "
+            "route 404s. Publish through an API Service Component instead "
+            "(listener archetypes: asc_wrapper.enabled=true; issue #133).",
             runtime_id=runtime_id,
             api_type=api_type,
         )
+
+    # 1.5. ASC mode (M6.1 #133): package + deploy the API Service Component
+    #      itself and confirm every route process is active in the SAME
+    #      environment — ASC deploy does not cascade (live-confirmed). Runs
+    #      AFTER the apiType preflight so a tier mismatch never deploys an ASC.
+    if asc_mode:
+        asc_component_id = str(
+            listener_meta.get("api_service_component_id") or ""
+        ).strip()
+        if not asc_component_id:
+            return _fail(
+                LISTENER_ASC_ROUTE_INVALID,
+                "The build publishes through an API Service Component but no ASC "
+                "component id was recorded in the build registry — apply the "
+                "build (or supply the webservice component id) before verifying.",
+            )
+        stage.api_service_component_id = asc_component_id
+        # Same version resolution as the process package (explicit override,
+        # else the build id) so the ASC package pairs with the process one.
+        asc_version = (
+            str(package_version or "").strip()
+            or _effective_package_version(request.package_version, str(request.build_id or ""))
+        )
+        asc_package, asc_deployment, asc_error = _ensure_api_service_deployment(
+            boomi_client,
+            profile,
+            asc_component_id=asc_component_id,
+            environment_id=str(environment_id),
+            package_version=asc_version,
+        )
+        if asc_package is not None:
+            stage.api_service_package_id = asc_package.package_id
+        if asc_deployment is not None:
+            stage.api_service_deployment_id = asc_deployment.deployment_id
+            stage.api_service_deployment_active = bool(asc_deployment.active)
+        if asc_error is not None:
+            return _fail(
+                LISTENER_ASC_DEPLOYMENT_INACTIVE,
+                "The API Service Component could not be packaged/deployed to the "
+                f"target environment: {asc_error.message}",
+                asc_component_id=asc_component_id,
+                environment_id=environment_id,
+            )
+        if not stage.api_service_deployment_active:
+            return _fail(
+                LISTENER_ASC_DEPLOYMENT_INACTIVE,
+                "The API Service Component deployment is not active in the target "
+                "environment — its /ws/rest routes cannot register.",
+                asc_component_id=asc_component_id,
+                environment_id=environment_id,
+                deployment_id=stage.api_service_deployment_id,
+            )
+        # Every route process must be active in the same environment. The
+        # deploy-target process is covered by this run's deployment stage;
+        # other route processes (hand-authored multi-route ASCs) are checked
+        # against the environment's active deployments.
+        other_route_ids = [
+            pid for pid in route_process_ids if pid != target.process_component_id
+        ]
+        if other_route_ids:
+            try:
+                route_deployments = manage_deployment_action(
+                    boomi_client,
+                    profile=profile,
+                    action="list_deployments",
+                    config_data={"environment_id": environment_id, "active_only": True},
+                )
+            except Exception as exc:
+                route_deployments = {"_success": False, "error": str(exc)}
+            if not (
+                isinstance(route_deployments, dict)
+                and route_deployments.get("_success")
+            ):
+                return _fail(
+                    LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE,
+                    "Could not list active deployments to confirm the ASC route "
+                    "processes are deployed: "
+                    + str((route_deployments or {}).get("error") or "unknown error"),
+                    environment_id=environment_id,
+                )
+            active_component_ids = {
+                dep.get("component_id")
+                for dep in (route_deployments.get("deployments") or [])
+                if isinstance(dep, dict)
+            }
+            missing_routes = [
+                pid for pid in other_route_ids if pid not in active_component_ids
+            ]
+            if missing_routes:
+                stage.route_deployments_active = False
+                return _fail(
+                    LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE,
+                    "ASC deploy does not cascade: every route process must be "
+                    "independently deployed to the same environment. Missing "
+                    f"active deployment(s) for route process(es): {missing_routes}.",
+                    environment_id=environment_id,
+                    missing_route_process_ids=missing_routes,
+                )
+        stage.route_deployments_active = True
 
     # 2. Deployment-active check (reuses this run's deployment stage result —
     #    the deploy stage already confirmed/reused the active deployment).
@@ -979,12 +1277,22 @@ def _run_listener_verify_stage(
 
     # 3. Collision check — component/deployment-query based, NEVER a pre-probe:
     #    on Boomi-managed clouds every unregistered path answers a uniform 401,
-    #    so probing is uninformative (live-confirmed 2026-07-04). Read each other
-    #    active deployed process (bounded), resolve its Listen operation, and
-    #    compare lowercase(operationType)+objectName. Case-insensitive compare —
-    #    the served path re-cases the first objectName letter (live-settled
-    #    2026-07-04), so a case-only difference IS the same served path.
+    #    so probing is uninformative (live-confirmed 2026-07-04).
+    #    Bare mode: read each other active deployed process (bounded), resolve
+    #    its Listen operation, and compare lowercase(operationType)+objectName
+    #    case-insensitively (the served /ws/simple path re-cases the first
+    #    objectName letter, so a case-only difference IS the same path).
+    #    ASC mode (#133): the platform's shadowing granularity is the ASC's
+    #    BASE urlPath — the perimeter binds ONE deployed webservice component
+    #    per base path and the first-deployed wins for the ENTIRE component
+    #    (routes do NOT merge across ASCs sharing a base; live-proven A/B/A
+    #    2026-07-05: same component 404'd on base "" while a fixture ASC held
+    #    it, served 200 on a distinct base). Read each other active deployed
+    #    webservice component and flag ANY equal base (case-verbatim); the
+    #    per-route effective method+path comparison is kept as a defensive
+    #    second signal (it catches interior-slash equivalence across bases).
     collision_count = 0
+    collision_paths: List[str] = []
     _COLLISION_SCAN_CAP = 25
     try:
         deployments_result = manage_deployment_action(
@@ -996,61 +1304,146 @@ def _run_listener_verify_stage(
     except Exception as exc:
         deployments_result = {"_success": False, "error": str(exc)}
     if isinstance(deployments_result, dict) and deployments_result.get("_success"):
-        my_path_key = f"{operation_type.lower()}{object_name}".casefold()
         deployed = deployments_result.get("deployments") or []
-        other_process_ids = []
-        for dep in deployed:
-            if not isinstance(dep, dict):
-                continue
-            comp_id = dep.get("component_id")
-            comp_type = str(dep.get("component_type") or "").strip().lower()
-            if not comp_id or comp_id == target.process_component_id:
-                continue
-            if comp_type and comp_type != "process":
-                continue
-            if comp_id not in other_process_ids:
-                other_process_ids.append(comp_id)
-        if len(other_process_ids) > _COLLISION_SCAN_CAP:
-            stage.warnings.append(
-                f"[LISTENER_COLLISION_SCAN_CAPPED] {len(other_process_ids)} other deployed "
-                f"processes in the environment; only the first {_COLLISION_SCAN_CAP} were "
-                "scanned for WSS path collisions."
+        if asc_mode:
+            my_route_key = f"{http_method} {endpoint_path}"
+            my_base = normalize_api_service_path_segment(
+                listener_meta.get("api_service_base_url_path")
             )
-            other_process_ids = other_process_ids[:_COLLISION_SCAN_CAP]
-        for comp_id in other_process_ids:
-            try:
-                process_read = component_get_xml(boomi_client, comp_id)
-                process_root = ET.fromstring(process_read["xml"])
-            except Exception:
+            other_asc_ids = []
+            for dep in deployed:
+                if not isinstance(dep, dict):
+                    continue
+                comp_id = dep.get("component_id")
+                comp_type = str(dep.get("component_type") or "").strip().lower()
+                if not comp_id or comp_id == stage.api_service_component_id:
+                    continue
+                if comp_type != "webservice":
+                    continue
+                if comp_id not in other_asc_ids:
+                    other_asc_ids.append(comp_id)
+            if len(other_asc_ids) > _COLLISION_SCAN_CAP:
                 stage.warnings.append(
-                    f"[LISTENER_COLLISION_SCAN_INCOMPLETE] could not read deployed process "
-                    f"{comp_id}; its WSS path (if any) was not collision-checked."
+                    f"[LISTENER_COLLISION_SCAN_CAPPED] {len(other_asc_ids)} other deployed "
+                    f"API Service Components in the environment; only the first "
+                    f"{_COLLISION_SCAN_CAP} were scanned for /ws/rest path collisions."
                 )
-                continue
-            listen_op_ids = [
-                ca.get("operationId")
-                for ca in process_root.iter("connectoraction")
-                if ca.get("actionType") == "Listen"
-                and str(ca.get("connectorType") or "").lower() == "wss"
-                and ca.get("operationId")
-            ]
-            for op_id in listen_op_ids:
+                other_asc_ids = other_asc_ids[:_COLLISION_SCAN_CAP]
+            for comp_id in other_asc_ids:
                 try:
-                    op_read = component_get_xml(boomi_client, op_id)
-                    op_root = ET.fromstring(op_read["xml"])
+                    asc_read = component_get_xml(boomi_client, comp_id)
+                    parsed_asc = _parse_api_service_xml(asc_read["xml"])
                 except Exception:
                     stage.warnings.append(
-                        f"[LISTENER_COLLISION_SCAN_INCOMPLETE] could not read WSS operation "
-                        f"{op_id} referenced by deployed process {comp_id}."
+                        f"[LISTENER_COLLISION_SCAN_INCOMPLETE] could not read deployed API "
+                        f"Service Component {comp_id}; its routes were not collision-checked."
                     )
                     continue
-                for action in op_root.iter("WebServicesServerListenAction"):
-                    other_key = (
-                        f"{str(action.get('operationType') or '').lower()}"
-                        f"{str(action.get('objectName') or '')}"
-                    ).casefold()
-                    if other_key and other_key == my_path_key:
+                # PRIMARY signal: equal base urlPath = whole-component
+                # shadowing, regardless of the routes' paths (#133 QA #147).
+                other_base = normalize_api_service_path_segment(
+                    parsed_asc.get("base_url_path")
+                )
+                if other_base == my_base:
+                    collision_count += 1
+                    base_key = (
+                        f"BASE /ws/rest/{my_base or ''} (component {comp_id})"
+                    )
+                    if base_key not in collision_paths:
+                        collision_paths.append(base_key)
+                    continue
+                for route in parsed_asc.get("routes") or []:
+                    overrides = {
+                        k: (v if v is not None else "")
+                        for k, v in (route.get("overrides") or {}).items()
+                    }
+                    wss_op_config = None
+                    route_pid = route.get("process_id")
+                    needs_op = not str(overrides.get("object_name") or "").strip() or not (
+                        str(overrides.get("http_method") or "").strip()
+                        or str(overrides.get("input_type") or "").strip()
+                    )
+                    if route_pid and needs_op:
+                        try:
+                            route_proc = component_get_xml(boomi_client, route_pid)
+                            binding = _extract_wss_listen_binding(route_proc["xml"])
+                            if binding["has_listen"] and binding["operation_id"]:
+                                op_read = component_get_xml(
+                                    boomi_client, binding["operation_id"]
+                                )
+                                wss_op_config = _extract_wss_operation_config(
+                                    op_read["xml"]
+                                )
+                        except Exception:
+                            stage.warnings.append(
+                                f"[LISTENER_COLLISION_SCAN_INCOMPLETE] could not resolve the "
+                                f"WSS operation behind ASC {comp_id} route process "
+                                f"{route_pid}; its effective path was not collision-checked."
+                            )
+                            continue
+                    effective = effective_api_service_route(
+                        parsed_asc.get("base_url_path") or "", overrides, wss_op_config
+                    )
+                    other_key = f"{effective['method']} {effective['path']}"
+                    if other_key == my_route_key:
                         collision_count += 1
+                        if other_key not in collision_paths:
+                            collision_paths.append(other_key)
+        else:
+            my_path_key = f"{operation_type.lower()}{object_name}".casefold()
+            other_process_ids = []
+            for dep in deployed:
+                if not isinstance(dep, dict):
+                    continue
+                comp_id = dep.get("component_id")
+                comp_type = str(dep.get("component_type") or "").strip().lower()
+                if not comp_id or comp_id == target.process_component_id:
+                    continue
+                if comp_type and comp_type != "process":
+                    continue
+                if comp_id not in other_process_ids:
+                    other_process_ids.append(comp_id)
+            if len(other_process_ids) > _COLLISION_SCAN_CAP:
+                stage.warnings.append(
+                    f"[LISTENER_COLLISION_SCAN_CAPPED] {len(other_process_ids)} other deployed "
+                    f"processes in the environment; only the first {_COLLISION_SCAN_CAP} were "
+                    "scanned for WSS path collisions."
+                )
+                other_process_ids = other_process_ids[:_COLLISION_SCAN_CAP]
+            for comp_id in other_process_ids:
+                try:
+                    process_read = component_get_xml(boomi_client, comp_id)
+                    process_root = ET.fromstring(process_read["xml"])
+                except Exception:
+                    stage.warnings.append(
+                        f"[LISTENER_COLLISION_SCAN_INCOMPLETE] could not read deployed process "
+                        f"{comp_id}; its WSS path (if any) was not collision-checked."
+                    )
+                    continue
+                listen_op_ids = [
+                    ca.get("operationId")
+                    for ca in process_root.iter("connectoraction")
+                    if ca.get("actionType") == "Listen"
+                    and str(ca.get("connectorType") or "").lower() == "wss"
+                    and ca.get("operationId")
+                ]
+                for op_id in listen_op_ids:
+                    try:
+                        op_read = component_get_xml(boomi_client, op_id)
+                        op_root = ET.fromstring(op_read["xml"])
+                    except Exception:
+                        stage.warnings.append(
+                            f"[LISTENER_COLLISION_SCAN_INCOMPLETE] could not read WSS operation "
+                            f"{op_id} referenced by deployed process {comp_id}."
+                        )
+                        continue
+                    for action in op_root.iter("WebServicesServerListenAction"):
+                        other_key = (
+                            f"{str(action.get('operationType') or '').lower()}"
+                            f"{str(action.get('objectName') or '')}"
+                        ).casefold()
+                        if other_key and other_key == my_path_key:
+                            collision_count += 1
     else:
         stage.warnings.append(
             "[LISTENER_COLLISION_SCAN_UNAVAILABLE] active-deployment listing failed; "
@@ -1058,7 +1451,23 @@ def _run_listener_verify_stage(
             + str((deployments_result or {}).get("error") or "unknown error")
         )
     stage.collision_count = collision_count
+    stage.collision_paths = collision_paths
     if collision_count:
+        if asc_mode:
+            return _fail(
+                LISTENER_ASC_COLLISION,
+                f"{collision_count} collision(s) with other deployed API Service "
+                f"Component(s) in this environment ({collision_paths}). Shadowing "
+                "granularity is the ASC's BASE urlPath: the platform binds ONE "
+                "deployed webservice component per base and the FIRST-deployed "
+                "serves — a later same-base ASC is shadowed IN ITS ENTIRETY, even "
+                "for routes with unique paths (live-proven 2026-07-05); "
+                "undeploying the winner does NOT activate the loser. Choose a "
+                "distinct base_url_path or undeploy the colliding ASC.",
+                endpoint_path=endpoint_path,
+                collision_count=collision_count,
+                collision_paths=collision_paths,
+            )
         return _fail(
             LISTENER_PATH_COLLISION,
             f"{collision_count} other deployed process(es) in this environment serve the "
@@ -1173,13 +1582,16 @@ def _run_listener_verify_stage(
         stage.probe_status_code = status_code
         served_casing: Optional[str] = None
         if status_code is not None and 200 <= status_code < 300:
-            # The primary path carries the sentence-cased objectName (live-settled
-            # 2026-07-04: Boomi upper-cases the first letter on the served path).
-            served_casing = "sentence_case"
-        elif status_code == 404:
-            # Defensive verbatim fallback: sentence-casing was settled live on one
-            # runtime/tier; if a runtime ever serves the verbatim spelling instead,
-            # one retry keeps the verify green and records the contradiction.
+            # Bare mode: the primary path carries the sentence-cased objectName
+            # (live-settled 2026-07-04: Boomi upper-cases the first letter on
+            # the served path). ASC /ws/rest paths are verbatim (#133).
+            served_casing = "verbatim" if asc_mode else "sentence_case"
+        elif status_code == 404 and not asc_mode:
+            # Defensive verbatim fallback (BARE mode only — /ws/rest paths are
+            # already verbatim, there is no casing transformation to fall back
+            # from): sentence-casing was settled live on one runtime/tier; if a
+            # runtime ever serves the verbatim spelling instead, one retry
+            # keeps the verify green and records the contradiction.
             verbatim_path = f"/ws/simple/{operation_type.lower()}{object_name}"
             if verbatim_path != endpoint_path:
                 alt_url = base_url.rstrip("/") + verbatim_path
@@ -1228,14 +1640,27 @@ def _run_listener_verify_stage(
         if status_code == 401:
             triage = (
                 "401 with the supplied credentials means either no route is registered "
-                "for this tenant yet (the no-route baseline on Boomi-managed clouds — "
-                "token sync can lag a fresh deploy) or the credentials are wrong."
+                "for this tenant yet (the pre-first-route baseline on Boomi-managed "
+                "clouds is a uniform 401 even with valid credentials — token sync can "
+                "also lag a fresh deploy) or the credentials are wrong."
             )
         elif status_code == 404:
             triage = (
                 "404 after authentication means the request reached the runtime but no "
-                "route matches this path — check apiType, the objectName, and that the "
-                "listener process (not just a parent component) is deployed."
+                "route matches this path — check apiType, the path segments, and that "
+                + (
+                    "BOTH the API Service Component and its route process are deployed "
+                    "(ASC deploy does not cascade). If another ASC sharing this base "
+                    "urlPath deployed EARLIER, it shadows this ENTIRE component "
+                    "(base-granularity first-deployed-wins) — the collision scan "
+                    "flags known same-base ASCs, but one deployed mid-verify or "
+                    "beyond the scan cap would surface here."
+                    if asc_mode
+                    else "the listener process (not just a parent component) is "
+                    "deployed. On an apiType=advanced runtime a bare /ws/simple 404 "
+                    "is the tier mismatch itself (the LISTENER_ASC_REQUIRED "
+                    "preflight should have caught it)."
+                )
             )
         else:
             triage = "Unexpected status from the listener endpoint."
@@ -1595,10 +2020,13 @@ def _find_or_create_package(
     *,
     component_id: str,
     package_version: str,
+    component_type: str = "process",
 ) -> Tuple[Optional[PackageStage], Optional[OrchestrateDeployError]]:
     """Reuse an existing package for ``component_id`` + ``package_version`` or create one.
 
-    Returns ``(PackageStage, None)`` on success or ``(None, error)`` on failure.
+    ``component_type`` defaults to the historical process-only behavior; the
+    M6.1 (#133) ASC deploy-both path passes ``"webservice"``. Returns
+    ``(PackageStage, None)`` on success or ``(None, error)`` on failure.
     """
     listed = _call_deployment_action(
         boomi_client, profile, "list_packages", {"component_id": component_id}
@@ -1635,7 +2063,7 @@ def _find_or_create_package(
             "create_package",
             {
                 "component_id": component_id,
-                "component_type": "process",
+                "component_type": component_type,
                 "package_version": package_version,
             },
         )
@@ -1697,7 +2125,7 @@ def _find_or_create_package(
             status=status,
             package_id=package_id,
             component_id=component_id,
-            component_type="process",
+            component_type=component_type,
             package_version=package_version,
             warnings=warnings,
         ),
@@ -1854,6 +2282,42 @@ def _find_or_create_deployment(
         ),
         None,
     )
+
+
+def _ensure_api_service_deployment(
+    boomi_client: Any,
+    profile: Optional[str],
+    *,
+    asc_component_id: str,
+    environment_id: str,
+    package_version: str,
+) -> Tuple[Optional[PackageStage], Optional[DeploymentStage], Optional[OrchestrateDeployError]]:
+    """Package + deploy the API Service Component to the environment (M6.1 #133).
+
+    ASC deploy does NOT cascade from the route process (live-confirmed) — the
+    ASC needs its own PackagedComponent (``component_type='webservice'``) and
+    DeployedPackage in the SAME environment as every route process. Reuses the
+    existing find-or-create package/deployment helpers so idempotent re-runs
+    reuse rather than duplicate.
+    """
+    asc_package, package_error = _find_or_create_package(
+        boomi_client,
+        profile,
+        component_id=asc_component_id,
+        package_version=package_version,
+        component_type="webservice",
+    )
+    if package_error is not None or asc_package is None:
+        return None, None, package_error
+    asc_deployment, deploy_error = _find_or_create_deployment(
+        boomi_client,
+        profile,
+        package_id=asc_package.package_id,
+        environment_id=environment_id,
+    )
+    if deploy_error is not None:
+        return asc_package, None, deploy_error
+    return asc_package, asc_deployment, None
 
 
 # ---------------------------------------------------------------------------
@@ -2981,6 +3445,12 @@ _ERROR_CODE_STAGES: Dict[str, str] = {
     LISTENER_PATH_COLLISION: "listener_verify",
     LISTENER_PROBE_FAILED: "listener_verify",
     LISTENER_EXECUTION_RECORD_MISSING: "listener_verify",
+    LISTENER_ASC_REQUIRED: "listener_verify",
+    LISTENER_ASC_UNSUPPORTED_FOR_APITYPE: "listener_verify",
+    LISTENER_ASC_DEPLOYMENT_INACTIVE: "listener_verify",
+    LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE: "listener_verify",
+    LISTENER_ASC_ROUTE_INVALID: "listener_verify",
+    LISTENER_ASC_COLLISION: "listener_verify",
     TEST_EXECUTION_FAILED: "execution",
     TEST_EXECUTION_TIMEOUT: "execution",
     TEST_REQUEST_ID_MISSING: "execution",
@@ -3100,12 +3570,44 @@ def _next_step_for_failure(error: OrchestrateDeployError, failed_stage: str) -> 
             "package, deploy, and runtime bindings already succeeded and will be reused."
         )
     if failed_stage == "listener_verify":
-        if code == LISTENER_APITYPE_UNSUPPORTED:
+        if code == LISTENER_ASC_REQUIRED:
             return (
                 "The runtime's Shared Web Server apiType is 'advanced', which does not serve "
-                "bare /ws/simple WSS routes — it requires an API Service Component (issue #133, "
-                "out of M6 scope). Switch the runtime's apiType to basic/intermediate in the "
-                "Shared Web Server panel, or wait for #133 ASC support, then re-run."
+                "bare /ws/simple WSS routes (the deploy succeeds but every route 404s). "
+                "Rebuild with the listener archetype's asc_wrapper.enabled=true (or author a "
+                "webservice component routing to the listener process), or switch the "
+                "runtime's apiType to basic/intermediate, then re-run."
+            )
+        if code == LISTENER_ASC_UNSUPPORTED_FOR_APITYPE:
+            return (
+                "The build publishes through an API Service Component, but ASC /ws/rest "
+                "routes are served only on apiType='advanced'. Switch the runtime's Shared "
+                "Web Server apiType to advanced, or rebuild without the asc_wrapper (bare "
+                "WSS serves basic/intermediate), then re-run."
+            )
+        if code in (LISTENER_ASC_DEPLOYMENT_INACTIVE, LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE):
+            return (
+                "ASC deploy does not cascade: the API Service Component AND every route "
+                "process must each be packaged and deployed (active) to the same "
+                "environment. Deploy the missing component (manage_deployment) and re-run "
+                "orchestrate_deploy — existing packages/deployments are reused."
+            )
+        if code == LISTENER_ASC_COLLISION:
+            return (
+                "Another deployed API Service Component collides with this one. The "
+                "platform binds ONE deployed webservice component per BASE urlPath — "
+                "the first-deployed serves and a later same-base ASC is shadowed in "
+                "its entirety, even for routes with unique paths (undeploying the "
+                "winner does not activate the loser). Give this ASC a distinct "
+                "base_url_path (asc_wrapper.base_url_path) or undeploy the colliding "
+                "ASC, then re-run."
+            )
+        if code == LISTENER_APITYPE_UNSUPPORTED:
+            return (
+                "The runtime's Shared Web Server apiType does not serve this listener "
+                "pattern. Bare /ws/simple WSS routes need basic/intermediate; /ws/rest "
+                "API Service routes need advanced (asc_wrapper.enabled=true). Align the "
+                "runtime apiType with the build's publish mode, then re-run."
             )
         if code == LISTENER_PATH_COLLISION:
             return (
@@ -3457,6 +3959,16 @@ def _listener_placeholder_stage(
         status="planned",
         endpoint_path=listener_meta.get("endpoint_path"),
         http_method=listener_meta.get("http_method"),
+        # M6.1 (#133): surface the resolved publish mode (bare_wss vs
+        # api_service) on planned placeholders so dry-run callers see which
+        # pattern the real run would verify.
+        publish_mode=listener_meta.get("publish_mode"),
+        api_service_component_id=listener_meta.get("api_service_component_id"),
+        route_process_ids=[
+            str(pid)
+            for pid in (listener_meta.get("route_process_ids") or [])
+            if isinstance(pid, str)
+        ],
     )
 
 
@@ -4275,6 +4787,9 @@ def orchestrate_deploy_action(
             listener_meta=listener_meta,
             deployment_stage=deployment_stage,
             creds=creds,
+            # ASC mode packages/deploys the webservice component with the SAME
+            # resolved version as the process package (M6.1 #133).
+            package_version=package_stage.package_version if package_stage else None,
         )
         if listener_error is not None:
             return _runtime_or_schedule_failed_response(

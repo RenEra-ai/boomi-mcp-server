@@ -20,13 +20,14 @@ structured validation are produced by the existing builders through those
 primitives — this file emits JSON component specs only, never raw XML, and
 never calls a live Boomi account.
 
-Scope (M6): bare WSS on basic/intermediate runtimes; ``apiType=advanced``
-requires an API Service Component and is deferred to #133. The listener is
-JSON-input (``singlejson``/``multijson``) with an ack-only response
-(``outputType="none"``); retry/DLQ and listener response mapping are out of
-scope for this thin pass. Deploy-time verification (apiType preflight, path
-collisions, live probe, execution readback) is owned by ``orchestrate_deploy``'s
-``listener_verify`` stage.
+Bare WSS serves basic/intermediate runtimes by default; ``apiType=advanced``
+runtimes are supported via the opt-in ``asc_wrapper`` (M6.1 #133), which
+appends an API Service Component publishing the listener process under
+``/ws/rest/...``. The listener is JSON-input (``singlejson``/``multijson``)
+with an ack-only response (``outputType="none"``); retry/DLQ and listener
+response mapping are out of scope for this thin pass. Deploy-time verification
+(apiType preflight, path collisions, live probe, execution readback) is owned
+by ``orchestrate_deploy``'s ``listener_verify`` stage.
 """
 
 from __future__ import annotations
@@ -65,6 +66,8 @@ from ..primitives.inbound_validate import (
 from ..primitives.wss_listen import (
     WssListenParameters,
     WssListenPrimitive,
+    api_service_http_method,
+    compute_asc_endpoint,
     compute_wss_endpoint,
     wss_http_method,
 )
@@ -116,6 +119,10 @@ _MAIN_PROCESS_KEY = "main_process"
 _LISTENER_REQUEST_PROFILE_KEY = "listener_request_profile"
 # Role key for the request-profile display-name override.
 _ROLE_LISTENER_PROFILE = "listener_request_profile"
+# M6.1 (#133): the opt-in API Service Component wrapper (asc_wrapper.enabled)
+# and its display-name override role.
+_ASC_COMPONENT_KEY = "api_service"
+_ROLE_API_SERVICE = "api_service"
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +204,75 @@ class InboundValidationConfig(BaseModel):
     mode: Literal["profile_bound"] = "profile_bound"
 
 
+class AscWrapperConfig(BaseModel):
+    """Opt-in API Service Component wrapper for apiType=advanced runtimes
+    (M6.1 #133).
+
+    When enabled, the preset appends a ``webservice`` component whose single
+    REST route publishes the generated listener process under
+    ``/ws/rest/...`` (case-verbatim). Bare WSS (``/ws/simple/...``) remains
+    the default and serves basic/intermediate runtimes only — on advanced
+    runtimes bare WSS deploys clean but every route 404s (live-confirmed).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Emit an API Service Component wrapping the listener process. "
+            "Required for apiType=advanced runtimes; leave false for "
+            "basic/intermediate (bare WSS)."
+        ),
+    )
+    base_url_path: str = Field(
+        default="",
+        description=(
+            "ASC base urlPath (first /ws/rest/<base>/... segment); empty "
+            "contributes no segment. STRONGLY RECOMMENDED to set a unique "
+            "value per environment: the platform serves ONE deployed ASC per "
+            "base urlPath (first-deployed wins for the whole component, "
+            "live-proven #133 QA), so the default '' collides with any other "
+            "default-base ASC — listener_verify's collision scan fails fast "
+            "on a same-base deployment (LISTENER_ASC_COLLISION)."
+        ),
+    )
+    route_url_path: str = Field(
+        default="",
+        description=(
+            "Route urlPath override (trailing path segment); empty contributes "
+            "no segment (the WSS operation has no urlPath to inherit)."
+        ),
+    )
+    object_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "Route objectName override. Default (None) inherits the listener's "
+            "WSS objectName — the live-confirmed all-inherit route serves "
+            "/ws/rest/{objectName} verbatim."
+        ),
+    )
+    http_method: Optional[str] = Field(
+        default=None,
+        description=(
+            "Route httpMethod override (GET/POST/PUT/DELETE/PATCH). Default "
+            "(None) inherits from the listener input_type (JSON input -> POST)."
+        ),
+    )
+    title: Optional[str] = Field(
+        default=None,
+        description="ASC metaInfo title (display metadata; defaults to the component name).",
+    )
+    version: str = Field(
+        default="1.0.0",
+        description="ASC metaInfo version (display metadata).",
+    )
+    component_name: Optional[str] = Field(
+        default=None,
+        description="ASC component display name; defaults to '<prefix> API Service'.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level parameters
 # ---------------------------------------------------------------------------
@@ -229,6 +305,14 @@ class HttpListenerToDbParameters(BaseModel):
     inbound_validation: InboundValidationConfig = Field(
         default_factory=InboundValidationConfig,
         description="Opt-in build-time inbound-contract validation (profile_bound).",
+    )
+    asc_wrapper: AscWrapperConfig = Field(
+        default_factory=AscWrapperConfig,
+        description=(
+            "Opt-in API Service Component wrapper publishing the listener "
+            "process under /ws/rest/... — required for apiType=advanced "
+            "runtimes (#133); default bare WSS."
+        ),
     )
 
     @model_validator(mode="after")
@@ -434,16 +518,81 @@ def _run_inbound_validation(parameters) -> Optional[Dict[str, Any]]:
     return fragment["metadata"]["inbound_validation"]
 
 
+def _asc_effective_route(parameters) -> Dict[str, str]:
+    """The ASC route's EFFECTIVE method + path, resolving the wrapper's
+    empty/None overrides against the preset's own listener contract (the
+    archetype knows the linked WSS operation shape by construction).
+
+    Duck-typed on ``parameters.listener`` / ``parameters.asc_wrapper``.
+    """
+    asc = parameters.asc_wrapper
+    listener = parameters.listener
+    object_name = (asc.object_name or "").strip() or listener.object_name.strip()
+    return {
+        "method": api_service_http_method(asc.http_method, listener.input_type),
+        "path": compute_asc_endpoint(asc.base_url_path, object_name, asc.route_url_path),
+    }
+
+
+def _build_asc_component(parameters, overrides: Dict[str, str]) -> IntegrationComponentSpec:
+    """The opt-in API Service Component wrapping the listener process (#133).
+
+    One REST route pointing at ``$ref:main_process``; override attributes
+    default to empty string = inherit from the linked WSS Listen operation, so
+    the served path is ``/ws/rest/{objectName}`` unless the wrapper overrides
+    segments. ``depends_on=[main_process]`` orders the ASC AFTER the process so
+    the route ``$ref`` resolves to a real component id at apply time. Shared by
+    both listener presets (duck-typed on ``parameters``).
+    """
+    naming = parameters.naming
+    asc = parameters.asc_wrapper
+    component_name = (
+        (asc.component_name or "").strip()
+        or _named(overrides, _ROLE_API_SERVICE)
+        or f"{naming.component_prefix} API Service"
+    )
+    route: Dict[str, Any] = {
+        "process": f"$ref:{_MAIN_PROCESS_KEY}",
+        "http_method": (asc.http_method or "").strip().upper(),
+        "url_path": asc.route_url_path.strip(),
+        "object_name": (asc.object_name or "").strip(),
+        # input/output types always inherit from the WSS Listen operation.
+        "input_type": "",
+        "output_type": "",
+    }
+    config: Dict[str, Any] = {
+        "component_type": "webservice",
+        "component_name": component_name,
+        "base_url_path": asc.base_url_path.strip(),
+        "version": asc.version,
+        "routes": [route],
+    }
+    if asc.title:
+        config["title"] = asc.title
+    if naming.folder_path:
+        config["folder_path"] = naming.folder_path
+    return IntegrationComponentSpec(
+        key=_ASC_COMPONENT_KEY,
+        type="webservice",
+        action="create",
+        name=component_name,
+        config=config,
+        depends_on=[_MAIN_PROCESS_KEY],
+    )
+
+
 def _listener_metadata_block(parameters, *, inbound_validation) -> Dict[str, Any]:
     """The ``validation_rules['listener']`` block orchestrate_deploy reads.
 
     Carries the computed endpoint so the ``listener_verify`` stage can probe the
     deployed route without re-deriving the formula. Duck-typed on
-    ``parameters.listener``.
+    ``parameters.listener`` (+ ``parameters.asc_wrapper`` for the #133 ASC
+    publish mode; the bare-WSS key set is unchanged when the wrapper is off).
     """
     listener = parameters.listener
     operation_type = listener.operation_type.strip().upper()
     object_name = listener.object_name.strip()
+    asc_enabled = parameters.asc_wrapper.enabled
     block: Dict[str, Any] = {
         "object_name": object_name,
         "operation_type": operation_type,
@@ -457,6 +606,23 @@ def _listener_metadata_block(parameters, *, inbound_validation) -> Dict[str, Any
         "api_type_requirement": "basic|intermediate (bare WSS); advanced requires an API Service Component (#133)",
         "test_mode_supported": False,
     }
+    if asc_enabled:
+        route = _asc_effective_route(parameters)
+        block.update(
+            {
+                # listener_verify dispatches on publish_mode (absent =
+                # bare_wss for backward compatibility).
+                "publish_mode": "api_service",
+                "api_type_requirement": "advanced",
+                "http_method": route["method"],
+                "endpoint_path": route["path"],
+                "bare_wss_endpoint_path": compute_wss_endpoint(
+                    operation_type, object_name
+                ),
+                "api_service_component_key": _ASC_COMPONENT_KEY,
+                "route_process_key": _MAIN_PROCESS_KEY,
+            }
+        )
     if inbound_validation is not None:
         block["inbound_validation"] = inbound_validation
     return block
@@ -467,6 +633,18 @@ def _listener_endpoint_summary(parameters) -> Dict[str, Any]:
     listener = parameters.listener
     operation_type = listener.operation_type.strip().upper()
     object_name = listener.object_name.strip()
+    if parameters.asc_wrapper.enabled:
+        route = _asc_effective_route(parameters)
+        return {
+            "key": "wss_listener",
+            "type": "wss",
+            "direction": "source",
+            "binding_mode": "create",
+            "method": route["method"],
+            "endpoint_path": route["path"],
+            "publish_mode": "api_service",
+            "executable": False,
+        }
     return {
         "key": "wss_listener",
         "type": "wss",
@@ -604,7 +782,9 @@ class HttpListenerToDbArchetype(ArchetypePattern):
             "map, and a database write target — a verified-linear "
             "listener -> map -> write stage graph. The endpoint is "
             "/ws/simple/{operationtype}{SentenceCase(objectName)} on basic/intermediate "
-            "runtimes (apiType=advanced needs an API Service Component, #133). "
+            "runtimes; apiType=advanced runtimes are supported via "
+            "asc_wrapper.enabled=true, which appends an API Service Component "
+            "publishing the listener under /ws/rest/... (#133). "
             "Every byte of XML is produced by the existing component builders "
             "through the wss_listen / field_map / db_write primitives."
         ),
@@ -615,7 +795,7 @@ class HttpListenerToDbArchetype(ArchetypePattern):
         ],
         not_for=[
             "Scheduled/polling sources (use database_to_api_sync / api_to_database_sync)",
-            "apiType=advanced runtimes without an API Service Component (#133)",
+            "apiType=advanced runtimes without the asc_wrapper enabled (bare WSS 404s there)",
             "Listener response body mapping (the listener acks with outputType=none)",
             "Retry/DLQ on the listener path (M6 is verified-linear; parity is a follow-up)",
         ],
@@ -628,12 +808,13 @@ class HttpListenerToDbArchetype(ArchetypePattern):
         "Listener process options are locked by construction: allowSimultaneous='true', updateRunDates='false' (live-captured invariants; defaults cause HTTP 500 under concurrency).",
         "The generated listener request profile is the transform's source shape; the database write profile (Fields/Conditions) is the map target through the confirmed #32 builders.",
         "Records the computed listener endpoint (/ws/simple/{operationtype}{SentenceCase(objectName)}, HTTP method from input_type) in validation_rules.listener for orchestrate_deploy's listener_verify stage.",
+        "Opt-in asc_wrapper emits a typed API Service Component (one REST route -> the listener process, depends_on ordering, /ws/rest/... endpoint metadata with publish_mode='api_service') for apiType=advanced runtimes (#133).",
         "Opt-in inbound_validation (mode='profile_bound') asserts at build time that the listener binds a JSON request profile.",
         "Emits executable component specs for build_integration(action='plan'); all XML comes from the existing builders.",
     ]
     limitations = [
         "Emits JSON component specs only; performs no Boomi mutation and exposes no raw XML.",
-        "Bare WSS only: serves basic/intermediate runtimes; apiType=advanced requires an API Service Component (deferred to #133).",
+        "Bare WSS (default) serves basic/intermediate runtimes only; apiType=advanced requires asc_wrapper.enabled=true (the ASC and the listener process each deploy independently — deploy does not cascade).",
         "JSON input only (singlejson/multijson -> HTTP POST); inbound GET/query-parameter flows are out of scope.",
         "Ack-only response (outputType='none'): HTTP 200 does NOT imply process success — verify via execution records (listener_verify does this).",
         "Listener processes cannot run in Test mode; behavioral verification is deploy + live probe + execution readback.",
@@ -689,7 +870,57 @@ class HttpListenerToDbArchetype(ArchetypePattern):
                 },
                 "inbound_validation": {"enabled": True},
             },
-        )
+        ),
+        PatternExample(
+            name="webhook_to_database_insert_advanced_runtime",
+            description=(
+                "Same listener -> map -> write graph published on an "
+                "apiType=advanced runtime: asc_wrapper.enabled=true appends an "
+                "API Service Component whose all-inherit route serves "
+                "POST /ws/rest/orderIntake (objectName verbatim). Both the ASC "
+                "and the listener process must be deployed to the environment "
+                "(deploy does not cascade) — orchestrate_deploy handles both."
+            ),
+            parameters={
+                "naming": {
+                    "integration_name": "Order Intake Listener (Advanced)",
+                    "component_prefix": "OrderIntake",
+                },
+                "listener": {
+                    "object_name": "orderIntake",
+                    "operation_type": "EXECUTE",
+                    "payload_profile": {
+                        "format": "json",
+                        "root": {
+                            "name": "Root",
+                            "kind": "object",
+                            "children": [
+                                {"name": "id", "kind": "simple", "data_type": "character"},
+                                {"name": "amount", "kind": "simple", "data_type": "number"},
+                            ],
+                        },
+                    },
+                },
+                "target": {
+                    "connection": {"mode": "reuse", "component_name": "<<existing DB connection>>"},
+                    "write_profile": {
+                        "statement_type": "dynamicinsert",
+                        "table_name": "<<target table>>",
+                        "fields": [
+                            {"name": "id", "data_type": "character", "mandatory": True},
+                            {"name": "amount", "data_type": "number"},
+                        ],
+                    },
+                },
+                "transform": {
+                    "operations": [
+                        {"operation_type": "direct", "source_path": "Root/id", "target_path": "Fields/id"},
+                        {"operation_type": "direct", "source_path": "Root/amount", "target_path": "Fields/amount"},
+                    ]
+                },
+                "asc_wrapper": {"enabled": True},
+            },
+        ),
     ]
 
     @classmethod
@@ -833,6 +1064,11 @@ class HttpListenerToDbArchetype(ArchetypePattern):
                 target_op_key=target_op_key,
             )
         )
+        if parameters.asc_wrapper.enabled:
+            # M6.1 (#133): the API Service Component wrapper publishes the
+            # listener process on apiType=advanced runtimes. Emitted AFTER
+            # main_process (and depends_on it) so the route $ref resolves.
+            components.append(_build_asc_component(parameters, overrides))
 
         return IntegrationSpecV1(
             version="1.0",
@@ -881,8 +1117,9 @@ class HttpListenerToDbArchetype(ArchetypePattern):
                 },
                 "limitations": {
                     "listener": (
-                        "bare WSS (basic/intermediate apiType); advanced needs an "
-                        "API Service Component (#133). JSON input only; ack-only "
+                        "bare WSS (basic/intermediate apiType) by default; "
+                        "advanced requires asc_wrapper.enabled=true (API "
+                        "Service Component, #133). JSON input only; ack-only "
                         "response; no Test mode — verify via listener_verify."
                     ),
                     "database_write": (

@@ -843,7 +843,15 @@ _ENTRIES: List[Dict[str, Any]] = [
             "their domains; a web-services listener for real-time APIs "
             "(low-latency versus general); the MCP Server connector where it "
             "fits. Service versioning rides a base API path with per-env "
-            "deploy."
+            "deploy. Real-time inbound HTTP dispatches on the runtime's "
+            "Shared Web Server apiType (M6.1 #133): basic/intermediate serve "
+            "the bare WSS listener (/ws/simple); 'advanced' serves ONLY "
+            "/ws/rest routes through an API Service Component wrapping the "
+            "WSS Listen process (listener archetypes: asc_wrapper.enabled="
+            "true) — the wrong pairing deploys clean but 404s (gotchas: "
+            "api_service_required_for_advanced_apitype, "
+            "api_service_not_for_basic_intermediate, "
+            "api_service_deploy_does_not_cascade)."
         ),
         "when_to_use": (
             "Early, when the requirement may be served better outside a "

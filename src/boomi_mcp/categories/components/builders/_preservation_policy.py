@@ -91,16 +91,21 @@ class OwnedPath:
     # ``accessToken``/``accessTokenKey`` at handshake time but the
     # builder unconditionally emits as a token-not-set skeleton).
     preserve_keys: Optional[Tuple[str, ...]] = None
-    # For ``mode="key_merge"``: tuple of key values that participate
-    # in conditional preservation. Current wins ONLY when desired's
-    # element has no meaningful content (no descendant attributes or
-    # text), interpreted as "caller didn't supply a value, builder
-    # emitted a placeholder." When desired IS populated, normal
-    # same-key replacement applies. Use for fields the builder emits
-    # an empty placeholder for when the caller omits them (e.g. REST
-    # operation ``queryParameters`` / ``requestHeaders``
+    # For ``mode="key_merge"``: tuple of key values — and for
+    # ``mode="subtree_merge"``: tuple of child TAG names — that
+    # participate in conditional preservation. Current wins ONLY when
+    # desired's element has no meaningful content (no descendant
+    # attributes or text), interpreted as "caller didn't supply a
+    # value, builder emitted a placeholder." When desired IS populated,
+    # normal replacement applies. key_merge use: fields the builder
+    # emits an empty placeholder for when the caller omits them (e.g.
+    # REST operation ``queryParameters`` / ``requestHeaders``
     # customProperties slots — Codex r8 P2: a path-only structured
     # update would otherwise wipe UI-added live custom properties).
+    # subtree_merge use (#133): XSD-sequenced blocks the builder must
+    # OWN for ordering but never authors content for (webservice
+    # ``profileOverrides`` — the placeholder keeps its canonical slot
+    # while a UI-populated live block survives the update).
     preserve_when_desired_empty: Optional[Tuple[str, ...]] = None
     # For ``mode="subtree_merge"``: tuple of child element tag names the
     # builder owns. Current children with these tags are replaced by

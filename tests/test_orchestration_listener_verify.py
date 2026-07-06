@@ -598,7 +598,9 @@ def test_error_execution_record_surfaces_warning_but_passes(registry, monkeypatc
 # ---------------------------------------------------------------------------
 
 
-def test_advanced_api_type_fails_with_133_deferral(registry, monkeypatch):
+def test_advanced_api_type_bare_wss_fails_asc_required(registry, monkeypatch):
+    # M6.1 (#133): advanced + bare WSS now names the shipped remedy — publish
+    # through an API Service Component (asc_wrapper) — instead of deferring.
     bid = registry("b-l-adv", _listener_entry())
     probe = _FakeProbe([(200, None)])
     fakes = _patch_real_run(
@@ -609,10 +611,11 @@ def test_advanced_api_type_fails_with_133_deferral(registry, monkeypatch):
     )
     result = _run(bid)
     assert result["_success"] is False
-    assert result["error_code"] == "LISTENER_APITYPE_UNSUPPORTED"
+    assert result["error_code"] == "LISTENER_ASC_REQUIRED"
     assert result["failed_stage"] == "listener_verify"
-    assert "#133" in result["error"]
+    assert "asc_wrapper" in result["error"]
     assert result["listener_verify"]["status"] == "failed"
+    assert result["listener_verify"]["publish_mode"] == "bare_wss"
     # Fails BEFORE any probe; execution/logs blocked.
     assert probe.calls == []
     assert result["execution"]["status"] == "blocked"
@@ -833,6 +836,12 @@ def test_listener_error_codes_map_to_listener_verify_stage():
         orchestration.LISTENER_PATH_COLLISION,
         orchestration.LISTENER_PROBE_FAILED,
         orchestration.LISTENER_EXECUTION_RECORD_MISSING,
+        orchestration.LISTENER_ASC_REQUIRED,
+        orchestration.LISTENER_ASC_UNSUPPORTED_FOR_APITYPE,
+        orchestration.LISTENER_ASC_DEPLOYMENT_INACTIVE,
+        orchestration.LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE,
+        orchestration.LISTENER_ASC_ROUTE_INVALID,
+        orchestration.LISTENER_ASC_COLLISION,
     ):
         assert orchestration._ERROR_CODE_STAGES[code] == "listener_verify"
 
@@ -1073,3 +1082,464 @@ def test_confirmed_binding_prefers_validation_rules_metadata(registry):
     # Comes from _LISTENER_META (validation_rules), not an op component (the
     # entry's operation_id is a literal with no matching in-spec component).
     assert stage["endpoint_path"] == "/ws/simple/executeOrderIntake"
+
+
+# ---------------------------------------------------------------------------
+# API Service Component publish mode (M6.1 #133)
+# ---------------------------------------------------------------------------
+
+_ASC_LISTENER_META = {
+    "object_name": "orderIntake",
+    "operation_type": "EXECUTE",
+    "input_type": "singlejson",
+    "output_type": "none",
+    "response_content_type": "text/plain",
+    "publish_mode": "api_service",
+    "api_type_requirement": "advanced",
+    "http_method": "POST",
+    "endpoint_path": "/ws/rest/orderIntake",
+    "bare_wss_endpoint_path": "/ws/simple/executeOrderIntake",
+    "api_service_component_key": "api_service",
+    "route_process_key": "proc",
+    "test_mode_supported": False,
+}
+
+
+def _asc_entry(*, process_id="CID-1", asc_id="ASC-1", extra_route=None, listener_meta=None):
+    """A recorded ASC listener build: the listener process PLUS a webservice
+    component whose route references it (the archetype asc_wrapper shape)."""
+    entry = _listener_entry(
+        process_id=process_id,
+        listener_meta=listener_meta if listener_meta is not None else _ASC_LISTENER_META,
+    )
+    routes = [{"process": "$ref:proc", "http_method": "", "url_path": "",
+               "object_name": "", "input_type": "", "output_type": ""}]
+    if extra_route is not None:
+        routes.append(extra_route)
+    entry["spec"]["components"].append(
+        {
+            "key": "api_service",
+            "type": "webservice",
+            "action": "create",
+            "name": "Order API Service",
+            "component_id": None,
+            "config": {
+                "component_type": "webservice",
+                "component_name": "Order API Service",
+                "routes": routes,
+            },
+            "depends_on": ["proc"],
+        }
+    )
+    entry["results"]["api_service"] = {
+        "status": "created",
+        "component_id": asc_id,
+        "type": "webservice",
+        "name": "Order API Service",
+    }
+    entry["execution_order"] = ["proc", "api_service"]
+    return entry
+
+
+def _asc_deployment_responses(
+    *,
+    asc_deployment_active=True,
+    collision_deployments=None,
+    route_check_deployments=None,
+):
+    """Queued deployment responses for an ASC-mode real run.
+
+    Call order: list_packages (process pkg) -> list_deployments (process
+    deploy) -> list_packages (ASC pkg) -> list_deployments (ASC deploy)
+    [-> list_deployments (route-process check, only for multi-route ASCs)]
+    -> list_deployments (collision scan).
+    """
+    responses = _deployment_responses(collision_deployments=collision_deployments)
+    responses["list_packages"] = [
+        responses["list_packages"],
+        {
+            "_success": True,
+            "packages": [
+                {
+                    "package_id": "pkg-asc",
+                    "component_id": "ASC-1",
+                    "component_type": "webservice",
+                    "package_version": "v1",
+                    "created_date": "2026-01-01T00:00:00Z",
+                }
+            ],
+        },
+    ]
+    process_deploy, collision = responses["list_deployments"]
+    if asc_deployment_active:
+        asc_deploy = {
+            "_success": True,
+            "deployments": [
+                {"deployment_id": "dep-asc", "active": True, "current_version": "1"}
+            ],
+        }
+    else:
+        # No active ASC deployment listed -> _find_or_create_deployment
+        # CREATES one; the platform answers with an inactive deployment
+        # (e.g. license ceiling), which the stage must reject.
+        asc_deploy = {"_success": True, "deployments": []}
+        responses["deploy"] = {
+            "_success": True,
+            "deployment": {
+                "deployment_id": "dep-asc",
+                "active": False,
+                "current_version": "1",
+            },
+        }
+    queued = [process_deploy, asc_deploy]
+    if route_check_deployments is not None:
+        queued.append({"_success": True, "deployments": list(route_check_deployments)})
+    queued.append(collision)
+    responses["list_deployments"] = queued
+    return responses
+
+
+def _patch_asc_real_run(
+    monkeypatch,
+    *,
+    server_info,
+    probe,
+    execution_records,
+    deployment_responses=None,
+    component_xml=None,
+):
+    """ASC-mode variant of _patch_real_run (queued ASC package/deploy legs)."""
+    dep = _FakeAction(
+        deployment_responses or _asc_deployment_responses(), label="deployment"
+    )
+    env = _FakeAction(
+        {"get": {"_success": True, "environment": {"id": "env-1"}}}, label="environments"
+    )
+    rt = _FakeAction(
+        {
+            "get": {"_success": True, "runtime": {"id": "rt-1"}},
+            "list_attachments": {
+                "_success": True,
+                "attachments": [{"id": "ea-1", "atom_id": "rt-1", "environment_id": "env-1"}],
+            },
+        },
+        label="runtimes",
+    )
+    sch = _FakeAction({}, label="schedules")
+    shared = _FakeAction({"get_server_info": server_info}, label="shared_resources")
+    monitor = _FakeAction(
+        {"execution_records": [_RECORD_EMPTY, execution_records]},
+        label="monitoring",
+    )
+    monkeypatch.setattr(orchestration, "manage_deployment_action", dep)
+    monkeypatch.setattr(orchestration, "manage_environments_action", env)
+    monkeypatch.setattr(orchestration, "manage_runtimes_action", rt)
+    monkeypatch.setattr(orchestration, "manage_schedules_action", sch)
+    monkeypatch.setattr(orchestration, "manage_shared_resources_action", shared)
+    monkeypatch.setattr(orchestration, "monitor_platform_action", monitor)
+    monkeypatch.setattr(orchestration, "_listener_probe", probe)
+    monkeypatch.setattr(orchestration, "time", _FakeTime())
+
+    def _fake_component_get_xml(client, component_id, **kwargs):
+        xml_map = component_xml or {}
+        if component_id not in xml_map:
+            raise Exception(f"unexpected component read: {component_id}")
+        return {"xml": xml_map[component_id]}
+
+    monkeypatch.setattr(orchestration, "component_get_xml", _fake_component_get_xml)
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("Test-mode execution must never run for a listener build")
+
+    monkeypatch.setattr(orchestration, "execute_process_action", _explode)
+    return {"deployment": dep, "shared": shared, "monitor": monitor, "probe": probe}
+
+
+def test_dry_run_asc_build_plans_publish_mode(registry):
+    bid = registry("b-asc-plan", _asc_entry())
+    result = orchestrate_deploy_action(
+        build_id=bid, environment_id="env-1", runtime_id="rt-1", dry_run=True
+    )
+    assert result["_success"] is True
+    stage = result["listener_verify"]
+    assert stage["status"] == "planned"
+    assert stage["publish_mode"] == "api_service"
+    assert stage["endpoint_path"] == "/ws/rest/orderIntake"
+    assert stage["api_service_component_id"] == "ASC-1"
+    assert stage["route_process_ids"] == ["CID-1"]
+
+
+def test_advanced_asc_happy_path_deploys_both_and_probes_ws_rest(registry, monkeypatch):
+    bid = registry("b-asc-ok", _asc_entry())
+    probe = _FakeProbe([(200, None)])
+    fakes = _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced", auth="basic", token="tok"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+    )
+    result = _run(bid)
+    assert result["_success"] is True, result.get("error")
+    stage = result["listener_verify"]
+    assert stage["status"] == "completed"
+    assert stage["publish_mode"] == "api_service"
+    assert stage["api_service_component_id"] == "ASC-1"
+    assert stage["api_service_package_id"] == "pkg-asc"
+    assert stage["api_service_deployment_id"] == "dep-asc"
+    assert stage["api_service_deployment_active"] is True
+    assert stage["route_deployments_active"] is True
+    assert stage["route_process_ids"] == ["CID-1"]
+    # The ASC package leg actually ran (two list_packages calls: process + ASC).
+    assert fakes["deployment"].actions_called().count("list_packages") == 2
+    # The probe hits the /ws/rest route with Basic auth, case-verbatim.
+    assert probe.calls[0]["url"].endswith("/ws/rest/orderIntake")
+    assert probe.calls[0]["method"] == "POST"
+    assert "Authorization" in probe.calls[0]["headers"]
+    # /ws/rest is verbatim — the 2xx probe records verbatim casing.
+    assert stage["served_object_name_casing"] == "verbatim"
+    # Behavior verified via strict readback baseline.
+    assert result["behavior_verified"]["verified"] is True
+
+
+def test_intermediate_plus_asc_fails_unsupported_apitype(registry, monkeypatch):
+    bid = registry("b-asc-tier", _asc_entry())
+    probe = _FakeProbe([(200, None)])
+    fakes = _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="intermediate"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_ASC_UNSUPPORTED_FOR_APITYPE"
+    assert result["failed_stage"] == "listener_verify"
+    # Fails BEFORE deploying the ASC (no second list_packages) and any probe.
+    assert fakes["deployment"].actions_called().count("list_packages") == 1
+    assert probe.calls == []
+
+
+def test_asc_deployment_inactive_fails(registry, monkeypatch):
+    bid = registry("b-asc-inactive", _asc_entry())
+    probe = _FakeProbe([(200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        deployment_responses=_asc_deployment_responses(asc_deployment_active=False),
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_ASC_DEPLOYMENT_INACTIVE"
+    assert result["listener_verify"]["api_service_deployment_active"] is False
+    assert probe.calls == []
+
+
+def test_missing_route_process_deployment_fails(registry, monkeypatch):
+    # A second (literal-id) route process that is NOT active in the
+    # environment: ASC deploy does not cascade — the check must fail.
+    bid = registry(
+        "b-asc-route",
+        _asc_entry(extra_route={"process": "CID-2", "http_method": "GET",
+                               "object_name": "statusPing", "url_path": "",
+                               "input_type": "none", "output_type": ""}),
+    )
+    probe = _FakeProbe([(200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        deployment_responses=_asc_deployment_responses(
+            route_check_deployments=[
+                {"deployment_id": "dep-1", "component_id": "CID-1",
+                 "component_type": "process", "active": True}
+            ]
+        ),
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE"
+    assert "CID-2" in result["error"]
+    assert probe.calls == []
+
+
+def _other_asc_xml(*, base="", object_name="somethingElse", http_method="POST"):
+    return (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="webservice" name="Other ASC">'
+        "<bns:object>"
+        f'<webservice xmlns="" urlPath="{base}">'
+        "<restApi>"
+        '<route processId="00000000-0000-0000-0000-0000000000aa">'
+        f'<overrides httpMethod="{http_method}" inputProfileKey="" inputType="singlejson" '
+        f'objectName="{object_name}" outputType="" urlPath=""/>'
+        "<description/></route>"
+        "</restApi>"
+        '<soapApi fullEnvelopePassthrough="false" singleWsdlSchema="false" '
+        'suppressWrappers="false" wsdlNamespace="" wsdlServiceName="">'
+        "<SOAPVersion>SOAP_1_1</SOAPVersion></soapApi><odataApi/>"
+        '<metaInfo title="t" version="1.0.0"><description/><termsOfService/></metaInfo>'
+        "<profileOverrides/><capturedHeaders/><apiRoles/>"
+        "</webservice></bns:object></bns:Component>"
+    )
+
+
+def test_asc_same_base_collision_flagged_even_with_unique_route_paths(registry, monkeypatch):
+    # #133 QA bug #147 regression lock: shadowing granularity is the ASC's
+    # BASE urlPath (live-proven A/B/A 2026-07-05) — a deployed ASC sharing
+    # our base ("" here, the default) collides even though every route path
+    # is unique account-wide.
+    bid = registry("b-asc-coll", _asc_entry())
+    probe = _FakeProbe([(200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        deployment_responses=_asc_deployment_responses(
+            collision_deployments=[
+                {"deployment_id": "dep-x", "component_id": "OTHER-ASC",
+                 "component_type": "webservice", "active": True}
+            ]
+        ),
+        component_xml={"OTHER-ASC": _other_asc_xml(base="", object_name="uniquePath")},
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_ASC_COLLISION"
+    assert "BASE urlPath" in result["error"]
+    assert result["listener_verify"]["collision_count"] == 1
+    assert result["listener_verify"]["collision_paths"] == [
+        "BASE /ws/rest/ (component OTHER-ASC)"
+    ]
+    # Collisions block BEFORE the probe (pre-probes are uninformative).
+    assert probe.calls == []
+
+
+def test_asc_distinct_base_no_collision_and_verify_green(registry, monkeypatch):
+    # A deployed ASC on a DIFFERENT base does not shadow ours — the scan
+    # reads its XML, finds neither a base nor an effective-path match, and
+    # the verify proceeds green.
+    bid = registry("b-asc-nocoll", _asc_entry())
+    probe = _FakeProbe([(200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        deployment_responses=_asc_deployment_responses(
+            collision_deployments=[
+                {"deployment_id": "dep-x", "component_id": "OTHER-ASC",
+                 "component_type": "webservice", "active": True}
+            ]
+        ),
+        component_xml={
+            "OTHER-ASC": _other_asc_xml(base="otherBase", object_name="orderIntake")
+        },
+    )
+    result = _run(bid)
+    assert result["_success"] is True, result.get("error")
+    assert result["listener_verify"]["collision_count"] == 0
+    assert result["listener_verify"]["collision_paths"] == []
+    assert len(probe.calls) == 1
+
+
+def test_asc_probe_404_has_no_ws_simple_casing_fallback(registry, monkeypatch):
+    # Bare mode retries a 404 on the verbatim /ws/simple casing; /ws/rest is
+    # already verbatim — ASC mode must fail without a second probe.
+    bid = registry("b-asc-404", _asc_entry())
+    probe = _FakeProbe([(404, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_PROBE_FAILED"
+    assert len(probe.calls) == 1
+    assert probe.calls[0]["url"].endswith("/ws/rest/orderIntake")
+    # ASC triage names the deploy-both rule.
+    assert "does not cascade" in result["error"]
+
+
+def test_asc_http_200_with_error_execution_not_behavior_verified(registry, monkeypatch):
+    bid = registry("b-asc-err", _asc_entry())
+    probe = _FakeProbe([(200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records={
+            "_success": True,
+            "total_count": 1,
+            "execution_records": [
+                {"execution_id": "exec-err", "status": "ERROR",
+                 "execution_type": "exec_listener"}
+            ],
+        },
+    )
+    result = _run(bid)
+    assert result["_success"] is True
+    stage = result["listener_verify"]
+    assert stage["execution_status"] == "ERROR"
+    assert any("LISTENER_EXECUTION_ERROR" in w for w in stage["warnings"])
+    assert result["behavior_verified"]["verified"] is False
+
+
+def test_asc_metadata_without_component_id_fails_route_invalid(registry, monkeypatch):
+    # A hand-authored spec whose metadata claims api_service but records no
+    # webservice component: the stage must fail structured, never probe.
+    entry = _listener_entry(listener_meta=_ASC_LISTENER_META)
+    bid = registry("b-asc-noid", entry)
+    probe = _FakeProbe([(200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_ASC_ROUTE_INVALID"
+    assert probe.calls == []
+
+
+def test_ensure_api_service_deployment_packages_as_webservice(monkeypatch):
+    """The ASC package leg must create the PackagedComponent with
+    component_type='webservice' (packages.py passes it through verbatim)."""
+    calls = []
+
+    def fake_action(sdk=None, profile=None, action=None, config_data=None, **kwargs):
+        calls.append({"action": action, "config_data": config_data})
+        if action == "list_packages":
+            return {"_success": True, "packages": []}
+        if action == "create_package":
+            return {"_success": True, "package": {"package_id": "pkg-new"}}
+        if action == "list_deployments":
+            return {"_success": True, "deployments": []}
+        if action == "deploy":
+            return {
+                "_success": True,
+                "deployment": {"deployment_id": "dep-new", "active": True},
+            }
+        raise AssertionError(f"unexpected action: {action}")
+
+    monkeypatch.setattr(orchestration, "manage_deployment_action", fake_action)
+    package, deployment, error = orchestration._ensure_api_service_deployment(
+        MagicMock(),
+        "prof",
+        asc_component_id="ASC-9",
+        environment_id="env-1",
+        package_version="v9",
+    )
+    assert error is None
+    assert package.component_type == "webservice"
+    assert package.package_id == "pkg-new"
+    assert deployment.active is True
+    create_call = next(c for c in calls if c["action"] == "create_package")
+    assert create_call["config_data"]["component_type"] == "webservice"
+    assert create_call["config_data"]["component_id"] == "ASC-9"
+    assert create_call["config_data"]["package_version"] == "v9"

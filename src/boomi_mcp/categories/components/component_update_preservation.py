@@ -502,7 +502,10 @@ def _apply_owned_path(
                 cur_child.set(attr_name, des_child.attrib[attr_name])
         if owned.owned_child_tags:
             _replace_children_by_tag(
-                cur_child, des_child, owned.owned_child_tags
+                cur_child,
+                des_child,
+                owned.owned_child_tags,
+                preserve_when_desired_empty=owned.preserve_when_desired_empty or (),
             )
         return
 
@@ -523,6 +526,7 @@ def _replace_children_by_tag(
     cur_elem: ET.Element,
     des_elem: ET.Element,
     owned_tags: Tuple[str, ...],
+    preserve_when_desired_empty: Tuple[str, ...] = (),
 ) -> None:
     """Replace ``cur_elem``'s owned-tag children with ``des_elem``'s, and
     preserve children of unknown tags.
@@ -538,22 +542,41 @@ def _replace_children_by_tag(
 
     Unknown-tag children are preserved in their current relative order.
     A surviving unknown child that sat *between* two owned blocks lands
-    after the regrouped owned block; this is acceptable because the merge
-    necessarily rewrites the owned blocks and no canonical Boomi export
-    interleaves unknown children among these connector-body blocks.
+    after the regrouped owned block. For XSD-sequenced bodies where an
+    element the builder does NOT author sits BETWEEN owned blocks (the
+    webservice ``profileOverrides`` slot, #133 live QA: displacing it
+    past ``apiRoles`` is a platform 400), the tag must instead be OWNED
+    for ordering and listed in ``preserve_when_desired_empty``: when
+    desired's child of that tag carries no meaningful content (the
+    builder's empty placeholder) and current has one, current's element
+    is kept — in the owned block's canonical slot.
 
     Tag matching is namespace-aware: ``owned_tags`` entries are bare
     local names (builders emit these children with ``xmlns=""``), and
     are expanded to the empty-namespace tag for comparison.
     """
     owned_tag_set = {_expand_segment(t) for t in owned_tags}
+    preserve_tag_set = {_expand_segment(t) for t in preserve_when_desired_empty}
+    current_by_tag: Dict[str, ET.Element] = {}
+    for child in list(cur_elem):
+        if child.tag in owned_tag_set and child.tag not in current_by_tag:
+            current_by_tag[child.tag] = child
     # Desired's owned-tag children, in desired document order — authoritative
-    # for both content and ordering of the spliced-in owned block.
-    desired_owned: List[ET.Element] = [
-        copy.deepcopy(child)
-        for child in list(des_elem)
-        if child.tag in owned_tag_set
-    ]
+    # for both content and ordering of the spliced-in owned block. A
+    # placeholder-empty desired child whose tag is in the preserve set yields
+    # current's populated element instead (position still desired-driven).
+    desired_owned: List[ET.Element] = []
+    for child in list(des_elem):
+        if child.tag not in owned_tag_set:
+            continue
+        if (
+            child.tag in preserve_tag_set
+            and child.tag in current_by_tag
+            and not _element_has_meaningful_content(child)
+        ):
+            desired_owned.append(copy.deepcopy(current_by_tag[child.tag]))
+        else:
+            desired_owned.append(copy.deepcopy(child))
 
     new_children: List[ET.Element] = []
     owned_block_emitted = False

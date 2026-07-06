@@ -34,6 +34,7 @@ from ._shared import (
     component_get_deadline_envelope,
     _component_get_deadline_seconds,
 )
+from .builders._api_service_paths import effective_api_service_route
 
 
 # ============================================================================
@@ -118,6 +119,218 @@ def _enrich_references(boomi_client: Boomi, references: List[Dict], id_key: str)
             ref['_enrichment_error'] = 'COMPONENT_GET_DEADLINE_BUDGET_EXHAUSTED'
         enriched.append(ref)
     return enriched
+
+
+# ============================================================================
+# API Service (webservice) analysis helpers — M6.1 #133
+# ============================================================================
+
+# Mandatory <webservice> placeholder children (live capture
+# tests/fixtures/live_xml/m6/api_service_minimal.xml) — flagged when absent so
+# hand-authored ASCs that would fail platform validation are visible.
+_API_SERVICE_PLACEHOLDER_TAGS = (
+    "restApi",
+    "soapApi",
+    "odataApi",
+    "metaInfo",
+    "profileOverrides",
+    "capturedHeaders",
+    "apiRoles",
+)
+
+# <overrides> attribute -> the snake_case route-override key used by the
+# shared effective-route resolver (empty string = inherit, live-confirmed).
+_API_SERVICE_OVERRIDE_ATTRS = {
+    "httpMethod": "http_method",
+    "urlPath": "url_path",
+    "objectName": "object_name",
+    "inputType": "input_type",
+    "outputType": "output_type",
+    "inputProfileKey": "input_profile_key",
+}
+
+
+def _parse_api_service_xml(raw_xml: str) -> Dict[str, Any]:
+    """Extract the ASC route/placeholder structure from webservice XML."""
+    root = ET.fromstring(raw_xml)
+    ws = next(root.iter("webservice"), None)
+    if ws is None:
+        return {"base_url_path": "", "routes": [], "placeholder_validation": {
+            "missing": list(_API_SERVICE_PLACEHOLDER_TAGS)}}
+
+    routes: List[Dict[str, Any]] = []
+    rest_api = next(ws.iter("restApi"), None)
+    if rest_api is not None:
+        for route in rest_api.iter("route"):
+            overrides_el = next(route.iter("overrides"), None)
+            overrides = {
+                snake: (overrides_el.get(attr) if overrides_el is not None else None)
+                for attr, snake in _API_SERVICE_OVERRIDE_ATTRS.items()
+            }
+            description_el = next(route.iter("description"), None)
+            routes.append({
+                "process_id": route.get("processId", ""),
+                "overrides": overrides,
+                "description": (description_el.text or "") if description_el is not None else "",
+            })
+
+    present = {tag: next(ws.iter(tag), None) is not None for tag in _API_SERVICE_PLACEHOLDER_TAGS}
+    profile_overrides_el = next(ws.iter("profileOverrides"), None)
+    profile_overrides_populated = profile_overrides_el is not None and (
+        len(profile_overrides_el) > 0 or bool(profile_overrides_el.attrib)
+    )
+    return {
+        "base_url_path": ws.get("urlPath", ""),
+        "routes": routes,
+        "placeholder_validation": {
+            "missing": [tag for tag, ok in present.items() if not ok],
+            # Populated profileOverrides are platform/UI-authored — the typed
+            # builder never emits them and structured updates preserve them.
+            "profile_overrides": (
+                "preserved_not_authored" if profile_overrides_populated else "empty"
+            ),
+        },
+    }
+
+
+def _extract_wss_listen_binding(process_xml: str) -> Dict[str, Any]:
+    """WSS Listen start-shape binding of a process, or has_listen=False."""
+    root = ET.fromstring(process_xml)
+    for ca in root.iter("connectoraction"):
+        if (
+            ca.get("actionType") == "Listen"
+            and str(ca.get("connectorType") or "").lower() == "wss"
+        ):
+            return {"has_listen": True, "operation_id": ca.get("operationId") or ""}
+    return {"has_listen": False, "operation_id": ""}
+
+
+def _extract_wss_operation_config(op_xml: str) -> Optional[Dict[str, str]]:
+    """objectName/inputType/outputType off a WSS Listen operation component."""
+    root = ET.fromstring(op_xml)
+    for action in root.iter("WebServicesServerListenAction"):
+        return {
+            "object_name": action.get("objectName") or "",
+            "operation_type": action.get("operationType") or "",
+            "input_type": action.get("inputType") or "",
+            "output_type": action.get("outputType") or "",
+        }
+    return None
+
+
+def _analyze_api_service(
+    boomi_client: Boomi,
+    component_id: str,
+    comp_meta: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Webservice (API Service Component) route analysis for ``dependencies``.
+
+    Best-effort and budget-bounded like ``_enrich_references``: each route's
+    process (and its WSS Listen operation) is read to resolve the effective
+    ``/ws/rest/...`` method+path via the shared inherit formula and to flag
+    routes whose target is missing, unreadable, not a process, or lacks a WSS
+    Listen start (such routes deploy clean but 404 at runtime).
+    """
+    parsed = _parse_api_service_xml(comp_meta["xml"])
+    base_url_path = parsed["base_url_path"]
+    routes_out: List[Dict[str, Any]] = []
+    effective_paths: List[str] = []
+    seen_effective: Dict[str, int] = {}
+    budget = float(_component_get_deadline_seconds())
+
+    for index, route in enumerate(parsed["routes"]):
+        flags: List[str] = []
+        process_id = route["process_id"]
+        overrides = {k: (v if v is not None else "") for k, v in route["overrides"].items()}
+        wss_op_config: Optional[Dict[str, str]] = None
+
+        if not process_id:
+            flags.append("process_missing")
+        elif budget < 1:
+            flags.append("analysis_budget_exhausted")
+        else:
+            started = time.monotonic()
+            try:
+                process_read = component_get_xml(
+                    boomi_client, process_id, deadline_seconds=int(budget)
+                )
+            except Exception:
+                flags.append("process_unreadable")
+                process_read = None
+            finally:
+                budget -= time.monotonic() - started
+            if process_read is not None:
+                if process_read.get("type") != "process":
+                    flags.append("not_process")
+                else:
+                    binding = _extract_wss_listen_binding(process_read["xml"])
+                    if not binding["has_listen"]:
+                        flags.append("not_wss_listen")
+                    elif binding["operation_id"] and budget >= 1:
+                        started = time.monotonic()
+                        try:
+                            op_read = component_get_xml(
+                                boomi_client,
+                                binding["operation_id"],
+                                deadline_seconds=int(budget),
+                            )
+                            wss_op_config = _extract_wss_operation_config(op_read["xml"])
+                            if wss_op_config is None:
+                                flags.append("wss_operation_not_listen")
+                        except Exception:
+                            flags.append("wss_operation_unreadable")
+                        finally:
+                            budget -= time.monotonic() - started
+                    elif binding["operation_id"]:
+                        flags.append("analysis_budget_exhausted")
+
+        effective = effective_api_service_route(base_url_path, overrides, wss_op_config)
+        effective_key = f"{effective['method']} {effective['path']}"
+        if wss_op_config is None and not str(overrides.get("object_name") or "").strip():
+            # Inherit-dependent path whose WSS operation could not be resolved
+            # — the computed path is partial, don't collision-flag it.
+            flags.append("effective_path_unresolved")
+        else:
+            if effective_key in seen_effective:
+                flags.append("duplicate_effective_path")
+                prior = routes_out[seen_effective[effective_key]]
+                if "duplicate_effective_path" not in prior["flags"]:
+                    prior["flags"].append("duplicate_effective_path")
+            else:
+                seen_effective[effective_key] = index
+        effective_paths.append(effective_key)
+        routes_out.append({
+            "process_id": process_id,
+            "overrides": overrides,
+            "effective_method": effective["method"],
+            "effective_path": effective["path"],
+            "wss_operation": wss_op_config,
+            "flags": flags,
+        })
+
+    return {
+        "base_url_path": base_url_path,
+        "route_count": len(routes_out),
+        "routes": routes_out,
+        "effective_paths": effective_paths,
+        "route_validation": [
+            {"index": i, "process_id": r["process_id"], "flags": r["flags"]}
+            for i, r in enumerate(routes_out)
+            if r["flags"]
+        ],
+        "placeholder_validation": parsed["placeholder_validation"],
+        "note": (
+            "Effective paths are /ws/rest/<base>/<objectName>/<urlPath> with "
+            "empty segments omitted, case-verbatim; empty override attributes "
+            "inherit from each route's WSS Listen operation. Routes flagged "
+            "not_wss_listen/duplicate_effective_path deploy clean but do not "
+            "serve correctly (within one ASC the first route wins; "
+            "non-listeners 404). Across components, shadowing is per BASE "
+            "urlPath: one deployed ASC serves per base, first-deployed wins "
+            "for the whole component (live-proven 2026-07-05) — keep "
+            "base_url_path unique per environment."
+        ),
+    }
 
 
 # ============================================================================
@@ -252,7 +465,7 @@ def find_dependencies(
             ref_type = ref.get('type', 'Unknown')
             type_counts[ref_type] = type_counts.get(ref_type, 0) + 1
 
-        return {
+        result = {
             "_success": True,
             "component_id": component_id,
             "component_name": comp_meta.get('name', ''),
@@ -263,6 +476,16 @@ def find_dependencies(
             "profile": profile,
             "note": "Shows immediate dependencies only (one level, not recursive)",
         }
+
+        # M6.1 (#133): webservice (API Service Component) route analysis —
+        # extract routes, resolve effective /ws/rest paths against each
+        # route's WSS Listen operation, and flag invalid routes.
+        if comp_meta.get('type') == 'webservice':
+            result["api_service"] = _analyze_api_service(
+                boomi_client, component_id, comp_meta
+            )
+
+        return result
 
     except ComponentGetDeadlineExceeded as e:
         return component_get_deadline_envelope(e)

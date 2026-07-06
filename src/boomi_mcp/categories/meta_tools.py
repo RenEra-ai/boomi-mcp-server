@@ -3976,6 +3976,172 @@ _COMPONENT_CREATE_PROCESS_PROPERTY = {
 }
 
 
+# Issue #133 M6.1: typed webservice (API Service Component) create template.
+_COMPONENT_CREATE_API_SERVICE = {
+    "resource_type": "component",
+    "operation": "create",
+    "component_type": "webservice",
+    "tool": "manage_component (action='create')",
+    "tool_note": (
+        "API Service Components (ASC, type='webservice') can be created via "
+        "manage_component directly (routes take LITERAL process component "
+        "UUIDs), or declared as an in-spec component in build_integration "
+        "with routes[].process='$ref:<process key>' (the process key MUST "
+        "also appear in depends_on so the ASC applies after its route "
+        "processes and the $ref resolves). Listener archetypes emit one "
+        "automatically via asc_wrapper.enabled=true (#133)."
+    ),
+    "note": (
+        "On an apiType='advanced' Shared Web Server, routes exist ONLY "
+        "through a deployed ASC (served under /ws/rest/..., case-VERBATIM); "
+        "bare /ws/simple WSS routes 404 there (live-confirmed). On "
+        "basic/intermediate the inverse holds — an ASC deploys clean but "
+        "does not serve. Every route's process must have a WSS Listen start "
+        "(actionType='Listen', connector subType 'wss'). Empty-string route "
+        "override attributes mean INHERIT from the linked WSS Listen "
+        "operation (per attribute); the all-inherit effective path is "
+        "/ws/rest/{WSS-op objectName}. Deploy does NOT cascade: the ASC and "
+        "each route process deploy independently to the same environment "
+        "(orchestrate_deploy's listener_verify handles both)."
+    ),
+    "update_note": (
+        "Structured updates use subtree_merge preservation: the builder owns "
+        "urlPath and the restApi/soapApi/odataApi/metaInfo/capturedHeaders/"
+        "apiRoles blocks; profileOverrides is deliberately NOT owned — "
+        "UI/platform-populated profile overrides survive structured updates "
+        "(never author profileOverrides programmatically; drive profiles "
+        "from the WSS operation)."
+    ),
+    "template": {
+        "component_type": "webservice",
+        "component_name": "<<component display name>>",
+        "folder_path": "<<optional folder>>",
+        "description": "<<optional description>>",
+        "base_url_path": "<<optional first /ws/rest/<base> segment; '' contributes none>>",
+        "title": "<<optional metaInfo title (display; defaults to component_name)>>",
+        "version": "<<optional metaInfo version (display; default 1.0.0)>>",
+        "routes": [
+            {
+                "process": "<<'$ref:<process key>' (build_integration) or a process component UUID (manage_component)>>",
+                "http_method": "<<'' inherit (input_type none->GET else POST) | GET | POST | PUT | DELETE | PATCH>>",
+                "url_path": "<<optional trailing path segment; '' contributes none>>",
+                "object_name": "<<'' inherits the WSS operation objectName>>",
+                "input_type": "<<'' inherit | none|singledata|singlejson|multijson|singlexml|multixml>>",
+                "output_type": "<<'' inherit | same vocabulary>>",
+                "description": "<<optional route description>>",
+            },
+        ],
+    },
+    "required": ["component_type", "component_name", "routes"],
+    "optional": ["folder_path", "description", "base_url_path", "title", "version"],
+    "route_required": ["process"],
+    "route_optional": [
+        "http_method",
+        "url_path",
+        "object_name",
+        "input_type",
+        "output_type",
+        "input_profile_key",
+        "description",
+    ],
+    "defaults": {"component_type": "webservice", "version": "1.0.0"},
+    "effective_path_formula": (
+        "/ws/rest/<base_url_path>/<objectName>/<urlPath> with EMPTY segments "
+        "omitted and casing preserved verbatim (unlike bare /ws/simple, which "
+        "sentence-cases the objectName). Live-confirmed: empty base + "
+        "all-inherit route serves /ws/rest/{WSS-op objectName}."
+    ),
+    "collision_note": (
+        "Shadowing granularity is the ASC's BASE urlPath (live-proven "
+        "2026-07-05): the platform binds ONE deployed webservice component "
+        "per base — the FIRST-deployed serves and a later same-base ASC is "
+        "shadowed IN ITS ENTIRETY (even for routes with unique paths); "
+        "undeploying the winner does NOT activate the loser. Give every ASC "
+        "a distinct base_url_path (the default '' collides with any other "
+        "default-base ASC). orchestrate_deploy's listener_verify "
+        "collision-scans active webservice deployments by base (plus "
+        "per-route effective paths as a secondary signal; never live "
+        "pre-probes — the cloud perimeter answers a uniform 401 "
+        "pre-registration)."
+    ),
+    "raw_xml_exposed": False,
+    "forbidden_secret_fields": [
+        "password",
+        "password_ref",
+        "secret",
+        "token",
+        "access_token",
+        "client_secret",
+        "api_key",
+        "credentials",
+        "authorization",
+        "bearer",
+    ],
+    "error_codes": {
+        "API_SERVICE_VALIDATION_FAILED": (
+            "shape / unknown-key failure not covered by a more specific code"
+        ),
+        "API_SERVICE_NAME_REQUIRED": "component_name missing/blank",
+        "API_SERVICE_ROUTES_REQUIRED": "routes list missing or empty",
+        "API_SERVICE_ROUTE_PROCESS_REQUIRED": (
+            "a route is missing its process reference (or the $ref key is "
+            "absent from depends_on in build_integration specs)"
+        ),
+        "API_SERVICE_ROUTE_PROCESS_REF_INVALID": (
+            "a route process is neither '$ref:KEY' nor a canonical component "
+            "UUID, or an unresolved $ref reached emission"
+        ),
+        "API_SERVICE_ROUTE_PROCESS_NOT_LISTEN": (
+            "a $ref route resolves to a non-process or to a process without "
+            "a WSS Listen source binding (deploys clean, 404s at runtime)"
+        ),
+        "API_SERVICE_DUPLICATE_ROUTE": (
+            "two routes are identical or resolve to the same explicit "
+            "effective method+path (first-deployed-wins shadowing)"
+        ),
+        "API_SERVICE_METHOD_UNSUPPORTED": "http_method not in (GET, POST, PUT, DELETE, PATCH, '')",
+        "API_SERVICE_TYPE_UNSUPPORTED": "input_type/output_type outside the WSS vocabulary",
+        "API_SERVICE_RAW_XML_UNSUPPORTED": (
+            "raw webservice subtree keys (restApi/soapApi/odataApi/metaInfo/"
+            "apiRoles/...) are not accepted; the raw escape hatch is config.xml"
+        ),
+        "API_SERVICE_PROFILE_OVERRIDES_UNSUPPORTED": (
+            "profileOverrides is never authored programmatically — drive "
+            "profiles from the WSS Listen operation"
+        ),
+        "PLAINTEXT_SECRET_REJECTED": (
+            "a dict key inside the config matches a secret-shaped name — "
+            "endpoint auth comes from the Shared Web Server, never component XML"
+        ),
+    },
+    "example": {
+        "key": "api_service",
+        "type": "webservice",
+        "action": "create",
+        "name": "<<component display name>>",
+        "depends_on": ["main_process"],
+        "config": {
+            "component_type": "webservice",
+            "component_name": "<<component display name>>",
+            "routes": [
+                {
+                    "process": "$ref:main_process",
+                    "http_method": "",
+                    "url_path": "",
+                    "object_name": "",
+                    "input_type": "",
+                    "output_type": "",
+                },
+            ],
+        },
+        "_example_note": (
+            "All-inherit route: the served path/method come from the "
+            "process's WSS Listen operation (/ws/rest/{objectName})."
+        ),
+    },
+}
+
+
 _COMPONENT_CREATE_SCRIPT_MAPPING = {
     "resource_type": "component",
     "operation": "create",
@@ -5838,21 +6004,28 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
         "build_and_verify_http_listener": {
             "description": (
                 "Author an inbound HTTP (Web Services Server) listener integration "
-                "and verify the deployed route (M6 / issue #12). Bare WSS serves "
-                "basic/intermediate apiType runtimes; 'advanced' needs an API "
-                "Service Component (#133). Listener processes have NO Test mode — "
+                "and verify the deployed route (M6 / #12; ASC M6.1 / #133). The "
+                "runtime's Shared Web Server apiType decides the publish pattern: "
+                "bare WSS /ws/simple serves basic/intermediate; 'advanced' serves "
+                "ONLY /ws/rest routes through an API Service Component "
+                "(asc_wrapper.enabled=true — bare WSS deploys clean there but "
+                "404s). ASC deploy does NOT cascade: the ASC and the listener "
+                "process each deploy to the environment (orchestrate_deploy "
+                "handles both). Listener processes have NO Test mode — "
                 "verification is the orchestrate_deploy listener_verify stage "
-                "(apiType preflight, collision check, live probe, execution "
-                "readback; ListenerStatus does not cover WSS routes)."
+                "(apiType preflight, deploy-both check, collision scan, "
+                "authenticated live probe, execution readback). ListenerStatus is "
+                "NOT a WSS/ASC verification signal — it stays empty for serving "
+                "WSS/ASC routes (live-proven)."
             ),
             "steps": [
-                "1. get_integration_archetype(name='http_listener_to_db') or get_integration_archetype(name='http_listener_to_rest') → inspect the listener parameter contract (objectName, operationType, JSON payload profile, optional inbound_validation)",
-                "2. build_from_archetype(name='http_listener_to_db'|'http_listener_to_rest', parameters={...}) → emit IntegrationSpecV1 (listener -> map -> write|send sync_pipeline; endpoint metadata recorded in validation_rules.listener)",
-                "3. build_integration(action='plan', config='{\"integration_spec\": <spec>, \"conflict_policy\": \"reuse\"}') → preview the deterministic plan",
-                "4. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec>}') → create the components",
-                "5. manage_shared_resources(action='get_server_info', resource_id='<runtime-id>') → confirm apiType is basic/intermediate (advanced 404s bare /ws/simple routes) and whether auth requires a Basic token",
-                "6. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=false, config='{\"listener_test_payload\": \"<json>\", \"listener_base_url\": \"<override when the runtime url is not reachable from here>\"}') → deploy + listener_verify (probe the /ws/simple endpoint, read back the execution record)",
-                "7. monitor_platform(action='execution_records', config='{\"process_id\": \"...\"}') → inspect the triggered execution — an HTTP 2xx ack does NOT imply process success",
+                "1. manage_shared_resources(action='get_server_info', resource_id='<runtime-id>') → read apiType FIRST (it selects the publish pattern) and whether auth requires a Basic token",
+                "2. get_integration_archetype(name='http_listener_to_db') or get_integration_archetype(name='http_listener_to_rest') → inspect the listener parameter contract (objectName, operationType, JSON payload profile, optional inbound_validation, asc_wrapper)",
+                "3. build_from_archetype(name='http_listener_to_db'|'http_listener_to_rest', parameters={...}) → apiType basic/intermediate: default bare WSS; apiType advanced: set asc_wrapper.enabled=true AND a unique asc_wrapper.base_url_path (one deployed ASC serves per base urlPath — a same-base ASC deployed earlier shadows the whole component; emits a typed webservice component routing to the listener process; /ws/rest endpoint recorded in validation_rules.listener)",
+                "4. build_integration(action='plan', config='{\"integration_spec\": <spec>, \"conflict_policy\": \"reuse\"}') → preview the deterministic plan (ASC route dependencies validated here)",
+                "5. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec>}') → create the components",
+                "6. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=false, config='{\"listener_test_payload\": \"<json>\", \"listener_base_url\": \"<override when the runtime url is not reachable from here>\"}') → deploy the process (+ the ASC in api_service mode) + listener_verify (tier preflight, active-deployment checks, collision scan, authenticated probe of the /ws/simple or /ws/rest endpoint, execution-record readback)",
+                "7. monitor_platform(action='execution_records', config='{\"process_id\": \"...\"}') → inspect the triggered execution — an HTTP 2xx ack does NOT imply process success (live-proven: 200 with an ERROR execution)",
             ],
         },
         "set_up_b2b_trading_partner": {
@@ -5916,6 +6089,7 @@ def _valid_schema_names() -> list:
         "cache_property_authoring",
         "process_property",
         "document_cache",
+        "api_service",
         "compose_archetypes",
     ]
     names += [f"workflow:{key}" for key in _authoring_workflow_sequences()]
@@ -6279,6 +6453,48 @@ def _get_authoring_schema_by_name(schema_name: str) -> Dict[str, Any]:
                 "readable at runtime (execution scope) — use them for "
                 "operator-tunable settings; use set_dpp for run-computed "
                 "state and set_ddp for per-document state."
+            ),
+        }
+
+    if schema_name == "api_service":
+        # Issue #133 M6.1: read-only authoring reference for the API Service
+        # Component (webservice) <-> WSS Listen process coupling and the
+        # apiType tier dispatch.
+        return {
+            "_success": True,
+            "schema_name": "api_service",
+            "surface": "api_service",
+            "read_only": True,
+            "raw_xml_exposed": False,
+            "boomi_mutation": False,
+            "create_template_pointer": (
+                "get_schema_template(resource_type='component', "
+                "operation='create', component_type='webservice')"
+            ),
+            "tier_dispatch": (
+                "SharedServerInformation.apiType selects the publish pattern: "
+                "basic/intermediate serve bare WSS /ws/simple routes (no ASC); "
+                "'advanced' serves ONLY /ws/rest routes through a deployed "
+                "ASC (bare WSS deploys clean there but 404s — live-confirmed). "
+                "Read apiType first via manage_shared_resources "
+                "get_server_info; listener archetypes emit the ASC via "
+                "asc_wrapper.enabled=true."
+            ),
+            "route_coupling": (
+                "Each restApi route references a process with a WSS Listen "
+                "start; empty-string override attributes inherit from that "
+                "process's WSS Listen operation per attribute (all-inherit "
+                "effective path: /ws/rest/{WSS-op objectName}, case-verbatim). "
+                "In build_integration specs the route process is "
+                "'$ref:<process key>' and MUST appear in the ASC's depends_on."
+            ),
+            "deploy_note": (
+                "Deploy does NOT cascade: the ASC and every route process "
+                "each need an active deployment in the same environment. "
+                "orchestrate_deploy packages/deploys both and verifies via "
+                "authenticated probe + execution-record readback — "
+                "ListenerStatus stays empty for WSS/ASC routes and HTTP 200 "
+                "does not imply process success (both live-proven)."
             ),
         }
 
@@ -7775,7 +7991,7 @@ _PROCESS_FLOW_PROTOCOLS = {
             "pipeline": "An M5.1 PipelineSpec: {stages: [...], dependencies: [...]}. Only the verified-linear, all-'ordering' subset is lowered in M5.2.",
             "pipeline.stages[].kind": "One of read/fetch/listener/map/send/write. The source is read (DB Get), fetch(rest_fetch) (REST GET), fetch(soap_fetch) (SOAP EXECUTE, #126), or listener(wss_listen) (inbound WSS Listen, M6 #12); the target is send(rest_send) (REST), send(soap_send) (SOAP EXECUTE, #126), or write (DB Send, M5.8 #74 — from a fetch/listener source); every other PipelineStageKind is reserved (see reserved_stage_kinds) and rejected.",
             "pipeline.stages[].config.primitive": "Required discriminator: 'db_read' for a read stage, 'rest_fetch' OR 'soap_fetch' for a fetch stage (#126), 'wss_listen' for a listener stage (M6 #12), 'map' for a map stage, 'rest_send' OR 'soap_send' for a send stage (#126), 'db_write' for a write stage (M5.8 #74). A fetch/send stage's declared primitive selects the REST-vs-SOAP connector family. A primitive on the wrong stage (e.g. 'db_write' on a 'send' stage, or 'rest_fetch' on a non-fetch stage) is rejected with a hint pointing at the right stage.",
-            "listener": "A listener stage (config.primitive='wss_listen', M6 #12) is the inbound Web Services Server Listen source: it lowers to the Listen START SHAPE (connectoraction actionType='Listen' connectorType='wss' embedded in the start shape) — no separate source connector shape and NO connection component, so the stage config carries ONLY primitive/operation_id/label (+ optional connector_type='wss'). The emitted process locks the listener options allowSimultaneous='true' / updateRunDates='false'. Bare-WSS endpoint = /ws/simple/{lowercase(operationType)}{SentenceCase(objectName)} — the objectName is stored verbatim on the operation but Boomi upper-cases its FIRST letter on the served path (live-settled 2026-07-04); HTTP method derives from the operation's input_type (none -> GET, else POST). Serves basic/intermediate apiType runtimes; 'advanced' requires an API Service Component (#133). Listener processes have no Test mode — orchestrate_deploy runs a listener_verify stage (apiType preflight, collision check, live probe, execution readback) instead.",
+            "listener": "A listener stage (config.primitive='wss_listen', M6 #12) is the inbound Web Services Server Listen source: it lowers to the Listen START SHAPE (connectoraction actionType='Listen' connectorType='wss' embedded in the start shape) — no separate source connector shape and NO connection component, so the stage config carries ONLY primitive/operation_id/label (+ optional connector_type='wss'). The emitted process locks the listener options allowSimultaneous='true' / updateRunDates='false'. Bare-WSS endpoint = /ws/simple/{lowercase(operationType)}{SentenceCase(objectName)} — the objectName is stored verbatim on the operation but Boomi upper-cases its FIRST letter on the served path (live-settled 2026-07-04); HTTP method derives from the operation's input_type (none -> GET, else POST). Serves basic/intermediate apiType runtimes; 'advanced' requires an API Service Component routing to the listener process (typed 'webservice' builder / listener-archetype asc_wrapper.enabled=true, #133) — the served path becomes /ws/rest/... (case-verbatim). Listener processes have no Test mode — orchestrate_deploy runs a listener_verify stage (apiType preflight, ASC deploy-both check in api_service mode, collision check, live probe, execution readback) instead.",
             "pipeline.stages[].config": "read/fetch/send/write carry the connector binding (connection_id, operation_id, optional connector_type/action_type/label); map carries map_ref (or map_id). Any other config key — e.g. a gated dynamic_path or reliability sub-block — is rejected (never silently dropped).",
             "fetch": "A fetch stage is a REST GET source (config.primitive='rest_fetch', M5.4 #72) or a SOAP Client EXECUTE source (config.primitive='soap_fetch', #126). A rest_fetch carries an explicit response/output shape and an EMPTY request document (some APIs reject GET-with-body); action_type defaults to 'GET' and must be 'GET'. A soap_fetch lowers to connectorType='wssoapclientsdk'; action_type defaults to 'EXECUTE' and must be 'EXECUTE' (SOAP Client is EXECUTE-only).",
             "send": "A send stage is a REST target (config.primitive='rest_send') carrying an explicit HTTP method, or a SOAP Client EXECUTE target (config.primitive='soap_send', #126) which lowers to connectorType='wssoapclientsdk' with action_type defaulting to (and required to be) 'EXECUTE'.",
@@ -8046,6 +8262,10 @@ def _get_component_template(operation=None, component_type=None, protocol=None, 
         if component_type == "documentcache":
             # Issue #122 M11.3: same truthful-advertisement upgrade.
             return {"_success": True, **_COMPONENT_CREATE_DOCUMENT_CACHE}
+        if component_type in ("webservice", "api_service", "api.service"):
+            # Issue #133 M6.1: typed API Service Component template replaces
+            # the generic raw-XML fallback.
+            return {"_success": True, **_COMPONENT_CREATE_API_SERVICE}
         if component_type == "connector-action":
             if protocol == "database.get":
                 return {"_success": True, **_COMPONENT_CREATE_CONNECTOR_ACTION_DATABASE_GET}

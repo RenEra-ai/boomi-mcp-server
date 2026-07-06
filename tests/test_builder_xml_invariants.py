@@ -1065,6 +1065,22 @@ INVARIANT_DISPOSITIONS: List[Dict[str, str]] = [
         "test": "test_inv_listener_start_and_process_options",
     },
     {
+        "id": "api_service_route_overrides",
+        "invariant": (
+            'API Service Component (type="webservice") always emits the mandatory '
+            "placeholder children in order (restApi, soapApi[SOAPVersion=SOAP_1_1], "
+            "odataApi, metaInfo[description+termsOfService], profileOverrides, "
+            "capturedHeaders, apiRoles), profileOverrides always EMPTY (never "
+            "authored), and every route <overrides> carries exactly "
+            "httpMethod/inputProfileKey/inputType/objectName/outputType/urlPath "
+            'with empty string = inherit-from-WSS-operation preserved verbatim '
+            "(live capture api_service_minimal.xml, 2026-07-04)"
+        ),
+        "emitter": "api_service_builder.ApiServiceBuilder.build (M6.1 issue #133)",
+        "disposition": "guaranteed-by-construction",
+        "test": "test_inv_api_service_placeholders_and_inherit_overrides",
+    },
+    {
         "id": "dataprocessscript_attrs",
         "invariant": 'dataprocessscript language="groovy2"/useCache="true"',
         "emitter": "process_flow_builder._emit_dataprocess (issue #106 M10.2)",
@@ -1299,3 +1315,70 @@ def test_inv_listener_start_and_process_options():
     connector_shapes = [s for s in shapes if s.attrib["shapetype"] == "connectoraction"]
     assert len(connector_shapes) == 1
     assert 'connectorType="wss"' not in ET.tostring(connector_shapes[0], encoding="unicode")
+
+
+def test_inv_api_service_placeholders_and_inherit_overrides():
+    # M6.1 (issue #133): the API Service Component invariants, live-locked
+    # against the renera `New API Service` capture (f7a605a0, 2026-07-04,
+    # serving POST /ws/rest/generalListener on the advanced cloud attachment):
+    # the <webservice> subtree always carries the mandatory placeholder
+    # children in the captured order — even when unused — with
+    # <soapApi><SOAPVersion>SOAP_1_1</SOAPVersion>, metaInfo's description/
+    # termsOfService children, and an always-EMPTY <profileOverrides/> (never
+    # authored; preserved on structured update). Every route <overrides>
+    # carries exactly the six captured attributes where empty string means
+    # inherit-from-WSS-operation, preserved verbatim (never normalized).
+    from src.boomi_mcp.categories.components.builders.api_service_builder import (
+        ApiServiceBuilder,
+    )
+
+    xml = ApiServiceBuilder().build(
+        component_type="webservice",
+        component_name="INV API Service",
+        routes=[
+            {"process": "c991a424-e7e3-4af1-b2ab-3ddba4a43974"},
+            {
+                "process": "415e6f5b-499e-4552-a047-d7d0a01e761e",
+                "http_method": "GET",
+                "object_name": "statusPing",
+                "input_type": "none",
+            },
+        ],
+    )
+    ws = ET.fromstring(xml).find(
+        "{http://api.platform.boomi.com/}object/webservice"
+    )
+    assert [child.tag for child in ws] == [
+        "restApi",
+        "soapApi",
+        "odataApi",
+        "metaInfo",
+        "profileOverrides",
+        "capturedHeaders",
+        "apiRoles",
+    ]
+    assert ws.find("soapApi/SOAPVersion").text == "SOAP_1_1"
+    assert ws.find("metaInfo/description") is not None
+    assert ws.find("metaInfo/termsOfService") is not None
+    assert len(ws.find("profileOverrides")) == 0 and not ws.find("profileOverrides").attrib
+    routes = ws.findall("restApi/route")
+    assert len(routes) == 2
+    # All-inherit route: every override attribute present and EMPTY.
+    inherit_overrides = routes[0].find("overrides")
+    assert sorted(inherit_overrides.attrib) == [
+        "httpMethod",
+        "inputProfileKey",
+        "inputType",
+        "objectName",
+        "outputType",
+        "urlPath",
+    ]
+    assert set(inherit_overrides.attrib.values()) == {""}
+    # Explicit route: supplied values verbatim (objectName case preserved),
+    # untouched attributes still present as empty inherit markers.
+    explicit_overrides = routes[1].find("overrides")
+    assert explicit_overrides.get("httpMethod") == "GET"
+    assert explicit_overrides.get("objectName") == "statusPing"
+    assert explicit_overrides.get("inputType") == "none"
+    assert explicit_overrides.get("outputType") == ""
+    assert explicit_overrides.get("urlPath") == ""

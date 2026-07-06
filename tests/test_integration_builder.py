@@ -8170,3 +8170,267 @@ class TestSyncPipelineJoinedMapLineage:
         )
         step = next(s for s in plan["steps"] if s["key"] == "main_process")
         assert step["planned_action"] == "create", step.get("validation_error")
+
+
+# ---------------------------------------------------------------------------
+# Issue #133 M6.1 — webservice (API Service Component) plan/apply dispatch
+# ---------------------------------------------------------------------------
+
+_ASC_PROCESS_UUID = "c991a424-e7e3-4af1-b2ab-3ddba4a43974"
+
+
+def _asc_listener_process_comp(key="main_process", name="Weblistener"):
+    return IntegrationComponentSpec(
+        key=key,
+        type="process",
+        action="create",
+        name=name,
+        config={
+            "process_kind": "sync_pipeline",
+            "pipeline": {
+                "stages": [
+                    {
+                        "key": "listen",
+                        "kind": "listener",
+                        "config": {"primitive": "wss_listen", "operation_id": "$ref:wss_op"},
+                    },
+                    {
+                        "key": "send",
+                        "kind": "send",
+                        "config": {
+                            "primitive": "rest_send",
+                            "action_type": "POST",
+                            "connection_id": "11111111-1111-1111-1111-111111111111",
+                            "operation_id": "22222222-2222-2222-2222-222222222222",
+                        },
+                    },
+                ],
+                "dependencies": [{"from_stage": "listen", "to_stage": "send"}],
+            },
+        },
+        depends_on=["wss_op"],
+    )
+
+
+def _asc_wss_op_comp(key="wss_op", name="Web Listener Op"):
+    return IntegrationComponentSpec(
+        key=key,
+        type="connector-action",
+        action="create",
+        name=name,
+        config={
+            "connector_type": "wss",
+            "operation_mode": "listen",
+            "component_name": name,
+            "object_name": "orderIntake",
+            "operation_type": "EXECUTE",
+            "input_type": "singlejson",
+            "output_type": "none",
+        },
+    )
+
+
+def _api_service_comp(
+    key="api_service",
+    name="Order API Service",
+    depends_on=("main_process",),
+    **config_overrides,
+):
+    cfg = {
+        "component_type": "webservice",
+        "component_name": name,
+        "routes": [{"process": "$ref:main_process"}],
+    }
+    cfg.update(config_overrides)
+    return IntegrationComponentSpec(
+        key=key,
+        type="webservice",
+        action="create",
+        name=name,
+        config=cfg,
+        depends_on=list(depends_on),
+    )
+
+
+def _asc_spec_components(**asc_overrides):
+    return [
+        _asc_wss_op_comp(),
+        _asc_listener_process_comp(),
+        _api_service_comp(**asc_overrides),
+    ]
+
+
+class TestBuildPlanApiServiceComponent:
+
+    @patch(_PATCH_TARGET)
+    def test_valid_api_service_plans_clean(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(_asc_spec_components()))
+        step = next(s for s in plan["steps"] if s["key"] == "api_service")
+        assert step["planned_action"] == "create", step.get("validation_error")
+        assert "validation_error" not in step
+
+    @patch(_PATCH_TARGET)
+    def test_api_service_alias_normalizes_to_webservice(self, mock_pag):
+        mock_pag.return_value = []
+        comps = _asc_spec_components()
+        asc = comps[-1].model_dump()
+        asc["type"] = "api_service"
+        plan = _build_plan(MagicMock(), _build_config(comps[:-1] + [asc]))
+        step = next(s for s in plan["steps"] if s["key"] == "api_service")
+        assert step["type"] == "webservice"
+        assert step["planned_action"] == "create", step.get("validation_error")
+
+    @patch(_PATCH_TARGET)
+    def test_execution_order_places_asc_after_route_process(self, mock_pag):
+        mock_pag.return_value = []
+        plan = _build_plan(MagicMock(), _build_config(_asc_spec_components()))
+        order = plan["execution_order"]
+        assert order.index("main_process") < order.index("api_service")
+
+    @patch(_PATCH_TARGET)
+    def test_ref_route_missing_from_depends_on_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        comps = _asc_spec_components(depends_on=())
+        plan = _build_plan(MagicMock(), _build_config(comps))
+        step = next(s for s in plan["steps"] if s["key"] == "api_service")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "API_SERVICE_ROUTE_PROCESS_REQUIRED"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_ref_route_to_non_process_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        comps = _asc_spec_components(
+            routes=[{"process": "$ref:wss_op"}], depends_on=("wss_op",)
+        )
+        plan = _build_plan(MagicMock(), _build_config(comps))
+        step = next(s for s in plan["steps"] if s["key"] == "api_service")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "API_SERVICE_ROUTE_PROCESS_NOT_LISTEN"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_ref_route_to_non_listener_process_rejected(self, mock_pag):
+        mock_pag.return_value = []
+        plain = IntegrationComponentSpec(
+            key="plain_process",
+            type="process",
+            action="create",
+            name="Plain",
+            config={
+                "process_kind": "sync_pipeline",
+                "pipeline": {
+                    "stages": [
+                        {
+                            "key": "fetch",
+                            "kind": "fetch",
+                            "config": {
+                                "primitive": "rest_fetch",
+                                "connection_id": "11111111-1111-1111-1111-111111111111",
+                                "operation_id": "22222222-2222-2222-2222-222222222222",
+                            },
+                        },
+                        {
+                            "key": "send",
+                            "kind": "send",
+                            "config": {
+                                "primitive": "rest_send",
+                                "action_type": "POST",
+                                "connection_id": "11111111-1111-1111-1111-111111111111",
+                                "operation_id": "22222222-2222-2222-2222-222222222222",
+                            },
+                        },
+                    ],
+                    "dependencies": [{"from_stage": "fetch", "to_stage": "send"}],
+                },
+            },
+        )
+        asc = _api_service_comp(
+            routes=[{"process": "$ref:plain_process"}],
+            depends_on=("plain_process",),
+        )
+        plan = _build_plan(MagicMock(), _build_config([plain, asc]))
+        step = next(s for s in plan["steps"] if s["key"] == "api_service")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"]
+            == "API_SERVICE_ROUTE_PROCESS_NOT_LISTEN"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_builder_validation_error_surfaces_at_plan(self, mock_pag):
+        mock_pag.return_value = []
+        comps = _asc_spec_components(routes=[])
+        plan = _build_plan(MagicMock(), _build_config(comps))
+        step = next(s for s in plan["steps"] if s["key"] == "api_service")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"] == "API_SERVICE_ROUTES_REQUIRED"
+        )
+
+    @patch(_PATCH_TARGET)
+    def test_secret_shaped_key_redacted(self, mock_pag):
+        mock_pag.return_value = []
+        comps = _asc_spec_components(token="leaked")
+        plan = _build_plan(MagicMock(), _build_config(comps))
+        step = next(s for s in plan["steps"] if s["key"] == "api_service")
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert (
+            step["validation_error"]["error_code"] == "PLAINTEXT_SECRET_REJECTED"
+        )
+        emitted = next(
+            c
+            for c in plan["integration_spec"]["components"]
+            if c["key"] == "api_service"
+        )
+        assert emitted["config"]["token"] == "[REDACTED]"
+
+    @patch(_PATCH_TARGET)
+    def test_missing_component_name_falls_back_to_spec_name(self, mock_pag):
+        mock_pag.return_value = []
+        comps = _asc_spec_components()
+        del comps[-1].config["component_name"]
+        plan = _build_plan(MagicMock(), _build_config(comps))
+        step = next(s for s in plan["steps"] if s["key"] == "api_service")
+        assert step["planned_action"] == "create", step.get("validation_error")
+
+    def test_structured_update_xml_resolves_builder_and_policy(self):
+        from src.boomi_mcp.categories.integration_builder import (
+            build_structured_update_xml,
+        )
+        comp = _api_service_comp(routes=[{"process": _ASC_PROCESS_UUID}])
+        comp.action = "update"
+        comp.component_id = "f7a605a0-732f-4ad8-a479-f59c5034bf45"
+        result = build_structured_update_xml(MagicMock(), comp, dict(comp.config))
+        assert result["_success"] is True
+        assert 'type="webservice"' in result["built_xml"]
+        assert result["policy"] is not None
+        owned = result["policy"].owned_paths[0]
+        assert owned.path == "bns:object/webservice"
+        assert owned.mode == "subtree_merge"
+        # profileOverrides is owned for XSD ORDERING but its content is
+        # never authored (preserve_when_desired_empty) — #133 QA bug #148.
+        assert "profileOverrides" in owned.owned_child_tags
+        assert owned.preserve_when_desired_empty == ("profileOverrides",)
+
+    def test_clone_suffix_applies_to_webservice(self):
+        from src.boomi_mcp.categories.integration_builder import _apply_clone_suffix
+        comp = _api_service_comp()
+        cloned = _apply_clone_suffix(comp, dict(comp.config))
+        assert cloned["component_name"] == "Order API Service-clone"
+
+    def test_metadata_type_map_and_name_primary_include_webservice(self):
+        from src.boomi_mcp.categories.integration_builder import (
+            _COMPONENT_NAME_PRIMARY_TYPES,
+            _METADATA_TYPE_MAP,
+            _normalize_component_type,
+        )
+        assert _METADATA_TYPE_MAP["webservice"] == "webservice"
+        assert "webservice" in _COMPONENT_NAME_PRIMARY_TYPES
+        assert _normalize_component_type("api_service") == "webservice"
+        assert _normalize_component_type("api.service") == "webservice"

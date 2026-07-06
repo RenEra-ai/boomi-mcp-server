@@ -26,8 +26,10 @@ It also exports the endpoint computation shared with ``orchestrate_deploy``'s
 
 Like every source primitive, this emits JSON ``IntegrationComponentSpec``
 objects only — all XML authoring and structured validation is delegated to the
-builder layer. Scope (M6): bare WSS for basic/intermediate runtimes only; API
-Service Component routing for ``apiType=advanced`` runtimes is deferred to #133.
+builder layer. Bare WSS serves basic/intermediate runtimes; ``apiType=advanced``
+runtimes route through an API Service Component wrapper (#133) — the listener
+archetypes emit one via ``asc_wrapper.enabled=true``, and this module hosts the
+shared ``/ws/rest`` endpoint helpers (``compute_asc_endpoint`` et al.).
 """
 
 from __future__ import annotations
@@ -80,13 +82,18 @@ def compute_wss_endpoint(operation_type: str, object_name: str) -> str:
     return f"/ws/simple/{str(operation_type).strip().lower()}{name}"
 
 
-def wss_http_method(input_type: str) -> str:
-    """HTTP method Boomi derives from the listener input type.
-
-    ``none`` -> GET; every document-bearing input type -> POST. The method is
-    never set on the WSS operation component (companion fixture, #12).
-    """
-    return "GET" if str(input_type).strip().lower() == "none" else "POST"
+# Shared WSS/ASC endpoint-formula helpers live in the builders layer (below
+# both patterns and deployment) so every consumer imports downward — this
+# module re-exports them for pattern-layer callers. See
+# categories/components/builders/_api_service_paths.py for the live-grounded
+# formula documentation (#133).
+from ...categories.components.builders._api_service_paths import (  # noqa: F401
+    api_service_http_method,
+    compute_asc_endpoint,
+    effective_api_service_route,
+    normalize_api_service_path_segment,
+    wss_http_method,
+)
 
 
 class WssListenComponentNames(BaseModel):
@@ -189,8 +196,9 @@ class WssListenPrimitive(PrimitivePattern):
             "(input_type none -> GET, else POST). The listener has NO "
             "connection component — it binds inside the process start shape "
             "(actionType='Listen'). Bare WSS serves basic/intermediate "
-            "runtimes; apiType=advanced needs an API Service Component (#133, "
-            "out of M6 scope). Emits JSON component specs for the "
+            "runtimes; apiType=advanced routes only through an API Service "
+            "Component wrapper (listener archetypes: asc_wrapper.enabled=true). "
+            "Emits JSON component specs for the "
             "WssListenerOperationBuilder; never calls a live API."
         ),
         tags=["source", "listener", "wss", "inbound", "event"],

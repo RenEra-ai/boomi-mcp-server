@@ -182,8 +182,11 @@ class TestCatalogAndSchema:
         for name, prop in schema["properties"].items():
             assert prop.get("description"), f"property {name!r} missing description"
         assert "<?xml" not in json.dumps(result)
-        # The #133 advanced-tier deferral is documented.
-        assert "#133" in json.dumps(arch["metadata"]["not_for"] + arch["limitations"])
+        # The #133 advanced-tier ASC wrapper is documented (shipped in M6.1 —
+        # advanced runtimes are served via asc_wrapper, no longer deferred).
+        assert "asc_wrapper" in json.dumps(
+            arch["metadata"]["not_for"] + arch["limitations"]
+        )
 
 
 # ===========================================================================
@@ -422,4 +425,126 @@ class TestParameterValidation:
         params = _rest_params()
         params["target"]["send_request"]["path"] = "/v1/items/{id}"
         result = build_from_archetype_action(_REST_ARCHETYPE, params)
+        assert result["_success"] is False
+
+
+# ===========================================================================
+# asc_wrapper — API Service Component publish mode (M6.1 #133)
+# ===========================================================================
+
+
+class TestAscWrapper:
+    @pytest.mark.parametrize(
+        "archetype,params_fn", [(_DB_ARCHETYPE, _db_params), (_REST_ARCHETYPE, _rest_params)]
+    )
+    def test_default_output_unchanged_without_wrapper(self, archetype, params_fn):
+        # Byte-compatible default: no webservice component, no publish_mode
+        # key, bare /ws/simple endpoint metadata.
+        spec = _spec(archetype, params_fn())
+        assert "api_service" not in _by_key(spec)
+        listener = spec["validation_rules"]["listener"]
+        assert "publish_mode" not in listener
+        assert listener["endpoint_path"].startswith("/ws/simple/")
+        spec_disabled = _spec(archetype, params_fn(asc_wrapper={"enabled": False}))
+        assert spec == spec_disabled
+
+    @pytest.mark.parametrize(
+        "archetype,params_fn", [(_DB_ARCHETYPE, _db_params), (_REST_ARCHETYPE, _rest_params)]
+    )
+    def test_enabled_emits_webservice_component(self, archetype, params_fn):
+        spec = _spec(archetype, params_fn(asc_wrapper={"enabled": True}))
+        by_key = _by_key(spec)
+        asc = by_key["api_service"]
+        assert asc["type"] == "webservice"
+        assert asc["action"] == "create"
+        assert asc["depends_on"] == ["main_process"]
+        routes = asc["config"]["routes"]
+        assert len(routes) == 1
+        assert routes[0]["process"] == "$ref:main_process"
+        # All-inherit route by default (empty string = inherit).
+        assert routes[0]["http_method"] == ""
+        assert routes[0]["object_name"] == ""
+        # The ASC counts in component_count and appears after main_process.
+        keys = [c["key"] for c in spec["components"]]
+        assert keys.index("main_process") < keys.index("api_service")
+        assert spec["validation_rules"]["component_count"] == len(spec["components"])
+        assert "<?xml" not in json.dumps(spec)
+
+    @pytest.mark.parametrize(
+        "archetype,params_fn,object_name",
+        [(_DB_ARCHETYPE, _db_params, "orderIntake"), (_REST_ARCHETYPE, _rest_params, "eventRelay")],
+    )
+    def test_enabled_listener_metadata_switches_to_api_service(
+        self, archetype, params_fn, object_name
+    ):
+        spec = _spec(archetype, params_fn(asc_wrapper={"enabled": True}))
+        listener = spec["validation_rules"]["listener"]
+        assert listener["publish_mode"] == "api_service"
+        assert listener["api_type_requirement"] == "advanced"
+        # /ws/rest paths are case-VERBATIM (never sentence-cased).
+        assert listener["endpoint_path"] == f"/ws/rest/{object_name}"
+        assert listener["http_method"] == "POST"
+        assert listener["api_service_component_key"] == "api_service"
+        assert listener["route_process_key"] == "main_process"
+        # The bare path stays available for diagnostics.
+        assert listener["bare_wss_endpoint_path"].startswith("/ws/simple/execute")
+        # The endpoint summary mirrors the ASC route.
+        source_endpoint = next(e for e in spec["endpoints"] if e["key"] == "wss_listener")
+        assert source_endpoint["endpoint_path"] == f"/ws/rest/{object_name}"
+        assert source_endpoint["publish_mode"] == "api_service"
+
+    def test_wrapper_overrides_shape_the_route_and_path(self):
+        spec = _spec(
+            _DB_ARCHETYPE,
+            _db_params(
+                asc_wrapper={
+                    "enabled": True,
+                    "base_url_path": "Intake",
+                    "route_url_path": "V1",
+                    "http_method": "post",
+                    "title": "Order API",
+                    "version": "2.0.0",
+                    "component_name": "Order API Service",
+                }
+            ),
+        )
+        asc = _by_key(spec)["api_service"]
+        assert asc["name"] == "Order API Service"
+        assert asc["config"]["base_url_path"] == "Intake"
+        assert asc["config"]["title"] == "Order API"
+        assert asc["config"]["version"] == "2.0.0"
+        route = asc["config"]["routes"][0]
+        assert route["http_method"] == "POST"
+        assert route["url_path"] == "V1"
+        listener = spec["validation_rules"]["listener"]
+        # Segments compose case-verbatim with empty segments omitted.
+        assert listener["endpoint_path"] == "/ws/rest/Intake/orderIntake/V1"
+
+    @pytest.mark.parametrize(
+        "archetype,params_fn", [(_DB_ARCHETYPE, _db_params), (_REST_ARCHETYPE, _rest_params)]
+    )
+    def test_enabled_spec_plans_clean_with_asc_after_process(self, archetype, params_fn):
+        spec = _spec(archetype, params_fn(asc_wrapper={"enabled": True}))
+        with patch(_PAGINATE_TARGET) as mock_pag:
+            mock_pag.return_value = []
+            plan = build_integration_action(
+                MagicMock(),
+                _PROFILE,
+                "plan",
+                {"integration_spec": spec, "conflict_policy": "reuse"},
+            )
+        assert plan["_success"] is True, plan
+        for step in plan["steps"]:
+            assert not str(step.get("planned_action", "")).startswith("error"), step
+        order = plan["execution_order"]
+        assert order.index("main_process") < order.index("api_service")
+
+    def test_invalid_wrapper_fields_rejected(self):
+        result = build_from_archetype_action(
+            _DB_ARCHETYPE, _db_params(asc_wrapper={"enabled": True, "banana": 1})
+        )
+        assert result["_success"] is False
+        result = build_from_archetype_action(
+            _DB_ARCHETYPE, _db_params(asc_wrapper={"enabled": "not-a-bool-shape"})
+        )
         assert result["_success"] is False

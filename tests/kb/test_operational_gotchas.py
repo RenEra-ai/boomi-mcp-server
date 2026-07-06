@@ -386,3 +386,47 @@ def test_process_building_category_and_m11_entries_present():
     ):
         assert gid in OPERATIONAL_GOTCHA_ENTRIES, gid
         assert OPERATIONAL_GOTCHA_ENTRIES[gid]["category"] == "process_building"
+
+
+def test_m6_asc_entries_present_with_expected_verification_status():
+    # Issue #133 M6.1: the six ASC/advanced-tier listener traps ship under
+    # the listener_wss facet with honest verification labels (live recon
+    # findings live_verified; companion-only claims stay companion_unverified
+    # until live QA upgrades them).
+    expected = {
+        "api_service_required_for_advanced_apitype": "live_verified",
+        "api_service_not_for_basic_intermediate": "companion_unverified",
+        "api_service_deploy_does_not_cascade": "docs_corroborated",
+        # Upgraded companion_unverified -> live_verified by the #133 QA A/B/A
+        # base-shadowing proof (2026-07-05), which also corrected the
+        # granularity claim (per BASE urlPath, whole-component).
+        "api_service_first_deployed_wins_collision": "live_verified",
+        "api_service_cloud_401_404_triage": "live_verified",
+        "listener_status_not_wss_asc": "live_verified",
+    }
+    for gid, status in expected.items():
+        assert gid in OPERATIONAL_GOTCHA_ENTRIES, gid
+        entry = OPERATIONAL_GOTCHA_ENTRIES[gid]
+        assert entry["category"] == "listener_wss", gid
+        assert entry["verification_status"] == status, gid
+
+
+def test_ranking_asc_advanced_apitype():
+    assert (
+        _top_id("advanced apiType bare wss 404 deploy clean")
+        == "api_service_required_for_advanced_apitype"
+    )
+
+
+def test_ranking_asc_deploy_no_cascade():
+    assert (
+        _top_id("api service component deploy route process 404 cascade")
+        == "api_service_deploy_does_not_cascade"
+    )
+
+
+def test_ranking_listener_status_not_wss():
+    assert (
+        _top_id("ListenerStatus empty wss listener serving")
+        == "listener_status_not_wss_asc"
+    )

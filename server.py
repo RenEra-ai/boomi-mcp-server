@@ -1770,6 +1770,10 @@ if analyze_component_action:
             dependencies - Find all components this component references (outbound):
                 component_id="abc-123-def"
                 config='{"type": "DEPENDENT"}'  (optional: filter — DEPENDENT or INDEPENDENT)
+                For type="webservice" (API Service Component) the result adds an
+                "api_service" block: routes -> referenced processes, effective
+                /ws/rest paths (WSS-operation inheritance resolved), and per-route
+                validation flags (not_wss_listen, duplicate_effective_path, ...)
 
             compare_versions - Compare two versions of a component:
                 component_id="abc-123-def"

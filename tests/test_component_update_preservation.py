@@ -2353,3 +2353,140 @@ def test_documentcache_owned_subtree_replaced_and_siblings_survive():
     assert cache.get("profile") == "00000000-0000-0000-0000-000000000002"
     assert [i.get("indexName") for i in cache.findall("CacheIndex")] == ["by id"]
     assert root.find("bns:object/FutureCacheSibling", NS) is not None
+
+
+# ---------------------------------------------------------------------------
+# Issue #133 M6.1 — webservice (API Service Component) subtree_merge
+# ---------------------------------------------------------------------------
+
+_CURRENT_API_SERVICE = (
+    '<bns:Component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+    'xmlns:bns="http://api.platform.boomi.com/" componentId="ASC-1" version="2" '
+    'type="webservice" name="New API Service" futureAttr="keep-me">'
+    '<bns:encryptedValues/>'
+    '<bns:description>old</bns:description>'
+    '<bns:object>'
+    '<webservice xmlns="" urlPath="legacy" futureWsAttr="keep-me-too">'
+    '<restApi>'
+    '<route processId="00000000-0000-0000-0000-00000000000a">'
+    '<overrides httpMethod="GET" inputProfileKey="" inputType="" '
+    'objectName="legacyName" outputType="" urlPath=""/>'
+    '<description/>'
+    '</route>'
+    '</restApi>'
+    '<soapApi fullEnvelopePassthrough="false" singleWsdlSchema="false" '
+    'suppressWrappers="false" wsdlNamespace="" wsdlServiceName="">'
+    '<SOAPVersion>SOAP_1_1</SOAPVersion></soapApi>'
+    '<odataApi/>'
+    '<metaInfo contactEmail="" contactName="" contactUrl="" licenseName="" '
+    'licenseUrl="" title="old title" version="0.9.0">'
+    '<description/><termsOfService/></metaInfo>'
+    '<profileOverrides>'
+    '<profileOverride processId="00000000-0000-0000-0000-00000000000a" '
+    'inputProfile="11111111-1111-1111-1111-111111111111"/>'
+    '</profileOverrides>'
+    '<capturedHeaders/>'
+    '<apiRoles/>'
+    '<futureWsChild keep="true"/>'
+    '</webservice>'
+    '<FutureAscSibling keep="true"/>'
+    '</bns:object>'
+    '</bns:Component>'
+)
+
+
+def _desired_api_service():
+    from boomi_mcp.categories.components.builders.api_service_builder import (
+        ApiServiceBuilder,
+    )
+    return ApiServiceBuilder().build(
+        component_type="webservice",
+        component_name="New API Service",
+        base_url_path="intake",
+        title="new title",
+        version="2.0.0",
+        routes=[
+            {
+                "process": "c991a424-e7e3-4af1-b2ab-3ddba4a43974",
+                "http_method": "POST",
+            }
+        ],
+    )
+
+
+def _asc_policy():
+    from boomi_mcp.categories.components.builders.api_service_builder import (
+        ApiServiceBuilder,
+    )
+    return ApiServiceBuilder.PRESERVATION_POLICY
+
+
+def test_webservice_owned_blocks_replaced_on_structured_update():
+    merged = merge_for_update(_CURRENT_API_SERVICE, _desired_api_service(), _asc_policy())
+    root = ET.fromstring(merged)
+    ws = root.find("bns:object/webservice", NS)
+    # Owned attr + owned child blocks come from desired.
+    assert ws.get("urlPath") == "intake"
+    routes = ws.findall("restApi/route")
+    assert [r.get("processId") for r in routes] == [
+        "c991a424-e7e3-4af1-b2ab-3ddba4a43974"
+    ]
+    assert routes[0].find("overrides").get("httpMethod") == "POST"
+    meta = ws.find("metaInfo")
+    assert meta.get("title") == "new title"
+    assert meta.get("version") == "2.0.0"
+
+
+def test_webservice_populated_profile_overrides_survive():
+    # profileOverrides is owned for ORDERING but its CONTENT is never
+    # authored (preserve_when_desired_empty): UI/platform-populated overrides
+    # survive a structured update — the builder's always-empty placeholder
+    # must not clobber the live block.
+    merged = merge_for_update(_CURRENT_API_SERVICE, _desired_api_service(), _asc_policy())
+    root = ET.fromstring(merged)
+    overrides = root.find("bns:object/webservice/profileOverrides", NS)
+    assert overrides is not None
+    entries = overrides.findall("profileOverride")
+    assert len(entries) == 1
+    assert entries[0].get("inputProfile") == "11111111-1111-1111-1111-111111111111"
+
+
+def test_webservice_merge_keeps_platform_xsd_child_order():
+    # #133 QA bug #148 regression lock: the platform XSD requires the exact
+    # sequence restApi/soapApi/odataApi/metaInfo/profileOverrides/
+    # capturedHeaders/apiRoles. The original policy left profileOverrides
+    # unowned and the merge displaced it past apiRoles — a live 400
+    # ("Invalid content ... element 'profileOverrides'"). Locked for both a
+    # populated live block and a builder-shaped no-op update.
+    canonical = [
+        "restApi",
+        "soapApi",
+        "odataApi",
+        "metaInfo",
+        "profileOverrides",
+        "capturedHeaders",
+        "apiRoles",
+    ]
+    merged = merge_for_update(_CURRENT_API_SERVICE, _desired_api_service(), _asc_policy())
+    ws = ET.fromstring(merged).find("bns:object/webservice", NS)
+    assert [c.tag for c in ws if c.tag != "futureWsChild"] == canonical
+    # No-op update of pure builder output keeps canonical order too.
+    desired = _desired_api_service()
+    current_noop = desired.replace(
+        "<bns:Component ", '<bns:Component componentId="ASC-2" version="1" ', 1
+    )
+    merged_noop = merge_for_update(current_noop, desired, _asc_policy())
+    ws_noop = ET.fromstring(merged_noop).find("bns:object/webservice", NS)
+    assert [c.tag for c in ws_noop] == canonical
+
+
+def test_webservice_unknown_children_attrs_and_siblings_survive():
+    merged = merge_for_update(_CURRENT_API_SERVICE, _desired_api_service(), _asc_policy())
+    root = ET.fromstring(merged)
+    ws = root.find("bns:object/webservice", NS)
+    # Unknown future attr/child on the owned element survive (subtree_merge).
+    assert ws.get("futureWsAttr") == "keep-me-too"
+    assert ws.find("futureWsChild") is not None
+    # Unknown bns:object sibling and unknown root attribute survive.
+    assert root.find("bns:object/FutureAscSibling", NS) is not None
+    assert root.get("futureAttr") == "keep-me"

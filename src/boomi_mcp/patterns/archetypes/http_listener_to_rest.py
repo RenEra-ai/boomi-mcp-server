@@ -20,12 +20,14 @@ structured validation are produced by the existing builders through those
 primitives — this file emits JSON component specs only, never raw XML, and
 never calls a live Boomi account.
 
-Scope (M6): bare WSS on basic/intermediate runtimes; ``apiType=advanced``
-requires an API Service Component and is deferred to #133. The listener is
-JSON-input with an ack-only response (``outputType="none"``); the REST send is
-static (no runtime path binding). Deploy-time verification (apiType preflight,
-path collisions, live probe, execution readback) is owned by
-``orchestrate_deploy``'s ``listener_verify`` stage.
+Bare WSS serves basic/intermediate runtimes by default; ``apiType=advanced``
+runtimes are supported via the opt-in ``asc_wrapper`` (M6.1 #133), which
+appends an API Service Component publishing the listener process under
+``/ws/rest/...``. The listener is JSON-input with an ack-only response
+(``outputType="none"``); the REST send is static (no runtime path binding).
+Deploy-time verification (apiType preflight, path collisions, live probe,
+execution readback) is owned by ``orchestrate_deploy``'s ``listener_verify``
+stage.
 """
 
 from __future__ import annotations
@@ -71,9 +73,11 @@ from .api_to_api_sync import (
 
 # Shared listener source contract + assembly helpers (M6 sibling preset).
 from .http_listener_to_db import (
+    AscWrapperConfig,
     InboundValidationConfig,
     ListenerSource,
     _LISTENER_REQUEST_PROFILE_KEY,
+    _build_asc_component,
     _build_listener_main_process,
     _build_listener_pipeline_dict,
     _build_listener_request_profile,
@@ -123,6 +127,14 @@ class HttpListenerToRestParameters(BaseModel):
     inbound_validation: InboundValidationConfig = Field(
         default_factory=InboundValidationConfig,
         description="Opt-in build-time inbound-contract validation (profile_bound).",
+    )
+    asc_wrapper: AscWrapperConfig = Field(
+        default_factory=AscWrapperConfig,
+        description=(
+            "Opt-in API Service Component wrapper publishing the listener "
+            "process under /ws/rest/... — required for apiType=advanced "
+            "runtimes (#133); default bare WSS."
+        ),
     )
 
     @model_validator(mode="after")
@@ -239,8 +251,10 @@ class HttpListenerToRestArchetype(ArchetypePattern):
             "listener process options locked), an optional transform map, and a "
             "REST send target — a verified-linear listener -> map -> send stage "
             "graph. The endpoint is /ws/simple/{operationtype}{SentenceCase(objectName)} on "
-            "basic/intermediate runtimes (apiType=advanced needs an API Service "
-            "Component, #133). Every byte of XML is produced by the existing "
+            "basic/intermediate runtimes; apiType=advanced runtimes are "
+            "supported via asc_wrapper.enabled=true, which appends an API "
+            "Service Component publishing the listener under /ws/rest/... "
+            "(#133). Every byte of XML is produced by the existing "
             "component builders through the wss_listen / field_map / "
             "rest_send_with_retry primitives."
         ),
@@ -251,7 +265,7 @@ class HttpListenerToRestArchetype(ArchetypePattern):
         ],
         not_for=[
             "Scheduled/polling sources (use api_to_api_sync / database_to_api_sync)",
-            "apiType=advanced runtimes without an API Service Component (#133)",
+            "apiType=advanced runtimes without the asc_wrapper enabled (bare WSS 404s there)",
             "Listener response body mapping (the listener acks with outputType=none)",
             "Runtime-bound REST paths (#96 dynamic path is out of scope here)",
         ],
@@ -264,12 +278,13 @@ class HttpListenerToRestArchetype(ArchetypePattern):
         "Listener process options are locked by construction: allowSimultaneous='true', updateRunDates='false' (live-captured invariants).",
         "The generated listener request profile is the transform's source shape; the target payload profile is generated and bound as the REST send request body.",
         "Records the computed listener endpoint (/ws/simple/{operationtype}{SentenceCase(objectName)}, HTTP method from input_type) in validation_rules.listener for orchestrate_deploy's listener_verify stage.",
+        "Opt-in asc_wrapper emits a typed API Service Component (one REST route -> the listener process, depends_on ordering, /ws/rest/... endpoint metadata with publish_mode='api_service') for apiType=advanced runtimes (#133).",
         "Opt-in inbound_validation (mode='profile_bound') asserts at build time that the listener binds a JSON request profile.",
         "Emits executable component specs for build_integration(action='plan'); all XML comes from the existing builders.",
     ]
     limitations = [
         "Emits JSON component specs only; performs no Boomi mutation and exposes no raw XML.",
-        "Bare WSS only: serves basic/intermediate runtimes; apiType=advanced requires an API Service Component (deferred to #133).",
+        "Bare WSS (default) serves basic/intermediate runtimes only; apiType=advanced requires asc_wrapper.enabled=true (the ASC and the listener process each deploy independently — deploy does not cascade).",
         "JSON input only (singlejson/multijson -> HTTP POST); inbound GET/query-parameter flows are out of scope.",
         "Ack-only response (outputType='none'): HTTP 200 does NOT imply process success — verify via execution records (listener_verify does this).",
         "Listener processes cannot run in Test mode; behavioral verification is deploy + live probe + execution readback.",
@@ -482,6 +497,11 @@ class HttpListenerToRestArchetype(ArchetypePattern):
                 target_op_key=target_op_key,
             )
         )
+        if parameters.asc_wrapper.enabled:
+            # M6.1 (#133): the API Service Component wrapper publishes the
+            # listener process on apiType=advanced runtimes. Emitted AFTER
+            # main_process (and depends_on it) so the route $ref resolves.
+            components.append(_build_asc_component(parameters, overrides))
 
         return IntegrationSpecV1(
             version="1.0",
@@ -530,8 +550,9 @@ class HttpListenerToRestArchetype(ArchetypePattern):
                 },
                 "limitations": {
                     "listener": (
-                        "bare WSS (basic/intermediate apiType); advanced needs an "
-                        "API Service Component (#133). JSON input only; ack-only "
+                        "bare WSS (basic/intermediate apiType) by default; "
+                        "advanced requires asc_wrapper.enabled=true (API "
+                        "Service Component, #133). JSON input only; ack-only "
                         "response; no Test mode — verify via listener_verify."
                     ),
                     "rest_target": "static send only; runtime-bound path/query/header is #96 (M5.4a)",
