@@ -70,6 +70,35 @@ def _kb_config():
     }
 
 
+# Per-chunk provenance keys the builder writes alongside the original 8 metadata
+# fields (Companion corpus). The two label fields default to the official values
+# so a pre-provenance corpus still reads cleanly; the rest default to "".
+_PROVENANCE_LABEL_DEFAULTS = {
+    "source_type": "official",
+    "verification_status": "official",
+}
+_PROVENANCE_STRING_KEYS = (
+    "upstream_repo",
+    "upstream_commit",
+    "source_path",
+    "raw_url",
+    "latest_url",
+)
+
+
+def _provenance_fields(meta):
+    """Extract the seven provenance fields from a chunk's metadata (frozen
+    contract). Missing keys fall back to official/"" so PRE-provenance corpora
+    surface as official docs rather than blank/unverified."""
+    fields = {
+        key: meta.get(key, default)
+        for key, default in _PROVENANCE_LABEL_DEFAULTS.items()
+    }
+    for key in _PROVENANCE_STRING_KEYS:
+        fields[key] = meta.get(key, "")
+    return fields
+
+
 def _flatten_query_result(raw):
     """Flatten a Chroma ``query`` result into a list of hit dicts.
 
@@ -83,7 +112,7 @@ def _flatten_query_result(raw):
     hits = []
     for i, chunk_id in enumerate(ids):
         meta = metadatas[i] or {}
-        hits.append({
+        hit = {
             "chunk_id": chunk_id,
             "title": meta.get("title", ""),
             "section_heading": meta.get("section_heading", ""),
@@ -95,7 +124,9 @@ def _flatten_query_result(raw):
             "token_estimate": meta.get("token_estimate"),
             "distance": distances[i] if i < len(distances) else None,
             "content": documents[i] if i < len(documents) else "",
-        })
+        }
+        hit.update(_provenance_fields(meta))
+        hits.append(hit)
     return hits
 
 
@@ -333,10 +364,17 @@ class KbService:
                     "section_heading": it["section_heading"],
                     "chunk_index": it["chunk_index"],
                     "content": it["content"],
+                    "source_type": it["_meta"].get("source_type", "official"),
+                    "verification_status": it["_meta"].get(
+                        "verification_status", "official"
+                    ),
                 }
                 for it in sliced
             ],
         }
+        # Page-level provenance comes from the first chunk's metadata, matching
+        # the page-level source_url/title/breadcrumb above.
+        result.update(_provenance_fields(first_meta))
         if truncated:
             result["next_chunk_index"] = start_chunk_index + chunks_returned
         result.update(self._provenance())

@@ -98,11 +98,15 @@ KB_INSTRUCTIONS = (
     "EDI/API behavior, deployment/runtime behavior, scripting, or error messages, "
     "consult `search_boomi_docs` before answering from model memory. Prefer "
     "retrieved KB evidence over parametric knowledge because Boomi documentation "
-    "changes. If search returns `low_confidence` or `no_match`, say the KB does "
-    "not provide enough support rather than inventing details. If a docs tool "
-    "returns `error: warming_up`, the knowledge base is still loading after a "
-    "cold start — wait `retry_after_seconds` and retry the same call rather than "
-    "treating it as a failure or answering from memory. If it returns "
+    "changes. Results may include supplemental `companion_reference` content "
+    "(community-sourced), not only official documentation; honor each hit's "
+    "`verification_status` — treat `companion_unverified` results as a helpful "
+    "hypothesis or implementation context, not as authoritative official "
+    "documentation. If search returns `low_confidence` or `no_match`, say the KB "
+    "does not provide enough support rather than inventing details. If a docs "
+    "tool returns `error: warming_up`, the knowledge base is still loading after "
+    "a cold start — wait `retry_after_seconds` and retry the same call rather "
+    "than treating it as a failure or answering from memory. If it returns "
     "`error: kb_unavailable`, documentation retrieval is temporarily unavailable; "
     "tell the user docs are momentarily unavailable (a later retry may succeed) "
     "rather than inventing Boomi facts."
@@ -4918,10 +4922,15 @@ if BOOMI_DOCS_ENABLED:
         Chunks are returned in full, so the top result is usually enough to
         answer directly. If a hit looks relevant but you need surrounding page
         context, follow up by calling read_boomi_doc_page with that hit's
-        page_key. If results look off-topic, retry with reformulated query terms.
-        If the response status is low_confidence or no_match, do not invent
-        unsupported Boomi facts; tell the user the KB does not provide enough
-        support. If the response is error "warming_up", the KB is still loading
+        page_key. Results may include supplemental companion_reference content
+        (community-sourced), not only official documentation: honor each hit's
+        verification_status — treat companion_unverified results as a helpful
+        hypothesis or implementation context, not as authoritative official
+        documentation. If results look off-topic, retry with reformulated query
+        terms. If the response status is low_confidence or no_match, do not
+        invent unsupported Boomi facts; tell the user the KB does not provide
+        enough support. If the response is error "warming_up", the KB is still
+        loading
         after a cold start — wait retry_after_seconds and retry the same call. If
         it is error "kb_unavailable", docs retrieval is temporarily unavailable;
         report that rather than inventing facts (a later retry may succeed).
@@ -4955,7 +4964,10 @@ if BOOMI_DOCS_ENABLED:
         step sequences, or sections adjacent to the matched chunk. Most Boomi doc
         pages fit in a single call (default 15 chunks); if the response has
         "truncated": true, call again with start_chunk_index set to the returned
-        next_chunk_index to continue. If the response is error "warming_up", the
+        next_chunk_index to continue. The result carries source_type and
+        verification_status: a companion_unverified page is supplemental
+        community-sourced content, not authoritative official documentation.
+        If the response is error "warming_up", the
         KB is still loading after a cold start — wait retry_after_seconds and
         retry. If it is error "kb_unavailable", docs retrieval is temporarily
         unavailable. Read-only.

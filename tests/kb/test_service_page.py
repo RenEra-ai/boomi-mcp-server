@@ -22,6 +22,10 @@ _SERVICE = get_kb_service()
 
 BIG_PAGE = "https://help.boomi.com/docs/processes/build-a-process"   # 30 chunks
 DB_PAGE = "https://help.boomi.com/docs/connectors/database"          # 5 chunks
+COMPANION_PAGE = (                                                   # 4 chunks
+    "companion://OfficialBoomi/boomi-integration/references/components/"
+    "map_component.md"
+)
 PROVENANCE_FIELDS = {"corpus_built_at", "corpus_version", "embedding_model"}
 
 
@@ -37,6 +41,37 @@ def test_read_page_returns_full_small_page_in_order():
     assert indices == [0, 1, 2, 3, 4]
     assert PROVENANCE_FIELDS <= set(result)
     assert result["title"] == "Database Connector"
+
+
+# --- provenance surfacing (frozen contract) ----------------------------------
+
+def test_read_page_official_carries_provenance():
+    result = _SERVICE.read_page(DB_PAGE)
+    assert result["source_type"] == "official"
+    assert result["verification_status"] == "official"
+    assert result["upstream_repo"] == ""
+    assert result["raw_url"] == ""
+    # Per-chunk items carry at least the two label fields.
+    for chunk in result["chunks"]:
+        assert chunk["source_type"] == "official"
+        assert chunk["verification_status"] == "official"
+
+
+def test_read_page_companion_carries_provenance():
+    result = _SERVICE.read_page(COMPANION_PAGE)
+    assert result["_success"] is True
+    assert result["chunk_count"] == 4
+    assert result["source_type"] == "companion_reference"
+    assert result["verification_status"] == "companion_unverified"
+    assert result["upstream_repo"] == "OfficialBoomi/boomi-integration"
+    assert len(result["upstream_commit"]) == 40
+    assert result["source_url"].startswith("https://github.com/OfficialBoomi/")
+    assert result["raw_url"].startswith("https://raw.githubusercontent.com/")
+    assert result["latest_url"].startswith("https://github.com/OfficialBoomi/")
+    assert result["source_path"] == "references/components/map_component.md"
+    for chunk in result["chunks"]:
+        assert chunk["source_type"] == "companion_reference"
+        assert chunk["verification_status"] == "companion_unverified"
 
 
 def test_read_page_truncates_large_page():

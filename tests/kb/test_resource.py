@@ -51,11 +51,28 @@ def test_corpus_resource_reads_as_coverage_map():
     assert "Collection: boomi_docs" in body
     assert "Embedding model: all-MiniLM-L6-v2" in body
     assert "Corpus version: kb-test" in body
-    assert "40 chunks across 3 pages" in body
+    # Totals include the supplemental companion page (4 chunks / 1 page).
+    assert "44 chunks across 4 pages" in body
     assert "Integration (35)" in body
     assert "EDI (5)" in body
+    assert "Companion Reference (4)" in body
     assert "Known exclusions:" in body
     assert "search_boomi_docs" in body
+
+
+def test_corpus_resource_shows_provenance_breakdown():
+    body = _read_resource_text(CORPUS_URI)
+    # Provenance line rendered from source_type_counts, sorted desc by count.
+    assert "Provenance: official (40), companion_reference (4)" in body
+
+
+def test_corpus_resource_shows_companion_source_and_caveat():
+    body = _read_resource_text(CORPUS_URI)
+    # Supplemental source names the repo + short commit.
+    assert "OfficialBoomi/boomi-integration @ 19aacdd" in body
+    # Unverified / not-authoritative caveat is present.
+    assert "not officially supported" in body
+    assert "companion_reference results as unverified, not authoritative" in body
 
 
 def test_resource_is_independent_of_warmup_state():

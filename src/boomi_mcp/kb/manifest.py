@@ -89,6 +89,39 @@ def render_corpus_resource(manifest):
         f"- Coverage: {manifest.get('chunk_count', 0):,} chunks across "
         f"{manifest.get('page_count', 0):,} pages",
         f"- Categories: {categories_str}",
+    ]
+
+    # Provenance breakdown by source_type (official vs supplemental companion).
+    # Absent on pre-provenance corpora — skip the line gracefully in that case.
+    source_type_counts = manifest.get("source_type_counts", {})
+    if source_type_counts:
+        provenance_str = ", ".join(
+            f"{name} ({count:,})"
+            for name, count in sorted(source_type_counts.items(), key=lambda kv: -kv[1])
+        )
+        lines.append(f"- Provenance: {provenance_str}")
+
+    # Supplemental Companion source, when present: name the repo + short commit
+    # and warn that companion_reference results are unverified, not authoritative.
+    companion = manifest.get("companion")
+    if companion:
+        repo = companion.get("repo", "unknown")
+        commit = companion.get("commit", "") or ""
+        short_commit = commit[:7] if commit else "unknown"
+        file_count = companion.get("file_count", 0)
+        file_word = "file" if file_count == 1 else "files"
+        lines.append(
+            f"- Supplemental source: {repo} @ {short_commit} "
+            f"({companion.get('chunk_count', 0):,} chunks from "
+            f"{file_count:,} community {file_word})"
+        )
+        lines.append(
+            "- Supplemental content is community BSD-2 licensed and not "
+            "officially supported — treat companion_reference results as "
+            "unverified, not authoritative."
+        )
+
+    lines += [
         "- Known exclusions: community posts, support tickets, tenant-specific "
         "configuration, and docs published after the build timestamp.",
         f"- Builder commit: {manifest.get('builder_commit') or 'unknown'}",

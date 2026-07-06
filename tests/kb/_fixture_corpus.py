@@ -107,6 +107,8 @@ def build_fixture_corpus(dest_dir, manifest_overrides=None, write_manifest=True)
         metadata={"hnsw:space": "cosine"},
     )
     # Mirror knowledge-base-builder/build_index.py build_index() — keep in sync.
+    # The seven provenance keys are read with defaults (official/"") so a
+    # pre-provenance fixture row still builds cleanly.
     collection.add(
         ids=[c["id"] for c in chunks],
         documents=[c["content"] for c in chunks],
@@ -119,6 +121,13 @@ def build_fixture_corpus(dest_dir, manifest_overrides=None, write_manifest=True)
             "chunk_index": c["chunk_index"],
             "category": c["category"],
             "token_estimate": c["token_estimate"],
+            "source_type": c.get("source_type", "official"),
+            "verification_status": c.get("verification_status", "official"),
+            "upstream_repo": c.get("upstream_repo", ""),
+            "upstream_commit": c.get("upstream_commit", ""),
+            "source_path": c.get("source_path", ""),
+            "raw_url": c.get("raw_url", ""),
+            "latest_url": c.get("latest_url", ""),
         } for c in chunks],
     )
 

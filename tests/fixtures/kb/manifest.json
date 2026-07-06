@@ -4,16 +4,31 @@
   "embedding_model": "all-MiniLM-L6-v2",
   "embedding_dim": 384,
   "build_timestamp": "2026-05-01T00:00:00+00:00",
-  "chunk_count": 40,
-  "page_count": 3,
+  "chunk_count": 44,
+  "page_count": 4,
   "category_counts": {
     "Integration": 35,
-    "EDI": 5
+    "EDI": 5,
+    "Companion Reference": 4
+  },
+  "source_type_counts": {
+    "official": 40,
+    "companion_reference": 4
   },
   "source_roots": [
+    "https://github.com",
     "https://help.boomi.com"
   ],
   "artifact_tag": "kb-test",
   "builder_commit": "fixture0",
-  "builder_version": "0.1.0"
+  "builder_version": "0.1.0",
+  "companion": {
+    "repo": "OfficialBoomi/boomi-integration",
+    "commit": "19aacdd0aa4c9c83f5d87e9b89fb213044447f52",
+    "file_count": 1,
+    "chunk_count": 4,
+    "area_counts": {
+      "Components": 4
+    }
+  }
 }

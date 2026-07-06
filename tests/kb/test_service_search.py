@@ -93,8 +93,16 @@ HIT_FIELDS = {
     "chunk_id", "title", "section_heading", "breadcrumb", "page_key",
     "source_url", "category", "chunk_index", "token_estimate", "distance",
     "content",
+    # Provenance (frozen contract): every hit carries these seven keys.
+    "source_type", "verification_status", "upstream_repo", "upstream_commit",
+    "source_path", "raw_url", "latest_url",
 }
 PROVENANCE_FIELDS = {"corpus_built_at", "corpus_version", "embedding_model"}
+
+COMPANION_PAGE_KEY = (
+    "companion://OfficialBoomi/boomi-integration/references/components/"
+    "map_component.md"
+)
 
 
 def test_search_returns_documented_shape_and_provenance():
@@ -173,6 +181,43 @@ def test_search_diversifies_across_pages():
     result = _SERVICE.search("EDI trading partner X12 communication channels", top_k=5)
     distinct_pages = {h["page_key"] for h in result["hits"]}
     assert len(distinct_pages) >= 2
+
+
+# --- provenance surfacing (frozen contract) ----------------------------------
+
+def test_search_official_hit_defaults_to_official_provenance():
+    result = _SERVICE.search("how do I configure a database connection")
+    db_hits = [h for h in result["hits"]
+               if h["page_key"] == "https://help.boomi.com/docs/connectors/database"]
+    assert db_hits, "expected the official database page in results"
+    hit = db_hits[0]
+    assert hit["source_type"] == "official"
+    assert hit["verification_status"] == "official"
+    assert hit["upstream_repo"] == ""
+    assert hit["upstream_commit"] == ""
+    assert hit["raw_url"] == ""
+    assert hit["latest_url"] == ""
+
+
+def test_search_surfaces_companion_provenance():
+    result = _SERVICE.search(
+        "map component transform source profile fields to destination", top_k=10
+    )
+    assert result["_success"] is True
+    companion_hits = [
+        h for h in result["hits"] if h["source_type"] == "companion_reference"
+    ]
+    assert companion_hits, "expected the companion Map Component page in results"
+    hit = companion_hits[0]
+    assert hit["page_key"] == COMPANION_PAGE_KEY
+    assert hit["verification_status"] == "companion_unverified"
+    assert hit["upstream_repo"] == "OfficialBoomi/boomi-integration"
+    assert len(hit["upstream_commit"]) == 40
+    # For companion chunks source_url is a github blob permalink, not help.boomi.com.
+    assert hit["source_url"].startswith("https://github.com/OfficialBoomi/")
+    assert hit["raw_url"].startswith("https://raw.githubusercontent.com/")
+    assert hit["latest_url"].startswith("https://github.com/OfficialBoomi/")
+    assert hit["source_path"] == "references/components/map_component.md"
 
 
 # --- no_match needs an empty collection (Chroma always returns hits otherwise) -
