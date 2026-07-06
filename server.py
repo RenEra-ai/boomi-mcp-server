@@ -499,6 +499,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import profile inference tool: {e}")
     infer_profile_fields_action = None
 
+# --- Existing Integration Import Tool (Issue #48) ---
+try:
+    from boomi_mcp.categories.integration_import import import_integration_draft_action
+    print("[INFO] Integration import tool loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import integration import tool: {e}")
+    import_integration_draft_action = None
+
 
 def _sanitize_error_msg(msg: str) -> str:
     """Strip URLs and file paths from error messages to prevent information leaks."""
@@ -2372,6 +2380,57 @@ if infer_profile_fields_action:
         return infer_profile_fields_action(source_type, artifact, options=options)
 
     print("[INFO] infer_profile_fields tool registered successfully")
+
+
+# --- Existing Integration Import MCP Tool (Issue #48) ---
+if import_integration_draft_action:
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+    def import_integration_draft(source_type: str, artifact: Any, options: dict | str | None = None):
+        """Convert an existing integration description into reviewable drafts (M7.2).
+
+        Read-only MIGRATION DISCOVERY. Does NOT call Boomi, mutate anything,
+        construct an SDK client, or read credentials. Turns a STRUCTURED
+        migration description into a semantic pipeline_draft (PipelineSpec
+        vocabulary), the closest EXISTING archetype preset with derived
+        preset_parameters, and — only when zero blocking gaps remain — an
+        IntegrationSpecV1 integration_spec_draft ready for
+        build_integration(action='plan'). Blocking gaps suppress the spec
+        draft, so the tool never emits a broken build input. Product/version
+        identifiers from export summaries are preserved as input_provenance
+        only — they never fork presets or templates.
+
+        Literal existing-profile UUIDs are resolved ONLY through a live
+        index_profile_component field index (issue #95) supplied in the
+        artifact; otherwise a MIGRATION_IMPORT_PROFILE_INDEX_REQUIRED gap is
+        emitted — map keys are never invented.
+
+        Args:
+            source_type: One of:
+                generic_integration_description — a hand-authored structured
+                    description ({name, source, target, trigger, mappings,
+                    transforms, error_handling, deployment}).
+                source_tool_export_summary — a source-tool export summary;
+                    product/vendor/tool/version keys are lifted into
+                    input_provenance and the flow is read from the same keys
+                    (optionally nested under 'flow').
+            artifact: The structured description (dict or JSON-object string).
+                Free-form text is rejected with MIGRATION_IMPORT_INVALID_INPUT.
+            options: Optional dict OR JSON-object string with:
+                integration_name, component_prefix.
+
+        Returns:
+            _success + read_only/boomi_mutation/raw_xml_exposed flags,
+            source_type, input_provenance, ready_for_build, confirmed_facts[],
+            inferred_assumptions[], gaps[] ({code, severity, field, message,
+            hint, details}), pipeline_draft, selected_preset,
+            preset_parameters, integration_spec_draft (only when build-ready),
+            next_steps[]; or a MIGRATION_IMPORT_INVALID_INPUT error envelope
+            (still carrying the safety flags) for malformed tool input.
+        """
+        return import_integration_draft_action(source_type, artifact, options=options)
+
+    print("[INFO] import_integration_draft tool registered successfully")
 
 
 # --- Folder Management MCP Tools ---

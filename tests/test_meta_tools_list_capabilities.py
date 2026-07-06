@@ -620,3 +620,47 @@ def test_compose_workflow_preserved_when_all_referenced_tools_present():
     }
     catalog = list_capabilities_action(available_tools=only)
     assert "compose_multi_target_integration" in catalog["workflows"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #48 (M7.2) — import_integration_draft discoverability
+# ---------------------------------------------------------------------------
+
+
+def test_import_integration_draft_in_capabilities():
+    tools = list_capabilities_action()["tools"]
+    assert "import_integration_draft" in tools
+    entry = tools["import_integration_draft"]
+    assert entry["category"] == "Integration Authoring"
+    assert entry["read_only"] is True
+    assert entry["no_boomi_mutation"] is True
+    assert entry["actions"] == [
+        "generic_integration_description",
+        "source_tool_export_summary",
+    ]
+    assert set(entry["parameters"]) == {"source_type", "artifact", "options"}
+    # Response-contract keys are documented for discoverability.
+    for key in (
+        "pipeline_draft",
+        "selected_preset",
+        "preset_parameters",
+        "integration_spec_draft",
+        "confirmed_facts",
+        "inferred_assumptions",
+        "gaps",
+        "ready_for_build",
+        "next_steps",
+    ):
+        assert key in entry["description"], f"{key} missing from description"
+
+
+def test_import_integration_draft_filtered_when_not_registered():
+    catalog = list_capabilities_action(available_tools={"build_integration"})
+    assert "import_integration_draft" not in catalog["tools"]
+
+
+def test_import_integration_draft_preserved_when_registered():
+    catalog = list_capabilities_action(
+        available_tools={"import_integration_draft"}
+    )
+    assert "import_integration_draft" in catalog["tools"]

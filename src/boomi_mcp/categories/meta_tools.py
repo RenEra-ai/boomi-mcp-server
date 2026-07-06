@@ -9639,6 +9639,37 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "infer_profile_fields(source_type=\"profile_from_xsd\", artifact=\"<XSD string>\") → profile.xml contract for build_integration",
             ],
         },
+        "import_integration_draft": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only MIGRATION DISCOVERY (issue #48): convert a structured "
+                "migration description or source-tool export summary into a semantic "
+                "pipeline_draft (PipelineSpec vocabulary), the closest EXISTING archetype "
+                "preset with derived preset_parameters, and — only when zero blocking gaps "
+                "remain — an IntegrationSpecV1 integration_spec_draft for "
+                "build_integration(action='plan'). Never calls Boomi or reads credentials. "
+                "Response keys: pipeline_draft, selected_preset, preset_parameters, "
+                "integration_spec_draft, confirmed_facts, inferred_assumptions, gaps, "
+                "ready_for_build, next_steps. Blocking gaps suppress the spec draft; "
+                "product/version identifiers stay input_provenance only (no preset forks); "
+                "literal profile UUIDs require a #95 index_profile_component field index."
+            ),
+            "actions": [
+                "generic_integration_description",
+                "source_tool_export_summary",
+            ],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "source_type": "str (required) — generic_integration_description | source_tool_export_summary",
+                "artifact": "dict or JSON-object str (required) — the structured migration description (free text rejected)",
+                "options": "dict or JSON str (optional) — {integration_name, component_prefix}",
+            },
+            "examples": [
+                "import_integration_draft(source_type=\"generic_integration_description\", artifact={\"source\": {\"protocol\": \"rest\", ...}, \"target\": {...}, \"mappings\": [...]})",
+                "import_integration_draft(source_type=\"source_tool_export_summary\", artifact={\"product\": \"<tool>\", \"flow\": {...}}) → drafts + structured gaps",
+            ],
+        },
         "build_integration": {
             "category": "Execution",
             "description": (
