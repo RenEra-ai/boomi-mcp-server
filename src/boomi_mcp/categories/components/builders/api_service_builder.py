@@ -61,8 +61,9 @@ Key shape facts (from the live capture — do not invent):
   ``<capturedHeaders/>``, ``<apiRoles/>``.
 * ``<profileOverrides>`` is NEVER authored programmatically — profiles are
   driven from the WSS operation; a populated live block must survive
-  structured updates (see PRESERVATION_POLICY: the tag is deliberately
-  excluded from ``owned_child_tags``).
+  structured updates (see PRESERVATION_POLICY: the tag is owned for XSD
+  ORDERING but listed in ``preserve_when_desired_empty``, so the builder's
+  empty placeholder yields to live content in its canonical slot).
 * Every route ``processId`` must point to a process with a WSS Listen start
   (``actionType="Listen"``, connector subType ``wss``) — the builder cannot
   see other components, so ``$ref`` route targets are checked at

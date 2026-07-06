@@ -1267,7 +1267,17 @@ def _patch_asc_real_run(
         xml_map = component_xml or {}
         if component_id not in xml_map:
             raise Exception(f"unexpected component read: {component_id}")
-        return {"xml": xml_map[component_id]}
+        # Mirror the real helper's envelope: 'type' parsed off the root
+        # attrs (the ASC route shape-check reads it).
+        import xml.etree.ElementTree as _ET
+
+        raw = xml_map[component_id]
+        root = _ET.fromstring(raw)
+        return {
+            "xml": raw,
+            "type": root.attrib.get("type", ""),
+            "name": root.attrib.get("name", ""),
+        }
 
     monkeypatch.setattr(orchestration, "component_get_xml", _fake_component_get_xml)
 
@@ -1359,9 +1369,19 @@ def test_asc_deployment_inactive_fails(registry, monkeypatch):
     assert probe.calls == []
 
 
+_EXTRA_ROUTE_LISTENER_XML = (
+    '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process" '
+    'componentId="CID-2" name="Second Listener"><bns:object>'
+    '<process xmlns=""><shapes><shape shapetype="start"><configuration>'
+    '<connectoraction actionType="Listen" connectorType="wss" operationId="OP-2"/>'
+    "</configuration></shape></shapes></process></bns:object></bns:Component>"
+)
+
+
 def test_missing_route_process_deployment_fails(registry, monkeypatch):
-    # A second (literal-id) route process that is NOT active in the
-    # environment: ASC deploy does not cascade — the check must fail.
+    # A second (literal-id) route process that IS a valid listener but is NOT
+    # active in the environment: ASC deploy does not cascade — the check must
+    # fail after the shape validation passes.
     bid = registry(
         "b-asc-route",
         _asc_entry(extra_route={"process": "CID-2", "http_method": "GET",
@@ -1380,12 +1400,87 @@ def test_missing_route_process_deployment_fails(registry, monkeypatch):
                  "component_type": "process", "active": True}
             ]
         ),
+        component_xml={"CID-2": _EXTRA_ROUTE_LISTENER_XML},
     )
     result = _run(bid)
     assert result["_success"] is False
     assert result["error_code"] == "LISTENER_ROUTE_PROCESS_DEPLOYMENT_INACTIVE"
     assert "CID-2" in result["error"]
     assert probe.calls == []
+
+
+def test_literal_route_to_non_listener_fails_before_asc_deploy(registry, monkeypatch):
+    # Architect review r1: literal-id extra routes bypass plan-time $ref
+    # validation — the verify stage must shape-check them (process + WSS
+    # Listen start) BEFORE deploying the ASC.
+    non_listener_xml = (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process" '
+        'componentId="CID-2" name="Plain"><bns:object>'
+        '<process xmlns=""><shapes><shape shapetype="start"><configuration>'
+        '<connectoraction actionType="Get" connectorType="database" operationId="x"/>'
+        "</configuration></shape></shapes></process></bns:object></bns:Component>"
+    )
+    bid = registry(
+        "b-asc-badroute",
+        _asc_entry(extra_route={"process": "CID-2", "http_method": "GET",
+                               "object_name": "statusPing", "url_path": "",
+                               "input_type": "none", "output_type": ""}),
+    )
+    probe = _FakeProbe([(200, None)])
+    fakes = _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe,
+        execution_records=_RECORD_OK,
+        component_xml={"CID-2": non_listener_xml},
+    )
+    result = _run(bid)
+    assert result["_success"] is False
+    assert result["error_code"] == "LISTENER_ASC_ROUTE_INVALID"
+    assert "WSS Listen start" in result["error"]
+    # Fails BEFORE the ASC package leg (one list_packages call: the process)
+    # and before any probe.
+    assert fakes["deployment"].actions_called().count("list_packages") == 1
+    assert probe.calls == []
+    # An unreadable literal route fails the same way.
+    bid2 = registry(
+        "b-asc-unreadroute",
+        _asc_entry(extra_route={"process": "CID-3", "http_method": "GET",
+                               "object_name": "statusPing2", "url_path": "",
+                               "input_type": "none", "output_type": ""}),
+    )
+    probe2 = _FakeProbe([(200, None)])
+    _patch_asc_real_run(
+        monkeypatch,
+        server_info=_server_info(api_type="advanced"),
+        probe=probe2,
+        execution_records=_RECORD_OK,
+    )
+    result2 = _run(bid2)
+    assert result2["_success"] is False
+    assert result2["error_code"] == "LISTENER_ASC_ROUTE_INVALID"
+    assert "could not be read" in result2["error"]
+
+
+def test_unknown_api_type_fails_closed_in_both_modes(registry, monkeypatch):
+    # Architect review r1: an absent/unknown apiType cannot select the
+    # publish pattern — fail preflight instead of probing on a guess.
+    for entry, label in ((_listener_entry(), "bare"), (_asc_entry(), "asc")):
+        bid = registry(f"b-l-unktier-{label}", entry)
+        probe = _FakeProbe([(200, None)])
+        fakes = _patch_asc_real_run(
+            monkeypatch,
+            server_info=_server_info(api_type=""),
+            probe=probe,
+            execution_records=_RECORD_OK,
+        )
+        result = _run(bid)
+        assert result["_success"] is False, label
+        assert result["error_code"] == "LISTENER_APITYPE_UNSUPPORTED", label
+        assert "unknown or absent apiType" in result["error"], label
+        assert probe.calls == [], label
+        # Fails before the ASC package leg too.
+        assert fakes["deployment"].actions_called().count("list_packages") == 1, label
 
 
 def _other_asc_xml(*, base="", object_name="somethingElse", http_method="POST"):

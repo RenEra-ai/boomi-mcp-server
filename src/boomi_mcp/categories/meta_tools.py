@@ -4006,11 +4006,12 @@ _COMPONENT_CREATE_API_SERVICE = {
     ),
     "update_note": (
         "Structured updates use subtree_merge preservation: the builder owns "
-        "urlPath and the restApi/soapApi/odataApi/metaInfo/capturedHeaders/"
-        "apiRoles blocks; profileOverrides is deliberately NOT owned — "
-        "UI/platform-populated profile overrides survive structured updates "
-        "(never author profileOverrides programmatically; drive profiles "
-        "from the WSS operation)."
+        "urlPath and ALL SEVEN child blocks (restApi/soapApi/odataApi/"
+        "metaInfo/profileOverrides/capturedHeaders/apiRoles) for the "
+        "platform's exact XSD ordering — but profileOverrides CONTENT is "
+        "never authored: the builder's empty placeholder yields to a "
+        "UI/platform-populated live block, which survives structured updates "
+        "in its canonical slot (drive profiles from the WSS operation)."
     ),
     "template": {
         "component_type": "webservice",

@@ -1143,6 +1143,21 @@ def _run_listener_verify_stage(
     auth = str(server_info.get("auth") or server_info.get("min_auth") or "none").strip().lower()
     stage.api_type = api_type or None
     stage.auth = auth or None
+    if api_type not in ("basic", "intermediate", "advanced"):
+        # Fail closed on an absent/unknown tier — the publish pattern cannot
+        # be selected without it (bare WSS needs basic/intermediate; ASC needs
+        # advanced), and probing on a guess produces misleading triage
+        # (architect plan #133: never guess the tier).
+        return _fail(
+            LISTENER_APITYPE_UNSUPPORTED,
+            "SharedServerInformation returned an unknown or absent apiType "
+            f"({api_type or 'absent'!r}) — cannot select the listener publish "
+            "pattern (bare /ws/simple WSS needs basic/intermediate; API "
+            "Service /ws/rest routes need advanced). Check the runtime's "
+            "Shared Web Server configuration and re-run.",
+            runtime_id=runtime_id,
+            api_type=api_type,
+        )
     if asc_mode:
         # ASC routes exist only through the /ws/rest gateway of an
         # apiType=advanced Shared Web Server; on basic/intermediate the ASC
@@ -1185,6 +1200,42 @@ def _run_listener_verify_stage(
                 "build (or supply the webservice component id) before verifying.",
             )
         stage.api_service_component_id = asc_component_id
+        # Literal-id extra route processes bypass plan-time $ref validation,
+        # so validate their SHAPE here — BEFORE deploying the ASC: a route to
+        # a non-process or a process without a WSS Listen start deploys clean
+        # and 404s at runtime (architect review r1). The deploy-target process
+        # itself was already binding-confirmed by _resolve_listener_metadata.
+        for route_pid in route_process_ids:
+            if route_pid == target.process_component_id:
+                continue
+            try:
+                route_read = component_get_xml(boomi_client, route_pid)
+            except Exception as exc:
+                return _fail(
+                    LISTENER_ASC_ROUTE_INVALID,
+                    f"ASC route process {route_pid} could not be read for "
+                    f"validation: {exc}",
+                    asc_component_id=asc_component_id,
+                    route_process_id=route_pid,
+                )
+            if route_read.get("type") != "process":
+                return _fail(
+                    LISTENER_ASC_ROUTE_INVALID,
+                    f"ASC route component {route_pid} is a "
+                    f"{route_read.get('type')!r}, not a process — every route "
+                    "must publish a process with a WSS Listen start.",
+                    asc_component_id=asc_component_id,
+                    route_process_id=route_pid,
+                )
+            if not _extract_wss_listen_binding(route_read["xml"])["has_listen"]:
+                return _fail(
+                    LISTENER_ASC_ROUTE_INVALID,
+                    f"ASC route process {route_pid} has no WSS Listen start "
+                    "(actionType='Listen', connectorType='wss') — the route "
+                    "deploys clean but 404s at runtime.",
+                    asc_component_id=asc_component_id,
+                    route_process_id=route_pid,
+                )
         # Same version resolution as the process package (explicit override,
         # else the build id) so the ASC package pairs with the process one.
         asc_version = (
