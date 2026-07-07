@@ -120,10 +120,20 @@ def test_workflow_chain_runs_through_archetype_to_build_integration_plan():
         if m:
             referenced.append(m.group(1))
 
-    # Profile first, then the design_doctrine consult (issue #86), then the
-    # archetype chain.
-    assert referenced[:5] == ["list_boomi_profiles", "get_schema_template", *AUTHORING_TOOLS], (
-        f"workflow must start profile → design_doctrine consult → archetype chain, got: {referenced[:5]!r}"
+    # Profile first, then the design_doctrine consult (issue #86), the archetype
+    # discovery/get pair, then the connection-reuse check (issue #83) interposed
+    # BEFORE build_from_archetype.
+    assert referenced[:6] == [
+        "list_boomi_profiles",
+        "get_schema_template",
+        "list_integration_archetypes",
+        "get_integration_archetype",
+        "suggest_connection_reuse",
+        "build_from_archetype",
+    ], (
+        f"workflow must run profile → design_doctrine consult → archetype "
+        f"discovery/get → connection-reuse check → build_from_archetype, "
+        f"got: {referenced[:6]!r}"
     )
     # At least one downstream step must hand off to build_integration(action='plan').
     assert any(
@@ -316,6 +326,100 @@ def test_prefer_archetypes_hint_points_at_list_integration_archetypes():
     hints = list_capabilities_action()["hints"]
     assert "prefer_archetypes" in hints, "hints must include prefer_archetypes"
     assert "list_integration_archetypes" in hints["prefer_archetypes"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #83 (M7.3) — suggest_connection_reuse discoverability
+# ---------------------------------------------------------------------------
+
+
+def test_list_capabilities_includes_suggest_connection_reuse():
+    tools = list_capabilities_action()["tools"]
+    assert "suggest_connection_reuse" in tools
+    entry = tools["suggest_connection_reuse"]
+    assert entry["category"] == "Integration Authoring"
+    assert entry["read_only"] is True
+    assert entry.get("no_boomi_mutation") is True
+    # Exactly the documented parameter surface.
+    assert set(entry["parameters"]) == {
+        "profile",
+        "connector_type",
+        "purpose",
+        "endpoint_hint",
+        "top_k",
+    }
+
+
+def test_suggest_connection_reuse_filtered_when_not_registered():
+    only = {"build_integration", "get_schema_template", "list_boomi_profiles"}
+    catalog = list_capabilities_action(available_tools=only)
+    assert "suggest_connection_reuse" not in catalog["tools"]
+
+
+def test_authoring_workflow_keeps_reuse_step_when_registered():
+    only = {
+        "list_boomi_profiles",
+        "get_schema_template",
+        "list_integration_archetypes",
+        "get_integration_archetype",
+        "suggest_connection_reuse",
+        "build_from_archetype",
+        "build_integration",
+        "review_transformation",
+        "orchestrate_deploy",
+    }
+    catalog = list_capabilities_action(available_tools=only)
+    assert "build_integration_from_description" in catalog["workflows"]
+    steps = catalog["workflows"]["build_integration_from_description"]["steps"]
+    reuse_steps = [s for s in steps if "suggest_connection_reuse(" in s]
+    assert len(reuse_steps) == 1, (
+        "reuse step must be present when the tool is registered"
+    )
+    # The reuse check must precede build_from_archetype.
+    reuse_idx = next(i for i, s in enumerate(steps) if "suggest_connection_reuse(" in s)
+    build_idx = next(i for i, s in enumerate(steps) if "build_from_archetype(" in s)
+    assert reuse_idx < build_idx, "reuse check must come before build_from_archetype"
+
+
+def test_authoring_workflow_strips_reuse_step_when_not_registered():
+    # Everything the core chain needs EXCEPT suggest_connection_reuse — the
+    # workflow must survive (reuse step stripped), not be dropped.
+    only = {
+        "list_boomi_profiles",
+        "get_schema_template",
+        "list_integration_archetypes",
+        "get_integration_archetype",
+        "build_from_archetype",
+        "build_integration",
+        "review_transformation",
+        "orchestrate_deploy",
+    }
+    catalog = list_capabilities_action(available_tools=only)
+    assert "build_integration_from_description" in catalog["workflows"], (
+        "workflow must survive when only the optional reuse tool is missing"
+    )
+    steps = catalog["workflows"]["build_integration_from_description"]["steps"]
+    assert all("suggest_connection_reuse" not in s for s in steps), (
+        "reuse step must be stripped when the tool is not registered"
+    )
+    assert any("build_from_archetype(" in s for s in steps)
+
+
+def test_reuse_doctrine_and_hint_name_the_tool():
+    catalog = list_capabilities_action()
+    doctrine = catalog["operating_doctrine"]["reuse_secured_connections"]
+    assert "suggest_connection_reuse" in doctrine
+    hints = catalog["hints"]
+    assert "suggest_connection_reuse" in hints["reuse_connections"]
+
+
+def test_reuse_hint_stays_tool_agnostic_when_not_registered():
+    only = {"build_integration", "get_schema_template", "list_boomi_profiles"}
+    hints = list_capabilities_action(available_tools=only)["hints"]
+    # The generic reuse guidance is always present, but must NOT name a tool the
+    # runtime doesn't surface.
+    assert "reuse_connections" in hints
+    assert "suggest_connection_reuse" not in hints["reuse_connections"]
 
 
 def test_prefer_archetypes_hint_suppressed_when_authoring_tools_not_registered():

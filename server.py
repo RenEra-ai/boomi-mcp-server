@@ -315,6 +315,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import connector tools: {e}")
     manage_connector_action = None
 
+# --- Connection Reuse Discovery Tool (Issue #83, M7.3) ---
+try:
+    from boomi_mcp.categories.components.connection_reuse import suggest_connection_reuse_action
+    print(f"[INFO] Connection reuse discovery tool loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import connection reuse discovery tool: {e}")
+    suggest_connection_reuse_action = None
+
 # --- Folder Tools ---
 try:
     from boomi_mcp.categories.folders import manage_folders_action
@@ -2116,6 +2124,91 @@ if manage_connector_action:
             return {"_success": False, "error": str(e)}
 
     print("[INFO] Connector tool registered successfully (1 consolidated tool)")
+
+
+# --- Connection Reuse Discovery MCP Tool (Issue #83, M7.3) ---
+if suggest_connection_reuse_action:
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    def suggest_connection_reuse(
+        profile: str,
+        connector_type: str,
+        purpose: str = None,
+        endpoint_hint: str = None,
+        top_k: int = 5,
+    ):
+        """Discover and rank EXISTING secured connections for safe reuse (M7.3).
+
+        Read-only DISCOVERY. Finds live connector-settings components matching
+        connector_type and ranks them by subtype match, endpoint/host hint match,
+        folder locality, and name similarity — so an agent can wire a REUSED
+        connection (keeping credentials out of the conversation) instead of
+        authoring a new one. Reads component XML only to extract non-secret
+        endpoint context; NEVER returns credential material (encrypted values,
+        usernames, passwords, OAuth/tokens stay opaque) and NEVER mutates Boomi.
+
+        Each candidate carries IntegrationSpecV1-compatible reuse bindings:
+        a reference_only config (resolved by component_id) plus an exact-name
+        fallback paired with conflict_policy='reuse'. Feed the returned binding
+        into build_from_archetype / build_integration to reuse the connection.
+
+        Args:
+            profile: Boomi profile name (required)
+            connector_type: Connector family/subtype to match — e.g. 'database',
+                'rest' / 'rest_client', 'soap_client', or a raw Boomi subType.
+            purpose: Optional free-text intent (e.g. 'orders warehouse DB') used
+                for folder-locality and name-similarity ranking.
+            endpoint_hint: Optional host/base-URL hint (e.g. 'db.prod.acme.com'
+                or 'https://api.acme.com') used to rank by endpoint match.
+            top_k: Max candidates to return (clamped 1..25; default 5).
+
+        Returns:
+            _success + read_only/boomi_mutation/raw_xml_exposed flags,
+            profile, connector_type, resolved_subtype, connector_family, top_k,
+            total_matched, candidates_scanned, enrichment_capped, and
+            candidates[] (component_id, name, folder, subtype, score,
+            why_matched[], safe_context, paired_actions[], reference{...}); or a
+            CONNECTION_REUSE_QUERY_FAILED error envelope (still carrying the
+            safety flags) on failure.
+        """
+        try:
+            subject = get_current_user()
+            print(f"[INFO] suggest_connection_reuse called by user: {subject}, profile: {profile}, connector_type: {connector_type}")
+
+            creds = get_secret(subject, profile)
+
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+
+            return suggest_connection_reuse_action(
+                sdk,
+                profile,
+                connector_type,
+                purpose=purpose,
+                endpoint_hint=endpoint_hint,
+                top_k=top_k,
+            )
+
+        except Exception as e:
+            print(f"[ERROR] Failed to suggest_connection_reuse: {e}")
+            return {
+                "_success": False,
+                "error": str(e),
+                "error_code": "CONNECTION_REUSE_QUERY_FAILED",
+                "profile": profile,
+                "connector_type": connector_type,
+                "read_only": True,
+                "boomi_mutation": False,
+                "raw_xml_exposed": False,
+            }
+
+    print("[INFO] suggest_connection_reuse tool registered successfully")
 
 
 # --- Integration Builder MCP Tool ---

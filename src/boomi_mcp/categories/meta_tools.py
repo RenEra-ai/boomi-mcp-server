@@ -5964,12 +5964,21 @@ def _authoring_workflow_sequences() -> Dict[str, Any]:
                 "2. get_schema_template(schema_name='design_doctrine') → consult the design pattern catalog BEFORE choosing an archetype; fetch a specific pattern with get_schema_template(schema_name='design_pattern:<name>'). Also consult get_schema_template(schema_name='account_governance') for folder placement, component naming, and role/write-restriction governance (fetch one with get_schema_template(schema_name='governance_pattern:<name>')). Select entries from BOTH surfaces by capability_status and record each as emittable_today (proceed via the named tool), gated (design around / propose for GUI apply), or guidance_only (GUI/handoff). For cache / dynamic-property / state-handoff intents also consult get_schema_template(schema_name='cache_property_authoring') (per-term capability_status + provenance, #124) — plan-time lineage validation rejects unprovable cache/property reads before any mutation.",
                 "3. list_integration_archetypes() → discover archetype catalog (read-only, no Boomi mutation)",
                 "4. get_integration_archetype(name='...') → inspect parameter_schema, capability_notes, limitations, examples",
-                "5. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
-                "6. build_integration(action='plan', config='{\"integration_spec\": <spec from step 5>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
-                "7. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 5>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
-                "8. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 5>, ...}') → execute ordered component creation/update",
-                "9. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
-                "10. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test).",
+                # Connection-reuse discovery (issue #83, M7.3). Interposed BEFORE
+                # build_from_archetype so callers check for an existing secured
+                # connection first and feed the returned reference_only /
+                # conflict_policy='reuse' binding into archetype parameters/spec
+                # authoring — keeping credentials out of the conversation. A
+                # parsable suggest_connection_reuse(...) step so the available_tools
+                # filter tracks it; it is stripped (see below) when that tool is
+                # not registered so the core authoring chain still surfaces.
+                "5. suggest_connection_reuse(profile='...', connector_type='...', endpoint_hint='...') → check for an EXISTING secured connection to reuse (reference_only + conflict_policy='reuse') before authoring a new one; feed any returned reuse binding into the archetype parameters / spec (read-only, no Boomi mutation)",
+                "6. build_from_archetype(name='...', parameters={...}) → emit IntegrationSpecV1 (no Boomi mutation)",
+                "7. build_integration(action='plan', config='{\"integration_spec\": <spec from step 6>, \"conflict_policy\": \"reuse\"}') → preview deterministic plan",
+                "8. review_transformation(action='validate_unmapped', config='{\"integration_spec\": <spec from step 6>}') → confirm the transform has no unmapped/invalid mappings BEFORE apply (read-only, no Boomi mutation). Optionally also run review_transformation(action='list_fields'|'mapping_diff') to inspect fields or diff against a prior spec.",
+                "9. build_integration(action='apply', config='{\"dry_run\": false, \"integration_spec\": <spec from step 6>, ...}') → execute ordered component creation/update",
+                "10. build_integration(action='verify', config='{\"build_id\": \"<uuid-from-apply>\"}') → verify created components and dependencies",
+                "11. orchestrate_deploy(profile='...', build_id='<uuid-from-apply>', environment_id='<env-id>', runtime_id='<runtime-id>', dry_run=true) → preview package → deploy → runtime-bind → optional schedule/test; re-run with dry_run=false to execute (deployment happens BEFORE any schedule/test).",
             ],
             "fallback": {
                 "when": "No archetype fits — e.g., an integration shape not yet covered by the registry.",
@@ -9670,6 +9679,39 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "import_integration_draft(source_type=\"source_tool_export_summary\", artifact={\"product\": \"<tool>\", \"flow\": {...}}) → drafts + structured gaps",
             ],
         },
+        "suggest_connection_reuse": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only CONNECTION-REUSE DISCOVERY (issue #83, M7.3): finds and "
+                "ranks EXISTING connector-settings components for safe reuse so you "
+                "wire a reused secured connection — keeping credentials out of the "
+                "conversation — instead of authoring a new one. Ranks by connector "
+                "subtype match, endpoint/host hint match, folder locality, and name "
+                "similarity. Reads component XML only to extract NON-secret endpoint "
+                "context; never returns credential material (encrypted values, "
+                "usernames, passwords, OAuth/tokens stay opaque) and never mutates "
+                "Boomi. Each candidate carries IntegrationSpecV1-compatible reuse "
+                "bindings — a reference_only config (by component_id) plus an "
+                "exact-name fallback paired with conflict_policy='reuse'. Response "
+                "keys: candidates[] (component_id, name, folder, subtype, score, "
+                "why_matched, safe_context, paired_actions, reference), "
+                "total_matched, candidates_scanned, enrichment_capped."
+            ),
+            "actions": ["(single action — ranks reusable connections)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "profile": "str (required) — Boomi profile name",
+                "connector_type": "str (required) — connector family/subtype: 'database' | 'rest' | 'rest_client' | 'soap_client' | a raw Boomi subType",
+                "purpose": "str (optional) — free-text intent for folder-locality and name-similarity ranking",
+                "endpoint_hint": "str (optional) — host or base URL to rank by endpoint match",
+                "top_k": "int (optional) — max candidates (clamped 1..25; default 5)",
+            },
+            "examples": [
+                "suggest_connection_reuse(profile=\"prod\", connector_type=\"database\", purpose=\"orders warehouse\", endpoint_hint=\"db.prod.acme.com\")",
+                "suggest_connection_reuse(profile=\"prod\", connector_type=\"rest\", endpoint_hint=\"https://api.acme.com\") → reference_only + conflict_policy='reuse' bindings",
+            ],
+        },
         "build_integration": {
             "category": "Execution",
             "description": (
@@ -10191,6 +10233,20 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 s for s in tsfe["steps"] if "search_boomi_gotchas(" not in s
             ]
 
+    # Issue #83 (M7.3): the build_integration_from_description chain interposes a
+    # suggest_connection_reuse step. Strip it here when that tool is NOT in the
+    # live registry, BEFORE the available_tools filter runs — otherwise
+    # _refs_in_steps would see the unregistered "5. suggest_connection_reuse("
+    # reference and drop the whole core authoring workflow. When available_tools
+    # is None the full chain is surfaced as-is. (A numbering gap after the strip
+    # is acceptable — same precedent as the search_boomi_gotchas strip above.)
+    if available_tools is not None and "suggest_connection_reuse" not in available_tools:
+        bifd = workflows.get("build_integration_from_description")
+        if bifd:
+            bifd["steps"] = [
+                s for s in bifd["steps"] if "suggest_connection_reuse(" not in s
+            ]
+
     # --- Filter workflows to only reference tools in the catalog ---
     if available_tools is not None:
         import re
@@ -10282,6 +10338,15 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "get_schema_template(resource_type='integration') or direct "
             "build_integration authoring."
         )
+    # Issue #83 (M7.3): upgrade the generic reuse hint to name the discovery tool
+    # only when it is actually registered — otherwise keep the tool-agnostic form.
+    if available_tools is None or "suggest_connection_reuse" in available_tools:
+        hints["reuse_connections"] = (
+            "Prefer existing secured connection components before authoring new "
+            "ones — call suggest_connection_reuse(profile=..., connector_type=...) "
+            "to find and rank reusable candidates (returns reference_only / "
+            "conflict_policy='reuse' bindings; credentials never leave Boomi)."
+        )
 
     # --- Operating doctrine (issue #10 — companion-adoption guidance) ---
     # Text-only guidance for agents; mechanical counterparts live in the M9
@@ -10311,7 +10376,10 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
         ),
         "reuse_secured_connections": (
             "Prefer existing secured connection components over authoring new "
-            "ones — reuse keeps credentials out of the conversation."
+            "ones — reuse keeps credentials out of the conversation. Call "
+            "suggest_connection_reuse(profile=..., connector_type=...) to find "
+            "and rank reusable candidates; wire the returned reference_only / "
+            "conflict_policy='reuse' binding instead of re-entering credentials."
         ),
         "review_logs_after_test": (
             "Deploy/test success is not behavioral correctness: a terminal "

@@ -101,6 +101,26 @@ def test_list_capabilities_wrapper_surfaces_integration_authoring_workflow():
     assert "list_integration_archetypes" in wf["steps"][2]
 
 
+def test_list_capabilities_wrapper_surfaces_suggest_connection_reuse():
+    """Issue #83 (M7.3): the live-filtered catalog surfaces suggest_connection_reuse
+    and the authoring workflow keeps the reusable-connection check step."""
+    result = _run_async(server.mcp.call_tool("list_capabilities", {}))
+    payload = _payload(result)
+
+    registered_names = {t.name for t in _run_async(server.mcp.list_tools())}
+    assert "suggest_connection_reuse" in registered_names, (
+        "suggest_connection_reuse must be registered"
+    )
+    assert "suggest_connection_reuse" in payload["tools"], (
+        "suggest_connection_reuse missing from live-filtered catalog"
+    )
+    wf = payload["workflows"].get("build_integration_from_description")
+    assert wf is not None, "authoring workflow dropped — reuse step filtered it out"
+    assert any("suggest_connection_reuse(" in s for s in wf["steps"]), (
+        "authoring workflow must reference suggest_connection_reuse"
+    )
+
+
 def test_list_capabilities_wrapper_does_not_call_boomi_or_credentials():
     """The wrapper is meta — it must never touch Boomi or credentials."""
     with (
