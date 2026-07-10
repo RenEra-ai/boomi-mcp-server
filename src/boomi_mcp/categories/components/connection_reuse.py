@@ -42,7 +42,6 @@ from boomi.models import (
 from ._shared import (
     component_get_xml,
     paginate_metadata,
-    _extract_api_error_msg,
     _component_get_deadline_seconds,
     ComponentGetDeadlineExceeded,
 )
@@ -359,17 +358,57 @@ def _connector_family(resolved_subtype: str) -> str:
         return "soap_client"
     if resolved_subtype.lower() == "database":
         return "database"
-    return resolved_subtype
+    # Unknown family → the documented "raw" marker; the actual subtype is still
+    # carried in each candidate's `subtype` field.
+    return "raw"
 
 
 # ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
 
+def _hint_host(endpoint_hint: Optional[str]) -> str:
+    """Extract the comparable host from an endpoint hint the SAME way candidate
+    endpoint values are reduced (JDBC hints via ``_jdbc_host``; others via
+    ``_safe_url_skeleton`` then ``_host_of``), so hint and candidate hosts compare
+    symmetrically. Returns '' when no host is discernible."""
+    if not endpoint_hint:
+        return ""
+    hint_raw = endpoint_hint.strip()
+    if _JDBC_PREFIX_RE.match(hint_raw):
+        return _jdbc_host(hint_raw)
+    return _host_of(_safe_url_skeleton(hint_raw) or hint_raw)
+
+
+def _endpoint_prefilter_bonus(
+    folder: Optional[str], endpoint_hint: Optional[str]
+) -> int:
+    """A cheap, metadata-only endpoint signal — folder-segment token overlap with
+    the hint host — used ONLY to order the bounded XML-enrichment window, NEVER
+    added to the final score (whose endpoint signal is the dedicated
+    ``_endpoint_score`` bucket; folding it into the score would double-count).
+
+    Without it, in a large account (> ``working_cap`` matching components) a
+    candidate whose FOLDER names the hinted host but whose name/purpose do not
+    would sit at the baseline cheap score, sort out of the enrichment window, never
+    receive its real endpoint score, and be dropped despite being the exact match.
+    (Name overlap with the hint is already carried by ``_name_score``.)"""
+    host = _hint_host(endpoint_hint)
+    if not host:
+        return 0
+    hint_tokens = _tokens(host)
+    if not hint_tokens:
+        return 0
+    folder_tokens: set = set()
+    for s in _SEGMENT_RE.split(folder or ""):
+        folder_tokens |= _tokens(s)
+    return 5 if (hint_tokens & folder_tokens) else 0
+
+
 def _folder_score(
-    folder: Optional[str], purpose: Optional[str], endpoint_hint: Optional[str]
+    folder: Optional[str], purpose: Optional[str]
 ) -> Tuple[int, List[str]]:
-    """Up to 15: shared/common placement + purpose/endpoint token overlap."""
+    """Up to 15: shared/common placement + purpose/folder token overlap."""
     if not folder:
         return 0, []
     reasons: List[str] = []
@@ -381,7 +420,10 @@ def _folder_score(
     elif any(s in _SHARED_FOLDER_SEGMENTS for s in seg_lower):
         score = 10
         reasons.append("in a shared/common folder")
-    wanted = _tokens(purpose) | _tokens(endpoint_hint)
+    # Folder locality credits the PURPOSE dimension only — endpoint matching has
+    # its own dedicated score bucket, so folding endpoint_hint tokens in here
+    # would double-count the endpoint signal.
+    wanted = _tokens(purpose)
     folder_tokens: set = set()
     for s in seg_lower:
         folder_tokens |= _tokens(s)
@@ -426,14 +468,10 @@ def _endpoint_score(
     if not endpoint_hint:
         return 0, []
     hint_raw = endpoint_hint.strip()
-    # Extract the hint host the SAME way candidate endpoint values are extracted
-    # so they compare symmetrically: JDBC hints via _jdbc_host; other hints are
-    # reduced via _safe_url_skeleton first (candidate values already are), so a
-    # query/matrix/scheme in the hint doesn't block an otherwise-exact match.
-    if _JDBC_PREFIX_RE.match(hint_raw):
-        hint_host = _jdbc_host(hint_raw)
-    else:
-        hint_host = _host_of(_safe_url_skeleton(hint_raw) or hint_raw)
+    # Extract the hint host the SAME way candidate endpoint values are extracted so
+    # they compare symmetrically (shared with the enrichment prefilter via
+    # _hint_host): a query/matrix/scheme in the hint doesn't block an exact match.
+    hint_host = _hint_host(hint_raw)
     hint_norm = hint_raw.lower()
     best = 0
     reason: Optional[str] = None
@@ -515,6 +553,14 @@ def _extract_safe_context(raw_xml: str) -> Tuple[Dict[str, Any], List[str]]:
 # ---------------------------------------------------------------------------
 # Secret backstop
 # ---------------------------------------------------------------------------
+
+# NOTE: there is deliberately NO error-message sanitizer here. Exception text is
+# an unbounded surface — a driver/SDK/platform message can embed a credential in
+# any format — so the two error branches in the handler never echo it; they
+# return only leak-proof bounded signals (exception type name + numeric HTTP
+# status). The `_scrub_secrets` backstop below guards the SUCCESS payload, whose
+# shape we fully control.
+
 
 def _scrub_secrets(node: Any) -> None:
     """Defensive in-place scrub: redact forbidden-keyed values, then drop any
@@ -704,20 +750,27 @@ def suggest_connection_reuse_action(
         for comp in settings:
             folder = comp.get("folder_name", "")
             name = comp.get("name", "")
-            folder_pts, folder_reasons = _folder_score(folder, purpose, endpoint_hint)
+            folder_pts, folder_reasons = _folder_score(folder, purpose)
             name_pts, name_reasons = _name_score(name, purpose, endpoint_hint)
+            cheap = 40 + folder_pts + name_pts  # subtype match is always 40
             scored.append({
                 "component_id": comp.get("component_id", ""),
                 "name": name,
                 "folder": folder,
-                "_cheap": 40 + folder_pts + name_pts,  # subtype match is always 40
+                "_cheap": cheap,
+                # Ordering key for the bounded enrichment window: the cheap score
+                # PLUS a metadata-only endpoint prefilter signal (kept OUT of
+                # `_cheap`, so it never reaches the final score — no double-count).
+                "_prefilter": cheap + _endpoint_prefilter_bonus(folder, endpoint_hint),
                 "_folder_pts": folder_pts,
                 "_name_pts": name_pts,
                 "_reasons": folder_reasons + name_reasons,
             })
 
         # --- Bounded XML enrichment (endpoint context) for the top window ---
-        scored.sort(key=lambda c: (c["_cheap"], c["name"]), reverse=True)
+        # Order by `_prefilter` so a folder-names-host candidate still reaches
+        # enrichment in a large account; the final score below uses `_cheap` only.
+        scored.sort(key=lambda c: (c["_prefilter"], c["_cheap"], c["name"]), reverse=True)
         working_cap = min(len(scored), max(top_k_int * 4, 20))
         enrichment_capped = working_cap < len(scored)
 
@@ -805,18 +858,30 @@ def suggest_connection_reuse_action(
         }
 
     except ApiError as e:
+        # No error path echoes the platform message. An exception message is an
+        # UNBOUNDED text surface — a driver/SDK/platform error can embed a
+        # credential in any format (quoted, escaped, JSON, JDBC, header) — and
+        # sanitizing the unknowable is a losing game. Instead surface only
+        # leak-proof BOUNDED signals: the exception type name and the numeric HTTP
+        # status (401 auth · 403 perms · 400 query · 429 rate-limit · 5xx platform),
+        # which is the actionable part anyway. The contract holds by construction.
+        status = getattr(e, "status", None)
+        status = status if isinstance(status, int) else None
+        suffix = f" (HTTP {status})" if status is not None else ""
         return {
             "_success": False,
-            "error": f"Failed to query reusable connections: {_extract_api_error_msg(e)}",
+            "error": f"Failed to query reusable connections{suffix}.",
             "error_code": CONNECTION_REUSE_QUERY_FAILED,
             "exception_type": type(e).__name__,
+            "http_status": status,
             "profile": profile,
             **_REUSE_FLAGS,
         }
     except Exception as e:
+        # Same rule for any other exception — echo only the type name, never str(e).
         return {
             "_success": False,
-            "error": f"Failed to query reusable connections: {str(e)}",
+            "error": f"Failed to query reusable connections (unexpected {type(e).__name__}).",
             "error_code": CONNECTION_REUSE_QUERY_FAILED,
             "exception_type": type(e).__name__,
             "profile": profile,

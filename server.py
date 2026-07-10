@@ -317,7 +317,9 @@ except ImportError as e:
 
 # --- Connection Reuse Discovery Tool (Issue #83, M7.3) ---
 try:
-    from boomi_mcp.categories.components.connection_reuse import suggest_connection_reuse_action
+    from boomi_mcp.categories.components.connection_reuse import (
+        suggest_connection_reuse_action,
+    )
     print(f"[INFO] Connection reuse discovery tool loaded successfully")
 except ImportError as e:
     print(f"[WARNING] Failed to import connection reuse discovery tool: {e}")
@@ -2196,11 +2198,18 @@ if suggest_connection_reuse_action:
             )
 
         except Exception as e:
-            print(f"[ERROR] Failed to suggest_connection_reuse: {e}")
+            # Pre-handler setup (auth / get_secret / Boomi construction) is an
+            # UNBOUNDED text surface — echo only the exception TYPE, never str(e),
+            # so neither the return envelope NOR this log line can carry a
+            # credential (the no-credential-material contract holds by construction;
+            # profile/connector_type already identify which call failed).
+            etype = type(e).__name__
+            print(f"[ERROR] Failed to suggest_connection_reuse: unexpected {etype}")
             return {
                 "_success": False,
-                "error": str(e),
+                "error": f"suggest_connection_reuse failed (unexpected {etype}).",
                 "error_code": "CONNECTION_REUSE_QUERY_FAILED",
+                "exception_type": etype,
                 "profile": profile,
                 "connector_type": connector_type,
                 "read_only": True,

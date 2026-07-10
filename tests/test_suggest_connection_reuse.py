@@ -983,6 +983,154 @@ def test_enrichment_budget_exhausted_skips_reads_gracefully():
     assert all(c["safe_context"] == {} for c in out["candidates"])
 
 
+def test_generic_exception_is_type_only():
+    # Repo-gate follow-up: a generic (non-ApiError) exception is an UNBOUNDED text
+    # surface — the envelope must echo ONLY the exception type, never str(e), so no
+    # credential in any format (JSON, spaced passphrase, composite key, userinfo)
+    # can leak. We do NOT sanitize-and-echo the unknowable; we drop the message.
+    def _boom(client, query_config, **kw):
+        raise RuntimeError(
+            'Login failed: {"db_password": "hunter2secret"} '
+            "scott/tiger@//db token=eyJabc.def.ghijklmnop.qrstuvwx"
+        )
+
+    with patch(f"{_MODULE}.paginate_metadata", side_effect=_boom):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "database")
+    assert out["_success"] is False
+    blob = json.dumps(out)
+    # Not one fragment of the exception message survives — only the type name.
+    assert "hunter2secret" not in blob and "eyJabc" not in blob and "tiger" not in blob
+    assert out["exception_type"] == "RuntimeError"
+    assert out["error"] == "Failed to query reusable connections (unexpected RuntimeError)."
+    assert out["read_only"] is True and out["boomi_mutation"] is False and out["raw_xml_exposed"] is False
+
+
+def test_apierror_is_type_only_with_status():
+    # Repo-gate final resolution: an ApiError message is an UNBOUNDED text surface
+    # (a platform/driver error can embed a credential in any quoted/escaped/JSON/
+    # header format), so the envelope NEVER echoes it. It surfaces only leak-proof
+    # bounded signals — the exception type name and the numeric HTTP status — which
+    # is the actionable part anyway. Contract holds by construction, not by regex.
+    from boomi.net.transport.api_error import ApiError
+
+    def _boom(client, query_config, **kw):
+        # A credential embedded with an escaped quote (the format that defeated the
+        # old regex sanitizer) must not appear even as a suffix.
+        raise ApiError('rejected: {"password": "hunter\\"2secret"} token=eyJabc.def', status=401)
+
+    with patch(f"{_MODULE}.paginate_metadata", side_effect=_boom):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "database")
+    assert out["_success"] is False
+    blob = json.dumps(out)
+    # No fragment of the message survives — not the secret, not the escaped suffix.
+    assert "hunter" not in blob and "2secret" not in blob and "eyJabc" not in blob
+    assert out["exception_type"] == "ApiError"
+    assert out["http_status"] == 401
+    assert out["error"] == "Failed to query reusable connections (HTTP 401)."
+    assert out["read_only"] is True and out["boomi_mutation"] is False and out["raw_xml_exposed"] is False
+
+
+def test_apierror_without_status_omits_http_status():
+    # A non-int / absent status degrades gracefully: http_status is None and the
+    # message carries no "(HTTP …)" suffix — still no echoed text.
+    from boomi.net.transport.api_error import ApiError
+
+    def _boom(client, query_config, **kw):
+        raise ApiError("password=leaked")  # no status arg
+
+    with patch(f"{_MODULE}.paginate_metadata", side_effect=_boom):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "database")
+    assert "leaked" not in json.dumps(out)
+    assert out["http_status"] is None
+    assert out["error"] == "Failed to query reusable connections."
+
+
+def test_unknown_connector_family_is_raw():
+    # Architect review §6 (low): an unrecognised subtype must yield connector_type
+    # "raw" in the reference binding, with the real subtype kept in `subtype`.
+    settings = [_meta("c1", "SFTP Conn", "#Common")]
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"c1": ""})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "sftp")
+    assert out["resolved_subtype"] == "sftp"
+    assert out["connector_family"] == "raw"
+    ref = out["candidates"][0]["reference"]
+    assert ref["reference_only_config"]["connector_type"] == "raw"
+    assert out["candidates"][0]["subtype"] == "sftp"  # real subtype preserved
+
+
+def test_endpoint_prefilter_keeps_folder_host_match_in_window():
+    # Repo-gate P2: in a large account (> working_cap matching components), a
+    # candidate whose FOLDER names the hinted host — but whose name/purpose do not —
+    # must still reach the bounded XML-enrichment window (and thus earn its real
+    # endpoint score) via the metadata-only prefilter signal §6 removed from the
+    # final score. Here 25 non-matching fillers (cheap 40) would fill the window and
+    # drop the true match; the folder-host prefilter bonus lifts it back in.
+    hint = "db.acme.com"
+    settings = [_meta(f"f{i:02d}", f"zzzz-{i:02d}", "/Misc") for i in range(25)]
+    xml = {
+        f"f{i:02d}": _rest_xml_url(f"https://other{i:02d}.example.internal/v1")
+        for i in range(25)
+    }
+    # Generic name (cheap 40, sorts BELOW the fillers) but its folder names the host
+    # and its base URL host IS the hint host.
+    settings.append(_meta("TGT", "0000-zzzz", "/Integrations/db.acme.com/prod"))
+    xml["TGT"] = _rest_xml_url("https://db.acme.com/v1")
+
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml(xml)),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "rest", purpose=None, endpoint_hint=hint, top_k=5
+        )
+
+    assert out["enrichment_capped"] is True  # 26 matches > working_cap (20)
+    ids = [c["component_id"] for c in out["candidates"]]
+    assert "TGT" in ids, "folder-host exact-endpoint match dropped from the window"
+    tgt = next(c for c in out["candidates"] if c["component_id"] == "TGT")
+    # Exact host match earns the 30-pt endpoint bucket; the +5 prefilter bonus stays
+    # OUT of the final score → 40 (subtype) + 30 (exact host) == 70, never 75.
+    assert tgt["score"] == 70
+    assert any("exact host match" in r for r in tgt["why_matched"])
+
+
+def test_endpoint_prefilter_bonus_absent_from_final_score():
+    # The prefilter bonus must never reach the final score: a folder whose name
+    # shares a host token but whose endpoint does NOT match scores subtype-only (40),
+    # not 45 — the bonus only orders enrichment, it grants no points.
+    settings = [_meta("c1", "0000-zzzz", "/Integrations/db.acme.com/prod")]
+    xml = {"c1": _rest_xml_url("https://unrelated.example.internal/v1")}
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml(xml)),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "rest", purpose=None, endpoint_hint="db.acme.com", top_k=5
+        )
+    assert out["candidates"][0]["score"] == 40  # subtype only — no leaked +5
+
+
+def test_query_uses_type_and_subtype_filter():
+    # Architect review §6 (low): the metadata query must actually filter by
+    # TYPE == connector-settings AND SUBTYPE == the resolved subtype.
+    captured = []
+
+    def _cap(client, query_config, **kw):
+        exprs = query_config.query_filter.expression.nested_expression
+        captured.append([a for e in exprs for a in (getattr(e, "argument", None) or [])])
+        return []
+
+    with patch(f"{_MODULE}.paginate_metadata", side_effect=_cap):
+        suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    assert captured, "paginate_metadata was not called"
+    args = captured[0]
+    assert "connector-settings" in args
+    assert "officialboomi-X3979C-rest-prod" in args  # resolved REST subtype
+
+
 def test_missing_connector_type_errors_with_flags():
     out = suggest_connection_reuse_action(_CLIENT, "prod", "")
     assert out["_success"] is False
