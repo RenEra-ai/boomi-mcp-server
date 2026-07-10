@@ -380,16 +380,30 @@ def _hint_host(endpoint_hint: Optional[str]) -> str:
     return _host_of(_safe_url_skeleton(hint_raw) or hint_raw)
 
 
+def _host_labels(text: Optional[str]) -> set:
+    """ALL alphanumeric labels of a host/folder segment, lowercased — INCLUDING
+    short (`db`, `io`) and numeric labels that ``_tokens`` (3-char minimum) drops.
+    Used only for endpoint affinity: dropping short labels would collapse
+    ``db.acme.io`` to just ``{acme}``, so an exact ``/db.acme.io`` folder would tie
+    a bare ``/Acme`` false positive instead of outranking it."""
+    if not text:
+        return set()
+    return set(_TOKEN_RE.findall(text.lower()))
+
+
 def _endpoint_affinity_strength(
     folder: Optional[str], endpoint_hint: Optional[str]
 ) -> int:
-    """Number of hint-host tokens that appear in the folder's segments — a cheap,
+    """Number of hint-host labels that appear in the folder's segments — a cheap,
     metadata-only measure of how SPECIFICALLY a folder names the hinted endpoint
-    (0 = no affinity; higher = more host tokens matched, so a folder literally named
-    ``api.acme.com`` outranks one merely sharing ``acme``). Used ONLY to size and
-    RANK the bounded XML-enrichment reserve — never as score points (the final
-    score's endpoint signal is the dedicated ``_endpoint_score`` bucket; counting it
-    here too would double-count).
+    (0 = no affinity; higher = more host labels matched, so a folder literally named
+    ``api.acme.com`` outranks one merely sharing ``acme``). Uses ``_host_labels`` (not
+    ``_tokens``) on BOTH sides so short/numeric hostname labels count — otherwise a
+    short-label host like ``db.acme.io`` would collapse to ``{acme}`` and the exact
+    folder would tie weak false positives. Used ONLY to size and RANK the bounded
+    XML-enrichment reserve — never as score points (the final score's endpoint signal
+    is the dedicated ``_endpoint_score`` bucket; counting it here too would
+    double-count).
 
     Its job: in a large account (> ``working_cap`` matching components) a candidate
     whose FOLDER names the hinted host but whose name/purpose do not would otherwise
@@ -401,13 +415,13 @@ def _endpoint_affinity_strength(
     host = _hint_host(endpoint_hint)
     if not host:
         return 0
-    hint_tokens = _tokens(host)
-    if not hint_tokens:
+    hint_labels = _host_labels(host)
+    if not hint_labels:
         return 0
-    folder_tokens: set = set()
+    folder_labels: set = set()
     for s in _SEGMENT_RE.split(folder or ""):
-        folder_tokens |= _tokens(s)
-    return len(hint_tokens & folder_tokens)
+        folder_labels |= _host_labels(s)
+    return len(hint_labels & folder_labels)
 
 
 def _folder_score(

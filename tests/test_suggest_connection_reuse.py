@@ -1158,6 +1158,37 @@ def test_reserve_ranks_by_affinity_strength_not_cheap_tie():
     assert out["candidates"][0]["component_id"] == "EXACT"
 
 
+def test_reserve_ranks_short_label_host_by_full_specificity():
+    # §6 re-review: affinity strength must count SHORT hostname labels (db, io) too —
+    # `_tokens`' 3-char filter would collapse `db.acme.io` to {acme}, tying the exact
+    # `/db.acme.io` folder with bare `/Acme` false positives (both strength 1) so it
+    # loses its reserve slot. `_host_labels` keeps all labels → exact folder strength
+    # 3 wins. Hint db.acme.io: 6 weak /Acme (strength 1, names sort high) + 1 exact
+    # /Integrations/db.acme.io (strength 3, name sorts low), below a full cheap window.
+    hint = "db.acme.io"
+    settings = [_meta(f"c{i:02d}", f"0000-w{i:02d}", "/#Common") for i in range(20)]
+    xml = {f"c{i:02d}": _rest_xml_url(f"https://cmn{i:02d}.example.internal/v1") for i in range(20)}
+    for i in range(6):
+        settings.append(_meta(f"a{i}", f"zzzz-{i}", "/Acme"))
+        xml[f"a{i}"] = _rest_xml_url(f"https://acme{i}.example.internal/v1")
+    settings.append(_meta("EXACT", "0000-zzzz", "/Integrations/db.acme.io"))
+    xml["EXACT"] = _rest_xml_url("https://db.acme.io/v1")
+
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml(xml)),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "rest", purpose=None, endpoint_hint=hint, top_k=5
+        )
+
+    ids = [c["component_id"] for c in out["candidates"]]
+    assert "EXACT" in ids, "short-label exact host folder lost its reserve slot to weak matches"
+    exact = next(c for c in out["candidates"] if c["component_id"] == "EXACT")
+    assert exact["score"] == 70  # 40 subtype + 30 exact host
+    assert out["candidates"][0]["component_id"] == "EXACT"
+
+
 def test_endpoint_affinity_absent_from_final_score():
     # The admission tier must never reach the final score: a folder whose segment
     # shares a host token but whose endpoint does NOT match scores subtype-only (40),
