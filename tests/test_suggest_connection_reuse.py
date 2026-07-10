@@ -1061,21 +1061,20 @@ def test_unknown_connector_family_is_raw():
     assert out["candidates"][0]["subtype"] == "sftp"  # real subtype preserved
 
 
-def test_endpoint_prefilter_keeps_folder_host_match_in_window():
-    # Repo-gate P2: in a large account (> working_cap matching components), a
-    # candidate whose FOLDER names the hinted host — but whose name/purpose do not —
-    # must still reach the bounded XML-enrichment window (and thus earn its real
-    # endpoint score) via the metadata-only prefilter signal §6 removed from the
-    # final score. Here 25 non-matching fillers (cheap 40) would fill the window and
-    # drop the true match; the folder-host prefilter bonus lifts it back in.
+def test_endpoint_affinity_admits_exact_host_folder_over_higher_cheap():
+    # Repo-gate P2 + §6 re-review: in a large account (> working_cap matching
+    # components), a folder that names the hinted host must reach the bounded
+    # XML-enrichment window even against MANY higher-cheap candidates. Here 25
+    # #Common candidates score cheap 55 (40 subtype + 15 shared-folder) — a +5
+    # prefilter nudge (→45) could NOT beat them, so the admission tier ranks any
+    # endpoint-affinity folder STRICTLY ahead. The true match (cheap 40) is admitted
+    # and earns its real endpoint score despite being outscored on cheap.
     hint = "db.acme.com"
-    settings = [_meta(f"f{i:02d}", f"zzzz-{i:02d}", "/Misc") for i in range(25)]
+    settings = [_meta(f"f{i:02d}", f"zzzz-{i:02d}", "/#Common") for i in range(25)]
     xml = {
         f"f{i:02d}": _rest_xml_url(f"https://other{i:02d}.example.internal/v1")
         for i in range(25)
     }
-    # Generic name (cheap 40, sorts BELOW the fillers) but its folder names the host
-    # and its base URL host IS the hint host.
     settings.append(_meta("TGT", "0000-zzzz", "/Integrations/db.acme.com/prod"))
     xml["TGT"] = _rest_xml_url("https://db.acme.com/v1")
 
@@ -1089,18 +1088,80 @@ def test_endpoint_prefilter_keeps_folder_host_match_in_window():
 
     assert out["enrichment_capped"] is True  # 26 matches > working_cap (20)
     ids = [c["component_id"] for c in out["candidates"]]
-    assert "TGT" in ids, "folder-host exact-endpoint match dropped from the window"
+    assert "TGT" in ids, "exact-host-folder match crowded out by higher-cheap #Common"
     tgt = next(c for c in out["candidates"] if c["component_id"] == "TGT")
-    # Exact host match earns the 30-pt endpoint bucket; the +5 prefilter bonus stays
-    # OUT of the final score → 40 (subtype) + 30 (exact host) == 70, never 75.
+    # Exact host match earns the 30-pt endpoint bucket; the admission tier stays OUT
+    # of the final score → 40 (subtype) + 30 (exact host) == 70. Its endpoint score
+    # (70) also beats the crowd of cheap-55 #Common candidates in the final ranking.
     assert tgt["score"] == 70
+    assert out["candidates"][0]["component_id"] == "TGT"
     assert any("exact host match" in r for r in tgt["why_matched"])
 
 
-def test_endpoint_prefilter_bonus_absent_from_final_score():
-    # The prefilter bonus must never reach the final score: a folder whose name
+def test_affinity_false_positives_do_not_evict_high_cheap_exact_match():
+    # Repo-gate P2 (symmetric): a STRICT affinity-first tier over-corrects — many
+    # affinity FALSE POSITIVES (folders that merely share a host token but whose
+    # endpoint does not match) would evict a genuine high-cheap non-affinity exact
+    # match. The cheap-primary window must keep that match. Here 20 stale /Acme
+    # candidates (cheap 40, affinity on "acme") must NOT crowd the /#Common
+    # exact-endpoint match (cheap 55) out of enrichment.
+    hint = "api.acme.com"
+    settings = [_meta(f"a{i:02d}", f"zzzz-{i:02d}", "/Acme") for i in range(20)]
+    xml = {f"a{i:02d}": _rest_xml_url(f"https://acme{i:02d}.example.internal/v1") for i in range(20)}
+    settings.append(_meta("CMN", "0000-zzzz", "/#Common"))  # cheap 55 (shared folder), no affinity
+    xml["CMN"] = _rest_xml_url("https://api.acme.com/v1")  # the true exact-endpoint match
+
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml(xml)),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "rest", purpose=None, endpoint_hint=hint, top_k=5
+        )
+
+    ids = [c["component_id"] for c in out["candidates"]]
+    assert "CMN" in ids, "high-cheap non-affinity exact match evicted by affinity false positives"
+    cmn = next(c for c in out["candidates"] if c["component_id"] == "CMN")
+    assert cmn["score"] == 85  # 40 subtype + 15 #Common + 30 exact host
+    assert out["candidates"][0]["component_id"] == "CMN"
+
+
+def test_reserve_ranks_by_affinity_strength_not_cheap_tie():
+    # Repo-gate P2 (reserve ranking): when more below-cap affinity candidates exist
+    # than the reserve holds, the reserve must prefer the MOST specific host match,
+    # not an arbitrary cheap/name tie. Hint api.acme.com: 6 weak /Acme matches
+    # (strength 1, names sort high) + 1 exact /Integrations/api.acme.com match
+    # (strength 3, name sorts low), all below a full top-20 cheap window. A cheap/
+    # name reserve would take the 6 /Acme and drop the exact; strength ranking keeps
+    # the exact one.
+    hint = "api.acme.com"
+    settings = [_meta(f"c{i:02d}", f"0000-w{i:02d}", "/#Common") for i in range(20)]  # cheap 55, fills primary
+    xml = {f"c{i:02d}": _rest_xml_url(f"https://cmn{i:02d}.example.internal/v1") for i in range(20)}
+    for i in range(6):  # weak affinity, cheap 40, names sort ABOVE the exact match
+        settings.append(_meta(f"a{i}", f"zzzz-{i}", "/Acme"))
+        xml[f"a{i}"] = _rest_xml_url(f"https://acme{i}.example.internal/v1")
+    settings.append(_meta("EXACT", "0000-zzzz", "/Integrations/api.acme.com"))  # strength 3, sorts low
+    xml["EXACT"] = _rest_xml_url("https://api.acme.com/v1")
+
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml(xml)),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "rest", purpose=None, endpoint_hint=hint, top_k=5
+        )
+
+    ids = [c["component_id"] for c in out["candidates"]]
+    assert "EXACT" in ids, "most-specific host match lost a reserve slot to weaker affinity matches"
+    exact = next(c for c in out["candidates"] if c["component_id"] == "EXACT")
+    assert exact["score"] == 70  # 40 subtype + 30 exact host (no affinity/tier points)
+    assert out["candidates"][0]["component_id"] == "EXACT"
+
+
+def test_endpoint_affinity_absent_from_final_score():
+    # The admission tier must never reach the final score: a folder whose segment
     # shares a host token but whose endpoint does NOT match scores subtype-only (40),
-    # not 45 — the bonus only orders enrichment, it grants no points.
+    # not 45 — the tier only orders enrichment admission, it grants no points.
     settings = [_meta("c1", "0000-zzzz", "/Integrations/db.acme.com/prod")]
     xml = {"c1": _rest_xml_url("https://unrelated.example.internal/v1")}
     with (
@@ -1110,7 +1171,29 @@ def test_endpoint_prefilter_bonus_absent_from_final_score():
         out = suggest_connection_reuse_action(
             _CLIENT, "prod", "rest", purpose=None, endpoint_hint="db.acme.com", top_k=5
         )
-    assert out["candidates"][0]["score"] == 40  # subtype only — no leaked +5
+    assert out["candidates"][0]["score"] == 40  # subtype only — no leaked tier points
+
+
+def test_no_endpoint_hint_ordering_unchanged():
+    # With no endpoint_hint every `_affinity` is 0, so the reserve is empty and the
+    # window reduces exactly to the prior `(_cheap, name)` ordering — #Common (55) beats a
+    # plain-folder one (cheap 40); no endpoint machinery perturbs the no-hint path.
+    settings = [
+        _meta("shared", "0000-a", "/#Common"),
+        _meta("plain", "0000-b", "/Misc"),
+    ]
+    xml = {
+        "shared": _rest_xml_url("https://a.example.internal/v1"),
+        "plain": _rest_xml_url("https://b.example.internal/v1"),
+    }
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml(xml)),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "rest", purpose=None, endpoint_hint=None, top_k=5
+        )
+    assert out["candidates"][0]["component_id"] == "shared"  # #Common wins on cheap
 
 
 def test_query_uses_type_and_subtype_filter():

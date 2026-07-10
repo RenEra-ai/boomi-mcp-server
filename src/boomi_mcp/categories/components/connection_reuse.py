@@ -380,19 +380,24 @@ def _hint_host(endpoint_hint: Optional[str]) -> str:
     return _host_of(_safe_url_skeleton(hint_raw) or hint_raw)
 
 
-def _endpoint_prefilter_bonus(
+def _endpoint_affinity_strength(
     folder: Optional[str], endpoint_hint: Optional[str]
 ) -> int:
-    """A cheap, metadata-only endpoint signal — folder-segment token overlap with
-    the hint host — used ONLY to order the bounded XML-enrichment window, NEVER
-    added to the final score (whose endpoint signal is the dedicated
-    ``_endpoint_score`` bucket; folding it into the score would double-count).
+    """Number of hint-host tokens that appear in the folder's segments — a cheap,
+    metadata-only measure of how SPECIFICALLY a folder names the hinted endpoint
+    (0 = no affinity; higher = more host tokens matched, so a folder literally named
+    ``api.acme.com`` outranks one merely sharing ``acme``). Used ONLY to size and
+    RANK the bounded XML-enrichment reserve — never as score points (the final
+    score's endpoint signal is the dedicated ``_endpoint_score`` bucket; counting it
+    here too would double-count).
 
-    Without it, in a large account (> ``working_cap`` matching components) a
-    candidate whose FOLDER names the hinted host but whose name/purpose do not
-    would sit at the baseline cheap score, sort out of the enrichment window, never
+    Its job: in a large account (> ``working_cap`` matching components) a candidate
+    whose FOLDER names the hinted host but whose name/purpose do not would otherwise
+    sit at the baseline cheap score, sort out of the enrichment window, never
     receive its real endpoint score, and be dropped despite being the exact match.
-    (Name overlap with the hint is already carried by ``_name_score``.)"""
+    The reserve rescues such folders — and, when they exceed the reserve cap, the
+    most specific host match wins. (Name overlap with the hint is already carried by
+    ``_name_score``.)"""
     host = _hint_host(endpoint_hint)
     if not host:
         return 0
@@ -402,7 +407,7 @@ def _endpoint_prefilter_bonus(
     folder_tokens: set = set()
     for s in _SEGMENT_RE.split(folder or ""):
         folder_tokens |= _tokens(s)
-    return 5 if (hint_tokens & folder_tokens) else 0
+    return len(hint_tokens & folder_tokens)
 
 
 def _folder_score(
@@ -758,21 +763,46 @@ def suggest_connection_reuse_action(
                 "name": name,
                 "folder": folder,
                 "_cheap": cheap,
-                # Ordering key for the bounded enrichment window: the cheap score
-                # PLUS a metadata-only endpoint prefilter signal (kept OUT of
-                # `_cheap`, so it never reaches the final score — no double-count).
-                "_prefilter": cheap + _endpoint_prefilter_bonus(folder, endpoint_hint),
+                # Endpoint-affinity STRENGTH: how many hint-host tokens the folder
+                # names (0 = none). Metadata-only, kept OUT of `_cheap` so it never
+                # reaches the final score (no endpoint double-count). It sizes and
+                # ranks the bounded enrichment reserve below — a folder literally
+                # named `api.acme.com` (3 tokens) outranks one merely sharing `acme`
+                # (1) for the scarce reserve slots.
+                "_affinity": _endpoint_affinity_strength(folder, endpoint_hint),
                 "_folder_pts": folder_pts,
                 "_name_pts": name_pts,
                 "_reasons": folder_reasons + name_reasons,
             })
 
         # --- Bounded XML enrichment (endpoint context) for the top window ---
-        # Order by `_prefilter` so a folder-names-host candidate still reaches
-        # enrichment in a large account; the final score below uses `_cheap` only.
-        scored.sort(key=lambda c: (c["_prefilter"], c["_cheap"], c["name"]), reverse=True)
+        # The window that gets its real endpoint score is a UNION of two bounded
+        # slices, so NEITHER kind of true match can be crowded out:
+        #   • Primary — top-by-cheap. Preserves admission of HIGH-cheap candidates
+        #     (incl. a non-affinity #Common exact-endpoint match) exactly as before
+        #     any endpoint prefilter existed.
+        #   • Affinity reserve — folders that NAME the hint host but fell BELOW the
+        #     primary window still get a bounded number of slots, ranked by affinity
+        #     STRENGTH first so the MOST specific host match (e.g. a folder named
+        #     `api.acme.com`) wins a scarce slot over weaker single-token matches
+        #     (e.g. `/Acme`) — not by an arbitrary cheap/name tie.
+        # A strict affinity-first tier was rejected: affinity FALSE POSITIVES (a
+        # folder that merely shares a token, e.g. /Acme vs api.acme.com) would then
+        # evict the high-cheap matches the primary window must keep. The final score
+        # stays `_cheap + _endpoint_pts` — neither `_affinity` nor the reserve adds
+        # points. With no endpoint_hint every `_affinity` is 0, so the reserve is
+        # empty and the window is exactly the prior top-by-cheap (no behavior change).
+        scored.sort(key=lambda c: (c["_cheap"], c["name"]), reverse=True)
         working_cap = min(len(scored), max(top_k_int * 4, 20))
-        enrichment_capped = working_cap < len(scored)
+        window = scored[:working_cap]
+        reserve = sorted(
+            (c for c in scored[working_cap:] if c["_affinity"]),
+            key=lambda c: (c["_affinity"], c["_cheap"], c["name"]),
+            reverse=True,
+        )[:top_k_int]
+        window = window + reserve
+        candidates_scanned = len(window)
+        enrichment_capped = candidates_scanned < len(scored)
 
         # Aggregate wall-clock budget: a window of stalled component reads must
         # not sum past the platform request timeout (mirrors the query_components
@@ -781,7 +811,7 @@ def suggest_connection_reuse_action(
         # starting another possibly-stalling request.
         budget = float(_component_get_deadline_seconds())
         enrichment_budget_exhausted = False
-        for cand in scored[:working_cap]:
+        for cand in window:
             endpoint_pts = 0
             endpoint_reasons: List[str] = []
             safe_context: Dict[str, Any] = {}
@@ -821,7 +851,7 @@ def suggest_connection_reuse_action(
 
         # --- Assemble final candidates ---
         assembled: List[Dict[str, Any]] = []
-        for cand in scored[:working_cap]:
+        for cand in window:
             total = cand["_cheap"] + cand.get("_endpoint_pts", 0)
             why = ["connector subtype match (" + resolved_subtype + ")"] + cand["_reasons"]
             safe_context = cand.get("_safe_context", {})
@@ -851,7 +881,7 @@ def suggest_connection_reuse_action(
         return {
             **base,
             "total_matched": len(settings),
-            "candidates_scanned": working_cap,
+            "candidates_scanned": candidates_scanned,
             "enrichment_capped": enrichment_capped,
             "enrichment_budget_exhausted": enrichment_budget_exhausted,
             "candidates": result_candidates,
