@@ -9993,7 +9993,10 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "category": "Documentation",
             "description": (
                 "Search the Boomi documentation knowledge base by semantic "
-                "similarity and return top-ranked chunks with inline content."
+                "similarity and return top-ranked chunks with inline content. "
+                "Hits may include supplemental companion_reference material, not "
+                "only official documentation — every hit carries source_type and "
+                "verification_status."
             ),
             "actions": ["(single action — semantic docs search)"],
             "read_only": True,
@@ -10008,7 +10011,10 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "note": (
                 "Use this before answering factual Boomi platform behavior, "
                 "connector, configuration, deployment/runtime, scripting, EDI/API, "
-                "or error-message questions. After a scale-to-zero cold start the "
+                "or error-message questions. Honor each hit's verification_status: "
+                "treat companion_unverified results as implementation context or a "
+                "hypothesis, not as authoritative official documentation. After a "
+                "scale-to-zero cold start the "
                 "first call may return error 'warming_up' (the KB is still "
                 "loading — wait retry_after_seconds and retry the same call) or "
                 "'kb_unavailable' (temporarily unavailable — report that rather "
@@ -10019,19 +10025,31 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "category": "Documentation",
             "description": (
                 "Read chunks from a Boomi documentation page by page_key after "
-                "a search result indicates the page is relevant."
+                "a search result indicates the page is relevant. Pages may be "
+                "official docs or supplemental companion_reference material — "
+                "every chunk carries source_type and verification_status."
             ),
             "actions": ["(single action — read page chunks)"],
             "read_only": True,
             "parameters": {
-                "page_key": "str (required) — page_key returned by search_boomi_docs",
+                "page_key": (
+                    "str (required) — page_key returned by search_boomi_docs "
+                    "(a help.boomi.com URL for official docs, or a companion://… "
+                    "key for supplemental content)"
+                ),
                 "max_chunks": "int (optional) — number of chunks to return",
                 "start_chunk_index": "int (optional) — pagination start index",
             },
             "examples": [
                 'read_boomi_doc_page(page_key="https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/int-Agent_step")',
+                'read_boomi_doc_page(page_key="companion://OfficialBoomi/boomi-integration/references/components/map_component.md")',
             ],
-            "note": "Use after search_boomi_docs when surrounding page context is needed.",
+            "note": (
+                "Use after search_boomi_docs when surrounding page context is "
+                "needed. Honor the chunks' verification_status: companion_unverified "
+                "content is supplemental implementation context, not authoritative "
+                "official documentation."
+            ),
         },
         "search_boomi_gotchas": {
             "category": "Documentation",
