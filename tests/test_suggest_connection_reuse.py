@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 _src = str(Path(__file__).resolve().parent.parent / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
@@ -41,9 +43,12 @@ def _meta(cid, name, folder):
     }
 
 
-def _db_xml(host, dbname="ORDERS", driver="sqlserver", port="1433"):
+def _db_xml(host, dbname="ORDERS", driver="sqlserver", port="1433", url_format=None):
     """Live-style database connector-settings XML with an ENCRYPTED password and
     a username — neither of which must ever surface in the tool output."""
+    if url_format is None:
+        url_format = f"jdbc:sqlserver://{host}:{port}"
+    url_format = url_format.replace("&", "&amp;")  # real Boomi XML escapes '&'
     return (
         '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
         'type="connector-settings" subType="database" name="db" folderName="f">'
@@ -53,7 +58,21 @@ def _db_xml(host, dbname="ORDERS", driver="sqlserver", port="1433"):
         "<bns:object>"
         f'<DatabaseConnectionSettings xmlns="" host="{host}" port="{port}" '
         f'dbname="{dbname}" driverId="{driver}" username="svc_secret_user" '
-        f'password="[encrypted]" urlFormat="jdbc:sqlserver://{host}:{port}"/>'
+        f'password="[encrypted]" urlFormat="{url_format}"/>'
+        "</bns:object></bns:Component>"
+    )
+
+
+def _rest_xml_url(url):
+    """Minimal REST connector-settings XML whose base URL is exactly ``url``."""
+    return (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'type="connector-settings" subType="officialboomi-X3979C-rest-prod" '
+        'name="rest" folderName="f">'
+        "<bns:object>"
+        '<GenericConnectionConfig xmlns="">'
+        f'<field id="url" type="string" value="{url}"/>'
+        "</GenericConnectionConfig>"
         "</bns:object></bns:Component>"
     )
 
@@ -359,6 +378,609 @@ def test_top_k_clamped_high_and_low():
         low = suggest_connection_reuse_action(_CLIENT, "prod", "database", top_k=0)
     assert low["top_k"] == 1
     assert len(low["candidates"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Endpoint-value sanitization — credential-free skeleton echo.
+#
+# safe_context echoes only scheme://host[:port][/path] (standard URL) or
+# jdbc:sub://host:port[/db] (JDBC). Userinfo, query, fragment, and the JDBC
+# ;property block are DROPPED — the only components that can carry credentials —
+# so any embedded credential is removed by construction, for any URL shape.
+# ---------------------------------------------------------------------------
+
+
+def test_any_at_in_url_omitted():
+    # Definitive rule (through round-27): ANY '@' in a url value → OMIT. Userinfo
+    # can contain ':' '/' '?' '#' '%' ';' that make host extraction ambiguous, and
+    # a real base URL never carries an '@'. Covers userinfo, query-'@', userinfo
+    # spanning delimiters, and nested-credential-url-in-query.
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    leaky_urls = [
+        "https://svcuser:hunter2@api.acme.com/v1?api_key=SECRETKEY123&plain=ok",
+        "https://api.acme.com?email=ops@example.com",
+        "https://user:p@ss@api.example.com/v1",
+        "https://svc_secret_user:p?ss@api.example.com",   # '?' in password
+        "https://api.example.com/cb?redirect=https://user:SUPERSECRET@evil/x",
+    ]
+    for leaky in leaky_urls:
+        xml_url = leaky.replace("&", "&amp;")
+        with (
+            patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+            patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(xml_url)})),
+        ):
+            out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+        ctx = out["candidates"][0]["safe_context"]
+        assert "url" not in ctx, leaky  # omitted, not echoed
+        blob = json.dumps(out)
+        for banned in ("svcuser", "hunter2", "SECRETKEY123", "svc_secret_user", "SUPERSECRET", "p@ss"):
+            assert banned not in blob
+
+
+def test_webhook_secret_in_path_dropped():
+    # Codex round-10: a credential embedded in the PATH (webhook token) is dropped.
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    url = "https://hooks.example.com/services/T00000/B00000/XXXXWEBHOOKSECRET"
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(url)})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    ctx_url = out["candidates"][0]["safe_context"]["url"]
+    assert ctx_url == "https://hooks.example.com"
+    assert "WEBHOOKSECRET" not in json.dumps(out) and "services" not in json.dumps(out)
+
+
+def test_ambiguous_matrix_at_authority_omitted():
+    # Codex round-23 P2a + Bug #153: an authority combining a ';'/'\' matrix with
+    # an '@' is ambiguous (userinfo vs matrix are grammatically identical) — omit
+    # (both the standard-URL AND schemeless branches, consistently).
+    from boomi_mcp.categories.components.connection_reuse import _safe_url_skeleton
+    for leaky in (
+        "https://api.example.com;token=abc@secret.internal/v1",
+        "https://api.example.com\\x=y@evil.internal",
+        "https://user:p;ass@api.example.com/v1",
+        "user:p;ass@host",              # schemeless
+        "host;token=x@secret.internal",  # schemeless
+    ):
+        assert _safe_url_skeleton(leaky) is None, leaky
+
+
+def test_any_literal_at_omitted_skeleton():
+    # Definitive rule (round-27): ANY literal '@' → omit, in either branch and
+    # regardless of where the '@' sits (userinfo, path, or query — a '?' or '/' in
+    # the password can move the '@' anywhere). Real base URLs never carry '@'.
+    from boomi_mcp.categories.components.connection_reuse import _safe_url_skeleton
+    for leaky in (
+        "https://svc:pa/ss@api.example.com",
+        "svc:pa/ss@api.example.com",
+        "https://u:p\\q@api.example.com",
+        "https://api.example.com/v1?x=a@b",       # '@' in query
+        "api.example.com?x=a@b",
+        "api.example.com/p@x",
+        "https://svc_secret_user:p?ss@api.example.com",  # '?' in password
+        "https://svc%2Fpass@api.example.com",     # literal '@', inner encoding
+    ):
+        assert _safe_url_skeleton(leaky) is None, leaky
+
+
+def test_nonnumeric_port_and_arbitrary_phrase_omitted():
+    # Codex round-30: a malformed `user:password` (no scheme/'@') makes urlsplit
+    # read the password as a non-numeric port and echo the username; and an
+    # arbitrary phrase must not be echoed as a placeholder.
+    from boomi_mcp.categories.components.connection_reuse import _safe_url_skeleton
+    # P1a: non-numeric port that is NOT a ${…} placeholder → omit (username leak).
+    assert _safe_url_skeleton("https://svc_secret_user:hunter2") is None
+    assert _safe_url_skeleton("svc_secret_user:hunter2") is None
+    # A ${PORT}-style externalized port keeps the host (real, not a leak).
+    assert _safe_url_skeleton("https://api.acme.com:${PORT}/v1") == "https://api.acme.com"
+    assert _safe_url_skeleton("api.acme.com:${PORT}") == "api.acme.com"
+    # P1b: only a KNOWN Boomi sentinel echoes verbatim; arbitrary text is omitted.
+    assert _safe_url_skeleton("MY PASSWORD IS hunter2") is None
+    assert _safe_url_skeleton("SET IN EXTENSION") == "SET IN EXTENSION"
+
+
+def test_percent_encoded_userinfo_host_omitted():
+    # Codex round-26: percent-encoded userinfo delimiters (%3A=':', %40='@') hide
+    # the '@' from urlsplit so the host includes the username; a '%' in the host
+    # means encoded delimiters → omit (never truncate to the username).
+    from boomi_mcp.categories.components.connection_reuse import _safe_url_skeleton
+    assert _safe_url_skeleton("https://svc_secret_user%3Ahunter2%40api.example.com/v1") is None
+
+
+def test_matrix_without_at_reduces_to_host():
+    # A ';' matrix WITHOUT an '@' is unambiguous — reduce to the host (both
+    # branches), dropping the matrix. Verified secret-safe through the handler.
+    from boomi_mcp.categories.components.connection_reuse import _safe_url_skeleton
+    assert _safe_url_skeleton("https://api.example.com;jsessionid=SECRET/v1") == "https://api.example.com"
+    assert _safe_url_skeleton("api.example.com;jsessionid=SECRET") == "api.example.com"
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url("https://api.example.com;jsessionid=SECRET/v1")})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    assert out["candidates"][0]["safe_context"]["url"] == "https://api.example.com"
+    assert "jsessionid" not in json.dumps(out) and "SECRET" not in json.dumps(out)
+
+
+def test_schemeless_ipv6_preserved():
+    # Codex round-23 P2b: a schemeless IPv6 literal must not be split at an
+    # internal ':' (bare) or dropped (bracketed).
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    cases = {
+        "2001:db8::1/path": "2001:db8::1",
+        "[2001:db8::1]:8443/v1": "[2001:db8::1]:8443",
+    }
+    for value, expected in cases.items():
+        with (
+            patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+            patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(value)})),
+        ):
+            out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+        assert out["candidates"][0]["safe_context"]["url"] == expected, value
+
+
+def test_skeleton_is_exactly_scheme_host_port():
+    # Belt-and-suspenders: a valid skeleton passes strict validation; the values
+    # echoed for common shapes are exactly scheme://host[:port]. A ';'-authority
+    # is omitted (malformed), not reduced.
+    from boomi_mcp.categories.components.connection_reuse import _safe_url_skeleton
+    assert _safe_url_skeleton("https://api.acme.com/v1/orders?x=1") == "https://api.acme.com"
+    assert _safe_url_skeleton("https://api.acme.com:8443/v1") == "https://api.acme.com:8443"
+    assert _safe_url_skeleton("https://[2001:db8::1]:8443/v1") == "https://[2001:db8::1]:8443"
+    assert _safe_url_skeleton("sftp://files.corp.net/in") == "sftp://files.corp.net"
+    # ';' matrix without '@' reduces to host; ';'+'@' (ambiguous) is omitted.
+    assert _safe_url_skeleton("https://api.acme.com;x=SECRET/v1") == "https://api.acme.com"
+    assert _safe_url_skeleton("https://api.acme.com;x=y@z/v1") is None
+
+
+def test_url_fragment_dropped_from_skeleton():
+    # A credential-shaped fragment param is dropped with the whole fragment.
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    url = "https://api.example.com/v1#access_token=FRAGMENTSECRET"
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(url)})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    ctx_url = out["candidates"][0]["safe_context"]["url"]
+    assert ctx_url == "https://api.example.com"
+    assert "FRAGMENTSECRET" not in json.dumps(out) and "access_token" not in json.dumps(out)
+
+
+def test_nested_credential_url_in_query_omitted():
+    # A nested URL with userinfo inside a query value: the outer '@' triggers the
+    # omit rule (any '@' → omit), so nothing leaks.
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    url = "https://api.example.com/cb?redirect=https://user:SUPERSECRET@evil.example/x"
+    xml_url = url.replace("&", "&amp;")
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(xml_url)})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    assert "url" not in out["candidates"][0]["safe_context"]
+    assert "SUPERSECRET" not in json.dumps(out)
+
+
+def test_schemeless_endpoint_reduced_to_host():
+    # A schemeless url/endpoint value is reduced to its bare host — query/path
+    # (and any credentials therein) are dropped.
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    url = "api.example.com/v1?api_key=SECRETVALUE"
+    xml_url = url.replace("&", "&amp;")
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(xml_url)})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    ctx_url = out["candidates"][0]["safe_context"]["url"]
+    assert ctx_url == "api.example.com"
+    assert "SECRETVALUE" not in json.dumps(out) and "api_key" not in json.dumps(out)
+
+
+def test_boomi_placeholder_url_preserved():
+    # A Boomi externalization placeholder ("SET IN EXTENSION") has whitespace but
+    # no path delimiters — it must be echoed intact, not truncated to "SET".
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url("SET IN EXTENSION")})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    assert out["candidates"][0]["safe_context"]["url"] == "SET IN EXTENSION"
+
+
+def test_schemeless_with_space_in_query_stripped():
+    # Codex round-11: a schemeless URL with an unescaped space in its query must
+    # still lose its path/query (the whitespace must NOT make it echo raw).
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url("api.acme.com/callback?api_key=SECRET VALUE")})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    ctx_url = out["candidates"][0]["safe_context"]["url"]
+    assert ctx_url == "api.acme.com"
+    assert "SECRET" not in json.dumps(out) and "callback" not in json.dumps(out)
+
+
+def test_schemeless_matrix_without_at_reduces_to_host():
+    # Codex round-12: a schemeless ';' matrix/property WITHOUT an '@' is
+    # unambiguous — reduce to the bare host (the ';...' block dropped).
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url("api.example.com;jsessionid=SECRET")})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    ctx_url = out["candidates"][0]["safe_context"]["url"]
+    assert ctx_url == "api.example.com"
+    blob = json.dumps(out)
+    assert "SECRET" not in blob and "jsessionid" not in blob
+
+
+def test_schemeless_semicolon_and_at_omitted():
+    # Codex round-14/23: a schemeless authority with a ';' AND an '@' is ambiguous
+    # (userinfo-';' vs matrix-'@' can't be told apart) — omit, never echo.
+    from boomi_mcp.categories.components.connection_reuse import _safe_url_skeleton
+    for leaky in (
+        "user:p;ass@api.example.com",
+        "user:pass@api.example.com;token=SECRET",
+        "user:p;ass@api.example.com:8080/path;jsessionid=Z",
+    ):
+        assert _safe_url_skeleton(leaky) is None, leaky
+
+
+def test_jdbc_host_stops_at_last_userinfo_at():
+    # Codex round-14/15 P2: a JDBC password with an unescaped '@' must not leak
+    # into the extracted host — userinfo runs to the LAST '@' in BOTH the '//'
+    # form and the Oracle Thin SID '@host' fallback.
+    from boomi_mcp.categories.components.connection_reuse import _jdbc_host
+    assert _jdbc_host("jdbc:mysql://user:p@ss@db.acme.com:3306/x") == "db.acme.com"
+    assert _jdbc_host("jdbc:mysql://user:pass@db.acme.com:3306/x") == "db.acme.com"
+    assert _jdbc_host("jdbc:mysql://db.acme.com:3306/x") == "db.acme.com"
+    # Oracle Thin SID (no '//') with a multi-'@' password.
+    assert _jdbc_host("jdbc:oracle:thin:scott/tig@er@db.acme.com:1521:ORCL") == "db.acme.com"
+    assert _jdbc_host("jdbc:oracle:thin:@db.acme.com:1521:ORCL") == "db.acme.com"
+    assert _jdbc_host("jdbc:oracle:thin:@//db.acme.com:1521/svc") == "db.acme.com"
+    # Colon-separated host descriptor (Sybase jConnect / Informix) — host is the
+    # segment before the numeric port.
+    assert _jdbc_host("jdbc:sybase:Tds:db.acme.com:5000/orders") == "db.acme.com"
+    assert _jdbc_host("jdbc:informix-sqli:db.acme.com:1526/stores") == "db.acme.com"
+    # No host to find → '' (in-memory / file DBs).
+    assert _jdbc_host("jdbc:h2:mem:testdb") == ""
+    assert _jdbc_host("jdbc:sqlite:/var/db/app.db") == ""
+    # Codex round-18: a ';password=p@ss' PROPERTY '@' after the host must NOT be
+    # taken as the userinfo '@' (userinfo stops at the ';' authority delimiter).
+    assert _jdbc_host("jdbc:sqlserver://db.acme.com:1433;password=p@ss;database=x") == "db.acme.com"
+    assert _jdbc_host("jdbc:sqlserver://db.acme.com;user=a@b") == "db.acme.com"
+    # Codex round-20: SQL Server property-based host form (serverName=), where the
+    # host is not in the //authority.
+    assert _jdbc_host("jdbc:sqlserver://;serverName=db.acme.com;databaseName=x") == "db.acme.com"
+    assert _jdbc_host("jdbc:sqlserver://;serverName=db.acme.com\\INST;databaseName=x") == "db.acme.com"
+    # Codex round-21: a ';password=p@ss' property '@' must NOT shadow the
+    # serverName host via the Oracle @-fallback (which is restricted to pre-';').
+    assert _jdbc_host("jdbc:sqlserver://;serverName=db.acme.com;password=p@ss") == "db.acme.com"
+    assert _jdbc_host("jdbc:sqlserver://;password=p@ss;serverName=db.acme.com") == "db.acme.com"
+    # Codex round-22 P2b: bracketed IPv6 authority — the full address, not '[2001'.
+    assert _jdbc_host("jdbc:postgresql://[2001:db8::1]:5432/db") == "2001:db8::1"
+    assert _jdbc_host("jdbc:mysql://user:p@ss@[2001:db8::2]:3306/x") == "2001:db8::2"
+    # Codex round-22 P2a: a braced password containing 'serverName=' text must NOT
+    # be mistaken for the real host.
+    assert _jdbc_host("jdbc:sqlserver://;password={p;serverName=secret};serverName=db.acme.com") == "db.acme.com"
+    # Codex round-24 P2a: a '//' inside a property value must NOT shadow the
+    # serverName host (the //authority scan is restricted to the pre-';' segment).
+    assert _jdbc_host("jdbc:sqlserver://;serverName=db.acme.com;password=p//secret") == "db.acme.com"
+    assert _jdbc_host("jdbc:mysql://host.acme.com:3306/db;sessionVariables=x") == "host.acme.com"
+    # Codex round-26: a SQL Server named-instance suffix ('\INST') must be stripped
+    # so an endpoint_hint of the bare host scores an exact (not substring) match.
+    assert _jdbc_host("jdbc:sqlserver://db.acme.com\\INST:1433;databaseName=x") == "db.acme.com"
+    # Codex round-27: a colon-style JDBC IPv4 host (starts with a digit) must not
+    # be mistaken for the port (the port segment is purely numeric).
+    assert _jdbc_host("jdbc:sybase:Tds:10.0.0.1:5000/orders") == "10.0.0.1"
+    # Codex round-28/29/31: JDBC userinfo ends at the LAST '@' regardless of how
+    # many '@'/'/'/':'/';' the password contains — never a pre-'@' username.
+    assert _jdbc_host("jdbc:mysql://svc:p/ss@db.acme.com:3306/x") == "db.acme.com"
+    assert _jdbc_host("jdbc:mysql://user:p@/ss@db.acme.com:3306/app") == "db.acme.com"
+    assert _jdbc_host("jdbc:mysql://svc_user:pa;ss@db.acme.com:3306/app") == "db.acme.com"  # ';' in pwd
+    assert _jdbc_host("jdbc:mysql://a@b@c@db.acme.com:3306") == "db.acme.com"
+    assert _jdbc_host("jdbc:mysql://user:pass@[2001:db8::1]:3306") == "2001:db8::1"
+    # A '//' inside a property value is NOT the authority (first '//' wins).
+    assert _jdbc_host("jdbc:sqlserver://;serverName=db.acme.com;password=p//secret") == "db.acme.com"
+
+
+def test_endpoint_hint_normalized_like_candidates():
+    # Codex round-24 P2b: a hint with a query/matrix/scheme must be reduced the
+    # same way candidate values are, so it still matches an exact host.
+    from boomi_mcp.categories.components.connection_reuse import _endpoint_score
+    assert _endpoint_score("api.example.com?wsdl", ["api.example.com"])[0] == 30
+    assert _endpoint_score("https://api.example.com;x=1/v1", ["api.example.com"])[0] == 30
+    assert _endpoint_score("host.docker.internal", ["http://host.docker.internal:8081"])[0] == 30
+
+
+def test_host_of_handles_ipv6():
+    # QA round-22 follow-up: a bare IPv6 must NOT be truncated at the first ':'
+    # (would false-match distinct IPv6 hosts sharing the first hextet).
+    from boomi_mcp.categories.components.connection_reuse import _host_of, _endpoint_score
+    assert _host_of("2001:db8::1") == "2001:db8::1"
+    assert _host_of("[2001:db8::1]:8443") == "2001:db8::1"
+    assert _host_of("https://[2001:db8::1]:8443/x") == "2001:db8::1"
+    assert _host_of("host.docker.internal:8081") == "host.docker.internal"
+    # Distinct IPv6 hosts must NOT collapse to a false exact match.
+    assert _endpoint_score("2001:db8::1", ["2001:db8::99"])[0] < 30
+    assert _endpoint_score("2001:db8::1", ["2001:db8::1"])[0] == 30
+
+
+def test_schemeless_backslash_path_stripped():
+    # Codex round-18: a schemeless value using backslash path separators must be
+    # reduced to the bare host (the '\path' must not be echoed).
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    for leaky in (
+        "api.example.com\\services\\WEBHOOKSECRET",
+        "api.example.com\\..\\..\\etc\\passwd",
+    ):
+        with (
+            patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+            patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(leaky)})),
+        ):
+            out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+        ctx_url = out["candidates"][0]["safe_context"]["url"]
+        assert ctx_url == "api.example.com", leaky
+        blob = json.dumps(out)
+        assert "WEBHOOKSECRET" not in blob and "services" not in blob and "passwd" not in blob
+
+
+def test_jdbc_endpoint_hint_matches_custom_url_candidate():
+    # Codex round-12: a caller passing a JDBC URL as the endpoint_hint must still
+    # match a custom_url candidate (hint host extracted the same way as candidate).
+    settings = [_meta("db1", "Snowflake DW", "#Common")]
+    url_format = "jdbc:snowflake://acct.us-east-1.snowflakecomputing.com/?db=ANALYTICS"
+    xml = _db_xml_custom_url(url_format)
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"db1": xml})),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "database",
+            endpoint_hint="jdbc:snowflake://acct.us-east-1.snowflakecomputing.com/?db=OTHER",
+        )
+    cand = out["candidates"][0]
+    assert any("exact host match" in r for r in cand["why_matched"])
+    assert "snowflakecomputing.com/?db" not in json.dumps(out)
+
+
+def test_oracle_thin_sid_host_extracted_for_matching():
+    # Codex round-13 P2b: Oracle Thin SID URLs (jdbc:oracle:thin:@host:port:sid)
+    # have no '//' — the host must still be extracted for matching (not echoed).
+    settings = [_meta("db1", "Oracle DW", "#Common")]
+    url_format = "jdbc:oracle:thin:scott/tiger@db.acme.com:1521:ORCL"
+    xml = _db_xml_custom_url(url_format)
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"db1": xml})),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "database", endpoint_hint="db.acme.com",
+        )
+    cand = out["candidates"][0]
+    assert any("exact host match (db.acme.com)" in r for r in cand["why_matched"])
+    # The connection string (with creds) is never echoed.
+    assert "urlFormat" not in cand["safe_context"]
+    assert "tiger" not in json.dumps(out) and "scott" not in json.dumps(out)
+
+
+def _db_v2_xml(url_value):
+    """Database V2-style connector-settings: a GenericConnectionConfig with a
+    JDBC url field (no DatabaseConnectionSettings scalar attrs)."""
+    return (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'type="connector-settings" subType="officialboomi-X3979C-dbv2da-prod" '
+        'name="db" folderName="f">'
+        "<bns:object>"
+        '<GenericConnectionConfig xmlns="">'
+        f'<field id="url" type="string" value="{url_value}"/>'
+        '<field id="password" type="password" value="[encrypted]"/>'
+        "</GenericConnectionConfig>"
+        "</bns:object></bns:Component>"
+    )
+
+
+def test_dbv2_jdbc_url_field_host_extracted_not_echoed():
+    # Codex round-13 P2a: a Database V2 GenericConnectionConfig JDBC url field is
+    # never echoed, but its host is extracted for matching.
+    settings = [_meta("db1", "DBv2 Conn", "#Common")]
+    xml = _db_v2_xml("jdbc:mysql://db.acme.com:3306/app")
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"db1": xml})),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "officialboomi-X3979C-dbv2da-prod",
+            endpoint_hint="db.acme.com",
+        )
+    cand = out["candidates"][0]
+    assert any("exact host match (db.acme.com)" in r for r in cand["why_matched"])
+    # The JDBC url is never echoed in safe_context.
+    assert "url" not in cand["safe_context"]
+    assert "jdbc:" not in json.dumps(out)
+
+
+def test_schemeless_percent_encoded_delimiters_omitted():
+    # Codex round-19 P1: percent-encoded delimiters (%3F, %2F) evade literal
+    # splitting; such a value is NOT a pure placeholder, so it must be omitted,
+    # never echoed with the embedded credential.
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    for leaky in (
+        "api.example.com%3Fapi_key=SECRET",
+        "api.example.com%2Fservices%2FWEBHOOKSECRET",
+    ):
+        with (
+            patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+            patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(leaky)})),
+        ):
+            out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+        ctx = out["candidates"][0]["safe_context"]
+        assert "url" not in ctx, leaky  # omitted, not echoed
+        blob = json.dumps(out)
+        assert "SECRET" not in blob and "api_key" not in blob and "WEBHOOK" not in blob
+
+
+def test_schemeless_templated_port_keeps_host():
+    # Codex round-19 P2: a schemeless externalized port (…:${PORT}) must keep the
+    # host (mirrors the standard-URL branch), not drop it.
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url("api.example.com:${PORT}/v1")})),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "rest", endpoint_hint="api.example.com",
+        )
+    cand = out["candidates"][0]
+    assert cand["safe_context"]["url"] == "api.example.com"
+    assert any("exact host match (api.example.com)" in r for r in cand["why_matched"])
+
+
+def test_templated_port_keeps_host():
+    # Codex round-11: a templated/externalized port (…:${PORT}) makes parts.port
+    # raise ValueError; the host must be kept (not discarded to "https:").
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url("https://api.acme.com:${PORT}/v1")})),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "rest", endpoint_hint="api.acme.com",
+        )
+    cand = out["candidates"][0]
+    assert cand["safe_context"]["url"] == "https://api.acme.com"
+    assert any("exact host match (api.acme.com)" in r for r in cand["why_matched"])
+
+
+def test_ipv6_host_skeleton_bracketed():
+    # An IPv6 literal host is bracketed correctly in the skeleton; no leak.
+    settings = [_meta("rest1", "Acme REST", "#Common")]
+    url = "https://[2001:db8::1]:8443/v1?token=SECRET"
+    xml_url = url.replace("&", "&amp;")
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"rest1": _rest_xml_url(xml_url)})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "rest")
+    ctx_url = out["candidates"][0]["safe_context"]["url"]
+    assert ctx_url == "https://[2001:db8::1]:8443"
+    assert "token" not in json.dumps(out)
+
+
+# Every JDBC connection-string shape (driver-specific credential grammars) is
+# reduced to nothing echoable: urlFormat is OMITTED from safe_context (its host
+# is carried by the separate `host` scalar attr), so no JDBC credential can leak.
+_JDBC_LEAKY_URL_FORMATS = [
+    "jdbc:mysql://db.acme.com:3306/orders;user=sa;password=topsecret",       # ';' matrix
+    "jdbc:postgresql://db.acme.com/app?user=svc&password=topsecret",         # '?' query (Postgres)
+    "jdbc:sqlserver://db.acme.com:1433;password=p@ss;database=x",            # '@' in password
+    "jdbc:sqlserver://db.acme.com:1433;password={p;ass};database=x",         # braced ';' value
+    "jdbc:mysql://user:pass@db.acme.com:3306/orders;applicationName=svc@corp",  # '//user:pass@'
+    "jdbc:oracle:thin:scott/tiger@//db.acme.com:1521/orcl",                  # Oracle thin creds
+]
+
+
+@pytest.mark.parametrize("url_format", _JDBC_LEAKY_URL_FORMATS)
+def test_jdbc_connection_string_never_echoed(url_format):
+    settings = [_meta("db1", "Orders DB", "#Common")]
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"db1": _db_xml("db.acme.com", url_format=url_format)})),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "database")
+    ctx = out["candidates"][0]["safe_context"]
+    # urlFormat (the JDBC string) is never echoed; DB identity is the scalars.
+    assert "urlFormat" not in ctx
+    assert ctx["host"] == "db.acme.com"
+    assert ctx["driverId"] == "sqlserver"
+    blob = json.dumps(out)
+    for banned in ("topsecret", "password", "p@ss", "p;ass", "tiger", "user:pass", "scott"):
+        assert banned not in blob
+
+
+def _db_xml_custom_url(url_format):
+    """custom_url-shape database XML: no host/dbname attrs, host lives only in
+    urlFormat (Snowflake and similar)."""
+    return (
+        '<bns:Component xmlns:bns="http://api.platform.boomi.com/" '
+        'type="connector-settings" subType="database" name="db" folderName="f">'
+        "<bns:object>"
+        f'<DatabaseConnectionSettings xmlns="" driverId="snowflake" '
+        f'urlFormat="{url_format}"/>'
+        "</bns:object></bns:Component>"
+    )
+
+
+def test_custom_jdbc_host_matches_via_endpoint_hint():
+    # Codex round-10 P2: a custom_url DB connection has the host ONLY in urlFormat
+    # (empty host/port/dbname attrs). The host must still be extracted for
+    # endpoint MATCHING (not echoed) so an endpoint_hint can distinguish it.
+    settings = [_meta("db1", "Snowflake DW", "#Common")]
+    url_format = "jdbc:snowflake://acct.us-east-1.snowflakecomputing.com/?db=ANALYTICS"
+    xml = _db_xml_custom_url(url_format)
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get_xml({"db1": xml})),
+    ):
+        out = suggest_connection_reuse_action(
+            _CLIENT, "prod", "database",
+            endpoint_hint="acct.us-east-1.snowflakecomputing.com",
+        )
+    cand = out["candidates"][0]
+    # Host matched for ranking even though it is never echoed.
+    assert any("exact host match" in r for r in cand["why_matched"])
+    assert "urlFormat" not in cand["safe_context"]
+    # The connection string itself never leaks.
+    assert "snowflakecomputing.com/?db" not in json.dumps(out)
+
+
+def test_enrichment_passes_shared_deadline_budget():
+    # Codex P2: each component read must receive an explicit deadline budget.
+    settings = [_meta("db1", "Orders DB", "#Common")]
+    seen = {}
+
+    def _capture(client, component_id, deadline_seconds=None, **kw):
+        seen["deadline_seconds"] = deadline_seconds
+        return {"xml": _db_xml("h"), "component_id": component_id}
+
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_capture),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "database")
+    assert out["_success"] is True
+    assert isinstance(seen["deadline_seconds"], int) and seen["deadline_seconds"] >= 1
+
+
+def test_enrichment_budget_exhausted_skips_reads_gracefully():
+    # Codex P2: when the aggregate budget is spent, remaining candidates are left
+    # un-enriched rather than starting more (possibly stalling) reads.
+    settings = [_meta(f"c{i}", f"Conn {i}", "#Common") for i in range(3)]
+    calls = {"n": 0}
+
+    def _get(client, component_id, deadline_seconds=None, **kw):
+        calls["n"] += 1
+        return {"xml": _db_xml("h"), "component_id": component_id}
+
+    with (
+        patch(f"{_MODULE}.paginate_metadata", side_effect=_paginate(settings)),
+        patch(f"{_MODULE}._component_get_deadline_seconds", return_value=0),
+        patch(f"{_MODULE}.component_get_xml", side_effect=_get),
+    ):
+        out = suggest_connection_reuse_action(_CLIENT, "prod", "database")
+    assert out["_success"] is True
+    assert out["enrichment_budget_exhausted"] is True
+    assert calls["n"] == 0  # zero budget → no reads started
+    # Candidates still returned, just un-enriched (subtype score only).
+    assert len(out["candidates"]) == 3
+    assert all(c["safe_context"] == {} for c in out["candidates"])
 
 
 def test_missing_connector_type_errors_with_flags():
