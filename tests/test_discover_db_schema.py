@@ -163,6 +163,77 @@ def test_db_field_truncation():
 # Read-only proof — DB tool never opens JDBC/network/credentials
 # ---------------------------------------------------------------------------
 
+def test_catalog_qualified_constraints_join_single_table():
+    """Columns carry table_catalog but constraints/indexes do not; they must
+    attach to the same table, not spawn a duplicate catalog=None table (Codex P2)."""
+    art = {
+        "catalog": "app",
+        "columns": [
+            {"table_catalog": "app", "table_schema": "public", "table_name": "orders",
+             "column_name": "id", "ordinal_position": 1, "data_type": "int"}
+        ],
+        "constraints": [
+            {"constraint_name": "pk_orders", "constraint_type": "PRIMARY KEY",
+             "table_schema": "public", "table_name": "orders", "columns": ["id"]}
+        ],
+        "indexes": [
+            {"index_name": "ix_id", "table_schema": "public", "table_name": "orders",
+             "unique": True, "columns": ["id"]}
+        ],
+    }
+    r = discover_db_schema_action(art)
+    assert len(r["tables"]) == 1  # not split into two (catalog=X columns / catalog=None keys)
+    t = r["tables"][0]
+    assert t["columns"] and t["constraints"] and t["indexes"]
+    assert t["constraints"][0]["name"] == "pk_orders"
+
+
+def test_db_constraint_matches_top_level_catalog_when_ambiguous():
+    """When the same (schema, table) exists in multiple catalogs, a catalog-less
+    constraint must attach to the top-level catalog's table, not the first-seen
+    one (Codex round-2 P2)."""
+    art = {
+        "catalog": "cat2",
+        "columns": [
+            {"table_catalog": "cat1", "table_schema": "public", "table_name": "orders",
+             "column_name": "a", "data_type": "int"},
+            {"table_catalog": "cat2", "table_schema": "public", "table_name": "orders",
+             "column_name": "b", "data_type": "int"},
+        ],
+        "constraints": [
+            {"constraint_name": "pk", "constraint_type": "PRIMARY KEY",
+             "table_schema": "public", "table_name": "orders", "columns": ["b"]}
+        ],
+    }
+    r = discover_db_schema_action(art)
+    assert len(r["tables"]) == 2  # both catalogs kept, no phantom third table
+    cat1 = next(t for t in r["tables"] if t["catalog"] == "cat1")
+    cat2 = next(t for t in r["tables"] if t["catalog"] == "cat2")
+    assert cat2["constraints"] and cat2["constraints"][0]["name"] == "pk"
+    assert not cat1["constraints"]
+
+
+def test_db_constraints_attach_to_column_bearing_table_not_empty_declaration():
+    """When tables[] declares a catalog-qualified table but columns[] omit the
+    catalog, constraints/indexes must attach to the column-bearing table, not the
+    empty declaration (Codex round-9 P2)."""
+    art = {
+        "catalog": "app",
+        "tables": [{"table_catalog": "app", "table_schema": "public", "table_name": "orders",
+                    "table_type": "BASE TABLE"}],
+        "columns": [{"table_schema": "public", "table_name": "orders",
+                     "column_name": "id", "ordinal_position": 1, "data_type": "int"}],
+        "constraints": [{"constraint_name": "pk", "constraint_type": "PRIMARY KEY",
+                         "table_schema": "public", "table_name": "orders", "columns": ["id"]}],
+    }
+    r = discover_db_schema_action(art)
+    # the table holding the columns must also hold the constraint
+    col_table = next(t for t in r["tables"] if t["columns"])
+    assert col_table["constraints"] and col_table["constraints"][0]["name"] == "pk"
+    # no table has constraints without columns
+    assert not any(t["constraints"] and not t["columns"] for t in r["tables"])
+
+
 def test_db_never_touches_network_or_credentials():
     with (
         patch.object(sd.httpx, "Client") as m_client,

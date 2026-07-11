@@ -358,8 +358,8 @@ def test_external_ref_never_fetched():
     with patch.object(sd.httpx, "Client") as m_client:
         r = discover_openapi_spec_action(artifact=doc)
     m_client.assert_not_called()
-    # only the trailing ref name is kept, never the URL
-    assert r["operations"][0]["responses"][0]["schema"]["ref"] == "X"
+    # An external ref is neither fetched NOR echoed (name suppressed to None).
+    assert r["operations"][0]["responses"][0]["schema"]["ref"] is None
     assert "evil.example.com" not in json.dumps(r)
 
 
@@ -368,6 +368,294 @@ def test_error_envelope_carries_flags_and_no_leak():
     assert r["_success"] is False
     assert r["read_only"] is True and r["boomi_mutation"] is False and r["raw_xml_exposed"] is False
     assert "SEKRET" not in json.dumps(r)
+
+
+# ---------------------------------------------------------------------------
+# Codex review regressions
+# ---------------------------------------------------------------------------
+
+def test_dotted_component_ref_preserved():
+    """A component name containing dots must not be dot-split, or refs stop
+    matching their schema (Codex P2)."""
+    doc = {
+        "openapi": "3.0.0",
+        "info": {},
+        "paths": {"/x": {"get": {"responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/com.example.Pet"}}}}}}}},
+        "components": {"schemas": {"com.example.Pet": {"type": "object", "properties": {"id": {"type": "integer"}}}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["schemas"][0]["name"] == "com.example.Pet"
+    assert r["operations"][0]["responses"][0]["schema"]["ref"] == "com.example.Pet"
+
+
+def test_relative_server_url_strips_query():
+    """A relative server URL must have its query stripped like absolute ones do,
+    or a token leaks (Codex P2)."""
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": "/v1?token=SECRET"}], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["servers"] == ["/v1"]
+    assert "SECRET" not in json.dumps(r)
+
+
+def test_templated_server_port_does_not_crash():
+    """OpenAPI 3 allows a variable in servers[].url; a templated PORT must not
+    crash the spec — it is safely omitted (it cannot be sanitized without risking
+    a userinfo-spill leak), while the spec still succeeds (Codex P2)."""
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": "https://api.example.com:{port}/v1"}], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["_success"] is True
+    assert r["servers"] == []  # templated-port authority omitted (not reconstructed)
+
+
+def test_host_variable_server_preserved():
+    """A host/path-level '{variable}' parses as a clean authority (no invalid
+    port), so it is preserved rather than omitted."""
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": "https://{region}.api.example.com/v1"}], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["_success"] is True
+    assert r["servers"] == ["https://{region}.api.example.com/v1"]
+
+
+def test_effective_params_operation_overrides_path_and_dedupes():
+    """A path-level and operation-level parameter sharing (name, in) collapse to
+    one, with the operation-level definition winning (Codex P2)."""
+    doc = {"openapi": "3.0.0", "info": {}, "paths": {"/x": {
+        "parameters": [{"name": "id", "in": "path", "required": True, "schema": {"type": "string"}}],
+        "get": {"parameters": [{"name": "id", "in": "path", "required": True, "schema": {"type": "integer"}}], "responses": {}},
+    }}}
+    r = discover_openapi_spec_action(artifact=doc)
+    ids = [p for p in r["operations"][0]["parameters"] if p["name"] == "id"]
+    assert len(ids) == 1 and ids[0]["type"] == "integer"
+
+
+def test_swagger2_path_level_body_param_in_request_schema():
+    """A Swagger 2 body parameter declared at path level must still populate
+    request_schema (Codex P2)."""
+    doc = {"swagger": "2.0", "info": {}, "paths": {"/x": {
+        "parameters": [{"name": "b", "in": "body", "schema": {"$ref": "#/definitions/T"}}],
+        "post": {"responses": {}},
+    }}, "definitions": {"T": {"type": "object"}}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["operations"][0]["request_schema"]["ref"] == "T"
+
+
+def test_swagger2_ref_body_param_overrides_path_level():
+    """An operation-level parameter $ref that resolves to the same (name, in) as a
+    path-level inline body param must override it, so request_schema reflects the
+    operation's override (Codex round-2 P2)."""
+    doc = {
+        "swagger": "2.0", "info": {},
+        "parameters": {"NewBody": {"name": "b", "in": "body", "schema": {"$ref": "#/definitions/New"}}},
+        "paths": {"/x": {
+            "parameters": [{"name": "b", "in": "body", "schema": {"$ref": "#/definitions/Old"}}],
+            "post": {"parameters": [{"$ref": "#/parameters/NewBody"}], "responses": {}},
+        }},
+        "definitions": {"Old": {"type": "object"}, "New": {"type": "object"}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["operations"][0]["request_schema"]["ref"] == "New"
+
+
+def test_external_ref_uri_not_echoed():
+    """An external '$ref' URI must not have a segment echoed as a name — it could
+    carry credential-like authority text (Codex round-3 P1)."""
+    doc = {
+        "openapi": "3.0.0", "info": {},
+        "paths": {"/x": {"get": {"responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {"$ref": "https://user:SEKRET@evil.example.com"}}}}}}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    assert "SEKRET" not in json.dumps(r)
+    assert r["operations"][0]["responses"][0]["schema"]["ref"] is None
+
+
+def test_invalid_port_authority_not_echoed():
+    """A non-integer port makes the authority unparseable; the URL is omitted
+    entirely, never echoed (Codex round-3 P2 / round-13 P1)."""
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": "https://api.example.com:SEKRET/v1"}], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert "SEKRET" not in json.dumps(r)
+    assert r["servers"] == []
+
+
+def test_chained_parameter_ref_resolved():
+    """A component parameter that aliases another local Reference Object must be
+    followed transitively so its (name, in) survive (Codex round-3 P2)."""
+    doc = {
+        "openapi": "3.0.0", "info": {},
+        "components": {"parameters": {
+            "A": {"$ref": "#/components/parameters/A0"},
+            "A0": {"name": "id", "in": "query", "schema": {"type": "string"}},
+        }},
+        "paths": {"/x": {"get": {"parameters": [{"$ref": "#/components/parameters/A"}], "responses": {}}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    params = r["operations"][0]["parameters"]
+    assert len(params) == 1 and params[0]["name"] == "id" and params[0]["in"] == "query"
+
+
+def test_openapi31_anchor_ref_name_preserved():
+    """OpenAPI 3.1 '$anchor' refs ('#Pet', fragment-only) are valid same-document
+    references and their name must be kept, not dropped as external (Codex
+    round-4 P2)."""
+    doc = {
+        "openapi": "3.1.0", "info": {},
+        "paths": {"/x": {"get": {"responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {"$ref": "#Pet"}}}}}}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["operations"][0]["responses"][0]["schema"]["ref"] == "Pet"
+
+
+def test_json_pointer_array_index_resolved():
+    """A parameter $ref that traverses an array index (e.g.
+    '#/paths/~1shared/parameters/0') must resolve, so it overrides/dedupes
+    correctly (Codex round-7 P2)."""
+    doc = {
+        "openapi": "3.0.0", "info": {},
+        "paths": {"/shared": {
+            "parameters": [{"name": "id", "in": "query", "schema": {"type": "string"}}],
+            "get": {"parameters": [{"$ref": "#/paths/~1shared/parameters/0"}], "responses": {}},
+        }},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    params = r["operations"][0]["parameters"]
+    # path-level 'id' and the op-level $ref to the same array element dedupe to one
+    assert len(params) == 1 and params[0]["name"] == "id" and params[0]["in"] == "query"
+
+
+def test_percent_encoded_ref_token_resolved():
+    """A standards-conforming percent-encoded local $ref token
+    ('#/components/parameters/Foo%2DBar' -> 'Foo-Bar') must be decoded before
+    lookup (Codex round-8 P2)."""
+    doc = {
+        "openapi": "3.0.0", "info": {},
+        "components": {"parameters": {"Foo-Bar": {"name": "q", "in": "query", "schema": {"type": "string"}}}},
+        "paths": {"/x": {"get": {"parameters": [{"$ref": "#/components/parameters/Foo%2DBar"}], "responses": {}}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    params = r["operations"][0]["parameters"]
+    assert len(params) == 1 and params[0]["name"] == "q" and params[0]["in"] == "query"
+
+
+def test_malformed_authority_userinfo_slash_suppressed():
+    """An unescaped '/' in userinfo makes urlsplit push credential material into
+    the path; the URL must be suppressed, not echoed (Codex round-10 P1)."""
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": "https://user:x/SEKRET@api.example.com/v1"}], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert "SEKRET" not in json.dumps(r)
+    assert r["servers"] == []
+
+
+def test_at_in_authority_path_suppressed_for_credential_safety():
+    """An '@' in the path of an authority-bearing URL is ambiguous with a userinfo
+    spill (which can leave a parseable prefix like 'user:443'), so it is
+    suppressed — credential safety (P1) supersedes preserving a rare legitimate
+    '@'-in-path endpoint (Codex round-14 P1 over round-11 P2)."""
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": "https://api.example.com/users/a@b"}], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["servers"] == []
+
+
+def test_resolve_pointer_encoded_leading_slash():
+    """A fragment that percent-encodes its leading '/' ('#%2F...') is still a
+    valid JSON Pointer and must resolve (Codex round-12 P2)."""
+    doc = {"components": {"parameters": {"Foo": {"name": "q", "in": "query"}}}}
+    assert sd._resolve_pointer(doc, "#%2Fcomponents%2Fparameters%2FFoo") == {"name": "q", "in": "query"}
+
+
+def test_json_pointer_name_encoded_leading_slash():
+    """_json_pointer_name must decode before classifying pointer-vs-anchor, so a
+    '%2F'-encoded leading slash yields the final token, not the whole path (Codex
+    round-12 P2)."""
+    assert sd._json_pointer_name("#%2Fcomponents%2Fschemas%2FFoo") == "Foo"
+
+
+def test_sanitize_url_matrix_no_credential_spill():
+    """_sanitize_url must never echo spilled userinfo, regardless of which path
+    segment the spilled '@' lands in, while preserving clean authorities and
+    legitimate path '@' (Codex round-13 P1 — multi-segment spill)."""
+    cases = {
+        # userinfo spills — ANY '@' in an authority's path is suppressed, whether
+        # the truncated authority prefix is unparseable ('user:x'), a valid
+        # host:port ('user:443'), or bare ('user'), and regardless of segment.
+        "https://user:x/SEKRET@api.example.com/v1": None,
+        "https://user:x/SEKRET/more@api.example.com/v1": None,    # multi-segment
+        "https://user:443/SEKRET@api.example.com/v1": None,       # parseable prefix
+        "https://user/SEKRET@api.example.com/v1": None,           # bare prefix
+        # an '@' anywhere in an authority's path is suppressed for safety
+        "https://api.example.com/users/a@b": None,
+        # clean authority, no path '@': userinfo stripped, URL echoed
+        "https://user:pw@api.example.com/x": "https://api.example.com/x",
+        "https://api.example.com/v1": "https://api.example.com/v1",
+        # host-level template parses cleanly -> preserved
+        "https://{region}.api.example.com/v1": "https://{region}.api.example.com/v1",
+        # unparseable authority (templated/invalid port) -> omitted entirely
+        "https://api.example.com:{port}/v1": None,
+        "https://api.example.com:SEKRET/v1": None,
+        # relative reference (no authority) -> '@' is legit path data, preserved
+        "/@tenant/v1": "/@tenant/v1",
+    }
+    for url, expected in cases.items():
+        assert sd._sanitize_url(url) == expected, url
+        if expected is None:
+            # and the suppressed value must never appear
+            assert "SEKRET" not in (sd._sanitize_url(url) or "")
+
+
+def test_multi_segment_spill_not_in_summary():
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": "https://user:x/SEKRET/more@api.example.com/v1"}], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert "SEKRET" not in json.dumps(r)
+    assert r["servers"] == []
+
+
+def test_relative_at_first_segment_preserved():
+    """A relative server URL whose first path segment contains '@' ('/@tenant/v1')
+    has no authority, so '@' is a legitimate path char and must be preserved
+    (Codex round-12 P2)."""
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": "/@tenant/v1"}], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["servers"] == ["/@tenant/v1"]
+
+
+def test_json_pointer_name_percent_decoded():
+    """The extracted schema-ref name must be percent-decoded to match the schema
+    key (Codex round-10 P2)."""
+    doc = {
+        "openapi": "3.0.0", "info": {},
+        "paths": {"/x": {"get": {"responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Foo%2DBar"}}}}}}}},
+        "components": {"schemas": {"Foo-Bar": {"type": "object"}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["schemas"][0]["name"] == "Foo-Bar"
+    assert r["operations"][0]["responses"][0]["schema"]["ref"] == "Foo-Bar"
+
+
+def test_resolve_pointer_encoded_slash_is_separator():
+    """RFC 6901: '%2F' decodes to a '/' pointer separator (whole-fragment decode
+    before tokenizing), not a literal-slash token (Codex round-10 P2)."""
+    doc = {"x-data": {"y": {"name": "q", "in": "query"}}}
+    assert sd._resolve_pointer(doc, "#/x-data/y") == {"name": "q", "in": "query"}
+    assert sd._resolve_pointer(doc, "#/x-data%2Fy") == {"name": "q", "in": "query"}
+
+
+def test_cyclic_parameter_ref_does_not_hang():
+    """A cyclic parameter $ref (A -> A) must be detected, not loop forever (Codex
+    round-3 P2 — cycle detection)."""
+    doc = {
+        "openapi": "3.0.0", "info": {},
+        "components": {"parameters": {"A": {"$ref": "#/components/parameters/A"}}},
+        "paths": {"/x": {"get": {"parameters": [{"$ref": "#/components/parameters/A"}], "responses": {}}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["_success"] is True
+
+
+def test_node_omitted_count_not_double_counted():
+    """3 operations with max_nodes=1 -> exactly 2 omitted, not 4 (Codex P3)."""
+    doc = {"openapi": "3.0.0", "info": {}, "paths": {"/a": {"get": {"responses": {}}, "post": {"responses": {}}}, "/b": {"get": {"responses": {}}}}}
+    r = discover_openapi_spec_action(artifact=doc, options={"max_nodes": 1})
+    node_reasons = [x for x in r["truncation"]["reasons"] if x["kind"] == "nodes:operations"]
+    assert node_reasons and node_reasons[0]["omitted"] == 2
 
 
 def test_handler_never_calls_boomi_or_credentials():

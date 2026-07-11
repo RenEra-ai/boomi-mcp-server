@@ -236,3 +236,14 @@ def test_odata_error_envelope_flags_and_no_leak():
 def test_odata_field_truncation():
     r, _, _ = _call("https://svc.example.com/$metadata", _EDMX_V4, options={"max_fields": 1})
     assert r["_success"] is True and r["truncated"] is True
+
+
+def test_odata_utf16_doctype_rejected():
+    """A UTF-16 EDMX with a DOCTYPE must be rejected via the encoding-robust
+    screen, not slip past a UTF-8 decode (Codex P1)."""
+    payload = (
+        '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x>'
+        '<edmx:Edmx xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx"/>'
+    ).encode("utf-16")
+    r, _, _ = _call("https://svc.example.com/$metadata", payload)
+    assert r["error_code"] == "ODATA_INVALID_SPEC"

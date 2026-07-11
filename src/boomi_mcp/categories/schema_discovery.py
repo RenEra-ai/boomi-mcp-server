@@ -39,7 +39,7 @@ import json
 import re
 import socket
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -246,29 +246,45 @@ class _Truncation:
 
 
 class _Budget:
-    """Node/field budgets. take_* returns True while under budget, else records a
-    single truncation reason for that kind and returns False."""
+    """Global node/field budgets shared across a parse. ``take_*`` returns True
+    while under budget (and consumes one slot), else counts one omission for that
+    kind and returns False. All truncation accounting flows through ``finalize``
+    ONCE at the end — a single path, so omissions are never double-counted. To
+    get accurate omitted counts, callers should keep iterating (``continue``) and
+    calling ``take_*`` for every candidate rather than ``break``-ing early."""
 
-    def __init__(self, trunc: _Truncation, node_limit: int, field_limit: int):
-        self._trunc = trunc
+    def __init__(self, node_limit: int, field_limit: int):
         self._node_limit = node_limit
         self._field_limit = field_limit
         self._nodes = 0
         self._fields = 0
+        self._seen: Dict[str, int] = {}
+        self._omitted: Dict[str, int] = {}
 
     def take_node(self, kind: str) -> bool:
+        key = "nodes:" + kind
+        self._seen[key] = self._seen.get(key, 0) + 1
         if self._nodes >= self._node_limit:
-            self._trunc.add("nodes:" + kind, self._node_limit, self._nodes + 1, 1)
+            self._omitted[key] = self._omitted.get(key, 0) + 1
             return False
         self._nodes += 1
         return True
 
     def take_field(self, kind: str) -> bool:
+        key = "fields:" + kind
+        self._seen[key] = self._seen.get(key, 0) + 1
         if self._fields >= self._field_limit:
-            self._trunc.add("fields:" + kind, self._field_limit, self._fields + 1, 1)
+            self._omitted[key] = self._omitted.get(key, 0) + 1
             return False
         self._fields += 1
         return True
+
+    def finalize(self, trunc: "_Truncation") -> None:
+        for key, omitted in self._omitted.items():
+            if omitted <= 0:
+                continue
+            limit = self._node_limit if key.startswith("nodes:") else self._field_limit
+            trunc.add(key, limit, self._seen.get(key, omitted), omitted)
 
 
 def _clip(value: Any, trunc: _Truncation) -> Optional[str]:
@@ -444,7 +460,13 @@ def _safe_xml(data: Any, parse_code: str, invalid_spec_code: str) -> "ET.Element
     document's own encoding declaration; str retries as UTF-8 bytes when it
     carries an encoding declaration (ElementTree rejects those on str)."""
     if isinstance(data, bytes):
-        screen = data.decode("utf-8", "replace")
+        # Encoding-robust DOCTYPE screen: decoding as UTF-8 would leave NUL bytes
+        # interleaved through the '<!DOCTYPE' of a UTF-16/UTF-32 document, so the
+        # regex would MISS the declaration and ET.fromstring (which honors the
+        # document's own encoding) could then expand internal entities. latin-1
+        # maps every byte 1:1 (never raises), and stripping NULs collapses the
+        # UTF-16/32 padding so an ASCII '<!DOCTYPE'/'<!ENTITY' is always exposed.
+        screen = data.decode("latin-1").replace("\x00", "")
     elif isinstance(data, str):
         screen = data
     else:
@@ -482,22 +504,60 @@ def _iter_local(parent: "ET.Element", local: str, ns_set: Optional[set] = None):
 
 
 def _last_segment(ref: Any) -> Optional[str]:
+    """Last dotted/slashed segment of a namespace-qualified name (e.g. OData
+    'NS.Order_Customer' -> 'Order_Customer'). Do NOT use for OpenAPI JSON Pointer
+    refs, whose component names may legitimately contain dots — see
+    ``_json_pointer_name``."""
     if not isinstance(ref, str) or not ref:
         return None
     return ref.rsplit("/", 1)[-1].rsplit(".", 1)[-1] or None
 
 
+def _json_pointer_name(ref: Any) -> Optional[str]:
+    """Name of a LOCAL OpenAPI '$ref', or None for an external one. A ref is
+    local only when the WHOLE value is a fragment (starts with '#'):
+      - JSON Pointer '#/components/schemas/com.example.Pet' -> 'com.example.Pet'
+        (no dot-splitting, so it matches the exact dotted component name);
+      - fragment-only anchor '#Pet' (OpenAPI 3.1 / JSON Schema '$anchor') -> 'Pet'.
+    An EXTERNAL / relative ref (e.g. 'https://user:SEKRET@host/x' or 'Pet.json#/X')
+    returns None: the tool summarizes only same-document refs, and echoing a
+    segment of an external URI could leak credential-like authority text."""
+    if not isinstance(ref, str) or not ref.startswith("#"):
+        return None
+    # Percent-decode the WHOLE fragment first (RFC 6901 §6) — this must happen
+    # BEFORE classifying pointer-vs-anchor, since a valid fragment may encode its
+    # leading '/' as '%2F' (e.g. '#%2Fcomponents%2Fschemas%2FFoo'). Then take the
+    # final pointer token (or the anchor) and JSON-Pointer-unescape it, so
+    # '.../Foo%2DBar' -> 'Foo-Bar' matches the schema registered under that name.
+    fragment = unquote(ref[1:])
+    if fragment.startswith("/"):
+        raw = fragment.rsplit("/", 1)[-1]
+    else:
+        raw = fragment  # fragment-only anchor
+    if not raw:
+        return None
+    return raw.replace("~1", "/").replace("~0", "~") or None
+
+
 def _qname_local(value: Any) -> Optional[str]:
     """Return the local part of an XML QName reference ('prefix:local' -> 'local',
-    'local' -> 'local'). Used for WSDL message/element/type/binding references."""
-    if not isinstance(value, str) or not value:
+    'local' -> 'local'). Used for WSDL message/element/type/binding references.
+    Leading/trailing whitespace is stripped first: XML Schema's QName datatype
+    collapses it, but ElementTree preserves the lexical value, so a schema-valid
+    'tns:Pt ' would otherwise miss its portType lookup."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value:
         return None
     return value.rsplit(":", 1)[-1] or None
 
 
 def _sanitize_url(value: Any) -> Optional[str]:
-    """Strip userinfo + query (which can hold credentials) from a URL string
-    before echoing it in a summary; return None if unparseable."""
+    """Strip userinfo + query + fragment (any of which can hold credentials) from
+    a URL string before echoing it in a summary; return None if unparseable.
+    Handles relative references (path only, no query) and templated OpenAPI
+    authorities (e.g. 'https://host:{port}/v1', whose port is not an int)."""
     if not isinstance(value, str) or not value.strip():
         return None
     try:
@@ -505,10 +565,30 @@ def _sanitize_url(value: Any) -> Optional[str]:
     except ValueError:
         return None
     if not parts.scheme and not parts.netloc:
-        return value.strip()[:_TEXT_CLIP]
-    host = parts.hostname or ""
-    port = f":{parts.port}" if parts.port else ""
-    return f"{parts.scheme}://{host}{port}{parts.path}"[:_TEXT_CLIP]
+        # Relative reference: no authority was parsed, so an '@' in the path is a
+        # legitimate RFC 3986 path character (e.g. '/@tenant/v1'). Emit the path
+        # only — never the query/fragment, which could carry '/v1?token=SECRET'.
+        return parts.path[:_TEXT_CLIP]
+    # An authority WAS parsed. Treat ANY '@' in the path as a possible userinfo
+    # spill and suppress the URL. An unescaped '/' in 'user:pw' truncates the
+    # authority — sometimes to a still-PARSEABLE prefix like 'user:443' or 'user'
+    # — and pushes the real 'SEKRET@realhost' into the path; echoing the
+    # reconstructed path would then leak the credential. A genuine spill is
+    # indistinguishable from a legitimate path '@' (e.g. '/users/a@b') from
+    # urlsplit's output alone, so the tool's hard no-credential-echo invariant
+    # (a P1 concern) requires suppressing the ambiguous case. The rare cost is
+    # dropping a legitimate '@'-in-path endpoint from the summary.
+    if "@" in parts.path:
+        return None
+    try:
+        port = f":{parts.port}" if parts.port else ""
+        authority = f"{parts.hostname or ''}{port}"
+    except ValueError:
+        # Unparseable/'{port}'-templated authority: omit the endpoint that cannot
+        # be safely sanitized (host/path '{variable}' templates parse cleanly
+        # above and are kept).
+        return None
+    return f"{parts.scheme}://{authority}{parts.path}"[:_TEXT_CLIP]
 
 
 # ---------------------------------------------------------------------------
@@ -526,12 +606,12 @@ def _openapi_schema_descriptor(schema: Any) -> Optional[Dict[str, Any]]:
     items_ref = None
     items_type = None
     if isinstance(items, dict):
-        items_ref = _last_segment(items.get("$ref"))
+        items_ref = _json_pointer_name(items.get("$ref"))
         items_type = items.get("type")
     return {
         "type": schema.get("type"),
         "format": schema.get("format"),
-        "ref": _last_segment(ref),
+        "ref": _json_pointer_name(ref),
         "items_type": items_type,
         "items_ref": items_ref,
     }
@@ -541,7 +621,7 @@ def _openapi_parameter(param: Any, trunc: _Truncation) -> Optional[Dict[str, Any
     if not isinstance(param, dict):
         return None
     if "$ref" in param and len(param) == 1:
-        name = _last_segment(param.get("$ref"))
+        name = _json_pointer_name(param.get("$ref"))
         return {
             "name": name,
             "in": None,
@@ -557,11 +637,98 @@ def _openapi_parameter(param: Any, trunc: _Truncation) -> Optional[Dict[str, Any
         "required": bool(param.get("required", False)),
         "type": param.get("type") or schema.get("type"),
         "format": param.get("format") or schema.get("format"),
-        "ref": _last_segment(schema.get("$ref")) if schema else None,
+        "ref": _json_pointer_name(schema.get("$ref")) if schema else None,
     }
 
 
-def _openapi_request_schema(op: Dict[str, Any], version_major: int) -> Optional[Dict[str, Any]]:
+def _resolve_pointer(doc: Any, ref: Any) -> Optional[Dict[str, Any]]:
+    """Resolve ONE same-document JSON Pointer '$ref' (e.g. '#/parameters/Foo' or
+    '#/components/parameters/Foo') to its target dict, or None. Never follows an
+    external ref."""
+    if not isinstance(ref, str) or not ref.startswith("#") or not isinstance(doc, dict):
+        return None
+    # Per RFC 6901 §6, percent-decode the WHOLE fragment BEFORE classifying and
+    # tokenizing: an encoded leading slash '%2F...' still denotes a pointer, an
+    # encoded separator '%2F' becomes a '/' delimiter, and an encoded token char
+    # like '%2D' becomes part of the token. THEN split and apply '~1'/'~0'.
+    pointer = unquote(ref[1:])  # drop leading '#'
+    if not pointer.startswith("/"):
+        return None  # anchor / empty fragment — not a JSON Pointer
+    node: Any = doc
+    for raw in pointer[1:].split("/"):
+        token = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict) and token in node:
+            node = node[token]
+        elif isinstance(node, list):
+            try:
+                idx = int(token)
+            except (TypeError, ValueError):
+                return None
+            if idx < 0 or idx >= len(node):
+                return None
+            node = node[idx]
+        else:
+            return None
+    return node if isinstance(node, dict) else None
+
+
+def _resolve_ref_chain(doc: Any, ref: Any, max_hops: int = 10) -> Optional[Dict[str, Any]]:
+    """Follow a chain of local '$ref' aliases (A -> A0 -> ...) to the final
+    non-ref target dict, with cycle detection and a hop cap. Returns None if any
+    hop is external/unresolvable or a cycle is detected."""
+    seen: set = set()
+    current: Any = ref
+    for _ in range(max_hops):
+        if not isinstance(current, str) or current in seen:
+            return None
+        seen.add(current)
+        target = _resolve_pointer(doc, current)
+        if not isinstance(target, dict):
+            return None
+        nxt = target.get("$ref")
+        if isinstance(nxt, str):
+            current = nxt
+            continue
+        return target
+    return None
+
+
+def _openapi_effective_parameters(
+    shared_params: Any, op_params: Any, doc: Any
+) -> List[Dict[str, Any]]:
+    """Merge path-level and operation-level parameters per the OpenAPI rule: an
+    operation-level parameter OVERRIDES a shared one with the same (name, in);
+    a same-target duplicate is not emitted twice. A same-document parameter
+    '$ref' is resolved to its target so it keys (and de-dupes / overrides) by the
+    resolved (name, in) — a ref and an inline param for the same target collapse
+    correctly. Unresolvable/external refs key on the ref string. Order is stable
+    (path-level first, then operation-level extras)."""
+    shared = shared_params if isinstance(shared_params, list) else []
+    ops = op_params if isinstance(op_params, list) else []
+    order: List[Any] = []
+    by_key: Dict[Any, Dict[str, Any]] = {}
+    for source in (shared, ops):
+        for p in source:
+            if not isinstance(p, dict):
+                continue
+            entry = p
+            if "$ref" in p:
+                target = _resolve_ref_chain(doc, p.get("$ref"))
+                if isinstance(target, dict):
+                    entry = target
+            if entry is p and "$ref" in p:  # unresolved / external ref
+                key: Any = ("$ref", p.get("$ref"))
+            else:
+                key = (entry.get("name"), entry.get("in"))
+            if key not in by_key:
+                order.append(key)
+            by_key[key] = entry  # later (operation-level) wins
+    return [by_key[k] for k in order]
+
+
+def _openapi_request_schema(
+    op: Dict[str, Any], effective_params: List[Dict[str, Any]], version_major: int
+) -> Optional[Dict[str, Any]]:
     if version_major == 3:
         body = op.get("requestBody")
         if not isinstance(body, dict):
@@ -573,8 +740,9 @@ def _openapi_request_schema(op: Dict[str, Any], version_major: int) -> Optional[
             if isinstance(media, dict) and isinstance(media.get("schema"), dict):
                 return _openapi_schema_descriptor(media["schema"])
         return None
-    # v2: a body parameter carries the schema
-    for param in op.get("parameters", []) or []:
+    # v2: a body parameter carries the schema — check the EFFECTIVE (merged)
+    # parameters so a path-level `in: body` is not missed.
+    for param in effective_params:
         if isinstance(param, dict) and param.get("in") == "body" and isinstance(
             param.get("schema"), dict
         ):
@@ -623,10 +791,9 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                     servers.append(_sanitize_url(f"{scheme}://{host}{base_path}"))
     servers = [s for s in servers if s]
 
-    budget = _Budget(trunc, limits["max_nodes"], limits["max_fields"])
+    budget = _Budget(limits["max_nodes"], limits["max_fields"])
 
     operations: List[Dict[str, Any]] = []
-    omitted_ops = 0
     for path in sorted(k for k in paths.keys() if isinstance(k, str)):
         item = paths.get(path)
         if not isinstance(item, dict):
@@ -637,16 +804,13 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             if not isinstance(op, dict):
                 continue
             if not budget.take_node("operations"):
-                omitted_ops += 1
                 continue
 
+            effective_params = _openapi_effective_parameters(shared_params, op.get("parameters"), doc)
             params_out: List[Dict[str, Any]] = []
-            raw_params = list(shared_params) + (
-                op.get("parameters") if isinstance(op.get("parameters"), list) else []
-            )
-            for p in raw_params:
+            for p in effective_params:
                 if not budget.take_field("parameters"):
-                    break
+                    continue
                 norm = _openapi_parameter(p, trunc)
                 if norm is not None:
                     params_out.append(norm)
@@ -655,7 +819,7 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             responses = op.get("responses") if isinstance(op.get("responses"), dict) else {}
             for status in sorted(str(s) for s in responses.keys()):
                 if not budget.take_field("responses"):
-                    break
+                    continue
                 resp = responses.get(status) if isinstance(responses.get(status), dict) else {}
                 schema_desc = None
                 if version_major == 3:
@@ -683,12 +847,10 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                     "operation_id": op.get("operationId"),
                     "summary": _clip(op.get("summary"), trunc),
                     "parameters": params_out,
-                    "request_schema": _openapi_request_schema(op, version_major),
+                    "request_schema": _openapi_request_schema(op, effective_params, version_major),
                     "responses": responses_out,
                 }
             )
-    if omitted_ops:
-        trunc.add("nodes:operations", limits["max_nodes"], budget._nodes + omitted_ops, omitted_ops)
 
     # Schemas / definitions
     if version_major == 3:
@@ -698,13 +860,11 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
         raw_schemas = doc.get("definitions") if isinstance(doc.get("definitions"), dict) else {}
 
     schemas_out: List[Dict[str, Any]] = []
-    omitted_schemas = 0
     for name in sorted(k for k in raw_schemas.keys() if isinstance(k, str)):
         schema = raw_schemas.get(name)
         if not isinstance(schema, dict):
             continue
         if not budget.take_node("schemas"):
-            omitted_schemas += 1
             continue
         required = schema.get("required") if isinstance(schema.get("required"), list) else []
         required_set = {r for r in required if isinstance(r, str)}
@@ -712,7 +872,7 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
         props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
         for pname in sorted(k for k in props.keys() if isinstance(k, str)):
             if not budget.take_field("properties"):
-                break
+                continue
             pschema = props.get(pname) if isinstance(props.get(pname), dict) else {}
             desc = _openapi_schema_descriptor(pschema) or {}
             props_out.append(
@@ -734,9 +894,8 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                 "properties": props_out,
             }
         )
-    if omitted_schemas:
-        trunc.add("nodes:schemas", limits["max_nodes"], budget._nodes + omitted_schemas, omitted_schemas)
 
+    budget.finalize(trunc)
     operations.sort(key=lambda o: (o["path"], o["method"]))
     body = {
         "title": title,
@@ -787,13 +946,19 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
         raise _DiscoveryError("WSDL_INVALID_SPEC")
 
     target_namespace = root.get("targetNamespace")
-    budget = _Budget(trunc, limits["max_nodes"], limits["max_fields"])
+    budget = _Budget(limits["max_nodes"], limits["max_fields"])
 
-    # portType operations: name -> {input, output, faults[]}
-    port_type_ops: Dict[str, Dict[str, Any]] = {}
+    # Abstract portType operations, keyed by (portType name, operation name) so
+    # two portTypes that define the same operation name never collide. Both key
+    # components are whitespace-normalized via _qname_local — the reference side
+    # (binding/@type) and the declaration side (portType/@name, operation/@name)
+    # must normalize identically (NCName/QName whitespace facet is 'collapse'),
+    # or a schema-valid ' Pt ' declaration would miss its 'tns:Pt' reference.
+    port_type_ops: Dict[Tuple[Optional[str], Optional[str]], Dict[str, Any]] = {}
     for port_type in _iter_local(root, "portType", _WSDL_NS):
+        pt_name = _qname_local(port_type.get("name"))
         for op in _iter_local(port_type, "operation", _WSDL_NS):
-            op_name = op.get("name")
+            op_name = _qname_local(op.get("name"))
             if not op_name:
                 continue
             input_msg = None
@@ -809,7 +974,7 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
                     fm = _qname_local(child.get("message")) or child.get("name")
                     if fm:
                         faults.append(fm)
-            port_type_ops[op_name] = {
+            port_type_ops[(pt_name, op_name)] = {
                 "input": input_msg,
                 "output": output_msg,
                 "faults": faults,
@@ -817,11 +982,14 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
 
     # bindings
     bindings_out: List[Dict[str, Any]] = []
-    binding_soap_version: Dict[str, Optional[str]] = {}
+    binding_soap_version: Dict[Optional[str], Optional[str]] = {}
     for binding in _iter_local(root, "binding", _WSDL_NS):
         if not budget.take_node("bindings"):
-            break
-        bname = binding.get("name")
+            continue
+        # Normalize declaration NCNames identically to the QName references that
+        # look them up (whitespace facet is 'collapse'), so ports[].binding
+        # matches bindings[].name and the soap-version fallback resolves.
+        bname = _qname_local(binding.get("name"))
         port_type = _qname_local(binding.get("type"))
         soap_version = None
         style = None
@@ -837,14 +1005,15 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
         ops_out: List[Dict[str, Any]] = []
         for op in _iter_local(binding, "operation", _WSDL_NS):
             if not budget.take_field("operations"):
-                break
-            op_name = op.get("name")
+                continue
+            op_name = _qname_local(op.get("name"))  # normalize to match the key
             soap_action = None
             for child in list(op):
                 if _local(child.tag) == "operation" and _ns(child.tag) in _SOAP_BINDING_NS:
                     soap_action = child.get("soapAction")
                     break
-            pt = port_type_ops.get(op_name, {})
+            # Resolve the abstract operation within THIS binding's port type.
+            pt = port_type_ops.get((port_type, op_name), {})
             ops_out.append(
                 {
                     "name": op_name,
@@ -868,10 +1037,12 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
     # services / ports
     services_out: List[Dict[str, Any]] = []
     for service in _iter_local(root, "service", _WSDL_NS):
+        if not budget.take_node("services"):
+            continue
         ports_out: List[Dict[str, Any]] = []
         for port in _iter_local(service, "port", _WSDL_NS):
             if not budget.take_field("ports"):
-                break
+                continue
             binding_ref = _qname_local(port.get("binding"))
             address = None
             soap_version = None
@@ -884,33 +1055,37 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
                 soap_version = binding_soap_version.get(binding_ref)
             ports_out.append(
                 {
-                    "name": port.get("name"),
+                    "name": _qname_local(port.get("name")),
                     "binding": binding_ref,
                     "address": address,
                     "soap_version": soap_version,
                 }
             )
-        services_out.append({"name": service.get("name"), "ports": ports_out})
+        services_out.append({"name": _qname_local(service.get("name")), "ports": ports_out})
 
     # messages
     messages_out: List[Dict[str, Any]] = []
     for message in _iter_local(root, "message", _WSDL_NS):
+        if not budget.take_node("messages"):
+            continue
         parts_out: List[Dict[str, Any]] = []
         for part in _iter_local(message, "part", _WSDL_NS):
             if not budget.take_field("message_parts"):
-                break
+                continue
             parts_out.append(
                 {
-                    "name": part.get("name"),
+                    "name": _qname_local(part.get("name")),
                     "element": _qname_local(part.get("element")),
                     "type": _qname_local(part.get("type")),
                 }
             )
-        messages_out.append({"name": message.get("name"), "parts": parts_out})
+        messages_out.append({"name": _qname_local(message.get("name")), "parts": parts_out})
 
     # imports (reported, never fetched)
     imports_out: List[Dict[str, Any]] = []
     for imp in _iter_local(root, "import", _WSDL_NS):
+        if not budget.take_node("imports"):
+            continue
         imports_out.append(
             {
                 "namespace": imp.get("namespace"),
@@ -919,6 +1094,7 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
             }
         )
 
+    budget.finalize(trunc)
     body = {
         "target_namespace": target_namespace,
         "services": services_out,
@@ -1029,7 +1205,7 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
     if version is None:
         raise _DiscoveryError("ODATA_INVALID_SPEC")
 
-    budget = _Budget(trunc, limits["max_nodes"], limits["max_fields"])
+    budget = _Budget(limits["max_nodes"], limits["max_fields"])
 
     # v2 associations: name -> {role_name: type}
     associations: Dict[str, Dict[str, str]] = {}
@@ -1056,7 +1232,7 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
             schema_names.append(sns)
         for etype in _iter_local(schema, "EntityType"):
             if not budget.take_node("entity_types"):
-                break
+                continue
             keys: List[str] = []
             for key in _iter_local(etype, "Key"):
                 for ref in _iter_local(key, "PropertyRef"):
@@ -1065,12 +1241,12 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
             props: List[Dict[str, Any]] = []
             for prop in _iter_local(etype, "Property"):
                 if not budget.take_field("properties"):
-                    break
+                    continue
                 props.append(_odata_property(prop))
             navs: List[Dict[str, Any]] = []
             for nav in _iter_local(etype, "NavigationProperty"):
                 if not budget.take_field("navigation_properties"):
-                    break
+                    continue
                 navs.append(_odata_navigation(nav, version, associations))
             entity_types.append(
                 {
@@ -1089,7 +1265,7 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
             cname = container.get("Name")
             for eset in _iter_local(container, "EntitySet"):
                 if not budget.take_field("entity_sets"):
-                    break
+                    continue
                 bindings: List[Dict[str, Any]] = []
                 for nb in _iter_local(eset, "NavigationPropertyBinding"):
                     bindings.append({"path": nb.get("Path"), "target": nb.get("Target")})
@@ -1102,6 +1278,7 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
                     }
                 )
 
+    budget.finalize(trunc)
     body = {
         "schemas": schema_names,
         "entity_types": entity_types,
@@ -1177,11 +1354,14 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
     if not isinstance(columns, list) or not columns:
         raise _DiscoveryError("DB_SCHEMA_INVALID_SPEC")
 
-    budget = _Budget(trunc, limits["max_nodes"], limits["max_fields"])
+    budget = _Budget(limits["max_nodes"], limits["max_fields"])
+    top_catalog = doc.get("catalog")
 
     # Build table registry (declared tables first, then derived from columns).
     tables: Dict[Tuple[Any, Any, Any], Dict[str, Any]] = {}
     order: List[Tuple[Any, Any, Any]] = []
+    # O(1) index: (schema, name) -> list of full keys, for catalog-less lookups.
+    by_schema_name: Dict[Tuple[Any, Any], List[Tuple[Any, Any, Any]]] = {}
 
     def _ensure(catalog, schema, name, ttype=None):
         key = _table_key(catalog, schema, name)
@@ -1196,9 +1376,30 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                 "indexes": [],
             }
             order.append(key)
+            by_schema_name.setdefault((schema, name), []).append(key)
         elif ttype and not tables[key]["type"]:
             tables[key]["type"] = ttype
         return tables[key]
+
+    def _locate(schema, name):
+        """Attach constraints/indexes (which carry no catalog) to the right
+        table without splitting a catalog-qualified DB into duplicates. Prefer a
+        COLUMN-BEARING candidate (so a catalog-less columns[] table wins over an
+        empty catalog-qualified tables[] declaration of the same (schema, name)),
+        then within that pool the exact top-level-catalog match, then a unique
+        candidate; else create under the top-level catalog. O(1) via the
+        (schema, name) index."""
+        candidates = [tables[k] for k in by_schema_name.get((schema, name), [])]
+        if not candidates:
+            return _ensure(top_catalog, schema, name)
+        with_cols = [t for t in candidates if t["columns"]]
+        pool = with_cols if with_cols else candidates
+        for t in pool:
+            if t["catalog"] == top_catalog:
+                return t
+        if len(pool) == 1:
+            return pool[0]
+        return _ensure(top_catalog, schema, name)
 
     declared = doc.get("tables")
     if isinstance(declared, list):
@@ -1215,7 +1416,7 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
         if not isinstance(col, dict) or not col.get("table_name"):
             continue
         if not budget.take_field("columns"):
-            break
+            continue
         table = _ensure(col.get("table_catalog"), col.get("table_schema"), col.get("table_name"))
         table["columns"].append(
             {
@@ -1237,8 +1438,8 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             if not isinstance(c, dict) or not c.get("table_name"):
                 continue
             if not budget.take_field("constraints"):
-                break
-            table = _ensure(None, c.get("table_schema"), c.get("table_name"))
+                continue
+            table = _locate(c.get("table_schema"), c.get("table_name"))
             table["constraints"].append(
                 {
                     "name": c.get("constraint_name"),
@@ -1258,8 +1459,8 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             if not isinstance(ix, dict) or not ix.get("table_name"):
                 continue
             if not budget.take_field("indexes"):
-                break
-            table = _ensure(None, ix.get("table_schema"), ix.get("table_name"))
+                continue
+            table = _locate(ix.get("table_schema"), ix.get("table_name"))
             table["indexes"].append(
                 {
                     "name": ix.get("index_name"),
@@ -1274,10 +1475,8 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
         key=lambda t: (str(t["schema"] or ""), str(t["name"] or "")),
     )
     tables_out: List[Dict[str, Any]] = []
-    omitted_tables = 0
     for t in ordered:
         if not budget.take_node("tables"):
-            omitted_tables += 1
             continue
         t["columns"].sort(
             key=lambda c: (
@@ -1286,12 +1485,11 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             )
         )
         tables_out.append(t)
-    if omitted_tables:
-        trunc.add("nodes:tables", limits["max_nodes"], len(ordered), omitted_tables)
 
+    budget.finalize(trunc)
     body = {
         "database_product": doc.get("database_product"),
-        "catalog": doc.get("catalog"),
+        "catalog": top_catalog,
         "tables": tables_out,
     }
     counts = {
