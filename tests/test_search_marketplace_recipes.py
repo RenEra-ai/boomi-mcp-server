@@ -112,11 +112,30 @@ def test_posts_to_fixed_endpoint_no_auth():
     args, kwargs = client.post.call_args
     assert args[0] == _URL
     body = kwargs["json"]
-    assert "catalogListings" in body["query"]
+    # The fixed GraphQL document selects the exact fields the normalizer reads.
+    q = body["query"]
+    assert "catalogListings" in q
+    for field in (
+        "totalCount",
+        "slug",
+        "catalogListingStatus",
+        "numberOfInstalls",
+        "listingMetaData",
+        "listingArtifact",
+        "artifactSourceId",
+        "listingTags",
+        "categoryCode",
+    ):
+        assert field in q, f"query missing selection {field!r}"
     inp = body["variables"]["input"]
+    # Exact variables: first page (offset 0), default limit 10, published-only,
+    # mandatory Recipe filter, and no searchTerm for a nonblank query? (yes here).
+    assert inp["offset"] == 0
+    assert inp["limit"] == 10
     assert inp["catalogListingStatus"] == ["PUBLISHED"]
     assert "solution_asset_type" in inp["catalogListingTagFilter"]
     assert "'Recipe'" in inp["catalogListingTagFilter"]
+    assert inp["searchTerm"] == "orders"
     # No authentication surface of any kind.
     assert "auth" not in kwargs and "cookies" not in kwargs
     headers = kwargs.get("headers") or {}
@@ -374,3 +393,55 @@ def test_malformed_envelope_catalog_listings_not_dict():
     with patch(f"{_MODULE}.httpx.Client", cls):
         out = search_marketplace_recipes_action()
     _assert_error(out, "invalid_response")
+
+
+def test_malformed_listing_tags_non_iterable_does_not_raise():
+    # A non-iterable listingTags (e.g. a bare int) must NOT raise out of the
+    # handler — it degrades that listing to empty tags and the search succeeds,
+    # honoring the "every failure mode returns a structured envelope" contract.
+    listing = {
+        "slug": "recipe-bad-tags",
+        "catalogListingStatus": "PUBLISHED",
+        "numberOfInstalls": 3,
+        "listingMetaData": {"name": "Bad Tags", "description": "d"},
+        "listingArtifact": {"listingType": "RECIPE", "artifactSourceId": "b1"},
+        "listingTags": 1,  # malformed: not a list
+    }
+    cls, client = _client_class(post_return=_resp(payload=_payload([listing])))
+    with patch(f"{_MODULE}.httpx.Client", cls):
+        out = search_marketplace_recipes_action()
+    assert out["_success"] is True
+    assert out["returned_count"] == 1
+    assert out["recipes"][0]["slug"] == "recipe-bad-tags"
+    assert out["recipes"][0]["tags"] == []
+
+
+def test_malformed_listing_entry_not_dict_is_skipped():
+    # A listingTags entry that is not a dict is skipped, not fatal.
+    listing = {
+        "slug": "recipe-mixed",
+        "catalogListingStatus": "PUBLISHED",
+        "numberOfInstalls": 3,
+        "listingMetaData": {"name": "Mixed", "description": "d"},
+        "listingArtifact": {"listingType": "RECIPE", "artifactSourceId": "b1"},
+        "listingTags": ["not-a-dict", {"listingTag": _tag("Stripe")}],
+    }
+    cls, client = _client_class(post_return=_resp(payload=_payload([listing])))
+    with patch(f"{_MODULE}.httpx.Client", cls):
+        out = search_marketplace_recipes_action()
+    assert out["_success"] is True
+    assert [t["name"] for t in out["recipes"][0]["tags"]] == ["Stripe"]
+
+
+def test_normalization_exception_returns_structured_envelope():
+    # Belt-and-suspenders backstop: if normalization raises for any unforeseen
+    # reason, the handler returns a structured envelope, not a raise.
+    cls, client = _client_class(
+        post_return=_resp(payload=_payload([_listing()]))
+    )
+    with (
+        patch(f"{_MODULE}.httpx.Client", cls),
+        patch(f"{_MODULE}._normalize_listing", side_effect=RuntimeError("boom")),
+    ):
+        out = search_marketplace_recipes_action()
+    _assert_error(out, "unexpected")

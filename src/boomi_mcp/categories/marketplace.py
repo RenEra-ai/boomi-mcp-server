@@ -164,7 +164,11 @@ def _normalize_listing(item: Any) -> Optional[Dict[str, Any]]:
     meta = meta if isinstance(meta, dict) else {}
 
     tags: List[Dict[str, Any]] = []
-    for entry in item.get("listingTags") or []:
+    raw_tags = item.get("listingTags")
+    # A non-list listingTags (e.g. a bare int/str from a malformed response) is
+    # NOT iterable-as-entries — guard it to [] so one weird listing degrades to
+    # empty tags instead of raising, consistent with the artifact/meta guards.
+    for entry in raw_tags if isinstance(raw_tags, list) else []:
         if not isinstance(entry, dict):
             continue
         tag = entry.get("listingTag")
@@ -288,14 +292,22 @@ def search_marketplace_recipes_action(
     if not isinstance(raw_items, list):
         return _error_envelope("invalid_response")
 
-    recipes: List[Dict[str, Any]] = []
-    for item in raw_items:
-        normalized = _normalize_listing(item)
-        if normalized is None:
-            continue
-        if not _matches_requested_tags(normalized["tags"], norm_tags):
-            continue
-        recipes.append(normalized)
+    # Belt-and-suspenders: _normalize_listing already guards the known nested
+    # shapes, but wrapping the whole normalization pass guarantees the handler's
+    # structured-error contract holds for ANY unforeseen malformed envelope shape
+    # rather than raising out of the handler.
+    try:
+        recipes: List[Dict[str, Any]] = []
+        for item in raw_items:
+            normalized = _normalize_listing(item)
+            if normalized is None:
+                continue
+            if not _matches_requested_tags(normalized["tags"], norm_tags):
+                continue
+            recipes.append(normalized)
+        total_count = outer.get("totalCount")
+    except Exception:
+        return _error_envelope("unexpected")
 
     return {
         "_success": True,
@@ -303,7 +315,7 @@ def search_marketplace_recipes_action(
         "query": norm_query,
         "tags": norm_tags,
         "top_k": top_k_int,
-        "total_count": outer.get("totalCount"),
+        "total_count": total_count,
         "returned_count": len(recipes),
         "recipes": recipes,
         "guidance": _GUIDANCE,
