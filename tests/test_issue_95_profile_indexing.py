@@ -247,6 +247,31 @@ class TestPureIndexerDbWrite:
         assert "customer_code" in res["field_index_by_path"]
         assert "Fields/customer_code" not in res["field_index_by_path"]
 
+    def test_conditions_are_required_fields_are_from_mandatory(self):
+        # DatabaseWriteProfileBuilder marks every condition required=True and
+        # honors field mandatory. Review's validate_unmapped reads "required".
+        assert self.idx["Conditions/record_id"]["required"] is True
+        assert self.idx["Fields/display_name"]["required"] is False
+
+    def test_data_type_inferred_from_dataformat(self):
+        # dbwrite exports omit dataType on character columns; type is encoded in
+        # the <DataFormat> child.
+        assert self.idx["Fields/display_name"]["data_type"] == "character"
+
+
+class TestDbDataTypeInference:
+    """DB exports omit the dataType attribute — the indexer decodes it from the
+    <DataFormat> child so review keeps type metadata (issue #95 fix)."""
+
+    def setup_method(self):
+        self.idx = index_existing_profile_xml(_fixture("profile_db"))["field_index_by_path"]
+
+    def test_character_column(self):
+        assert self.idx["customer_code"]["data_type"] == "character"
+
+    def test_date_column(self):
+        assert self.idx["updated_at"]["data_type"] == "datetime"
+
 
 class TestPureIndexerFailures:
     def test_malformed_xml(self):
@@ -662,6 +687,39 @@ class TestApplyDriftFailFast:
             result = _apply_plan(MagicMock(), "work", cfg)
         assert result.get("_success", True) is not False
         m_exec.assert_called()
+
+    @patch(_PLAN_PAGINATE, return_value=[])
+    def test_raw_xml_map_with_literal_ids_not_blocked_by_drift_guard(self, _pag):
+        # A raw-XML (config.xml) map with literal IDs skips structured validation
+        # everywhere else; the drift guard must not run validate_transform_map on
+        # it (which would fail UNSUPPORTED_TRANSFORM_ROUTE). It reaches apply.
+        spec = {
+            "version": "1.0",
+            "name": "rawxml",
+            "components": [
+                {
+                    "key": "raw_map",
+                    "type": "transform.map",
+                    "action": "create",
+                    "name": "Raw Map",
+                    "config": {
+                        "component_type": "transform.map",
+                        "xml": "<bns:Component type=\"transform.map\"><bns:object/></bns:Component>",
+                        "source_profile_id": JSON_UUID,
+                        "target_profile_id": XML_UUID,
+                    },
+                    "depends_on": [],
+                }
+            ],
+        }
+        cfg = {"conflict_policy": "reuse", "dry_run": False, "integration_spec": spec}
+        with (
+            patch(_APPLY_RESOLVE, side_effect=[{}, {}]),
+            patch(_APPLY_EXEC, return_value={"_success": True, "component_id": "x"}) as m_exec,
+        ):
+            result = _apply_plan(MagicMock(), "work", cfg)
+        m_exec.assert_called()
+        assert result.get("_success", True) is not False
 
 
 class TestTransformationReviewLiteralIndexes:

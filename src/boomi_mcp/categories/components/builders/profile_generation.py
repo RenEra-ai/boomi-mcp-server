@@ -1216,6 +1216,32 @@ def _local_name(tag: Any) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
+# Exported profiles encode a leaf's type EITHER on the ``dataType`` attribute
+# (JSON / XML) OR only via the ``<DataFormat>`` child (DB profiles omit the
+# attribute on character columns). Map the format element's local name back to
+# the canonical data type so the index never loses type metadata.
+_DATA_FORMAT_TO_TYPE = {
+    "ProfileCharacterFormat": "character",
+    "ProfileNumberFormat": "number",
+    "ProfileDateFormat": "datetime",
+}
+
+
+def _element_data_type(element: Any) -> Optional[str]:
+    """Resolve a leaf's data type: the ``dataType`` attribute when present, else
+    inferred from its ``<DataFormat>`` child (as DB exports encode it)."""
+    attr = element.get("dataType")
+    if isinstance(attr, str) and attr.strip():
+        return attr.strip()
+    data_format = _first_child(element, "DataFormat")
+    if data_format is not None:
+        for child in list(data_format):
+            mapped = _DATA_FORMAT_TO_TYPE.get(_local_name(child.tag))
+            if mapped is not None:
+                return mapped
+    return None
+
+
 def _first_child(parent: Any, local: str) -> Any:
     """First direct child of ``parent`` whose local name is ``local`` (or None)."""
     for child in list(parent):
@@ -1264,14 +1290,16 @@ def _add_profile_index_entry(
     data_type: Optional[str],
     kind: str,
     mappable: bool,
+    required: bool = False,
 ) -> None:
     """Register one field-index entry; reject a duplicate canonical path.
 
     Entry shape is a superset of ``build_field_index``'s (adds ``is_mappable`` /
     ``structural``; ``profile_component_type`` is stamped by the caller): the map
-    builder reads ``key`` / ``key_path`` / ``name_path`` and validation reads
-    ``mappable``, so a live-indexed profile validates and renders exactly like an
-    equivalent generated one.
+    builder reads ``key`` / ``key_path`` / ``name_path``, validation reads
+    ``mappable``, and transformation review reads ``required`` — so a live-indexed
+    profile validates, renders, AND reviews exactly like an equivalent generated
+    one.
     """
     if logical_path in field_index:
         raise BuilderValidationError(
@@ -1293,6 +1321,7 @@ def _add_profile_index_entry(
         "name_path": "/".join(name_path),
         "data_type": data_type,
         "kind": kind,
+        "required": required,
         "mappable": mappable,
         "is_mappable": mappable,
         "structural": not mappable,
@@ -1428,6 +1457,7 @@ def _index_json_profile(
         data_type=None,
         kind="object",
         mappable=False,
+        required=root_value.get("required") == "true",
     )
     wrapper = _first_child(root_value, "JSONObject")
     if wrapper is None:
@@ -1463,6 +1493,7 @@ def _walk_json_object_entries(
         object_child = _first_child(entry, "JSONObject")
         array_child = _first_child(entry, "JSONArray")
 
+        entry_required = entry.get("required") == "true"
         if object_child is not None:
             # Structural object (non-mappable regardless of isMappable).
             _add_profile_index_entry(
@@ -1476,6 +1507,7 @@ def _walk_json_object_entries(
                 data_type=None,
                 kind="object",
                 mappable=False,
+                required=entry_required,
             )
             wrapper_key = _require_element_key(object_child, "JSONObject")
             wrapper_name = object_child.get("name") or "Object"
@@ -1500,6 +1532,7 @@ def _walk_json_object_entries(
                 data_type=None,
                 kind="array",
                 mappable=False,
+                required=entry_required,
             )
             array_key = _require_element_key(array_child, "JSONArray")
             array_name = array_child.get("name") or "Array"
@@ -1540,9 +1573,10 @@ def _walk_json_object_entries(
                 key=entry_key,
                 key_path=entry_key_path,
                 name_path=entry_name_path,
-                data_type=entry.get("dataType"),
+                data_type=_element_data_type(entry),
                 kind="simple",
                 mappable=entry.get("isMappable") == "true",
+                required=entry_required,
             )
 
 
@@ -1593,6 +1627,8 @@ def _walk_xml_element(
     # descendants' logical path (mirrors the JSON array convention).
     repeating = str(element.get("maxOccurs", "1")) != "1"
     child_segment = f"{logical}[]" if repeating else logical
+    # Exported XML encodes requiredness as minOccurs (>= 1 = required).
+    element_required = str(element.get("minOccurs", "0")).strip() not in ("", "0")
 
     if child_elements:
         _add_profile_index_entry(
@@ -1606,6 +1642,7 @@ def _walk_xml_element(
             data_type=None,
             kind="element",
             mappable=False,
+            required=element_required,
         )
     else:
         _add_profile_index_entry(
@@ -1616,9 +1653,10 @@ def _walk_xml_element(
             key=key,
             key_path=key_path,
             name_path=name_path,
-            data_type=element.get("dataType"),
+            data_type=_element_data_type(element),
             kind="element",
             mappable=element.get("isMappable") == "true",
+            required=element_required,
         )
 
     for attribute in attribute_children:
@@ -1661,9 +1699,10 @@ def _index_xml_attribute(
         key=key,
         key_path=parent_key_path + [f"*[@key='{key}']"],
         name_path=parent_name_path + [f"@{name}"],
-        data_type=attribute.get("dataType"),
+        data_type=_element_data_type(attribute),
         kind="attribute",
         mappable=attribute.get("isMappable") == "true",
+        required=attribute.get("required") == "true",
     )
 
 
@@ -1734,9 +1773,10 @@ def _index_db_profile(
                     f"*[@key='{column_key}']",
                 ],
                 name_path=[statement_name, fields_name, column_name],
-                data_type=column.get("dataType"),
+                data_type=_element_data_type(column),
                 kind="simple",
                 mappable=column.get("isMappable") == "true",
+                required=column.get("mandatory") == "true",
             )
 
     # WHERE-condition keys (dynamicupdate / dynamicdelete write profiles only).
@@ -1759,9 +1799,10 @@ def _index_db_profile(
                     f"*[@key='{condition_key}']",
                 ],
                 name_path=[statement_name, conditions_name, condition_name],
-                data_type=condition.get("dataType"),
+                data_type=_element_data_type(condition),
                 kind="simple",
                 mappable=condition.get("isMappable") == "true",
+                required=True,
             )
 
 

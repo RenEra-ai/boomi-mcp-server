@@ -6647,6 +6647,12 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
         if comp.type != "transform.map" or comp.key not in _built_map_keys:
             continue
         cfg = comp.config if isinstance(comp.config, dict) else {}
+        # Raw-XML maps (config.xml escape hatch) skip structured map validation in
+        # both _build_plan and _execute_component — they submit the XML directly.
+        # Don't run validate_transform_map on them here (it would fail with
+        # UNSUPPORTED_TRANSFORM_ROUTE on a map with no map_type/field_mappings).
+        if isinstance(cfg.get("xml"), str) and cfg["xml"].strip():
+            continue
         has_literal = any(
             isinstance(cfg.get(side), str)
             and cfg[side].strip()
