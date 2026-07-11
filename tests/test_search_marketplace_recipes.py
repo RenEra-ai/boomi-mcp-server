@@ -98,6 +98,31 @@ def _input_of(client):
     return client.post.call_args.kwargs["json"]["variables"]["input"]
 
 
+def _ws(s):
+    """Collapse all whitespace runs so query documents compare structurally."""
+    return " ".join(s.split())
+
+
+# The full GraphQL document the handler MUST send — pinned independently of the
+# module (already whitespace-normalized) so dropping any field selection fails
+# the request-shape test.
+_EXPECTED_QUERY = (
+    "query SearchMarketplaceRecipes($input: CatalogListingsSearchInput) { "
+    "catalogListings(input: $input) { "
+    "totalCount currentPageSize catalogListings { "
+    "slug catalogListingStatus numberOfInstalls "
+    "listingMetaData { name description } "
+    "listingArtifact { listingType artifactSourceId } "
+    "listingTags { listingTag { id name categoryCode } } "
+    "} } }"
+)
+
+_RECIPE_FILTER = (
+    "(listingTags.listingTag.categoryCode = 'solution_asset_type' "
+    "and listingTags.listingTag.name = 'Recipe')"
+)
+
+
 # ---------------------------------------------------------------------------
 # Request shape / no-auth
 # ---------------------------------------------------------------------------
@@ -112,30 +137,20 @@ def test_posts_to_fixed_endpoint_no_auth():
     args, kwargs = client.post.call_args
     assert args[0] == _URL
     body = kwargs["json"]
-    # The fixed GraphQL document selects the exact fields the normalizer reads.
-    q = body["query"]
-    assert "catalogListings" in q
-    for field in (
-        "totalCount",
-        "slug",
-        "catalogListingStatus",
-        "numberOfInstalls",
-        "listingMetaData",
-        "listingArtifact",
-        "artifactSourceId",
-        "listingTags",
-        "categoryCode",
-    ):
-        assert field in q, f"query missing selection {field!r}"
-    inp = body["variables"]["input"]
-    # Exact variables: first page (offset 0), default limit 10, published-only,
-    # mandatory Recipe filter, and no searchTerm for a nonblank query? (yes here).
-    assert inp["offset"] == 0
-    assert inp["limit"] == 10
-    assert inp["catalogListingStatus"] == ["PUBLISHED"]
-    assert "solution_asset_type" in inp["catalogListingTagFilter"]
-    assert "'Recipe'" in inp["catalogListingTagFilter"]
-    assert inp["searchTerm"] == "orders"
+    # The FULL GraphQL document must match the pinned expected document exactly
+    # (whitespace-normalized) — dropping any field selection fails here.
+    assert _ws(body["query"]) == _EXPECTED_QUERY
+    # EXACT variables: no missing keys, no extra keys. First page (offset 0),
+    # default limit 10, published-only, mandatory Recipe filter, searchTerm.
+    assert body["variables"] == {
+        "input": {
+            "offset": 0,
+            "limit": 10,
+            "catalogListingStatus": ["PUBLISHED"],
+            "catalogListingTagFilter": _RECIPE_FILTER,
+            "searchTerm": "orders",
+        }
+    }
     # No authentication surface of any kind.
     assert "auth" not in kwargs and "cookies" not in kwargs
     headers = kwargs.get("headers") or {}
