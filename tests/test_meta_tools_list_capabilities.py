@@ -803,3 +803,50 @@ def test_search_marketplace_recipes_preserved_when_registered():
         available_tools={"search_marketplace_recipes"}
     )
     assert "search_marketplace_recipes" in catalog["tools"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #13 (M7): schema/spec discovery tools
+# ---------------------------------------------------------------------------
+
+_DISCOVERY_TOOLS = {
+    "discover_openapi_spec": {"spec_url", "artifact", "options"},
+    "discover_soap_wsdl": {"wsdl_url", "artifact", "options"},
+    "discover_odata_metadata": {"metadata_url", "options"},
+    "discover_db_schema": {"artifact", "options"},
+}
+
+
+def test_discovery_tools_catalog_entries():
+    tools = list_capabilities_action()["tools"]
+    for name, params in _DISCOVERY_TOOLS.items():
+        entry = tools[name]
+        assert entry["category"] == "Integration Authoring", name
+        assert entry["read_only"] is True, name
+        assert entry.get("no_boomi_mutation") is True, name
+        assert set(entry["parameters"]) == params, name
+
+
+def test_discovery_tools_describe_formats_and_collections():
+    tools = list_capabilities_action()["tools"]
+    assert "operations[]" in tools["discover_openapi_spec"]["description"]
+    assert "OPENAPI_UNSUPPORTED_FORMAT" in tools["discover_openapi_spec"]["description"]
+    assert "services[]" in tools["discover_soap_wsdl"]["description"]
+    assert "entity_types[]" in tools["discover_odata_metadata"]["description"]
+    db_desc = tools["discover_db_schema"]["description"]
+    assert "tables[]" in db_desc
+    # DB-tool boundary vs infer_profile_fields is documented.
+    assert "infer_profile_fields" in db_desc
+
+
+def test_discovery_tools_filtered_when_not_registered():
+    only = {"build_integration", "get_schema_template", "list_boomi_profiles"}
+    catalog = list_capabilities_action(available_tools=only)
+    for name in _DISCOVERY_TOOLS:
+        assert name not in catalog["tools"], name
+
+
+def test_discovery_tools_preserved_when_registered():
+    for name in _DISCOVERY_TOOLS:
+        catalog = list_capabilities_action(available_tools={name})
+        assert name in catalog["tools"], name

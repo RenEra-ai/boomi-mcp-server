@@ -341,6 +341,22 @@ except ImportError as e:
     print(f"[WARNING] Failed to import index_profile_component tool: {e}")
     index_profile_component_action = None
 
+# --- Schema/Spec Discovery Tools (Issue #13, M7) ---
+try:
+    from boomi_mcp.categories.schema_discovery import (
+        discover_openapi_spec_action,
+        discover_soap_wsdl_action,
+        discover_odata_metadata_action,
+        discover_db_schema_action,
+    )
+    print(f"[INFO] Schema discovery tools loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import schema discovery tools: {e}")
+    discover_openapi_spec_action = None
+    discover_soap_wsdl_action = None
+    discover_odata_metadata_action = None
+    discover_db_schema_action = None
+
 # --- Folder Tools ---
 try:
     from boomi_mcp.categories.folders import manage_folders_action
@@ -2706,6 +2722,228 @@ if import_integration_draft_action:
         return import_integration_draft_action(source_type, artifact, options=options)
 
     print("[INFO] import_integration_draft tool registered successfully")
+
+
+# --- Schema/Spec Discovery MCP Tools (Issue #13, M7) ---
+def _discovery_wrapper_error(error_code, exception_type):
+    """Leak-proof envelope for an unexpected discovery wrapper-level failure —
+    carries the mandatory read-only safety flags, a structured error_code, and
+    the exception TYPE name only (never its message, URL, artifact, or body)."""
+    return {
+        "_success": False,
+        "read_only": True,
+        "boomi_mutation": False,
+        "raw_xml_exposed": False,
+        "error_code": error_code,
+        "error": "Schema discovery failed unexpectedly.",
+        "exception_type": exception_type,
+    }
+
+
+if discover_openapi_spec_action:
+
+    @mcp.tool(
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
+    def discover_openapi_spec(
+        spec_url: str | None = None,
+        artifact: Any = None,
+        options: dict | str | None = None,
+    ):
+        """Summarize an OpenAPI/Swagger spec for archetype authoring (M7, read-only).
+
+        READ-ONLY DISCOVERY. Does NOT call Boomi, construct an SDK client, read
+        credentials, or mutate anything. Parses an OpenAPI 2.0 (Swagger) or 3.x
+        JSON spec into a bounded summary — operations (path/method/params/request
+        + response schemas), reusable schemas, and sanitized servers — for the LLM
+        to reason over before filling archetype/profile parameters. The raw spec
+        is NEVER echoed back.
+
+        Supply EXACTLY ONE of spec_url or artifact. URL mode fetches over HTTP(S)
+        with SSRF protection, NO redirects, and NO credentials/cookies/auth
+        headers — a 401/403 returns OPENAPI_AUTH_FAILURE; download a private spec
+        yourself and pass it via artifact instead. YAML is not parsed (JSON only):
+        it returns OPENAPI_UNSUPPORTED_FORMAT. External `$ref`s are never fetched.
+
+        Args:
+            spec_url: HTTP(S) URL of a JSON OpenAPI document (URL mode).
+            artifact: A parsed OpenAPI dict or a JSON string (artifact mode).
+            options: Optional dict OR JSON-object string with max_input_chars,
+                max_nodes, max_fields (clamped to hard caps).
+
+        Returns:
+            {_success, read_only, boomi_mutation, raw_xml_exposed, source_mode,
+             format, version, title, servers[], operations[], schemas[], counts,
+             truncated, truncation, warnings}, or a structured OPENAPI_* error
+             envelope (still carrying the safety flags).
+        """
+        try:
+            return discover_openapi_spec_action(spec_url=spec_url, artifact=artifact, options=options)
+        except Exception as e:
+            etype = type(e).__name__
+            print(f"[ERROR] discover_openapi_spec failed: unexpected {etype}")
+            return _discovery_wrapper_error("OPENAPI_DISCOVERY_FAILED", etype)
+
+    print("[INFO] discover_openapi_spec tool registered successfully")
+
+
+if discover_soap_wsdl_action:
+
+    @mcp.tool(
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
+    def discover_soap_wsdl(
+        wsdl_url: str | None = None,
+        artifact: str | None = None,
+        options: dict | str | None = None,
+    ):
+        """Summarize a WSDL 1.1 document for archetype authoring (M7, read-only).
+
+        READ-ONLY DISCOVERY. Does NOT call Boomi, construct an SDK client, read
+        credentials, or mutate anything. Parses a WSDL 1.1 document (SOAP 1.1 and
+        SOAP 1.2 bindings) into a bounded summary — services/ports, bindings and
+        their operations (soapAction, input/output/fault messages), messages and
+        parts, and reported (never fetched) imports. The raw WSDL is NEVER echoed
+        back; DOCTYPE/ENTITY declarations are rejected (XXE-safe).
+
+        Supply EXACTLY ONE of wsdl_url or artifact. URL mode fetches over HTTP(S)
+        with SSRF protection, NO redirects, and NO credentials/cookies/auth
+        headers — a 401/403 returns WSDL_AUTH_FAILURE; download a private WSDL
+        yourself and pass its XML via artifact instead. WSDL/XSD imports are never
+        recursively fetched.
+
+        Args:
+            wsdl_url: HTTP(S) URL of a WSDL document (URL mode).
+            artifact: The WSDL XML text (artifact mode).
+            options: Optional dict OR JSON-object string with max_input_chars,
+                max_nodes, max_fields (clamped to hard caps).
+
+        Returns:
+            {_success, read_only, boomi_mutation, raw_xml_exposed, source_mode,
+             format, version, target_namespace, services[], bindings[],
+             messages[], imports[], counts, truncated, truncation, warnings}, or a
+             structured WSDL_* error envelope (still carrying the safety flags).
+        """
+        try:
+            return discover_soap_wsdl_action(wsdl_url=wsdl_url, artifact=artifact, options=options)
+        except Exception as e:
+            etype = type(e).__name__
+            print(f"[ERROR] discover_soap_wsdl failed: unexpected {etype}")
+            return _discovery_wrapper_error("WSDL_DISCOVERY_FAILED", etype)
+
+    print("[INFO] discover_soap_wsdl tool registered successfully")
+
+
+if discover_odata_metadata_action:
+
+    @mcp.tool(
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
+    def discover_odata_metadata(
+        metadata_url: str,
+        options: dict | str | None = None,
+    ):
+        """Summarize an OData EDMX $metadata document for authoring (M7, read-only).
+
+        READ-ONLY DISCOVERY. Does NOT call Boomi, construct an SDK client, read
+        credentials, or mutate anything. Fetches and parses an OData v2 or v4 EDMX
+        $metadata document into a bounded summary — schemas, entity types
+        (keys/properties/navigation), and entity sets (with v4 navigation
+        bindings). The raw metadata is NEVER echoed back; DOCTYPE/ENTITY
+        declarations are rejected (XXE-safe).
+
+        URL-only: fetches the EXACT metadata_url you pass (it does NOT infer or
+        append `/$metadata`). Fetch uses SSRF protection, NO redirects, and NO
+        credentials/cookies/auth headers — a 401/403 returns ODATA_AUTH_FAILURE,
+        so protected endpoints are out of scope (there is no auth-forwarding).
+
+        Args:
+            metadata_url: HTTP(S) URL of the OData EDMX $metadata document.
+            options: Optional dict OR JSON-object string with max_input_chars,
+                max_nodes, max_fields (clamped to hard caps).
+
+        Returns:
+            {_success, read_only, boomi_mutation, raw_xml_exposed, source_mode,
+             format, version, schemas[], entity_types[], entity_sets[], counts,
+             truncated, truncation, warnings}, or a structured ODATA_* error
+             envelope (still carrying the safety flags).
+        """
+        try:
+            return discover_odata_metadata_action(metadata_url=metadata_url, options=options)
+        except Exception as e:
+            etype = type(e).__name__
+            print(f"[ERROR] discover_odata_metadata failed: unexpected {etype}")
+            return _discovery_wrapper_error("ODATA_DISCOVERY_FAILED", etype)
+
+    print("[INFO] discover_odata_metadata tool registered successfully")
+
+
+if discover_db_schema_action:
+
+    @mcp.tool(
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
+    def discover_db_schema(
+        artifact: Any,
+        options: dict | str | None = None,
+    ):
+        """Summarize a DB schema from a supplied information-schema artifact (M7).
+
+        READ-ONLY DISCOVERY. Artifact-only: it NEVER opens a JDBC/network
+        connection, calls Boomi, constructs an SDK client, or reads credentials —
+        the caller supplies a normalized information-schema JSON snapshot (tables,
+        columns, constraints, indexes) and the tool returns a bounded relational
+        topology (tables with columns/keys/foreign-keys/indexes). Actual column
+        default VALUES are never returned — only `default_present` — to avoid
+        leaking secrets or customer data.
+
+        This is discovery-only, NOT builder-ready: for a single query/result
+        column list you want turned into a Boomi profile, use
+        infer_profile_fields(source_type='profile_from_db_metadata') instead. This
+        tool never calls infer_profile_fields, creates a profile, selects a table,
+        or emits SQL.
+
+        Args:
+            artifact: A normalized information-schema dict, or a JSON-object string
+                of the same. Requires a non-empty `columns` list; `tables` is
+                optional (derived from the columns when omitted).
+            options: Optional dict OR JSON-object string with max_input_chars,
+                max_nodes, max_fields (clamped to hard caps).
+
+        Returns:
+            {_success, read_only, boomi_mutation, raw_xml_exposed, source_mode,
+             format, version, database_product, catalog, tables[], counts,
+             truncated, truncation, warnings}, or a structured DB_SCHEMA_* error
+             envelope (still carrying the safety flags).
+        """
+        try:
+            return discover_db_schema_action(artifact, options=options)
+        except Exception as e:
+            etype = type(e).__name__
+            print(f"[ERROR] discover_db_schema failed: unexpected {etype}")
+            return _discovery_wrapper_error("DB_SCHEMA_DISCOVERY_FAILED", etype)
+
+    print("[INFO] discover_db_schema tool registered successfully")
 
 
 # --- Folder Management MCP Tools ---

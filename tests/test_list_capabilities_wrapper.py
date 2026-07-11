@@ -150,3 +150,20 @@ def test_list_capabilities_wrapper_surfaces_search_marketplace_recipes():
     assert "search_marketplace_recipes" in payload["tools"], (
         "search_marketplace_recipes missing from live-filtered catalog"
     )
+
+
+def test_list_capabilities_wrapper_surfaces_schema_discovery_tools():
+    """Issue #13 (M7): the four schema/spec discovery tools appear in BOTH the
+    live FastMCP registry and the live-filtered capability catalog."""
+    result = _run_async(server.mcp.call_tool("list_capabilities", {}))
+    payload = _payload(result)
+
+    registered_names = {t.name for t in _run_async(server.mcp.list_tools())}
+    for name in (
+        "discover_openapi_spec",
+        "discover_soap_wsdl",
+        "discover_odata_metadata",
+        "discover_db_schema",
+    ):
+        assert name in registered_names, f"{name} must be registered"
+        assert name in payload["tools"], f"{name} missing from live-filtered catalog"

@@ -9780,6 +9780,118 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "index_profile_component(profile=\"prod\", component_id=\"<profile-uuid>\", include_raw_xml=True)",
             ],
         },
+        "discover_openapi_spec": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only OPENAPI/SWAGGER DISCOVERY (issue #13, M7): parses an "
+                "OpenAPI 2.0 (Swagger) or 3.x JSON spec into a bounded summary — "
+                "operations[] (path, method, parameters, request/response schemas), "
+                "schemas[], and sanitized servers[] — so the LLM can inspect an API "
+                "before filling archetype parameters. No profile, no credentials, "
+                "no Boomi mutation; the raw spec is never echoed. Supply EXACTLY "
+                "ONE of spec_url or artifact. JSON only — YAML returns "
+                "OPENAPI_UNSUPPORTED_FORMAT. URL mode is SSRF-guarded, sends no "
+                "auth/cookies and follows no redirects (401/403 -> "
+                "OPENAPI_AUTH_FAILURE; download private specs and pass via "
+                "artifact); external $refs are never fetched. Response keys: "
+                "operations[], schemas[], servers[], counts, truncated, warnings."
+            ),
+            "actions": ["(single action — summarizes an OpenAPI/Swagger spec)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "spec_url": "str (optional) — HTTP(S) URL of a JSON OpenAPI document (URL mode)",
+                "artifact": "dict | str (optional) — a parsed OpenAPI dict or JSON string (artifact mode); supply exactly one of spec_url/artifact",
+                "options": "dict | str (optional) — max_input_chars, max_nodes, max_fields (clamped to hard caps)",
+            },
+            "examples": [
+                "discover_openapi_spec(spec_url=\"https://<host>/openapi.json\")",
+                "discover_openapi_spec(artifact=\"{\\\"openapi\\\": \\\"3.0.0\\\", ...}\")",
+            ],
+        },
+        "discover_soap_wsdl": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only WSDL DISCOVERY (issue #13, M7): parses a WSDL 1.1 "
+                "document (SOAP 1.1 and 1.2 bindings) into a bounded summary — "
+                "services[]/ports, bindings[] with operations (soapAction, "
+                "input/output/fault messages), messages[]/parts, and reported "
+                "imports[] (fetched=false, never retrieved). No profile, no "
+                "credentials, no Boomi mutation; the raw WSDL is never echoed and "
+                "DOCTYPE/ENTITY is rejected (XXE-safe). Supply EXACTLY ONE of "
+                "wsdl_url or artifact. URL mode is SSRF-guarded, sends no "
+                "auth/cookies and follows no redirects (401/403 -> "
+                "WSDL_AUTH_FAILURE; download private WSDLs and pass via artifact). "
+                "Response keys: services[], bindings[], messages[], imports[], "
+                "counts, truncated, warnings."
+            ),
+            "actions": ["(single action — summarizes a WSDL 1.1 document)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "wsdl_url": "str (optional) — HTTP(S) URL of a WSDL document (URL mode)",
+                "artifact": "str (optional) — the WSDL XML text (artifact mode); supply exactly one of wsdl_url/artifact",
+                "options": "dict | str (optional) — max_input_chars, max_nodes, max_fields (clamped to hard caps)",
+            },
+            "examples": [
+                "discover_soap_wsdl(wsdl_url=\"https://<host>/service?wsdl\")",
+                "discover_soap_wsdl(artifact=\"<definitions ...>...</definitions>\")",
+            ],
+        },
+        "discover_odata_metadata": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only ODATA METADATA DISCOVERY (issue #13, M7): fetches and "
+                "parses an OData v2 or v4 EDMX $metadata document into a bounded "
+                "summary — schemas[], entity_types[] (keys, properties, "
+                "navigation), and entity_sets[] (with v4 navigation bindings). No "
+                "profile, no credentials, no Boomi mutation; the raw metadata is "
+                "never echoed and DOCTYPE/ENTITY is rejected (XXE-safe). URL-only: "
+                "fetches the EXACT metadata_url (no /$metadata inference). "
+                "SSRF-guarded, sends no auth/cookies and follows no redirects "
+                "(401/403 -> ODATA_AUTH_FAILURE; protected endpoints are out of "
+                "scope — no auth-forwarding). Response keys: entity_types[], "
+                "entity_sets[], schemas[], counts, truncated, warnings."
+            ),
+            "actions": ["(single action — summarizes an OData EDMX $metadata document)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "metadata_url": "str (required) — HTTP(S) URL of the OData EDMX $metadata document",
+                "options": "dict | str (optional) — max_input_chars, max_nodes, max_fields (clamped to hard caps)",
+            },
+            "examples": [
+                "discover_odata_metadata(metadata_url=\"https://<host>/service/$metadata\")",
+            ],
+        },
+        "discover_db_schema": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only DB SCHEMA DISCOVERY (issue #13, M7): summarizes a "
+                "normalized information-schema JSON artifact into a bounded "
+                "relational topology — tables[] with columns, primary/foreign-key "
+                "constraints, and indexes. Artifact-only: it NEVER opens a "
+                "JDBC/network connection, calls Boomi, or reads credentials. "
+                "Actual column default VALUES are never returned (only "
+                "default_present) to avoid leaking secrets/customer data. "
+                "Discovery-only, NOT builder-ready — to turn a single "
+                "query/result column list into a Boomi profile use "
+                "infer_profile_fields(source_type='profile_from_db_metadata') "
+                "instead; this tool never calls it, creates a profile, picks a "
+                "table, or emits SQL. Response keys: tables[] "
+                "(columns/constraints/indexes), counts, truncated, warnings."
+            ),
+            "actions": ["(single action — summarizes a DB information-schema artifact)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "artifact": "dict | str (required) — normalized information-schema snapshot (or JSON-object string); requires a non-empty columns[] list, tables[] optional (derived when omitted)",
+                "options": "dict | str (optional) — max_input_chars, max_nodes, max_fields (clamped to hard caps)",
+            },
+            "examples": [
+                "discover_db_schema(artifact={\"columns\": [{\"table_name\": \"orders\", \"column_name\": \"id\", \"data_type\": \"int\"}]})",
+            ],
+        },
         "build_integration": {
             "category": "Execution",
             "description": (
