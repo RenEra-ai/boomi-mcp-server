@@ -548,7 +548,12 @@ def _supplied_literal_indexes(
         if not isinstance(uuid, str):
             continue
         if validate_supplied_profile_index(uuid, entry) is None:
-            resolved[uuid.strip()] = entry.get("field_index_by_path")
+            # {profile_component_type, field_index_by_path} wrapper — same shape
+            # build_integration resolves, so review threads the canonical type.
+            resolved[uuid.strip()] = {
+                "profile_component_type": entry.get("profile_component_type"),
+                "field_index_by_path": entry.get("field_index_by_path"),
+            }
     return resolved
 
 

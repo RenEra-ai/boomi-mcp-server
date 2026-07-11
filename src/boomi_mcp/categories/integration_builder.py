@@ -4999,11 +4999,12 @@ def _lint_script_bodies(spec: IntegrationSpecV1) -> List[str]:
 def _discover_profile_index(
     boomi_client: Boomi, component_id: str
 ) -> Optional[Dict[str, Any]]:
-    """Read-only live discovery of an existing profile's ``field_index_by_path``.
+    """Read-only live discovery of an existing profile's field index.
 
-    Returns the index dict, or None when the component can't be fetched or its
-    XML can't be indexed (unsupported type / malformed). Never returns or logs
-    raw XML — indexing is internal to build_integration here (issue #95 M7.5).
+    Returns ``{"profile_component_type": str, "field_index_by_path": dict}``, or
+    None when the component can't be fetched or its XML can't be indexed
+    (unsupported type / malformed). Never returns or logs raw XML — indexing is
+    internal to build_integration here (issue #95 M7.5).
     """
     try:
         component = component_get_xml(boomi_client, component_id)
@@ -5031,7 +5032,10 @@ def _discover_profile_index(
         indexed = index_existing_profile_xml(raw_xml)
     except Exception:
         return None
-    return indexed.get("field_index_by_path")
+    return {
+        "profile_component_type": indexed.get("profile_component_type"),
+        "field_index_by_path": indexed.get("field_index_by_path"),
+    }
 
 
 def _resolve_literal_profile_indexes(
@@ -5046,6 +5050,11 @@ def _resolve_literal_profile_indexes(
     result — validate_transform_map then surfaces MAP_PROFILE_INDEX_UNAVAILABLE.
     Makes ZERO live calls when the spec has no literal-UUID map endpoint (issue
     #95 M7.5).
+
+    Each resolved value is
+    ``{"profile_component_type": <canonical outer type>, "field_index_by_path":
+    <index>}`` — the type is carried EXPLICITLY (the validated top-level type),
+    never re-derived from a per-field stamp.
     """
     uuids = set()
     for comp in spec.components:
@@ -5070,18 +5079,9 @@ def _resolve_literal_profile_indexes(
         if isinstance(entry, Mapping):
             supplied_err = validate_supplied_profile_index(uuid, entry)
             if supplied_err is None:
-                # Stamp the profile type onto each field entry (discovered
-                # indexes already carry it) so downstream endpoint-type checks
-                # can read it from the resolved index.
-                ptype = entry.get("profile_component_type")
-                field_index = entry.get("field_index_by_path")
                 resolved[uuid] = {
-                    path: (
-                        field_entry
-                        if field_entry.get("profile_component_type")
-                        else {**field_entry, "profile_component_type": ptype}
-                    )
-                    for path, field_entry in field_index.items()
+                    "profile_component_type": entry.get("profile_component_type"),
+                    "field_index_by_path": entry.get("field_index_by_path"),
                 }
                 continue
             # A malformed supplied index never bypasses validation — fall

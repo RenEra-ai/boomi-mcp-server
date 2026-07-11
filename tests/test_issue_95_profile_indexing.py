@@ -587,7 +587,12 @@ class TestLiteralUuidMapPlan:
             profile_indexes=self._both_supplied(),
         )
         step = _map_step(_build_plan(MagicMock(), cfg))
-        assert step["validation_error"]["error_code"] == "PROFILE_FIELD_NOT_MAPPABLE"
+        ve = step["validation_error"]
+        assert ve["error_code"] == "PROFILE_FIELD_NOT_MAPPABLE"
+        # A non-mappable LEAF must not be diagnosed as a structural node
+        # (the diagnostic branches on the index's structural flag).
+        assert ve["details"]["structural"] is False
+        assert "structural node" not in ve["error"]
 
     @patch(_PLAN_PAGINATE, return_value=[])
     def test_index_type_mismatch_reports_unavailable(self, _pag):
@@ -681,7 +686,8 @@ class TestResolveMapProfileIndexNormalization:
 
     def test_literal_uuid_stripped_only_for_index_lookup(self):
         idx = {"f": {"key": "5", "key_path": "kp", "name_path": "np", "mappable": True}}
-        assert resolve_map_profile_index("  U1  ", None, {"U1": idx}) is idx
+        wrapper = {"profile_component_type": "profile.json", "field_index_by_path": idx}
+        assert resolve_map_profile_index("  U1  ", None, {"U1": wrapper}) is idx
 
     def test_unknown_literal_uuid_returns_none(self):
         assert resolve_map_profile_index("nope", None, {"U1": {}}) is None
@@ -716,8 +722,8 @@ class TestApplyDriftFailFast:
         # empty map (a live profile changed/removed between plan and apply) ->
         # fail fast BEFORE any _execute_component, so no partial mutation.
         valid = {
-            JSON_UUID: _supplied_index(JSON_UUID, "profile_json")["field_index_by_path"],
-            XML_UUID: _supplied_index(XML_UUID, "profile_xml")["field_index_by_path"],
+            JSON_UUID: _supplied_index(JSON_UUID, "profile_json"),
+            XML_UUID: _supplied_index(XML_UUID, "profile_xml"),
         }
         cfg = _literal_map_config(
             [{"source_path": "Root/customer_code", "target_path": "Order/customer_code"}],
@@ -738,8 +744,8 @@ class TestApplyDriftFailFast:
         # Sanity: with stable indexes across plan+apply, the drift guard does not
         # false-trigger — the map reaches the execution loop.
         valid = {
-            JSON_UUID: _supplied_index(JSON_UUID, "profile_json")["field_index_by_path"],
-            XML_UUID: _supplied_index(XML_UUID, "profile_xml")["field_index_by_path"],
+            JSON_UUID: _supplied_index(JSON_UUID, "profile_json"),
+            XML_UUID: _supplied_index(XML_UUID, "profile_xml"),
         }
         cfg = _literal_map_config(
             [{"source_path": "Root/customer_code", "target_path": "Order/customer_code"}],

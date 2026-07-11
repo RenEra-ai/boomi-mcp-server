@@ -47,9 +47,13 @@ def resolve_map_profile_index(
     # resolving in one place and staying an unresolved literal everywhere else.
     if not profile_id.startswith("$ref:"):
         # Literal existing-profile UUID — resolvable only from a supplied /
-        # discovered index (issue #95). Unknown UUID -> None -> unavailable.
+        # discovered index (issue #95). Each literal_indexes value is a
+        # {profile_component_type, field_index_by_path} wrapper; return the field
+        # map. Unknown UUID -> None -> unavailable.
         if literal_indexes:
-            return literal_indexes.get(profile_id.strip())
+            wrapper = literal_indexes.get(profile_id.strip())
+            if isinstance(wrapper, Mapping):
+                return wrapper.get("field_index_by_path")
         return None
     if components_by_key is None:
         return None
@@ -101,19 +105,19 @@ def resolve_map_profile_index(
         return None
 
 
-def _index_profile_component_type(
-    index: Optional[Dict[str, Dict[str, Any]]]
+def _literal_index_profile_type(
+    literal_indexes: Optional[Dict[str, Dict[str, Any]]], profile_id: Any
 ) -> Optional[str]:
-    """Return the ``profile_component_type`` stamped on a resolved literal-UUID
-    index (issue #95). Discovered and supplied literal indexes stamp it on every
-    entry; generated ``$ref`` indexes do not (so this returns None for them)."""
-    if not index:
+    """Return the CANONICAL ``profile_component_type`` carried alongside a
+    resolved literal-UUID index (issue #95) — the validated outer type, looked
+    up by UUID, never re-derived from a per-field stamp."""
+    if not literal_indexes or not isinstance(profile_id, str):
         return None
-    for entry in index.values():
-        if isinstance(entry, Mapping):
-            ptype = entry.get("profile_component_type")
-            if isinstance(ptype, str) and ptype:
-                return ptype
+    wrapper = literal_indexes.get(profile_id.strip())
+    if isinstance(wrapper, Mapping):
+        ptype = wrapper.get("profile_component_type")
+        if isinstance(ptype, str) and ptype:
+            return ptype
     return None
 
 
@@ -555,7 +559,9 @@ def validate_transform_map(
             declared = effective_config.get(f"{side}_profile_type")
             if not (isinstance(declared, str) and declared.strip()):
                 continue
-            index_type = _index_profile_component_type(side_index)
+            index_type = _literal_index_profile_type(
+                literal_indexes, effective_config.get(f"{side}_profile_id")
+            )
             if index_type is not None and index_type != declared.strip():
                 gen_profile_err = BuilderValidationError(
                     f"{side}_profile_id index type {index_type!r} does not match "

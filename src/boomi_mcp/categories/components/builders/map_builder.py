@@ -453,17 +453,12 @@ def _validate_direct_field_mappings(
                     details={"path": source_path, "side": "source"},
                 )
             if not src_entry.get("mappable", False):
-                return BuilderValidationError(
-                    f"{field_prefix}[{index}].source_path resolves to a "
-                    "structural node",
-                    error_code=PROFILE_FIELD_NOT_MAPPABLE,
+                return _non_mappable_field_error(
+                    src_entry,
                     field=f"{field_prefix}[{index}].source_path",
-                    hint=(
-                        "Source paths must point at scalar leaves. "
-                        "Object/array/structural-element nodes are not "
-                        "mappable."
-                    ),
-                    details={"path": source_path, "side": "source"},
+                    path=source_path,
+                    side="source",
+                    role="Source paths",
                 )
         if target_index is not None:
             tgt_entry = target_index.get(target_path)
@@ -480,20 +475,48 @@ def _validate_direct_field_mappings(
                     details={"path": target_path, "side": "target"},
                 )
             if not tgt_entry.get("mappable", False):
-                return BuilderValidationError(
-                    f"{field_prefix}[{index}].target_path resolves to a "
-                    "structural node",
-                    error_code=PROFILE_FIELD_NOT_MAPPABLE,
+                return _non_mappable_field_error(
+                    tgt_entry,
                     field=f"{field_prefix}[{index}].target_path",
-                    hint=(
-                        "Target paths must point at scalar leaves. "
-                        "Object/array/structural-element nodes are not "
-                        "mappable destinations."
-                    ),
-                    details={"path": target_path, "side": "target"},
+                    path=target_path,
+                    side="target",
+                    role="Target paths",
                 )
 
     return None
+
+
+def _non_mappable_field_error(
+    entry: Mapping[str, Any], *, field: str, path: str, side: str, role: str
+) -> BuilderValidationError:
+    """PROFILE_FIELD_NOT_MAPPABLE error worded to match the node's ACTUAL shape.
+
+    A generated-profile index entry carries no ``structural`` key (there,
+    mappable=False always means a structural container), so it defaults to
+    structural. A live-indexed entry (issue #95) sets ``structural`` explicitly,
+    so an explicitly non-mappable scalar LEAF is reported as a leaf, not a
+    container — the hint no longer contradicts the index.
+    """
+    structural = bool(entry.get("structural", True))
+    if structural:
+        message = f"{field} resolves to a structural node"
+        hint = (
+            f"{role} must point at scalar leaves; object / array / "
+            "structural-element nodes are not mappable."
+        )
+    else:
+        message = f"{field} resolves to a field explicitly marked non-mappable"
+        hint = (
+            "This profile field is marked non-mappable; choose a different, "
+            "mappable leaf."
+        )
+    return BuilderValidationError(
+        message,
+        error_code=PROFILE_FIELD_NOT_MAPPABLE,
+        field=field,
+        hint=hint,
+        details={"path": path, "side": side, "structural": structural},
+    )
 
 
 def _render_direct_mapping(
@@ -1159,17 +1182,12 @@ class MapFunctionBuilder:
                             details={"path": source_path, "side": "source"},
                         )
                     if not src_entry.get("mappable", False):
-                        return BuilderValidationError(
-                            f"{field_prefix}.inputs[{input_index}] resolves "
-                            "to a structural node",
-                            error_code=PROFILE_FIELD_NOT_MAPPABLE,
+                        return _non_mappable_field_error(
+                            src_entry,
                             field=f"{field_prefix}.inputs[{input_index}]",
-                            hint=(
-                                "Function inputs must be scalar leaves. "
-                                "Object/array/structural-element nodes are "
-                                "not mappable."
-                            ),
-                            details={"path": source_path, "side": "source"},
+                            path=source_path,
+                            side="source",
+                            role="Function inputs",
                         )
             if target_index is not None and target_path is not None:
                 tgt_entry = target_index.get(target_path)
@@ -1186,17 +1204,12 @@ class MapFunctionBuilder:
                         details={"path": target_path, "side": "target"},
                     )
                 if not tgt_entry.get("mappable", False):
-                    return BuilderValidationError(
-                        f"{field_prefix}.target_path resolves to a "
-                        "structural node",
-                        error_code=PROFILE_FIELD_NOT_MAPPABLE,
+                    return _non_mappable_field_error(
+                        tgt_entry,
                         field=f"{field_prefix}.target_path",
-                        hint=(
-                            "Target paths must point at scalar leaves. "
-                            "Object/array/structural-element nodes are not "
-                            "mappable destinations."
-                        ),
-                        details={"path": target_path, "side": "target"},
+                        path=target_path,
+                        side="target",
+                        role="Target paths",
                     )
 
         # Optional field_mappings (mixed map). Validate using shared helper
@@ -1701,17 +1714,12 @@ class MapScriptBuilder:
                             details={"path": source_path, "side": "source"},
                         )
                     if not src_entry.get("mappable", False):
-                        return BuilderValidationError(
-                            f"{field_prefix}.inputs[{in_idx}].source_path "
-                            "resolves to a structural node",
-                            error_code=PROFILE_FIELD_NOT_MAPPABLE,
+                        return _non_mappable_field_error(
+                            src_entry,
                             field=f"{field_prefix}.inputs[{in_idx}].source_path",
-                            hint=(
-                                "Script inputs must be scalar leaves. "
-                                "Object/array/structural-element nodes "
-                                "are not mappable."
-                            ),
-                            details={"path": source_path, "side": "source"},
+                            path=source_path,
+                            side="source",
+                            role="Script inputs",
                         )
             if target_index is not None:
                 for out_idx, (_output_name, target_path) in enumerate(
@@ -1732,17 +1740,12 @@ class MapScriptBuilder:
                             details={"path": target_path, "side": "target"},
                         )
                     if not tgt_entry.get("mappable", False):
-                        return BuilderValidationError(
-                            f"{field_prefix}.outputs[{out_idx}].target_path "
-                            "resolves to a structural node",
-                            error_code=PROFILE_FIELD_NOT_MAPPABLE,
+                        return _non_mappable_field_error(
+                            tgt_entry,
                             field=f"{field_prefix}.outputs[{out_idx}].target_path",
-                            hint=(
-                                "Target paths must point at scalar "
-                                "leaves. Object/array/structural-element "
-                                "nodes are not mappable destinations."
-                            ),
-                            details={"path": target_path, "side": "target"},
+                            path=target_path,
+                            side="target",
+                            role="Target paths",
                         )
 
         # Optional field_mappings (mixed direct + script map). Validate
