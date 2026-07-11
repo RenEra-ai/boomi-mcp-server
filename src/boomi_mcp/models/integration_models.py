@@ -71,6 +71,22 @@ class IntegrationSpecV1(BaseModel):
     folders: Dict[str, Any] = Field(default_factory=dict)
     runtime: Dict[str, Any] = Field(default_factory=dict)
     validation_rules: Dict[str, Any] = Field(default_factory=dict)
+    profile_indexes_by_component_id: Optional[Dict[str, Dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "Issue #95 M7.5 — EPHEMERAL, validation-only. Keyed by literal "
+            "existing-profile component UUID; each value is the object returned "
+            "by index_profile_component: {component_id, profile_component_type, "
+            "field_index_by_path}. Lets build_integration validate a transform.map "
+            "whose source_profile_id / target_profile_id is a literal "
+            "existing-profile UUID (not a '$ref:KEY' in-spec profile). When a "
+            "literal-UUID map endpoint is not covered here, build_integration "
+            "discovers the index live (read-only) or, failing that, rejects with "
+            "MAP_PROFILE_INDEX_UNAVAILABLE. This field is NEVER emitted into a "
+            "Boomi component or any mutation payload — build_integration only "
+            "materializes 'components'."
+        ),
+    )
     pipeline: Optional[PipelineSpec] = Field(
         default=None,
         description=(

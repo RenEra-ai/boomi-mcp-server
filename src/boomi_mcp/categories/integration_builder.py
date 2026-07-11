@@ -194,6 +194,10 @@ from .components.builders.transform_map_validation import (
     resolve_map_profile_index,
     validate_transform_map,
 )
+from .components.builders.profile_generation import (
+    index_existing_profile_xml,
+    validate_supplied_profile_index,
+)
 from .components.builders.cache_property_lineage import validate_config_lineage
 from .components.builders.api_service_builder import (
     ApiServiceBuilder,
@@ -3442,6 +3446,7 @@ def _execute_component(
     target_id: Optional[str] = None,
     *,
     components_by_key: Optional[Dict[str, IntegrationComponentSpec]] = None,
+    literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     payload = dict(config)
     # Align apply-time dispatcher predicates with plan-time predicates:
@@ -4055,24 +4060,27 @@ def _execute_component(
         source_index = resolve_map_profile_index(
             raw_comp_config.get("source_profile_id"),
             components_by_key,
+            literal_indexes,
         )
         target_index = resolve_map_profile_index(
             raw_comp_config.get("target_profile_id"),
             components_by_key,
+            literal_indexes,
         )
         if source_index is None or target_index is None:
             return {
                 "_success": False,
                 "error_code": "MAP_PROFILE_INDEX_UNAVAILABLE",
                 "error": (
-                    "Cannot compute source/target field index from in-spec "
-                    "profile components. Literal existing-profile UUIDs are "
-                    "not indexable in M2 (indexing live existing-profile XML is "
-                    "separate future work, not covered by infer_profile_fields)."
+                    "Cannot compute source/target field index for the map. A "
+                    "literal existing-profile UUID endpoint has no supplied or "
+                    "discoverable field index (issue #95)."
                 ),
                 "hint": (
-                    "Reference both source and target profiles as in-spec "
-                    "components via '$ref:KEY'."
+                    "Reference both profiles as in-spec components via "
+                    "'$ref:KEY', or index the existing profile with "
+                    "index_profile_component and supply it via "
+                    "profile_indexes_by_component_id."
                 ),
             }
         try:
@@ -4975,6 +4983,75 @@ def _lint_script_bodies(spec: IntegrationSpecV1) -> List[str]:
     return warnings
 
 
+def _discover_profile_index(
+    boomi_client: Boomi, component_id: str
+) -> Optional[Dict[str, Any]]:
+    """Read-only live discovery of an existing profile's ``field_index_by_path``.
+
+    Returns the index dict, or None when the component can't be fetched or its
+    XML can't be indexed (unsupported type / malformed). Never returns or logs
+    raw XML — indexing is internal to build_integration here (issue #95 M7.5).
+    """
+    try:
+        component = component_get_xml(boomi_client, component_id)
+    except Exception:
+        return None
+    raw_xml = component.get("xml") if isinstance(component, dict) else None
+    if not raw_xml:
+        return None
+    try:
+        indexed = index_existing_profile_xml(raw_xml)
+    except Exception:
+        return None
+    return indexed.get("field_index_by_path")
+
+
+def _resolve_literal_profile_indexes(
+    boomi_client: Boomi, spec: IntegrationSpecV1
+) -> Dict[str, Dict[str, Any]]:
+    """Resolve field indexes for literal existing-profile UUIDs in transform maps.
+
+    Collects every non-``$ref`` ``source_profile_id`` / ``target_profile_id``
+    across the spec's transform.map components and resolves each UUID with
+    precedence: (1) a valid supplied ``profile_indexes_by_component_id`` entry,
+    (2) read-only live discovery. Unresolvable UUIDs are simply absent from the
+    result — validate_transform_map then surfaces MAP_PROFILE_INDEX_UNAVAILABLE.
+    Makes ZERO live calls when the spec has no literal-UUID map endpoint (issue
+    #95 M7.5).
+    """
+    uuids = set()
+    for comp in spec.components:
+        if getattr(comp, "type", None) != "transform.map":
+            continue
+        cfg = comp.config or {}
+        for side in ("source_profile_id", "target_profile_id"):
+            value = cfg.get(side)
+            if (
+                isinstance(value, str)
+                and value.strip()
+                and not value.startswith("$ref:")
+            ):
+                uuids.add(value.strip())
+    if not uuids:
+        return {}
+
+    supplied = spec.profile_indexes_by_component_id or {}
+    resolved: Dict[str, Dict[str, Any]] = {}
+    for uuid in uuids:
+        entry = supplied.get(uuid)
+        if isinstance(entry, Mapping):
+            supplied_err = validate_supplied_profile_index(uuid, entry)
+            if supplied_err is None:
+                resolved[uuid] = entry.get("field_index_by_path")
+                continue
+            # A malformed supplied index never bypasses validation — fall
+            # through to live discovery (and, failing that, rejection).
+        discovered = _discover_profile_index(boomi_client, uuid)
+        if discovered is not None:
+            resolved[uuid] = discovered
+    return resolved
+
+
 def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
     spec = _normalize_to_spec(config)
     # Issue #41 r3: inject transform.function wrappers between any
@@ -5011,6 +5088,10 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
         return {"_success": False, "error": str(exc)}
 
     components_by_key = {comp.key: comp for comp in spec.components}
+    # Issue #95 M7.5: resolve field indexes for any literal existing-profile UUID
+    # referenced by a transform.map (supplied or live-discovered) so the map can
+    # be validated against real fields. Empty (zero live calls) for all-$ref specs.
+    literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
     steps: List[Dict[str, Any]] = []
     warnings: List[str] = []
 
@@ -5980,6 +6061,7 @@ def _build_plan(boomi_client: Boomi, config: Dict[str, Any]) -> Dict[str, Any]:
                         effective_config,
                         comp.depends_on,
                         components_by_key,
+                        literal_indexes=literal_profile_indexes,
                     )
                 elif is_script_mapping_component:
                     # Issue #41: script.mapping has no source/target profile
@@ -6531,6 +6613,10 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     execution_order = planned["execution_order"]
     components_by_key = {comp.key: comp for comp in spec.components}
     existing_ids = {step["key"]: step["existing_component_id"] for step in planned["steps"]}
+    # Issue #95 M7.5: re-resolve literal existing-profile UUID indexes (supplied
+    # or live-discovered) so a validated literal-UUID transform.map also RENDERS
+    # at apply — keeps plan and apply from diverging.
+    literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
 
     id_registry: Dict[str, str] = {}
     results: Dict[str, Dict[str, Any]] = {}
@@ -6576,6 +6662,7 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
             config=resolved_config,
             target_id=target_id,
             components_by_key=components_by_key,
+            literal_indexes=literal_profile_indexes,
         )
 
         component_id = _extract_component_id(exec_result)

@@ -74,6 +74,7 @@ EXPECTED_SPEC_DICT = {
         "component_count": 0,
     },
     "pipeline": None,
+    "profile_indexes_by_component_id": None,
 }
 
 

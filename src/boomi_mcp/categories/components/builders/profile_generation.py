@@ -25,6 +25,7 @@ archetype's full Pydantic surface.
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from typing import Any, Dict, Iterable, List, Mapping, NoReturn, Optional
 
 from pydantic import BaseModel
@@ -54,6 +55,25 @@ MAP_PROFILE_REF_REQUIRED = "MAP_PROFILE_REF_REQUIRED"
 MAP_PROFILE_INDEX_UNAVAILABLE = "MAP_PROFILE_INDEX_UNAVAILABLE"
 MAP_FIELD_NOT_FOUND = "MAP_FIELD_NOT_FOUND"
 UNSUPPORTED_TRANSFORM_ROUTE = "UNSUPPORTED_TRANSFORM_ROUTE"
+
+# Issue #95 M7.5 additions — consumed by the live existing-profile indexer
+# (``index_existing_profile_xml``) and the read-only ``index_profile_component``
+# discovery surface. These are the STRUCTURED parse-failure codes; the
+# map-validation boundary still surfaces ``MAP_PROFILE_INDEX_UNAVAILABLE`` when a
+# literal-UUID map endpoint has no usable index.
+PROFILE_INDEX_PARSE_FAILED = "PROFILE_INDEX_PARSE_FAILED"
+PROFILE_INDEX_UNSUPPORTED_TYPE = "PROFILE_INDEX_UNSUPPORTED_TYPE"
+PROFILE_INDEX_DUPLICATE_PATH = "PROFILE_INDEX_DUPLICATE_PATH"
+PROFILE_INDEX_STRUCTURE_INVALID = "PROFILE_INDEX_STRUCTURE_INVALID"
+
+# The three live profile component types the indexer understands, mapped from
+# the exported profile-root local element name.
+PROFILE_INDEX_SUPPORTED_TYPES = ("profile.json", "profile.xml", "profile.db")
+_PROFILE_ROOT_LOCAL_TO_TYPE = {
+    "JSONProfile": "profile.json",
+    "XMLProfile": "profile.xml",
+    "DatabaseProfile": "profile.db",
+}
 
 # Issue #40 additions — consumed by MapFunctionBuilder and the function registry.
 UNSUPPORTED_MAP_FUNCTION_TYPE = "UNSUPPORTED_MAP_FUNCTION_TYPE"
@@ -1170,3 +1190,601 @@ def reject_unsupported_generation_source(generation_mode: str) -> NoReturn:
             "deferred_to_issue": "#47",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #95 M7.5 — live existing-profile XML indexer
+# ---------------------------------------------------------------------------
+#
+# Turn an EXPORTED Boomi profile component (``profile.json`` / ``profile.xml`` /
+# ``profile.db``) into the same ``field_index_by_path`` contract that the
+# generated-profile builders' ``build_field_index()`` emits, so a transform.map
+# referencing a literal existing-profile UUID can be validated against real
+# field key/keyPath/namePath/mappability — pre-mutation.
+#
+# Pure: stdlib ``xml.etree.ElementTree`` only, no SDK / network / credentials.
+# Namespace-insensitive (local element names; the #43 logical-path model is
+# namespace-less). Fail-closed: a structural container is never mappable even
+# when its exported ``isMappable`` says otherwise; a leaf is mappable ONLY when
+# it explicitly declares ``isMappable="true"``.
+
+
+def _local_name(tag: Any) -> str:
+    """Return an element's local name with any ``{namespace}`` prefix stripped."""
+    if not isinstance(tag, str):
+        return ""
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def _first_child(parent: Any, local: str) -> Any:
+    """First direct child of ``parent`` whose local name is ``local`` (or None)."""
+    for child in list(parent):
+        if _local_name(child.tag) == local:
+            return child
+    return None
+
+
+def _iter_children(parent: Any, local: str) -> List[Any]:
+    """All direct children of ``parent`` whose local name is ``local``."""
+    return [child for child in list(parent) if _local_name(child.tag) == local]
+
+
+def _require_element_key(element: Any, node_label: str) -> str:
+    """Return the platform ``key`` attribute, or raise a structured failure.
+
+    A profile node without a platform key cannot be referenced by a map
+    (``fromKeyPath`` / ``toKeyPath`` reconstruct from these), so a missing /
+    blank key is a hard structural failure rather than a silently dropped node.
+    """
+    key = element.get("key")
+    if key is None or not str(key).strip():
+        raise BuilderValidationError(
+            f"{node_label} is missing its platform 'key' attribute",
+            error_code=PROFILE_INDEX_STRUCTURE_INVALID,
+            field="component_xml",
+            hint=(
+                "The exported profile XML is malformed — every JSON/XML/DB "
+                "profile node carries an integer platform key. Re-export the "
+                "component."
+            ),
+            details={"node": node_label},
+        )
+    return str(key).strip()
+
+
+def _add_profile_index_entry(
+    field_index: Dict[str, Dict[str, Any]],
+    mappable_paths: List[str],
+    *,
+    logical_path: str,
+    name: str,
+    key: str,
+    key_path: List[str],
+    name_path: List[str],
+    data_type: Optional[str],
+    kind: str,
+    mappable: bool,
+) -> None:
+    """Register one field-index entry; reject a duplicate canonical path.
+
+    Entry shape is a superset of ``build_field_index``'s (adds ``is_mappable`` /
+    ``structural``; ``profile_component_type`` is stamped by the caller): the map
+    builder reads ``key`` / ``key_path`` / ``name_path`` and validation reads
+    ``mappable``, so a live-indexed profile validates and renders exactly like an
+    equivalent generated one.
+    """
+    if logical_path in field_index:
+        raise BuilderValidationError(
+            f"two profile nodes resolve to the same canonical path "
+            f"{logical_path!r}",
+            error_code=PROFILE_INDEX_DUPLICATE_PATH,
+            field="component_xml",
+            hint=(
+                "Sibling profile nodes must use unique names; namespace-less "
+                "logical paths would otherwise collide."
+            ),
+            details={"path": logical_path},
+        )
+    field_index[logical_path] = {
+        "path": logical_path,
+        "name": name,
+        "key": key,
+        "key_path": "/".join(key_path),
+        "name_path": "/".join(name_path),
+        "data_type": data_type,
+        "kind": kind,
+        "mappable": mappable,
+        "is_mappable": mappable,
+        "structural": not mappable,
+    }
+    if mappable:
+        mappable_paths.append(logical_path)
+
+
+def index_existing_profile_xml(component_xml: Any) -> Dict[str, Any]:
+    """Index an exported Boomi profile component's XML into ``field_index_by_path``.
+
+    Accepts either the full ``<bns:Component type="profile.*">`` envelope or the
+    bare inner profile root (``<JSONProfile>`` / ``<XMLProfile>`` /
+    ``<DatabaseProfile>``).
+
+    Returns ``{profile_component_type, field_index_by_path, mappable_paths}``.
+    ``field_index_by_path`` includes both structural containers (non-mappable) and
+    leaves; ``mappable_paths`` lists only mappable leaves. Raises
+    ``BuilderValidationError`` with one of ``PROFILE_INDEX_PARSE_FAILED`` /
+    ``PROFILE_INDEX_UNSUPPORTED_TYPE`` / ``PROFILE_INDEX_STRUCTURE_INVALID`` /
+    ``PROFILE_INDEX_DUPLICATE_PATH`` on malformed input.
+    """
+    if not isinstance(component_xml, str) or not component_xml.strip():
+        raise BuilderValidationError(
+            "component_xml must be a non-empty XML string",
+            error_code=PROFILE_INDEX_PARSE_FAILED,
+            field="component_xml",
+        )
+    try:
+        root = ET.fromstring(component_xml)
+    except ET.ParseError as exc:
+        raise BuilderValidationError(
+            "profile component XML could not be parsed",
+            error_code=PROFILE_INDEX_PARSE_FAILED,
+            field="component_xml",
+            details={"parse_error": str(exc)},
+        )
+
+    profile_root = _find_profile_root(root)
+    if profile_root is None:
+        raise BuilderValidationError(
+            "no JSONProfile / XMLProfile / DatabaseProfile root found in the "
+            "component XML",
+            error_code=PROFILE_INDEX_UNSUPPORTED_TYPE,
+            field="component_xml",
+            hint=(
+                "index_profile_component supports profile.json, profile.xml, and "
+                "profile.db components only."
+            ),
+        )
+
+    component_type = _PROFILE_ROOT_LOCAL_TO_TYPE[_local_name(profile_root.tag)]
+    field_index: Dict[str, Dict[str, Any]] = {}
+    mappable_paths: List[str] = []
+
+    if component_type == "profile.json":
+        _index_json_profile(profile_root, field_index, mappable_paths)
+    elif component_type == "profile.xml":
+        _index_xml_profile(profile_root, field_index, mappable_paths)
+    else:
+        _index_db_profile(profile_root, field_index, mappable_paths)
+
+    for entry in field_index.values():
+        entry["profile_component_type"] = component_type
+
+    return {
+        "profile_component_type": component_type,
+        "field_index_by_path": field_index,
+        "mappable_paths": mappable_paths,
+    }
+
+
+def _find_profile_root(root: Any) -> Any:
+    """Locate the ``<JSONProfile>`` / ``<XMLProfile>`` / ``<DatabaseProfile>``.
+
+    Handles the full ``<bns:Component>`` envelope (root → ``<bns:object>`` →
+    profile root) as well as a bare profile root passed directly.
+    """
+    if _local_name(root.tag) in _PROFILE_ROOT_LOCAL_TO_TYPE:
+        return root
+    obj = _first_child(root, "object")
+    if obj is not None:
+        for child in list(obj):
+            if _local_name(child.tag) in _PROFILE_ROOT_LOCAL_TO_TYPE:
+                return child
+    # Defensive fallback: scan descendants (a wrapper we didn't anticipate).
+    for element in root.iter():
+        if _local_name(element.tag) in _PROFILE_ROOT_LOCAL_TO_TYPE:
+            return element
+    return None
+
+
+def _require_data_elements(profile_root: Any) -> Any:
+    data_elements = _first_child(profile_root, "DataElements")
+    if data_elements is None:
+        raise BuilderValidationError(
+            "profile root has no <DataElements> section",
+            error_code=PROFILE_INDEX_STRUCTURE_INVALID,
+            field="component_xml",
+        )
+    return data_elements
+
+
+# ---- JSON ----------------------------------------------------------------
+
+
+def _index_json_profile(
+    profile_root: Any,
+    field_index: Dict[str, Dict[str, Any]],
+    mappable_paths: List[str],
+) -> None:
+    data_elements = _require_data_elements(profile_root)
+    root_value = _first_child(data_elements, "JSONRootValue")
+    if root_value is None:
+        raise BuilderValidationError(
+            "JSON profile has no <JSONRootValue>",
+            error_code=PROFILE_INDEX_STRUCTURE_INVALID,
+            field="component_xml",
+        )
+    root_key = _require_element_key(root_value, "JSONRootValue")
+    root_name = root_value.get("name") or "Root"
+    # The JSONRootValue is the structural anchor (it wraps a JSONObject named
+    # "Object"). Its own index entry carries only its key/name — matching
+    # json_profile_builder's index[root_name].
+    _add_profile_index_entry(
+        field_index,
+        mappable_paths,
+        logical_path=root_name,
+        name=root_name,
+        key=root_key,
+        key_path=[f"*[@key='{root_key}']"],
+        name_path=[root_name],
+        data_type=None,
+        kind="object",
+        mappable=False,
+    )
+    wrapper = _first_child(root_value, "JSONObject")
+    if wrapper is None:
+        return
+    wrapper_key = _require_element_key(wrapper, "JSONObject")
+    wrapper_name = wrapper.get("name") or "Object"
+    _walk_json_object_entries(
+        wrapper,
+        parent_logical=root_name,
+        parent_key_path=[f"*[@key='{root_key}']", f"*[@key='{wrapper_key}']"],
+        parent_name_path=[root_name, wrapper_name],
+        field_index=field_index,
+        mappable_paths=mappable_paths,
+    )
+
+
+def _walk_json_object_entries(
+    obj_element: Any,
+    *,
+    parent_logical: str,
+    parent_key_path: List[str],
+    parent_name_path: List[str],
+    field_index: Dict[str, Dict[str, Any]],
+    mappable_paths: List[str],
+) -> None:
+    for entry in _iter_children(obj_element, "JSONObjectEntry"):
+        entry_key = _require_element_key(entry, "JSONObjectEntry")
+        entry_name = entry.get("name") or ""
+        logical = f"{parent_logical}/{entry_name}"
+        entry_key_path = parent_key_path + [f"*[@key='{entry_key}']"]
+        entry_name_path = parent_name_path + [entry_name]
+
+        object_child = _first_child(entry, "JSONObject")
+        array_child = _first_child(entry, "JSONArray")
+
+        if object_child is not None:
+            # Structural object (non-mappable regardless of isMappable).
+            _add_profile_index_entry(
+                field_index,
+                mappable_paths,
+                logical_path=logical,
+                name=entry_name,
+                key=entry_key,
+                key_path=entry_key_path,
+                name_path=entry_name_path,
+                data_type=None,
+                kind="object",
+                mappable=False,
+            )
+            wrapper_key = _require_element_key(object_child, "JSONObject")
+            wrapper_name = object_child.get("name") or "Object"
+            _walk_json_object_entries(
+                object_child,
+                parent_logical=logical,
+                parent_key_path=entry_key_path + [f"*[@key='{wrapper_key}']"],
+                parent_name_path=entry_name_path + [wrapper_name],
+                field_index=field_index,
+                mappable_paths=mappable_paths,
+            )
+        elif array_child is not None:
+            # Structural array (non-mappable).
+            _add_profile_index_entry(
+                field_index,
+                mappable_paths,
+                logical_path=logical,
+                name=entry_name,
+                key=entry_key,
+                key_path=entry_key_path,
+                name_path=entry_name_path,
+                data_type=None,
+                kind="array",
+                mappable=False,
+            )
+            array_key = _require_element_key(array_child, "JSONArray")
+            array_name = array_child.get("name") or "Array"
+            array_elem = _first_child(array_child, "JSONArrayElement")
+            if array_elem is None:
+                continue
+            elem_key = _require_element_key(array_elem, "JSONArrayElement")
+            elem_name = array_elem.get("name") or entry_name
+            inner_obj = _first_child(array_elem, "JSONObject")
+            # Only arrays-of-objects expose per-field mappable leaves (matches
+            # json_profile_builder, which emits arrays as object wrappers). An
+            # array of scalars stays a structural container with no leaf entries.
+            if inner_obj is None:
+                continue
+            inner_key = _require_element_key(inner_obj, "JSONObject")
+            inner_name = inner_obj.get("name") or "Object"
+            _walk_json_object_entries(
+                inner_obj,
+                parent_logical=f"{logical}[]",
+                parent_key_path=entry_key_path
+                + [
+                    f"*[@key='{array_key}']",
+                    f"*[@key='{elem_key}']",
+                    f"*[@key='{inner_key}']",
+                ],
+                parent_name_path=entry_name_path
+                + [array_name, elem_name, inner_name],
+                field_index=field_index,
+                mappable_paths=mappable_paths,
+            )
+        else:
+            # Scalar leaf — honor the explicit isMappable, fail closed otherwise.
+            _add_profile_index_entry(
+                field_index,
+                mappable_paths,
+                logical_path=logical,
+                name=entry_name,
+                key=entry_key,
+                key_path=entry_key_path,
+                name_path=entry_name_path,
+                data_type=entry.get("dataType"),
+                kind="simple",
+                mappable=entry.get("isMappable") == "true",
+            )
+
+
+# ---- XML -----------------------------------------------------------------
+
+
+def _index_xml_profile(
+    profile_root: Any,
+    field_index: Dict[str, Dict[str, Any]],
+    mappable_paths: List[str],
+) -> None:
+    # Only the <DataElements> subtree describes the mappable element tree. The
+    # sibling <Namespaces> section carries <Types>/<Type>/<XMLElement> type
+    # DEFINITIONS (with their own keys) that MUST NOT be indexed as data paths.
+    data_elements = _require_data_elements(profile_root)
+    for root_element in _iter_children(data_elements, "XMLElement"):
+        _walk_xml_element(
+            root_element,
+            parent_logical="",
+            parent_key_path=[],
+            parent_name_path=[],
+            is_root=True,
+            field_index=field_index,
+            mappable_paths=mappable_paths,
+        )
+
+
+def _walk_xml_element(
+    element: Any,
+    *,
+    parent_logical: str,
+    parent_key_path: List[str],
+    parent_name_path: List[str],
+    is_root: bool,
+    field_index: Dict[str, Dict[str, Any]],
+    mappable_paths: List[str],
+) -> None:
+    key = _require_element_key(element, "XMLElement")
+    name = element.get("name") or ""
+    logical = name if is_root else f"{parent_logical}/{name}"
+    key_path = parent_key_path + [f"*[@key='{key}']"]
+    name_path = ([name] if is_root else parent_name_path + [name])
+
+    # Only child ELEMENTS make an element structural; attributes never do.
+    child_elements = _iter_children(element, "XMLElement")
+    attribute_children = _iter_children(element, "XMLAttribute")
+    # A repeating element (maxOccurs != 1) pushes a "[]" segment onto its
+    # descendants' logical path (mirrors the JSON array convention).
+    repeating = str(element.get("maxOccurs", "1")) != "1"
+    child_segment = f"{logical}[]" if repeating else logical
+
+    if child_elements:
+        _add_profile_index_entry(
+            field_index,
+            mappable_paths,
+            logical_path=logical,
+            name=name,
+            key=key,
+            key_path=key_path,
+            name_path=name_path,
+            data_type=None,
+            kind="element",
+            mappable=False,
+        )
+    else:
+        _add_profile_index_entry(
+            field_index,
+            mappable_paths,
+            logical_path=logical,
+            name=name,
+            key=key,
+            key_path=key_path,
+            name_path=name_path,
+            data_type=element.get("dataType"),
+            kind="element",
+            mappable=element.get("isMappable") == "true",
+        )
+
+    for attribute in attribute_children:
+        _index_xml_attribute(
+            attribute,
+            parent_logical=child_segment,
+            parent_key_path=key_path,
+            parent_name_path=name_path,
+            field_index=field_index,
+            mappable_paths=mappable_paths,
+        )
+    for child in child_elements:
+        _walk_xml_element(
+            child,
+            parent_logical=child_segment,
+            parent_key_path=key_path,
+            parent_name_path=name_path,
+            is_root=False,
+            field_index=field_index,
+            mappable_paths=mappable_paths,
+        )
+
+
+def _index_xml_attribute(
+    attribute: Any,
+    *,
+    parent_logical: str,
+    parent_key_path: List[str],
+    parent_name_path: List[str],
+    field_index: Dict[str, Dict[str, Any]],
+    mappable_paths: List[str],
+) -> None:
+    key = _require_element_key(attribute, "XMLAttribute")
+    name = attribute.get("name") or ""
+    _add_profile_index_entry(
+        field_index,
+        mappable_paths,
+        logical_path=f"{parent_logical}/@{name}",
+        name=name,
+        key=key,
+        key_path=parent_key_path + [f"*[@key='{key}']"],
+        name_path=parent_name_path + [f"@{name}"],
+        data_type=attribute.get("dataType"),
+        kind="attribute",
+        mappable=attribute.get("isMappable") == "true",
+    )
+
+
+# ---- Database ------------------------------------------------------------
+
+
+def _index_db_profile(
+    profile_root: Any,
+    field_index: Dict[str, Dict[str, Any]],
+    mappable_paths: List[str],
+) -> None:
+    # Mirror profile_builder.build_field_index exactly: index the result_set
+    # columns (<DatabaseElement> under <DBFields>) by BARE column name, so a
+    # live-indexed DB profile keys identically to a generated one. DBParameters
+    # are intentionally not indexed (matching the generated-profile contract).
+    data_elements = _require_data_elements(profile_root)
+    statement = _first_child(data_elements, "DBStatement")
+    if statement is None:
+        raise BuilderValidationError(
+            "database profile has no <DBStatement>",
+            error_code=PROFILE_INDEX_STRUCTURE_INVALID,
+            field="component_xml",
+        )
+    statement_key = _require_element_key(statement, "DBStatement")
+    statement_name = statement.get("name") or "Statement"
+    fields = _first_child(statement, "DBFields")
+    if fields is None:
+        return
+    fields_key = _require_element_key(fields, "DBFields")
+    fields_name = fields.get("name") or "Fields"
+    for column in _iter_children(fields, "DatabaseElement"):
+        column_key = _require_element_key(column, "DatabaseElement")
+        column_name = column.get("name") or ""
+        _add_profile_index_entry(
+            field_index,
+            mappable_paths,
+            logical_path=column_name,
+            name=column_name,
+            key=column_key,
+            key_path=[
+                f"*[@key='{statement_key}']",
+                f"*[@key='{fields_key}']",
+                f"*[@key='{column_key}']",
+            ],
+            name_path=[statement_name, fields_name, column_name],
+            data_type=column.get("dataType"),
+            kind="simple",
+            mappable=column.get("isMappable") == "true",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Issue #95 M7.5 — supplied-index validation
+# ---------------------------------------------------------------------------
+
+
+def validate_supplied_profile_index(
+    component_id: Any, entry: Any
+) -> Optional[BuilderValidationError]:
+    """Validate a caller-supplied ``profile_indexes_by_component_id`` entry.
+
+    Returns ``None`` when ``entry`` is a well-formed index for ``component_id``
+    (matching ``component_id``, a supported ``profile_component_type``, and a
+    non-empty ``field_index_by_path`` whose every entry carries non-blank
+    ``key`` / ``key_path`` / ``name_path`` and a boolean ``mappable``). Returns a
+    ``MAP_PROFILE_INDEX_UNAVAILABLE`` error otherwise, so a malformed supplied
+    index falls through to live discovery / rejection and never bypasses
+    validation.
+    """
+    def _fail(message: str, detail: Optional[Dict[str, Any]] = None) -> BuilderValidationError:
+        return BuilderValidationError(
+            message,
+            error_code=MAP_PROFILE_INDEX_UNAVAILABLE,
+            field="profile_indexes_by_component_id",
+            hint=(
+                "Each supplied index must be the object returned by "
+                "index_profile_component: {component_id, profile_component_type, "
+                "field_index_by_path}."
+            ),
+            details=detail or {"component_id": str(component_id)},
+        )
+
+    if not isinstance(entry, Mapping):
+        return _fail("supplied profile index must be an object")
+    supplied_id = entry.get("component_id")
+    if not isinstance(supplied_id, str) or supplied_id.strip() != str(component_id).strip():
+        return _fail(
+            "supplied profile index component_id does not match its map key",
+            {"component_id": str(component_id), "supplied": supplied_id},
+        )
+    profile_type = entry.get("profile_component_type")
+    if profile_type not in PROFILE_INDEX_SUPPORTED_TYPES:
+        return _fail(
+            f"supplied profile index has unsupported profile_component_type "
+            f"{profile_type!r}",
+            {"component_id": str(component_id), "profile_component_type": profile_type},
+        )
+    field_index = entry.get("field_index_by_path")
+    if not isinstance(field_index, Mapping) or not field_index:
+        return _fail(
+            "supplied profile index field_index_by_path must be a non-empty object",
+            {"component_id": str(component_id)},
+        )
+    for path, field_entry in field_index.items():
+        if not isinstance(field_entry, Mapping):
+            return _fail(
+                f"supplied field index entry {path!r} must be an object",
+                {"component_id": str(component_id), "path": path},
+            )
+        for required_key in ("key", "key_path", "name_path"):
+            value = field_entry.get(required_key)
+            if not isinstance(value, (str, int)) or not str(value).strip():
+                return _fail(
+                    f"supplied field index entry {path!r} is missing a valid "
+                    f"{required_key}",
+                    {"component_id": str(component_id), "path": path},
+                )
+        if not isinstance(field_entry.get("mappable"), bool):
+            return _fail(
+                f"supplied field index entry {path!r} must declare a boolean "
+                "'mappable'",
+                {"component_id": str(component_id), "path": path},
+            )
+    return None

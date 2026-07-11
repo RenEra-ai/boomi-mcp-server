@@ -333,6 +333,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import marketplace recipe search tool: {e}")
     search_marketplace_recipes_action = None
 
+# --- Existing-Profile Index Discovery Tool (Issue #95, M7.5) ---
+try:
+    from boomi_mcp.categories.profile_index import index_profile_component_action
+    print(f"[INFO] index_profile_component discovery tool loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import index_profile_component tool: {e}")
+    index_profile_component_action = None
+
 # --- Folder Tools ---
 try:
     from boomi_mcp.categories.folders import manage_folders_action
@@ -2555,6 +2563,90 @@ if infer_profile_fields_action:
         return infer_profile_fields_action(source_type, artifact, options=options)
 
     print("[INFO] infer_profile_fields tool registered successfully")
+
+
+# --- Existing-Profile Index Discovery MCP Tool (Issue #95, M7.5) ---
+if index_profile_component_action:
+
+    @mcp.tool(
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
+    def index_profile_component(
+        profile: str, component_id: str, include_raw_xml: bool = False
+    ):
+        """Index a live existing Boomi profile component's fields (read-only, M7.5).
+
+        READ-ONLY DISCOVERY. Fetches a live profile component
+        (profile.json / profile.xml / profile.db) and parses its exported XML
+        into the canonical field index — platform keys, key paths, name paths,
+        mappable flags, and the profile component type — the same
+        `field_index_by_path` shape the generated-profile builders emit. This
+        lets a transform.map that references a literal existing-profile UUID be
+        validated against real fields (see build_integration): supply the
+        returned index to `IntegrationSpecV1.profile_indexes_by_component_id`, or
+        rely on build_integration discovering it. Structural containers
+        (objects/arrays/parent elements) are reported non-mappable so they are
+        rejected as map endpoints before any mutation.
+
+        The DEFAULT response is the normalized field index, NOT raw XML. The
+        exported component XML is returned only when `include_raw_xml=true`.
+        Never mutates. This is a separate surface from `infer_profile_fields`
+        (which stays artifact-based and never calls Boomi).
+
+        Args:
+            profile: Boomi credential profile name (REQUIRED - no default).
+            component_id: UUID of a profile.json / profile.xml / profile.db component.
+            include_raw_xml: When true, also return the exported XML under
+                `raw_xml` (default false).
+
+        Returns:
+            {_success, read_only, boomi_mutation, component_id,
+             profile_component_type, field_index_by_path, mappable_paths,
+             raw_xml_exposed [, raw_xml]}, or a structured read-only error
+             envelope (MAP_PROFILE_INDEX_UNAVAILABLE / PROFILE_INDEX_* /
+             INDEX_PROFILE_COMPONENT_* — never exposing raw XML).
+        """
+        try:
+            subject = get_current_user()
+        except Exception as e:
+            return {"_success": False, "error": f"Authentication failed: {str(e)}"}
+
+        try:
+            creds = get_secret(subject, profile)
+        except DisabledProfileError as e:
+            return {"_success": False, "error": str(e)}
+        except ValueError as e:
+            return {
+                "_success": False,
+                "error": f"Profile '{profile}' not found: {str(e)}",
+            }
+        except Exception as e:
+            return {
+                "_success": False,
+                "error": f"Failed to retrieve credentials: {str(e)}",
+            }
+
+        try:
+            sdk_params = {
+                "account_id": creds["account_id"],
+                "username": creds["username"],
+                "password": creds["password"],
+                "timeout": 30000,
+            }
+            if creds.get("base_url"):
+                sdk_params["base_url"] = creds["base_url"]
+            sdk = Boomi(**sdk_params)
+        except Exception as e:
+            return {"_success": False, "error": f"Failed to initialize Boomi SDK: {str(e)}"}
+
+        return index_profile_component_action(sdk, component_id, include_raw_xml)
+
+    print("[INFO] index_profile_component tool registered successfully")
 
 
 # --- Existing Integration Import MCP Tool (Issue #48) ---

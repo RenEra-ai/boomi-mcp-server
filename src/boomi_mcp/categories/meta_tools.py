@@ -2977,10 +2977,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         "(#41), XSLT (#42), lookup, expression, and default routes are "
         "rejected at plan time with structured pointers. Source and target "
         "profile references must point at in-spec profile.json / profile.xml / "
-        "profile.db components via '$ref:KEY'; literal existing-profile UUIDs "
-        "are rejected with MAP_PROFILE_INDEX_UNAVAILABLE (indexing live "
-        "existing-profile XML remains separate future work; infer_profile_fields "
-        "infers only from supplied artifacts, not live profile XML)."
+        "profile.db components via '$ref:KEY', OR literal existing-profile "
+        "UUIDs validated against a supplied/discoverable field index "
+        "(index_profile_component + profile_indexes_by_component_id, #95); an "
+        "unindexable literal UUID is rejected with MAP_PROFILE_INDEX_UNAVAILABLE."
     ),
     "template": {
         "component_type": "transform.map",
@@ -3053,10 +3053,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
         "profile component runs first.",
         "Include target_profile_id's $ref key in depends_on so the target "
         "profile component runs first.",
-        "Both profiles must be in-spec — literal existing-profile UUIDs "
-        "produce MAP_PROFILE_INDEX_UNAVAILABLE because issue #26 does not "
-        "parse arbitrary Boomi profile XML (live-profile-XML indexing remains "
-        "separate future work; not infer_profile_fields).",
+        "Both profiles are in-spec '$ref:KEY' OR literal existing-profile "
+        "UUIDs with a supplied/discoverable field index; an unindexable "
+        "literal UUID produces MAP_PROFILE_INDEX_UNAVAILABLE (index it with "
+        "index_profile_component and pass via profile_indexes_by_component_id, #95).",
     ],
     "forbidden_secret_fields": [
         "password",
@@ -3075,8 +3075,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_DIRECT = {
             "source_profile_id or target_profile_id missing / blank"
         ),
         "MAP_PROFILE_INDEX_UNAVAILABLE": (
-            "literal existing-profile UUID supplied without an in-spec "
-            "generated profile component to index (separate future work; infer_profile_fields does not index live existing-profile XML)"
+            "literal existing-profile UUID with no in-spec generated profile "
+            "component and no supplied/discoverable field index — index it with "
+            "index_profile_component and pass it via "
+            "profile_indexes_by_component_id (#95)"
         ),
         "MAP_FIELD_NOT_FOUND": (
             "source_path or target_path is not declared in the corresponding "
@@ -3216,7 +3218,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         "(no output leaf). Mixed maps may also declare direct field_mappings "
         "alongside function_mappings. Source/target profile refs follow the same "
         "'$ref:KEY' rule as direct maps; literal existing-profile UUIDs are "
-        "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (separate future work; infer_profile_fields does not index live existing-profile XML). "
+        "validated against a supplied or discoverable field index (index_profile_component + profile_indexes_by_component_id, #95), else rejected with MAP_PROFILE_INDEX_UNAVAILABLE. "
         "Reusable script-based transforms (Groovy / JavaScript) ship in "
         "map_type='script' (#41). XSLT (#42), standalone reusable "
         "transform.function components, and chained multi-step function "
@@ -3536,9 +3538,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
         "profile component runs first.",
         "Include target_profile_id's $ref key in depends_on so the target "
         "profile component runs first.",
-        "Both profiles must be in-spec — literal existing-profile UUIDs "
-        "produce MAP_PROFILE_INDEX_UNAVAILABLE (indexing live existing-profile "
-        "XML remains separate future work; not infer_profile_fields).",
+        "Both profiles are in-spec '$ref:KEY' OR literal existing-profile "
+        "UUIDs with a supplied/discoverable field index; an unindexable "
+        "literal UUID produces MAP_PROFILE_INDEX_UNAVAILABLE (index it with "
+        "index_profile_component and pass via profile_indexes_by_component_id, #95).",
         "For defined_process_property_get/set, include the Process Property "
         "component's $ref key (from parameters.process_property_component_id) "
         "in depends_on so the processproperty component runs before the map "
@@ -3562,8 +3565,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_FUNCTION = {
             "$ref target was not declared in depends_on"
         ),
         "MAP_PROFILE_INDEX_UNAVAILABLE": (
-            "literal existing-profile UUID supplied without an in-spec "
-            "generated profile component to index (separate future work; infer_profile_fields does not index live existing-profile XML)"
+            "literal existing-profile UUID with no in-spec generated profile "
+            "component and no supplied/discoverable field index — index it with "
+            "index_profile_component and pass it via "
+            "profile_indexes_by_component_id (#95)"
         ),
         "MAP_FIELD_NOT_FOUND": (
             "function_mappings[].inputs[] or .target_path is not declared in "
@@ -4375,7 +4380,7 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
         "also declare direct field_mappings alongside script_mappings. "
         "Source/target profile refs follow the same '$ref:KEY' rule as "
         "direct and function maps; literal existing-profile UUIDs are "
-        "rejected with MAP_PROFILE_INDEX_UNAVAILABLE (separate future work; infer_profile_fields does not index live existing-profile XML)."
+        "validated against a supplied or discoverable field index (index_profile_component + profile_indexes_by_component_id, #95), else rejected with MAP_PROFILE_INDEX_UNAVAILABLE."
     ),
     "update_note": (
         "Structured updates via build_integration action='update' now use "
@@ -4523,8 +4528,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
         "Include every script_mappings[].script_component_id's $ref key in "
         "depends_on so each referenced script.mapping component runs before "
         "this map.",
-        "Both profiles must be in-spec — literal existing-profile UUIDs "
-        "produce MAP_PROFILE_INDEX_UNAVAILABLE (separate future work; infer_profile_fields does not index live existing-profile XML).",
+        "Both profiles are in-spec '$ref:KEY' OR literal existing-profile "
+        "UUIDs with a supplied/discoverable field index; an unindexable "
+        "literal UUID produces MAP_PROFILE_INDEX_UNAVAILABLE (index it with "
+        "index_profile_component and pass via profile_indexes_by_component_id, #95).",
     ],
     "forbidden_secret_fields": [
         "password",
@@ -4544,8 +4551,10 @@ _COMPONENT_CREATE_TRANSFORM_MAP_SCRIPT = {
             "$ref target isn't declared in depends_on"
         ),
         "MAP_PROFILE_INDEX_UNAVAILABLE": (
-            "literal existing-profile UUID supplied without an in-spec "
-            "generated profile component to index (separate future work; infer_profile_fields does not index live existing-profile XML)"
+            "literal existing-profile UUID with no in-spec generated profile "
+            "component and no supplied/discoverable field index — index it with "
+            "index_profile_component and pass it via "
+            "profile_indexes_by_component_id (#95)"
         ),
         "MAP_FIELD_NOT_FOUND": (
             "a script input's source_path or output's target_path is not "
@@ -9738,6 +9747,37 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "examples": [
                 "search_marketplace_recipes(query=\"salesforce order sync\")",
                 "search_marketplace_recipes(tags=[\"Salesforce\", \"ServiceNow\"], top_k=5)",
+            ],
+        },
+        "index_profile_component": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only EXISTING-PROFILE INDEX DISCOVERY (issue #95, M7.5): "
+                "fetches a live profile component (profile.json / profile.xml / "
+                "profile.db) and parses its exported XML into the canonical "
+                "field_index_by_path — platform keys, key paths, name paths, "
+                "mappable flags, and profile_component_type — so a transform.map "
+                "that references a LITERAL existing-profile UUID can be validated "
+                "against real fields. Structural containers are reported "
+                "non-mappable (rejected as map endpoints before mutation). The "
+                "default response is the normalized index, NOT raw XML "
+                "(include_raw_xml=true to expose it). Never mutates. Supply the "
+                "returned index to build_integration via "
+                "profile_indexes_by_component_id, or let build_integration "
+                "discover it. Separate surface from infer_profile_fields (which "
+                "stays artifact-based and never calls Boomi)."
+            ),
+            "actions": ["(single action — indexes one profile component)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "profile": "str (required) — Boomi profile name",
+                "component_id": "str (required) — UUID of a profile.json / profile.xml / profile.db component",
+                "include_raw_xml": "bool (optional) — also return exported XML under raw_xml (default false)",
+            },
+            "examples": [
+                "index_profile_component(profile=\"prod\", component_id=\"<profile-uuid>\")",
+                "index_profile_component(profile=\"prod\", component_id=\"<profile-uuid>\", include_raw_xml=True)",
             ],
         },
         "build_integration": {

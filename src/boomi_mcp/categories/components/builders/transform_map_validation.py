@@ -27,14 +27,27 @@ from .xml_profile_builder import XMLGeneratedProfileBuilder
 def resolve_map_profile_index(
     profile_id: Any,
     components_by_key: Optional[Dict[str, Any]],
+    literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Dict[str, Any]]]:
     """Resolve the field index for a transform.map's source / target profile
-    reference. Returns None when the reference is a literal UUID or points at a
-    missing / non-profile component — in those cases the map builder's
-    validator raises MAP_PROFILE_INDEX_UNAVAILABLE."""
-    if components_by_key is None:
+    reference.
+
+    For a ``$ref:KEY`` reference the index is built from the in-spec profile
+    component. For a LITERAL existing-profile UUID (issue #95 M7.5), the index
+    is looked up in ``literal_indexes`` (uuid -> field_index_by_path), which the
+    caller resolves from a supplied ``profile_indexes_by_component_id`` or live
+    read-only discovery. Returns None when no index is available — the map
+    validator then raises MAP_PROFILE_INDEX_UNAVAILABLE."""
+    if not isinstance(profile_id, str) or not profile_id.strip():
         return None
-    if not isinstance(profile_id, str) or not profile_id.startswith("$ref:"):
+    profile_id = profile_id.strip()
+    if not profile_id.startswith("$ref:"):
+        # Literal existing-profile UUID — resolvable only from a supplied /
+        # discovered index (issue #95). Unknown UUID -> None -> unavailable.
+        if literal_indexes:
+            return literal_indexes.get(profile_id)
+        return None
+    if components_by_key is None:
         return None
     ref_key = profile_id[len("$ref:") :]
     target_comp = components_by_key.get(ref_key)
@@ -180,6 +193,7 @@ def validate_transform_map(
     effective_config: Mapping[str, Any],
     depends_on: Any,
     components_by_key: Optional[Dict[str, Any]],
+    literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Optional[BuilderValidationError]:
     """Validate a transform.map component the way build_integration's plan does.
 
@@ -198,10 +212,10 @@ def validate_transform_map(
     # profile components so MAP_FIELD_NOT_FOUND fires when a $ref:KEY target
     # maps to a missing leaf in the referenced profile.
     source_index = resolve_map_profile_index(
-        effective_config.get("source_profile_id"), components_by_key
+        effective_config.get("source_profile_id"), components_by_key, literal_indexes
     )
     target_index = resolve_map_profile_index(
-        effective_config.get("target_profile_id"), components_by_key
+        effective_config.get("target_profile_id"), components_by_key, literal_indexes
     )
     # A non-string map_type (e.g. a JSON number/bool) must not raise on
     # .lower() — coerce to "" so get_map_builder returns None and the caller
@@ -555,19 +569,28 @@ def validate_transform_map(
                 )
                 break
 
-    # Literal-UUID profile refs (no $ref) can't be indexed in M2 — indexing
-    # live existing-profile XML is separate future work (NOT infer_profile_fields,
-    # which infers from supplied artifacts). Reject so the caller knows what to fix.
+    # Literal-UUID profile refs (no $ref): issue #95 M7.5 makes these validatable
+    # when a field index is supplied (profile_indexes_by_component_id) or is
+    # live-discoverable. Only reject when NO index resolved for that side — an
+    # available index already drove the specific MAP_FIELD_NOT_FOUND /
+    # PROFILE_FIELD_NOT_MAPPABLE checks in validate_config above.
     if gen_profile_err is None:
-        for side in ("source", "target"):
+        for side, side_index in (
+            ("source", source_index),
+            ("target", target_index),
+        ):
             ref_value = effective_config.get(f"{side}_profile_id")
-            if isinstance(ref_value, str) and not ref_value.startswith("$ref:"):
+            if (
+                isinstance(ref_value, str)
+                and ref_value.strip()
+                and not ref_value.startswith("$ref:")
+                and side_index is None
+            ):
                 gen_profile_err = BuilderValidationError(
                     f"{side}_profile_id is a literal "
-                    "existing-profile reference without "
-                    "an in-spec generated profile "
-                    "component — the map builder has no "
-                    "field index to validate against.",
+                    "existing-profile reference the map "
+                    "builder could not index (no supplied "
+                    "or discoverable field index).",
                     error_code="MAP_PROFILE_INDEX_UNAVAILABLE",
                     field=f"{side}_profile_id",
                     hint=(
@@ -575,10 +598,13 @@ def validate_transform_map(
                         "profile as an in-spec "
                         "profile.json / profile.xml / "
                         "profile.db component and "
-                        f"reference it via '$ref:KEY'. "
-                        "Indexing live existing-profile "
-                        "XML is separate future work, not "
-                        "covered by infer_profile_fields."
+                        "reference it via '$ref:KEY', or "
+                        "index the existing profile with "
+                        "index_profile_component and supply "
+                        "it via "
+                        "profile_indexes_by_component_id "
+                        "(build_integration also discovers "
+                        "indexable existing profiles live)."
                     ),
                     details={"side": side},
                 )
