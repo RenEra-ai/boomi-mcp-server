@@ -1290,6 +1290,7 @@ def _add_profile_index_entry(
     data_type: Optional[str],
     kind: str,
     mappable: bool,
+    structural: bool,
     required: bool = False,
 ) -> None:
     """Register one field-index entry; reject a duplicate canonical path.
@@ -1300,6 +1301,10 @@ def _add_profile_index_entry(
     ``mappable``, and transformation review reads ``required`` — so a live-indexed
     profile validates, renders, AND reviews exactly like an equivalent generated
     one.
+
+    ``structural`` reflects NODE SHAPE (a container: object/array/parent element)
+    and is INDEPENDENT of ``mappable`` — an explicitly non-mappable scalar leaf is
+    a leaf (``structural=False``), not a container.
     """
     if logical_path in field_index:
         raise BuilderValidationError(
@@ -1324,7 +1329,7 @@ def _add_profile_index_entry(
         "required": required,
         "mappable": mappable,
         "is_mappable": mappable,
-        "structural": not mappable,
+        "structural": structural,
     }
     if mappable:
         mappable_paths.append(logical_path)
@@ -1457,6 +1462,7 @@ def _index_json_profile(
         data_type=None,
         kind="object",
         mappable=False,
+        structural=True,
         required=root_value.get("required") == "true",
     )
     wrapper = _first_child(root_value, "JSONObject")
@@ -1507,6 +1513,7 @@ def _walk_json_object_entries(
                 data_type=None,
                 kind="object",
                 mappable=False,
+                structural=True,
                 required=entry_required,
             )
             wrapper_key = _require_element_key(object_child, "JSONObject")
@@ -1532,6 +1539,7 @@ def _walk_json_object_entries(
                 data_type=None,
                 kind="array",
                 mappable=False,
+                structural=True,
                 required=entry_required,
             )
             array_key = _require_element_key(array_child, "JSONArray")
@@ -1576,6 +1584,7 @@ def _walk_json_object_entries(
                 data_type=_element_data_type(entry),
                 kind="simple",
                 mappable=entry.get("isMappable") == "true",
+                structural=False,
                 required=entry_required,
             )
 
@@ -1642,6 +1651,7 @@ def _walk_xml_element(
             data_type=None,
             kind="element",
             mappable=False,
+            structural=True,
             required=element_required,
         )
     else:
@@ -1656,6 +1666,7 @@ def _walk_xml_element(
             data_type=_element_data_type(element),
             kind="element",
             mappable=element.get("isMappable") == "true",
+            structural=False,
             required=element_required,
         )
 
@@ -1702,6 +1713,7 @@ def _index_xml_attribute(
         data_type=_element_data_type(attribute),
         kind="attribute",
         mappable=attribute.get("isMappable") == "true",
+        structural=False,
         required=attribute.get("required") == "true",
     )
 
@@ -1776,6 +1788,7 @@ def _index_db_profile(
                 data_type=_element_data_type(column),
                 kind="simple",
                 mappable=column.get("isMappable") == "true",
+                structural=False,
                 required=column.get("mandatory") == "true",
             )
 
@@ -1802,6 +1815,7 @@ def _index_db_profile(
                 data_type=_element_data_type(condition),
                 kind="simple",
                 mappable=condition.get("isMappable") == "true",
+                structural=False,
                 required=True,
             )
 
@@ -1864,12 +1878,22 @@ def validate_supplied_profile_index(
                 f"supplied field index entry {path!r} must be an object",
                 {"component_id": str(component_id), "path": path},
             )
-        for required_key in ("key", "key_path", "name_path"):
-            value = field_entry.get(required_key)
-            if not isinstance(value, (str, int)) or not str(value).strip():
+        # ``key`` may be an int or a string (the platform key), but ``key_path``
+        # and ``name_path`` are rendered verbatim through the string-only XML
+        # escaper (_escape_xml) — a non-string there would pass planning and then
+        # raise AttributeError mid-apply, after earlier components were created.
+        key_value = field_entry.get("key")
+        if not isinstance(key_value, (str, int)) or not str(key_value).strip():
+            return _fail(
+                f"supplied field index entry {path!r} is missing a valid key",
+                {"component_id": str(component_id), "path": path},
+            )
+        for path_key in ("key_path", "name_path"):
+            value = field_entry.get(path_key)
+            if not isinstance(value, str) or not value.strip():
                 return _fail(
-                    f"supplied field index entry {path!r} is missing a valid "
-                    f"{required_key}",
+                    f"supplied field index entry {path!r} {path_key} must be a "
+                    "non-blank string",
                     {"component_id": str(component_id), "path": path},
                 )
         if not isinstance(field_entry.get("mappable"), bool):

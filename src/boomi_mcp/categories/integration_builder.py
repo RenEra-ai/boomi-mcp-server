@@ -195,6 +195,7 @@ from .components.builders.transform_map_validation import (
     validate_transform_map,
 )
 from .components.builders.profile_generation import (
+    PROFILE_INDEX_SUPPORTED_TYPES,
     index_existing_profile_xml,
     validate_supplied_profile_index,
 )
@@ -5008,8 +5009,23 @@ def _discover_profile_index(
         component = component_get_xml(boomi_client, component_id)
     except Exception:
         return None
-    raw_xml = component.get("xml") if isinstance(component, dict) else None
+    if not isinstance(component, dict):
+        return None
+    raw_xml = component.get("xml")
     if not raw_xml:
+        return None
+    # Verify identity + declared type before indexing: never mis-index a
+    # non-profile component (or a mismatched response) that embeds a
+    # profile-shaped subtree (issue #95, plan requirement).
+    returned_id = component.get("component_id")
+    if isinstance(returned_id, str) and returned_id and returned_id != component_id:
+        return None
+    component_type = component.get("type")
+    if (
+        isinstance(component_type, str)
+        and component_type
+        and component_type not in PROFILE_INDEX_SUPPORTED_TYPES
+    ):
         return None
     try:
         indexed = index_existing_profile_xml(raw_xml)
@@ -5054,7 +5070,19 @@ def _resolve_literal_profile_indexes(
         if isinstance(entry, Mapping):
             supplied_err = validate_supplied_profile_index(uuid, entry)
             if supplied_err is None:
-                resolved[uuid] = entry.get("field_index_by_path")
+                # Stamp the profile type onto each field entry (discovered
+                # indexes already carry it) so downstream endpoint-type checks
+                # can read it from the resolved index.
+                ptype = entry.get("profile_component_type")
+                field_index = entry.get("field_index_by_path")
+                resolved[uuid] = {
+                    path: (
+                        field_entry
+                        if field_entry.get("profile_component_type")
+                        else {**field_entry, "profile_component_type": ptype}
+                    )
+                    for path, field_entry in field_index.items()
+                }
                 continue
             # A malformed supplied index never bypasses validation — fall
             # through to live discovery (and, failing that, rejection).

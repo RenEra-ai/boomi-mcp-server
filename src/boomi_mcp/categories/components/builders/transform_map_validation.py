@@ -101,6 +101,22 @@ def resolve_map_profile_index(
         return None
 
 
+def _index_profile_component_type(
+    index: Optional[Dict[str, Dict[str, Any]]]
+) -> Optional[str]:
+    """Return the ``profile_component_type`` stamped on a resolved literal-UUID
+    index (issue #95). Discovered and supplied literal indexes stamp it on every
+    entry; generated ``$ref`` indexes do not (so this returns None for them)."""
+    if not index:
+        return None
+    for entry in index.values():
+        if isinstance(entry, Mapping):
+            ptype = entry.get("profile_component_type")
+            if isinstance(ptype, str) and ptype:
+                return ptype
+    return None
+
+
 def _ref_target_input_names(target_comp: Any) -> List[str]:
     """Return the ordered list of input names exposed by the referenced
     component's external port surface."""
@@ -518,6 +534,46 @@ def validate_transform_map(
                         },
                     )
                     break
+
+    # Issue #95: a resolved literal-UUID index must be TYPE-COMPATIBLE with the
+    # map endpoint's declared profile type. Catch a wrong-type supplied/discovered
+    # index pre-mutation (clearer than the MAP_FIELD_NOT_FOUND it would otherwise
+    # surface once the paths inevitably mismatch).
+    if gen_profile_err is None:
+        for side, side_index in (
+            ("source", source_index),
+            ("target", target_index),
+        ):
+            ref_value = effective_config.get(f"{side}_profile_id")
+            if not (
+                isinstance(ref_value, str)
+                and ref_value.strip()
+                and not ref_value.startswith("$ref:")
+                and side_index is not None
+            ):
+                continue
+            declared = effective_config.get(f"{side}_profile_type")
+            if not (isinstance(declared, str) and declared.strip()):
+                continue
+            index_type = _index_profile_component_type(side_index)
+            if index_type is not None and index_type != declared.strip():
+                gen_profile_err = BuilderValidationError(
+                    f"{side}_profile_id index type {index_type!r} does not match "
+                    f"the declared {side}_profile_type {declared.strip()!r}",
+                    error_code="MAP_PROFILE_INDEX_UNAVAILABLE",
+                    field=f"{side}_profile_type",
+                    hint=(
+                        "Supply an index_profile_component index for the SAME "
+                        "profile type as the map endpoint, or correct the "
+                        f"declared {side}_profile_type."
+                    ),
+                    details={
+                        "side": side,
+                        "index_type": index_type,
+                        "declared_type": declared.strip(),
+                    },
+                )
+                break
 
     if gen_profile_err is None:
         gen_profile_err = type(map_builder_instance).validate_config(

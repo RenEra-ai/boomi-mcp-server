@@ -29,7 +29,11 @@ from .components._shared import (
     component_get_xml,
 )
 from .components.builders.connector_builder import BuilderValidationError
-from .components.builders.profile_generation import index_existing_profile_xml
+from .components.builders.profile_generation import (
+    PROFILE_INDEX_SUPPORTED_TYPES,
+    PROFILE_INDEX_UNSUPPORTED_TYPE,
+    index_existing_profile_xml,
+)
 
 # Every response carries these flags (mirrors the marketplace / inference
 # read-only contracts). ``raw_xml_exposed`` is added per-response.
@@ -113,11 +117,40 @@ def index_profile_component_action(
         )
 
     component_type = component.get("type") if isinstance(component, dict) else None
+    returned_id = component.get("component_id") if isinstance(component, dict) else None
     raw_xml = component.get("xml") if isinstance(component, dict) else None
     if not raw_xml:
         return _error_envelope(
             error_code=INDEX_PROFILE_COMPONENT_FETCH_FAILED,
             error=f"Component {component_id!r} returned no XML body",
+            field="component_id",
+            details={"component_id": component_id, "component_type": component_type},
+        )
+    # Verify the fetched component's identity + declared type. The plan requires
+    # returned-ID equality and a supported profile metadata type — don't rely on
+    # XML-root scanning alone, which could mis-index a NON-profile component that
+    # embeds a profile-shaped subtree.
+    if isinstance(returned_id, str) and returned_id and returned_id != component_id:
+        return _error_envelope(
+            error_code=INDEX_PROFILE_COMPONENT_FETCH_FAILED,
+            error=(
+                f"Fetched component id {returned_id!r} does not match the "
+                f"requested id {component_id!r}"
+            ),
+            field="component_id",
+            details={"component_id": component_id, "returned_id": returned_id},
+        )
+    if (
+        isinstance(component_type, str)
+        and component_type
+        and component_type not in PROFILE_INDEX_SUPPORTED_TYPES
+    ):
+        return _error_envelope(
+            error_code=PROFILE_INDEX_UNSUPPORTED_TYPE,
+            error=(
+                f"Component {component_id!r} is a {component_type!r} component, "
+                "not a profile.json / profile.xml / profile.db"
+            ),
             field="component_id",
             details={"component_id": component_id, "component_type": component_type},
         )

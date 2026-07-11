@@ -2611,25 +2611,33 @@ if index_profile_component_action:
              envelope (MAP_PROFILE_INDEX_UNAVAILABLE / PROFILE_INDEX_* /
              INDEX_PROFILE_COMPONENT_* — never exposing raw XML).
         """
+        # Pre-handler failures still honor the advertised read-only response
+        # contract (flags + a structured error code, never any raw XML).
+        def _wrapper_error(error_code, error):
+            return {
+                "_success": False,
+                "read_only": True,
+                "boomi_mutation": False,
+                "raw_xml_exposed": False,
+                "error_code": error_code,
+                "error": error,
+            }
+
         try:
             subject = get_current_user()
         except Exception as e:
-            return {"_success": False, "error": f"Authentication failed: {str(e)}"}
+            return _wrapper_error("AUTHENTICATION_FAILED", f"Authentication failed: {str(e)}")
 
         try:
             creds = get_secret(subject, profile)
         except DisabledProfileError as e:
-            return {"_success": False, "error": str(e)}
+            return _wrapper_error("PROFILE_DISABLED", str(e))
         except ValueError as e:
-            return {
-                "_success": False,
-                "error": f"Profile '{profile}' not found: {str(e)}",
-            }
+            return _wrapper_error("PROFILE_NOT_FOUND", f"Profile '{profile}' not found: {str(e)}")
         except Exception as e:
-            return {
-                "_success": False,
-                "error": f"Failed to retrieve credentials: {str(e)}",
-            }
+            return _wrapper_error(
+                "CREDENTIAL_RETRIEVAL_FAILED", f"Failed to retrieve credentials: {str(e)}"
+            )
 
         try:
             sdk_params = {
@@ -2642,7 +2650,7 @@ if index_profile_component_action:
                 sdk_params["base_url"] = creds["base_url"]
             sdk = Boomi(**sdk_params)
         except Exception as e:
-            return {"_success": False, "error": f"Failed to initialize Boomi SDK: {str(e)}"}
+            return _wrapper_error("SDK_INIT_FAILED", f"Failed to initialize Boomi SDK: {str(e)}")
 
         return index_profile_component_action(sdk, component_id, include_raw_xml)
 

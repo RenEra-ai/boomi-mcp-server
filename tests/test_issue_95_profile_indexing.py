@@ -111,6 +111,16 @@ class TestPureIndexerJson:
         assert self.idx["Root/internal_ref"]["mappable"] is False
         assert "Root/internal_ref" not in self.res["mappable_paths"]
 
+    def test_non_mappable_leaf_is_not_structural(self):
+        # structural reflects NODE SHAPE, independent of mappable — a
+        # non-mappable scalar LEAF is a leaf, not a container.
+        assert self.idx["Root/internal_ref"]["structural"] is False
+        # containers are structural.
+        assert self.idx["Root/address"]["structural"] is True
+        assert self.idx["Root/lines"]["structural"] is True
+        # mappable leaves are non-structural.
+        assert self.idx["Root/customer_code"]["structural"] is False
+
     def test_leaf_key_and_paths_match_builder_emit(self):
         e = self.idx["Root/customer_code"]
         assert e["key"] == "3"
@@ -375,6 +385,25 @@ class TestSuppliedIndexValidation:
         entry["field_index_by_path"][first]["mappable"] = "true"  # str, not bool
         assert validate_supplied_profile_index(JSON_UUID, entry) is not None
 
+    def test_non_string_key_path_rejected(self):
+        # key_path / name_path reach the string-only XML escaper — an int there
+        # would pass planning and crash rendering mid-apply.
+        for bad_key in ("key_path", "name_path"):
+            entry = _supplied_index(JSON_UUID, "profile_json")
+            first = next(iter(entry["field_index_by_path"]))
+            entry["field_index_by_path"][first] = dict(entry["field_index_by_path"][first])
+            entry["field_index_by_path"][first][bad_key] = 123  # int, not str
+            err = validate_supplied_profile_index(JSON_UUID, entry)
+            assert err is not None and err.error_code == MAP_PROFILE_INDEX_UNAVAILABLE
+
+    def test_integer_key_still_accepted(self):
+        # key (the platform key) may legitimately be an int.
+        entry = _supplied_index(JSON_UUID, "profile_json")
+        first = next(iter(entry["field_index_by_path"]))
+        entry["field_index_by_path"][first] = dict(entry["field_index_by_path"][first])
+        entry["field_index_by_path"][first]["key"] = 5
+        assert validate_supplied_profile_index(JSON_UUID, entry) is None
+
 
 # ===========================================================================
 # 3. Read-only handler
@@ -444,6 +473,25 @@ class TestIndexProfileComponentAction:
         assert res["_success"] is False
         assert res["error_code"] == PROFILE_INDEX_PARSE_FAILED
         assert res["raw_xml_exposed"] is False
+
+    def test_non_profile_metadata_type_rejected_even_with_profile_subtree(self):
+        # A non-profile component whose XML embeds a profile-shaped subtree must
+        # be rejected on its declared metadata type — not mis-indexed.
+        sneaky = (
+            '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process">'
+            "<bns:object>" + _fixture("profile_json").split("<bns:object>")[1]
+        )
+        with patch(_HANDLER_GET, return_value={"type": "process", "component_id": JSON_UUID, "xml": sneaky}):
+            res = index_profile_component_action(MagicMock(), JSON_UUID)
+        assert res["_success"] is False
+        assert res["error_code"] == PROFILE_INDEX_UNSUPPORTED_TYPE
+        assert res["raw_xml_exposed"] is False
+
+    def test_returned_id_mismatch_rejected(self):
+        with patch(_HANDLER_GET, return_value={"type": "profile.json", "component_id": "other-id", "xml": _fixture("profile_json")}):
+            res = index_profile_component_action(MagicMock(), JSON_UUID)
+        assert res["_success"] is False
+        assert res["error_code"] == "INDEX_PROFILE_COMPONENT_FETCH_FAILED"
 
 
 # ===========================================================================
@@ -540,6 +588,23 @@ class TestLiteralUuidMapPlan:
         )
         step = _map_step(_build_plan(MagicMock(), cfg))
         assert step["validation_error"]["error_code"] == "PROFILE_FIELD_NOT_MAPPABLE"
+
+    @patch(_PLAN_PAGINATE, return_value=[])
+    def test_index_type_mismatch_reports_unavailable(self, _pag):
+        # A supplied index whose profile type conflicts with the endpoint's
+        # declared source/target_profile_type is rejected pre-mutation.
+        indexes = {
+            JSON_UUID: _supplied_index(JSON_UUID, "profile_xml"),  # xml index for a profile.json endpoint
+            XML_UUID: _supplied_index(XML_UUID, "profile_xml"),
+        }
+        cfg = _literal_map_config(
+            [{"source_path": "Order/customer_code", "target_path": "Order/customer_code"}],
+            profile_indexes=indexes,
+        )
+        step = _map_step(_build_plan(MagicMock(), cfg))
+        assert step["planned_action"] == "error_generated_profile_validation"
+        assert step["validation_error"]["error_code"] == "MAP_PROFILE_INDEX_UNAVAILABLE"
+        assert step["validation_error"]["field"] == "source_profile_type"
 
     @patch(_PLAN_PAGINATE, return_value=[])
     def test_no_index_and_no_discovery_reports_unavailable(self, _pag):
@@ -840,3 +905,19 @@ class TestIndexProfileComponentWrapper:
             result = server.index_profile_component(profile="work", component_id=JSON_UUID)
         assert result["_success"] is False
         assert "disabled" in result["error"].lower()
+
+    def test_wrapper_errors_carry_read_only_contract_flags(self):
+        # Pre-handler failures must still honor the advertised read-only envelope
+        # (flags + structured error code, never raw XML).
+        with (
+            patch.object(server, "get_current_user", return_value="user@example.com"),
+            patch.object(
+                server, "get_secret", side_effect=ValueError("no such profile")
+            ),
+        ):
+            result = server.index_profile_component(profile="nope", component_id=JSON_UUID)
+        assert result["_success"] is False
+        assert result["read_only"] is True
+        assert result["boomi_mutation"] is False
+        assert result["raw_xml_exposed"] is False
+        assert result["error_code"] == "PROFILE_NOT_FOUND"
