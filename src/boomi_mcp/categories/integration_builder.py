@@ -371,6 +371,12 @@ def _normalize_to_spec(config: Dict[str, Any]) -> IntegrationSpecV1:
                 "folders": source_description.get("folders", {}),
                 "runtime": source_description.get("runtime", {}),
                 "validation_rules": source_description.get("validation_rules", {}),
+                # Issue #95: preserve the ephemeral existing-profile index map so a
+                # top-level source_description form can still validate literal-UUID
+                # transform.maps against supplied indexes.
+                "profile_indexes_by_component_id": source_description.get(
+                    "profile_indexes_by_component_id"
+                ),
             }
         else:
             spec_payload = {
@@ -384,6 +390,12 @@ def _normalize_to_spec(config: Dict[str, Any]) -> IntegrationSpecV1:
                 "folders": config.get("folders", {}),
                 "runtime": config.get("runtime", {}),
                 "validation_rules": config.get("validation_rules", {}),
+                # Issue #95: preserve the ephemeral existing-profile index map from
+                # the documented top-level plan form so supplied indexes are not
+                # silently dropped.
+                "profile_indexes_by_component_id": config.get(
+                    "profile_indexes_by_component_id"
+                ),
             }
 
     if not isinstance(spec_payload, dict):
@@ -6617,6 +6629,55 @@ def _apply_plan(boomi_client: Boomi, profile: str, config: Dict[str, Any]) -> Di
     # or live-discovered) so a validated literal-UUID transform.map also RENDERS
     # at apply — keeps plan and apply from diverging.
     literal_profile_indexes = _resolve_literal_profile_indexes(boomi_client, spec)
+
+    # Apply re-resolves those indexes, and live discovery can DRIFT from plan
+    # time (a profile edited/removed between plan and apply, or a transient fetch
+    # failure). Re-validate every literal-UUID transform.map that will actually be
+    # built, against the apply-time indexes, and FAIL FAST here — before the
+    # mutation loop — so a drifted/missing index can never create earlier
+    # components and then fail at the map step (partial mutation).
+    _built_actions = ("create", "create_clone", "update")
+    _built_map_keys = {
+        step["key"]
+        for step in planned["steps"]
+        if step.get("type") == "transform.map"
+        and step.get("planned_action") in _built_actions
+    }
+    for comp in spec.components:
+        if comp.type != "transform.map" or comp.key not in _built_map_keys:
+            continue
+        cfg = comp.config if isinstance(comp.config, dict) else {}
+        has_literal = any(
+            isinstance(cfg.get(side), str)
+            and cfg[side].strip()
+            and not cfg[side].startswith("$ref:")
+            for side in ("source_profile_id", "target_profile_id")
+        )
+        if not has_literal:
+            continue
+        effective_config = dict(cfg)
+        if comp.name and not effective_config.get("component_name"):
+            effective_config["component_name"] = comp.name
+        drift_err = validate_transform_map(
+            effective_config,
+            comp.depends_on,
+            components_by_key,
+            literal_indexes=literal_profile_indexes,
+        )
+        if drift_err is not None:
+            return {
+                "_success": False,
+                "error_code": drift_err.error_code,
+                "error": str(drift_err),
+                "field": drift_err.field,
+                "failed_step": comp.key,
+                "hint": (
+                    "A literal existing-profile index available at plan time "
+                    "could not be re-resolved at apply (the profile changed or "
+                    "was removed, or discovery failed). No components were "
+                    "created."
+                ),
+            }
 
     id_registry: Dict[str, str] = {}
     results: Dict[str, Dict[str, Any]] = {}

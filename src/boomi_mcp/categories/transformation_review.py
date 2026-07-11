@@ -50,6 +50,7 @@ from .components.builders.transform_map_validation import (
     resolve_map_profile_index,
     validate_transform_map,
 )
+from .components.builders.profile_generation import validate_supplied_profile_index
 
 # ---------------------------------------------------------------------------
 # Error / finding codes
@@ -141,6 +142,9 @@ class _MapUnit:
     map_config: Optional[Dict[str, Any]] = None
     depends_on: Any = field(default_factory=list)
     components_by_key: Optional[Dict[str, Any]] = None
+    # Issue #95: supplied literal existing-profile UUID indexes (review is
+    # offline — it cannot live-discover, only honor supplied indexes).
+    literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 @dataclass
@@ -425,7 +429,9 @@ def _build_context(config: Mapping[str, Any]) -> _Context:
     if not isinstance(components, list):
         components = []
     if _has_transform_map(components):
-        return _context_from_components(components)
+        return _context_from_components(
+            components, _supplied_literal_indexes(spec)
+        )
 
     raise _ReviewError(
         TRANSFORM_REVIEW_NO_TRANSFORM_FOUND,
@@ -522,7 +528,35 @@ def _has_transform_map(components: Any) -> bool:
     return False
 
 
-def _context_from_components(components: Any) -> _Context:
+def _supplied_literal_indexes(
+    spec: Mapping[str, Any]
+) -> Dict[str, Dict[str, Any]]:
+    """Build the literal-UUID index map from a spec's supplied
+    ``profile_indexes_by_component_id`` (issue #95).
+
+    Review is offline (no SDK / live discovery), so ONLY caller-supplied indexes
+    are honored — mirroring build_integration's supplied-index precedence. A
+    malformed supplied entry is dropped (never trusted), so review stays
+    consistent with build for well-formed supplied indexes and honestly reports
+    unavailable when an index must be live-discovered.
+    """
+    supplied = spec.get("profile_indexes_by_component_id")
+    if not isinstance(supplied, Mapping):
+        return {}
+    resolved: Dict[str, Dict[str, Any]] = {}
+    for uuid, entry in supplied.items():
+        if not isinstance(uuid, str):
+            continue
+        if validate_supplied_profile_index(uuid, entry) is None:
+            resolved[uuid.strip()] = entry.get("field_index_by_path")
+    return resolved
+
+
+def _context_from_components(
+    components: Any,
+    literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> _Context:
+    literal_indexes = literal_indexes or {}
     views = [
         _comp_view(cd)
         for cd in (_coerce_component(c) for c in components)
@@ -553,8 +587,12 @@ def _context_from_components(components: Any) -> _Context:
                 hint="Raw map XML import is future work (#48).",
             )
 
-        source_index = _resolve_side_index(effective, "source", components_by_key)
-        target_index = _resolve_side_index(effective, "target", components_by_key)
+        source_index = _resolve_side_index(
+            effective, "source", components_by_key, literal_indexes
+        )
+        target_index = _resolve_side_index(
+            effective, "target", components_by_key, literal_indexes
+        )
         units.append(
             _MapUnit(
                 source_index=source_index,
@@ -563,6 +601,7 @@ def _context_from_components(components: Any) -> _Context:
                 map_config=effective,
                 depends_on=mv.depends_on,
                 components_by_key=components_by_key,
+                literal_indexes=literal_indexes,
             )
         )
 
@@ -573,11 +612,14 @@ def _resolve_side_index(
     effective_config: Mapping[str, Any],
     side: str,
     components_by_key: Mapping[str, Any],
+    literal_indexes: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Resolve one side's normalized field index via the same generated-profile
     logic build_integration uses (resolve_map_profile_index). Raw-XML profiles
-    and unresolvable refs (literal UUID / missing / non-profile) surface as
-    'review unavailable', never silent emptiness."""
+    and unresolvable refs (missing $ref / non-profile / literal UUID with no
+    supplied index) surface as 'review unavailable', never silent emptiness.
+    A literal existing-profile UUID resolves when ``literal_indexes`` supplies it
+    (issue #95)."""
     ref = effective_config.get(f"{side}_profile_id")
     ref_key = (
         ref[len("$ref:"):]
@@ -594,16 +636,19 @@ def _resolve_side_index(
             details={"side": side},
         )
 
-    index = resolve_map_profile_index(ref, components_by_key)
+    index = resolve_map_profile_index(ref, components_by_key, literal_indexes)
     if index is None:
         raise _ReviewError(
             TRANSFORM_REVIEW_PROFILE_INDEX_UNAVAILABLE,
             f"{side}_profile_id could not be indexed — it is a literal "
-            "existing-profile id, a missing $ref, or a non-profile component",
+            "existing-profile id with no supplied index, a missing $ref, or a "
+            "non-profile component",
             field=f"{side}_profile_id",
             hint=(
-                "Indexing live existing-profile XML is separate future work, "
-                "not covered by infer_profile_fields (issue #47)."
+                "For a literal existing-profile UUID, index it with "
+                "index_profile_component and supply it via "
+                "profile_indexes_by_component_id; review is offline and cannot "
+                "live-discover."
             ),
             details={"side": side},
         )
@@ -750,7 +795,10 @@ def _mapped_targets(unit: _MapUnit) -> set:
 def _validate_executable_unit(unit: _MapUnit):
     issues: List[Dict[str, Any]] = []
     err = validate_transform_map(
-        unit.map_config, unit.depends_on, unit.components_by_key
+        unit.map_config,
+        unit.depends_on,
+        unit.components_by_key,
+        literal_indexes=unit.literal_indexes,
     )
     if err is not None:
         issues.append(_issue_from_builder_error(err))

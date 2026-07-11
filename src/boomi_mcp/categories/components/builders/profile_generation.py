@@ -1670,15 +1670,38 @@ def _index_xml_attribute(
 # ---- Database ------------------------------------------------------------
 
 
+def _db_execution_type(profile_root: Any) -> str:
+    """Return the profile's ``executionType`` (``dbread`` / ``dbwrite``).
+
+    Read from ``<ProfileProperties><DatabaseGeneralInfo executionType="...">``;
+    defaults to ``dbread`` when absent (the read-profile field-index shape).
+    """
+    props = _first_child(profile_root, "ProfileProperties")
+    if props is not None:
+        info = _first_child(props, "DatabaseGeneralInfo")
+        if info is not None:
+            exec_type = info.get("executionType")
+            if isinstance(exec_type, str) and exec_type.strip():
+                return exec_type.strip()
+    return "dbread"
+
+
 def _index_db_profile(
     profile_root: Any,
     field_index: Dict[str, Dict[str, Any]],
     mappable_paths: List[str],
 ) -> None:
-    # Mirror profile_builder.build_field_index exactly: index the result_set
-    # columns (<DatabaseElement> under <DBFields>) by BARE column name, so a
-    # live-indexed DB profile keys identically to a generated one. DBParameters
-    # are intentionally not indexed (matching the generated-profile contract).
+    # Mirror the DB build_field_index shapes exactly so a live-indexed DB profile
+    # keys IDENTICALLY to a generated one:
+    #   * dbread  (DatabaseReadProfileBuilder): result_set columns under DBFields,
+    #     keyed by BARE column name.
+    #   * dbwrite (DatabaseWriteProfileBuilder): writable columns under DBFields
+    #     keyed "Fields/<name>", WHERE keys under DBConditions keyed
+    #     "Conditions/<name>" (namespace-prefixed so a column appearing in both
+    #     the SET fields and WHERE conditions of a dynamicupdate stays distinct;
+    #     a dynamicdelete carries DBConditions only, no DBFields).
+    # DBParameters are intentionally not indexed (matching the generated
+    # read-profile contract).
     data_elements = _require_data_elements(profile_root)
     statement = _first_child(data_elements, "DBStatement")
     if statement is None:
@@ -1689,30 +1712,57 @@ def _index_db_profile(
         )
     statement_key = _require_element_key(statement, "DBStatement")
     statement_name = statement.get("name") or "Statement"
+    is_write = _db_execution_type(profile_root) == "dbwrite"
+
     fields = _first_child(statement, "DBFields")
-    if fields is None:
-        return
-    fields_key = _require_element_key(fields, "DBFields")
-    fields_name = fields.get("name") or "Fields"
-    for column in _iter_children(fields, "DatabaseElement"):
-        column_key = _require_element_key(column, "DatabaseElement")
-        column_name = column.get("name") or ""
-        _add_profile_index_entry(
-            field_index,
-            mappable_paths,
-            logical_path=column_name,
-            name=column_name,
-            key=column_key,
-            key_path=[
-                f"*[@key='{statement_key}']",
-                f"*[@key='{fields_key}']",
-                f"*[@key='{column_key}']",
-            ],
-            name_path=[statement_name, fields_name, column_name],
-            data_type=column.get("dataType"),
-            kind="simple",
-            mappable=column.get("isMappable") == "true",
-        )
+    if fields is not None:
+        fields_key = _require_element_key(fields, "DBFields")
+        fields_name = fields.get("name") or "Fields"
+        for column in _iter_children(fields, "DatabaseElement"):
+            column_key = _require_element_key(column, "DatabaseElement")
+            column_name = column.get("name") or ""
+            logical = f"{fields_name}/{column_name}" if is_write else column_name
+            _add_profile_index_entry(
+                field_index,
+                mappable_paths,
+                logical_path=logical,
+                name=column_name,
+                key=column_key,
+                key_path=[
+                    f"*[@key='{statement_key}']",
+                    f"*[@key='{fields_key}']",
+                    f"*[@key='{column_key}']",
+                ],
+                name_path=[statement_name, fields_name, column_name],
+                data_type=column.get("dataType"),
+                kind="simple",
+                mappable=column.get("isMappable") == "true",
+            )
+
+    # WHERE-condition keys (dynamicupdate / dynamicdelete write profiles only).
+    conditions = _first_child(statement, "DBConditions")
+    if is_write and conditions is not None:
+        conditions_key = _require_element_key(conditions, "DBConditions")
+        conditions_name = conditions.get("name") or "Conditions"
+        for condition in _iter_children(conditions, "DBCondition"):
+            condition_key = _require_element_key(condition, "DBCondition")
+            condition_name = condition.get("name") or ""
+            _add_profile_index_entry(
+                field_index,
+                mappable_paths,
+                logical_path=f"{conditions_name}/{condition_name}",
+                name=condition_name,
+                key=condition_key,
+                key_path=[
+                    f"*[@key='{statement_key}']",
+                    f"*[@key='{conditions_key}']",
+                    f"*[@key='{condition_key}']",
+                ],
+                name_path=[statement_name, conditions_name, condition_name],
+                data_type=condition.get("dataType"),
+                kind="simple",
+                mappable=condition.get("isMappable") == "true",
+            )
 
 
 # ---------------------------------------------------------------------------

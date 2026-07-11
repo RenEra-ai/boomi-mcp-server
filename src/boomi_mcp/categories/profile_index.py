@@ -138,6 +138,10 @@ def index_profile_component_action(
     response: Dict[str, Any] = {
         "_success": True,
         **_INDEX_FLAGS,
+        # Provenance marker required by import_integration_draft (issue #48):
+        # integration_import._analyze_schema only accepts a live field index whose
+        # produced_by == "index_profile_component".
+        "produced_by": "index_profile_component",
         "component_id": component_id,
         "profile_component_type": indexed["profile_component_type"],
         "field_index_by_path": indexed["field_index_by_path"],

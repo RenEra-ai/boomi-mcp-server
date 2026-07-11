@@ -44,7 +44,15 @@ from src.boomi_mcp.categories.components.builders.profile_generation import (
 )
 from src.boomi_mcp.categories import profile_index as profile_index_mod
 from src.boomi_mcp.categories.profile_index import index_profile_component_action
-from src.boomi_mcp.categories.integration_builder import _build_plan
+from src.boomi_mcp.categories.integration_builder import (
+    _apply_plan,
+    _build_plan,
+    _normalize_to_spec,
+)
+from src.boomi_mcp.categories.components.builders.transform_map_validation import (
+    resolve_map_profile_index,
+)
+from src.boomi_mcp.categories.transformation_review import review_transformation_action
 
 _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "profile_components" / "issue_95"
 
@@ -52,6 +60,7 @@ _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "profile_component
 JSON_UUID = "11111111-1111-1111-1111-111111111111"
 XML_UUID = "22222222-2222-2222-2222-222222222222"
 DB_UUID = "33333333-3333-3333-3333-333333333333"
+JSON2_UUID = "55555555-5555-5555-5555-555555555555"
 
 
 def _fixture(name):
@@ -188,6 +197,57 @@ class TestPureIndexerDb:
         assert len(self.idx) == 3
 
 
+class TestPureIndexerDbWrite:
+    """A dbwrite profile namespaces columns (Fields/) and WHERE keys (Conditions/)
+    exactly like DatabaseWriteProfileBuilder.build_field_index."""
+
+    def setup_method(self):
+        self.res = index_existing_profile_xml(_fixture("profile_db_write"))
+        self.idx = self.res["field_index_by_path"]
+
+    def test_fields_namespaced_and_keyed(self):
+        e = self.idx["Fields/display_name"]
+        assert e["key"] == "5"
+        assert e["key_path"] == "*[@key='2']/*[@key='3']/*[@key='5']"
+        assert e["name_path"] == "Statement/Fields/display_name"
+        assert e["mappable"] is True
+
+    def test_conditions_namespaced_under_key_4(self):
+        e = self.idx["Conditions/record_id"]
+        assert e["key"] == "7"
+        assert e["key_path"] == "*[@key='2']/*[@key='4']/*[@key='7']"
+        assert e["name_path"] == "Statement/Conditions/record_id"
+        assert e["mappable"] is True
+
+    def test_bare_column_name_not_used_for_write(self):
+        # Write profiles must NOT key by bare name (that's the read-profile shape).
+        assert "display_name" not in self.idx
+        assert self.res["mappable_paths"] == [
+            "Fields/display_name",
+            "Fields/status",
+            "Conditions/record_id",
+        ]
+
+    def test_dynamicdelete_conditions_only(self):
+        xml = (
+            '<DatabaseProfile xmlns=""><ProfileProperties>'
+            '<DatabaseGeneralInfo executionType="dbwrite"/></ProfileProperties>'
+            '<DataElements><DBStatement key="2" name="Statement" '
+            'statementType="dynamicdelete"><DBConditions key="4" name="Conditions">'
+            '<DBCondition key="5" name="record_id" dataType="character" '
+            'isMappable="true"/></DBConditions></DBStatement></DataElements>'
+            "</DatabaseProfile>"
+        )
+        res = index_existing_profile_xml(xml)
+        assert res["mappable_paths"] == ["Conditions/record_id"]
+
+    def test_dbread_still_uses_bare_column_names(self):
+        # Regression: a read profile keeps bare-name keys (no Fields/ prefix).
+        res = index_existing_profile_xml(_fixture("profile_db"))
+        assert "customer_code" in res["field_index_by_path"]
+        assert "Fields/customer_code" not in res["field_index_by_path"]
+
+
 class TestPureIndexerFailures:
     def test_malformed_xml(self):
         with pytest.raises(BuilderValidationError) as exc:
@@ -316,6 +376,13 @@ class TestIndexProfileComponentAction:
             res = index_profile_component_action(MagicMock(), JSON_UUID, include_raw_xml=True)
         assert res["raw_xml_exposed"] is True
         assert res["raw_xml"] == _fixture("profile_json")
+
+    def test_success_carries_import_provenance_marker(self):
+        # import_integration_draft only accepts a live index whose
+        # produced_by == "index_profile_component".
+        with patch(_HANDLER_GET, return_value={"type": "profile.json", "xml": _fixture("profile_json")}):
+            res = index_profile_component_action(MagicMock(), JSON_UUID)
+        assert res["produced_by"] == "index_profile_component"
 
     def test_blank_component_id_is_structured_error(self):
         res = index_profile_component_action(MagicMock(), "   ")
@@ -506,6 +573,140 @@ class TestLiteralUuidMapPlan:
         with patch(_PLAN_GET) as m_get:
             _build_plan(MagicMock(), cfg)
         m_get.assert_not_called()
+
+
+# ---- Fix regressions: $ref normalization, top-level config, apply drift, review ----
+
+_APPLY_RESOLVE = "src.boomi_mcp.categories.integration_builder._resolve_literal_profile_indexes"
+_APPLY_EXEC = "src.boomi_mcp.categories.integration_builder._execute_component"
+
+
+class TestResolveMapProfileIndexNormalization:
+    def test_ref_with_leading_whitespace_treated_as_literal(self):
+        # A padded " $ref:x" must NOT resolve as a $ref (depends_on coverage and
+        # _resolve_dependency_tokens test the unstripped value); it stays a
+        # literal -> None -> MAP_PROFILE_INDEX_UNAVAILABLE, consistently.
+        assert resolve_map_profile_index(" $ref:x", None, {}) is None
+        assert resolve_map_profile_index(" $ref:x", {"x": object()}) is None
+
+    def test_literal_uuid_stripped_only_for_index_lookup(self):
+        idx = {"f": {"key": "5", "key_path": "kp", "name_path": "np", "mappable": True}}
+        assert resolve_map_profile_index("  U1  ", None, {"U1": idx}) is idx
+
+    def test_unknown_literal_uuid_returns_none(self):
+        assert resolve_map_profile_index("nope", None, {"U1": {}}) is None
+
+
+class TestTopLevelConfigPreservesIndexes:
+    def test_top_level_form_preserves_supplied_indexes(self):
+        supplied = {JSON_UUID: _supplied_index(JSON_UUID, "profile_json")}
+        spec = _normalize_to_spec(
+            {"name": "x", "components": [], "profile_indexes_by_component_id": supplied}
+        )
+        assert spec.profile_indexes_by_component_id == supplied
+
+    def test_integration_spec_form_preserves_supplied_indexes(self):
+        supplied = {JSON_UUID: _supplied_index(JSON_UUID, "profile_json")}
+        spec = _normalize_to_spec(
+            {
+                "integration_spec": {
+                    "name": "x",
+                    "components": [],
+                    "profile_indexes_by_component_id": supplied,
+                }
+            }
+        )
+        assert spec.profile_indexes_by_component_id == supplied
+
+
+class TestApplyDriftFailFast:
+    @patch(_PLAN_PAGINATE, return_value=[])
+    def test_apply_time_index_drift_fails_before_mutation(self, _pag):
+        # Plan resolves valid indexes (map validates clean); apply RE-resolves an
+        # empty map (a live profile changed/removed between plan and apply) ->
+        # fail fast BEFORE any _execute_component, so no partial mutation.
+        valid = {
+            JSON_UUID: _supplied_index(JSON_UUID, "profile_json")["field_index_by_path"],
+            XML_UUID: _supplied_index(XML_UUID, "profile_xml")["field_index_by_path"],
+        }
+        cfg = _literal_map_config(
+            [{"source_path": "Root/customer_code", "target_path": "Order/customer_code"}],
+        )
+        cfg["dry_run"] = False
+        with (
+            patch(_APPLY_RESOLVE, side_effect=[valid, {}]),
+            patch(_APPLY_EXEC) as m_exec,
+        ):
+            result = _apply_plan(MagicMock(), "work", cfg)
+        assert result["_success"] is False
+        assert result["error_code"] == "MAP_PROFILE_INDEX_UNAVAILABLE"
+        assert result["failed_step"] == "literal_map"
+        m_exec.assert_not_called()
+
+    @patch(_PLAN_PAGINATE, return_value=[])
+    def test_stable_indexes_apply_without_drift_error(self, _pag):
+        # Sanity: with stable indexes across plan+apply, the drift guard does not
+        # false-trigger — the map reaches the execution loop.
+        valid = {
+            JSON_UUID: _supplied_index(JSON_UUID, "profile_json")["field_index_by_path"],
+            XML_UUID: _supplied_index(XML_UUID, "profile_xml")["field_index_by_path"],
+        }
+        cfg = _literal_map_config(
+            [{"source_path": "Root/customer_code", "target_path": "Order/customer_code"}],
+        )
+        cfg["dry_run"] = False
+        with (
+            patch(_APPLY_RESOLVE, side_effect=[valid, valid]),
+            patch(_APPLY_EXEC, return_value={"_success": True, "component_id": "new-map"}) as m_exec,
+        ):
+            result = _apply_plan(MagicMock(), "work", cfg)
+        assert result.get("_success", True) is not False
+        m_exec.assert_called()
+
+
+class TestTransformationReviewLiteralIndexes:
+    def _review_config(self, with_index):
+        spec = {
+            "version": "1.0",
+            "name": "rev",
+            "components": [
+                {
+                    "key": "m",
+                    "type": "transform.map",
+                    "name": "M",
+                    "config": {
+                        "component_type": "transform.map",
+                        "map_type": "direct",
+                        "component_name": "M",
+                        "source_profile_id": JSON_UUID,
+                        "source_profile_type": "profile.json",
+                        "target_profile_id": JSON2_UUID,
+                        "target_profile_type": "profile.json",
+                        "field_mappings": [
+                            {"source_path": "Root/customer_code", "target_path": "Root/customer_code"}
+                        ],
+                    },
+                    "depends_on": [],
+                }
+            ],
+        }
+        if with_index:
+            spec["profile_indexes_by_component_id"] = {
+                JSON_UUID: _supplied_index(JSON_UUID, "profile_json"),
+                JSON2_UUID: _supplied_index(JSON2_UUID, "profile_json"),
+            }
+        return {"integration_spec": spec}
+
+    def test_review_without_supplied_index_reports_unavailable(self):
+        res = review_transformation_action("list_fields", self._review_config(False))
+        assert res["_success"] is False
+        assert "PROFILE_INDEX_UNAVAILABLE" in json.dumps(res)
+
+    def test_review_with_supplied_index_resolves(self):
+        # Build accepts this spec; review must not diverge (no unavailable error).
+        res = review_transformation_action("list_fields", self._review_config(True))
+        assert res["_success"] is True
+        assert "PROFILE_INDEX_UNAVAILABLE" not in json.dumps(res)
 
 
 # ===========================================================================

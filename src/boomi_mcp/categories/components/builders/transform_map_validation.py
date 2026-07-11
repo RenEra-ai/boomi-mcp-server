@@ -40,12 +40,16 @@ def resolve_map_profile_index(
     validator then raises MAP_PROFILE_INDEX_UNAVAILABLE."""
     if not isinstance(profile_id, str) or not profile_id.strip():
         return None
-    profile_id = profile_id.strip()
+    # Test $ref on the RAW value (do not pre-strip): the depends_on coverage
+    # check and _resolve_dependency_tokens also test the unstripped value, so a
+    # whitespace-padded " $ref:..." must be treated as a literal here too (it
+    # resolves to None -> MAP_PROFILE_INDEX_UNAVAILABLE) rather than silently
+    # resolving in one place and staying an unresolved literal everywhere else.
     if not profile_id.startswith("$ref:"):
         # Literal existing-profile UUID — resolvable only from a supplied /
         # discovered index (issue #95). Unknown UUID -> None -> unavailable.
         if literal_indexes:
-            return literal_indexes.get(profile_id)
+            return literal_indexes.get(profile_id.strip())
         return None
     if components_by_key is None:
         return None
