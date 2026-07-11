@@ -325,6 +325,14 @@ except ImportError as e:
     print(f"[WARNING] Failed to import connection reuse discovery tool: {e}")
     suggest_connection_reuse_action = None
 
+# --- Marketplace Recipe Search Tool (Issue #84, M7.4) ---
+try:
+    from boomi_mcp.categories.marketplace import search_marketplace_recipes_action
+    print(f"[INFO] Marketplace recipe search tool loaded successfully")
+except ImportError as e:
+    print(f"[WARNING] Failed to import marketplace recipe search tool: {e}")
+    search_marketplace_recipes_action = None
+
 # --- Folder Tools ---
 try:
     from boomi_mcp.categories.folders import manage_folders_action
@@ -2218,6 +2226,66 @@ if suggest_connection_reuse_action:
             }
 
     print("[INFO] suggest_connection_reuse tool registered successfully")
+
+
+# --- Marketplace Recipe Search MCP Tool (Issue #84, M7.4) ---
+if search_marketplace_recipes_action:
+
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+    def search_marketplace_recipes(
+        query: str | None = None,
+        tags: list[str] | None = None,
+        top_k: int = 10,
+    ):
+        """Search Boomi's PUBLIC Marketplace catalog for Recipe reference patterns (M7.4).
+
+        Read-only, OPEN-WORLD DISCOVERY. Queries Boomi's public, UNAUTHENTICATED
+        GraphQL catalog (POST platform.boomi.com/graphql) and returns PUBLISHED
+        Recipe listings. Sends NO profile, credentials, cookies, or Authorization
+        header — it never touches your Boomi account — and exposes NO install or
+        mutation path (install is deliberately deferred). Recipes are REFERENCE
+        PATTERNS to review and adapt, not production-ready components.
+
+        Args:
+            query: Optional free-text search term (GraphQL searchTerm). Blank/None
+                omits the term and returns the most popular published recipes.
+            tags: Optional list of solution tag names (e.g. ['Salesforce',
+                'ServiceNow']). Any-match among the names; the Recipe asset-type
+                tag is ALWAYS required. Empty/None applies no extra tag filter.
+            top_k: Max recipes to return (clamped 1..25; default 10; first page
+                only).
+
+        Returns:
+            _success + read_only/boomi_mutation/open_world flags, query, tags,
+            top_k, total_count, returned_count, and recipes[] (slug, name,
+            description, tags[{id,name,category_code}], install_count,
+            artifact_source_id) plus guidance; or a structured
+            MARKETPLACE_GRAPHQL_UNAVAILABLE error envelope (recipes=[], still
+            carrying the safety flags) on endpoint/GraphQL failure.
+        """
+        try:
+            return search_marketplace_recipes_action(
+                query=query, tags=tags, top_k=top_k
+            )
+        except Exception as e:
+            # Belt-and-suspenders: the handler already returns a structured
+            # envelope for every failure mode, but any unexpected wrapper-level
+            # error still returns the same leak-proof shape (type name only).
+            etype = type(e).__name__
+            print(f"[ERROR] search_marketplace_recipes failed: unexpected {etype}")
+            return {
+                "_success": False,
+                "error_code": "MARKETPLACE_GRAPHQL_UNAVAILABLE",
+                "error": "Boomi Marketplace recipe search is temporarily unavailable.",
+                "failure_kind": "unexpected",
+                "http_status": None,
+                "recipes": [],
+                "read_only": True,
+                "boomi_mutation": False,
+                "open_world": True,
+            }
+
+    print("[INFO] search_marketplace_recipes tool registered successfully")
 
 
 # --- Integration Builder MCP Tool ---

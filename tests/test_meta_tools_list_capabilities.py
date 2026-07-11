@@ -768,3 +768,38 @@ def test_import_integration_draft_preserved_when_registered():
         available_tools={"import_integration_draft"}
     )
     assert "import_integration_draft" in catalog["tools"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #84 (M7.4) — search_marketplace_recipes discoverability
+# ---------------------------------------------------------------------------
+
+
+def test_list_capabilities_includes_search_marketplace_recipes():
+    tools = list_capabilities_action()["tools"]
+    assert "search_marketplace_recipes" in tools
+    entry = tools["search_marketplace_recipes"]
+    assert entry["category"] == "Integration Authoring"
+    assert entry["read_only"] is True
+    assert entry.get("no_boomi_mutation") is True
+    # Exactly the documented parameter surface (no profile).
+    assert set(entry["parameters"]) == {"query", "tags", "top_k"}
+    # Reference-pattern positioning + public/unauthenticated framing, and no
+    # install path.
+    desc = entry["description"]
+    assert "reference pattern" in desc.lower()
+    assert "UNAUTHENTICATED" in desc
+    assert "NO install path" in desc
+
+
+def test_search_marketplace_recipes_filtered_when_not_registered():
+    only = {"build_integration", "get_schema_template", "list_boomi_profiles"}
+    catalog = list_capabilities_action(available_tools=only)
+    assert "search_marketplace_recipes" not in catalog["tools"]
+
+
+def test_search_marketplace_recipes_preserved_when_registered():
+    catalog = list_capabilities_action(
+        available_tools={"search_marketplace_recipes"}
+    )
+    assert "search_marketplace_recipes" in catalog["tools"]

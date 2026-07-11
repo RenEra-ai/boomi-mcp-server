@@ -135,3 +135,18 @@ def test_list_capabilities_wrapper_does_not_call_boomi_or_credentials():
     m_user.assert_not_called()
     m_secret.assert_not_called()
     m_boomi.assert_not_called()
+
+
+def test_list_capabilities_wrapper_surfaces_search_marketplace_recipes():
+    """Issue #84 (M7.4): the live-filtered catalog surfaces the marketplace search
+    tool — it is in BOTH the static catalog and the live FastMCP registry."""
+    result = _run_async(server.mcp.call_tool("list_capabilities", {}))
+    payload = _payload(result)
+
+    registered_names = {t.name for t in _run_async(server.mcp.list_tools())}
+    assert "search_marketplace_recipes" in registered_names, (
+        "search_marketplace_recipes must be registered"
+    )
+    assert "search_marketplace_recipes" in payload["tools"], (
+        "search_marketplace_recipes missing from live-filtered catalog"
+    )

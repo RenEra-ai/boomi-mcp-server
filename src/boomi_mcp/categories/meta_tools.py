@@ -9712,6 +9712,34 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
                 "suggest_connection_reuse(profile=\"prod\", connector_type=\"rest\", endpoint_hint=\"https://api.acme.com\") → reference_only + conflict_policy='reuse' bindings",
             ],
         },
+        "search_marketplace_recipes": {
+            "category": "Integration Authoring",
+            "description": (
+                "Read-only MARKETPLACE RECIPE SEARCH (issue #84, M7.4): queries "
+                "Boomi's PUBLIC, UNAUTHENTICATED GraphQL catalog (POST "
+                "platform.boomi.com/graphql) and returns PUBLISHED Recipe listings "
+                "as reference patterns — no profile, no credentials, no Boomi "
+                "mutation, and NO install path (install is deliberately deferred). "
+                "Each result: slug, name, description, tags[{id,name,category_code}], "
+                "install_count, artifact_source_id. Recipes are reference patterns "
+                "to review and adapt, not installable/production-ready components "
+                "here. Response keys: recipes[], total_count, returned_count. "
+                "Endpoint or GraphQL failures return a structured "
+                "MARKETPLACE_GRAPHQL_UNAVAILABLE envelope (recipes=[])."
+            ),
+            "actions": ["(single action — searches published Marketplace recipes)"],
+            "read_only": True,
+            "no_boomi_mutation": True,
+            "parameters": {
+                "query": "str (optional) — free-text search term (GraphQL searchTerm)",
+                "tags": "list[str] (optional) — solution tag names (any-match; the Recipe asset-type tag is always required)",
+                "top_k": "int (optional) — max recipes (clamped 1..25; default 10; first page only)",
+            },
+            "examples": [
+                "search_marketplace_recipes(query=\"salesforce order sync\")",
+                "search_marketplace_recipes(tags=[\"Salesforce\", \"ServiceNow\"], top_k=5)",
+            ],
+        },
         "build_integration": {
             "category": "Execution",
             "description": (
