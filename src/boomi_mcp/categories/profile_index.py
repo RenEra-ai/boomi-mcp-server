@@ -117,7 +117,10 @@ def index_profile_component_action(
         )
 
     component_type = component.get("type") if isinstance(component, dict) else None
-    returned_id = component.get("component_id") if isinstance(component, dict) else None
+    # ``id`` is the RAW exported componentId (empty when the XML omits it);
+    # ``component_id`` would mask a missing one by substituting the request.
+    exported_id = component.get("id") if isinstance(component, dict) else None
+    exported_id = exported_id.strip() if isinstance(exported_id, str) else ""
     raw_xml = component.get("xml") if isinstance(component, dict) else None
     if not raw_xml:
         return _error_envelope(
@@ -126,25 +129,22 @@ def index_profile_component_action(
             field="component_id",
             details={"component_id": component_id, "component_type": component_type},
         )
-    # Verify the fetched component's identity + declared type. The plan requires
-    # returned-ID equality and a supported profile metadata type — don't rely on
-    # XML-root scanning alone, which could mis-index a NON-profile component that
-    # embeds a profile-shaped subtree.
-    if isinstance(returned_id, str) and returned_id and returned_id != component_id:
+    # FAIL-CLOSED identity + type verification (plan requirement): the exported
+    # componentId must be PRESENT and equal the request, and the declared metadata
+    # type must be EXACTLY one of the supported profile types — never fall through
+    # to XML-root scanning (which could mis-index a non-profile component that
+    # embeds a profile-shaped subtree).
+    if not exported_id or exported_id != component_id:
         return _error_envelope(
             error_code=INDEX_PROFILE_COMPONENT_FETCH_FAILED,
             error=(
-                f"Fetched component id {returned_id!r} does not match the "
+                f"Fetched component id {exported_id!r} does not match the "
                 f"requested id {component_id!r}"
             ),
             field="component_id",
-            details={"component_id": component_id, "returned_id": returned_id},
+            details={"component_id": component_id, "returned_id": exported_id},
         )
-    if (
-        isinstance(component_type, str)
-        and component_type
-        and component_type not in PROFILE_INDEX_SUPPORTED_TYPES
-    ):
+    if component_type not in PROFILE_INDEX_SUPPORTED_TYPES:
         return _error_envelope(
             error_code=PROFILE_INDEX_UNSUPPORTED_TYPE,
             error=(

@@ -1882,8 +1882,14 @@ def validate_supplied_profile_index(
         # and ``name_path`` are rendered verbatim through the string-only XML
         # escaper (_escape_xml) — a non-string there would pass planning and then
         # raise AttributeError mid-apply, after earlier components were created.
+        # ``key`` is the platform key (str or int) — but NOT a bool (bool
+        # subclasses int; True/False would render as invalid map keys).
         key_value = field_entry.get("key")
-        if not isinstance(key_value, (str, int)) or not str(key_value).strip():
+        if (
+            isinstance(key_value, bool)
+            or not isinstance(key_value, (str, int))
+            or not str(key_value).strip()
+        ):
             return _fail(
                 f"supplied field index entry {path!r} is missing a valid key",
                 {"component_id": str(component_id), "path": path},

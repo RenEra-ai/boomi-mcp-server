@@ -5015,18 +5015,16 @@ def _discover_profile_index(
     raw_xml = component.get("xml")
     if not raw_xml:
         return None
-    # Verify identity + declared type before indexing: never mis-index a
+    # FAIL-CLOSED identity + type verification before indexing: never mis-index a
     # non-profile component (or a mismatched response) that embeds a
-    # profile-shaped subtree (issue #95, plan requirement).
-    returned_id = component.get("component_id")
-    if isinstance(returned_id, str) and returned_id and returned_id != component_id:
+    # profile-shaped subtree (issue #95, plan requirement). ``id`` is the RAW
+    # exported componentId ('' when absent) — ``component_id`` would mask a
+    # missing one with the request.
+    exported_id = component.get("id")
+    exported_id = exported_id.strip() if isinstance(exported_id, str) else ""
+    if not exported_id or exported_id != component_id:
         return None
-    component_type = component.get("type")
-    if (
-        isinstance(component_type, str)
-        and component_type
-        and component_type not in PROFILE_INDEX_SUPPORTED_TYPES
-    ):
+    if component.get("type") not in PROFILE_INDEX_SUPPORTED_TYPES:
         return None
     try:
         indexed = index_existing_profile_xml(raw_xml)

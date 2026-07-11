@@ -404,6 +404,16 @@ class TestSuppliedIndexValidation:
         entry["field_index_by_path"][first]["key"] = 5
         assert validate_supplied_profile_index(JSON_UUID, entry) is None
 
+    def test_boolean_key_rejected(self):
+        # bool subclasses int, but True/False would render as invalid map keys.
+        for bad in (True, False):
+            entry = _supplied_index(JSON_UUID, "profile_json")
+            first = next(iter(entry["field_index_by_path"]))
+            entry["field_index_by_path"][first] = dict(entry["field_index_by_path"][first])
+            entry["field_index_by_path"][first]["key"] = bad
+            err = validate_supplied_profile_index(JSON_UUID, entry)
+            assert err is not None and err.error_code == MAP_PROFILE_INDEX_UNAVAILABLE
+
 
 # ===========================================================================
 # 3. Read-only handler
@@ -415,7 +425,7 @@ _HANDLER_GET = "src.boomi_mcp.categories.profile_index.component_get_xml"
 
 class TestIndexProfileComponentAction:
     def test_default_omits_raw_xml(self):
-        with patch(_HANDLER_GET, return_value={"type": "profile.json", "xml": _fixture("profile_json")}):
+        with patch(_HANDLER_GET, return_value={"type": "profile.json", "id": JSON_UUID, "xml": _fixture("profile_json")}):
             res = index_profile_component_action(MagicMock(), JSON_UUID)
         assert res["_success"] is True
         assert res["read_only"] is True
@@ -426,7 +436,7 @@ class TestIndexProfileComponentAction:
         assert "Root/customer_code" in res["field_index_by_path"]
 
     def test_opt_in_includes_raw_xml(self):
-        with patch(_HANDLER_GET, return_value={"type": "profile.json", "xml": _fixture("profile_json")}):
+        with patch(_HANDLER_GET, return_value={"type": "profile.json", "id": JSON_UUID, "xml": _fixture("profile_json")}):
             res = index_profile_component_action(MagicMock(), JSON_UUID, include_raw_xml=True)
         assert res["raw_xml_exposed"] is True
         assert res["raw_xml"] == _fixture("profile_json")
@@ -434,7 +444,7 @@ class TestIndexProfileComponentAction:
     def test_success_carries_import_provenance_marker(self):
         # import_integration_draft only accepts a live index whose
         # produced_by == "index_profile_component".
-        with patch(_HANDLER_GET, return_value={"type": "profile.json", "xml": _fixture("profile_json")}):
+        with patch(_HANDLER_GET, return_value={"type": "profile.json", "id": JSON_UUID, "xml": _fixture("profile_json")}):
             res = index_profile_component_action(MagicMock(), JSON_UUID)
         assert res["produced_by"] == "index_profile_component"
 
@@ -460,7 +470,7 @@ class TestIndexProfileComponentAction:
             '<bns:Component xmlns:bns="http://api.platform.boomi.com/">'
             "<bns:object><NotAProfile/></bns:object></bns:Component>"
         )
-        with patch(_HANDLER_GET, return_value={"type": "process", "xml": bad}):
+        with patch(_HANDLER_GET, return_value={"type": "process", "id": JSON_UUID, "xml": bad}):
             res = index_profile_component_action(MagicMock(), JSON_UUID)
         assert res["_success"] is False
         assert res["error_code"] == PROFILE_INDEX_UNSUPPORTED_TYPE
@@ -468,7 +478,7 @@ class TestIndexProfileComponentAction:
         assert "raw_xml" not in res
 
     def test_parse_failure_is_structured_error(self):
-        with patch(_HANDLER_GET, return_value={"type": "profile.json", "xml": "<broken"}):
+        with patch(_HANDLER_GET, return_value={"type": "profile.json", "id": JSON_UUID, "xml": "<broken"}):
             res = index_profile_component_action(MagicMock(), JSON_UUID)
         assert res["_success"] is False
         assert res["error_code"] == PROFILE_INDEX_PARSE_FAILED
@@ -481,17 +491,33 @@ class TestIndexProfileComponentAction:
             '<bns:Component xmlns:bns="http://api.platform.boomi.com/" type="process">'
             "<bns:object>" + _fixture("profile_json").split("<bns:object>")[1]
         )
-        with patch(_HANDLER_GET, return_value={"type": "process", "component_id": JSON_UUID, "xml": sneaky}):
+        with patch(_HANDLER_GET, return_value={"type": "process", "id": JSON_UUID, "xml": sneaky}):
             res = index_profile_component_action(MagicMock(), JSON_UUID)
         assert res["_success"] is False
         assert res["error_code"] == PROFILE_INDEX_UNSUPPORTED_TYPE
         assert res["raw_xml_exposed"] is False
 
     def test_returned_id_mismatch_rejected(self):
-        with patch(_HANDLER_GET, return_value={"type": "profile.json", "component_id": "other-id", "xml": _fixture("profile_json")}):
+        with patch(_HANDLER_GET, return_value={"type": "profile.json", "id": "other-id", "xml": _fixture("profile_json")}):
             res = index_profile_component_action(MagicMock(), JSON_UUID)
         assert res["_success"] is False
         assert res["error_code"] == "INDEX_PROFILE_COMPONENT_FETCH_FAILED"
+
+    def test_missing_exported_id_fails_closed(self):
+        # component_get_xml returns 'id'='' when the exported XML omits componentId;
+        # the identity check must FAIL CLOSED (not fall through to indexing).
+        with patch(_HANDLER_GET, return_value={"type": "profile.json", "id": "", "xml": _fixture("profile_json")}):
+            res = index_profile_component_action(MagicMock(), JSON_UUID)
+        assert res["_success"] is False
+        assert res["error_code"] == "INDEX_PROFILE_COMPONENT_FETCH_FAILED"
+
+    def test_missing_metadata_type_fails_closed(self):
+        # A blank/absent declared type must be rejected fail-closed, never
+        # falling through to XML-root inference.
+        with patch(_HANDLER_GET, return_value={"type": "", "id": JSON_UUID, "xml": _fixture("profile_json")}):
+            res = index_profile_component_action(MagicMock(), JSON_UUID)
+        assert res["_success"] is False
+        assert res["error_code"] == PROFILE_INDEX_UNSUPPORTED_TYPE
 
 
 # ===========================================================================
@@ -631,7 +657,7 @@ class TestLiteralUuidMapPlan:
         def _fake_get(_client, component_id, *a, **k):
             fixture = "profile_json" if component_id == JSON_UUID else "profile_xml"
             return {"type": f"profile.{'json' if fixture=='profile_json' else 'xml'}",
-                    "xml": _fixture(fixture)}
+                    "id": component_id, "xml": _fixture(fixture)}
 
         with patch(_PLAN_GET, side_effect=_fake_get):
             step = _map_step(_build_plan(MagicMock(), cfg))
@@ -651,7 +677,7 @@ class TestLiteralUuidMapPlan:
         def _fake_get(_client, component_id, *a, **k):
             fixture = "profile_json" if component_id == JSON_UUID else "profile_xml"
             return {"type": "profile.json" if component_id == JSON_UUID else "profile.xml",
-                    "xml": _fixture(fixture)}
+                    "id": component_id, "xml": _fixture(fixture)}
 
         with patch(_PLAN_GET, side_effect=_fake_get):
             step = _map_step(_build_plan(MagicMock(), cfg))
