@@ -2248,7 +2248,8 @@ if search_marketplace_recipes_action:
 
         Args:
             query: Optional free-text search term (GraphQL searchTerm). Blank/None
-                omits the term and returns the most popular published recipes.
+                omits the term and returns published recipes in the catalog's
+                default order (each carries install_count for client-side ranking).
             tags: Optional list of solution tag names (e.g. ['Salesforce',
                 'ServiceNow']). Any-match among the names; the Recipe asset-type
                 tag is ALWAYS required. Empty/None applies no extra tag filter.
