@@ -31,10 +31,10 @@ import server  # noqa: E402
 
 # The heavy KB build is now deferred off the import path (KbWarmup). Force it
 # ready before the surface tests so the first call returns a real result rather
-# than a bounded warming_up. get() performs the kick() itself, so this works
+# than a bounded warming_up. resolve() performs the kick() itself, so this works
 # regardless of the eager flag (which is only wired through server_http).
-_warmed = server._kb_warmup.get(wait_seconds=120)
-assert _warmed is not None, "KB warmup did not become ready for the surface tests"
+_warmed = server._kb_warmup.resolve()
+assert _warmed.ready, "KB warmup did not become ready for the surface tests"
 
 DB_PAGE = "https://help.boomi.com/docs/connectors/database"
 BIG_PAGE = "https://help.boomi.com/docs/processes/build-a-process"

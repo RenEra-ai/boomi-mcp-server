@@ -41,15 +41,15 @@ print("ENABLED_OK")
 """
 
 # The heavy build is deferred, so `import server` must NOT import the ML stack;
-# forcing warmup via get() then performs the build and imports it. EAGER is off
-# so nothing kicks before the assertion (in-process import never kicks anyway).
+# forcing warmup via resolve() then performs the build and imports it. EAGER is
+# off so nothing kicks before the assertion (in-process import never kicks anyway).
 DEFERRED_IMPORT_SCRIPT = """
 import sys
 import server
 assert "chromadb" not in sys.modules, "chromadb imported at import (build not deferred)"
 assert "sentence_transformers" not in sys.modules, "sentence_transformers imported at import"
-svc = server._kb_warmup.get(wait_seconds=120)
-assert svc is not None, "KB warmup did not become ready"
+resolution = server._kb_warmup.resolve()
+assert resolution.ready, "KB warmup did not become ready"
 assert "chromadb" in sys.modules, "chromadb not imported after forcing warmup"
 res = server.search_boomi_docs(query="database connector")
 assert res["_success"] is True, res
@@ -61,9 +61,9 @@ print("DEFERRED_IMPORT_OK")
 # in Workstream C catches it before prod.
 CHUNK_MISMATCH_SCRIPT = """
 import server
-svc = server._kb_warmup.get(wait_seconds=120)
-assert svc is None, "expected warmup to fail on chunk-count mismatch"
-resp = server._kb_warmup.not_ready_response()
+resolution = server._kb_warmup.resolve()
+assert not resolution.ready, "expected warmup to fail on chunk-count mismatch"
+resp = resolution.response
 assert resp["error"] == "kb_unavailable", resp
 assert resp["error_type"] == "KbStartupError", resp
 blob = repr(resp)

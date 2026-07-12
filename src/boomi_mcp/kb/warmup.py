@@ -4,20 +4,28 @@ The heavy KB build (Chroma open + embedding-model load) is the dominant
 cold-start cost. Running it at module import blocks uvicorn's socket bind, so a
 cold Cloud Run instance accepts zero connections until it finishes and the
 client times out. ``KbWarmup`` moves that build off the import path into a
-single daemon thread and lets MCP tool calls return a bounded structured
-response (``warming_up``) instead of hanging.
+single daemon thread and gives MCP tool calls one atomic ``resolve()``
+operation: a ready service, or a bounded structured response
+(``warming_up`` / ``kb_unavailable``) — never a hang.
 
 Design notes:
 
 * ``threading`` primitives (NOT asyncio) — FastMCP runs the sync ``def`` KB
-  tools in worker threads via ``anyio.to_thread``, so ``get()`` is called from a
-  thread, never the event loop.
+  tools in worker threads via ``anyio.to_thread``, so ``resolve()`` is called
+  from a thread, never the event loop.
 * Single in-flight build, guarded by a lock; ``kick()`` is idempotent so racing
   callers (the eager first-request hook and the first tool call) never start two
   builds.
+* ``resolve()`` admits at most ``max_waiters`` long waiters while WARMING; the
+  bounded wait holds a request in flight (CPU allocated on request-billed Cloud
+  Run) so the build advances, while overflow callers return ``warming_up`` in
+  well under a second instead of starving the tool-worker thread pool. After a
+  wait, the state is inspected and the result constructed under ONE lock
+  acquisition, so readiness can never race with response construction.
 * State machine ``idle -> warming -> ready | failed`` with self-heal: a failed
-  build re-attempts after a cooldown on the next ``get()`` (a transient OOM/disk
-  failure recovers without an instance restart).
+  build re-attempts after a cooldown on the next ``resolve()`` (a transient
+  OOM/disk failure recovers without an instance restart). A failed build
+  signals all admitted waiters immediately.
 * No detail leak: client responses carry a generic message + coarse error_type;
   the full exception detail is logged server-side only.
 """
@@ -25,6 +33,7 @@ import logging
 import math
 import threading
 import time
+from dataclasses import dataclass
 
 logger = logging.getLogger("boomi.kb.warmup")
 
@@ -34,21 +43,43 @@ WARMING = "warming"
 READY = "ready"
 FAILED = "failed"
 
-# Client-facing retry hint for warming_up (seconds) — matches the default
-# in-request wait; a short poll interval while the build is in flight. The
-# kb_unavailable hint is NOT a constant: it is derived from the REMAINING retry
-# cooldown (see not_ready_response), so a tuned BOOMI_DOCS_WARMUP_RETRY_COOLDOWN
-# never leaves clients retrying before a re-kick is even possible.
-WARMING_UP_RETRY_AFTER = 5
+# warming_up retry-hint clamps (seconds): the hint is derived from the
+# remaining share of the expected build duration and clamped into this window,
+# so clients neither hammer a build that has just started nor sleep past one
+# that is about to finish. When the estimate is already exceeded, hint the
+# floor. The kb_unavailable hint is NOT a constant: it is derived from the
+# REMAINING retry cooldown (see _kb_unavailable_locked).
+WARMING_UP_RETRY_MIN = 5
+WARMING_UP_RETRY_MAX = 60
+
+# Production defaults (also pinned in cloudbuild.yaml): a bounded wait just
+# above the measured p95+max build time (2026-07-05..2026-07-12 window: mean
+# 48.6s, p95 58.4s, max 62.8s), the expected duration for retry hints, and the
+# long-waiter admission cap.
+DEFAULT_WAIT_SECONDS = 65.0
+DEFAULT_EXPECTED_SECONDS = 60.0
+DEFAULT_MAX_WAITERS = 4
 
 # Build-running-longer-than this logs a STUCK warning (detection only — Python
-# cannot force-kill the thread; the bounded get() wait already prevents any
+# cannot force-kill the thread; the bounded resolve() wait already prevents any
 # client hang, so a stuck build degrades to persistent warming_up, not a hang).
 DEFAULT_STUCK_AFTER_SECONDS = 120.0
 
 
+@dataclass(frozen=True)
+class KbResolution:
+    """Atomic result of one resolve(): a ready service XOR a client response."""
+
+    service: object
+    response: dict
+
+    @property
+    def ready(self):
+        return self.service is not None
+
+
 class KbWarmup:
-    """Owns the deferred heavy KB build and serves a state-based readiness view."""
+    """Owns the deferred heavy KB build and serves atomic readiness resolution."""
 
     def __init__(
         self,
@@ -57,6 +88,9 @@ class KbWarmup:
         retry_cooldown_seconds=30.0,
         stuck_after_seconds=DEFAULT_STUCK_AFTER_SECONDS,
         time_fn=time.monotonic,
+        wait_seconds=DEFAULT_WAIT_SECONDS,
+        expected_seconds=DEFAULT_EXPECTED_SECONDS,
+        max_waiters=DEFAULT_MAX_WAITERS,
     ):
         self._bootstrap = bootstrap
         if builder is None:
@@ -70,6 +104,9 @@ class KbWarmup:
         self._retry_cooldown = float(retry_cooldown_seconds)
         self._stuck_after = float(stuck_after_seconds)
         self._time = time_fn
+        self._wait_seconds = float(wait_seconds)
+        self._expected_seconds = float(expected_seconds)
+        self._max_waiters = int(max_waiters)
 
         self._lock = threading.Lock()
         self._done = threading.Event()
@@ -81,6 +118,9 @@ class KbWarmup:
         self._started_at = None
         self._stuck_logged = False
         self._thread = None
+        self._waiters = 0
+        self._admitted_total = 0
+        self._overflow_total = 0
 
     # -- public API --------------------------------------------------------- #
     def kick(self):
@@ -118,60 +158,100 @@ class KbWarmup:
             logger.info("KB_WARMUP_RETRY" if is_retry else "KB_WARMUP_STARTED")
         thread.start()
 
-    def get(self, wait_seconds):
-        """Return the ready KbService, or None if not ready within wait_seconds.
+    def resolve(self):
+        """Atomically resolve readiness: kick, optionally wait, return a result.
 
-        Always kicks first so warmup proceeds even when the eager hook is off /
-        never fired (otherwise an instance could report warming_up forever). The
-        bounded wait holds a request in flight (CPU allocated on request-billed
-        Cloud Run) so the build advances. Returns None for warming AND failed —
-        the caller renders not_ready_response() for the exact client status.
+        READY returns the service immediately; FAILED returns a snapshotted
+        ``kb_unavailable`` response immediately. While WARMING, at most
+        ``max_waiters`` callers are admitted (under the state lock) to a long
+        wait on the readiness event, bounded by ``wait_seconds``; every
+        admitted caller releases its slot in ``finally``. Overflow callers
+        return ``warming_up`` immediately without occupying a slot. After a
+        wait, the state is inspected and the result constructed under the SAME
+        lock acquisition, so a build that finished right at the timeout is
+        served, never mis-reported as warming.
         """
         self.kick()
         with self._lock:
             if self._state == READY:
-                return self._service
+                return KbResolution(self._service, None)
+            if self._state == FAILED:
+                return KbResolution(None, self._kb_unavailable_locked())
+            # WARMING (IDLE is unreachable here: kick() either started a build
+            # or left FAILED in place). Admit or overflow.
+            if self._waiters >= self._max_waiters:
+                self._overflow_total += 1
+                logger.info(
+                    "KB_RESOLVE_OVERFLOW overflow_total=%d", self._overflow_total
+                )
+                return KbResolution(None, self._warming_up_locked())
+            self._waiters += 1
+            self._admitted_total += 1
+            logger.info(
+                "KB_RESOLVE_ADMITTED waiters=%d admitted_total=%d",
+                self._waiters, self._admitted_total,
+            )
             done = self._done
-        done.wait(timeout=max(0.0, float(wait_seconds)))
+
+        try:
+            done.wait(timeout=max(0.0, self._wait_seconds))
+        finally:
+            with self._lock:
+                self._waiters -= 1
+
         with self._lock:
             if self._state == READY:
-                return self._service
+                return KbResolution(self._service, None)
+            if self._state == FAILED:
+                return KbResolution(None, self._kb_unavailable_locked())
             self._maybe_log_stuck_locked()
-            return None
+            return KbResolution(None, self._warming_up_locked())
 
-    def not_ready_response(self):
-        """Structured client response for a not-ready state (read under lock).
+    # -- internals ---------------------------------------------------------- #
+    def _warming_up_locked(self):
+        """warming_up response with a remaining-estimate retry hint.
 
-        Keyed off the CURRENT state, never error history: a cooldown re-kick
-        (state back to WARMING) reports warming_up, not stale kb_unavailable.
-        Carries no raw exception detail — only a coarse error_type category.
+        Caller must hold the lock. ``remaining = max(0, expected - elapsed)``;
+        while positive the hint is ceil(remaining) clamped into
+        [WARMING_UP_RETRY_MIN, WARMING_UP_RETRY_MAX]; once the estimate is
+        exceeded the hint drops to the floor (short polls — the build should
+        finish any moment or be declared stuck).
         """
-        with self._lock:
-            state = self._state
-            error_type = self._error_type
-            retry_after = self._remaining_cooldown_locked()
-        if state == FAILED:
-            logger.info("KB_RESPONSE status=kb_unavailable error_type=%s", error_type)
-            return {
-                "_success": False,
-                "error": "kb_unavailable",
-                "message": "Boomi Docs KB is temporarily unavailable. Please retry shortly.",
-                "error_type": error_type or "KbStartupError",
-                # Soonest a retry could change state = when the cooldown lets the
-                # next get() re-kick. Tracks the configured cooldown, not a fixed
-                # default, so clients don't retry into kb_unavailable.
-                "retry_after_seconds": retry_after,
-            }
-        # IDLE or WARMING (incl. a retry build in flight) -> still loading.
-        logger.info("KB_RESPONSE status=warming_up")
+        elapsed = self._time() - (self._started_at if self._started_at is not None
+                                  else self._time())
+        remaining = max(0.0, self._expected_seconds - elapsed)
+        if remaining > 0:
+            retry_after = min(WARMING_UP_RETRY_MAX,
+                              max(WARMING_UP_RETRY_MIN, math.ceil(remaining)))
+        else:
+            retry_after = WARMING_UP_RETRY_MIN
+        logger.info("KB_RESPONSE status=warming_up retry_after=%d", retry_after)
         return {
             "_success": False,
             "error": "warming_up",
             "message": "Boomi Docs KB is still loading. Retry shortly.",
-            "retry_after_seconds": WARMING_UP_RETRY_AFTER,
+            "retry_after_seconds": retry_after,
         }
 
-    # -- internals ---------------------------------------------------------- #
+    def _kb_unavailable_locked(self):
+        """kb_unavailable response for the FAILED state (read under lock).
+
+        Carries no raw exception detail — only a coarse error_type category.
+        """
+        error_type = self._error_type
+        retry_after = self._remaining_cooldown_locked()
+        logger.info("KB_RESPONSE status=kb_unavailable error_type=%s", error_type)
+        return {
+            "_success": False,
+            "error": "kb_unavailable",
+            "message": "Boomi Docs KB is temporarily unavailable. Please retry shortly.",
+            "error_type": error_type or "KbStartupError",
+            # Soonest a retry could change state = when the cooldown lets the
+            # next resolve() re-kick. Tracks the configured cooldown, not a
+            # fixed default, so clients don't retry into kb_unavailable.
+            "retry_after_seconds": retry_after,
+        }
+
     def _run(self, done):
         start = self._time()
         service = None
@@ -196,9 +276,21 @@ class KbWarmup:
                     self._error = str(error)
                     self._error_type = type(error).__name__
                     self._failed_at = self._time()
+            admitted_total = self._admitted_total
+            overflow_total = self._overflow_total
+        # A failed build signals all admitted waiters immediately, same as a
+        # successful one — nobody sleeps out the full wait against a known
+        # terminal state.
         done.set()
+        elapsed = self._time() - start
+        outcome = "ready" if error is None else "failed"
+        logger.info(
+            "KB_WARMUP_ELAPSED seconds=%.2f outcome=%s admitted_total=%d "
+            "overflow_total=%d",
+            elapsed, outcome, admitted_total, overflow_total,
+        )
         if error is None:
-            logger.info("KB_WARMUP_SUCCEEDED seconds=%.2f", self._time() - start)
+            logger.info("KB_WARMUP_SUCCEEDED seconds=%.2f", elapsed)
         else:
             logger.error(
                 "KB_WARMUP_FAILED error_type=%s detail=%s",

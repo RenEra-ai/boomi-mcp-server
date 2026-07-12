@@ -5385,14 +5385,41 @@ if BOOMI_DOCS_ENABLED:
     from boomi_mcp.kb.manifest import render_corpus_resource
 
     def _kb_env_float(name, default):
+        """Finite positive float from the environment, else the default with an
+        operator warning — a wait/expected duration of inf, nan, zero, or a
+        negative would break the waiter admission and retry-hint math."""
+        import math as _math
+
         raw = os.getenv(name)
         if raw is None or raw.strip() == "":
             return default
         try:
-            return float(raw)
+            value = float(raw)
         except ValueError:
             print(f"[WARNING] {name}={raw!r} is not a number; using default {default}")
             return default
+        if not _math.isfinite(value) or value <= 0:
+            print(f"[WARNING] {name}={raw!r} is not a finite positive number; "
+                  f"using default {default}")
+            return default
+        return value
+
+    def _kb_env_int(name, default):
+        """Positive integer from the environment, else the default with an
+        operator warning."""
+        raw = os.getenv(name)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            print(f"[WARNING] {name}={raw!r} is not an integer; using default {default}")
+            return default
+        if value <= 0:
+            print(f"[WARNING] {name}={raw!r} is not a positive integer; "
+                  f"using default {default}")
+            return default
+        return value
 
     def _kb_env_flag(name, default):
         return os.getenv(name, default).strip().lower() in ("true", "1", "yes", "on")
@@ -5408,16 +5435,25 @@ if BOOMI_DOCS_ENABLED:
         print(f"[ERROR] Boomi Docs KB startup failed: {e}")
         sys.exit(1)
 
-    # Max seconds a docs call blocks for warmup before returning warming_up.
-    _WARMUP_WAIT = _kb_env_float("BOOMI_DOCS_WARMUP_WAIT_SECONDS", 5.0)
+    # Max seconds an ADMITTED docs call blocks for warmup before returning
+    # warming_up; sized just above the measured production build p95/max.
+    _WARMUP_WAIT = _kb_env_float("BOOMI_DOCS_WARMUP_WAIT_SECONDS", 65.0)
+    # Expected build duration — drives the warming_up retry-after hint.
+    _WARMUP_EXPECTED = _kb_env_float("BOOMI_DOCS_WARMUP_EXPECTED_SECONDS", 60.0)
+    # Long-waiter admission cap while WARMING; overflow returns warming_up fast.
+    _WARMUP_MAX_WAITERS = _kb_env_int("BOOMI_DOCS_WARMUP_MAX_WAITERS", 4)
     _WARMUP_RETRY_COOLDOWN = _kb_env_float("BOOMI_DOCS_WARMUP_RETRY_COOLDOWN", 30.0)
     # Read by server_http.py to decide whether to install the eager first-request
-    # warmup hook. Opportunistic only — get() at the first tool call is the
+    # warmup hook. Opportunistic only — resolve() at the first tool call is the
     # correctness path.
     _kb_warmup_eager = _kb_env_flag("BOOMI_DOCS_WARMUP_EAGER", "true")
 
     _kb_warmup = KbWarmup(
-        _kb_bootstrap, retry_cooldown_seconds=_WARMUP_RETRY_COOLDOWN
+        _kb_bootstrap,
+        retry_cooldown_seconds=_WARMUP_RETRY_COOLDOWN,
+        wait_seconds=_WARMUP_WAIT,
+        expected_seconds=_WARMUP_EXPECTED,
+        max_waiters=_WARMUP_MAX_WAITERS,
     )
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
@@ -5445,11 +5481,11 @@ if BOOMI_DOCS_ENABLED:
         report that rather than inventing facts (a later retry may succeed).
         Read-only.
         """
-        svc = _kb_warmup.get(_WARMUP_WAIT)
-        if svc is None:
-            return _kb_warmup.not_ready_response()
+        res = _kb_warmup.resolve()
+        if not res.ready:
+            return res.response
         try:
-            return svc.search(query, top_k)
+            return res.service.search(query, top_k)
         except Exception as e:
             # Sanitize: full detail server-side only; client gets a generic
             # message + coarse category (KbQueryError text can embed internals).
@@ -5481,11 +5517,11 @@ if BOOMI_DOCS_ENABLED:
         retry. If it is error "kb_unavailable", docs retrieval is temporarily
         unavailable. Read-only.
         """
-        svc = _kb_warmup.get(_WARMUP_WAIT)
-        if svc is None:
-            return _kb_warmup.not_ready_response()
+        res = _kb_warmup.resolve()
+        if not res.ready:
+            return res.response
         try:
-            return svc.read_page(page_key, max_chunks, start_chunk_index)
+            return res.service.read_page(page_key, max_chunks, start_chunk_index)
         except Exception as e:
             print(f"[ERROR] read_boomi_doc_page failed: {e}")
             return {

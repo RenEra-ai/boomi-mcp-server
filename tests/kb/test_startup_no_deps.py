@@ -62,9 +62,9 @@ class _BlockML(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, _BlockML())
 
 import server
-svc = server._kb_warmup.get(wait_seconds=30)
-assert svc is None, "warmup should fail when ML deps are missing"
-resp = server._kb_warmup.not_ready_response()
+resolution = server._kb_warmup.resolve()
+assert not resolution.ready, "warmup should fail when ML deps are missing"
+resp = resolution.response
 assert resp["error"] == "kb_unavailable", resp
 assert resp["error_type"] == "KbStartupError", resp
 blob = repr(resp)
