@@ -701,6 +701,14 @@ def test_openapi_31_union_type_preserved():
     assert prop["type"] == ["integer", "null"]
 
 
+def test_openapi_31_union_type_on_component_schema_row():
+    """A 3.1 union type on a component schema ITSELF (row-level) is preserved
+    (repo-gate P2)."""
+    doc = {"openapi": "3.1.0", "info": {}, "paths": {}, "components": {"schemas": {"T": {"type": ["object", "null"], "properties": {}}}}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["schemas"][0]["type"] == ["object", "null"]
+
+
 def test_non_string_scalar_field_dropped():
     """A non-string value smuggled into a string field (e.g. a list-typed title)
     is dropped to None, never echoed unbounded (§6 re-review #1)."""

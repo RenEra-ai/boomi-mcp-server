@@ -415,6 +415,19 @@ def test_wsdl_namespace_spilled_userinfo_suppressed():
         assert r["imports"][0]["namespace"] is None, ns
 
 
+def test_wsdl_ipv6_namespace_bracketed_and_sanitized():
+    """An absolute IPv6 namespace must keep its brackets (and lose userinfo)
+    after sanitization (repo-gate P2)."""
+    payload = (
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+        '<import namespace="https://user:pw@[2606:4700:4700::1111]:8443/ns" location="x"/>'
+        '</definitions>'
+    )
+    r = discover_soap_wsdl_action(artifact=payload)
+    assert "user:pw" not in json.dumps(r)
+    assert r["imports"][0]["namespace"] == "https://[2606:4700:4700::1111]:8443/ns"
+
+
 def test_utf16_doctype_rejected_via_url_mode():
     payload = (
         '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x>'

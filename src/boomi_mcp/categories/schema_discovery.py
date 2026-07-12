@@ -630,7 +630,10 @@ def _sanitize_url(value: Any) -> Optional[str]:
         return None
     try:
         port = f":{parts.port}" if parts.port else ""
-        authority = f"{parts.hostname or ''}{port}"
+        host = parts.hostname or ""
+        if ":" in host:  # IPv6 literal — restore the brackets urlsplit strips
+            host = f"[{host}]"
+        authority = f"{host}{port}"
     except ValueError:
         # Unparseable/'{port}'-templated authority: omit the endpoint that cannot
         # be safely sanitized (host/path '{variable}' templates parse cleanly
@@ -988,7 +991,7 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
         schemas_out.append(
             {
                 "name": _clip(name, trunc),
-                "type": _clip(schema.get("type"), trunc),
+                "type": _clip_type(schema.get("type"), trunc),  # 3.1 union arrays allowed here too
                 "required_fields": _clip_list(sorted(required_set), trunc, "required_fields"),
                 "properties": props_out,
             }
