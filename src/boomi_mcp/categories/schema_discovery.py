@@ -322,6 +322,18 @@ def _clip_list(items: Any, trunc: _Truncation, kind: str) -> List[str]:
     return out
 
 
+def _clip_type(value: Any, trunc: _Truncation) -> Any:
+    """Bound a JSON-Schema `type`, which in OpenAPI 3.1 may be a STRING or an
+    ARRAY of strings (a union such as ['string','null']). Keep the bounded
+    string-array form, clip a plain string, and drop any other type — so union
+    types survive while a malformed non-string/non-list type never echoes."""
+    if isinstance(value, list):
+        return _clip_list(value, trunc, "type")
+    if isinstance(value, str):
+        return _clip(value, trunc)
+    return None
+
+
 def _success(
     fmt: str,
     version: Optional[str],
@@ -639,11 +651,19 @@ def _sanitize_ns(value: Any) -> Optional[str]:
     if not isinstance(value, str) or not value.strip():
         return None
     v = value.strip()
+    # An ABSOLUTE URL: delegate to _sanitize_url, which carries the full guard
+    # set (including the spilled-userinfo '@'-in-path credential guard).
+    if "://" in v:
+        return _sanitize_url(v)
     try:
         parts = urlsplit(v)
     except ValueError:
         return None
-    if parts.netloc:
+    if parts.netloc:  # scheme-relative / network-path reference '//host/...'
+        # Same spilled-userinfo guard as _sanitize_url: an '@' in the path of an
+        # authority-bearing reference is treated as a possible credential spill.
+        if "@" in parts.path:
+            return None
         try:
             host = parts.hostname or ""
             port = f":{parts.port}" if parts.port else ""
@@ -651,8 +671,7 @@ def _sanitize_ns(value: Any) -> Optional[str]:
             return None
         if ":" in host:  # IPv6 literal — restore brackets
             host = f"[{host}]"
-        scheme = f"{parts.scheme}:" if parts.scheme else ""
-        return f"{scheme}//{host}{port}{parts.path}" or None
+        return f"//{host}{port}{parts.path}" or None
     return v.split("?", 1)[0].split("#", 1)[0] or None
 
 
@@ -672,9 +691,9 @@ def _openapi_schema_descriptor(schema: Any, trunc: _Truncation) -> Optional[Dict
     items_type = None
     if isinstance(items, dict):
         items_ref = _clip(_json_pointer_name(items.get("$ref")), trunc)
-        items_type = _clip(items.get("type"), trunc)
+        items_type = _clip_type(items.get("type"), trunc)
     return {
-        "type": _clip(schema.get("type"), trunc),
+        "type": _clip_type(schema.get("type"), trunc),
         "format": _clip(schema.get("format"), trunc),
         "ref": _clip(_json_pointer_name(ref), trunc),
         "items_type": items_type,
@@ -700,7 +719,7 @@ def _openapi_parameter(param: Any, trunc: _Truncation) -> Optional[Dict[str, Any
         "name": _clip(param.get("name"), trunc),
         "in": _clip(param.get("in"), trunc),
         "required": bool(param.get("required", False)),
-        "type": _clip(param.get("type") or schema.get("type"), trunc),
+        "type": _clip_type(param.get("type") or schema.get("type"), trunc),
         "format": _clip(param.get("format") or schema.get("format"), trunc),
         "ref": _clip(_json_pointer_name(schema.get("$ref")), trunc) if schema else None,
     }
@@ -956,11 +975,13 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             props_out.append(
                 {
                     "name": _clip(pname, trunc),
-                    "type": _clip(desc.get("type"), trunc),
-                    "format": _clip(desc.get("format"), trunc),
+                    # desc fields are already bounded by _openapi_schema_descriptor
+                    # (type via _clip_type keeps 3.1 union arrays) — do not re-clip.
+                    "type": desc.get("type"),
+                    "format": desc.get("format"),
                     "required": pname in required_set,
                     "ref": desc.get("ref"),
-                    "items_type": _clip(desc.get("items_type"), trunc),
+                    "items_type": desc.get("items_type"),
                     "items_ref": desc.get("items_ref"),
                 }
             )
@@ -1298,15 +1319,6 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
     associations: Dict[str, Dict[str, Dict[str, Any]]] = {}
     short_assoc: Dict[str, Optional[Dict[str, Dict[str, Any]]]] = {}
     if version == "2.0":
-        # Collect CSDL <Using Namespace=".." Alias=".."> mappings (alias -> ns).
-        # A '{using-alias}.Name' reference is equivalent to '{namespace}.Name'.
-        using_aliases: Dict[str, str] = {}
-        for schema in schemas:
-            for using in _iter_local(schema, "Using"):
-                u_alias = using.get("Alias")
-                u_ns = using.get("Namespace")
-                if u_alias and u_ns:
-                    using_aliases[u_alias] = u_ns
         for schema in schemas:
             sns = schema.get("Namespace") or ""
             alias = schema.get("Alias")
@@ -1323,14 +1335,18 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
                         associations[f"{sns}.{aname}"] = roles
                     if alias:
                         associations[f"{alias}.{aname}"] = roles
-                    # index under any <Using> alias that maps to this namespace
-                    for u_alias, u_ns in using_aliases.items():
-                        if u_ns == sns:
-                            associations[f"{u_alias}.{aname}"] = roles
                     if aname in short_assoc and short_assoc[aname] is not roles:
                         short_assoc[aname] = None  # ambiguous -> leave unresolved
                     else:
                         short_assoc[aname] = roles
+            # NOTE: schema-scoped CSDL <Using Alias=".."> namespace aliases are
+            # intentionally NOT resolved. Indexing associations under them
+            # correctly requires per-schema alias scoping (a global merge would
+            # let one schema's alias shadow another's), and materializing every
+            # alias/association pair risks quadratic memory. A navigation that
+            # references an association only through a <Using> alias therefore
+            # stays unresolved (collection=null + bounded relationship name) —
+            # the plan's explicit "otherwise" fallback, never an invented target.
 
     entity_types: List[Dict[str, Any]] = []
     schema_names: List[str] = []

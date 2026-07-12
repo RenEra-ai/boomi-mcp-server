@@ -398,6 +398,23 @@ def test_wsdl_network_path_namespace_sanitized():
     assert r["imports"][0]["namespace"] == "//host.example.com/x"
 
 
+def test_wsdl_namespace_spilled_userinfo_suppressed():
+    """A namespace whose userinfo was split by an unescaped '/' (spilling
+    'SEKRET@realhost' into the path) must be suppressed, not echoed — same guard
+    as endpoint URLs (repo-gate P1: preserve authority-path credential guard)."""
+    for ns in (
+        "http://user:443/SEKRET@realhost.example.com/x",   # absolute
+        "//user:443/SEKRET@realhost.example.com/x",         # network-path
+    ):
+        payload = (
+            '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+            f'<import namespace="{ns}" location="x"/></definitions>'
+        )
+        r = discover_soap_wsdl_action(artifact=payload)
+        assert "SEKRET" not in json.dumps(r), ns
+        assert r["imports"][0]["namespace"] is None, ns
+
+
 def test_utf16_doctype_rejected_via_url_mode():
     payload = (
         '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x>'

@@ -318,14 +318,17 @@ _EDMX_V2_USING = b"""<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microso
 </edmx:Edmx>"""
 
 
-def test_odata_v2_using_alias_association_resolved():
-    """A navigation referencing an association through a CSDL <Using> alias must
-    resolve to that association's multiplicity (§6 re-review #4)."""
+def test_odata_v2_using_alias_resolves_via_unambiguous_short_name():
+    """A '<Using>'-alias-qualified relationship ('R.Rel') is not indexed under
+    the alias (no global cross-product merge), but still resolves via the
+    UNAMBIGUOUS short name 'Rel'; an ambiguous short name would stay unresolved
+    (repo-gate: no alias cross-product / global-scope hazard)."""
     r, _, _ = _call("https://svc.example.com/odata/$metadata", _EDMX_V2_USING)
     assert r["_success"] is True and r["version"] == "2.0"
     et = next(t for t in r["entity_types"] if t["name"] == "A")
     nav = et["navigation_properties"][0]
     assert nav["collection"] is True and nav["target_type"] == "NS1.B"
+    assert nav["relationship"] == "Rel"
 
 
 def test_odata_utf16_doctype_rejected():

@@ -687,6 +687,20 @@ def test_long_ref_clipped_matches_declaration_and_flags_truncation():
     assert r["truncated"] is True
 
 
+def test_openapi_31_union_type_preserved():
+    """OpenAPI 3.1 allows an array-form `type` (['string','null']); this union
+    must be preserved, not dropped by strict scalar clipping (repo-gate P2)."""
+    doc = {
+        "openapi": "3.1.0", "info": {},
+        "paths": {"/x": {"get": {"parameters": [{"name": "q", "in": "query", "schema": {"type": ["string", "null"]}}], "responses": {}}}},
+        "components": {"schemas": {"T": {"type": "object", "properties": {"a": {"type": ["integer", "null"]}}}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["operations"][0]["parameters"][0]["type"] == ["string", "null"]
+    prop = r["schemas"][0]["properties"][0]
+    assert prop["type"] == ["integer", "null"]
+
+
 def test_non_string_scalar_field_dropped():
     """A non-string value smuggled into a string field (e.g. a list-typed title)
     is dropped to None, never echoed unbounded (§6 re-review #1)."""
