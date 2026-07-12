@@ -238,6 +238,39 @@ def test_odata_field_truncation():
     assert r["_success"] is True and r["truncated"] is True
 
 
+_EDMX_V2_MULT = b"""<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+ <edmx:DataServices m:MaxDataServiceVersion="2.0" xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+  <Schema Namespace="NS" xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+   <EntityType Name="Order"><Key><PropertyRef Name="Id"/></Key>
+     <Property Name="Id" Type="Edm.Int32" Nullable="false"/>
+     <NavigationProperty Name="Items" Relationship="NS.Order_Items" FromRole="Order" ToRole="Items"/>
+     <NavigationProperty Name="Customer" Relationship="NS.Order_Customer" FromRole="Order" ToRole="Customer"/>
+   </EntityType>
+   <Association Name="Order_Items">
+     <End Role="Order" Type="NS.Order" Multiplicity="1"/>
+     <End Role="Items" Type="NS.Item" Multiplicity="*"/>
+   </Association>
+   <Association Name="Order_Customer">
+     <End Role="Order" Type="NS.Order" Multiplicity="*"/>
+     <End Role="Customer" Type="NS.Customer" Multiplicity="1"/>
+   </Association>
+   <EntityContainer Name="Ctx"><EntitySet Name="Orders" EntityType="NS.Order"/></EntityContainer>
+  </Schema>
+ </edmx:DataServices>
+</edmx:Edmx>"""
+
+
+def test_odata_v2_navigation_collection_from_multiplicity():
+    """v2 navigation `collection` must be a boolean derived from the target role's
+    Multiplicity ('*' -> collection), per the response contract (§6 impl-review
+    #5)."""
+    r, _, _ = _call("https://svc.example.com/odata/$metadata", _EDMX_V2_MULT)
+    assert r["_success"] is True and r["version"] == "2.0"
+    navs = {n["name"]: n for n in r["entity_types"][0]["navigation_properties"]}
+    assert navs["Items"]["collection"] is True and navs["Items"]["target_type"] == "NS.Item"
+    assert navs["Customer"]["collection"] is False and navs["Customer"]["target_type"] == "NS.Customer"
+
+
 def test_odata_utf16_doctype_rejected():
     """A UTF-16 EDMX with a DOCTYPE must be rejected via the encoding-robust
     screen, not slip past a UTF-8 decode (Codex P1)."""

@@ -658,6 +658,18 @@ def test_node_omitted_count_not_double_counted():
     assert node_reasons and node_reasons[0]["omitted"] == 2
 
 
+def test_long_scalar_clipped_and_flags_truncation():
+    """An arbitrarily long emitted scalar (operationId/path) is clipped to the
+    bound and flags truncation — the bounded-summary contract applies to every
+    scalar, not just descriptions (§6 impl-review #2)."""
+    doc = {"openapi": "3.0.0", "info": {}, "paths": {"/" + "p" * 1000: {"get": {"operationId": "o" * 1000, "responses": {}}}}}
+    r = discover_openapi_spec_action(artifact=doc)
+    op = r["operations"][0]
+    assert len(op["operation_id"]) == 512
+    assert len(op["path"]) == 512
+    assert r["truncated"] is True
+
+
 def test_handler_never_calls_boomi_or_credentials():
     # The discovery module must never CALL a credential helper or CONSTRUCT the
     # Boomi SDK (the docstring may mention the names, so match call forms only).

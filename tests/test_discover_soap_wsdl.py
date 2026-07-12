@@ -330,6 +330,31 @@ def test_binding_declaration_whitespace_matches_port_reference_and_fallback():
     assert port["soap_version"] == "1.1"  # fallback lookup via normalized binding name
 
 
+def test_wsdl_import_namespace_sanitized():
+    """An import namespace URI carrying credentials must be sanitized like the
+    location, not echoed verbatim (§6 impl-review #4)."""
+    payload = (
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+        '<import namespace="http://user:SEKRET@ns.example.com/x?token=abc" '
+        'location="https://u:p@ex.com/other.wsdl?key=9"/></definitions>'
+    )
+    r = discover_soap_wsdl_action(artifact=payload)
+    assert "SEKRET" not in json.dumps(r) and "token" not in json.dumps(r) and "key=9" not in json.dumps(r)
+    assert r["imports"][0]["namespace"] == "http://ns.example.com/x"
+
+
+def test_wsdl_xml_element_count_truncation():
+    """max_nodes bounds every XML element: a document with more elements than the
+    budget reports truncated=true (§6 impl-review #3)."""
+    payload = (
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+        '<message name="M"><part name="p1"/><part name="p2"/><part name="p3"/></message>'
+        '</definitions>'
+    )
+    r = discover_soap_wsdl_action(artifact=payload, options={"max_nodes": 1})
+    assert r["_success"] is True and r["truncated"] is True
+
+
 def test_utf16_doctype_rejected_via_url_mode():
     payload = (
         '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x>'

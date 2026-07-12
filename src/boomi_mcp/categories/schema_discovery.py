@@ -73,7 +73,8 @@ _LIMITS_DB = {
     "max_fields": (2_000, 10_000),
 }
 
-_TEXT_CLIP = 512  # individual description/summary strings are bounded to this
+_TEXT_CLIP = 512  # individual description/summary/identifier strings bounded to this
+_LIST_CAP = 1000  # max elements emitted per nested identifier list
 
 # ---------------------------------------------------------------------------
 # XXE / billion-laughs mitigation — reject DOCTYPE/ENTITY declarations outright
@@ -288,14 +289,34 @@ class _Budget:
 
 
 def _clip(value: Any, trunc: _Truncation) -> Optional[str]:
-    """Bound an individual free-text string to _TEXT_CLIP chars; register a
-    truncation reason when clipped. Non-strings pass through unchanged."""
+    """Bound an individual free-text/identifier string to _TEXT_CLIP chars;
+    register a truncation reason when clipped. Non-strings pass through
+    unchanged. Applied to EVERY emitted scalar (names, paths, ids, descriptions)
+    so a single artifact field can never inflate the bounded summary."""
     if not isinstance(value, str):
         return value
     if len(value) <= _TEXT_CLIP:
         return value
     trunc.add("text", _TEXT_CLIP, len(value), len(value) - _TEXT_CLIP)
     return value[:_TEXT_CLIP]
+
+
+def _clip_list(items: Any, trunc: _Truncation, kind: str) -> List[str]:
+    """Bound a nested list of identifiers to _LIST_CAP string elements (each also
+    clipped), registering truncation when either the count or an element is
+    clipped — so one artifact list (e.g. a constraint's columns) can't inflate
+    the bounded summary."""
+    if not isinstance(items, list):
+        return []
+    out: List[str] = []
+    for x in items:
+        if not isinstance(x, str):
+            continue
+        if len(out) >= _LIST_CAP:
+            trunc.add("list:" + kind, _LIST_CAP, len(items), len(items) - _LIST_CAP)
+            break
+        out.append(_clip(x, trunc))
+    return out
 
 
 def _success(
@@ -484,6 +505,19 @@ def _safe_xml(data: Any, parse_code: str, invalid_spec_code: str) -> "ET.Element
         raise _DiscoveryError(parse_code)
 
 
+def _guard_xml_element_count(root: "ET.Element", node_limit: int, trunc: _Truncation) -> None:
+    """Enforce the plan's XML-element node budget across the WHOLE parsed tree:
+    the summary only counts selected constructs, so a document padded with many
+    other elements (annotations, deep XSD types, etc.) would otherwise report
+    truncated=false. If the total element count exceeds max_nodes, register a
+    truncation reason so `truncated` reflects that the document exceeded the
+    bound. (Input size is already hard-capped by max_input_chars, bounding
+    memory; this makes the element count an honest, accurate signal.)"""
+    total = sum(1 for _ in root.iter())
+    if total > node_limit:
+        trunc.add("nodes:xml_elements", node_limit, total, total - node_limit)
+
+
 def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else tag
 
@@ -591,6 +625,19 @@ def _sanitize_url(value: Any) -> Optional[str]:
     return f"{parts.scheme}://{authority}{parts.path}"[:_TEXT_CLIP]
 
 
+def _sanitize_ns(value: Any) -> Optional[str]:
+    """Sanitize a namespace/identifier URI before echoing it. A WSDL/OData
+    namespace can be a URL that embeds credentials (userinfo or secret query
+    params), so strip them the same way as an endpoint URL; a non-URL identifier
+    (e.g. a URN) has any query/fragment tail dropped and is clipped."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    v = value.strip()
+    if "://" in v:
+        return _sanitize_url(v)
+    return v.split("?", 1)[0].split("#", 1)[0][:_TEXT_CLIP]
+
+
 # ---------------------------------------------------------------------------
 # OpenAPI parsing
 # ---------------------------------------------------------------------------
@@ -632,11 +679,11 @@ def _openapi_parameter(param: Any, trunc: _Truncation) -> Optional[Dict[str, Any
         }
     schema = param.get("schema") if isinstance(param.get("schema"), dict) else {}
     return {
-        "name": param.get("name"),
-        "in": param.get("in"),
+        "name": _clip(param.get("name"), trunc),
+        "in": _clip(param.get("in"), trunc),
         "required": bool(param.get("required", False)),
-        "type": param.get("type") or schema.get("type"),
-        "format": param.get("format") or schema.get("format"),
+        "type": _clip(param.get("type") or schema.get("type"), trunc),
+        "format": _clip(param.get("format") or schema.get("format"), trunc),
         "ref": _json_pointer_name(schema.get("$ref")) if schema else None,
     }
 
@@ -842,9 +889,9 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
 
             operations.append(
                 {
-                    "path": path,
+                    "path": _clip(path, trunc),
                     "method": method.upper(),
-                    "operation_id": op.get("operationId"),
+                    "operation_id": _clip(op.get("operationId"), trunc),
                     "summary": _clip(op.get("summary"), trunc),
                     "parameters": params_out,
                     "request_schema": _openapi_request_schema(op, effective_params, version_major),
@@ -877,20 +924,20 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             desc = _openapi_schema_descriptor(pschema) or {}
             props_out.append(
                 {
-                    "name": pname,
-                    "type": desc.get("type"),
-                    "format": desc.get("format"),
+                    "name": _clip(pname, trunc),
+                    "type": _clip(desc.get("type"), trunc),
+                    "format": _clip(desc.get("format"), trunc),
                     "required": pname in required_set,
                     "ref": desc.get("ref"),
-                    "items_type": desc.get("items_type"),
+                    "items_type": _clip(desc.get("items_type"), trunc),
                     "items_ref": desc.get("items_ref"),
                 }
             )
         schemas_out.append(
             {
-                "name": name,
-                "type": schema.get("type"),
-                "required_fields": sorted(required_set),
+                "name": _clip(name, trunc),
+                "type": _clip(schema.get("type"), trunc),
+                "required_fields": _clip_list(sorted(required_set), trunc, "required_fields"),
                 "properties": props_out,
             }
         )
@@ -945,8 +992,9 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
     if _local(root.tag) != "definitions" or _ns(root.tag) not in _WSDL_NS:
         raise _DiscoveryError("WSDL_INVALID_SPEC")
 
-    target_namespace = root.get("targetNamespace")
+    target_namespace = _clip(root.get("targetNamespace"), trunc)
     budget = _Budget(limits["max_nodes"], limits["max_fields"])
+    _guard_xml_element_count(root, limits["max_nodes"], trunc)
 
     # Abstract portType operations, keyed by (portType name, operation name) so
     # two portTypes that define the same operation name never collide. Both key
@@ -997,8 +1045,8 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
         for child in list(binding):
             if _local(child.tag) == "binding" and _ns(child.tag) in _SOAP_BINDING_NS:
                 soap_version = _soap_version_of(_ns(child.tag))
-                style = child.get("style")
-                transport = child.get("transport")
+                style = _clip(child.get("style"), trunc)
+                transport = _clip(child.get("transport"), trunc)
                 break
         binding_soap_version[bname] = soap_version
 
@@ -1010,7 +1058,7 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
             soap_action = None
             for child in list(op):
                 if _local(child.tag) == "operation" and _ns(child.tag) in _SOAP_BINDING_NS:
-                    soap_action = child.get("soapAction")
+                    soap_action = _clip(child.get("soapAction"), trunc)
                     break
             # Resolve the abstract operation within THIS binding's port type.
             pt = port_type_ops.get((port_type, op_name), {})
@@ -1020,7 +1068,7 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
                     "soap_action": soap_action,
                     "input_message": pt.get("input"),
                     "output_message": pt.get("output"),
-                    "fault_messages": list(pt.get("faults", [])),
+                    "fault_messages": _clip_list(pt.get("faults", []), trunc, "fault_messages"),
                 }
             )
         bindings_out.append(
@@ -1088,7 +1136,7 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
             continue
         imports_out.append(
             {
-                "namespace": imp.get("namespace"),
+                "namespace": _sanitize_ns(imp.get("namespace")),
                 "location": _sanitize_url(imp.get("location")),
                 "fetched": False,
             }
@@ -1178,15 +1226,15 @@ def _detect_odata_version(root: "ET.Element", schemas: List["ET.Element"]) -> Op
     return None
 
 
-def _odata_property(prop: "ET.Element") -> Dict[str, Any]:
+def _odata_property(prop: "ET.Element", trunc: _Truncation) -> Dict[str, Any]:
     nullable_attr = prop.get("Nullable")
     return {
-        "name": prop.get("Name"),
-        "type": prop.get("Type"),
+        "name": _clip(prop.get("Name"), trunc),
+        "type": _clip(prop.get("Type"), trunc),
         "nullable": True if nullable_attr is None else nullable_attr.lower() == "true",
-        "max_length": prop.get("MaxLength"),
+        "max_length": _clip(prop.get("MaxLength"), trunc),
         "precision": _to_int(prop.get("Precision")),
-        "scale": prop.get("Scale"),
+        "scale": _clip(prop.get("Scale"), trunc),
     }
 
 
@@ -1206,20 +1254,21 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
         raise _DiscoveryError("ODATA_INVALID_SPEC")
 
     budget = _Budget(limits["max_nodes"], limits["max_fields"])
+    _guard_xml_element_count(root, limits["max_nodes"], trunc)
 
-    # v2 associations: name -> {role_name: type}
-    associations: Dict[str, Dict[str, str]] = {}
+    # v2 associations: name -> {role_name: {"type", "multiplicity"}}
+    associations: Dict[str, Dict[str, Dict[str, Any]]] = {}
     if version == "2.0":
         for schema in schemas:
             sns = schema.get("Namespace") or ""
             for assoc in _iter_local(schema, "Association"):
                 aname = assoc.get("Name")
-                roles: Dict[str, str] = {}
+                roles: Dict[str, Dict[str, Any]] = {}
                 for end in _iter_local(assoc, "End"):
                     role = end.get("Role")
                     etype = end.get("Type")
                     if role and etype:
-                        roles[role] = etype
+                        roles[role] = {"type": etype, "multiplicity": end.get("Multiplicity")}
                 if aname:
                     associations[aname] = roles
                     associations[f"{sns}.{aname}"] = roles
@@ -1242,18 +1291,18 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
             for prop in _iter_local(etype, "Property"):
                 if not budget.take_field("properties"):
                     continue
-                props.append(_odata_property(prop))
+                props.append(_odata_property(prop, trunc))
             navs: List[Dict[str, Any]] = []
             for nav in _iter_local(etype, "NavigationProperty"):
                 if not budget.take_field("navigation_properties"):
                     continue
-                navs.append(_odata_navigation(nav, version, associations))
+                navs.append(_odata_navigation(nav, version, associations, trunc))
             entity_types.append(
                 {
-                    "namespace": sns,
-                    "name": etype.get("Name"),
-                    "base_type": etype.get("BaseType"),
-                    "keys": keys,
+                    "namespace": _clip(sns, trunc),
+                    "name": _clip(etype.get("Name"), trunc),
+                    "base_type": _clip(etype.get("BaseType"), trunc),
+                    "keys": _clip_list(keys, trunc, "keys"),
                     "properties": props,
                     "navigation_properties": navs,
                 }
@@ -1268,19 +1317,21 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
                     continue
                 bindings: List[Dict[str, Any]] = []
                 for nb in _iter_local(eset, "NavigationPropertyBinding"):
-                    bindings.append({"path": nb.get("Path"), "target": nb.get("Target")})
+                    bindings.append(
+                        {"path": _clip(nb.get("Path"), trunc), "target": _clip(nb.get("Target"), trunc)}
+                    )
                 entity_sets.append(
                     {
-                        "container": cname,
-                        "name": eset.get("Name"),
-                        "entity_type": eset.get("EntityType"),
+                        "container": _clip(cname, trunc),
+                        "name": _clip(eset.get("Name"), trunc),
+                        "entity_type": _clip(eset.get("EntityType"), trunc),
                         "navigation_bindings": bindings,
                     }
                 )
 
     budget.finalize(trunc)
     body = {
-        "schemas": schema_names,
+        "schemas": _clip_list(schema_names, trunc, "schemas"),
         "entity_types": entity_types,
         "entity_sets": entity_sets,
     }
@@ -1292,9 +1343,12 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
 
 
 def _odata_navigation(
-    nav: "ET.Element", version: str, associations: Dict[str, Dict[str, str]]
+    nav: "ET.Element",
+    version: str,
+    associations: Dict[str, Dict[str, Dict[str, Any]]],
+    trunc: _Truncation,
 ) -> Dict[str, Any]:
-    name = nav.get("Name")
+    name = _clip(nav.get("Name"), trunc)
     if version == "4.0":
         type_attr = nav.get("Type") or ""
         collection = type_attr.startswith("Collection(")
@@ -1304,26 +1358,31 @@ def _odata_navigation(
         nullable_attr = nav.get("Nullable")
         return {
             "name": name,
-            "target_type": target or None,
+            "target_type": _clip(target or None, trunc),
             "collection": collection,
             "nullable": None if nullable_attr is None else nullable_attr.lower() == "true",
-            "partner": nav.get("Partner"),
+            "partner": _clip(nav.get("Partner"), trunc),
             "relationship": None,
         }
-    # v2
+    # v2: resolve the target role's type AND multiplicity from the Association, so
+    # `collection` is a boolean ('*' -> many) per the response contract.
     relationship = nav.get("Relationship")
     to_role = nav.get("ToRole")
     target_type = None
+    collection: Optional[bool] = None
     roles = associations.get(relationship) or associations.get(_last_segment(relationship) or "")
     if roles and to_role and to_role in roles:
-        target_type = roles[to_role]
+        target_type = roles[to_role].get("type")
+        mult = roles[to_role].get("multiplicity")
+        if mult is not None:
+            collection = mult.strip() == "*"
     return {
         "name": name,
-        "target_type": target_type,
-        "collection": None,
+        "target_type": _clip(target_type, trunc),
+        "collection": collection,
         "nullable": None,
         "partner": None,
-        "relationship": _last_segment(relationship),
+        "relationship": _clip(_last_segment(relationship), trunc),
     }
 
 
@@ -1353,6 +1412,22 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
     columns = doc.get("columns")
     if not isinstance(columns, list) or not columns:
         raise _DiscoveryError("DB_SCHEMA_INVALID_SPEC")
+
+    # Fail closed on structurally invalid column records: every column MUST be an
+    # object carrying the required string fields (table_name, column_name,
+    # data_type), per the normalized information-schema contract. A malformed
+    # artifact (e.g. {"columns":[{}]}) is INVALID_SPEC, not a success with nulls.
+    for col in columns:
+        if (
+            not isinstance(col, dict)
+            or not isinstance(col.get("table_name"), str)
+            or not col.get("table_name")
+            or not isinstance(col.get("column_name"), str)
+            or not col.get("column_name")
+            or not isinstance(col.get("data_type"), str)
+            or not col.get("data_type")
+        ):
+            raise _DiscoveryError("DB_SCHEMA_INVALID_SPEC")
 
     budget = _Budget(limits["max_nodes"], limits["max_fields"])
     top_catalog = doc.get("catalog")
@@ -1413,16 +1488,14 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                 )
 
     for col in columns:
-        if not isinstance(col, dict) or not col.get("table_name"):
-            continue
         if not budget.take_field("columns"):
             continue
         table = _ensure(col.get("table_catalog"), col.get("table_schema"), col.get("table_name"))
         table["columns"].append(
             {
-                "name": col.get("column_name"),
+                "name": _clip(col.get("column_name"), trunc),
                 "ordinal_position": _to_int(col.get("ordinal_position")),
-                "data_type": col.get("data_type"),
+                "data_type": _clip(col.get("data_type"), trunc),
                 "nullable": _normalize_nullable(col.get("is_nullable")),
                 # NEVER echo the actual default value (may hold secrets/PII).
                 "default_present": col.get("column_default") is not None,
@@ -1442,14 +1515,14 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             table = _locate(c.get("table_schema"), c.get("table_name"))
             table["constraints"].append(
                 {
-                    "name": c.get("constraint_name"),
-                    "type": c.get("constraint_type"),
-                    "columns": [x for x in (c.get("columns") or []) if isinstance(x, str)],
-                    "referenced_schema": c.get("referenced_table_schema"),
-                    "referenced_table": c.get("referenced_table_name"),
-                    "referenced_columns": [
-                        x for x in (c.get("referenced_columns") or []) if isinstance(x, str)
-                    ],
+                    "name": _clip(c.get("constraint_name"), trunc),
+                    "type": _clip(c.get("constraint_type"), trunc),
+                    "columns": _clip_list(c.get("columns"), trunc, "constraint_columns"),
+                    "referenced_schema": _clip(c.get("referenced_table_schema"), trunc),
+                    "referenced_table": _clip(c.get("referenced_table_name"), trunc),
+                    "referenced_columns": _clip_list(
+                        c.get("referenced_columns"), trunc, "referenced_columns"
+                    ),
                 }
             )
 
@@ -1463,9 +1536,9 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             table = _locate(ix.get("table_schema"), ix.get("table_name"))
             table["indexes"].append(
                 {
-                    "name": ix.get("index_name"),
+                    "name": _clip(ix.get("index_name"), trunc),
                     "unique": bool(ix.get("unique")),
-                    "columns": [x for x in (ix.get("columns") or []) if isinstance(x, str)],
+                    "columns": _clip_list(ix.get("columns"), trunc, "index_columns"),
                 }
             )
 
@@ -1484,12 +1557,16 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                 str(c["name"] or ""),
             )
         )
+        t["catalog"] = _clip(t["catalog"], trunc)
+        t["schema"] = _clip(t["schema"], trunc)
+        t["name"] = _clip(t["name"], trunc)
+        t["type"] = _clip(t["type"], trunc)
         tables_out.append(t)
 
     budget.finalize(trunc)
     body = {
-        "database_product": doc.get("database_product"),
-        "catalog": top_catalog,
+        "database_product": _clip(doc.get("database_product"), trunc),
+        "catalog": _clip(top_catalog, trunc),
         "tables": tables_out,
     }
     counts = {

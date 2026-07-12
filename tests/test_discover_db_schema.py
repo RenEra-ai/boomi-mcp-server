@@ -234,6 +234,31 @@ def test_db_constraints_attach_to_column_bearing_table_not_empty_declaration():
     assert not any(t["constraints"] and not t["columns"] for t in r["tables"])
 
 
+def test_db_invalid_column_records_rejected():
+    """Columns missing required string fields (table_name/column_name/data_type)
+    make the artifact structurally invalid -> DB_SCHEMA_INVALID_SPEC, not a
+    success with nulls (§6 impl-review #6)."""
+    assert discover_db_schema_action({"columns": [{}]})["error_code"] == "DB_SCHEMA_INVALID_SPEC"
+    assert discover_db_schema_action({"columns": [{"table_name": "t", "column_name": "c"}]})["error_code"] == "DB_SCHEMA_INVALID_SPEC"  # no data_type
+    assert discover_db_schema_action({"columns": [{"table_name": "t", "data_type": "int"}]})["error_code"] == "DB_SCHEMA_INVALID_SPEC"  # no column_name
+    # a fully-specified column still succeeds
+    assert discover_db_schema_action({"columns": [{"table_name": "t", "column_name": "c", "data_type": "int"}]})["_success"] is True
+
+
+def test_db_nested_lists_capped():
+    """A constraint's columns list is capped to the per-list bound with truncation
+    (§6 impl-review #2)."""
+    art = {
+        "columns": [{"table_name": "t", "column_name": "c", "data_type": "int"}],
+        "constraints": [{"constraint_name": "pk", "constraint_type": "PRIMARY KEY",
+                         "table_name": "t", "columns": [f"c{i}" for i in range(2000)]}],
+    }
+    r = discover_db_schema_action(art)
+    cons = r["tables"][0]["constraints"][0]
+    assert len(cons["columns"]) == 1000
+    assert r["truncated"] is True
+
+
 def test_db_never_touches_network_or_credentials():
     with (
         patch.object(sd.httpx, "Client") as m_client,
