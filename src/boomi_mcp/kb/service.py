@@ -19,6 +19,11 @@ import os
 import time
 from dataclasses import dataclass
 
+from .embedding_contract import (
+    assert_collection_metric,
+    assert_model_seq_length,
+    resolve_embedding_contract,
+)
 from .errors import KbQueryError, KbStartupError
 from .manifest import corpus_version, load_manifest, validate_manifest
 
@@ -391,14 +396,16 @@ class KbService:
 class KbBootstrap:
     """Cheap, ML-free startup state produced by ``validate_kb_manifest_cheap``.
 
-    Carries both the resolved ``config`` and the parsed ``manifest`` because the
-    heavy build AND KbService need config (db_path/collection/top_k/confidence),
-    not just the manifest. Held by KbWarmup and handed to ``build_kb_service_heavy``
-    when the deferred build runs.
+    Carries the resolved ``config``, the parsed ``manifest``, and the resolved
+    embedding ``contract`` because the heavy build AND KbService need config
+    (db_path/collection/top_k/confidence), not just the manifest. Held by
+    KbWarmup and handed to ``build_kb_service_heavy`` when the deferred build
+    runs.
     """
 
     config: dict
     manifest: dict
+    contract: object  # EmbeddingContract
 
 
 def validate_kb_manifest_cheap():
@@ -428,7 +435,12 @@ def validate_kb_manifest_cheap():
     if not manifest.get("embedding_model"):
         raise KbStartupError("KB manifest is missing 'embedding_model'")
 
-    return KbBootstrap(config=config, manifest=manifest)
+    # Resolve the embedding contract fail-closed while still cheap: a malformed
+    # contract or an unknown unpinned legacy model must never defer a heavy
+    # build that would load the wrong (or an unverifiable) model identity.
+    contract = resolve_embedding_contract(manifest)
+
+    return KbBootstrap(config=config, manifest=manifest, contract=contract)
 
 
 def build_kb_service_heavy(bootstrap):
@@ -444,9 +456,10 @@ def build_kb_service_heavy(bootstrap):
     """
     config = bootstrap.config
     manifest = bootstrap.manifest
+    contract = bootstrap.contract
     db_path = config["db_path"]
     collection_name = config["collection"]
-    embedding_model = manifest.get("embedding_model")
+    embedding_model = contract.model_id
 
     def _phase(name, start):
         print(f"[INFO] KB warmup phase={name} seconds={time.monotonic() - start:.2f}")
@@ -473,13 +486,19 @@ def build_kb_service_heavy(bootstrap):
 
     # Step 8 (before 6): the embedding function is required to re-open the
     # collection so that query_texts work — so build it before get_collection.
+    # The contract pins the exact model identity: revision and normalization
+    # are forwarded to SentenceTransformer, and the loaded model's token window
+    # is asserted so serving can never silently truncate model-side.
     t = time.monotonic()
     try:
         ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=embedding_model
+            model_name=embedding_model,
+            revision=contract.revision,
+            normalize_embeddings=contract.normalize_embeddings,
         )
     except Exception as e:
         raise KbStartupError(f"Failed to load embedding model {embedding_model!r}: {e}")
+    assert_model_seq_length(ef._model, contract)
     _phase("load_model", t)
 
     # Step 6: open the collection.
@@ -490,6 +509,7 @@ def build_kb_service_heavy(bootstrap):
         raise KbStartupError(
             f"Failed to open Chroma collection {collection_name!r}: {e}"
         )
+    assert_collection_metric(collection, contract)
     _phase("open_collection", t)
 
     # Step 7: exact count match guards against incomplete/corrupt artifacts.

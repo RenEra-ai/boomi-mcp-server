@@ -129,6 +129,28 @@ def test_import_defers_ml_stack_when_enabled(tmp_path):
     assert "DEFERRED_IMPORT_NO_ML_OK" in result.stdout
 
 
+def test_unknown_legacy_model_fails_fast_without_ml_deps(tmp_path):
+    """A manifest with no embedding_contract and an unknown model must be
+    rejected by the CHEAP validation at import — fail-closed, no ML deps."""
+    manifest = {
+        "schema_version": "1",
+        "collection_name": "boomi_docs",
+        "embedding_model": "bge-small-en-v1.5",
+        "chunk_count": 1,
+        "build_timestamp": "2026-01-01T00:00:00Z",
+    }
+    with open(os.path.join(str(tmp_path), "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f)
+    result = run_import_server(
+        IMPORT_ONLY_SCRIPT,
+        {"BOOMI_DOCS_ENABLED": "true", "BOOMI_DOCS_DB_PATH": str(tmp_path)},
+    )
+    assert result.returncode == 1
+    combined = result.stdout + result.stderr
+    assert "Boomi Docs KB startup failed" in combined
+    assert "legacy" in combined
+
+
 def test_missing_deps_degrade_to_sanitized_kb_unavailable(tmp_path):
     _write_cheap_valid_manifest(str(tmp_path))
     result = run_import_server(

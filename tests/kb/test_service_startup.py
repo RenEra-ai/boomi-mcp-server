@@ -16,9 +16,10 @@ import pytest
 pytest.importorskip("chromadb")
 pytest.importorskip("sentence_transformers")
 
+from boomi_mcp.kb.embedding_contract import KB24_COMPATIBLE_REVISION
 from boomi_mcp.kb.errors import KbStartupError
 from boomi_mcp.kb.manifest import load_manifest, validate_manifest
-from boomi_mcp.kb.service import build_kb_service
+from boomi_mcp.kb.service import build_kb_service, validate_kb_manifest_cheap
 from _fixture_corpus import build_fixture_corpus, get_fixture_corpus, load_fixture_manifest
 
 
@@ -75,13 +76,66 @@ def test_malformed_manifest_json_raises(monkeypatch, tmp_path):
         build_kb_service()
 
 
-def test_bad_schema_version_raises(monkeypatch, tmp_path):
+def test_schema_v2_with_valid_contract_passes_cheap_validation(monkeypatch, tmp_path):
+    """kb-25 compatibility: a schema-v2 manifest with a well-formed
+    embedding_contract must pass the cheap validation gate."""
     manifest = load_fixture_manifest()
     manifest["schema_version"] = "2"
+    manifest["embedding_contract"] = {
+        "version": 1,
+        "model_id": "all-MiniLM-L6-v2",
+        "revision": KB24_COMPATIBLE_REVISION,
+        "max_seq_length": 256,
+        "distance_metric": "cosine",
+        "normalize_embeddings": False,
+        "embedding_text_version": "s5-s6-v1",
+        "s7_enabled": False,
+    }
+    _write_manifest(tmp_path, manifest)
+    _point_at(monkeypatch, tmp_path)
+    bootstrap = validate_kb_manifest_cheap()
+    assert bootstrap.contract.source == "contract"
+    assert bootstrap.contract.embedding_text_version == "s5-s6-v1"
+
+
+def test_unsupported_schema_version_raises(monkeypatch, tmp_path):
+    manifest = load_fixture_manifest()
+    manifest["schema_version"] = "3"
     _write_manifest(tmp_path, manifest)
     _point_at(monkeypatch, tmp_path)
     with pytest.raises(KbStartupError, match="schema_version"):
         build_kb_service()
+
+
+def test_malformed_contract_fails_cheap_validation(monkeypatch, tmp_path):
+    """A present-but-broken embedding_contract fails fast at cheap validation —
+    it must never fall back to the legacy mapping."""
+    manifest = load_fixture_manifest()
+    manifest["embedding_contract"] = {"version": 1}
+    _write_manifest(tmp_path, manifest)
+    _point_at(monkeypatch, tmp_path)
+    with pytest.raises(KbStartupError, match="missing required field"):
+        validate_kb_manifest_cheap()
+
+
+def test_unknown_legacy_model_fails_cheap_validation(monkeypatch, tmp_path):
+    manifest = load_fixture_manifest()
+    manifest["embedding_model"] = "bge-small-en-v1.5"
+    _write_manifest(tmp_path, manifest)
+    _point_at(monkeypatch, tmp_path)
+    with pytest.raises(KbStartupError, match="legacy"):
+        validate_kb_manifest_cheap()
+
+
+def test_bootstrap_resolves_legacy_contract_for_fixture_corpus(monkeypatch):
+    """The kb-24-shaped fixture manifest (no contract) resolves to the pinned
+    behavior-compatible revision through the legacy mapping."""
+    _point_at(monkeypatch, get_fixture_corpus())
+    bootstrap = validate_kb_manifest_cheap()
+    assert bootstrap.contract.revision == KB24_COMPATIBLE_REVISION
+    assert bootstrap.contract.source == "legacy-kb24"
+    assert bootstrap.contract.max_seq_length == 256
+    assert bootstrap.contract.distance_metric == "cosine"
 
 
 def test_collection_name_mismatch_raises(monkeypatch, tmp_path):

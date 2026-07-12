@@ -60,6 +60,16 @@ def test_corpus_resource_reads_as_coverage_map():
     assert "search_boomi_docs" in body
 
 
+def test_corpus_resource_shows_embedding_contract_facts():
+    """The resource renders the RESOLVED contract: revision, embedding text
+    version, and S7 mode — for the legacy fixture these come from the kb-24
+    mapping."""
+    body = _read_resource_text(CORPUS_URI)
+    assert "Model revision: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41" in body
+    assert "Embedding text version: raw-v1" in body
+    assert "Synthetic descriptions (S7): disabled" in body
+
+
 def test_corpus_resource_shows_provenance_breakdown():
     body = _read_resource_text(CORPUS_URI)
     # Provenance line rendered from source_type_counts, sorted desc by count.

@@ -162,3 +162,42 @@ def resolve_embedding_contract(manifest):
             f"equal embedding_contract.model_id {contract.model_id!r}"
         )
     return contract
+
+
+def assert_model_seq_length(model, contract):
+    """Fail closed unless the LOADED model's max_seq_length matches the contract.
+
+    ``model`` is the SentenceTransformer instance (it exposes max_seq_length).
+    A mismatch means the loaded weights/config are not the corpus's embedding
+    identity — serving would silently rank with a different token window.
+    """
+    actual = getattr(model, "max_seq_length", None)
+    if actual != contract.max_seq_length:
+        raise KbStartupError(
+            f"Loaded embedding model max_seq_length {actual!r} does not match "
+            f"the corpus contract max_seq_length {contract.max_seq_length!r}"
+        )
+
+
+def assert_collection_metric(collection, contract):
+    """Fail closed unless the collection's hnsw space equals the declared metric.
+
+    Chroma exposes the space via the legacy ``metadata['hnsw:space']`` key and,
+    on newer persisted collections, via ``configuration_json['hnsw']['space']``.
+    Indeterminate is a failure: a corpus whose metric cannot be verified must
+    not serve distances that the confidence thresholds assume are cosine.
+    """
+    space = None
+    metadata = getattr(collection, "metadata", None)
+    if isinstance(metadata, dict):
+        space = metadata.get("hnsw:space")
+    if space is None:
+        try:
+            space = collection.configuration_json["hnsw"]["space"]
+        except (AttributeError, KeyError, TypeError):
+            space = None
+    if space != contract.distance_metric:
+        raise KbStartupError(
+            f"KB collection distance metric {space!r} does not match the corpus "
+            f"contract distance_metric {contract.distance_metric!r}"
+        )

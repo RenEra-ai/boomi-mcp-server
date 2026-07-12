@@ -21,6 +21,8 @@ from boomi_mcp.kb.embedding_contract import (
     KB24_COMPATIBLE_REVISION,
     PINNED_MODEL_ID,
     EmbeddingContract,
+    assert_collection_metric,
+    assert_model_seq_length,
     resolve_embedding_contract,
 )
 from boomi_mcp.kb.errors import KbStartupError
@@ -166,3 +168,57 @@ def test_top_level_model_must_equal_contract_model_id():
     manifest["embedding_model"] = "some-other-model"
     with pytest.raises(KbStartupError, match="embedding_model"):
         resolve_embedding_contract(manifest)
+
+
+# --- loaded-model / collection assertion helpers -------------------------------
+
+class _FakeModel:
+    def __init__(self, max_seq_length):
+        self.max_seq_length = max_seq_length
+
+
+class _FakeCollection:
+    def __init__(self, metadata=None, configuration_json=None):
+        self.metadata = metadata
+        if configuration_json is not None:
+            self.configuration_json = configuration_json
+
+
+def _legacy_contract():
+    return resolve_embedding_contract(
+        {"schema_version": "1", "embedding_model": "all-MiniLM-L6-v2"}
+    )
+
+
+def test_assert_model_seq_length_accepts_matching_model():
+    assert_model_seq_length(_FakeModel(256), _legacy_contract())
+
+
+def test_assert_model_seq_length_rejects_mismatch():
+    with pytest.raises(KbStartupError, match="max_seq_length"):
+        assert_model_seq_length(_FakeModel(512), _legacy_contract())
+
+
+def test_assert_collection_metric_reads_legacy_metadata_key():
+    assert_collection_metric(
+        _FakeCollection(metadata={"hnsw:space": "cosine"}), _legacy_contract()
+    )
+
+
+def test_assert_collection_metric_falls_back_to_configuration_json():
+    collection = _FakeCollection(
+        metadata=None, configuration_json={"hnsw": {"space": "cosine"}}
+    )
+    assert_collection_metric(collection, _legacy_contract())
+
+
+def test_assert_collection_metric_rejects_wrong_space():
+    with pytest.raises(KbStartupError, match="distance metric"):
+        assert_collection_metric(
+            _FakeCollection(metadata={"hnsw:space": "l2"}), _legacy_contract()
+        )
+
+
+def test_assert_collection_metric_fails_closed_when_indeterminate():
+    with pytest.raises(KbStartupError, match="distance metric"):
+        assert_collection_metric(_FakeCollection(metadata={}), _legacy_contract())

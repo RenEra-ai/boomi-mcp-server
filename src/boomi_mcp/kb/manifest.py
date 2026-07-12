@@ -5,9 +5,13 @@ Pure stdlib — safe to import without the ML stack installed.
 import json
 import os
 
+from .embedding_contract import resolve_embedding_contract
 from .errors import KbStartupError
 
 MANIFEST_SCHEMA_VERSION = "1"
+# Legacy kb-24 corpora are schema "1" (no embedding_contract, mapped by the
+# resolver); kb-25 corpora are schema "2" (explicit embedding_contract).
+SUPPORTED_SCHEMA_VERSIONS = ("1", "2")
 
 
 def load_manifest(db_path):
@@ -43,10 +47,10 @@ def validate_manifest(manifest, expected_collection):
     Raises KbStartupError with a specific message on mismatch.
     """
     schema_version = manifest.get("schema_version")
-    if schema_version != MANIFEST_SCHEMA_VERSION:
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise KbStartupError(
             f"Unsupported KB manifest schema_version {schema_version!r}; "
-            f"this server supports {MANIFEST_SCHEMA_VERSION!r}"
+            f"this server supports {list(SUPPORTED_SCHEMA_VERSIONS)}"
         )
 
     collection_name = manifest.get("collection_name")
@@ -70,6 +74,10 @@ def render_corpus_resource(manifest):
         f"{embedding_model} ({embedding_dim} dim)" if embedding_dim else embedding_model
     )
 
+    # Resolved embedding identity. Safe here: the resource registers only after
+    # validate_kb_manifest_cheap resolved this same manifest successfully.
+    contract = resolve_embedding_contract(manifest)
+
     category_counts = manifest.get("category_counts", {})
     categories_str = ", ".join(
         f"{name} ({count:,})"
@@ -83,6 +91,10 @@ def render_corpus_resource(manifest):
         "",
         f"- Collection: {manifest.get('collection_name', 'unknown')}",
         f"- Embedding model: {model_line}",
+        f"- Model revision: {contract.revision}",
+        f"- Embedding text version: {contract.embedding_text_version}",
+        f"- Synthetic descriptions (S7): "
+        f"{'enabled' if contract.s7_enabled else 'disabled'}",
         f"- Build: {manifest.get('build_timestamp', 'unknown')}",
         f"- Corpus version: {corpus_version(manifest)}",
         f"- Sources: {sources}",
