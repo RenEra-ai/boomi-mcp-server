@@ -343,16 +343,21 @@ def test_wsdl_import_namespace_sanitized():
     assert r["imports"][0]["namespace"] == "http://ns.example.com/x"
 
 
-def test_wsdl_xml_element_count_truncation():
-    """max_nodes bounds every XML element: a document with more elements than the
-    budget reports truncated=true (§6 impl-review #3)."""
+def test_wsdl_top_level_node_budget_single_path():
+    """The single semantic node budget bounds top-level constructs
+    (services/bindings/messages/imports) with accurate, non-overlapping omitted
+    counts (repo-gate: single XML node budget)."""
     payload = (
         '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
-        '<message name="M"><part name="p1"/><part name="p2"/><part name="p3"/></message>'
+        '<message name="M1"/><message name="M2"/><message name="M3"/>'
         '</definitions>'
     )
     r = discover_soap_wsdl_action(artifact=payload, options={"max_nodes": 1})
     assert r["_success"] is True and r["truncated"] is True
+    assert len(r["messages"]) == 1
+    # exactly 2 omitted (3 messages - 1 budget), no double-counting
+    msg_reasons = [x for x in r["truncation"]["reasons"] if x["kind"] == "nodes:messages"]
+    assert msg_reasons and msg_reasons[0]["omitted"] == 2
 
 
 def test_utf16_doctype_rejected_via_url_mode():

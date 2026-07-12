@@ -271,6 +271,33 @@ def test_odata_v2_navigation_collection_from_multiplicity():
     assert navs["Customer"]["collection"] is False and navs["Customer"]["target_type"] == "NS.Customer"
 
 
+_EDMX_V2_ALIAS = b"""<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+ <edmx:DataServices m:MaxDataServiceVersion="2.0" xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+  <Schema Namespace="My.Long.Namespace" Alias="AA" xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+   <EntityType Name="Order"><Key><PropertyRef Name="Id"/></Key>
+     <Property Name="Id" Type="Edm.Int32" Nullable="false"/>
+     <NavigationProperty Name="Items" Relationship="AA.Rel" FromRole="Order" ToRole="Items"/>
+   </EntityType>
+   <Association Name="Rel">
+     <End Role="Order" Type="AA.Order" Multiplicity="1"/>
+     <End Role="Items" Type="AA.Item" Multiplicity="*"/>
+   </Association>
+   <EntityContainer Name="Ctx"><EntitySet Name="Orders" EntityType="AA.Order"/></EntityContainer>
+  </Schema>
+ </edmx:DataServices>
+</edmx:Edmx>"""
+
+
+def test_odata_v2_alias_qualified_association_resolved():
+    """A navigation referencing an association via a schema ALIAS ('AA.Rel') must
+    resolve to that association's multiplicity, not fall back to an ambiguous
+    short name (repo-gate: index associations under aliases)."""
+    r, _, _ = _call("https://svc.example.com/odata/$metadata", _EDMX_V2_ALIAS)
+    assert r["_success"] is True and r["version"] == "2.0"
+    nav = r["entity_types"][0]["navigation_properties"][0]
+    assert nav["collection"] is True and nav["target_type"] == "AA.Item"
+
+
 def test_odata_utf16_doctype_rejected():
     """A UTF-16 EDMX with a DOCTYPE must be rejected via the encoding-robust
     screen, not slip past a UTF-8 decode (Codex P1)."""

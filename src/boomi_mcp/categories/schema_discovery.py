@@ -505,19 +505,6 @@ def _safe_xml(data: Any, parse_code: str, invalid_spec_code: str) -> "ET.Element
         raise _DiscoveryError(parse_code)
 
 
-def _guard_xml_element_count(root: "ET.Element", node_limit: int, trunc: _Truncation) -> None:
-    """Enforce the plan's XML-element node budget across the WHOLE parsed tree:
-    the summary only counts selected constructs, so a document padded with many
-    other elements (annotations, deep XSD types, etc.) would otherwise report
-    truncated=false. If the total element count exceeds max_nodes, register a
-    truncation reason so `truncated` reflects that the document exceeded the
-    bound. (Input size is already hard-capped by max_input_chars, bounding
-    memory; this makes the element count an honest, accurate signal.)"""
-    total = sum(1 for _ in root.iter())
-    if total > node_limit:
-        trunc.add("nodes:xml_elements", node_limit, total, total - node_limit)
-
-
 def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else tag
 
@@ -544,7 +531,8 @@ def _last_segment(ref: Any) -> Optional[str]:
     ``_json_pointer_name``."""
     if not isinstance(ref, str) or not ref:
         return None
-    return ref.rsplit("/", 1)[-1].rsplit(".", 1)[-1] or None
+    seg = ref.rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+    return seg[:_TEXT_CLIP] if seg else None
 
 
 def _json_pointer_name(ref: Any) -> Optional[str]:
@@ -568,9 +556,13 @@ def _json_pointer_name(ref: Any) -> Optional[str]:
         raw = fragment.rsplit("/", 1)[-1]
     else:
         raw = fragment  # fragment-only anchor
-    if not raw:
+    name = raw.replace("~1", "/").replace("~0", "~")
+    if not name:
         return None
-    return raw.replace("~1", "/").replace("~0", "~") or None
+    # Hard-cap to _TEXT_CLIP: a reference and its declaration name both flow
+    # through this helper / _clip, so identical bounding keeps a (pathologically
+    # long) ref matching its clipped schema name AND keeps the output bounded.
+    return name[:_TEXT_CLIP]
 
 
 def _qname_local(value: Any) -> Optional[str]:
@@ -584,7 +576,12 @@ def _qname_local(value: Any) -> Optional[str]:
     value = value.strip()
     if not value:
         return None
-    return value.rsplit(":", 1)[-1] or None
+    local = value.rsplit(":", 1)[-1]
+    if not local:
+        return None
+    # Hard-cap to _TEXT_CLIP so every WSDL identifier (declaration and reference)
+    # is bounded and clips identically (keeping refs matched to declarations).
+    return local[:_TEXT_CLIP]
 
 
 def _sanitize_url(value: Any) -> Optional[str]:
@@ -994,7 +991,6 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
 
     target_namespace = _clip(root.get("targetNamespace"), trunc)
     budget = _Budget(limits["max_nodes"], limits["max_fields"])
-    _guard_xml_element_count(root, limits["max_nodes"], trunc)
 
     # Abstract portType operations, keyed by (portType name, operation name) so
     # two portTypes that define the same operation name never collide. Both key
@@ -1254,13 +1250,18 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
         raise _DiscoveryError("ODATA_INVALID_SPEC")
 
     budget = _Budget(limits["max_nodes"], limits["max_fields"])
-    _guard_xml_element_count(root, limits["max_nodes"], trunc)
 
-    # v2 associations: name -> {role_name: {"type", "multiplicity"}}
+    # v2 associations, keyed by FULLY-QUALIFIED name (Namespace.Name AND, when
+    # the schema declares one, Alias.Name). A bare short name is tracked
+    # separately and only used when UNAMBIGUOUS across schemas, so a navigation
+    # that references an association via an alias resolves to the right one and a
+    # duplicated short name never silently reads the wrong association.
     associations: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    short_assoc: Dict[str, Optional[Dict[str, Dict[str, Any]]]] = {}
     if version == "2.0":
         for schema in schemas:
             sns = schema.get("Namespace") or ""
+            alias = schema.get("Alias")
             for assoc in _iter_local(schema, "Association"):
                 aname = assoc.get("Name")
                 roles: Dict[str, Dict[str, Any]] = {}
@@ -1270,8 +1271,14 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
                     if role and etype:
                         roles[role] = {"type": etype, "multiplicity": end.get("Multiplicity")}
                 if aname:
-                    associations[aname] = roles
-                    associations[f"{sns}.{aname}"] = roles
+                    if sns:
+                        associations[f"{sns}.{aname}"] = roles
+                    if alias:
+                        associations[f"{alias}.{aname}"] = roles
+                    if aname in short_assoc and short_assoc[aname] is not roles:
+                        short_assoc[aname] = None  # ambiguous -> leave unresolved
+                    else:
+                        short_assoc[aname] = roles
 
     entity_types: List[Dict[str, Any]] = []
     schema_names: List[str] = []
@@ -1296,7 +1303,7 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
             for nav in _iter_local(etype, "NavigationProperty"):
                 if not budget.take_field("navigation_properties"):
                     continue
-                navs.append(_odata_navigation(nav, version, associations, trunc))
+                navs.append(_odata_navigation(nav, version, associations, short_assoc, trunc))
             entity_types.append(
                 {
                     "namespace": _clip(sns, trunc),
@@ -1346,6 +1353,7 @@ def _odata_navigation(
     nav: "ET.Element",
     version: str,
     associations: Dict[str, Dict[str, Dict[str, Any]]],
+    short_assoc: Dict[str, Optional[Dict[str, Dict[str, Any]]]],
     trunc: _Truncation,
 ) -> Dict[str, Any]:
     name = _clip(nav.get("Name"), trunc)
@@ -1370,7 +1378,11 @@ def _odata_navigation(
     to_role = nav.get("ToRole")
     target_type = None
     collection: Optional[bool] = None
-    roles = associations.get(relationship) or associations.get(_last_segment(relationship) or "")
+    # Prefer the fully-qualified (Namespace/Alias) key; fall back to the bare
+    # short name ONLY when it is unambiguous (short_assoc holds None otherwise).
+    roles = associations.get(relationship)
+    if roles is None:
+        roles = short_assoc.get(_last_segment(relationship) or "")
     if roles and to_role and to_role in roles:
         target_type = roles[to_role].get("type")
         mult = roles[to_role].get("multiplicity")
