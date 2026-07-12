@@ -89,8 +89,11 @@ RUN if [ -n "$KB_RELEASE_TAG" ]; then \
 ENV HF_HOME=/home/appuser/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/home/appuser/.cache/sentence_transformers
 
+# Preload resolves the model identity (name + pinned revision) from the
+# DOWNLOADED corpus manifest via the same fail-closed resolver the runtime
+# warmup uses — the Dockerfile no longer duplicates any model logic.
 RUN if [ -n "$KB_RELEASE_TAG" ]; then \
-        python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"; \
+        PYTHONPATH=/app/src python scripts/preload_kb_model.py --db-path /app/kb/boomi_knowledge_db; \
     fi
 
 # Build-time KB validation gate (Workstream C): run the full build_kb_service()

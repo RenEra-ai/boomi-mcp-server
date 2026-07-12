@@ -222,3 +222,72 @@ def test_assert_collection_metric_rejects_wrong_space():
 def test_assert_collection_metric_fails_closed_when_indeterminate():
     with pytest.raises(KbStartupError, match="distance metric"):
         assert_collection_metric(_FakeCollection(metadata={}), _legacy_contract())
+
+
+# --- Docker preload parity ------------------------------------------------------
+
+import json
+import subprocess
+import types
+
+from boomi_mcp.kb.embedding_contract import preload_model
+
+
+def _write_manifest_dir(tmp_path, manifest):
+    with open(os.path.join(str(tmp_path), "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f)
+    return str(tmp_path)
+
+
+def test_preload_model_loads_exactly_the_resolved_contract(tmp_path, monkeypatch):
+    """Parity rule: the Docker preload must load the model identity the RUNTIME
+    resolver produces for the same manifest — same function, same contract."""
+    db_path = _write_manifest_dir(
+        tmp_path,
+        {"schema_version": "1", "collection_name": "boomi_docs",
+         "embedding_model": "all-MiniLM-L6-v2"},
+    )
+    calls = []
+
+    fake_module = types.ModuleType("sentence_transformers")
+
+    def _fake_st(model_name_or_path, revision=None):
+        calls.append((model_name_or_path, revision))
+        return object()
+
+    fake_module.SentenceTransformer = _fake_st
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+
+    contract = preload_model(db_path)
+    expected = resolve_embedding_contract(
+        {"schema_version": "1", "embedding_model": "all-MiniLM-L6-v2"}
+    )
+    assert contract == expected
+    assert calls == [(PINNED_MODEL_ID, KB24_COMPATIBLE_REVISION)]
+
+
+def test_preload_model_fails_closed_on_malformed_manifest(tmp_path, monkeypatch):
+    db_path = _write_manifest_dir(
+        tmp_path,
+        {"schema_version": "1", "collection_name": "boomi_docs",
+         "embedding_model": "unknown-model"},
+    )
+    fake_module = types.ModuleType("sentence_transformers")
+    fake_module.SentenceTransformer = lambda *a, **k: pytest.fail(
+        "must not load a model for an unresolvable manifest"
+    )
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+    with pytest.raises(KbStartupError, match="legacy"):
+        preload_model(db_path)
+
+
+def test_preload_cli_exits_nonzero_on_bad_manifest(tmp_path):
+    (tmp_path / "manifest.json").write_text("{not json", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, os.path.join(_ROOT, "scripts", "preload_kb_model.py"),
+         "--db-path", str(tmp_path)],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONPATH": _SRC},
+    )
+    assert result.returncode == 1
+    assert "KB model preload failed" in result.stdout + result.stderr

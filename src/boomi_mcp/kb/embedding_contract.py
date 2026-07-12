@@ -164,6 +164,29 @@ def resolve_embedding_contract(manifest):
     return contract
 
 
+def preload_model(db_path):
+    """Resolve the corpus contract and bake its exact model into the local cache.
+
+    The single shared preload implementation: the Docker image build invokes it
+    (scripts/preload_kb_model.py) against the downloaded corpus manifest, so
+    the baked model identity is BY CONSTRUCTION the one the runtime resolver
+    will demand — no duplicated model logic in the Dockerfile. Returns the
+    resolved contract. Raises KbStartupError on any manifest/contract problem
+    BEFORE touching the ML stack.
+    """
+    # Local imports: manifest.py imports this module at module level (renders
+    # the corpus resource from the resolved contract), and sentence_transformers
+    # must stay off this module's import path.
+    from .manifest import load_manifest
+
+    contract = resolve_embedding_contract(load_manifest(db_path))
+
+    from sentence_transformers import SentenceTransformer
+
+    SentenceTransformer(contract.model_id, revision=contract.revision)
+    return contract
+
+
 def assert_model_seq_length(model, contract):
     """Fail closed unless the LOADED model's max_seq_length matches the contract.
 
