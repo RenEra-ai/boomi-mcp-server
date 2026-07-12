@@ -360,6 +360,31 @@ def test_wsdl_top_level_node_budget_single_path():
     assert msg_reasons and msg_reasons[0]["omitted"] == 2
 
 
+def test_long_porttype_names_do_not_collide_on_lookup():
+    """Two portType names that share their first 512 chars must resolve to their
+    OWN messages: lookups use the FULL normalized name, only the emitted value is
+    clipped (repo-gate: preserve full QNames when resolving bindings)."""
+    base = "P" * 600
+    a, b = base + "A", base + "B"  # differ only after char 600
+    payload = (
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/" '
+        'xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:tns="http://ex.com/s" '
+        'targetNamespace="http://ex.com/s">'
+        '<message name="MA"/><message name="MB"/>'
+        f'<portType name="{a}"><operation name="Do"><input message="tns:MA"/></operation></portType>'
+        f'<portType name="{b}"><operation name="Do"><input message="tns:MB"/></operation></portType>'
+        f'<binding name="BA" type="tns:{a}"><soap:binding style="d" transport="t"/>'
+        '<operation name="Do"><soap:operation soapAction="a"/></operation></binding>'
+        f'<binding name="BB" type="tns:{b}"><soap:binding style="d" transport="t"/>'
+        '<operation name="Do"><soap:operation soapAction="b"/></operation></binding>'
+        '</definitions>'
+    )
+    r = discover_soap_wsdl_action(artifact=payload)
+    by = {x["name"]: x for x in r["bindings"]}
+    assert by["BA"]["operations"][0]["input_message"] == "MA"
+    assert by["BB"]["operations"][0]["input_message"] == "MB"
+
+
 def test_utf16_doctype_rejected_via_url_mode():
     payload = (
         '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x>'

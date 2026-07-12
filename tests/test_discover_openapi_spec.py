@@ -670,6 +670,23 @@ def test_long_scalar_clipped_and_flags_truncation():
     assert r["truncated"] is True
 
 
+def test_long_ref_clipped_matches_declaration_and_flags_truncation():
+    """A >512-char component ref is clipped identically to its (also-clipped)
+    declaration name — bounded, still matching, AND truncation is registered
+    (repo-gate: route reference clips through truncation-aware clipping)."""
+    longname = "S" * 800
+    doc = {
+        "openapi": "3.0.0", "info": {},
+        "paths": {"/x": {"get": {"responses": {"200": {"description": "ok", "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{longname}"}}}}}}}},
+        "components": {"schemas": {longname: {"type": "object"}}},
+    }
+    r = discover_openapi_spec_action(artifact=doc)
+    decl = r["schemas"][0]["name"]
+    ref = r["operations"][0]["responses"][0]["schema"]["ref"]
+    assert len(decl) == 512 and decl == ref
+    assert r["truncated"] is True
+
+
 def test_handler_never_calls_boomi_or_credentials():
     # The discovery module must never CALL a credential helper or CONSTRUCT the
     # Boomi SDK (the docstring may mention the names, so match call forms only).

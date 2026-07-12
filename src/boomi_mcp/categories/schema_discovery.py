@@ -531,8 +531,9 @@ def _last_segment(ref: Any) -> Optional[str]:
     ``_json_pointer_name``."""
     if not isinstance(ref, str) or not ref:
         return None
-    seg = ref.rsplit("/", 1)[-1].rsplit(".", 1)[-1]
-    return seg[:_TEXT_CLIP] if seg else None
+    # Return the FULL normalized name (no length cap): callers use it for
+    # lookups/matching and clip the EMITTED copy via truncation-aware _clip.
+    return ref.rsplit("/", 1)[-1].rsplit(".", 1)[-1] or None
 
 
 def _json_pointer_name(ref: Any) -> Optional[str]:
@@ -559,10 +560,9 @@ def _json_pointer_name(ref: Any) -> Optional[str]:
     name = raw.replace("~1", "/").replace("~0", "~")
     if not name:
         return None
-    # Hard-cap to _TEXT_CLIP: a reference and its declaration name both flow
-    # through this helper / _clip, so identical bounding keeps a (pathologically
-    # long) ref matching its clipped schema name AND keeps the output bounded.
-    return name[:_TEXT_CLIP]
+    # Return the FULL name (no length cap) so it still matches its declaration in
+    # lookups; the EMITTED ref is clipped via truncation-aware _clip at each site.
+    return name
 
 
 def _qname_local(value: Any) -> Optional[str]:
@@ -579,9 +579,10 @@ def _qname_local(value: Any) -> Optional[str]:
     local = value.rsplit(":", 1)[-1]
     if not local:
         return None
-    # Hard-cap to _TEXT_CLIP so every WSDL identifier (declaration and reference)
-    # is bounded and clips identically (keeping refs matched to declarations).
-    return local[:_TEXT_CLIP]
+    # Return the FULL local part (no length cap): it is used as a lookup key
+    # (portType/binding resolution), so capping here would collide distinct
+    # long names. Emitted copies are clipped via truncation-aware _clip.
+    return local
 
 
 def _sanitize_url(value: Any) -> Optional[str]:
@@ -642,7 +643,7 @@ def _sanitize_ns(value: Any) -> Optional[str]:
 _HTTP_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 
 
-def _openapi_schema_descriptor(schema: Any) -> Optional[Dict[str, Any]]:
+def _openapi_schema_descriptor(schema: Any, trunc: _Truncation) -> Optional[Dict[str, Any]]:
     if not isinstance(schema, dict):
         return None
     ref = schema.get("$ref")
@@ -650,12 +651,12 @@ def _openapi_schema_descriptor(schema: Any) -> Optional[Dict[str, Any]]:
     items_ref = None
     items_type = None
     if isinstance(items, dict):
-        items_ref = _json_pointer_name(items.get("$ref"))
-        items_type = items.get("type")
+        items_ref = _clip(_json_pointer_name(items.get("$ref")), trunc)
+        items_type = _clip(items.get("type"), trunc)
     return {
-        "type": schema.get("type"),
-        "format": schema.get("format"),
-        "ref": _json_pointer_name(ref),
+        "type": _clip(schema.get("type"), trunc),
+        "format": _clip(schema.get("format"), trunc),
+        "ref": _clip(_json_pointer_name(ref), trunc),
         "items_type": items_type,
         "items_ref": items_ref,
     }
@@ -665,7 +666,7 @@ def _openapi_parameter(param: Any, trunc: _Truncation) -> Optional[Dict[str, Any
     if not isinstance(param, dict):
         return None
     if "$ref" in param and len(param) == 1:
-        name = _json_pointer_name(param.get("$ref"))
+        name = _clip(_json_pointer_name(param.get("$ref")), trunc)
         return {
             "name": name,
             "in": None,
@@ -681,7 +682,7 @@ def _openapi_parameter(param: Any, trunc: _Truncation) -> Optional[Dict[str, Any
         "required": bool(param.get("required", False)),
         "type": _clip(param.get("type") or schema.get("type"), trunc),
         "format": _clip(param.get("format") or schema.get("format"), trunc),
-        "ref": _json_pointer_name(schema.get("$ref")) if schema else None,
+        "ref": _clip(_json_pointer_name(schema.get("$ref")), trunc) if schema else None,
     }
 
 
@@ -771,7 +772,10 @@ def _openapi_effective_parameters(
 
 
 def _openapi_request_schema(
-    op: Dict[str, Any], effective_params: List[Dict[str, Any]], version_major: int
+    op: Dict[str, Any],
+    effective_params: List[Dict[str, Any]],
+    version_major: int,
+    trunc: _Truncation,
 ) -> Optional[Dict[str, Any]]:
     if version_major == 3:
         body = op.get("requestBody")
@@ -782,7 +786,7 @@ def _openapi_request_schema(
             return None
         for _mtype, media in content.items():
             if isinstance(media, dict) and isinstance(media.get("schema"), dict):
-                return _openapi_schema_descriptor(media["schema"])
+                return _openapi_schema_descriptor(media["schema"], trunc)
         return None
     # v2: a body parameter carries the schema — check the EFFECTIVE (merged)
     # parameters so a path-level `in: body` is not missed.
@@ -790,7 +794,7 @@ def _openapi_request_schema(
         if isinstance(param, dict) and param.get("in") == "body" and isinstance(
             param.get("schema"), dict
         ):
-            return _openapi_schema_descriptor(param["schema"])
+            return _openapi_schema_descriptor(param["schema"], trunc)
     return None
 
 
@@ -871,11 +875,11 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                     if isinstance(content, dict):
                         for _mt, media in content.items():
                             if isinstance(media, dict) and isinstance(media.get("schema"), dict):
-                                schema_desc = _openapi_schema_descriptor(media["schema"])
+                                schema_desc = _openapi_schema_descriptor(media["schema"], trunc)
                                 break
                 else:
                     if isinstance(resp.get("schema"), dict):
-                        schema_desc = _openapi_schema_descriptor(resp["schema"])
+                        schema_desc = _openapi_schema_descriptor(resp["schema"], trunc)
                 responses_out.append(
                     {
                         "status_code": status,
@@ -891,7 +895,7 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                     "operation_id": _clip(op.get("operationId"), trunc),
                     "summary": _clip(op.get("summary"), trunc),
                     "parameters": params_out,
-                    "request_schema": _openapi_request_schema(op, effective_params, version_major),
+                    "request_schema": _openapi_request_schema(op, effective_params, version_major, trunc),
                     "responses": responses_out,
                 }
             )
@@ -918,7 +922,7 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
             if not budget.take_field("properties"):
                 continue
             pschema = props.get(pname) if isinstance(props.get(pname), dict) else {}
-            desc = _openapi_schema_descriptor(pschema) or {}
+            desc = _openapi_schema_descriptor(pschema, trunc) or {}
             props_out.append(
                 {
                     "name": _clip(pname, trunc),
@@ -1056,21 +1060,22 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
                 if _local(child.tag) == "operation" and _ns(child.tag) in _SOAP_BINDING_NS:
                     soap_action = _clip(child.get("soapAction"), trunc)
                     break
-            # Resolve the abstract operation within THIS binding's port type.
+            # Resolve the abstract operation within THIS binding's port type
+            # using the FULL (uncapped) key; emit clipped copies.
             pt = port_type_ops.get((port_type, op_name), {})
             ops_out.append(
                 {
-                    "name": op_name,
+                    "name": _clip(op_name, trunc),
                     "soap_action": soap_action,
-                    "input_message": pt.get("input"),
-                    "output_message": pt.get("output"),
+                    "input_message": _clip(pt.get("input"), trunc),
+                    "output_message": _clip(pt.get("output"), trunc),
                     "fault_messages": _clip_list(pt.get("faults", []), trunc, "fault_messages"),
                 }
             )
         bindings_out.append(
             {
-                "name": bname,
-                "port_type": port_type,
+                "name": _clip(bname, trunc),
+                "port_type": _clip(port_type, trunc),
                 "soap_version": soap_version,
                 "style": style,
                 "transport": transport,
@@ -1099,13 +1104,15 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
                 soap_version = binding_soap_version.get(binding_ref)
             ports_out.append(
                 {
-                    "name": _qname_local(port.get("name")),
-                    "binding": binding_ref,
+                    "name": _clip(_qname_local(port.get("name")), trunc),
+                    "binding": _clip(binding_ref, trunc),  # full binding_ref used for lookup above
                     "address": address,
                     "soap_version": soap_version,
                 }
             )
-        services_out.append({"name": _qname_local(service.get("name")), "ports": ports_out})
+        services_out.append(
+            {"name": _clip(_qname_local(service.get("name")), trunc), "ports": ports_out}
+        )
 
     # messages
     messages_out: List[Dict[str, Any]] = []
@@ -1118,12 +1125,14 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
                 continue
             parts_out.append(
                 {
-                    "name": _qname_local(part.get("name")),
-                    "element": _qname_local(part.get("element")),
-                    "type": _qname_local(part.get("type")),
+                    "name": _clip(_qname_local(part.get("name")), trunc),
+                    "element": _clip(_qname_local(part.get("element")), trunc),
+                    "type": _clip(_qname_local(part.get("type")), trunc),
                 }
             )
-        messages_out.append({"name": _qname_local(message.get("name")), "parts": parts_out})
+        messages_out.append(
+            {"name": _clip(_qname_local(message.get("name")), trunc), "parts": parts_out}
+        )
 
     # imports (reported, never fetched)
     imports_out: List[Dict[str, Any]] = []
