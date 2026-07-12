@@ -289,12 +289,15 @@ class _Budget:
 
 
 def _clip(value: Any, trunc: _Truncation) -> Optional[str]:
-    """Bound an individual free-text/identifier string to _TEXT_CLIP chars;
-    register a truncation reason when clipped. Non-strings pass through
-    unchanged. Applied to EVERY emitted scalar (names, paths, ids, descriptions)
-    so a single artifact field can never inflate the bounded summary."""
+    """Bound an individual emitted scalar. None passes through; a genuine string
+    is length-capped to _TEXT_CLIP (registering truncation when clipped). ANY
+    OTHER type (a list/dict/number smuggled into a string field by a malformed
+    caller artifact) is DROPPED to None — never echoed unbounded — so a single
+    artifact field can never inflate or corrupt the bounded string summary."""
+    if value is None:
+        return None
     if not isinstance(value, str):
-        return value
+        return None
     if len(value) <= _TEXT_CLIP:
         return value
     trunc.add("text", _TEXT_CLIP, len(value), len(value) - _TEXT_CLIP)
@@ -600,7 +603,8 @@ def _sanitize_url(value: Any) -> Optional[str]:
         # Relative reference: no authority was parsed, so an '@' in the path is a
         # legitimate RFC 3986 path character (e.g. '/@tenant/v1'). Emit the path
         # only — never the query/fragment, which could carry '/v1?token=SECRET'.
-        return parts.path[:_TEXT_CLIP]
+        # The caller clips this (full) value at emit via truncation-aware _clip.
+        return parts.path or None
     # An authority WAS parsed. Treat ANY '@' in the path as a possible userinfo
     # spill and suppress the URL. An unescaped '/' in 'user:pw' truncates the
     # authority — sometimes to a still-PARSEABLE prefix like 'user:443' or 'user'
@@ -620,20 +624,36 @@ def _sanitize_url(value: Any) -> Optional[str]:
         # be safely sanitized (host/path '{variable}' templates parse cleanly
         # above and are kept).
         return None
-    return f"{parts.scheme}://{authority}{parts.path}"[:_TEXT_CLIP]
+    # Return the FULL sanitized URL; the caller clips it at emit via _clip.
+    return f"{parts.scheme}://{authority}{parts.path}" or None
 
 
 def _sanitize_ns(value: Any) -> Optional[str]:
-    """Sanitize a namespace/identifier URI before echoing it. A WSDL/OData
-    namespace can be a URL that embeds credentials (userinfo or secret query
-    params), so strip them the same way as an endpoint URL; a non-URL identifier
-    (e.g. a URN) has any query/fragment tail dropped and is clipped."""
+    """Sanitize a namespace/identifier URI-reference before echoing it. A
+    WSDL/OData namespace can be any URI-reference that embeds credentials — an
+    absolute URL, a scheme-relative/network-path reference ('//user:pw@host/x'),
+    or one with a secret query — so parse it with urlsplit and, WHENEVER an
+    authority is present, strip userinfo + query + fragment. A URN/opaque
+    identifier (no authority) just has its query/fragment tail dropped. The
+    caller clips the (full) sanitized value at emit."""
     if not isinstance(value, str) or not value.strip():
         return None
     v = value.strip()
-    if "://" in v:
-        return _sanitize_url(v)
-    return v.split("?", 1)[0].split("#", 1)[0][:_TEXT_CLIP]
+    try:
+        parts = urlsplit(v)
+    except ValueError:
+        return None
+    if parts.netloc:
+        try:
+            host = parts.hostname or ""
+            port = f":{parts.port}" if parts.port else ""
+        except ValueError:
+            return None
+        if ":" in host:  # IPv6 literal — restore brackets
+            host = f"[{host}]"
+        scheme = f"{parts.scheme}:" if parts.scheme else ""
+        return f"{scheme}//{host}{port}{parts.path}" or None
+    return v.split("?", 1)[0].split("#", 1)[0] or None
 
 
 # ---------------------------------------------------------------------------
@@ -805,7 +825,7 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
     swagger = doc.get("swagger")
     openapi = doc.get("openapi")
     if isinstance(openapi, str) and openapi.startswith("3."):
-        version = openapi
+        version = _clip(openapi, trunc)  # bound the emitted version string
         version_major = 3
     elif swagger == "2.0" or openapi == "2.0":
         version = "2.0"
@@ -822,24 +842,34 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
     info = doc.get("info") if isinstance(doc.get("info"), dict) else {}
     title = _clip(info.get("title"), trunc)
 
+    budget = _Budget(limits["max_nodes"], limits["max_fields"])
+
+    # servers[] is charged against the shared field budget (and each URL clipped
+    # at emit), so a caller artifact with thousands of servers cannot defeat the
+    # bounded-summary contract.
     servers: List[str] = []
     if version_major == 3 and isinstance(doc.get("servers"), list):
         for srv in doc["servers"]:
-            if isinstance(srv, dict):
-                url = _sanitize_url(srv.get("url"))
-                if url:
-                    servers.append(url)
+            if not isinstance(srv, dict):
+                continue
+            if not budget.take_field("servers"):
+                continue
+            url = _clip(_sanitize_url(srv.get("url")), trunc)
+            if url:
+                servers.append(url)
     elif version_major == 2:
         host = doc.get("host")
         base_path = doc.get("basePath") or ""
         schemes = doc.get("schemes") if isinstance(doc.get("schemes"), list) else ["https"]
         if isinstance(host, str) and host:
             for scheme in schemes:
-                if isinstance(scheme, str):
-                    servers.append(_sanitize_url(f"{scheme}://{host}{base_path}"))
-    servers = [s for s in servers if s]
-
-    budget = _Budget(limits["max_nodes"], limits["max_fields"])
+                if not isinstance(scheme, str):
+                    continue
+                if not budget.take_field("servers"):
+                    continue
+                url = _clip(_sanitize_url(f"{scheme}://{host}{base_path}"), trunc)
+                if url:
+                    servers.append(url)
 
     operations: List[Dict[str, Any]] = []
     for path in sorted(k for k in paths.keys() if isinstance(k, str)):
@@ -882,7 +912,7 @@ def _parse_openapi(doc: Any, limits: Dict[str, int], trunc: _Truncation):
                         schema_desc = _openapi_schema_descriptor(resp["schema"], trunc)
                 responses_out.append(
                     {
-                        "status_code": status,
+                        "status_code": _clip(status, trunc),
                         "description": _clip(resp.get("description"), trunc),
                         "schema": schema_desc,
                     }
@@ -1106,7 +1136,7 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
                 {
                     "name": _clip(_qname_local(port.get("name")), trunc),
                     "binding": _clip(binding_ref, trunc),  # full binding_ref used for lookup above
-                    "address": address,
+                    "address": _clip(address, trunc),
                     "soap_version": soap_version,
                 }
             )
@@ -1141,8 +1171,8 @@ def _parse_wsdl(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation):
             continue
         imports_out.append(
             {
-                "namespace": _sanitize_ns(imp.get("namespace")),
-                "location": _sanitize_url(imp.get("location")),
+                "namespace": _clip(_sanitize_ns(imp.get("namespace")), trunc),
+                "location": _clip(_sanitize_url(imp.get("location")), trunc),
                 "fetched": False,
             }
         )
@@ -1268,6 +1298,15 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
     associations: Dict[str, Dict[str, Dict[str, Any]]] = {}
     short_assoc: Dict[str, Optional[Dict[str, Dict[str, Any]]]] = {}
     if version == "2.0":
+        # Collect CSDL <Using Namespace=".." Alias=".."> mappings (alias -> ns).
+        # A '{using-alias}.Name' reference is equivalent to '{namespace}.Name'.
+        using_aliases: Dict[str, str] = {}
+        for schema in schemas:
+            for using in _iter_local(schema, "Using"):
+                u_alias = using.get("Alias")
+                u_ns = using.get("Namespace")
+                if u_alias and u_ns:
+                    using_aliases[u_alias] = u_ns
         for schema in schemas:
             sns = schema.get("Namespace") or ""
             alias = schema.get("Alias")
@@ -1284,6 +1323,10 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
                         associations[f"{sns}.{aname}"] = roles
                     if alias:
                         associations[f"{alias}.{aname}"] = roles
+                    # index under any <Using> alias that maps to this namespace
+                    for u_alias, u_ns in using_aliases.items():
+                        if u_ns == sns:
+                            associations[f"{u_alias}.{aname}"] = roles
                     if aname in short_assoc and short_assoc[aname] is not roles:
                         short_assoc[aname] = None  # ambiguous -> leave unresolved
                     else:
@@ -1333,6 +1376,8 @@ def _parse_odata(root: "ET.Element", limits: Dict[str, int], trunc: _Truncation)
                     continue
                 bindings: List[Dict[str, Any]] = []
                 for nb in _iter_local(eset, "NavigationPropertyBinding"):
+                    if not budget.take_field("navigation_bindings"):
+                        continue
                     bindings.append(
                         {"path": _clip(nb.get("Path"), trunc), "target": _clip(nb.get("Target"), trunc)}
                     )
@@ -1435,18 +1480,26 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
         raise _DiscoveryError("DB_SCHEMA_INVALID_SPEC")
 
     # Fail closed on structurally invalid column records: every column MUST be an
-    # object carrying the required string fields (table_name, column_name,
-    # data_type), per the normalized information-schema contract. A malformed
-    # artifact (e.g. {"columns":[{}]}) is INVALID_SPEC, not a success with nulls.
+    # object carrying the required non-empty string fields (table_name,
+    # column_name, data_type); the qualifier fields used to key/echo tables
+    # (table_schema, table_catalog) MUST be a string or absent (never a
+    # list/dict/number, which would corrupt the table key or the summary). A
+    # malformed artifact (e.g. {"columns":[{}]}) is INVALID_SPEC, not a success
+    # with nulls or a generic DISCOVERY_FAILED crash.
+    def _bad_required(v):
+        return not isinstance(v, str) or not v
+
+    def _bad_optional_str(v):
+        return v is not None and not isinstance(v, str)
+
     for col in columns:
         if (
             not isinstance(col, dict)
-            or not isinstance(col.get("table_name"), str)
-            or not col.get("table_name")
-            or not isinstance(col.get("column_name"), str)
-            or not col.get("column_name")
-            or not isinstance(col.get("data_type"), str)
-            or not col.get("data_type")
+            or _bad_required(col.get("table_name"))
+            or _bad_required(col.get("column_name"))
+            or _bad_required(col.get("data_type"))
+            or _bad_optional_str(col.get("table_schema"))
+            or _bad_optional_str(col.get("table_catalog"))
         ):
             raise _DiscoveryError("DB_SCHEMA_INVALID_SPEC")
 
@@ -1500,13 +1553,18 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
     declared = doc.get("tables")
     if isinstance(declared, list):
         for t in declared:
-            if isinstance(t, dict) and t.get("table_name"):
-                _ensure(
-                    t.get("table_catalog"),
-                    t.get("table_schema"),
-                    t.get("table_name"),
-                    t.get("table_type"),
-                )
+            if not isinstance(t, dict) or not isinstance(t.get("table_name"), str) or not t.get("table_name"):
+                continue
+            # Skip a declared table whose key fields are the wrong type (a
+            # list/dict schema/catalog would be an unhashable table key).
+            if _bad_optional_str(t.get("table_schema")) or _bad_optional_str(t.get("table_catalog")):
+                continue
+            _ensure(
+                t.get("table_catalog"),
+                t.get("table_schema"),
+                t.get("table_name"),
+                t.get("table_type"),
+            )
 
     for col in columns:
         if not budget.take_field("columns"):
@@ -1531,6 +1589,8 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
         for c in constraints:
             if not isinstance(c, dict) or not c.get("table_name"):
                 continue
+            if _bad_optional_str(c.get("table_schema")):
+                continue  # unhashable/invalid lookup key
             if not budget.take_field("constraints"):
                 continue
             table = _locate(c.get("table_schema"), c.get("table_name"))
@@ -1552,6 +1612,8 @@ def _parse_db_schema(doc: Any, limits: Dict[str, int], trunc: _Truncation):
         for ix in indexes:
             if not isinstance(ix, dict) or not ix.get("table_name"):
                 continue
+            if _bad_optional_str(ix.get("table_schema")):
+                continue  # unhashable/invalid lookup key
             if not budget.take_field("indexes"):
                 continue
             table = _locate(ix.get("table_schema"), ix.get("table_name"))

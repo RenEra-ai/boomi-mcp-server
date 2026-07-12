@@ -298,6 +298,36 @@ def test_odata_v2_alias_qualified_association_resolved():
     assert nav["collection"] is True and nav["target_type"] == "AA.Item"
 
 
+_EDMX_V2_USING = b"""<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+ <edmx:DataServices m:MaxDataServiceVersion="2.0" xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata">
+  <Schema Namespace="NS1" xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+   <Association Name="Rel">
+     <End Role="A" Type="NS1.A" Multiplicity="1"/>
+     <End Role="B" Type="NS1.B" Multiplicity="*"/>
+   </Association>
+  </Schema>
+  <Schema Namespace="NS2" xmlns="http://schemas.microsoft.com/ado/2008/09/edm">
+   <Using Namespace="NS1" Alias="R"/>
+   <EntityType Name="A"><Key><PropertyRef Name="Id"/></Key>
+     <Property Name="Id" Type="Edm.Int32" Nullable="false"/>
+     <NavigationProperty Name="Bs" Relationship="R.Rel" FromRole="A" ToRole="B"/>
+   </EntityType>
+   <EntityContainer Name="Ctx"><EntitySet Name="As" EntityType="NS2.A"/></EntityContainer>
+  </Schema>
+ </edmx:DataServices>
+</edmx:Edmx>"""
+
+
+def test_odata_v2_using_alias_association_resolved():
+    """A navigation referencing an association through a CSDL <Using> alias must
+    resolve to that association's multiplicity (§6 re-review #4)."""
+    r, _, _ = _call("https://svc.example.com/odata/$metadata", _EDMX_V2_USING)
+    assert r["_success"] is True and r["version"] == "2.0"
+    et = next(t for t in r["entity_types"] if t["name"] == "A")
+    nav = et["navigation_properties"][0]
+    assert nav["collection"] is True and nav["target_type"] == "NS1.B"
+
+
 def test_odata_utf16_doctype_rejected():
     """A UTF-16 EDMX with a DOCTYPE must be rejected via the encoding-robust
     screen, not slip past a UTF-8 decode (Codex P1)."""

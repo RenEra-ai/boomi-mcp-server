@@ -259,6 +259,17 @@ def test_db_nested_lists_capped():
     assert r["truncated"] is True
 
 
+def test_db_invalid_optional_field_types_rejected():
+    """A wrong-typed optional key field (list schema, numeric catalog) is
+    structurally invalid -> DB_SCHEMA_INVALID_SPEC, not a crash or bad summary
+    (§6 re-review #5)."""
+    base = {"table_name": "t", "column_name": "c", "data_type": "int"}
+    assert discover_db_schema_action({"columns": [{**base, "table_schema": []}]})["error_code"] == "DB_SCHEMA_INVALID_SPEC"
+    assert discover_db_schema_action({"columns": [{**base, "table_catalog": 123}]})["error_code"] == "DB_SCHEMA_INVALID_SPEC"
+    # a valid optional string still works
+    assert discover_db_schema_action({"columns": [{**base, "table_schema": "public"}]})["_success"] is True
+
+
 def test_db_never_touches_network_or_credentials():
     with (
         patch.object(sd.httpx, "Client") as m_client,

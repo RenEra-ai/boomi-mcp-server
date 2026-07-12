@@ -687,6 +687,24 @@ def test_long_ref_clipped_matches_declaration_and_flags_truncation():
     assert r["truncated"] is True
 
 
+def test_non_string_scalar_field_dropped():
+    """A non-string value smuggled into a string field (e.g. a list-typed title)
+    is dropped to None, never echoed unbounded (§6 re-review #1)."""
+    doc = {"openapi": "3.0.0", "info": {"title": list(range(2000))}, "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc)
+    assert r["title"] is None
+    assert "1999" not in json.dumps(r)
+
+
+def test_servers_charged_against_budget():
+    """A caller artifact with thousands of servers cannot defeat the bounded
+    summary — servers are charged against the field budget (§6 re-review #2)."""
+    doc = {"openapi": "3.0.0", "info": {}, "servers": [{"url": f"https://h{i}.example.com/v"} for i in range(1500)], "paths": {}}
+    r = discover_openapi_spec_action(artifact=doc, options={"max_fields": 10})
+    assert len(r["servers"]) <= 10
+    assert r["truncated"] is True
+
+
 def test_handler_never_calls_boomi_or_credentials():
     # The discovery module must never CALL a credential helper or CONSTRUCT the
     # Boomi SDK (the docstring may mention the names, so match call forms only).

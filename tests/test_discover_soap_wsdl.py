@@ -385,6 +385,19 @@ def test_long_porttype_names_do_not_collide_on_lookup():
     assert by["BB"]["operations"][0]["input_message"] == "MB"
 
 
+def test_wsdl_network_path_namespace_sanitized():
+    """A network-path (scheme-relative) namespace reference with userinfo must be
+    sanitized — the '://'-only check missed it (§6 re-review #3)."""
+    payload = (
+        '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/">'
+        '<import namespace="//user:SEKRET@host.example.com/x?token=abc" location="//u:p@ex.com/o?key=9"/>'
+        '</definitions>'
+    )
+    r = discover_soap_wsdl_action(artifact=payload)
+    assert "SEKRET" not in json.dumps(r) and "token" not in json.dumps(r) and "key=9" not in json.dumps(r)
+    assert r["imports"][0]["namespace"] == "//host.example.com/x"
+
+
 def test_utf16_doctype_rejected_via_url_mode():
     payload = (
         '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x>'
