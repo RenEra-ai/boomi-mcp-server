@@ -20,6 +20,29 @@ import pytest
 
 from _fixture_corpus import run_import_server
 
+from boomi_mcp.kb.service import _env_float, _env_int
+
+
+# --- the shared hardened parsers (also used for the KB query knobs) -----------
+
+@pytest.mark.parametrize("value", ["0", "-1", "3.5", "abc"])
+def test_env_int_rejects_non_positive_and_non_int(monkeypatch, value):
+    monkeypatch.setenv("BOOMI_TEST_KNOB", value)
+    assert _env_int("BOOMI_TEST_KNOB", 7) == 7
+
+
+@pytest.mark.parametrize("value", ["0", "-0.1", "inf", "-inf", "nan", "xyz"])
+def test_env_float_rejects_non_positive_and_non_finite(monkeypatch, value):
+    monkeypatch.setenv("BOOMI_TEST_KNOB", value)
+    assert _env_float("BOOMI_TEST_KNOB", 0.45) == 0.45
+
+
+def test_env_parsers_accept_valid_values(monkeypatch):
+    monkeypatch.setenv("BOOMI_TEST_KNOB", "5")
+    assert _env_int("BOOMI_TEST_KNOB", 7) == 5
+    monkeypatch.setenv("BOOMI_TEST_KNOB", "0.3")
+    assert _env_float("BOOMI_TEST_KNOB", 0.45) == 0.3
+
 PRINT_WARMUP_CONFIG_SCRIPT = """
 import server
 print("WARMUP_CONFIG", server._WARMUP_WAIT, server._WARMUP_EXPECTED,

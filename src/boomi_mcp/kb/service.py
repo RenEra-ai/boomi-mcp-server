@@ -15,6 +15,7 @@ deferred off the import/socket-bind path (see boomi_mcp.kb.warmup):
 ``build_kb_service`` composes the two and keeps its original signature/behavior
 (used by the Docker build-time validation gate and the startup test matrix).
 """
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -79,25 +80,44 @@ def validate_source_type_request(source_type, manifest):
 
 
 def _env_int(name, default):
+    """Positive integer from the environment, else the default with a warning.
+
+    The KB knobs this parses (top-k, waiter counts) are all counts, so a
+    non-positive value is a misconfiguration — reject it rather than let a 0
+    or -1 silently collapse the clamps that consume it. Shared by server.py so
+    the warmup and query knobs validate identically."""
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return default
     try:
-        return int(raw)
+        value = int(raw)
     except ValueError:
         print(f"[WARNING] {name}={raw!r} is not an integer; using default {default}")
         return default
+    if value <= 0:
+        print(f"[WARNING] {name}={raw!r} is not a positive integer; "
+              f"using default {default}")
+        return default
+    return value
 
 
 def _env_float(name, default):
+    """Finite positive float from the environment, else the default with a
+    warning — an nan/inf/zero/negative distance or duration would break the
+    threshold and timing math that consume it. Shared by server.py."""
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return default
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
         print(f"[WARNING] {name}={raw!r} is not a float; using default {default}")
         return default
+    if not math.isfinite(value) or value <= 0:
+        print(f"[WARNING] {name}={raw!r} is not a finite positive number; "
+              f"using default {default}")
+        return default
+    return value
 
 
 def _kb_config():

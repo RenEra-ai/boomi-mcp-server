@@ -5380,49 +5380,22 @@ if not LOCAL_MODE:
 # docs call after a cold start returns a bounded warming_up / kb_unavailable
 # instead of hanging.
 if BOOMI_DOCS_ENABLED:
+    # Reuse the hardened env parsers from kb.service so the warmup timing knobs
+    # and the query knobs validate identically (finite positive float / positive
+    # int, else default with an operator warning) — no second, divergent copy.
     from boomi_mcp.kb.service import (
+        _env_float as _kb_env_float,
+        _env_int as _kb_env_int,
         validate_kb_manifest_cheap,
         validate_source_type_request,
     )
-    from boomi_mcp.kb.warmup import KbWarmup
+    from boomi_mcp.kb.warmup import (
+        DEFAULT_EXPECTED_SECONDS,
+        DEFAULT_MAX_WAITERS,
+        DEFAULT_WAIT_SECONDS,
+        KbWarmup,
+    )
     from boomi_mcp.kb.manifest import render_corpus_resource
-
-    def _kb_env_float(name, default):
-        """Finite positive float from the environment, else the default with an
-        operator warning — a wait/expected duration of inf, nan, zero, or a
-        negative would break the waiter admission and retry-hint math."""
-        import math as _math
-
-        raw = os.getenv(name)
-        if raw is None or raw.strip() == "":
-            return default
-        try:
-            value = float(raw)
-        except ValueError:
-            print(f"[WARNING] {name}={raw!r} is not a number; using default {default}")
-            return default
-        if not _math.isfinite(value) or value <= 0:
-            print(f"[WARNING] {name}={raw!r} is not a finite positive number; "
-                  f"using default {default}")
-            return default
-        return value
-
-    def _kb_env_int(name, default):
-        """Positive integer from the environment, else the default with an
-        operator warning."""
-        raw = os.getenv(name)
-        if raw is None or raw.strip() == "":
-            return default
-        try:
-            value = int(raw)
-        except ValueError:
-            print(f"[WARNING] {name}={raw!r} is not an integer; using default {default}")
-            return default
-        if value <= 0:
-            print(f"[WARNING] {name}={raw!r} is not a positive integer; "
-                  f"using default {default}")
-            return default
-        return value
 
     def _kb_env_flag(name, default):
         return os.getenv(name, default).strip().lower() in ("true", "1", "yes", "on")
@@ -5439,12 +5412,16 @@ if BOOMI_DOCS_ENABLED:
         sys.exit(1)
 
     # Max seconds an ADMITTED docs call blocks for warmup before returning
-    # warming_up; sized just above the measured production build p95/max.
-    _WARMUP_WAIT = _kb_env_float("BOOMI_DOCS_WARMUP_WAIT_SECONDS", 65.0)
+    # warming_up; sized just above the measured production build p95/max. The
+    # defaults come from warmup.py so the code default and this wiring never
+    # drift.
+    _WARMUP_WAIT = _kb_env_float("BOOMI_DOCS_WARMUP_WAIT_SECONDS", DEFAULT_WAIT_SECONDS)
     # Expected build duration — drives the warming_up retry-after hint.
-    _WARMUP_EXPECTED = _kb_env_float("BOOMI_DOCS_WARMUP_EXPECTED_SECONDS", 60.0)
+    _WARMUP_EXPECTED = _kb_env_float(
+        "BOOMI_DOCS_WARMUP_EXPECTED_SECONDS", DEFAULT_EXPECTED_SECONDS
+    )
     # Long-waiter admission cap while WARMING; overflow returns warming_up fast.
-    _WARMUP_MAX_WAITERS = _kb_env_int("BOOMI_DOCS_WARMUP_MAX_WAITERS", 4)
+    _WARMUP_MAX_WAITERS = _kb_env_int("BOOMI_DOCS_WARMUP_MAX_WAITERS", DEFAULT_MAX_WAITERS)
     _WARMUP_RETRY_COOLDOWN = _kb_env_float("BOOMI_DOCS_WARMUP_RETRY_COOLDOWN", 30.0)
     # Read by server_http.py to decide whether to install the eager first-request
     # warmup hook. Opportunistic only — resolve() at the first tool call is the
