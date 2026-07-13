@@ -133,18 +133,30 @@ and embedded into the image at build time via
 
 **Cold-start behavior (operators).** The heavy KB build (Chroma + embedding
 model load) is deferred off the import path so the server binds its HTTP port
-immediately — the docs tools are registered *before* the KB is ready. On a
-scale-to-zero cold start the first call(s) may return a bounded
-`error: warming_up` (still loading — clients should wait `retry_after_seconds`
-and retry) or `error: kb_unavailable` (temporary build failure — self-heals on a
-later call after a cooldown). A docs call no longer hangs while the corpus loads.
-Tuning env vars: `BOOMI_DOCS_WARMUP_WAIT_SECONDS` (default 5 — max seconds a call
-blocks waiting for warmup), `BOOMI_DOCS_WARMUP_EAGER` (default true — kick the
-build on the first authenticated `/mcp` request; **pinned `false` in
-`cloudbuild.yaml` since 2026-06-01** so the heavy model load defers to the first
-docs call and never contends with non-docs tools on a cold 1-vCPU instance),
-`BOOMI_DOCS_WARMUP_RETRY_COOLDOWN`
-(default 30 — seconds before a failed build re-attempts).
+immediately — the docs tools are registered *before* the KB is ready. Every
+docs call resolves readiness atomically and lands in one of three states:
+
+1. **Normal block-then-serve** — during a cold start up to
+   `BOOMI_DOCS_WARMUP_MAX_WAITERS` docs calls are admitted as long waiters and
+   block (bounded by `BOOMI_DOCS_WARMUP_WAIT_SECONDS`) until the build
+   finishes, then return real results. Production builds measure mean ~49s,
+   p95 ~58s, max ~63s, so admitted callers normally just see a slow first call.
+2. **Overflow or a genuinely slow build** — further concurrent calls (or an
+   admitted waiter whose bounded wait elapses) return
+   `error: warming_up` immediately with a `retry_after_seconds` hint derived
+   from the remaining share of `BOOMI_DOCS_WARMUP_EXPECTED_SECONDS`
+   (clamped 5–60; the floor once the estimate is exceeded).
+3. **Failed build** — all admitted waiters wake immediately with a sanitized
+   `error: kb_unavailable`; the build self-heals on a later call after
+   `BOOMI_DOCS_WARMUP_RETRY_COOLDOWN` (default 30s).
+
+Tuning env vars (code defaults match `cloudbuild.yaml`; invalid values fall
+back with an operator warning): `BOOMI_DOCS_WARMUP_EAGER` (default true — kick
+the build on the first authenticated `/mcp` request),
+`BOOMI_DOCS_WARMUP_WAIT_SECONDS` (default 65), `BOOMI_DOCS_WARMUP_EXPECTED_SECONDS`
+(default 60), `BOOMI_DOCS_WARMUP_MAX_WAITERS` (default 4). The full operator
+guide (baseline measurements, log-event inventory) lives at
+`docs/kb-warmup-operations.md`.
 
 ### Boomi Operational Gotchas KB (optional)
 

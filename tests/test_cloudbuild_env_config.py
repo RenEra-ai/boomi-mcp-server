@@ -55,3 +55,14 @@ def test_cloudbuild_keeps_cpu_available_for_docs_warmup():
     segment = _update_env_vars_segment(text)
     assert "--no-cpu-throttling" in text
     assert "BOOMI_DOCS_WARMUP_EAGER=true" in segment
+
+
+def test_cloudbuild_pins_all_four_warmup_env_values():
+    """Production pins the full warmup contract: eager on, a 65s bounded wait
+    (just above the measured build p95/max), a 60s expected-duration hint, and
+    a 4-slot long-waiter admission cap. Must match the code defaults."""
+    segment = _update_env_vars_segment(_cloudbuild_text())
+    assert "BOOMI_DOCS_WARMUP_EAGER=true" in segment
+    assert "BOOMI_DOCS_WARMUP_WAIT_SECONDS=65" in segment
+    assert "BOOMI_DOCS_WARMUP_EXPECTED_SECONDS=60" in segment
+    assert "BOOMI_DOCS_WARMUP_MAX_WAITERS=4" in segment
