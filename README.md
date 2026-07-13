@@ -153,10 +153,14 @@ docs call resolves readiness atomically and lands in one of three states:
 Tuning env vars (code defaults match `cloudbuild.yaml`; invalid values fall
 back with an operator warning): `BOOMI_DOCS_WARMUP_EAGER` (default true — kick
 the build on the first authenticated `/mcp` request),
-`BOOMI_DOCS_WARMUP_WAIT_SECONDS` (default 65), `BOOMI_DOCS_WARMUP_EXPECTED_SECONDS`
-(default 60), `BOOMI_DOCS_WARMUP_MAX_WAITERS` (default 4). The full operator
-guide (baseline measurements, log-event inventory) lives at
-`docs/kb-warmup-operations.md`.
+`BOOMI_DOCS_WARMUP_WAIT_SECONDS` (default 65 — bounds an admitted waiter's
+block, sized just above the measured build p95/max),
+`BOOMI_DOCS_WARMUP_EXPECTED_SECONDS` (default 60 — drives the `warming_up`
+retry-after hint), `BOOMI_DOCS_WARMUP_MAX_WAITERS` (default 4 — long-waiter
+admission cap; overflow returns `warming_up` immediately). The
+`boomi.kb.warmup` logger emits `KB_WARMUP_STARTED/RETRY`,
+`KB_RESOLVE_ADMITTED/OVERFLOW`, `KB_WARMUP_ELAPSED`, and per-phase build
+timings for observability.
 
 ### Boomi Operational Gotchas KB (optional)
 
