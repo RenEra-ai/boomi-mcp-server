@@ -68,6 +68,39 @@ def test_docs_workflow_and_hint_point_at_search_tool():
     assert "search_boomi_docs" in catalog["hints"]["boomi_docs"]
 
 
+GUIDANCE_SENTENCE = "Never introduce an identifier solely from this guidance"
+
+
+def test_docs_search_catalog_carries_identifier_reuse_guidance():
+    """The generic search guidance tells the model to REUSE identifiers it
+    already has (from the user, a prior result, or the selected schema) and
+    never to invent one from the guidance itself."""
+    entry = list_capabilities_action()["tools"]["search_boomi_docs"]
+    note = entry["note"]
+    assert "Reuse exact identifiers" in note
+    assert GUIDANCE_SENTENCE in note
+
+
+def test_docs_search_generic_guidance_carries_no_component_anchors():
+    """Component-specific anchor identifiers (FunctionStep, DocumentPropertySet,
+    ...) must not appear in the GENERIC guidance or examples — they would bias
+    every search toward one component family."""
+    import json as _json
+
+    entry = list_capabilities_action()["tools"]["search_boomi_docs"]
+    blob = _json.dumps(entry)
+    assert "FunctionStep" not in blob
+    assert "DocumentPropertySet" not in blob
+
+
+def test_docs_search_catalog_documents_source_type_parameter():
+    entry = list_capabilities_action()["tools"]["search_boomi_docs"]
+    assert "source_type" in entry["parameters"]
+    param_doc = entry["parameters"]["source_type"]
+    assert "official" in param_doc
+    assert "companion_reference" in param_doc
+
+
 # ---------------------------------------------------------------------------
 # Workflow: archetype-first with fallback
 # ---------------------------------------------------------------------------

@@ -142,6 +142,29 @@ def test_search_tool_schema_exposes_source_type_parameter():
     assert "source_type" in schema_blob
 
 
+# --- identifier-reuse search guidance (updated together across surfaces) -------
+
+GUIDANCE_SENTENCE = "Never introduce an identifier solely from this guidance"
+
+
+def test_search_tool_docstring_carries_identifier_reuse_guidance():
+    tool = run_async(server.mcp.get_tool("search_boomi_docs"))
+    description = " ".join((tool.description or "").split())
+    assert "Reuse exact identifiers" in description
+    assert GUIDANCE_SENTENCE in description
+    assert "FunctionStep" not in description
+    assert "DocumentPropertySet" not in description
+
+
+def test_service_search_docstring_carries_identifier_reuse_guidance():
+    from boomi_mcp.kb.service import KbService
+
+    doc = " ".join((KbService.search.__doc__ or "").split())
+    assert GUIDANCE_SENTENCE in doc
+    assert "FunctionStep" not in doc
+    assert "DocumentPropertySet" not in doc
+
+
 # --- read_boomi_doc_page wrapper ---------------------------------------------
 
 def test_read_page_wrapper_returns_documented_shape():

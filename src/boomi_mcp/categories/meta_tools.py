@@ -10115,15 +10115,27 @@ def list_capabilities_action(available_tools: set = None) -> Dict[str, Any]:
             "parameters": {
                 "query": "str (required) — factual Boomi docs question or search terms",
                 "top_k": "int (optional) — number of chunks to return, capped by server config",
+                "source_type": (
+                    "str (optional) — opt-in filter restricting results to one "
+                    "corpus: 'official' or 'companion_reference'. Leave unset "
+                    "for normal searches; invalid values return "
+                    "invalid_source_type, unindexed values return "
+                    "source_type_unavailable"
+                ),
             },
             "examples": [
                 'search_boomi_docs(query="Agent step output process property", top_k=5)',
                 'search_boomi_docs(query="Tracking Direction Input Documents Output Documents Process Reporting")',
+                'search_boomi_docs(query="map function configuration", source_type="companion_reference")',
             ],
             "note": (
                 "Use this before answering factual Boomi platform behavior, "
                 "connector, configuration, deployment/runtime, scripting, EDI/API, "
-                "or error-message questions. Honor each hit's verification_status: "
+                "or error-message questions. Reuse exact identifiers already "
+                "supplied by the user, returned by a prior result, or exposed by "
+                "the selected component or capability schema. Never introduce an "
+                "identifier solely from this guidance. Honor each hit's "
+                "verification_status: "
                 "treat companion_unverified results as implementation context or a "
                 "hypothesis, not as authoritative official documentation. After a "
                 "scale-to-zero cold start the "
