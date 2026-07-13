@@ -68,6 +68,80 @@ def test_search_tool_annotations_are_read_only():
     assert tool.annotations.openWorldHint is False
 
 
+# --- search_boomi_docs source_type filtering -----------------------------------
+
+def test_search_wrapper_default_omits_source_type_key():
+    result = server.search_boomi_docs(query="database connector configuration")
+    assert result["_success"] is True
+    assert "source_type" not in result
+
+
+def test_search_wrapper_filters_by_companion_reference():
+    result = server.search_boomi_docs(
+        query="map component mapping", source_type="companion_reference"
+    )
+    assert result["_success"] is True
+    assert result["source_type"] == "companion_reference"
+    assert result["hits"]
+    assert all(h["source_type"] == "companion_reference" for h in result["hits"])
+
+
+def test_search_wrapper_filters_by_official():
+    result = server.search_boomi_docs(
+        query="database connector", source_type="official"
+    )
+    assert result["_success"] is True
+    assert result["source_type"] == "official"
+    assert result["hits"]
+    assert all(h["source_type"] == "official" for h in result["hits"])
+
+
+def test_search_wrapper_invalid_source_type_envelope():
+    result = server.search_boomi_docs(query="database", source_type="bogus")
+    assert result == {
+        "_success": False,
+        "error": "invalid_source_type",
+        "message": "source_type must be one of ['official', 'companion_reference']",
+        "source_type": "bogus",
+        "allowed_source_types": ["official", "companion_reference"],
+    }
+
+
+def test_search_wrapper_validates_source_type_before_warmup():
+    """An invalid source_type must be rejected from the cheap bootstrap manifest
+    BEFORE the warmup resolve — even a permanently-warming KB answers instantly."""
+    import threading
+    import time as _time
+
+    from boomi_mcp.kb.warmup import KbWarmup
+
+    gate = threading.Event()
+
+    def _blocked_builder(_bootstrap):
+        gate.wait(timeout=30)
+        return object()
+
+    real_warmup = server._kb_warmup
+    server._kb_warmup = KbWarmup(
+        bootstrap=server._kb_bootstrap, builder=_blocked_builder, wait_seconds=30.0
+    )
+    try:
+        start = _time.monotonic()
+        result = server.search_boomi_docs(query="database", source_type="bogus")
+        elapsed = _time.monotonic() - start
+    finally:
+        gate.set()
+        server._kb_warmup = real_warmup
+    assert result["error"] == "invalid_source_type", result
+    assert elapsed < 1.0, f"validation blocked on warmup for {elapsed:.2f}s"
+
+
+def test_search_tool_schema_exposes_source_type_parameter():
+    tool = run_async(server.mcp.get_tool("search_boomi_docs"))
+    schema_blob = repr(tool.parameters)
+    assert "source_type" in schema_blob
+
+
 # --- read_boomi_doc_page wrapper ---------------------------------------------
 
 def test_read_page_wrapper_returns_documented_shape():

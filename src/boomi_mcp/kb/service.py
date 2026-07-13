@@ -39,6 +39,44 @@ OVERFETCH_CEILING = 30           # cap on Chroma n_results for diversification
 READ_PAGE_DEFAULT_MAX_CHUNKS = 15
 READ_PAGE_MAX_CHUNKS_CEILING = 30
 
+# Opt-in search filter values (the producer's two source_type labels).
+ALLOWED_SOURCE_TYPES = ("official", "companion_reference")
+
+
+def validate_source_type_request(source_type, manifest):
+    """Validate an explicit source_type filter against a manifest.
+
+    Returns None when the filter is valid and available, else the structured
+    error envelope. Pure and cheap — the tool wrapper calls it with the
+    BOOTSTRAP manifest before warmup, so an invalid or unavailable filter is
+    answered instantly and never executes a query.
+    """
+    if source_type not in ALLOWED_SOURCE_TYPES:
+        return {
+            "_success": False,
+            "error": "invalid_source_type",
+            "message": f"source_type must be one of {list(ALLOWED_SOURCE_TYPES)}",
+            "source_type": source_type,
+            "allowed_source_types": list(ALLOWED_SOURCE_TYPES),
+        }
+    counts = manifest.get("source_type_counts") or {}
+    available = [
+        t for t in ALLOWED_SOURCE_TYPES
+        if isinstance(counts.get(t), int) and not isinstance(counts.get(t), bool)
+        and counts[t] > 0
+    ]
+    if source_type not in available:
+        return {
+            "_success": False,
+            "error": "source_type_unavailable",
+            "message": (
+                f"source_type {source_type!r} has no indexed content in this corpus"
+            ),
+            "source_type": source_type,
+            "available_source_types": available,
+        }
+    return None
+
 
 def _env_int(name, default):
     raw = os.getenv(name)
@@ -197,12 +235,22 @@ class KbService:
             "embedding_model": self.embedding_model,
         }
 
-    def search(self, query, top_k=None):
-        """Semantic search over the corpus (spec §5.1).
+    def search(self, query, top_k=None, source_type=None):
+        """Semantic search over the corpus (spec §5.1), optionally filtered to
+        one source_type.
 
+        Identifier guidance: reuse exact identifiers already supplied by the
+        user, returned by a prior result, or exposed by the selected component
+        or capability schema. Never introduce an identifier solely from this
+        guidance.
+
+        With ``source_type=None`` the unfiltered code path and response are
+        unchanged (no ``where`` clause, no top-level ``source_type`` key).
+        With a filter, the ``where={"source_type": ...}`` clause restricts the
+        Chroma query BEFORE ranking and the response echoes the selection.
         Returns a structured dict. Raises KbQueryError only on an underlying
-        Chroma failure; expected problems (empty query) return a structured
-        error instead.
+        Chroma failure; expected problems (empty query, bad filter) return a
+        structured error instead.
         """
         trimmed = (query or "").strip()
         if not trimmed:
@@ -211,6 +259,14 @@ class KbService:
                 "error": "empty_query",
                 "message": "query must be a non-empty string",
             }
+
+        if source_type is not None:
+            # Defense in depth: the wrapper already validated against the
+            # bootstrap manifest pre-warmup; direct callers get the same
+            # fail-closed envelopes from the service's own manifest.
+            error = validate_source_type_request(source_type, self.manifest)
+            if error is not None:
+                return error
 
         if top_k is None:
             top_k = self._config["top_k_default"]
@@ -224,7 +280,17 @@ class KbService:
         n_results = min(top_k * 3, OVERFETCH_CEILING)
 
         try:
-            raw = self._collection.query(query_texts=[trimmed], n_results=n_results)
+            if source_type is not None:
+                raw = self._collection.query(
+                    query_texts=[trimmed], n_results=n_results,
+                    where={"source_type": source_type},
+                )
+            else:
+                # Unfiltered path stays byte-for-byte identical — including the
+                # exact Chroma call signature (no where kwarg).
+                raw = self._collection.query(
+                    query_texts=[trimmed], n_results=n_results
+                )
         except Exception as e:
             raise KbQueryError(f"KB search query failed: {e}")
 
@@ -239,8 +305,10 @@ class KbService:
             status = "low_confidence"
 
         distances = [h["distance"] for h in hits if h["distance"] is not None]
+        filter_note = f" source_type={source_type!r}" if source_type else ""
         print(
-            f"[INFO] search_boomi_docs query={trimmed!r} top_k={top_k} "
+            f"[INFO] search_boomi_docs query={trimmed!r} top_k={top_k}"
+            f"{filter_note} "
             f"results={len(hits)} status={status} "
             f"distance_min={min(distances) if distances else None} "
             f"distance_max={max(distances) if distances else None}"
@@ -267,12 +335,16 @@ class KbService:
             "_success": True,
             "query": trimmed,
             "top_k": top_k,
+        }
+        if source_type is not None:
+            result["source_type"] = source_type
+        result.update({
             "status": status,
             "warning": warning,
             "best_distance": best_distance,
             "low_confidence_distance": low_confidence_distance,
             "hits": hits,
-        }
+        })
         result.update(self._provenance())
         return result
 

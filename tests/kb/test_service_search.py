@@ -15,7 +15,13 @@ import pytest
 pytest.importorskip("chromadb")
 pytest.importorskip("sentence_transformers")
 
-from boomi_mcp.kb.service import KbService, _diversify_by_page, _flatten_query_result
+from boomi_mcp.kb.service import (
+    ALLOWED_SOURCE_TYPES,
+    KbService,
+    _diversify_by_page,
+    _flatten_query_result,
+    validate_source_type_request,
+)
 from _fixture_corpus import get_kb_service
 
 _SERVICE = get_kb_service()
@@ -220,6 +226,143 @@ def test_search_surfaces_companion_provenance():
     assert hit["raw_url"].startswith("https://raw.githubusercontent.com/")
     assert hit["latest_url"].startswith("https://github.com/OfficialBoomi/")
     assert hit["source_path"] == "references/components/map_component.md"
+
+
+# --- source_type filtering (spec: opt-in lookup filter) ------------------------
+
+_COUNTS_BOTH = {"official": 40, "companion_reference": 4}
+
+# The frozen unfiltered top-level response key order — the default call must
+# keep producing exactly this shape (byte-for-byte parity, no source_type key).
+UNFILTERED_KEY_ORDER = [
+    "_success", "query", "top_k", "status", "warning", "best_distance",
+    "low_confidence_distance", "hits",
+    "corpus_built_at", "corpus_version", "embedding_model",
+]
+
+
+class _RecordingCollection:
+    """Stub that records exactly the kwargs KbService.search passes to Chroma."""
+
+    def __init__(self):
+        self.calls = []
+
+    def query(self, query_texts, n_results, **kwargs):
+        self.calls.append({"query_texts": query_texts, "n_results": n_results,
+                           **kwargs})
+        source_type = "official"
+        where = kwargs.get("where")
+        if where:
+            source_type = where["source_type"]
+        return {
+            "ids": [["c1"]],
+            "documents": [["body"]],
+            "metadatas": [[{"page_key": "p", "source_type": source_type,
+                            "title": "T", "section_heading": "S"}]],
+            "distances": [[0.2]],
+        }
+
+
+def _stub_service(source_type_counts=_COUNTS_BOTH):
+    collection = _RecordingCollection()
+    manifest = {
+        "build_timestamp": "2026-05-01T00:00:00Z", "artifact_tag": "kb-x",
+        "embedding_model": "all-MiniLM-L6-v2",
+    }
+    if source_type_counts is not None:
+        manifest["source_type_counts"] = source_type_counts
+    svc = KbService(
+        collection, manifest,
+        {"top_k_default": 5, "top_k_max": 10, "low_confidence_distance": 0.45},
+    )
+    return svc, collection
+
+
+def test_default_search_passes_no_where_and_omits_source_type_key():
+    svc, collection = _stub_service()
+    result = svc.search("anything")
+    assert collection.calls == [
+        {"query_texts": ["anything"], "n_results": 15}
+    ], "unfiltered search must not pass a where clause"
+    assert "source_type" not in result
+    assert list(result.keys()) == UNFILTERED_KEY_ORDER
+
+
+@pytest.mark.parametrize("source_type", list(ALLOWED_SOURCE_TYPES))
+def test_filtered_search_passes_where_clause_and_echoes_source_type(source_type):
+    svc, collection = _stub_service()
+    result = svc.search("anything", source_type=source_type)
+    assert collection.calls == [
+        {"query_texts": ["anything"], "n_results": 15,
+         "where": {"source_type": source_type}}
+    ]
+    assert result["_success"] is True
+    assert result["source_type"] == source_type
+    # The selected source_type sits right after top_k; the rest is unchanged.
+    assert list(result.keys()) == (
+        UNFILTERED_KEY_ORDER[:3] + ["source_type"] + UNFILTERED_KEY_ORDER[3:]
+    )
+
+
+def test_invalid_source_type_returns_envelope_without_querying():
+    svc, collection = _stub_service()
+    result = svc.search("anything", source_type="bogus")
+    assert collection.calls == [], "invalid source_type must not execute a query"
+    assert result == {
+        "_success": False,
+        "error": "invalid_source_type",
+        "message": "source_type must be one of ['official', 'companion_reference']",
+        "source_type": "bogus",
+        "allowed_source_types": ["official", "companion_reference"],
+    }
+
+
+def test_unavailable_source_type_returns_envelope_without_querying():
+    svc, collection = _stub_service(source_type_counts={"official": 40})
+    result = svc.search("anything", source_type="companion_reference")
+    assert collection.calls == []
+    assert result["_success"] is False
+    assert result["error"] == "source_type_unavailable"
+    assert result["source_type"] == "companion_reference"
+    assert result["available_source_types"] == ["official"]
+
+
+def test_missing_source_type_counts_makes_every_filter_unavailable():
+    svc, collection = _stub_service(source_type_counts=None)
+    result = svc.search("anything", source_type="official")
+    assert collection.calls == []
+    assert result["error"] == "source_type_unavailable"
+    assert result["available_source_types"] == []
+
+
+def test_validate_source_type_request_ignores_non_positive_and_non_int_counts():
+    manifest = {"source_type_counts": {
+        "official": 0, "companion_reference": True,
+    }}
+    err = validate_source_type_request("official", manifest)
+    assert err["error"] == "source_type_unavailable"
+    assert err["available_source_types"] == []
+
+
+def test_validate_source_type_request_accepts_positive_counts():
+    assert validate_source_type_request(
+        "companion_reference", {"source_type_counts": _COUNTS_BOTH}
+    ) is None
+
+
+def test_filtered_search_against_fixture_returns_only_that_source_type():
+    for source_type in ALLOWED_SOURCE_TYPES:
+        result = _SERVICE.search("map component mapping", source_type=source_type)
+        assert result["_success"] is True
+        assert result["source_type"] == source_type
+        assert result["hits"], f"expected {source_type} hits from the fixture"
+        assert all(h["source_type"] == source_type for h in result["hits"])
+
+
+def test_default_search_against_fixture_omits_source_type_key():
+    result = _SERVICE.search("map component mapping")
+    assert result["_success"] is True
+    assert "source_type" not in result
 
 
 # --- no_match needs an empty collection (Chroma always returns hits otherwise) -

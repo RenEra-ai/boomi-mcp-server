@@ -5380,7 +5380,10 @@ if not LOCAL_MODE:
 # docs call after a cold start returns a bounded warming_up / kb_unavailable
 # instead of hanging.
 if BOOMI_DOCS_ENABLED:
-    from boomi_mcp.kb.service import validate_kb_manifest_cheap
+    from boomi_mcp.kb.service import (
+        validate_kb_manifest_cheap,
+        validate_source_type_request,
+    )
     from boomi_mcp.kb.warmup import KbWarmup
     from boomi_mcp.kb.manifest import render_corpus_resource
 
@@ -5457,13 +5460,16 @@ if BOOMI_DOCS_ENABLED:
     )
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
-    def search_boomi_docs(query: str, top_k: int = None) -> dict:
+    def search_boomi_docs(query: str, top_k: int = None, source_type: str = None) -> dict:
         """Search the Boomi documentation knowledge base by semantic similarity
         and return the top-ranked chunks with inline content. Use this as the
         primary entrypoint for factual Boomi questions: platform behavior,
         connector/configuration details, EDI/API behavior, deployment/runtime
         behavior, scripting, terminology, and error messages. Prefer retrieved KB
         evidence over model memory because Boomi documentation changes over time.
+        Reuse exact identifiers already supplied by the user, returned by a
+        prior result, or exposed by the selected component or capability schema.
+        Never introduce an identifier solely from this guidance.
         Chunks are returned in full, so the top result is usually enough to
         answer directly. If a hit looks relevant but you need surrounding page
         context, follow up by calling read_boomi_doc_page with that hit's
@@ -5471,21 +5477,33 @@ if BOOMI_DOCS_ENABLED:
         (community-sourced), not only official documentation: honor each hit's
         verification_status — treat companion_unverified results as a helpful
         hypothesis or implementation context, not as authoritative official
-        documentation. If results look off-topic, retry with reformulated query
-        terms. If the response status is low_confidence or no_match, do not
-        invent unsupported Boomi facts; tell the user the KB does not provide
-        enough support. If the response is error "warming_up", the KB is still
-        loading
-        after a cold start — wait retry_after_seconds and retry the same call. If
-        it is error "kb_unavailable", docs retrieval is temporarily unavailable;
-        report that rather than inventing facts (a later retry may succeed).
-        Read-only.
+        documentation. source_type is an OPTIONAL opt-in lookup filter
+        ("official" or "companion_reference") that restricts results to one
+        corpus; leave it unset for normal searches — filtering is a targeted
+        lookup aid, not a relevance fix. An invalid value returns error
+        "invalid_source_type" (with allowed_source_types); a value with no
+        indexed content returns error "source_type_unavailable" (with
+        available_source_types). If results look off-topic, retry with
+        reformulated query terms. If the response status is low_confidence or
+        no_match, do not invent unsupported Boomi facts; tell the user the KB
+        does not provide enough support. If the response is error "warming_up",
+        the KB is still loading after a cold start — wait retry_after_seconds
+        and retry the same call. If it is error "kb_unavailable", docs retrieval
+        is temporarily unavailable; report that rather than inventing facts (a
+        later retry may succeed). Read-only.
         """
+        if source_type is not None:
+            # Validate against the cheap bootstrap manifest BEFORE warmup: an
+            # invalid or unavailable filter answers instantly, even mid-warmup,
+            # and never executes a query.
+            error = validate_source_type_request(source_type, _kb_bootstrap.manifest)
+            if error is not None:
+                return error
         res = _kb_warmup.resolve()
         if not res.ready:
             return res.response
         try:
-            return res.service.search(query, top_k)
+            return res.service.search(query, top_k, source_type=source_type)
         except Exception as e:
             # Sanitize: full detail server-side only; client gets a generic
             # message + coarse category (KbQueryError text can embed internals).
