@@ -1,0 +1,396 @@
+{
+  "_comment": "Issue #135 (M12.0) compatibility-freeze fixture. Synthetic, secret-free sentinel data only — sentinel_* names, 11111111-style UUIDs, $ref: tokens, and the literal placeholder value REDACTED-SENTINEL. Consumed by tests/test_issue_135_compatibility_freeze.py, which pins CURRENT boundary behavior (characterization tests, not desired-state tests).",
+  "spec_extra_ignore": {
+    "input": {
+      "name": "Sentinel Spec",
+      "totally_unknown_field": "sentinel-extra-value"
+    },
+    "unknown_key": "totally_unknown_field",
+    "expected_dump": {
+      "version": "1.0",
+      "name": "Sentinel Spec",
+      "mode": "lift_shift",
+      "components": [],
+      "goals": [],
+      "endpoints": [],
+      "flows": [],
+      "naming": {},
+      "folders": {},
+      "runtime": {},
+      "validation_rules": {},
+      "profile_indexes_by_component_id": null,
+      "pipeline": null
+    }
+  },
+  "component_extra_ignore_config_preserved": {
+    "input": {
+      "key": "sentinel_component",
+      "type": "process",
+      "unknown_component_field": "sentinel-extra-value",
+      "config": {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [{"subprocess_ref": "$ref:child"}],
+        "free_form_block": {"alpha": 1, "beta": ["x", "y"]}
+      }
+    },
+    "unknown_key": "unknown_component_field"
+  },
+  "pipeline_extra_forbidden": {
+    "pipeline_spec": {
+      "stages": [],
+      "dependencies": [],
+      "bogus_extra": true
+    },
+    "stage_spec": {
+      "key": "sentinel_stage",
+      "kind": "map",
+      "config": {},
+      "bogus_extra": true
+    },
+    "edge_spec": {
+      "from_stage": "sentinel_from",
+      "to_stage": "sentinel_to",
+      "bogus_extra": true
+    }
+  },
+  "stage_config_open": {
+    "input": {
+      "key": "sentinel_stage",
+      "kind": "map",
+      "config": {
+        "primitive": "map",
+        "map_ref": "$ref:sentinel_map",
+        "free_form": {"nested": [1, 2, 3], "note": "sentinel"}
+      }
+    }
+  },
+  "compact_nested_vs_expanded_top": {
+    "compact_pipeline": {
+      "stages": [
+        {
+          "key": "read_stage",
+          "kind": "read",
+          "config": {
+            "primitive": "db_read",
+            "connection_id": "$ref:sentinel_read_conn",
+            "operation_id": "$ref:sentinel_read_op"
+          }
+        },
+        {
+          "key": "send_stage",
+          "kind": "send",
+          "config": {
+            "primitive": "rest_send",
+            "action_type": "POST",
+            "connection_id": "$ref:sentinel_send_conn",
+            "operation_id": "$ref:sentinel_send_op"
+          }
+        }
+      ],
+      "dependencies": [
+        {"from_stage": "read_stage", "to_stage": "send_stage"}
+      ]
+    },
+    "expected_stage_metadata_keys": [
+      "cardinality",
+      "context_effect",
+      "side_effect",
+      "failure_behavior"
+    ]
+  },
+  "normalize_nested": {
+    "config": {
+      "integration_spec": {
+        "name": "Sentinel Nested",
+        "pipeline": {
+          "stages": [
+            {
+              "key": "read_stage",
+              "kind": "read",
+              "config": {
+                "primitive": "db_read",
+                "connection_id": "$ref:sentinel_read_conn",
+                "operation_id": "$ref:sentinel_read_op"
+              }
+            },
+            {
+              "key": "send_stage",
+              "kind": "send",
+              "config": {
+                "primitive": "rest_send",
+                "action_type": "POST",
+                "connection_id": "$ref:sentinel_send_conn",
+                "operation_id": "$ref:sentinel_send_op"
+              }
+            }
+          ],
+          "dependencies": [
+            {"from_stage": "read_stage", "to_stage": "send_stage"}
+          ]
+        }
+      }
+    },
+    "expected_stage_keys": ["read_stage", "send_stage"]
+  },
+  "normalize_top_level_dropped": {
+    "config": {
+      "name": "Sentinel Top Level",
+      "components": [],
+      "pipeline": {
+        "stages": [
+          {
+            "key": "read_stage",
+            "kind": "read",
+            "config": {
+              "primitive": "db_read",
+              "connection_id": "$ref:sentinel_read_conn",
+              "operation_id": "$ref:sentinel_read_op"
+            }
+          }
+        ],
+        "dependencies": []
+      }
+    }
+  },
+  "normalize_source_description_dropped": {
+    "config": {
+      "source_description": {
+        "name": "Sentinel Source Description",
+        "components": [
+          {"key": "sentinel_component", "type": "process", "config": {}}
+        ],
+        "goals": ["sentinel goal"],
+        "pipeline": {
+          "stages": [
+            {
+              "key": "read_stage",
+              "kind": "read",
+              "config": {
+                "primitive": "db_read",
+                "connection_id": "$ref:sentinel_read_conn",
+                "operation_id": "$ref:sentinel_read_op"
+              }
+            }
+          ],
+          "dependencies": []
+        }
+      }
+    },
+    "expected_component_keys": ["sentinel_component"],
+    "expected_goals": ["sentinel goal"]
+  },
+  "normalize_string_source_description": {
+    "config": {
+      "name": "Sentinel String",
+      "source_description": "Sync sentinel orders to the sentinel target"
+    },
+    "expected_goals": ["Sync sentinel orders to the sentinel target"]
+  },
+  "contradictory_pipelines": {
+    "config": {
+      "integration_spec": {
+        "name": "Sentinel Contradictory",
+        "pipeline": {
+          "stages": [
+            {
+              "key": "fetch_stage",
+              "kind": "fetch",
+              "config": {
+                "primitive": "rest_fetch",
+                "connection_id": "$ref:sentinel_fetch_conn",
+                "operation_id": "$ref:sentinel_fetch_op"
+              }
+            },
+            {
+              "key": "send_stage",
+              "kind": "send",
+              "config": {
+                "primitive": "rest_send",
+                "action_type": "POST",
+                "connection_id": "$ref:sentinel_spec_send_conn",
+                "operation_id": "$ref:sentinel_spec_send_op"
+              }
+            }
+          ],
+          "dependencies": [
+            {"from_stage": "fetch_stage", "to_stage": "send_stage"}
+          ]
+        },
+        "components": [
+          {
+            "key": "main_process",
+            "type": "process",
+            "config": {
+              "process_kind": "sync_pipeline",
+              "pipeline": {
+                "stages": [
+                  {
+                    "key": "read_stage",
+                    "kind": "read",
+                    "config": {
+                      "primitive": "db_read",
+                      "connection_id": "$ref:sentinel_read_conn",
+                      "operation_id": "$ref:sentinel_read_op"
+                    }
+                  },
+                  {
+                    "key": "send_stage",
+                    "kind": "send",
+                    "config": {
+                      "primitive": "rest_send",
+                      "action_type": "POST",
+                      "connection_id": "$ref:sentinel_target_conn",
+                      "operation_id": "$ref:sentinel_target_op"
+                    }
+                  }
+                ],
+                "dependencies": [
+                  {"from_stage": "read_stage", "to_stage": "send_stage"}
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "expected_spec_pipeline_kinds": ["fetch", "send"],
+    "expected_lowered_source_connection_id": "$ref:sentinel_read_conn",
+    "expected_lowered_target_connection_id": "$ref:sentinel_target_conn"
+  },
+  "sync_pipeline_unknown_key": {
+    "config": {
+      "process_kind": "sync_pipeline",
+      "pipeline": {
+        "stages": [
+          {
+            "key": "read_stage",
+            "kind": "read",
+            "config": {
+              "primitive": "db_read",
+              "connection_id": "$ref:sentinel_read_conn",
+              "operation_id": "$ref:sentinel_read_op"
+            }
+          },
+          {
+            "key": "send_stage",
+            "kind": "send",
+            "config": {
+              "primitive": "rest_send",
+              "action_type": "POST",
+              "connection_id": "$ref:sentinel_send_conn",
+              "operation_id": "$ref:sentinel_send_op"
+            }
+          }
+        ],
+        "dependencies": [
+          {"from_stage": "read_stage", "to_stage": "send_stage"}
+        ]
+      },
+      "bogus": true
+    },
+    "expected_error_code": "SYNC_PIPELINE_CONFIG_INVALID",
+    "expected_field": "bogus"
+  },
+  "sync_pipeline_gated_keys": {
+    "base_config": {
+      "process_kind": "sync_pipeline",
+      "pipeline": {
+        "stages": [
+          {
+            "key": "read_stage",
+            "kind": "read",
+            "config": {
+              "primitive": "db_read",
+              "connection_id": "$ref:sentinel_read_conn",
+              "operation_id": "$ref:sentinel_read_op"
+            }
+          },
+          {
+            "key": "send_stage",
+            "kind": "send",
+            "config": {
+              "primitive": "rest_send",
+              "action_type": "POST",
+              "connection_id": "$ref:sentinel_send_conn",
+              "operation_id": "$ref:sentinel_send_op"
+            }
+          }
+        ],
+        "dependencies": [
+          {"from_stage": "read_stage", "to_stage": "send_stage"}
+        ]
+      }
+    },
+    "cases": {
+      "reliability": {
+        "value": {"retry": {"max_attempts": 3}},
+        "expected_error_code": "SYNC_PIPELINE_CONFIG_INVALID"
+      },
+      "source": {
+        "value": {"connector_type": "database"},
+        "expected_error_code": "SYNC_PIPELINE_CONFIG_INVALID"
+      },
+      "target": {
+        "value": {"connector_type": "rest"},
+        "expected_error_code": "SYNC_PIPELINE_CONFIG_INVALID"
+      },
+      "transform": {
+        "value": {"mode": "passthrough"},
+        "expected_error_code": "SYNC_PIPELINE_CONFIG_INVALID"
+      },
+      "return_documents": {
+        "value": {"enabled": true},
+        "expected_error_code": "SYNC_PIPELINE_CONFIG_INVALID"
+      },
+      "branch": {
+        "value": {"legs": []},
+        "expected_error_code": "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED"
+      },
+      "process_calls": {
+        "value": [{"process_id": "11111111-1111-1111-1111-111111111111"}],
+        "expected_error_code": "SYNC_PIPELINE_CONTROL_FLOW_UNSUPPORTED"
+      }
+    }
+  },
+  "flow_sequence_unknown_step_key": {
+    "step": {"kind": "message", "message_text": "sentinel text", "bogus": 1},
+    "field": "flow_sequence[0]",
+    "expected_error_code": "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+    "expected_field": "flow_sequence[0]"
+  },
+  "flow_sequence_unknown_kind": {
+    "step": {"kind": "widget"},
+    "field": "flow_sequence[0]",
+    "expected_error_code": "PROCESS_FLOW_SEQUENCE_CONFIG_INVALID",
+    "expected_field": "flow_sequence[0].kind"
+  },
+  "wrapper_unknown_extras": {
+    "base_config": {
+      "process_kind": "wrapper_subprocess",
+      "process_calls": [
+        {"process_id": "11111111-1111-1111-1111-111111111111"}
+      ]
+    },
+    "config_with_extras": {
+      "process_kind": "wrapper_subprocess",
+      "bogus_extra": {"nested": "sentinel"},
+      "process_calls": [
+        {
+          "process_id": "11111111-1111-1111-1111-111111111111",
+          "bogus_call_key": "sentinel"
+        }
+      ]
+    }
+  },
+  "wrapper_secret_extra": {
+    "config": {
+      "process_kind": "wrapper_subprocess",
+      "process_calls": [
+        {"process_id": "11111111-1111-1111-1111-111111111111"}
+      ],
+      "password": "REDACTED-SENTINEL"
+    },
+    "expected_error_code": "PLAINTEXT_SECRET_REJECTED",
+    "expected_field": "password"
+  }
+}
