@@ -2,9 +2,10 @@
 
 **Status:** evolving — this file is the M12 migration ledger and is UPDATED as M12 issues land
 (unlike [ADR-001](ADR-001-process-ir-authority.md), which is immutable once accepted).
-**Measured baseline:** 2026-07-13 (issue #135, epic #134). Every `file:line` below was read and
-verified against the checkout on this date; line numbers drift as the codebase moves — re-verify
-before relying on them in a later issue.
+**Measured baseline:** 2026-07-13, extended with review-round re-measurements dated inline as
+2026-07-14 (issue #135, epic #134). Every `file:line` below was read and verified against the
+checkout on the stated date; line numbers drift as the codebase moves — re-verify before relying
+on them in a later issue.
 **References:** epic [#134](https://github.com/RenEra-ai/boomi-mcp-server/issues/134),
 issue [#135](https://github.com/RenEra-ai/boomi-mcp-server/issues/135),
 [ADR-001: Process IR Authority and Compiler Boundary](ADR-001-process-ir-authority.md).
@@ -32,9 +33,9 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Current acceptance | Optional `PipelineSpec` on the spec envelope; validated strictly when present, `None` by default (`src/boomi_mcp/models/integration_models.py:90-97`) |
 | Public / executable | Public (part of the pydantic spec schema); **NOT executable** — no Boomi XML is emitted from this field alone |
 | Writers | 4 archetypes set it "so the plan is inspectable": `src/boomi_mcp/patterns/archetypes/api_to_api_sync.py:1681`, `api_to_database_sync.py:856`, `http_listener_to_db.py:1092`, `http_listener_to_rest.py:525`. Deliberate non-writer: `database_to_api_sync.py:2884-2885` (its internal adapter keeps `pipeline=None`) |
-| Readers | **Source: NONE.** No `.py` under `src/` reads `spec.pipeline` to drive behavior. Test readers only: `tests/patterns/test_database_to_api_sync_assembly.py:357`, `test_api_to_api_sync_e2e.py:307-314`, `test_api_to_database_sync_e2e.py:291-293`, `test_stub_archetype.py:76` |
+| Readers | **Source: NONE.** No `.py` under `src/` reads `spec.pipeline` to drive behavior. Test readers only: `tests/patterns/test_database_to_api_sync_assembly.py:357`, `test_api_to_api_sync_e2e.py:307-314`, `test_api_to_database_sync_e2e.py:291-293`, `test_stub_archetype.py:76`, `tests/test_pipeline_models.py:406-419` |
 | Validation / lowering owner | Pydantic `PipelineSpec` validation only (`src/boomi_mcp/models/pipeline_models.py:218-231`); **no lowering path exists from this field** |
-| Defaults & aliases | Default `None`; stage metadata (`cardinality`/`context_effect`/`side_effect`/`failure_behavior`) defaults `None` per stage (`pipeline_models.py:192-203`), so a `model_dump()` of the spec expands stages with those four `null` keys while a compact nested `config.pipeline` dict stays byte-identical |
+| Defaults & aliases | Default `None`; a `model_dump()` of the spec expands every default — per stage `component_ref: null` plus the four semantic metadata keys (`cardinality`/`context_effect`/`side_effect`/`failure_behavior`) as `null` (`pipeline_models.py:186-203`), per dependency `edge_kind: "ordering"`, `label: null`, `ordinal: null` (`:163-172`) — while a compact nested `config.pipeline` dict stays byte-identical (full expanded dump pinned by the freeze suite) |
 | Unknown-field behavior | Spec envelope drops unknowns silently (§2.1); the `PipelineSpec` value itself rejects extras (§2.4) |
 | Error codes | Pydantic `ValidationError` (no builder codes — nothing consumes it) |
 | Fixtures / tests | The 4 pattern e2e tests above; #135 freeze suite `tests/test_issue_135_compatibility_freeze.py` |
@@ -83,7 +84,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Field | Measured state |
 |---|---|
 | Authority status (ADR-001) | Compatibility input and semantic seed for ProcessIRV1 |
-| Current acceptance | Ordered list of typed step objects composing 2+ M10/M11 shapes in one `database_to_api_sync` process; control kinds (decision/branch) and the exception terminal must be the LAST step of their sequence; branch legs are linear sub-flows; decision legs may nest one branch/exception level |
+| Current acceptance | Ordered list of one or more typed step objects composing M10/M11 shapes in one `database_to_api_sync` process (a single-step sequence is accepted — measured 2026-07-14, pinned by the freeze suite); control kinds (decision/branch) and the exception terminal must be the LAST step of their sequence; branch legs are linear sub-flows; decision legs may nest one branch/exception level |
 | Public / executable | Public (capability catalog + schema docs: `meta_tools.py:7298-7329` field list, `:7401,7507-7522` schema + error taxonomy); executable |
 | Writers | `src/boomi_mcp/patterns/composition.py:852` (compose_archetypes rewrites parts onto the Branch surface), `patterns/primitives/document_cache_put.py:116` and `document_cache_lookup.py:118` (fragments carrying a `process_config.flow_sequence` step) |
 | Readers | Dispatch: `process_flow_builder.py:655-669` (validate) and `:848-852` (build) route to the composed path when present (`_flow_sequence_enabled` `:4616`, reads `:4624`). Ref-type checks: `integration_builder.py:2391` calling `_check_flow_sequence_ref_types` (def `:2501`, recursive `:2566+`). Lineage pass gate: `integration_builder.py:5964-5968`; cache/property lineage walk `src/boomi_mcp/categories/components/builders/cache_property_lineage.py:336-360` |
@@ -143,6 +144,35 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Doctrine views (design doctrine, gotchas, governance prose) | Advisory text | `src/boomi_mcp/kb/design_doctrine.py:232` (`wrapper_subprocess_separation`) + cross-refs; `src/boomi_mcp/kb/operational_gotchas.py:1364,1398` (`applies_to` includes `flow_sequence`) | Stays advisory (docs refresh in #147) | Never validation-bearing per ADR-001 |
 | `import_integration_draft.pipeline_draft` | Derived verification/analysis view (analysis-only) | `src/boomi_mcp/categories/integration_import.py:1093` (`_build_pipeline_draft`), attached `:1354-1356`, response key `:1476`; tool docs `meta_tools.py:9665-9669` | #146 (MCP surface updates) | A validated `PipelineSpec` dump describing an EXISTING component — never an executable input |
 
+Remaining ledger dimensions for the auxiliary surfaces (fields that are `n/a` reflect that the
+surface is not an authored input; "not measured" entries are explicit gates for the owning issue,
+never assumptions):
+
+| Surface | Acceptance / public / executable | Unknown-field behavior | Errors | Fixtures & assertion strength | Migration gate |
+|---|---|---|---|---|---|
+| Archetype / composition inputs | Typed per-archetype/composition parameters; public tools; emit `IntegrationSpecV1` plans, never XML directly | Not measured in this baseline — measure before adapter rework | Per-tool validation errors (not inventoried here) | `examples/m8/` JSON round-trips (structural, `tests/patterns/test_archetype_composition.py:346-371,692-717`); archetype XML via `try_catch_*` goldens (§3) | #139/#145 must freeze parameter acceptance before rerouting through ProcessIRV1 |
+| Materialization `depends_on` | List of in-spec component keys; public spec field; drives topo-sorted execution order | n/a (list of strings). Self-dependency rejected at the model (`integration_models.py:37-43`); a dangling key hard-fails the plan (`_success: false`, "depends on unknown component" — measured 2026-07-14) | Model `ValueError` (self-dep); plan-level error (dangling key); `MISSING_PROCESS_DEPENDENCY` for unresolvable `$ref:KEY` values (`integration_builder.py:2033`) | Exercised structurally throughout `tests/test_integration_builder.py` (topo-sort, wrapper edge synthesis) | Unchanged in M12; #147 re-verifies end-to-end |
+| Cache / property lineage pass | n/a — internal plan-time validation pass, not authored, not public | n/a | `PROCESS_LINEAGE_*` family | `tests/test_cache_property_lineage.py` (dedicated, structural) | #143 absorbs it into ProcessIRV1 semantic validation |
+| Verifier output | n/a — post-emission report, never an input | n/a | Report entries (its own report shape, not `BuilderValidationError`) | `tests/test_process_graph_verifier.py` (dedicated, structural) | #138 keeps it as the outer gate; #146 exposes the verify surface |
+| Doctrine views | n/a — advisory text; never accepted as input | n/a | None (never validation-bearing) | `tests/test_design_doctrine.py`, `tests/test_doctrine_emitter_consistency.py` (structural consistency) | Stays advisory; docs refresh in #147 |
+| `import_integration_draft.pipeline_draft` | Read-only tool output; public; never accepted as input by any tool (zero consumers measured) | n/a (output, not input) | n/a | `tests/test_integration_import.py`, `tests/test_integration_import_wrapper.py` (structural) | #146 documents it as a derived view of the compiler summary |
+
+Shared plan/builder error machinery (applies across the process surfaces above, owned by the
+shared validation passes rather than any single surface): cross-component `$ref` type checks
+(`PROCESS_REF_TYPE_MISMATCH`, `MISSING_PROCESS_DEPENDENCY`), connector binding validation
+(`PROCESS_CONNECTOR_BINDING_INVALID`), process naming (`PROCESS_NAME_REQUIRED`,
+`PROCESS_NAME_CONFLICT`), the plaintext-secret scan (`PLAINTEXT_SECRET_REJECTED`), and the
+lineage pass (`PROCESS_LINEAGE_*`). The per-tool taxonomies surfaced by
+`get_schema_template`/`list_capabilities` (`src/boomi_mcp/categories/meta_tools.py`) cover these
+families EXCEPT `PROCESS_LINEAGE_*`: its five codes (`PROCESS_LINEAGE_AMBIGUOUS_LAST_WRITE`,
+`PROCESS_LINEAGE_BRANCH_ORDER_INVALID`, `PROCESS_LINEAGE_CACHE_WRITER_MISSING`,
+`PROCESS_LINEAGE_DDP_SCOPE_INVALID`, `PROCESS_LINEAGE_PROPERTY_READ_BEFORE_WRITE`) are defined in
+`src/boomi_mcp/categories/components/builders/profile_generation.py:133-137` and raised only by
+the lineage pass (`cache_property_lineage.py`); they are NOT published by `meta_tools.py`
+(measured 2026-07-14). This ledger does not duplicate the published taxonomies —
+`LEGACY_ADAPTER_*` (#139) must map each family explicitly before any adapter rewires these
+surfaces, sourcing the lineage family from `profile_generation.py`.
+
 ### 1.8 Component-envelope aliases (`_normalize_component`)
 
 `_normalize_component` (`src/boomi_mcp/categories/integration_builder.py:291-351`) applies these
@@ -163,7 +193,8 @@ aliases/promotions to every component dict before `IntegrationSpecV1` validation
 
 ## 2. Measured unknown-field boundary behavior
 
-Every claim below was verified by reading the cited code on 2026-07-13.
+Every claim below was verified by reading the cited code on 2026-07-13; entries added during
+the #135 review rounds carry their own inline measurement date (2026-07-14).
 
 ### 2.1 `IntegrationSpecV1` / `IntegrationComponentSpec` — extras silently ignored
 
@@ -229,7 +260,7 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
   (9 naming the owning surface/issue; `finalize`'s names none); the 7 M11 property/cache kinds (`set_ddp`, `set_dpp`, `get_property`,
   `set_process_property`, `cache_put`, `cache_get`, `cache_join`) share the generic hint
   "Reserved stage kind (no PipelineSpec lowering in M5.2)." naming no owning issue (measured
-  2026-07-13; enriching the hint map is a runtime string change out of #135's scope and belongs
+  2026-07-14; enriching the hint map is a runtime string change out of #135's scope and belongs
   to the M12 issue that next touches this surface).
 - Stage-level config allowlists: binding stages `_SYNC_PIPELINE_BINDING_KEYS` (`:6741-6743`,
   enforced `:7262`), listener `_SYNC_PIPELINE_LISTENER_KEYS` (`:6747-6749`, enforced `:7226`),
@@ -240,6 +271,31 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
 - Per-kind step-key allowlists `_FLOW_SEQUENCE_STEP_KEYS` (`process_flow_builder.py:289`);
   unknown kind → `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` with `field=<step>.kind` (`:4874-4881`);
   extra step keys → same code with `field=<step path>` (`:4882-4890`).
+- The strictness is **recursive** (measured 2026-07-14, pinned by the freeze suite): an unknown
+  key on a branch leg object → `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` with
+  `field=flow_sequence[i].legs[j]`; an unknown key on a step nested inside a leg → same code
+  with `field=flow_sequence[i].legs[j].steps[k]`.
+- The config ROOT next to `flow_sequence` has no allowlist: an unknown root key whose value
+  carries no `$ref:` token is accepted AND ignored — `ProcessFlowBuilder.build()` output is
+  string-identical with and without it (measured 2026-07-14, pinned by the freeze suite). The
+  root is still subject to the cross-cutting `$ref` reachability scan, which reads EVERY config
+  value including unknown root keys. Declarations flow through `validate_config`'s `depends_on=`
+  keyword parameter — which `_build_plan` supplies from the component spec — NOT through the
+  config dict: a `depends_on` KEY inside the config is just another ignored root extra, never a
+  declaration. A `$ref:` token inside an unknown root extra is therefore rejected with
+  `MISSING_PROCESS_DEPENDENCY` at `depends_on` unless the token is declared via the keyword
+  parameter (equivalently, in the component spec's `depends_on` at the `_build_plan` layer), in
+  which case it is accepted and ignored like any other extra (identical planned steps).
+  `ProcessFlowBuilder.build()` takes no declaration parameter and never runs the scan — emitted
+  XML is byte-identical with or without a ref-bearing extra, declared or not; the scan is
+  validation/plan-time only. The plan-layer rejection applies to authoring actions (measured on
+  create and update): when a same-name component is found under the default
+  `conflict_policy="reuse"`, `_build_plan` skips builder validation entirely and the SAME config
+  — undeclared `$ref` extra included — plans as a clean `reuse` step with no validation error
+  (all measured 2026-07-14, all pinned by the freeze suite). Any adapter gate for root leniency
+  must scope to non-`$ref` values and account for the validation-skipping reuse path. A one-step `flow_sequence` is accepted
+  (no 2+ minimum; an empty list is rejected with `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` at
+  `flow_sequence`).
 - Legacy single-slot sibling blocks (`flow_control`/`branch`/`decision`/non-passthrough
   `transform`/Try-Catch `reliability`) are rejected **by presence** alongside a `flow_sequence`
   (`:4627-4639,4672-4695`).

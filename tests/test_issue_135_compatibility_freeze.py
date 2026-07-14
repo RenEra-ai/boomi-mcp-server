@@ -57,6 +57,7 @@ from src.boomi_mcp.categories.integration_builder import (
 )
 from src.boomi_mcp.categories.components.builders import (
     BuilderValidationError,
+    ProcessFlowBuilder,
     SyncPipelineBuilder,
     WrapperSubprocessBuilder,
 )
@@ -161,12 +162,11 @@ def test_top_level_pipeline_dump_expands_defaults_nested_stays_compact():
             }
         ],
     )
-    dumped_stage = spec.model_dump()["pipeline"]["stages"][0]
-    # The typed spec.pipeline dump gains the four None-default semantic
-    # metadata keys per stage...
-    for key in case["expected_stage_metadata_keys"]:
-        assert key in dumped_stage
-        assert dumped_stage[key] is None
+    # The typed spec.pipeline dump expands EVERY default — per-stage
+    # component_ref + the four None-default semantic metadata keys, and
+    # per-dependency edge_kind="ordering"/label/ordinal. Compared as a
+    # complete document so any serialization drift breaks the freeze.
+    assert spec.model_dump()["pipeline"] == case["expected_expanded_pipeline_dump"]
     # ...while the same dict nested in component config stays byte-compact.
     assert spec.components[0].config["pipeline"] == compact
     for key in case["expected_stage_metadata_keys"]:
@@ -267,7 +267,13 @@ def test_contradictory_pipelines_silent_precedence_through_build_plan(mock_pag):
     plan_broken = _build_plan(MagicMock(), broken)
     broken_step = next(s for s in plan_broken["steps"] if s["key"] == "main_process")
     assert broken_step["planned_action"] == "error_process_validation"
-    assert broken_step["validation_error"]["error_code"].startswith("SYNC_PIPELINE_")
+    assert (
+        broken_step["validation_error"]["error_code"]
+        == "SYNC_PIPELINE_STAGE_UNSUPPORTED"
+    )
+    assert (
+        broken_step["validation_error"]["field"] == "pipeline.stages[read_stage].kind"
+    )
 
     # Pin 3 — spec.pipeline is never consulted: rewriting it (schema-valid but
     # semantically different again) leaves every planned step identical.
@@ -328,6 +334,198 @@ def test_flow_sequence_step_rejects_unknown_kind():
     assert isinstance(err, BuilderValidationError)
     assert err.error_code == case["expected_error_code"]
     assert err.field == case["expected_field"]
+
+
+def test_sync_pipeline_rejects_unknown_stage_config_key():
+    """StageSpec.config is model-open (test 5) but the sync_pipeline builder is
+    strict about it: an unknown key inside a stage's config is rejected with an
+    exact code/field pair."""
+    case = _case("sync_pipeline_stage_config_unknown_key")
+    err = SyncPipelineBuilder.validate_config(case["config"])
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == case["expected_error_code"]
+    assert err.field == case["expected_field"]
+
+
+def test_flow_sequence_accepts_single_step_and_ignores_root_extras():
+    """Full-config boundary through ProcessFlowBuilder.validate_config: a
+    ONE-step flow_sequence is accepted (no 2+ minimum), and an unknown root key
+    (with no $ref token in its value) is accepted AND ignored — build() output
+    is string-identical with and without it (the config root has no allowlist).
+    The root is NOT unconditionally inert: the cross-cutting $ref reachability
+    scan reads unknown root values too, so a $ref token there is rejected."""
+    case = _case("flow_sequence_composed")
+    base = copy.deepcopy(case["base_config"])
+    assert ProcessFlowBuilder.validate_config(base) is None
+    with_extra = copy.deepcopy(base)
+    with_extra[case["bogus_root_key"]] = case["bogus_root_value"]
+    assert ProcessFlowBuilder.validate_config(with_extra) is None
+    xml_base = ProcessFlowBuilder.build(
+        copy.deepcopy(base), name=case["process_name"]
+    )
+    xml_extra = ProcessFlowBuilder.build(
+        copy.deepcopy(with_extra), name=case["process_name"]
+    )
+    assert xml_base == xml_extra
+    # Boundary of the leniency: a $ref token inside an unknown root extra is
+    # caught by the reachability scan, not ignored.
+    with_ref_extra = copy.deepcopy(base)
+    with_ref_extra[case["bogus_root_key"]] = case["bogus_root_ref_value"]
+    err = ProcessFlowBuilder.validate_config(with_ref_extra)
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == case["expected_root_ref_error_code"]
+    assert err.field == case["expected_root_ref_field"]
+    # Declarations flow through validate_config's depends_on= KEYWORD (the
+    # plan layer's conduit) — a depends_on KEY inside the config dict is just
+    # another ignored root extra, never a declaration.
+    bare_declared = copy.deepcopy(base)
+    bare_declared["depends_on"] = [case["declared_dep_key"]]
+    bare_declared[case["bogus_root_key"]] = case["declared_ref_token"]
+    err = ProcessFlowBuilder.validate_config(bare_declared)
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == case["expected_root_ref_error_code"]
+    assert err.field == case["expected_root_ref_field"]
+    # Declared via the keyword parameter → accepted at the direct-builder layer.
+    kwarg_declared = copy.deepcopy(base)
+    kwarg_declared[case["bogus_root_key"]] = case["declared_ref_token"]
+    assert (
+        ProcessFlowBuilder.validate_config(
+            kwarg_declared, depends_on=[case["declared_dep_key"]]
+        )
+        is None
+    )
+    # build() takes no declaration parameter and never runs the scan: emitted
+    # XML is byte-identical with or without a ref-bearing extra, declared or
+    # not — the reachability scan is validation/plan-time only.
+    xml_declared_extra = ProcessFlowBuilder.build(
+        copy.deepcopy(kwarg_declared), name=case["process_name"]
+    )
+    undeclared_config = copy.deepcopy(base)
+    undeclared_config[case["bogus_root_key"]] = case["bogus_root_ref_value"]
+    xml_undeclared_extra = ProcessFlowBuilder.build(
+        copy.deepcopy(undeclared_config), name=case["process_name"]
+    )
+    assert xml_declared_extra == xml_base
+    assert xml_undeclared_extra == xml_base
+
+
+@patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
+def test_flow_sequence_declared_ref_root_extra_ignored_at_plan_layer(mock_pag):
+    """At the _build_plan layer (where depends_on is declared on the component
+    spec), a $ref token declared in depends_on inside an unknown root extra is
+    accepted and ignored like any other extra — identical planned steps — while
+    an undeclared token is rejected on the process step."""
+    mock_pag.return_value = []
+    case = _case("flow_sequence_composed")
+
+    def _spec(extra_value=None):
+        config = copy.deepcopy(case["base_config"])
+        if extra_value is not None:
+            config[case["bogus_root_key"]] = extra_value
+        return {
+            "integration_spec": {
+                "name": "Sentinel Composed Plan",
+                "components": [
+                    {
+                        "key": "composed_process",
+                        "type": "process",
+                        "name": case["process_name"],
+                        "depends_on": [case["declared_dep_key"]],
+                        "config": config,
+                    },
+                    copy.deepcopy(case["dep_stub_component"]),
+                ],
+            }
+        }
+
+    baseline = _build_plan(MagicMock(), _spec())
+    assert baseline["_success"] is True
+    base_step = next(s for s in baseline["steps"] if s["key"] == "composed_process")
+    assert base_step["planned_action"] == "create"
+
+    declared = _build_plan(MagicMock(), _spec(case["declared_ref_token"]))
+    assert declared["_success"] is True
+    declared_step = next(
+        s for s in declared["steps"] if s["key"] == "composed_process"
+    )
+    assert declared_step["planned_action"] == "create"
+    assert "validation_error" not in declared_step
+    assert declared["steps"] == baseline["steps"]
+    assert declared["execution_order"] == baseline["execution_order"]
+
+    undeclared = _build_plan(MagicMock(), _spec(case["bogus_root_ref_value"]))
+    undeclared_step = next(
+        s for s in undeclared["steps"] if s["key"] == "composed_process"
+    )
+    assert undeclared_step["planned_action"] == "error_process_validation"
+    assert (
+        undeclared_step["validation_error"]["error_code"]
+        == case["expected_root_ref_error_code"]
+    )
+
+    # The update path is an authoring action too: the identical undeclared-ref
+    # config with action="update" + component_id is rejected the same way.
+    update_spec = _spec(case["bogus_root_ref_value"])
+    update_comp = update_spec["integration_spec"]["components"][0]
+    update_comp["action"] = "update"
+    update_comp["component_id"] = "99999999-9999-9999-9999-999999999999"
+    updated = _build_plan(MagicMock(), update_spec)
+    updated_step = next(
+        s for s in updated["steps"] if s["key"] == "composed_process"
+    )
+    assert updated_step["planned_action"] == "error_process_validation"
+    assert (
+        updated_step["validation_error"]["error_code"]
+        == case["expected_root_ref_error_code"]
+    )
+
+    # The rejection is an AUTHORING-action behavior: a same-name match under
+    # the default conflict_policy="reuse" skips builder validation entirely —
+    # the identical undeclared-ref config plans as a clean reuse step.
+    mock_pag.return_value = [
+        {
+            "component_id": "99999999-9999-9999-9999-999999999999",
+            "id": "99999999-9999-9999-9999-999999999999",
+            "name": case["process_name"],
+            "folder_name": "Root",
+            "type": "process",
+            "version": 1,
+        }
+    ]
+    try:
+        reused = _build_plan(MagicMock(), _spec(case["bogus_root_ref_value"]))
+    finally:
+        mock_pag.return_value = []
+    reused_step = next(s for s in reused["steps"] if s["key"] == "composed_process")
+    assert reused["_success"] is True
+    assert reused_step["planned_action"] == "reuse"
+    assert "validation_error" not in reused_step or (
+        reused_step["validation_error"] is None
+    )
+
+
+def test_flow_sequence_rejects_branch_leg_and_recursive_step_extras():
+    """Recursive strictness through ProcessFlowBuilder.validate_config: unknown
+    keys on a branch LEG object and on a step NESTED inside a leg are both
+    rejected with exact code/field pairs (the field is the recursive path)."""
+    case = _case("flow_sequence_composed")
+    valid = copy.deepcopy(case["base_config"])
+    valid["flow_sequence"] = [copy.deepcopy(case["branch_step"])]
+    assert ProcessFlowBuilder.validate_config(valid) is None
+
+    leg_extra = copy.deepcopy(valid)
+    leg_extra["flow_sequence"][0]["legs"][0]["bogus_leg_key"] = True
+    err = ProcessFlowBuilder.validate_config(leg_extra)
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == case["expected_error_code"]
+    assert err.field == case["expected_leg_extra_field"]
+
+    nested_extra = copy.deepcopy(valid)
+    nested_extra["flow_sequence"][0]["legs"][0]["steps"][0]["bogus"] = 1
+    err = ProcessFlowBuilder.validate_config(nested_extra)
+    assert isinstance(err, BuilderValidationError)
+    assert err.error_code == case["expected_error_code"]
+    assert err.field == case["expected_nested_step_extra_field"]
 
 
 # ---------------------------------------------------------------------------
