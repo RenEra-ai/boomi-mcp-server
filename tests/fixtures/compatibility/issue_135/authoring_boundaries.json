@@ -220,6 +220,13 @@
           {
             "key": "main_process",
             "type": "process",
+            "name": "Sentinel Contradictory Process",
+            "depends_on": [
+              "db_connection",
+              "db_query_operation",
+              "target_rest_connection",
+              "target_rest_operation"
+            ],
             "config": {
               "process_kind": "sync_pipeline",
               "pipeline": {
@@ -229,8 +236,8 @@
                     "kind": "read",
                     "config": {
                       "primitive": "db_read",
-                      "connection_id": "$ref:sentinel_read_conn",
-                      "operation_id": "$ref:sentinel_read_op"
+                      "connection_id": "$ref:db_connection",
+                      "operation_id": "$ref:db_query_operation"
                     }
                   },
                   {
@@ -239,8 +246,8 @@
                     "config": {
                       "primitive": "rest_send",
                       "action_type": "POST",
-                      "connection_id": "$ref:sentinel_target_conn",
-                      "operation_id": "$ref:sentinel_target_op"
+                      "connection_id": "$ref:target_rest_connection",
+                      "operation_id": "$ref:target_rest_operation"
                     }
                   }
                 ],
@@ -249,13 +256,57 @@
                 ]
               }
             }
+          },
+          {
+            "key": "db_connection",
+            "type": "connector-settings",
+            "action": "update",
+            "component_id": "00000000-0000-0000-0000-stubbed00001",
+            "name": "Db Connection",
+            "config": {"connector_type": "database", "name": "Db Connection"}
+          },
+          {
+            "key": "db_query_operation",
+            "type": "connector-action",
+            "action": "update",
+            "component_id": "00000000-0000-0000-0000-stubbed00001",
+            "name": "Db Query Operation",
+            "config": {
+              "connector_type": "database",
+              "operation_mode": "get",
+              "name": "Db Query Operation"
+            }
+          },
+          {
+            "key": "target_rest_connection",
+            "type": "connector-settings",
+            "action": "update",
+            "component_id": "00000000-0000-0000-0000-stubbed00001",
+            "name": "Target Rest Connection",
+            "config": {"connector_type": "rest", "name": "Target Rest Connection"}
+          },
+          {
+            "key": "target_rest_operation",
+            "type": "connector-action",
+            "action": "update",
+            "component_id": "00000000-0000-0000-0000-stubbed00001",
+            "name": "Target Rest Operation",
+            "depends_on": ["target_rest_connection"],
+            "config": {
+              "connector_type": "rest",
+              "operation_mode": "execute",
+              "method": "POST",
+              "path": "/v1/stub",
+              "component_name": "Target Rest Operation",
+              "connection_ref_key": "target_rest_connection"
+            }
           }
         ]
       }
     },
     "expected_spec_pipeline_kinds": ["fetch", "send"],
-    "expected_lowered_source_connection_id": "$ref:sentinel_read_conn",
-    "expected_lowered_target_connection_id": "$ref:sentinel_target_conn"
+    "expected_lowered_source_connection_id": "$ref:db_connection",
+    "expected_lowered_target_connection_id": "$ref:target_rest_connection"
   },
   "sync_pipeline_unknown_key": {
     "config": {

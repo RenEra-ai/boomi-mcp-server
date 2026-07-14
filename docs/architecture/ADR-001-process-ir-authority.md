@@ -227,7 +227,7 @@ Every authoring capability sits in exactly one of four states:
 
 ## 10. M12 Dependency DAG
 
-The M12 issues land in waves W0–W9. The graph below draws the direct dependency edges; waves group issues that can proceed in parallel once the previous wave completes.
+The M12 issues land in waves W0–W9. The direct dependency edges drawn below are **normative**: an issue may start once its direct dependencies are complete. Waves are non-barrier scheduling groupings that summarize the expected landing order — an issue in a later wave whose direct dependencies are complete may start even if unrelated issues from an earlier wave are still open (e.g. #138 needs only #137, not #144).
 
 ```mermaid
 flowchart LR

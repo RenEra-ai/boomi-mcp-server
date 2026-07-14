@@ -33,6 +33,7 @@ import copy
 import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -50,7 +51,10 @@ from src.boomi_mcp.models.pipeline_models import (
     PipelineSpec,
     StageSpec,
 )
-from src.boomi_mcp.categories.integration_builder import _normalize_to_spec
+from src.boomi_mcp.categories.integration_builder import (
+    _build_plan,
+    _normalize_to_spec,
+)
 from src.boomi_mcp.categories.components.builders import (
     BuilderValidationError,
     SyncPipelineBuilder,
@@ -228,6 +232,55 @@ def test_contradictory_pipelines_coexist_and_nested_wins_lowering():
         lowered["target"]["connection_id"]
         == case["expected_lowered_target_connection_id"]
     )
+
+
+@patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
+def test_contradictory_pipelines_silent_precedence_through_build_plan(mock_pag):
+    """Plan-level freeze of the same silent precedence, through `_build_plan`
+    (the public planning path that #139 will change). Three pins:
+
+    1. A spec carrying BOTH a spec-level pipeline and a disagreeing nested
+       config.pipeline plans clean — no authority-conflict rejection exists.
+    2. The planner consults the NESTED pipeline: corrupting it fails the plan
+       with a SYNC_PIPELINE_* validation error on the main process step.
+    3. The planner never consults spec.pipeline: mutating it changes nothing
+       in the planned steps.
+    """
+    mock_pag.return_value = []
+    case = _case("contradictory_pipelines")
+
+    # Pin 1 — the contradiction plans clean; the inert view is echoed back.
+    plan = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
+    assert plan["_success"] is True
+    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+    assert main_step["planned_action"] == "create"
+    assert "validation_error" not in main_step
+    echoed = plan["integration_spec"]["pipeline"]
+    assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+
+    # Pin 2 — the nested pipeline IS the consulted channel: a reserved stage
+    # kind there fails the plan on the main process step.
+    broken = copy.deepcopy(case["config"])
+    broken["integration_spec"]["components"][0]["config"]["pipeline"]["stages"][0][
+        "kind"
+    ] = "lookup"
+    plan_broken = _build_plan(MagicMock(), broken)
+    broken_step = next(s for s in plan_broken["steps"] if s["key"] == "main_process")
+    assert broken_step["planned_action"] == "error_process_validation"
+    assert broken_step["validation_error"]["error_code"].startswith("SYNC_PIPELINE_")
+
+    # Pin 3 — spec.pipeline is never consulted: rewriting it (schema-valid but
+    # semantically different again) leaves every planned step identical.
+    mutated = copy.deepcopy(case["config"])
+    mutated["integration_spec"]["pipeline"]["stages"] = [
+        {"key": "solo_stage", "kind": "write", "config": {"primitive": "db_write"}}
+    ]
+    mutated["integration_spec"]["pipeline"]["dependencies"] = []
+    plan_mutated = _build_plan(MagicMock(), mutated)
+    assert plan_mutated["_success"] is True
+    assert plan_mutated["steps"] == plan["steps"]
+    assert plan_mutated["execution_order"] == plan["execution_order"]
+    assert plan_mutated.get("warnings") == plan.get("warnings")
 
 
 # ---------------------------------------------------------------------------
