@@ -209,6 +209,44 @@
     },
     "expected_stage_kinds": ["read", "send"]
   },
+  "zero_process_pipeline_with_secret": {
+    "config": {
+      "integration_spec": {
+        "name": "Sentinel ZeroProcess Secret",
+        "components": [],
+        "pipeline": {
+          "stages": [
+            {
+              "key": "read_stage",
+              "kind": "read",
+              "config": {
+                "primitive": "db_read",
+                "connection_id": "$ref:sentinel_read_conn",
+                "operation_id": "$ref:sentinel_read_op",
+                "api_key": "REDACTED-SENTINEL"
+              }
+            },
+            {
+              "key": "send_stage",
+              "kind": "send",
+              "config": {
+                "primitive": "rest_send",
+                "action_type": "POST",
+                "connection_id": "$ref:sentinel_send_conn",
+                "operation_id": "$ref:sentinel_send_op"
+              }
+            }
+          ],
+          "dependencies": [
+            {"from_stage": "read_stage", "to_stage": "send_stage"}
+          ]
+        }
+      }
+    },
+    "secret_key": "api_key",
+    "secret_sentinel": "REDACTED-SENTINEL",
+    "expected_stage_kinds": ["read", "send"]
+  },
   "normalize_top_level_dropped": {
     "config": {
       "name": "Sentinel Top Level",

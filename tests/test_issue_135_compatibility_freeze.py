@@ -210,6 +210,44 @@ def test_zero_process_pipeline_accepted_and_preserved_through_build_plan():
     assert [s["kind"] for s in echoed["stages"]] == case["expected_stage_kinds"]
 
 
+def test_zero_process_pipeline_secret_config_echoed_is_known_gap():
+    """KNOWN GAP characterization (ADR-001 §5 security-precedence note + §11;
+    compatibility inventory §2.5). A zero-process spec (`components: []`) whose
+    top-level `spec.pipeline` stage `config` carries a SECRET-SHAPED key is
+    ACCEPTED and the secret value is ECHOED BACK UNCHANGED by `_build_plan` —
+    because the top-level pipeline is never lowered through a process builder,
+    so none of the per-process-config plaintext-secret scanners
+    (`PLAINTEXT_SECRET_REJECTED` at integration_builder.py:5430/5503/5590/5646/
+    5991/6243) ever inspect it, and `StageSpec.config` is an open `Dict[str, Any]`.
+
+    This is the leak ADR §11 flags. It is PRE-EXISTING (not introduced by #135)
+    and #135 only CHARACTERIZES it — it does NOT fix it (a runtime secret scan
+    over `spec.pipeline` stage config is a behavior change owned by the #139
+    legacy adapter, whose contract already forbids promoting free-form
+    credential fields into derived pipeline summaries). Frozen, NOT endorsed:
+    if a downstream scan starts rejecting/redacting this, flip this test.
+
+    The sentinel value is a PLACEHOLDER token (§11: fixtures use sentinels only),
+    never a real secret.
+    """
+    case = _case("zero_process_pipeline_with_secret")
+    secret_key = case["secret_key"]
+    secret_val = case["secret_sentinel"]
+
+    # Accepted: zero-process spec plans clean, no executable steps.
+    plan = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
+    assert plan["_success"] is True
+    assert plan["steps"] == []
+
+    # THE GAP: the secret-shaped value survives verbatim in the echoed spec —
+    # no scan touched it, no redaction happened.
+    echoed_stage_cfg = plan["integration_spec"]["pipeline"]["stages"][0]["config"]
+    assert echoed_stage_cfg[secret_key] == secret_val
+
+    # And it is NOT surfaced as any validation error / rejection (no scanner ran).
+    assert "PLAINTEXT_SECRET_REJECTED" not in json.dumps(plan)
+
+
 def test_normalize_drops_top_level_pipeline():
     case = _case("normalize_top_level_dropped")
     spec = _normalize_to_spec(case["config"])

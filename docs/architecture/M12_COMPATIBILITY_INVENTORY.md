@@ -253,6 +253,21 @@ lowering reads ONLY the nested dict (`process_flow_builder.py:6864`). The execut
 pipeline **wins silently** — this is the measured baseline #139 must replace with derived
 equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
 
+**Secret-boundary gap (measured, pre-existing).** The top-level `spec.pipeline` is **never lowered
+through a process builder**, so it is **out of scope of every plaintext-secret scan**: the
+`PLAINTEXT_SECRET_REJECTED` / `scan_forbidden_secret_fields` scanners run only inside per-process
+builders during step planning (`integration_builder.py:5430/5503/5590/5646/5991/6243`), and a
+zero-process spec (`components: []`) runs none of them. Combined with `StageSpec.config` being an
+open `Dict[str, Any]` (§2.4) and `_build_plan` echoing `spec.model_dump()` (`:6502`), a
+**secret-shaped value inside a top-level `spec.pipeline` stage's `config` is accepted and echoed
+back unchanged** — unlike the `flow_sequence`/`wrapper_subprocess` root extras (§2.7/§2.8), which
+*are* covered by the cross-cutting scan. This is a **pre-existing** gap that #135 only
+**characterizes** (freeze test `test_zero_process_pipeline_secret_config_echoed_is_known_gap`); it
+is not introduced or fixed here. **Owner:** the #139 legacy adapter, whose contract already forbids
+promoting "free-form credential/auth fields into ProcessIR, logs, diagnostics, or derived pipeline
+summaries" — it must extend secret-scanning to `spec.pipeline` `stage.config` before that view
+becomes a supported (non-inert) contract. ADR-001 §11 takes precedence over the §5 preserve rule.
+
 ### 2.6 `sync_pipeline` — fail-closed allowlists at both levels
 
 - Top-level allowlist `_SYNC_PIPELINE_ALLOWED_TOP_LEVEL` (`process_flow_builder.py:6764-6776`):
@@ -487,5 +502,9 @@ stay accepted; rejecting one is a compatibility break requiring a separately ann
 forbidden. **This no-op rule does NOT govern the mandated `LEGACY_ADAPTER_AUTHORITY_CONFLICT`
 rejections of ADR §5** (a disagreeing single-process, or any multi-process, authored
 `spec.pipeline`): those are the deliberate M12 authority decision — not the silent tightening of an
-ignored extra — and #139 rejects them by design. Un-goldened parity gaps are closed by establishing
-baselines (§3.4), not by a no-op.
+ignored extra. **But because that rejection withdraws an acceptance the freeze suite proves exists
+today, it is still a compatibility tightening governed by ADR §9's announced-policy-before-removal
+gate** — #139 lands the derived-equality reconciliation and the diagnostic, and the hard rejection of
+currently-accepted contradictory/ambiguous input ships only behind an announced deprecation with a
+documented replacement surface (not by design at #139's cutover, and not via the no-op rule).
+Un-goldened parity gaps are closed by establishing baselines (§3.4), not by a no-op.
