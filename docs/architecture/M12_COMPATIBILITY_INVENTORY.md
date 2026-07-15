@@ -102,7 +102,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Error codes | `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` (unknown kind `:4874-4881`, extra step keys `:4882-4890`, legacy-sibling blocks `:4627-4639`, ordering/terminal violations); `PROCESS_LINEAGE_BRANCH_ORDER_INVALID` from the lineage pass (pinned by `tests/test_m11_composed_examples.py:144`) |
 | Fixtures / tests | 5 committed goldens (§3), `tests/test_process_flow_builder.py` flow_sequence sections, `tests/test_m11_composed_examples.py`, `tests/test_builder_xml_invariants.py` (structural invariants) |
 | Assertion strength | Raw-byte golden equality for the 5 flow_sequence goldens (§3) plus structural ET assertions |
-| Adapter issue | **#136** builds the strict new ProcessIRV1 models (M12.1 — promote the flow_sequence *vocabulary* into strict models); the **legacy** `flow_sequence` config-root leniency (§2.7) is closed by the **#139** legacy adapter, not #136; semantic validation unification #143 |
+| Adapter issue | **#136** builds the strict new ProcessIRV1 models (M12.1 — promote the flow_sequence *vocabulary* into strict models); the **legacy** `flow_sequence` config-root leniency (§2.7) is brought under the **#139** legacy adapter's ownership (mapped as a compatibility no-op, not tightened), not #136; semantic validation unification #143 |
 | Migration gate | **#139** owns bringing the permissive **legacy** config root (§2.7) under explicit adapter ownership, mapping today's accepted-but-ignored root extras as a **compatibility no-op** (they stay accepted) — never silently tightened, and **never rejected without a separately announced deprecation** (§9 of ADR-001). #136 only makes the **new** ProcessIRV1 models strict and leaves existing `flow_sequence` input unchanged until #139's cutover; step-level codes stay stable until #139's adapter mapping review |
 
 ### 1.5 `wrapper_subprocess` (process kind)
@@ -480,5 +480,7 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 | Fixture/parity ledger (this file) | every issue as it lands; final sweep #147 | Each landing issue updates its row(s) here; #147 verifies the whole ledger against the shipped state |
 
 **Standing rule** (ADR-001): permissive or un-goldened behavior identified above is a **gate to
-close in the owning issue** with an explicit adapter mapping or rejection — silently tightening a
-measured-lenient boundary in an unrelated change is a compatibility break.
+close in the owning issue** with an explicit adapter **no-op mapping** — currently-accepted inputs
+stay accepted. **Rejecting** a currently-accepted field is itself a compatibility break requiring a
+separately announced deprecation (ADR-001 §9); silently tightening a measured-lenient boundary in an
+unrelated change is likewise forbidden.
