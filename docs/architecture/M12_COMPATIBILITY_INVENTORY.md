@@ -48,7 +48,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Error codes | Pydantic `ValidationError` (no builder codes — nothing consumes it) |
 | Fixtures / tests | The 4 pattern e2e tests above; #135 freeze suite `tests/test_issue_135_compatibility_freeze.py` |
 | Assertion strength | Structural (dict/None comparisons); no XML coverage possible (emits nothing) |
-| Adapter issue | #139 (M12.4 legacy adapters and golden parity) — must become a compiler-derived summary; authored values must be checked by derived equality or rejected with `LEGACY_ADAPTER_AUTHORITY_CONFLICT`, never precedence |
+| Adapter issue | #139 (M12.4 legacy adapters and golden parity) — must become a compiler-derived summary **for a single-process spec** (authored values checked by derived equality or rejected with `LEGACY_ADAPTER_AUTHORITY_CONFLICT`, never precedence); a **zero-process** spec's authored pipeline is preserved as a frozen inert value and a **multi-process** one is rejected as ambiguous (ADR §5) |
 | Migration gate | Today the executable nested pipeline **wins silently** when the two disagree (nothing reconciles them — §2.5). #139 closes this; until then the freeze test pins the silent-precedence baseline |
 
 ### 1.2 `main_process.config.pipeline` (process-config dict `"pipeline"` key)
@@ -460,7 +460,7 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 
 | Surface | Owning issue(s) | Migration gate (must close in the owning issue — never silently tightened) |
 |---|---|---|
-| `IntegrationSpecV1.pipeline` | #139 | Silent-precedence baseline (§2.5) replaced by derived equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; field becomes compiler-derived summary only |
+| `IntegrationSpecV1.pipeline` | #139 | Silent-precedence baseline (§2.5) replaced by derived equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; the field becomes a compiler-derived summary for a single-process spec, a preserved frozen inert value for a zero-process spec, and a rejected ambiguous input for a multi-process spec (ADR §5) |
 | `main_process.config.pipeline` / `sync_pipeline` | #139 (adapter), #137 (lowering contracts) | Golden parity for the lowered config + XML (§3.4 has no committed golden today); `SYNC_PIPELINE_*` codes stay stable until the adapter mapping review |
 | `flow_sequence` | #136 (strict models), #143 (semantic validation) | **Permissive config root** (§2.7 — unknown top-level keys around a flow_sequence are ignored) closed by strict ProcessIRV1 models in #136, with explicit rejection/mapping — not a quiet allowlist add here; `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
 | `wrapper_subprocess` | #139 | **Root/call extras accepted-and-ignored** (§2.8) is a gate: the adapter must explicitly map or reject extras; `PLAINTEXT_SECRET_REJECTED` and the `PROCESS_REF_*` codes stay stable |

@@ -141,7 +141,7 @@ Every representation in the stack has exactly one of the following statuses. Thi
 |---|---|
 | One `ProcessIRV1(version="1", body=...)` root per process | Authoritative semantic input |
 | `IntegrationSpecV1.components` and `components[].depends_on` | Authoritative component/materialization plan only |
-| `IntegrationSpecV1.pipeline` | Derived inspectable/analysis view |
+| `IntegrationSpecV1.pipeline` | Derived inspectable/analysis view for a single-process spec; a frozen inert legacy value for a zero-process spec (§5) |
 | `main_process.config.pipeline` with `process_kind="sync_pipeline"` | Compatibility input through the linear adapter |
 | `flow_sequence` | Compatibility input and semantic seed for ProcessIRV1 |
 | Legacy source/transform/target blocks, `wrapper_subprocess`, archetype configs, and composition parts | Compatibility inputs through named adapters/recipes |
@@ -154,8 +154,8 @@ Every representation in the stack has exactly one of the following statuses. Thi
 
 Three clarifications:
 
-- The `IntegrationSpecV1.pipeline` status ("Derived inspectable/analysis view") is consistent with the measured current state: today the field is authored-but-inert (§1). Under M12 it becomes a *compiler-derived* summary; it never becomes an executable input. That role change ships only under an explicit adapter/versioning story (§9: shape retention never implies role retention).
-- The singular top-level `spec.pipeline` is a **single-process** derived view (§5): it is well-defined only when the spec has exactly one process component. A multi-process spec's authored top-level pipeline is rejected as ambiguous (`LEGACY_ADAPTER_AUTHORITY_CONFLICT`) — never resolved by key/positional precedence and never silently discarded — while per-process summaries are compiler-derived on each process component.
+- The `IntegrationSpecV1.pipeline` status ("Derived inspectable/analysis view") is consistent with the measured current state: today the field is authored-but-inert (§1). Under M12 it becomes a *compiler-derived* summary **for a single-process spec**; it never becomes an executable input. That role change ships only under an explicit adapter/versioning story (§9: shape retention never implies role retention).
+- The singular top-level `spec.pipeline` is a **single-process** derived view (§5): it is well-defined only when the spec has exactly one process component. A **zero-process** spec's authored pipeline (an accepted, freeze-pinned shape) has no process to derive from and is preserved as a frozen inert value — neither reinterpreted as a derived view nor rejected — until an announced deprecation gate. A **multi-process** spec's authored top-level pipeline is rejected as ambiguous (`LEGACY_ADAPTER_AUTHORITY_CONFLICT`) — never resolved by key/positional precedence and never silently discarded — while per-process summaries are compiler-derived on each process component.
 - "Semantic seed for ProcessIRV1" records that `flow_sequence` is the surface being promoted into the strict ProcessIRV1 models (#136) — it is a compatibility input like the others, but its vocabulary seeds the IR node set rather than requiring a from-scratch design.
 
 ## 5. Authority-Conflict Rule
