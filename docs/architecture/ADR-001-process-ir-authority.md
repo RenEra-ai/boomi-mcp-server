@@ -142,7 +142,7 @@ Every representation in the stack has exactly one of the following statuses. Thi
 
 | Representation | Status |
 |---|---|
-| One `ProcessIRV1(version="1", body=...)` root per authored process (reference-only reuse components carry none, §3/§5) | Authoritative semantic input |
+| One `ProcessIRV1(version="1", body=...)` root per authored process that reaches AST construction (non-authoring reuse/reference and pre-AST-failed authored processes carry none, §3/§5) | Authoritative semantic input |
 | `IntegrationSpecV1.components` and `components[].depends_on` | Authoritative component/materialization plan only |
 | `IntegrationSpecV1.pipeline` | Derived inspectable/analysis view |
 | `main_process.config.pipeline` with `process_kind="sync_pipeline"` | Compatibility input through the linear adapter |
@@ -179,6 +179,8 @@ Precedence-based reconciliation ("the nested one wins", "the spec one wins", or 
 - **Multi-process spec** (more than one root-bearing process component) carrying a non-`None` authored `spec.pipeline`: **ambiguous by construction**, since no marker designates which process it summarizes. #139 **rejects** it with `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; it must never select a process by component `key` order, positional index, or any other implicit precedence, and must never silently discard the authored value. Per-process summaries for such specs are compiler-derived **per process component**, never folded into the singular top-level field.
 
 If a first-class multi-process top-level summary is ever wanted, #139 must **first** introduce an explicit designation marker (the archetypes' existing `main_process` component-key convention, `_MAIN_PROCESS_KEY`, is the natural seed but is not today a model-level contract); the top-level field must not become an implicit aggregate.
+
+**Cardinality is evaluated only on a successfully-planned spec.** A **pre-AST** failure of any authored process (§3 — a `PROCESS_KIND_REQUIRED` rejection, a #139 adapter normalization/unsupported rejection, or a schema-parse error) fails the whole plan (`_build_plan` returns `_success=false`), so the derive/preserve/reject disposition above is **never reached** for that spec. The root-bearing count is taken only over authored processes whose AST is constructed within a plan that otherwise succeeds — this is what reconciles the "one root per authored process" statement (§4) with the pre-AST rootless outcomes (§3): a process that fails before AST construction never contributes a root *and* never yields a successfully-planned spec whose `spec.pipeline` disposition would need deciding.
 
 ## 6. Compiler Ownership
 
