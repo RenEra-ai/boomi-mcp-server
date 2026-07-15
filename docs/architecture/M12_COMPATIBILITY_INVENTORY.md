@@ -103,7 +103,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Fixtures / tests | 5 committed goldens (§3), `tests/test_process_flow_builder.py` flow_sequence sections, `tests/test_m11_composed_examples.py`, `tests/test_builder_xml_invariants.py` (structural invariants) |
 | Assertion strength | Raw-byte golden equality for the 5 flow_sequence goldens (§3) plus structural ET assertions |
 | Adapter issue | **#136** builds the strict new ProcessIRV1 models (M12.1 — promote the flow_sequence *vocabulary* into strict models); the **legacy** `flow_sequence` config-root leniency (§2.7) is closed by the **#139** legacy adapter, not #136; semantic validation unification #143 |
-| Migration gate | **#139** owns closing the permissive **legacy** config root (§2.7) through its adapter — mapped or rejected explicitly, never silently tightened. #136 only makes the **new** ProcessIRV1 models strict and leaves existing `flow_sequence` input (accepted-but-ignored root extras) unchanged until #139's cutover; step-level codes stay stable until #139's adapter mapping review |
+| Migration gate | **#139** owns bringing the permissive **legacy** config root (§2.7) under explicit adapter ownership, mapping today's accepted-but-ignored root extras as a **compatibility no-op** (they stay accepted) — never silently tightened, and **never rejected without a separately announced deprecation** (§9 of ADR-001). #136 only makes the **new** ProcessIRV1 models strict and leaves existing `flow_sequence` input unchanged until #139's cutover; step-level codes stay stable until #139's adapter mapping review |
 
 ### 1.5 `wrapper_subprocess` (process kind)
 
@@ -121,7 +121,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Fixtures / tests | Dedicated: `tests/test_wrapper_subprocess_builder.py` (golden `processcall_standalone_parent.xml`), `tests/test_wrapper_subprocess_extensions_hoist.py`; plus `test_integration_builder.py`, `test_process_flow_builder.py:1338-2091`, `test_schema_template_process_flow.py`, `test_design_doctrine.py` |
 | Assertion strength | **Canonicalized** XML equality (`ET.canonicalize`, `tests/test_wrapper_subprocess_builder.py:82`) — not raw-byte; plus structural shape/wiring assertions |
 | Adapter issue | #139 (named adapter over Process Call semantics) |
-| Migration gate | The accepted-and-ignored root/call extras (§2.8) are a gate to close in #139 — the adapter must map or reject them explicitly, never silently tighten; `PLAINTEXT_SECRET_REJECTED` stays stable |
+| Migration gate | The accepted-and-ignored root/call extras (§2.8) are a gate to close in #139 — the adapter must map them as a compatibility no-op (still accepted), never silently tighten and never reject a currently-accepted extra without a separately announced deprecation (§9); `PLAINTEXT_SECRET_REJECTED` stays stable |
 
 ### 1.6 Primitive `emit_fragment`
 
@@ -330,7 +330,7 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
   `ProcessFlowBuilder.validate_config` (`:596`) checks only the blocks it knows
   (process_kind, source/target, transform, reliability, flow_sequence, refs) — an unknown
   top-level config key is **ignored**, in contrast to `sync_pipeline`'s fail-closed root (§2.6).
-  This leniency is a **#139 legacy-adapter** migration gate, not a contract — #136 only makes the new ProcessIRV1 models strict and does not tighten this legacy envelope.
+  This leniency is a **#139 legacy-adapter** migration gate, not a contract — #136 only makes the new ProcessIRV1 models strict and does not tighten this legacy envelope. #139's adapter must map a currently-accepted extra as a compatibility no-op (still accepted); rejecting any currently-accepted field waits for a separately announced deprecation (ADR-001 §9).
 
 ### 2.8 `wrapper_subprocess` — no root allowlist; secret scan is the only extra-key guard
 
@@ -465,8 +465,8 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 |---|---|---|
 | `IntegrationSpecV1.pipeline` | #139 | Silent-precedence baseline (§2.5) replaced by derived equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; the field becomes a compiler-derived summary for a single-process spec, a preserved frozen inert value for a zero-process spec, and a rejected ambiguous input for a multi-process spec (ADR §5) |
 | `main_process.config.pipeline` / `sync_pipeline` | #139 (adapter), #137 (lowering contracts) | Golden parity for the lowered config + XML (§3.4 has no committed golden today); `SYNC_PIPELINE_*` codes stay stable until the adapter mapping review |
-| `flow_sequence` | #136 (new strict ProcessIRV1 models), #139 (legacy config-root adapter), #143 (semantic validation) | #136 makes the **new** ProcessIRV1 models strict; the **legacy** permissive config root (§2.7 — unknown top-level keys around a flow_sequence are ignored) is closed by **#139**'s adapter with explicit rejection/mapping — accepted-but-ignored fields survive until then, never a quiet allowlist add; `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
-| `wrapper_subprocess` | #139 | **Root/call extras accepted-and-ignored** (§2.8) is a gate: the adapter must explicitly map or reject extras; `PLAINTEXT_SECRET_REJECTED` and the `PROCESS_REF_*` codes stay stable |
+| `flow_sequence` | #136 (new strict ProcessIRV1 models), #139 (legacy config-root adapter), #143 (semantic validation) | #136 makes the **new** ProcessIRV1 models strict; the **legacy** permissive config root (§2.7 — unknown top-level keys around a flow_sequence are ignored) is brought under **#139**'s adapter, which maps today's accepted extras as a compatibility no-op (still accepted) — never a quiet allowlist add and never rejected without an announced deprecation (§9); `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
+| `wrapper_subprocess` | #139 | **Root/call extras accepted-and-ignored** (§2.8) is a gate: the adapter maps them as a compatibility no-op (still accepted), never rejecting a currently-accepted extra without an announced deprecation (§9); `PLAINTEXT_SECRET_REJECTED` and the `PROCESS_REF_*` codes stay stable |
 | Legacy `source`/`transform`/`target` blocks | #139 | Adapter + parity gates before any deprecation (ADR-001 versioning policy) |
 | Primitive `emit_fragment` | #138, #145 | **Convention-not-contract** (§2.9) is a gate: replaced by the typed emitter-registry/recipe contract, with fragment parity tests, before any consuming archetype is rerouted |
 | Archetype / composition inputs | #139, #145 | Recipes become typed contributions producing ProcessIR roots; existing composed goldens (§3) are the parity baseline |
