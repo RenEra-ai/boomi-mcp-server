@@ -215,10 +215,13 @@ def test_zero_process_pipeline_secret_config_echoed_is_known_gap():
     compatibility inventory §2.5). A zero-process spec (`components: []`) whose
     top-level `spec.pipeline` stage `config` carries a SECRET-SHAPED key is
     ACCEPTED and the secret value is ECHOED BACK UNCHANGED by `_build_plan` —
-    because the top-level pipeline is never lowered through a process builder,
-    so none of the per-process-config plaintext-secret scanners
-    (`PLAINTEXT_SECRET_REJECTED` at integration_builder.py:5430/5503/5590/5646/
-    5991/6243) ever inspect it, and `StageSpec.config` is an open `Dict[str, Any]`.
+    because the per-component `scan_forbidden_secret_fields` scanners (invoked
+    per component at integration_builder.py:5338/5479/5566/5625/5744/5774 and
+    the generic/profile scanner at :6032) traverse only each component's own
+    raw_config, never the top-level `spec.pipeline`; `StageSpec.config` is an
+    open `Dict[str, Any]`. The gap is
+    component-independent (no scanner ever reaches spec.pipeline); components=[]
+    is just the cleanest isolation (zero scanners run at all).
 
     This is the leak ADR §11 flags. It is PRE-EXISTING (not introduced by #135)
     and #135 only CHARACTERIZES it — it does NOT fix it (a runtime secret scan

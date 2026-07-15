@@ -48,7 +48,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Error codes | Pydantic `ValidationError` (no builder codes — nothing consumes it) |
 | Fixtures / tests | The 4 pattern e2e tests above; #135 freeze suite `tests/test_issue_135_compatibility_freeze.py` |
 | Assertion strength | Structural (dict/None comparisons); no XML coverage possible (emits nothing) |
-| Adapter issue | #139 (M12.4 legacy adapters and golden parity) — must become a compiler-derived summary **for a single-process spec** (authored values checked by derived equality or rejected with `LEGACY_ADAPTER_AUTHORITY_CONFLICT`, never precedence); a **zero-process** spec's authored pipeline is preserved as a frozen inert value and a **multi-process** one is rejected as ambiguous (ADR §5) |
+| Adapter issue | #139 (M12.4 legacy adapters and golden parity) — must become a compiler-derived summary **for a single-process spec** (authored values checked by derived equality, or — on the strict surface / after announced V1 deprecation — rejected with `LEGACY_ADAPTER_AUTHORITY_CONFLICT`, never precedence; V1 preserves a disagreeing value inert until then); a **zero-process** spec's authored pipeline is preserved as a frozen inert value and a **multi-process** one is rejected as ambiguous on the strict surface (V1 preserves it inert until an announced §9 deprecation — ADR §5) |
 | Migration gate | Today the executable nested pipeline **wins silently** when the two disagree (nothing reconciles them — §2.5). #139 closes this; until then the freeze test pins the silent-precedence baseline |
 
 ### 1.2 `main_process.config.pipeline` (process-config dict `"pipeline"` key)
@@ -253,20 +253,26 @@ lowering reads ONLY the nested dict (`process_flow_builder.py:6864`). The execut
 pipeline **wins silently** — this is the measured baseline #139 must replace with derived
 equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
 
-**Secret-boundary gap (measured, pre-existing).** The top-level `spec.pipeline` is **never lowered
-through a process builder**, so it is **out of scope of every plaintext-secret scan**: the
-`PLAINTEXT_SECRET_REJECTED` / `scan_forbidden_secret_fields` scanners run only inside per-process
-builders during step planning (`integration_builder.py:5430/5503/5590/5646/5991/6243`), and a
-zero-process spec (`components: []`) runs none of them. Combined with `StageSpec.config` being an
-open `Dict[str, Any]` (§2.4) and `_build_plan` echoing `spec.model_dump()` (`:6502`), a
-**secret-shaped value inside a top-level `spec.pipeline` stage's `config` is accepted and echoed
-back unchanged** — unlike the `flow_sequence`/`wrapper_subprocess` root extras (§2.7/§2.8), which
-*are* covered by the cross-cutting scan. This is a **pre-existing** gap that #135 only
-**characterizes** (freeze test `test_zero_process_pipeline_secret_config_echoed_is_known_gap`); it
-is not introduced or fixed here. **Owner:** the #139 legacy adapter, whose contract already forbids
-promoting "free-form credential/auth fields into ProcessIR, logs, diagnostics, or derived pipeline
-summaries" — it must extend secret-scanning to `spec.pipeline` `stage.config` before that view
-becomes a supported (non-inert) contract. ADR-001 §11 takes precedence over the §5 preserve rule.
+**Secret-boundary gap (measured, pre-existing).** The `scan_forbidden_secret_fields` scanners are
+invoked **per component**, keyed on component type, during step planning — e.g. `integration_builder.py:5338`
+(DB), `:5479` (REST), `:5566` (SOAP), `:5625` (WSS), `:5744`/`:5774` (process-flow), and `:6032`
+(the generic/profile scanner covering profiles, maps, scripts, process properties, caches, and
+webservices); the `:5430`/`:5503`/… sites are the *redaction* branches that fire **after** a scan
+returns `PLAINTEXT_SECRET_REJECTED`, not the scan calls. Each scanner traverses **only that component's own
+`raw_config`, never the top-level `spec.pipeline`** — so the gap is **not** "zero components → no
+scan" (a spec with a DB/REST/SOAP/WSS/profile component *does* run that component's scanner); the
+gap is that **no scanner ever traverses the spec-level `spec.pipeline`, whatever components exist**.
+The `components: []` case is merely the cleanest demonstration (zero scanners run at all). Combined
+with `StageSpec.config` being an open `Dict[str, Any]` (§2.4) and `_build_plan` echoing
+`spec.model_dump()` (`:6502`), a **secret-shaped value inside a top-level `spec.pipeline` stage's
+`config` is accepted and echoed back unchanged** — unlike the `flow_sequence`/`wrapper_subprocess`
+root extras (§2.7/§2.8), which *are* covered by the cross-cutting scan on their process component.
+This is a **pre-existing** gap that #135 only **characterizes** (freeze test
+`test_zero_process_pipeline_secret_config_echoed_is_known_gap`); it is not introduced or fixed here.
+**Owner:** the #139 legacy adapter, whose contract already forbids promoting "free-form
+credential/auth fields into ProcessIR, logs, diagnostics, or derived pipeline summaries" — it must
+extend secret-scanning to `spec.pipeline` `stage.config` before that view becomes a supported
+(non-inert) contract. ADR-001 §11 takes precedence over the §5 preserve rule.
 
 ### 2.6 `sync_pipeline` — fail-closed allowlists at both levels
 
@@ -478,7 +484,7 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 
 | Surface | Owning issue(s) | Migration gate (must close in the owning issue — never silently tightened) |
 |---|---|---|
-| `IntegrationSpecV1.pipeline` | #139 | Silent-precedence baseline (§2.5) replaced by derived equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; the field becomes a compiler-derived summary for a single-process spec, a preserved frozen inert value for a zero-process spec, and a rejected ambiguous input for a multi-process spec (ADR §5) |
+| `IntegrationSpecV1.pipeline` | #139 | Silent-precedence baseline (§2.5) replaced by derived equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; the field becomes a compiler-derived summary for a single-process spec, a preserved frozen inert value for a zero-process spec, and (on the strict surface / after announced V1 deprecation) a rejected ambiguous input for a multi-process spec — V1 preserves it inert until then (ADR §5) |
 | `main_process.config.pipeline` / `sync_pipeline` | #139 (adapter), #137 (lowering contracts) | Golden parity for the lowered config + XML (§3.4 has no committed golden today); `SYNC_PIPELINE_*` codes stay stable until the adapter mapping review |
 | `flow_sequence` | #136 (new strict ProcessIRV1 models), #139 (legacy config-root adapter), #143 (semantic validation) | #136 makes the **new** ProcessIRV1 models strict; the **legacy** permissive config root (§2.7 — unknown top-level keys around a flow_sequence are ignored) is brought under **#139**'s adapter, which maps today's accepted extras as a compatibility no-op (still accepted) — never a quiet allowlist add and never rejected without an announced deprecation (§9); `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
 | `wrapper_subprocess` | #139 | **Root/call extras accepted-and-ignored** (§2.8) is a gate: the adapter maps them as a compatibility no-op (still accepted), never rejecting a currently-accepted extra without an announced deprecation (§9); `PLAINTEXT_SECRET_REJECTED` and the `PROCESS_REF_*` codes stay stable |
