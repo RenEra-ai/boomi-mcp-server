@@ -289,13 +289,19 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
   2026-07-14, pinned by the freeze suite). The root is still subject to the cross-cutting
   `$ref` reachability scan, which reads EVERY config value including unknown root keys.
   It is **also** subject to the cross-cutting plaintext-secret scan: on the public `_build_plan`
-  path, `ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)` runs FIRST whenever
-  `process_kind` is set (`integration_builder.py:5738-5744`), **before** builder validation and
-  **even on the reuse/reference/rejection paths**, so a secret-shaped root extra (e.g.
-  `password`) is rejected and redacted with `PLAINTEXT_SECRET_REJECTED`. The "accepted-and-ignored"
-  behavior above is therefore scoped to **non-secret** root values; the plaintext-secret guard is
-  a plan-time precedence, not a widened boundary (the same cross-cutting scan already pinned for
-  `wrapper_subprocess` in §2.8 by `test_wrapper_rejects_secret_looking_extras`). Declarations flow through `validate_config`'s `depends_on=`
+  path, `ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)` runs FIRST in the typed
+  `process_kind` branch (`integration_builder.py:5762-5774`), **before** builder validation and
+  **even on the reuse/reference/rejection paths**, so a secret-shaped root extra whose value is a
+  **non-empty string or a dict/list** (`password: "x"`, `authorization: {…}`) is rejected and
+  redacted with `PLAINTEXT_SECRET_REJECTED`. The scan is value-shape-sensitive: a forbidden key
+  carrying an **empty string, `null`, or a bare scalar** (`password: ""`, `password: null`,
+  `password: 123`) is deliberately **not** rejected (`process_flow_builder.py:523-545` — "scalars
+  carry no plaintext to leak", and empty strings skip like the DB builder's `value and value`
+  guard), so such a value remains accepted-and-ignored like any other non-secret extra. The
+  "accepted-and-ignored" behavior above is therefore scoped to root values that are **not
+  secret-shaped strings/containers**; the plaintext-secret guard is a plan-time precedence, not a
+  widened boundary (the same cross-cutting scan already pinned for `wrapper_subprocess` in §2.8 by
+  `test_wrapper_rejects_secret_looking_extras`). Declarations flow through `validate_config`'s `depends_on=`
   keyword parameter — which `_build_plan` supplies from the component spec — NOT through the
   config dict: a `depends_on` KEY inside the config is just another ignored root extra, never a
   declaration. A `$ref:` token inside an unknown root extra is therefore rejected with
@@ -309,10 +315,12 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
   `conflict_policy="reuse"`, `_build_plan` skips builder validation entirely and the SAME config
   — undeclared `$ref` extra included — plans as a clean `reuse` step with no validation error
   (all measured 2026-07-14, all pinned by the freeze suite). The one exception is a secret-shaped
-  root extra: the plaintext-secret scan precedes the reuse skip (`integration_builder.py:5738-5744`)
-  and still rejects it with `PLAINTEXT_SECRET_REJECTED`. Any adapter gate for root leniency
-  must scope to non-`$ref`, **non-secret** values and account for the validation-skipping reuse
-  path (past which the plaintext-secret scan still runs). A one-step `flow_sequence` is accepted
+  root extra **with a non-empty string / dict / list value**: the plaintext-secret scan precedes
+  the reuse skip (`integration_builder.py:5762-5774`) and still rejects it with
+  `PLAINTEXT_SECRET_REJECTED` (an empty/`null`/scalar secret-shaped value is skipped — see above).
+  Any adapter gate for root leniency must scope to non-`$ref`, **non-secret-string/-container**
+  values and account for the validation-skipping reuse path (past which the plaintext-secret scan
+  still runs). A one-step `flow_sequence` is accepted
   (no 2+ minimum; an empty list is rejected with `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` at
   `flow_sequence`).
 - Legacy single-slot sibling blocks (`flow_control`/`branch`/`decision`/non-passthrough
