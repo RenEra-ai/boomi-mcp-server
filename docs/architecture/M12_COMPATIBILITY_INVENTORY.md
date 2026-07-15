@@ -16,6 +16,14 @@ readers/writers, its validation/lowering owner, defaults and aliases, measured u
 behavior, existing error codes, its fixture/test coverage with honest assertion strength, its
 adapter issue, and the migration gate that must close before its behavior may change.
 
+**Checkout scope.** Per the repository convention (`.gitignore`: `docs/*` is local-only *except*
+`docs/architecture/`, established by commit `56ae84e "chore: exclude docs folder from remote repo"`),
+[ADR-001](ADR-001-process-ir-authority.md) and this inventory are the **checkout-authoritative** M12
+records and cite only tracked sources (`src/…`, `tests/…`, `examples/…`). The M12 refreshes to
+`docs/INTEGRATION_AUTHORING_ROADMAP.md` and `docs/MCP_TOOL_DESIGN.md` land in those local design docs,
+which remain outside the tracked checkout by that convention — so this inventory grounds every claim in
+tracked code/tests rather than in the local docs.
+
 **The load-bearing structural fact** (the ADR crux, measured): `IntegrationSpecV1.pipeline` and
 `main_process.config.pipeline` are two DISTINCT surfaces that are not wired to each other. The
 spec-level field is write-only/inspection-only (zero source readers); the nested process-config
@@ -67,7 +75,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 |---|---|
 | Authority status (ADR-001) | Compatibility input through the linear adapter (this process kind IS the linear adapter) |
 | Current acceptance | `process_kind="sync_pipeline"` + `pipeline` stage graph; lowers ONLY `read(db_read) \| fetch(rest_fetch\|soap_fetch) \| listener(wss_listen) → [map] → send(rest_send\|soap_send) \| write(db_write)` (`_SYNC_PIPELINE_SUPPORTED_KINDS`, `process_flow_builder.py:6686-6688`); all other declared `PipelineStageKind` values (`pipeline_models.py:69-130`) are reserved and rejected |
-| Public / executable | Documented as **internal** builder vocabulary (`docs/MCP_TOOL_DESIGN.md` "internal process-builder kind"; `docs/INTEGRATION_AUTHORING_ROADMAP.md` "not a public archetype name") but reachable through `build_integration` process config and documented by `get_schema_template` (`meta_tools.py:7955-8065`); executable |
+| Public / executable | Internal builder vocabulary: `sync_pipeline` is a `process_kind` (`SyncPipelineBuilder.PROCESS_KIND`, `process_flow_builder.py:6816`), **not** one of the public archetype names returned by `list_integration_archetypes` — yet it is reachable through `build_integration` process config and documented by `get_schema_template` (`meta_tools.py:7955-8065`); executable |
 | Writers | Archetypes emit it: `api_to_api_sync.py:1156,1688`; `api_to_database_sync.py:519,863`; `http_listener_to_db.py:746,1099`; `http_listener_to_rest.py:532`; `database_to_api_sync.py:2892` (internal adapter). Primitives feeding stages: `patterns/primitives/soap_send.py`, `soap_fetch.py`, `wss_listen.py` |
 | Readers (routing/detection) | `integration_builder.py:5908-5940` routes `SyncPipelineBuilder` configs through `lower_config` then re-runs ref-type + lineage checks on the lowered config; `orchestration.py:775,888` recognizes the sync_pipeline `listener` stage |
 | Validation / lowering owner | `SyncPipelineBuilder` (`process_flow_builder.py:6816` `PROCESS_KIND`, `:6819` `lower_config`, `:7453` `validate_config`, `:7495` `build`) |
@@ -276,10 +284,18 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
   `field=flow_sequence[i].legs[j]`; an unknown key on a step nested inside a leg → same code
   with `field=flow_sequence[i].legs[j].steps[k]`.
 - The config ROOT next to `flow_sequence` has no allowlist: an unknown root key whose value
-  carries no `$ref:` token is accepted AND ignored — `ProcessFlowBuilder.build()` output is
-  string-identical with and without it (measured 2026-07-14, pinned by the freeze suite). The
-  root is still subject to the cross-cutting `$ref` reachability scan, which reads EVERY config
-  value including unknown root keys. Declarations flow through `validate_config`'s `depends_on=`
+  carries no `$ref:` token **and is not secret-shaped** is accepted AND ignored —
+  `ProcessFlowBuilder.build()` output is string-identical with and without it (measured
+  2026-07-14, pinned by the freeze suite). The root is still subject to the cross-cutting
+  `$ref` reachability scan, which reads EVERY config value including unknown root keys.
+  It is **also** subject to the cross-cutting plaintext-secret scan: on the public `_build_plan`
+  path, `ProcessFlowBuilder.scan_forbidden_secret_fields(raw_config)` runs FIRST whenever
+  `process_kind` is set (`integration_builder.py:5738-5744`), **before** builder validation and
+  **even on the reuse/reference/rejection paths**, so a secret-shaped root extra (e.g.
+  `password`) is rejected and redacted with `PLAINTEXT_SECRET_REJECTED`. The "accepted-and-ignored"
+  behavior above is therefore scoped to **non-secret** root values; the plaintext-secret guard is
+  a plan-time precedence, not a widened boundary (the same cross-cutting scan already pinned for
+  `wrapper_subprocess` in §2.8 by `test_wrapper_rejects_secret_looking_extras`). Declarations flow through `validate_config`'s `depends_on=`
   keyword parameter — which `_build_plan` supplies from the component spec — NOT through the
   config dict: a `depends_on` KEY inside the config is just another ignored root extra, never a
   declaration. A `$ref:` token inside an unknown root extra is therefore rejected with
@@ -292,8 +308,11 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
   create and update): when a same-name component is found under the default
   `conflict_policy="reuse"`, `_build_plan` skips builder validation entirely and the SAME config
   — undeclared `$ref` extra included — plans as a clean `reuse` step with no validation error
-  (all measured 2026-07-14, all pinned by the freeze suite). Any adapter gate for root leniency
-  must scope to non-`$ref` values and account for the validation-skipping reuse path. A one-step `flow_sequence` is accepted
+  (all measured 2026-07-14, all pinned by the freeze suite). The one exception is a secret-shaped
+  root extra: the plaintext-secret scan precedes the reuse skip (`integration_builder.py:5738-5744`)
+  and still rejects it with `PLAINTEXT_SECRET_REJECTED`. Any adapter gate for root leniency
+  must scope to non-`$ref`, **non-secret** values and account for the validation-skipping reuse
+  path (past which the plaintext-secret scan still runs). A one-step `flow_sequence` is accepted
   (no 2+ minimum; an empty list is rejected with `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` at
   `flow_sequence`).
 - Legacy single-slot sibling blocks (`flow_control`/`branch`/`decision`/non-passthrough
