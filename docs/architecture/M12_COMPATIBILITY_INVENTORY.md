@@ -339,9 +339,14 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
 **no root-key allowlist**: unknown root keys AND unknown keys inside a process-call entry are
 accepted and ignored (build output is unchanged by their presence). The single guard over extras
 is the inherited plaintext-secret scan (`scan_forbidden_secret_fields`, `:509`, code
-`PLAINTEXT_SECRET_REJECTED` at `:564`): a secret-looking root key such as `password` is rejected.
-Pinned today by `tests/test_wrapper_subprocess_builder.py:220-224`
-(`test_rejects_plaintext_secret`).
+`PLAINTEXT_SECRET_REJECTED` at `:564`): a secret-looking root key such as `password` **whose value
+is a non-empty string or a dict/list** is rejected. This is the identical inherited scanner —
+`validate_config` returns `cls.scan_forbidden_secret_fields(config)` (`:6610`) — so the same
+value-shape rule as §2.7 applies: a forbidden key carrying an empty string, `null`, or a bare
+scalar (`password: ""`, `password: null`, `password: 123`) is **not** rejected and stays
+accepted-and-ignored (`process_flow_builder.py:523-545`). Pinned today by
+`tests/test_wrapper_subprocess_builder.py:220-224` (`test_rejects_plaintext_secret`), which uses a
+non-empty string value.
 
 ### 2.9 `emit_fragment` — convention, not contract
 
