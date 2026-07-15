@@ -479,8 +479,13 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 | Doctrine views | #147 (docs refresh only) | Remains advisory text; never validation-bearing |
 | Fixture/parity ledger (this file) | every issue as it lands; final sweep #147 | Each landing issue updates its row(s) here; #147 verifies the whole ledger against the shipped state |
 
-**Standing rule** (ADR-001): permissive or un-goldened behavior identified above is a **gate to
-close in the owning issue** with an explicit adapter **no-op mapping** — currently-accepted inputs
-stay accepted. **Rejecting** a currently-accepted field is itself a compatibility break requiring a
-separately announced deprecation (ADR-001 §9); silently tightening a measured-lenient boundary in an
-unrelated change is likewise forbidden.
+**Standing rule** (ADR-001): the **measured accepted-but-ignored unknown-field extras** identified
+above (the permissive `flow_sequence` config root, wrapper root/call extras) are a **gate to close
+in the owning issue** with an explicit adapter **no-op mapping** — such currently-accepted extras
+stay accepted; rejecting one is a compatibility break requiring a separately announced deprecation
+(ADR-001 §9), and silently tightening a measured-lenient boundary in an unrelated change is likewise
+forbidden. **This no-op rule does NOT govern the mandated `LEGACY_ADAPTER_AUTHORITY_CONFLICT`
+rejections of ADR §5** (a disagreeing single-process, or any multi-process, authored
+`spec.pipeline`): those are the deliberate M12 authority decision — not the silent tightening of an
+ignored extra — and #139 rejects them by design. Un-goldened parity gaps are closed by establishing
+baselines (§3.4), not by a no-op.
