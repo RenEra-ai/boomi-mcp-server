@@ -184,6 +184,27 @@ def test_normalize_keeps_nested_integration_spec_pipeline():
     assert [s.key for s in spec.pipeline.stages] == case["expected_stage_keys"]
 
 
+def test_zero_process_pipeline_accepted_and_preserved_through_build_plan():
+    """Zero-process baseline pin (ADR-001 §5): a spec with `components: []` and a
+    surviving nested `spec.pipeline` is ACCEPTED by the public `_build_plan` today,
+    plans to ZERO steps, and preserves the authored pipeline inert in the echoed
+    integration_spec. #139 must preserve this frozen inert value unchanged (never
+    reinterpret as a derived view, never reject) — not silently discard it."""
+    case = _case("zero_process_pipeline")
+    # Normalization keeps the nested pipeline and yields zero process components.
+    spec = _normalize_to_spec(case["config"])
+    assert spec.pipeline is not None
+    assert spec.components == []
+    assert [s.kind for s in spec.pipeline.stages] == case["expected_stage_kinds"]
+    # The public plan path accepts it and produces no executable steps.
+    plan = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
+    assert plan["_success"] is True
+    assert plan["steps"] == []
+    # The authored pipeline survives inert in the echoed spec (unreconciled).
+    echoed = plan["integration_spec"]["pipeline"]
+    assert [s["kind"] for s in echoed["stages"]] == case["expected_stage_kinds"]
+
+
 def test_normalize_drops_top_level_pipeline():
     case = _case("normalize_top_level_dropped")
     spec = _normalize_to_spec(case["config"])

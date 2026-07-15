@@ -96,7 +96,7 @@ The M12 target replaces the entangled surfaces with a single semantic authority 
 
 Everything to the left of the AST is an adapter or recipe; everything to the right of the AST is compiler-internal. The roles are:
 
-- **`ProcessIRV1(version="1", body=...)`** — exactly **one in-memory ProcessIR root per process**, produced by a named adapter. This is the only authoritative semantic input.
+- **`ProcessIRV1(version="1", body=...)`** — exactly **one in-memory ProcessIR root per process**, reached by **two convergent ingress lanes**: (a) a named adapter that normalizes a legacy/compatibility input, or (b) **direct ProcessIR authoring** by the #146 MCP surface. Both lanes yield a root that passes the *same* semantic validation and the same one-root-per-process invariant; the direct lane is not a bypass. This is the only authoritative semantic input.
 - **`IntegrationSpecV1`** — remains the **component/materialization plan**: which components exist, in what dependency order they materialize (`components[].depends_on`), and how they reference each other. It is not a process-semantics authority.
 - **Named adapters** (linear `sync_pipeline`, `flow_sequence`, `wrapper_subprocess`, legacy block configs, archetype/composition recipes) normalize each compatibility input into exactly one ProcessIR root. Adapters never emit XML themselves.
 - **`SystemTopologySpecV1`** — a future **capability-gated, planning-only** topology authority (#144). It never mutates runtime state and never feeds the process compiler.
@@ -120,8 +120,9 @@ flowchart TD
     AD3 --> IR
     AD4 --> IR
     AD5 --> IR
+    DIRECT["direct ProcessIR authoring — #146 MCP surface"] -->|"validated ProcessIRV1 payload"| IR
 
-    IR["ProcessIRV1 AST — exactly one root per process"] --> VAL["semantic validation"]
+    IR["ProcessIRV1 AST — exactly one root per process (per component key)"] --> VAL["semantic validation"]
     VAL --> CFG["compiler-derived CFG"]
     CFG --> EPLAN["deterministic emission plan"]
     EPLAN --> EMIT["verified emitters / XML"]
@@ -133,6 +134,8 @@ flowchart TD
     TOPO["SystemTopologySpecV1 — capability-gated, planning-only"] -.->|"advises planning; never feeds the compiler"| SPEC
 ```
 
+**Per-process association and the two ingress lanes.** A ProcessIR root is associated with its `IntegrationSpecV1` process component by that component's `key` — the same key the materialization DAG and `$ref:` tokens resolve against — with exactly **one root per process component**. Both lanes bind to that key identically: the **adapter** lane derives the root from the component's legacy config (`sync_pipeline` / `flow_sequence` / `wrapper_subprocess` / block configs), and the **direct** lane (#146) accepts a validated `ProcessIRV1` payload for that component. The compiler enforces the one-root-per-process invariant on **both** lanes, and the compiler-produced **ComponentPlan** (the emitted component plus its wiring) is the boundary between the per-process root and the `IntegrationSpecV1` materialization plan. Direct authoring never supplies CFG edges, shape IDs, layout, or XML (§6); the lanes differ only in how the semantic root is obtained, never in what a caller may author.
+
 ## 4. Representation Authority
 
 Every representation in the stack has exactly one of the following statuses. This table is the normative classification for all of M12:
@@ -141,7 +144,7 @@ Every representation in the stack has exactly one of the following statuses. Thi
 |---|---|
 | One `ProcessIRV1(version="1", body=...)` root per process | Authoritative semantic input |
 | `IntegrationSpecV1.components` and `components[].depends_on` | Authoritative component/materialization plan only |
-| `IntegrationSpecV1.pipeline` | Derived inspectable/analysis view for a single-process spec; a frozen inert legacy value for a zero-process spec (§5) |
+| `IntegrationSpecV1.pipeline` | Derived inspectable/analysis view |
 | `main_process.config.pipeline` with `process_kind="sync_pipeline"` | Compatibility input through the linear adapter |
 | `flow_sequence` | Compatibility input and semantic seed for ProcessIRV1 |
 | Legacy source/transform/target blocks, `wrapper_subprocess`, archetype configs, and composition parts | Compatibility inputs through named adapters/recipes |
@@ -155,7 +158,7 @@ Every representation in the stack has exactly one of the following statuses. Thi
 Three clarifications:
 
 - The `IntegrationSpecV1.pipeline` status ("Derived inspectable/analysis view") is consistent with the measured current state: today the field is authored-but-inert (§1). Under M12 it becomes a *compiler-derived* summary **for a single-process spec**; it never becomes an executable input. That role change ships only under an explicit adapter/versioning story (§9: shape retention never implies role retention).
-- The singular top-level `spec.pipeline` is a **single-process** derived view (§5): it is well-defined only when the spec has exactly one process component. A **zero-process** spec's authored pipeline (an accepted, freeze-pinned shape) has no process to derive from and is preserved as a frozen inert value — neither reinterpreted as a derived view nor rejected — until an announced deprecation gate. A **multi-process** spec's authored top-level pipeline is rejected as ambiguous (`LEGACY_ADAPTER_AUTHORITY_CONFLICT`) — never resolved by key/positional precedence and never silently discarded — while per-process summaries are compiler-derived on each process component.
+- The single authority status above is "Derived inspectable/analysis view." Its per-cardinality *disposition* — single-process derivation, zero-process preserve-inert, and multi-process rejection — is not a second status; it is defined **solely in §5** (and reflected in the compatibility inventory's migration gate).
 - "Semantic seed for ProcessIRV1" records that `flow_sequence` is the surface being promoted into the strict ProcessIRV1 models (#136) — it is a compatibility input like the others, but its vocabulary seeds the IR node set rather than requiring a from-scratch design.
 
 ## 5. Authority-Conflict Rule
@@ -172,7 +175,7 @@ Precedence-based reconciliation ("the nested one wins", "the spec one wins", or 
 **Process scope of the singular derived view (multi-process specs).** `IntegrationSpecV1.components` is a list, so a spec may carry more than one process component (a `wrapper_subprocess` parent plus its child processes, or independently authored processes sharing one materialization plan). The one-root-per-process rule (§3) therefore yields one ProcessIR/CFG **per process**, while the spec envelope exposes only a **single** top-level `pipeline` field (`src/boomi_mcp/models/integration_models.py:90-97`), and `IntegrationComponentSpec` carries **no main/entry marker** — only an arbitrary component `key`. The scope is therefore fixed by process **cardinality**, never by inventing a precedence:
 
 - **Single-process spec** (exactly one `type="process"` component): the top-level `spec.pipeline` view derives from that sole process, and the derived-equality-or-`LEGACY_ADAPTER_AUTHORITY_CONFLICT` decision above runs against its ProcessIR. This is the only shape any archetype writes `spec.pipeline` in today — the four writers each emit one process component and multi-process specs keep `pipeline=None` (§1, measured).
-- **Zero-process spec** (`components` empty, or no `type="process"` component) carrying a non-`None` authored `spec.pipeline`: this shape is **accepted today** and pinned by the #135 freeze suite (`components: []` with a top-level pipeline). There is no process to compile, so the authored pipeline has no derivable counterpart and cannot become a compiler-derived view. #139 **preserves it unchanged** as a frozen inert legacy value — it drives nothing, is not reinterpreted as a derived summary, and is **not** rejected (rejecting an accepted inert input would be an unannounced compatibility break, §9) — until an announced deprecation gate governs it. Unlike the multi-process case there is no ambiguity/precedence risk to guard against.
+- **Zero-process spec** (`components` empty, or no `type="process"` component) carrying a non-`None` authored `spec.pipeline`: this shape is **accepted today** and pinned by the #135 freeze suite (`test_zero_process_pipeline_accepted_and_preserved_through_build_plan` — `components: []` with a surviving `config.integration_spec.pipeline`; `_build_plan` returns `_success` with zero steps and echoes the inert pipeline). There is no process to compile, so the authored pipeline has no derivable counterpart and cannot become a compiler-derived view. #139 **preserves it unchanged** as a frozen inert legacy value — it drives nothing, is not reinterpreted as a derived summary, and is **not** rejected (rejecting an accepted inert input would be an unannounced compatibility break, §9) — until an announced deprecation gate governs it. Unlike the multi-process case there is no ambiguity/precedence risk to guard against.
 - **Multi-process spec** carrying a non-`None` authored `spec.pipeline`: **ambiguous by construction**, since no marker designates which process it summarizes. #139 **rejects** it with `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; it must never select a process by component `key` order, positional index, or any other implicit precedence, and must never silently discard the authored value. Per-process summaries for such specs are compiler-derived **per process component**, never folded into the singular top-level field.
 
 If a first-class multi-process top-level summary is ever wanted, #139 must **first** introduce an explicit designation marker (the archetypes' existing `main_process` component-key convention, `_MAIN_PROCESS_KEY`, is the natural seed but is not today a model-level contract); the top-level field must not become an implicit aggregate.
@@ -196,17 +199,19 @@ Summaries and inspection views (including the derived `spec.pipeline` view of §
 
 ## 7. Error-Family Ownership (Reserved)
 
-The following seven error-code families are **reserved by this ADR — no runtime codes ship in #135**. Each family has a single owning issue (or explicit shared owners) that introduces its codes:
+The following seven error-code families are **reserved by this ADR — no runtime codes ship in #135**. Each family is introduced across one or more owning issues; the *introducers* below are taken from each child issue's declared contract (a family's codes are introduced by every issue listed, not a single first-owner). **#146 is a surface-only consumer** — it exposes these established diagnostics through its MCP authoring/planning/compile/verify contracts and introduces **no** family of its own:
 
-| Family | Owns | Owning issue(s) |
+| Family | Scope | Introduced by |
 |---|---|---|
-| `PROCESS_IR_SCHEMA_*` | Model/codec boundary (parse, shape, version) | #136 |
-| `PROCESS_IR_REFERENCE_*` | Reference format and resolution | #136 / #137 / #143 |
-| `PROCESS_IR_CAPABILITY_*` | Capability gates | #146 |
-| `PROCESS_IR_SEMANTIC_*` | User-authored semantic defects | #137 / #143 |
-| `PROCESS_IR_COMPILE_*` | Lowering, emission-plan, emitter, or compiler-invariant defects | #137 / #138 |
+| `PROCESS_IR_SCHEMA_*` | Model/codec boundary (parse, shape, version) | #136, #141, #142 |
+| `PROCESS_IR_REFERENCE_*` | Reference format and resolution | #136, #140, #143 |
+| `PROCESS_IR_CAPABILITY_*` | Capability gates | #136, #140, #141, #142, #143 |
+| `PROCESS_IR_SEMANTIC_*` | User-authored semantic defects | #137, #140, #141, #142, #143 |
+| `PROCESS_IR_COMPILE_*` | Lowering, emission-plan, emitter, or compiler-invariant defects | #137, #138, #140, #141, #142 |
 | `TOPOLOGY_*` | Topology schema/reference/relation/capability validation | #144 |
-| `LEGACY_ADAPTER_*` | Normalization, authority conflicts, semantic loss, and parity | #139 |
+| `LEGACY_ADAPTER_*` | Normalization, authority conflicts, semantic loss, and parity | #139 (`…AUTHORITY`/`…OUTPUT`/`…PIPELINE`/`…SEMANTIC`/`…UNSUPPORTED`), #143 (`…EXEMPTION`) |
+
+To keep codes stable across shared introducers, each family's name and code constants live in **one shared registry** from the family's first introducer onward; a later introducer **adds** codes to the existing family — it never renames or re-scopes it. #146 surfaces the established families through MCP contracts without first-owning any.
 
 Every diagnostic in these families must carry: a **stable code**, the **authored JSON path** it points at, a **safe remediation** hint, and **no secret-bearing values** (see §11).
 
@@ -230,7 +235,7 @@ Every authoring capability sits in exactly one of four states:
 - **Strict new IR versions.** ProcessIRV1 models are strict (unknown fields rejected). Any semantic change that would alter the meaning of an accepted document requires a new IR version; versions are never mutated in place.
 - **Shape retention never implies role retention.** Retaining an existing JSON shape (such as `PipelineSpec`) while changing its semantic role — authored input to compiler-derived view, executable to advisory, or any authority reclassification in §4 — is a compatibility change and requires an explicit adapter and/or versioning story: a named adapter with parity gates, or a new versioned model. It never happens implicitly as a side effect of another change.
 - **Explicit adapters.** Every legacy surface reaches the compiler only through a named adapter. Adapters are code, not convention; each has an owner issue and its own tests.
-- **Parity gates before any behavior claim.** An adapter is complete only when it demonstrates parity at every level: schema acceptance, JSON round-trip, semantic equivalence, ComponentPlan equivalence, and emitted-XML equivalence (against the existing golden baselines), plus `process_graph_verifier` verification and live MCP QA.
+- **Parity gates before any behavior claim.** An adapter is complete only when it demonstrates parity at every level: schema acceptance, JSON round-trip, semantic equivalence, ComponentPlan equivalence, and emitted-XML parity, plus `process_graph_verifier` verification and live MCP QA. **XML parity is byte-identical wherever a raw-byte golden exists today** (the 18 raw-byte goldens, inventory §3.1); where the current baseline is canonicalized (§3.2) or un-goldened (§3.4, e.g. `sync_pipeline`), the adapter must **first establish a raw-byte baseline** for the covered output before any cutover. Parity is never downgraded from byte-identity to canonical-equivalence to pass a gate.
 - **Replacement documentation before deprecation.** No surface is deprecated until its replacement is documented and its adapter has passed the parity gates.
 - **Announced policy before warnings or removal.** Deprecation warnings, and later removal, happen only under an announced policy — never as a side effect of landing an M12 issue. Per the milestone entry gate, merging #135 deprecates nothing.
 
@@ -275,23 +280,28 @@ flowchart LR
     end
 
     N135 --> N136
+    N135 --> N144
     N136 --> N137
     N136 --> N144
+    N136 --> N145
     N137 --> N138
+    N137 --> N143
     N138 --> N139
     N139 --> N140
     N139 --> N145
     N140 --> N141
     N140 --> N142
+    N140 --> N143
     N141 --> N143
     N142 --> N143
     N143 --> N146
+    N144 --> N145
     N144 --> N146
     N145 --> N146
     N146 --> N147
 ```
 
-The wave chain is `#135 → #136 → {#137, #144} → #138 → #139 → {#140, #145} → {#141, #142} → #143 → #146 → #147`. The graph is acyclic by construction (every edge points from an earlier wave to a later one).
+The edges above are the **complete declared direct-dependency set** — each is a `Depends on` entry from the corresponding child issue (`#136←#135`; `#137←#136`; `#138←#137`; `#139←#138`; `#140←#139`; `#141←#140`; `#142←#140`; `#143←#137,#140,#141,#142`; `#144←#135,#136`; `#145←#136,#139,#144`; `#146←#143,#144,#145`), not a transitive reduction. In particular `#144 → #145` is a **direct** edge (#145 declares `#144`) that no other path implies, so typed executable recipes (#145) may not start before the topology contract (#144). The graph is acyclic by construction (every edge points from an earlier wave to a later one).
 
 **#147 depends directly on every issue #135–#146**, even where the diagram compresses those final edges into the single `#146 → #147` arrow: the closing migration/documentation/live-QA issue cannot start from a partially landed milestone, and no issue #135–#146 may be skipped or reordered past it.
 

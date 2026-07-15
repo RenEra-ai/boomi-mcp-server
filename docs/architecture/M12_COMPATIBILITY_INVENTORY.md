@@ -102,8 +102,8 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Error codes | `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` (unknown kind `:4874-4881`, extra step keys `:4882-4890`, legacy-sibling blocks `:4627-4639`, ordering/terminal violations); `PROCESS_LINEAGE_BRANCH_ORDER_INVALID` from the lineage pass (pinned by `tests/test_m11_composed_examples.py:144`) |
 | Fixtures / tests | 5 committed goldens (§3), `tests/test_process_flow_builder.py` flow_sequence sections, `tests/test_m11_composed_examples.py`, `tests/test_builder_xml_invariants.py` (structural invariants) |
 | Assertion strength | Raw-byte golden equality for the 5 flow_sequence goldens (§3) plus structural ET assertions |
-| Adapter issue | **#136** (M12.1 — promote flow_sequence into strict ProcessIRV1 models); semantic validation unification #143 |
-| Migration gate | #136 owns closing the permissive config root (§2.7) via strict models — never silently tightened here; step-level codes stay stable until #139's adapter mapping review |
+| Adapter issue | **#136** builds the strict new ProcessIRV1 models (M12.1 — promote the flow_sequence *vocabulary* into strict models); the **legacy** `flow_sequence` config-root leniency (§2.7) is closed by the **#139** legacy adapter, not #136; semantic validation unification #143 |
+| Migration gate | **#139** owns closing the permissive **legacy** config root (§2.7) through its adapter — mapped or rejected explicitly, never silently tightened. #136 only makes the **new** ProcessIRV1 models strict and leaves existing `flow_sequence` input (accepted-but-ignored root extras) unchanged until #139's cutover; step-level codes stay stable until #139's adapter mapping review |
 
 ### 1.5 `wrapper_subprocess` (process kind)
 
@@ -330,7 +330,7 @@ equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT` (per ADR-001), never precedence.
   `ProcessFlowBuilder.validate_config` (`:596`) checks only the blocks it knows
   (process_kind, source/target, transform, reliability, flow_sequence, refs) — an unknown
   top-level config key is **ignored**, in contrast to `sync_pipeline`'s fail-closed root (§2.6).
-  This leniency is a #136 migration gate, not a contract.
+  This leniency is a **#139 legacy-adapter** migration gate, not a contract — #136 only makes the new ProcessIRV1 models strict and does not tighten this legacy envelope.
 
 ### 2.8 `wrapper_subprocess` — no root allowlist; secret scan is the only extra-key guard
 
@@ -442,8 +442,11 @@ All example payloads carry `example_not_template: true` / `template_status:
 ### 3.6 #135 additions
 
 `tests/fixtures/compatibility/issue_135/authoring_boundaries.json` +
-`tests/test_issue_135_compatibility_freeze.py` characterize the §2 boundary behavior (JSON-level
-only; no new XML goldens — the suites above remain the XML baseline).
+`tests/test_issue_135_compatibility_freeze.py` characterize the §2 boundary behavior using **JSON
+fixtures plus differential emitted-XML equality** — several cases build with and without an extra
+and assert `ProcessFlowBuilder.build(...)` output is string-identical (e.g. the flow_sequence
+root-leniency case), and the wrapper cases assert scanner behavior — with **no new committed XML
+golden** (the suites in §3.1–§3.4 remain the golden XML baseline).
 
 ---
 
@@ -462,7 +465,7 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 |---|---|---|
 | `IntegrationSpecV1.pipeline` | #139 | Silent-precedence baseline (§2.5) replaced by derived equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; the field becomes a compiler-derived summary for a single-process spec, a preserved frozen inert value for a zero-process spec, and a rejected ambiguous input for a multi-process spec (ADR §5) |
 | `main_process.config.pipeline` / `sync_pipeline` | #139 (adapter), #137 (lowering contracts) | Golden parity for the lowered config + XML (§3.4 has no committed golden today); `SYNC_PIPELINE_*` codes stay stable until the adapter mapping review |
-| `flow_sequence` | #136 (strict models), #143 (semantic validation) | **Permissive config root** (§2.7 — unknown top-level keys around a flow_sequence are ignored) closed by strict ProcessIRV1 models in #136, with explicit rejection/mapping — not a quiet allowlist add here; `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
+| `flow_sequence` | #136 (new strict ProcessIRV1 models), #139 (legacy config-root adapter), #143 (semantic validation) | #136 makes the **new** ProcessIRV1 models strict; the **legacy** permissive config root (§2.7 — unknown top-level keys around a flow_sequence are ignored) is closed by **#139**'s adapter with explicit rejection/mapping — accepted-but-ignored fields survive until then, never a quiet allowlist add; `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
 | `wrapper_subprocess` | #139 | **Root/call extras accepted-and-ignored** (§2.8) is a gate: the adapter must explicitly map or reject extras; `PLAINTEXT_SECRET_REJECTED` and the `PROCESS_REF_*` codes stay stable |
 | Legacy `source`/`transform`/`target` blocks | #139 | Adapter + parity gates before any deprecation (ADR-001 versioning policy) |
 | Primitive `emit_fragment` | #138, #145 | **Convention-not-contract** (§2.9) is a gate: replaced by the typed emitter-registry/recipe contract, with fragment parity tests, before any consuming archetype is rerouted |
