@@ -13,6 +13,11 @@ ProcessIR consolidation (ADR-001, docs/architecture/) will migrate:
 - the two UNWIRED pipeline surfaces: an authored ``spec.pipeline`` is inert
   while the nested ``main_process.config.pipeline`` is what
   ``SyncPipelineBuilder.lower_config`` actually lowers (the #139 baseline pin),
+- the ``spec.pipeline`` PROCESS-CARDINALITY combinations ADR-001 §5 is built on:
+  zero-authored, lone-create-collapsing-to-collision-reuse, and multi-authored --
+  each carrying a top-level pipeline, each accepted today,
+- the ``spec.pipeline`` secret-scan gap, in BOTH its zero-component isolation and
+  its component-bearing form (with a control proving a real scanner ran),
 - ``sync_pipeline`` top-level key gate (unknown + gated keys, exact
   code/field pairs),
 - ``flow_sequence`` per-step key/kind strictness,
@@ -221,7 +226,11 @@ def test_zero_process_pipeline_secret_config_echoed_is_known_gap():
     raw_config, never the top-level `spec.pipeline`; `StageSpec.config` is an
     open `Dict[str, Any]`. The gap is
     component-independent (no scanner ever reaches spec.pipeline); components=[]
-    is just the cleanest isolation (zero scanners run at all).
+    is just the cleanest isolation (zero scanners run at all). That
+    component-independence is NOT self-attested here — it is measured by the
+    sibling `test_component_bearing_pipeline_secret_config_echoed_is_known_gap`,
+    whose control run proves a real component scanner fires while this same gap
+    holds in the very same plan.
 
     This is the leak ADR §11 flags. It is PRE-EXISTING (not introduced by #135)
     and #135 only CHARACTERIZES it — it does NOT fix it (a runtime secret scan
@@ -249,6 +258,55 @@ def test_zero_process_pipeline_secret_config_echoed_is_known_gap():
 
     # And it is NOT surfaced as any validation error / rejection (no scanner ran).
     assert "PLAINTEXT_SECRET_REJECTED" not in json.dumps(plan)
+
+
+@patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
+def test_component_bearing_pipeline_secret_config_echoed_is_known_gap(mock_pag):
+    """Component-BEARING half of the same KNOWN GAP (ADR-001 §5 security-precedence
+    note + §11; compatibility inventory §2.5). The sibling
+    `test_zero_process_pipeline_secret_config_echoed_is_known_gap` isolates the gap
+    with `components: []` (zero scanners run at all); this case proves the strictly
+    STRONGER claim the inventory actually makes — that no scanner traverses the
+    top-level `spec.pipeline` **whatever components exist**.
+
+    The control run is what licenses that claim: it is the SAME spec with the sentinel
+    ALSO planted in the component's own config, and it fails with
+    PLAINTEXT_SECRET_REJECTED — so that component's scanner demonstrably runs on this
+    exact shape, and the `spec.pipeline` secret still sails past it unscanned in the
+    very same plan.
+
+    Frozen, NOT endorsed (the leak is PRE-EXISTING and owned by #139): if a downstream
+    scan starts rejecting/redacting the spec.pipeline value, flip this test.
+    The sentinel is a PLACEHOLDER token (§11), never a real secret.
+    """
+    mock_pag.return_value = []
+    case = _case("component_bearing_pipeline_with_secret")
+    secret_key = case["secret_key"]
+    secret_val = case["secret_sentinel"]
+
+    # THE GAP: components exist and plan clean, yet the spec.pipeline secret is echoed.
+    plan = _build_plan(MagicMock(), copy.deepcopy(case["config"]))
+    # Clean-planned means NO error steps (`_build_plan` hardcodes _success=True).
+    assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
+    comp_step = next(s for s in plan["steps"] if s["key"] == case["component_key"])
+    assert comp_step["planned_action"] == case["expected_component_action"]
+    echoed_stage_cfg = plan["integration_spec"]["pipeline"]["stages"][0]["config"]
+    assert echoed_stage_cfg[secret_key] == secret_val
+    assert "PLAINTEXT_SECRET_REJECTED" not in json.dumps(plan)
+
+    # THE CONTROL: the same sentinel in the component's OWN config IS rejected, proving
+    # a real scanner traverses this component — while the spec.pipeline copy survives
+    # unredacted in that same plan.
+    control = _build_plan(MagicMock(), copy.deepcopy(case["control_config"]))
+    control_step = next(s for s in control["steps"] if s["key"] == case["component_key"])
+    assert control_step["planned_action"] == case["control_expected_action"]
+    assert (
+        control_step["validation_error"]["error_code"]
+        == case["control_expected_error_code"]
+    )
+    assert control_step["validation_error"]["field"] == case["control_secret_key"]
+    control_stage_cfg = control["integration_spec"]["pipeline"]["stages"][0]["config"]
+    assert control_stage_cfg[secret_key] == secret_val
 
 
 def test_normalize_drops_top_level_pipeline():
@@ -354,6 +412,78 @@ def test_contradictory_pipelines_silent_precedence_through_build_plan(mock_pag):
     assert plan_mutated["steps"] == plan["steps"]
     assert plan_mutated["execution_order"] == plan["execution_order"]
     assert plan_mutated.get("warnings") == plan.get("warnings")
+
+
+@patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
+def test_collision_reuse_with_top_level_pipeline_plans_clean_and_echoes(mock_pag):
+    """Cardinality freeze (ADR-001 §5). The IDENTICAL authored payload as
+    `test_contradictory_pipelines_silent_precedence_through_build_plan` — which forces
+    NO collision — but here a live same-name process EXISTS, so the lone authored
+    `create` collapses to `planned_action="reuse"`. It still plans clean (no error
+    steps) and still echoes the authored `spec.pipeline` inert.
+
+    This is load-bearing for two ADR §5 claims that were previously only INFERRED from
+    the composition of two other tests:
+      - the preserve-inert case's collision-driven-reuse sub-case, and
+      - the account-independence invariant: acceptance does not move when collision
+        resolution changes. Compare against the no-collision pin above — same payload,
+        different live account, same acceptance.
+
+    Note the agree-vs-conflict distinction is invisible TODAY: no code compares
+    `spec.pipeline` to the process config at all (that comparison is #139's future
+    contract), so this one measurement pins the combination for both sub-cases.
+    """
+    case = _case("collision_reuse_pipeline")
+    base = _case("contradictory_pipelines")
+
+    mock_pag.return_value = [copy.deepcopy(case["collision_stub_metadata"])]
+    plan = _build_plan(MagicMock(), copy.deepcopy(base["config"]))
+
+    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+    assert main_step["planned_action"] == case["expected_planned_action"]
+    assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
+    # The inert authored view is echoed even though the submitted config was discarded.
+    echoed = plan["integration_spec"]["pipeline"]
+    assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
+
+
+@patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
+def test_multi_authored_spec_with_top_level_pipeline_accepted_today(mock_pag):
+    """Cardinality freeze (ADR-001 §5, multi-authored bullet). TWO authored process
+    components plus a singular top-level `spec.pipeline` — the shape the ADR calls
+    "ambiguous by construction" because no marker designates which process the single
+    field summarizes — is ACCEPTED today: both processes plan `create`, no error step,
+    no authority-conflict code, and the ambiguous view is echoed back.
+
+    This is the measured evidence for ADR §9's announced-policy-before-removal gate:
+    #139's strict-surface rejection withdraws an acceptance that demonstrably exists,
+    so it cannot ship as a side effect of the cutover. No current archetype writes this
+    shape (§1 measured — multi-process specs keep `pipeline=None`); it is reachable by
+    hand-authoring, which is exactly why the freeze pins it.
+    """
+    mock_pag.return_value = []
+    case = _case("multi_authored_pipeline")
+    config = _case("contradictory_pipelines")["config"]
+
+    # Add a SECOND authored process alongside the first (distinct key and name, so it
+    # is a genuinely separate authored component rather than a collision).
+    second = copy.deepcopy(config["integration_spec"]["components"][0])
+    second["key"] = case["second_process_key"]
+    second["name"] = case["second_process_name"]
+    config["integration_spec"]["components"].insert(1, second)
+
+    plan = _build_plan(MagicMock(), config)
+
+    proc_steps = [
+        next(s for s in plan["steps"] if s["key"] == key)
+        for key in ("main_process", case["second_process_key"])
+    ]
+    assert [s["planned_action"] for s in proc_steps] == case["expected_planned_actions"]
+    assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
+    echoed = plan["integration_spec"]["pipeline"]
+    assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
 
 
 # ---------------------------------------------------------------------------
