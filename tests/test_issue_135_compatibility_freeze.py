@@ -563,6 +563,9 @@ def test_multi_authored_collision_reuse_keeps_acceptance_and_echo(mock_pag):
     second["name"] = multi["second_process_name"]
     config["integration_spec"]["components"].insert(1, second)
     proc_keys = ("main_process", multi["second_process_key"])
+    # Captured pre-plan: the echo asserts below pin the FULL normalized
+    # PipelineSpec dump (the agreeing-collision pin's idiom), not just kinds.
+    authored_pipeline = copy.deepcopy(config["integration_spec"]["pipeline"])
 
     # (a) PARTIAL collision — only the first authored process has a live
     # same-name component; the second stays a genuine create.
@@ -578,6 +581,7 @@ def test_multi_authored_collision_reuse_keeps_acceptance_and_echo(mock_pag):
         s for s in plan_partial["steps"] if str(s["planned_action"]).startswith("error")
     ] == []
     echoed_partial = plan_partial["integration_spec"]["pipeline"]
+    assert echoed_partial == PipelineSpec(**authored_pipeline).model_dump()
     assert [s["kind"] for s in echoed_partial["stages"]] == (
         case["expected_spec_pipeline_kinds"]
     )
@@ -599,6 +603,7 @@ def test_multi_authored_collision_reuse_keeps_acceptance_and_echo(mock_pag):
         s for s in plan_full["steps"] if str(s["planned_action"]).startswith("error")
     ] == []
     echoed_full = plan_full["integration_spec"]["pipeline"]
+    assert echoed_full == PipelineSpec(**authored_pipeline).model_dump()
     assert [s["kind"] for s in echoed_full["stages"]] == (
         case["expected_spec_pipeline_kinds"]
     )
