@@ -518,7 +518,10 @@ rejections of ADR §5** (a disagreeing single-process, or any multi-process, aut
 ignored extra. **But because that rejection withdraws an acceptance the freeze suite proves exists
 today — `test_contradictory_pipelines_silent_precedence_through_build_plan` pins the disagreeing
 single-process shape and `test_multi_authored_spec_with_top_level_pipeline_accepted_today` pins the
-multi-process one — it is still a compatibility tightening governed by ADR §9's
+multi-process one (its collision variants — one or both authored processes collapsing to
+collision-driven reuse — are pinned by `test_multi_authored_collision_reuse_keeps_acceptance_and_echo`,
+so the ADR §5 account-independence claim has a measured baseline) — it is still a compatibility
+tightening governed by ADR §9's
 announced-policy-before-removal gate** — #139 lands the derived-equality reconciliation and the diagnostic, and the hard rejection of
 currently-accepted contradictory/ambiguous input ships only behind an announced deprecation with a
 documented replacement surface (not by design at #139's cutover, and not via the no-op rule).

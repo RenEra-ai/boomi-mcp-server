@@ -346,6 +346,20 @@
     "expected_planned_actions": ["create", "create"],
     "expected_spec_pipeline_kinds": ["fetch", "send"]
   },
+  "multi_authored_collision_pipeline": {
+    "_comment": "Collision variants of `multi_authored_pipeline` (ADR-001 §5's multi-authored account-independence claim: the ambiguity count is over DECLARED authoring actions, so collision-reuse never dissolves it — 'even if some or all of those authored processes collapse to collision-driven reuse'). Same two-authored spec + singular top-level spec.pipeline, but a live same-name component exists for the first (partial variant) or both (full variant) authored processes, collapsing them to planned_action='reuse'. Both variants are accepted today exactly like the no-collision pin. Main-process stub reused from `collision_reuse_pipeline`.",
+    "second_collision_stub_metadata": {
+      "component_id": "88888888-8888-8888-8888-888888888888",
+      "id": "88888888-8888-8888-8888-888888888888",
+      "name": "Sentinel Second Process",
+      "folder_name": "Root",
+      "type": "process",
+      "version": 1
+    },
+    "expected_partial_planned_actions": ["reuse", "create"],
+    "expected_full_planned_actions": ["reuse", "reuse"],
+    "expected_spec_pipeline_kinds": ["fetch", "send"]
+  },
   "normalize_top_level_dropped": {
     "config": {
       "name": "Sentinel Top Level",

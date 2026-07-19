@@ -15,7 +15,8 @@ ProcessIR consolidation (ADR-001, docs/architecture/) will migrate:
   ``SyncPipelineBuilder.lower_config`` actually lowers (the #139 baseline pin),
 - the ``spec.pipeline`` PROCESS-CARDINALITY combinations ADR-001 §5 is built on:
   zero-authored, lone-create-collapsing-to-collision-reuse (in both its agreeing
-  and disagreeing authored-view variants), and multi-authored -- each carrying a
+  and disagreeing authored-view variants), and multi-authored (with no collision,
+  one of two colliding, and both colliding to reuse) -- each carrying a
   top-level pipeline, each accepted today,
 - the ``spec.pipeline`` secret-scan gap, in BOTH its zero-component isolation and
   its component-bearing form (with a control proving a real scanner ran),
@@ -528,6 +529,80 @@ def test_multi_authored_spec_with_top_level_pipeline_accepted_today(mock_pag):
     echoed = plan["integration_spec"]["pipeline"]
     assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
     assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
+
+
+@patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
+def test_multi_authored_collision_reuse_keeps_acceptance_and_echo(mock_pag):
+    """Collision variants of the multi-authored pin (ADR-001 §5, multi-authored
+    bullet + determinism note). §5 counts the ambiguity decision over DECLARED
+    authoring actions, so it claims account-independence "even if some or all of
+    those authored processes collapse to collision-driven reuse". This pin
+    measures the baseline for both halves of that claim: the SAME two-authored
+    payload as `test_multi_authored_spec_with_top_level_pipeline_accepted_today`,
+    replanned against a live account where (a) ONE of the two authored creates
+    collides (partial — ["reuse", "create"]) and (b) BOTH collide (full —
+    ["reuse", "reuse"]).
+
+    Today both variants plan clean and echo the ambiguous view — identical to
+    the no-collision pin, since no code counts authored processes or compares
+    surfaces yet. The pins keep #139 honest about WHERE it counts: a cardinality
+    computed AFTER collision resolution would see the full-collision variant as
+    zero-authored (preserve-inert path) and the partial variant as
+    single-authored (conflict/derive path) instead of ambiguous — exactly the
+    account-dependent reject/accept flip §5's determinism note prohibits. On the
+    V1 surface these acceptances persist until an announced §9 deprecation, so
+    the pins are durable, not transition-scoped.
+    """
+    case = _case("multi_authored_collision_pipeline")
+    multi = _case("multi_authored_pipeline")
+    main_stub = _case("collision_reuse_pipeline")["collision_stub_metadata"]
+
+    config = _case("contradictory_pipelines")["config"]
+    second = copy.deepcopy(config["integration_spec"]["components"][0])
+    second["key"] = multi["second_process_key"]
+    second["name"] = multi["second_process_name"]
+    config["integration_spec"]["components"].insert(1, second)
+    proc_keys = ("main_process", multi["second_process_key"])
+
+    # (a) PARTIAL collision — only the first authored process has a live
+    # same-name component; the second stays a genuine create.
+    mock_pag.return_value = [copy.deepcopy(main_stub)]
+    plan_partial = _build_plan(MagicMock(), copy.deepcopy(config))
+    partial_steps = [
+        next(s for s in plan_partial["steps"] if s["key"] == key) for key in proc_keys
+    ]
+    assert [s["planned_action"] for s in partial_steps] == (
+        case["expected_partial_planned_actions"]
+    )
+    assert [
+        s for s in plan_partial["steps"] if str(s["planned_action"]).startswith("error")
+    ] == []
+    echoed_partial = plan_partial["integration_spec"]["pipeline"]
+    assert [s["kind"] for s in echoed_partial["stages"]] == (
+        case["expected_spec_pipeline_kinds"]
+    )
+    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan_partial)
+
+    # (b) FULL collision — both authored processes collapse to reuse.
+    mock_pag.return_value = [
+        copy.deepcopy(main_stub),
+        copy.deepcopy(case["second_collision_stub_metadata"]),
+    ]
+    plan_full = _build_plan(MagicMock(), copy.deepcopy(config))
+    full_steps = [
+        next(s for s in plan_full["steps"] if s["key"] == key) for key in proc_keys
+    ]
+    assert [s["planned_action"] for s in full_steps] == (
+        case["expected_full_planned_actions"]
+    )
+    assert [
+        s for s in plan_full["steps"] if str(s["planned_action"]).startswith("error")
+    ] == []
+    echoed_full = plan_full["integration_spec"]["pipeline"]
+    assert [s["kind"] for s in echoed_full["stages"]] == (
+        case["expected_spec_pipeline_kinds"]
+    )
+    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan_full)
 
 
 # ---------------------------------------------------------------------------
