@@ -54,6 +54,19 @@ COMPONENT_EDIT_PATCH_MISMATCH = "COMPONENT_EDIT_PATCH_MISMATCH"
 COMPONENT_EDIT_DRIFT_DETECTED = "COMPONENT_EDIT_DRIFT_DETECTED"
 COMPONENT_EDIT_TYPE_MISMATCH = "COMPONENT_EDIT_TYPE_MISMATCH"
 
+# --- ProcessIRV1 model/codec boundary (M12.1 / issue #136; ADR-001 §7) --------
+# First codes of the PROCESS_IR_SCHEMA_* / PROCESS_IR_REFERENCE_* /
+# PROCESS_IR_CAPABILITY_* families. Per ADR-001 §7 this module is the ONE
+# shared registry for the family constants; later introducers (#140-#143)
+# ADD codes here, never rename or re-scope these.
+PROCESS_IR_SCHEMA_UNKNOWN_NODE = "PROCESS_IR_SCHEMA_UNKNOWN_NODE"
+PROCESS_IR_SCHEMA_UNKNOWN_FIELD = "PROCESS_IR_SCHEMA_UNKNOWN_FIELD"
+PROCESS_IR_SCHEMA_INVALID_CARDINALITY = "PROCESS_IR_SCHEMA_INVALID_CARDINALITY"
+PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED = "PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED"
+PROCESS_IR_SCHEMA_INVALID = "PROCESS_IR_SCHEMA_INVALID"
+PROCESS_IR_REFERENCE_INVALID_FORMAT = "PROCESS_IR_REFERENCE_INVALID_FORMAT"
+PROCESS_IR_CAPABILITY_UNSUPPORTED = "PROCESS_IR_CAPABILITY_UNSUPPORTED"
+
 
 @dataclass(frozen=True)
 class ErrorCodeSpec:
@@ -255,6 +268,55 @@ ERROR_TAXONOMY: Dict[str, ErrorCodeSpec] = {
             retryable=False,
             summary="patch.component_type does not match the live component type.",
             owner="#97",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SCHEMA_UNKNOWN_NODE,
+            category="process_ir",
+            retryable=False,
+            summary="A ProcessIRV1 node carries an unknown 'kind' (or nested discriminator) tag.",
+            owner="#136",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SCHEMA_UNKNOWN_FIELD,
+            category="process_ir",
+            retryable=False,
+            summary="A ProcessIRV1 node carries a field its strict schema does not declare.",
+            owner="#136",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
+            category="process_ir",
+            retryable=False,
+            summary="A ProcessIRV1 list/step bound was violated (empty steps, branch leg count, ordering).",
+            owner="#136",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary="The ProcessIR document version is missing or not a supported version.",
+            owner="#136",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_SCHEMA_INVALID,
+            category="process_ir",
+            retryable=False,
+            summary="The ProcessIR payload failed strict schema validation (shape/type mismatch).",
+            owner="#136",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_REFERENCE_INVALID_FORMAT,
+            category="process_ir",
+            retryable=False,
+            summary="An opaque component reference is not an exact '$ref:KEY' token or literal component id.",
+            owner="#136",
+        ),
+        ErrorCodeSpec(
+            code=PROCESS_IR_CAPABILITY_UNSUPPORTED,
+            category="process_ir",
+            retryable=False,
+            summary="The payload requests a gated/unsupported ProcessIR capability (keyed cache, secret carriage, ...).",
+            owner="#136",
         ),
     )
 }

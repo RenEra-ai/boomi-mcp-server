@@ -1,0 +1,154 @@
+{
+  "_comment": "Issue #136 codec parity fixtures. Sentinel refs/values only — no live ids, no secrets. Each case: legacy config + the depends_on keys and connector bindings its reverse mapping needs. 'bindings' maps operation_ref -> {connector_type, action_type}; 'fallback_target' re-synthesizes the legacy-required root target for self-terminating sequences (D2).",
+  "shared": {
+    "depends_on": ["db_conn", "db_op", "rest_conn", "rest_op", "rest_conn_b", "rest_op_b", "map", "profile_json", "profile_xml", "profile_props", "cache", "child"],
+    "bindings": {
+      "$ref:db_op": {"connector_type": "database", "action_type": "Get"},
+      "$ref:rest_op": {"connector_type": "rest_client", "action_type": "POST"},
+      "$ref:rest_op_b": {"connector_type": "rest_client", "action_type": "PUT"}
+    },
+    "source": {"connector_type": "database", "connection_id": "$ref:db_conn", "operation_id": "$ref:db_op", "action_type": "Get"},
+    "target": {"connector_type": "rest_client", "connection_id": "$ref:rest_conn", "operation_id": "$ref:rest_op", "action_type": "POST"},
+    "target_b": {"connector_type": "rest_client", "connection_id": "$ref:rest_conn_b", "operation_id": "$ref:rest_op_b", "action_type": "PUT"}
+  },
+  "cases": {
+    "full_vocabulary_linear": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [
+          {"kind": "flow_control", "for_each_count": 10, "label": "batch"},
+          {"kind": "message", "message_text": "sentinel-message"},
+          {"kind": "map_ref", "map_ref": "$ref:map"},
+          {"kind": "dataprocess", "steps": [
+            {"operation": "custom_scripting", "script": "return 1"},
+            {"operation": "split_documents", "profile_type": "json", "profile_id": "$ref:profile_json", "link_element_key": "lek", "link_element_name": "len"},
+            {"operation": "combine_documents", "profile_type": "xml", "profile_id": "$ref:profile_xml", "link_element_key": "lek2", "link_element_name": "len2", "combine_into_link_element_key": "parent"}
+          ]},
+          {"kind": "set_ddp", "name": "DDP_SENTINEL", "source_values": [
+            {"value_type": "static", "value": "sv"},
+            {"value_type": "current"},
+            {"value_type": "profile", "element_id": "el", "element_name": "eln", "profile_id": "$ref:profile_props", "profile_type": "profile.json"},
+            {"value_type": "ddp", "property_name": "OTHER_DDP", "default_value": "dv"}
+          ]},
+          {"kind": "set_dpp", "name": "DPP_SENTINEL", "source_values": [{"value_type": "dpp", "property_name": "OTHER_DPP"}], "persist": true},
+          {"kind": "doccacheload", "document_cache_id": "$ref:cache"},
+          {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache"},
+          {"kind": "doccacheremove", "document_cache_id": "$ref:cache"},
+          {"kind": "cache_put", "document_cache_id": "$ref:cache", "label": "stage-write"},
+          {"kind": "cache_get", "document_cache_id": "$ref:cache", "external_writer": true}
+        ]
+      }
+    },
+    "decision_branch_map": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [
+          {"kind": "map_ref", "map_ref": "$ref:map"},
+          {"kind": "decision", "comparison": "equals", "label": "route",
+           "left": {"value_type": "track", "property_id": "dynamicdocument.DDP_STATUS", "property_name": "DDP_STATUS", "default_value": "unset"},
+           "right": {"value_type": "static", "static_value": "ok"},
+           "true_steps": [{"kind": "message", "message_text": "accepted"}],
+           "false_steps": [
+             {"kind": "message", "message_text": "rejected"},
+             {"kind": "branch", "legs": [
+               {"steps": [{"kind": "map_ref", "map_ref": "$ref:map"}], "target": "@target_b"},
+               {"steps": [{"kind": "message", "message_text": "staging"}, {"kind": "cache_put", "document_cache_id": "$ref:cache"}]}
+             ]}
+           ]}
+        ]
+      }
+    },
+    "cache_load_retrieve_remove": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [
+          {"kind": "doccacheload", "document_cache_id": "$ref:cache"},
+          {"kind": "doccacheretrieve", "document_cache_id": "$ref:cache", "empty_cache_behavior": "stopprocess", "load_all_documents": true},
+          {"kind": "doccacheremove", "document_cache_id": "$ref:cache", "remove_all_documents": true}
+        ]
+      }
+    },
+    "exception_terminal": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [
+          {"kind": "message", "message_text": "pre"},
+          {"kind": "exception", "message_template": "sentinel failure: {1}", "title": "Sentinel", "stop_single_document": true, "parameter_source": "current_document"}
+        ]
+      },
+      "needs_fallback_target": true
+    },
+    "set_properties_ddp_dpp": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [
+          {"kind": "set_ddp", "name": "DDP_ONE", "source_values": [{"value_type": "static", "value": ""}]},
+          {"kind": "set_dpp", "name": "DPP_TWO", "source_values": [{"value_type": "ddp", "property_name": "DDP_ONE"}]}
+        ]
+      }
+    },
+    "cache_put_get": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [
+          {"kind": "cache_put", "document_cache_id": "$ref:cache"},
+          {"kind": "cache_get", "document_cache_id": "$ref:cache", "empty_cache_behavior": "stopprocess"}
+        ]
+      }
+    },
+    "linear_return_documents": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [{"kind": "message", "message_text": "hand back"}],
+        "return_documents": {"enabled": true, "label": "returned-docs"}
+      }
+    },
+    "one_step_sequence": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [{"kind": "message", "message_text": "only"}]
+      }
+    },
+    "root_branch_staging": {
+      "config": {
+        "process_kind": "database_to_api_sync",
+        "source": "@source",
+        "target": "@target",
+        "flow_sequence": [
+          {"kind": "message", "message_text": "fan"},
+          {"kind": "branch", "legs": [
+            {"steps": [], "target": "@target_b"},
+            {"steps": [{"kind": "cache_put", "document_cache_id": "$ref:cache"}]}
+          ]}
+        ]
+      },
+      "needs_fallback_target": true
+    },
+    "wrapper_process_calls": {
+      "config": {
+        "process_kind": "wrapper_subprocess",
+        "process_calls": [
+          {"subprocess_ref": "$ref:child"},
+          {"process_id": "00000000-0000-0000-0000-000000000001", "wait": false, "abort_on_error": true, "label": "second"}
+        ],
+        "return_documents": {"enabled": true, "label": "wrapper-out"}
+      }
+    }
+  }
+}

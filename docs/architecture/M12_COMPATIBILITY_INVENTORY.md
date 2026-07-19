@@ -102,7 +102,7 @@ key is the real authoring-to-XML channel via `SyncPipelineBuilder.lower_config`.
 | Error codes | `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` (unknown kind `:4874-4881`, extra step keys `:4882-4890`, legacy-sibling blocks `:4627-4639`, ordering/terminal violations); `PROCESS_LINEAGE_BRANCH_ORDER_INVALID` from the lineage pass (pinned by `tests/test_m11_composed_examples.py:144`) |
 | Fixtures / tests | 5 committed goldens (§3), `tests/test_process_flow_builder.py` flow_sequence sections, `tests/test_m11_composed_examples.py`, `tests/test_builder_xml_invariants.py` (structural invariants) |
 | Assertion strength | Raw-byte golden equality for the 5 flow_sequence goldens (§3) plus structural ET assertions |
-| Adapter issue | **#136** builds the strict new ProcessIRV1 models (M12.1 — promote the flow_sequence *vocabulary* into strict models); the **legacy** `flow_sequence` config-root leniency (§2.7) is brought under the **#139** legacy adapter's ownership (mapped as a compatibility no-op, not tightened), not #136; semantic validation unification #143 |
+| Adapter issue | **#136 LANDED** (2026-07-19): the strict ProcessIRV1 models exist dark (`src/boomi_mcp/models/process_ir.py` + the private test-only `_process_ir_compat` codec; see [PROCESS_IR_V1.md](PROCESS_IR_V1.md)) — the legacy `flow_sequence` surface is UNCHANGED; the **legacy** config-root leniency (§2.7) stays under the **#139** legacy adapter's ownership (mapped as a compatibility no-op, not tightened), not #136; semantic validation unification #143 |
 | Migration gate | **#139** owns bringing the permissive **legacy** config root (§2.7) under explicit adapter ownership, mapping today's accepted-but-ignored root extras as a **compatibility no-op** (they stay accepted) — never silently tightened, and **never rejected without a separately announced deprecation** (§9 of ADR-001). #136 only makes the **new** ProcessIRV1 models strict and leaves existing `flow_sequence` input unchanged until #139's cutover; step-level codes stay stable until #139's adapter mapping review |
 
 ### 1.5 `wrapper_subprocess` (process kind)
@@ -476,6 +476,22 @@ and assert `ProcessFlowBuilder.build(...)` output is string-identical (e.g. the 
 root-leniency case), and the wrapper cases assert scanner behavior — with **no new committed XML
 golden** (the suites in §3.1–§3.4 remain the golden XML baseline).
 
+### 3.7 #136 additions (ProcessIRV1 models — dark)
+
+New fixture directory `tests/fixtures/process_ir/` (JSON only; **no XML fixture added or
+changed** — the §3.1 goldens stay the emission baseline):
+
+| Fixture | Consuming test | Assertion mode |
+|---|---|---|
+| `process_ir_v1.json` (3 full-vocabulary canonical IR documents) | `tests/test_process_ir_models.py` golden pins | **Byte-equal** canonical JSON, generated twice per run |
+| `process_ir_v1.schema.json` | `tests/test_process_ir_models.py` golden pins | **Byte-equal** canonical JSON Schema (pinned to the current pydantic; an upgrade forces a reviewed regeneration) |
+| `flow_sequence_compat_cases.json` (10 sentinel legacy configs incl. the semantic shapes of the five §3.1 flow_sequence goldens + a wrapper case) | `tests/test_process_ir_flow_sequence_codec.py` | Canonical-IR round-trip equality (`legacy→IR` == `legacy→IR→legacy→IR`) + reconstructed configs pass the UNCHANGED `ProcessFlowBuilder`/`WrapperSubprocessBuilder.validate_config` |
+
+Model-boundary coverage lives in `tests/test_process_ir_models.py` (structural: every node
+kind, strictness, `PROCESS_IR_*` diagnostics with pinned JSON pointers, secret/repr
+suppression, closed-schema assertions). The codec is PRIVATE and test-only; builder execution
+is never rerouted through it.
+
 ---
 
 ## 4. Migration ownership map
@@ -493,7 +509,7 @@ verify surfaces · #147 M12.12 complete migration, documentation, examples, and 
 |---|---|---|
 | `IntegrationSpecV1.pipeline` | #139 | Silent-precedence baseline (§2.5) replaced by derived equality or `LEGACY_ADAPTER_AUTHORITY_CONFLICT`; the field becomes a compiler-derived summary for a single-process spec, a preserved frozen inert value for a zero-process spec, and (on the strict surface / after announced V1 deprecation) a rejected ambiguous input for a multi-process spec — V1 preserves it inert until then (ADR §5) |
 | `main_process.config.pipeline` / `sync_pipeline` | #139 (adapter), #137 (lowering contracts) | Golden parity for the lowered config + XML (§3.4 has no committed golden today); `SYNC_PIPELINE_*` codes stay stable until the adapter mapping review |
-| `flow_sequence` | #136 (new strict ProcessIRV1 models), #139 (legacy config-root adapter), #143 (semantic validation) | #136 makes the **new** ProcessIRV1 models strict; the **legacy** permissive config root (§2.7 — unknown top-level keys around a flow_sequence are ignored) is brought under **#139**'s adapter, which maps today's accepted extras as a compatibility no-op (still accepted) — never a quiet allowlist add and never rejected without an announced deprecation (§9); `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
+| `flow_sequence` | #136 (new strict ProcessIRV1 models — **LANDED** 2026-07-19, dark: models + `PROCESS_IR_*` codes in `boomi_mcp.errors` + goldens, zero legacy-surface change; §3.7), #139 (legacy config-root adapter), #143 (semantic validation) | #136's half of this gate is CLOSED: the **new** ProcessIRV1 models are strict and the frozen vocabulary is losslessly representable (codec parity, §3.7); the **legacy** permissive config root (§2.7 — unknown top-level keys around a flow_sequence are ignored) stays with **#139**'s adapter, which maps today's accepted extras as a compatibility no-op (still accepted) — never a quiet allowlist add and never rejected without an announced deprecation (§9); `PROCESS_FLOW_SEQUENCE_CONFIG_INVALID` stays stable |
 | `wrapper_subprocess` | #139 | **Root/call extras accepted-and-ignored** (§2.8) is a gate: the adapter maps them as a compatibility no-op (still accepted), never rejecting a currently-accepted extra without an announced deprecation (§9); `PLAINTEXT_SECRET_REJECTED` and the `PROCESS_REF_*` codes stay stable |
 | Legacy `source`/`transform`/`target` blocks | #139 | Adapter + parity gates before any deprecation (ADR-001 versioning policy) |
 | Primitive `emit_fragment` | #138, #145 | **Convention-not-contract** (§2.9) is a gate: replaced by the typed emitter-registry/recipe contract, with fragment parity tests, before any consuming archetype is rerouted |
