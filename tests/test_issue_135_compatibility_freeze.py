@@ -472,9 +472,10 @@ def test_collision_reuse_with_agreeing_top_level_pipeline_plans_clean_and_echoes
     case = _case("collision_reuse_agreeing_pipeline")
     stub = _case("collision_reuse_pipeline")["collision_stub_metadata"]
     config = _case("contradictory_pipelines")["config"]
-    config["integration_spec"]["pipeline"] = copy.deepcopy(
+    authored_pipeline = copy.deepcopy(
         config["integration_spec"]["components"][0]["config"]["pipeline"]
     )
+    config["integration_spec"]["pipeline"] = copy.deepcopy(authored_pipeline)
 
     mock_pag.return_value = [stub]
     plan = _build_plan(MagicMock(), config)
@@ -482,8 +483,11 @@ def test_collision_reuse_with_agreeing_top_level_pipeline_plans_clean_and_echoes
     main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
     assert main_step["planned_action"] == case["expected_planned_action"]
     assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
-    # The agreeing authored view is echoed inert, exactly like the disagreeing one.
+    # Echo fidelity is this pin's whole job, so assert the FULL normalized
+    # PipelineSpec dump (defaults expanded, semantics preserved — the zero-process
+    # preserve pin's idiom), not merely the same kinds sequence.
     echoed = plan["integration_spec"]["pipeline"]
+    assert echoed == PipelineSpec(**authored_pipeline).model_dump()
     assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
     assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
 
