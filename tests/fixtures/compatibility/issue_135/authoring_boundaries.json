@@ -334,6 +334,11 @@
     "expected_planned_action": "reuse",
     "expected_spec_pipeline_kinds": ["fetch", "send"]
   },
+  "collision_reuse_agreeing_pipeline": {
+    "_comment": "Agreeing variant of `collision_reuse_pipeline` (ADR-001 §5's preserve-inert collision-driven-reuse sub-case as defined: non-conflicting). Derives its spec from `contradictory_pipelines` but overwrites the authored top-level spec.pipeline with a verbatim copy of the nested config.pipeline, so the two surfaces AGREE by construction; the same live same-name collision (stub reused from `collision_reuse_pipeline`) then collapses the lone authored `create` to planned_action='reuse'.",
+    "expected_planned_action": "reuse",
+    "expected_spec_pipeline_kinds": ["read", "send"]
+  },
   "multi_authored_pipeline": {
     "_comment": "Derives its spec from `contradictory_pipelines` and adds a SECOND authored process component, so the spec is multi-authored while still carrying a singular top-level spec.pipeline. Freezes ADR-001 §5's multi-authored acceptance (the shape #139 must reject on the strict surface).",
     "second_process_key": "second_process",

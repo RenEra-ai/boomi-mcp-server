@@ -14,8 +14,9 @@ ProcessIR consolidation (ADR-001, docs/architecture/) will migrate:
   while the nested ``main_process.config.pipeline`` is what
   ``SyncPipelineBuilder.lower_config`` actually lowers (the #139 baseline pin),
 - the ``spec.pipeline`` PROCESS-CARDINALITY combinations ADR-001 §5 is built on:
-  zero-authored, lone-create-collapsing-to-collision-reuse, and multi-authored --
-  each carrying a top-level pipeline, each accepted today,
+  zero-authored, lone-create-collapsing-to-collision-reuse (in both its agreeing
+  and disagreeing authored-view variants), and multi-authored -- each carrying a
+  top-level pipeline, each accepted today,
 - the ``spec.pipeline`` secret-scan gap, in BOTH its zero-component isolation and
   its component-bearing form (with a control proving a real scanner ran),
 - ``sync_pipeline`` top-level key gate (unknown + gated keys, exact
@@ -431,7 +432,9 @@ def test_collision_reuse_with_top_level_pipeline_plans_clean_and_echoes(mock_pag
 
     Note the agree-vs-conflict distinction is invisible TODAY: no code compares
     `spec.pipeline` to the process config at all (that comparison is #139's future
-    contract), so this one measurement pins the combination for both sub-cases.
+    contract). This pin measures the DISAGREEING authored view; the agreeing variant
+    is pinned separately below, so each sub-case ADR §5 names has its own direct
+    measurement even though today both exercise the identical comparison-free echo.
     """
     case = _case("collision_reuse_pipeline")
     base = _case("contradictory_pipelines")
@@ -443,6 +446,43 @@ def test_collision_reuse_with_top_level_pipeline_plans_clean_and_echoes(mock_pag
     assert main_step["planned_action"] == case["expected_planned_action"]
     assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
     # The inert authored view is echoed even though the submitted config was discarded.
+    echoed = plan["integration_spec"]["pipeline"]
+    assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
+    assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
+
+
+@patch("src.boomi_mcp.categories.integration_builder.paginate_metadata")
+def test_collision_reuse_with_agreeing_top_level_pipeline_plans_clean_and_echoes(mock_pag):
+    """Agreeing variant of the collision-reuse pin (ADR-001 §5). The preserve-inert
+    bullet's collision-driven-reuse sub-case is defined over a `spec.pipeline` that
+    does NOT conflict with the process's derived summary; the pin above measures the
+    disagreeing payload (which §5 files under the authority-conflict case, preserved
+    on V1 only until the §9 gate). This pin measures the sub-case as defined: the
+    authored top-level view is a verbatim copy of the nested `config.pipeline` —
+    agreeing by construction under any equality #139 later chooses — and the lone
+    authored `create` collapses to `planned_action="reuse"` against the same live
+    same-name component.
+
+    Today the variants are indistinguishable (no code compares the two surfaces; the
+    comparison is #139's future contract), so both pin the identical comparison-free
+    echo. Keeping both measured means #139's V1 surface — which must KEEP accepting
+    the agreeing shape while the disagreeing one is governed by the §9 transition —
+    changes a pinned behavior only where the ADR says it may.
+    """
+    case = _case("collision_reuse_agreeing_pipeline")
+    stub = _case("collision_reuse_pipeline")["collision_stub_metadata"]
+    config = _case("contradictory_pipelines")["config"]
+    config["integration_spec"]["pipeline"] = copy.deepcopy(
+        config["integration_spec"]["components"][0]["config"]["pipeline"]
+    )
+
+    mock_pag.return_value = [stub]
+    plan = _build_plan(MagicMock(), config)
+
+    main_step = next(s for s in plan["steps"] if s["key"] == "main_process")
+    assert main_step["planned_action"] == case["expected_planned_action"]
+    assert [s for s in plan["steps"] if str(s["planned_action"]).startswith("error")] == []
+    # The agreeing authored view is echoed inert, exactly like the disagreeing one.
     echoed = plan["integration_spec"]["pipeline"]
     assert [s["kind"] for s in echoed["stages"]] == case["expected_spec_pipeline_kinds"]
     assert "LEGACY_ADAPTER_AUTHORITY_CONFLICT" not in json.dumps(plan)
