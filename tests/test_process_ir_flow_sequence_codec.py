@@ -326,3 +326,100 @@ def test_unsupported_process_kind_rejected():
     with pytest.raises(ProcessIRValidationError) as exc_info:
         legacy_flow_sequence_to_ir({"process_kind": "sync_pipeline", "pipeline": {}})
     assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+@pytest.mark.parametrize(
+    "flow_sequence",
+    [
+        [{"kind": "teleport"}],
+        [{"message_text": "kindless"}],
+        [
+            {
+                "kind": "branch",
+                "legs": [
+                    {"steps": [{"kind": "teleport"}], "target": None},
+                    {"steps": [], "target": None},
+                ],
+            }
+        ],
+        [
+            {
+                "kind": "decision",
+                "comparison": "equals",
+                "left": {"value_type": "static", "static_value": ""},
+                "right": {"value_type": "static", "static_value": ""},
+                "true_steps": [{"kind": "teleport"}],
+                "false_steps": [{"kind": "message", "message_text": "f"}],
+            }
+        ],
+    ],
+    ids=["root-unknown", "root-kindless", "branch-leg-unknown", "decision-arm-unknown"],
+)
+def test_unknown_legacy_step_kind_is_typed_error_not_keyerror(flow_sequence):
+    config = _linear_config(*flow_sequence)
+    for leg_holder in flow_sequence:
+        if leg_holder.get("kind") == "branch":
+            for leg in leg_holder["legs"]:
+                leg["target"] = copy.deepcopy(_SHARED["target_b"])
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(config)
+    assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+def test_endpoint_labels_preserved_both_directions():
+    # shared source/target carry labels; a leg target label rides through too.
+    config = _linear_config({"kind": "message", "message_text": "m"})
+    ir = legacy_flow_sequence_to_ir(config)
+    assert ir.body.steps[0].label == "DB Read"
+    assert ir.body.steps[-2].label == "REST Send"
+    legacy2 = ir_to_legacy_flow_sequence(ir, build_context(with_fallback=False))
+    assert legacy2["source"]["label"] == "DB Read"
+    assert legacy2["target"]["label"] == "REST Send"
+
+
+def test_dataprocess_operation_extra_key_rejected_not_dropped():
+    config = _linear_config(
+        {
+            "kind": "dataprocess",
+            "steps": [{"operation": "custom_scripting", "script": "s", "surprise": 1}],
+        }
+    )
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(config)
+    assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+def test_property_source_extra_key_rejected_not_dropped():
+    config = _linear_config(
+        {
+            "kind": "set_ddp",
+            "name": "N",
+            "source_values": [{"value_type": "current", "surprise": 1}],
+        }
+    )
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(config)
+    assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+def test_decision_operand_extra_key_rejected_not_dropped():
+    config = _linear_config(
+        {
+            "kind": "decision",
+            "comparison": "equals",
+            "left": {"value_type": "static", "static_value": "", "surprise": 1},
+            "right": {"value_type": "static", "static_value": ""},
+            "true_steps": [],
+            "false_steps": [{"kind": "message", "message_text": "f"}],
+        }
+    )
+    with pytest.raises(ProcessIRValidationError) as exc_info:
+        legacy_flow_sequence_to_ir(config)
+    assert exc_info.value.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID
+
+
+def test_return_documents_ir_has_no_dead_target():
+    ir = legacy_flow_sequence_to_ir(CASES["linear_return_documents"]["config"])
+    kinds = [s.kind for s in ir.body.steps]
+    assert kinds == ["source", "message", "return_documents"]
+    assert "target" not in kinds

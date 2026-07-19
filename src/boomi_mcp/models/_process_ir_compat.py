@@ -126,7 +126,43 @@ _WRAPPER_ROOT_KEYS = frozenset(
     {"process_kind", "process_type", "process_calls", "return_documents", "description"}
 )
 _BINDING_KEYS = frozenset(
-    {"connector_type", "connection_id", "operation_id", "action_type"}
+    {"connector_type", "connection_id", "operation_id", "action_type", "label"}
+)
+
+# Legacy per-operation Data Process key allowlists (mirrors the builder's
+# custom_scripting / _DATAPROCESS_SPLIT_KEYS / _DATAPROCESS_COMBINE_KEYS) —
+# an unknown operation key is rejected, never silently dropped.
+_DATAPROCESS_OP_KEYS: Dict[str, frozenset] = {
+    "custom_scripting": frozenset({"operation", "script", "language", "use_cache"}),
+    "split_documents": frozenset(
+        {"operation", "profile_type", "profile_id", "link_element_key", "link_element_name"}
+    ),
+    "combine_documents": frozenset(
+        {
+            "operation",
+            "profile_type",
+            "profile_id",
+            "link_element_key",
+            "link_element_name",
+            "combine_into_link_element_key",
+        }
+    ),
+}
+
+# Legacy property-source key allowlists (mirrors PROPERTY_SOURCE_FIELD_CONTRACT).
+_PROPERTY_SOURCE_KEYS: Dict[str, frozenset] = {
+    "static": frozenset({"value_type", "value"}),
+    "current": frozenset({"value_type"}),
+    "profile": frozenset(
+        {"value_type", "element_id", "element_name", "profile_id", "profile_type"}
+    ),
+    "ddp": frozenset({"value_type", "property_name", "default_value"}),
+    "dpp": frozenset({"value_type", "property_name", "default_value"}),
+}
+
+# Legacy decision-operand key allowlist (mirrors _DECISION_OPERAND_ALLOWED_KEYS).
+_OPERAND_KEYS = frozenset(
+    {"value_type", "property_id", "default_value", "property_name", "static_value"}
 )
 
 # Legacy per-kind step key allowlists (legacy spellings) — mirrors
@@ -175,7 +211,13 @@ def _require_dict(value: Any, path: str, what: str) -> Dict[str, Any]:
 
 
 def _check_step_keys(step: Dict[str, Any], legacy_kind: str, path: str) -> None:
-    allowed = _LEGACY_STEP_KEYS[legacy_kind]
+    allowed = _LEGACY_STEP_KEYS.get(legacy_kind)
+    if allowed is None:
+        raise _reject(
+            PROCESS_IR_SCHEMA_INVALID,
+            f"{path}/kind",
+            "unsupported legacy step kind",
+        )
     extra = set(step) - allowed
     if extra:
         raise _reject(
@@ -194,6 +236,12 @@ def _maybe_label(step: Dict[str, Any], node: Dict[str, Any]) -> Dict[str, Any]:
 def _convert_property_source(source: Any, path: str) -> Dict[str, Any]:
     src = _require_dict(source, path, "source value")
     value_type = str(src.get("value_type") or "").strip()
+    allowed = _PROPERTY_SOURCE_KEYS.get(value_type)
+    if allowed is not None and set(src) - allowed:
+        raise _reject(
+            PROCESS_IR_SCHEMA_INVALID, path,
+            f"unsupported key(s) for property source value_type '{value_type}'",
+        )
     if value_type == "static":
         return {"value_type": "static", "value": src.get("value")}
     if value_type == "current":
@@ -225,6 +273,8 @@ def _convert_property_source(source: Any, path: str) -> Dict[str, Any]:
 
 def _convert_operand(operand: Any, path: str) -> Dict[str, Any]:
     op = _require_dict(operand, path, "decision operand")
+    if set(op) - _OPERAND_KEYS:
+        raise _reject(PROCESS_IR_SCHEMA_INVALID, path, "unsupported decision operand key(s)")
     value_type = str(op.get("value_type") or "").strip()
     if value_type == "track":
         out: Dict[str, Any] = {"value_type": "track", "property_id": op.get("property_id")}
@@ -241,6 +291,12 @@ def _convert_operand(operand: Any, path: str) -> Dict[str, Any]:
 def _convert_dataprocess_op(step: Any, path: str) -> Dict[str, Any]:
     op = _require_dict(step, path, "data process operation")
     operation = str(op.get("operation") or "").strip()
+    allowed = _DATAPROCESS_OP_KEYS.get(operation)
+    if allowed is not None and set(op) - allowed:
+        raise _reject(
+            PROCESS_IR_SCHEMA_INVALID, path,
+            f"unsupported key(s) for data process operation '{operation}'",
+        )
     if operation == "custom_scripting":
         out: Dict[str, Any] = {"operation": "custom_scripting", "script": op.get("script")}
         if "language" in op:
@@ -272,11 +328,14 @@ def _convert_target_binding(target: Any, path: str) -> Dict[str, Any]:
     extra = set(tgt) - _BINDING_KEYS
     if extra:
         raise _reject(PROCESS_IR_SCHEMA_INVALID, path, "unsupported target binding key(s)")
-    return {
+    node: Dict[str, Any] = {
         "kind": "target",
         "connection_ref": tgt.get("connection_id"),
         "operation_ref": tgt.get("operation_id"),
     }
+    if tgt.get("label") is not None:
+        node["label"] = tgt.get("label")
+    return node
 
 
 def _convert_linear_step(step: Dict[str, Any], legacy_kind: str, path: str) -> Dict[str, Any]:
@@ -561,6 +620,8 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
         "connection_ref": source.get("connection_id"),
         "operation_ref": source.get("operation_id"),
     }
+    if source.get("label") is not None:
+        source_node["label"] = source.get("label")
     target_node = _convert_target_binding(cfg.get("target"), "/target")
 
     seq = cfg.get("flow_sequence")
@@ -608,8 +669,15 @@ def legacy_flow_sequence_to_ir(config: Any) -> ProcessIRV1:
         # D1/D2: the root target either lives in the decision TRUE arm or is
         # dead config (branch/exception) and is not represented.
         steps.append(control_terminal)
+    elif rd_enabled:
+        # Legacy Return Documents path emits ONLY `returndocuments` after the
+        # sequence (_target_terminal_entries) — the root target is dead config
+        # and is not represented (same D2 rule as branch/exception).
+        steps.append(_terminal_from_return_documents(cfg))
     else:
         steps.append(target_node)
+        # rd is absent/disabled here — this still validates a disabled block's
+        # keys and returns the stop terminal.
         steps.append(_terminal_from_return_documents(cfg))
     return parse_process_ir_v1({"version": "1", "body": {"kind": "sequence", "steps": steps}})
 
@@ -645,12 +713,15 @@ def _resolve_binding(
             PROCESS_IR_SCHEMA_INVALID, path,
             "no connector binding for the operation reference in the resolution context",
         )
-    return {
+    out: Dict[str, Any] = {
         "connector_type": binding.connector_type,
         "connection_id": node.connection_ref,
         "operation_id": node.operation_ref,
         "action_type": binding.action_type,
     }
+    if node.label is not None:
+        out["label"] = node.label
+    return out
 
 
 def _legacy_label(node: Any, out: Dict[str, Any]) -> Dict[str, Any]:
@@ -840,16 +911,27 @@ def ir_to_legacy_flow_sequence(
     terminal = steps[-1]
     flow_steps: List[Dict[str, Any]] = []
 
-    if terminal.kind in ("stop", "return_documents"):
+    if terminal.kind == "stop":
         target_node = steps[-2]
         config["target"] = _resolve_binding(target_node, context, "")
         for node in steps[1:-2]:
             flow_steps.append(_linear_node_to_legacy(node))
-        if terminal.kind == "return_documents":
-            config["return_documents"] = {
-                "enabled": True,
-                **({"label": terminal.label} if terminal.label is not None else {}),
-            }
+    elif terminal.kind == "return_documents":
+        # Standalone RD terminal: the legacy-required root target is dead
+        # config, re-synthesized from the context (D2).
+        if context.fallback_target is None:
+            raise _reject(
+                PROCESS_IR_SCHEMA_INVALID, "/body/steps",
+                "a return_documents-terminated sequence needs context.fallback_target "
+                "to reconstruct the legacy-required root target",
+            )
+        config["target"] = dict(context.fallback_target)
+        for node in steps[1:-1]:
+            flow_steps.append(_linear_node_to_legacy(node))
+        config["return_documents"] = {
+            "enabled": True,
+            **({"label": terminal.label} if terminal.label is not None else {}),
+        }
     else:
         for node in steps[1:-1]:
             flow_steps.append(_linear_node_to_legacy(node))

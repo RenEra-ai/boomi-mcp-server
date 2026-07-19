@@ -230,6 +230,14 @@ class CurrentPropertySourceV1(_ProcessIRBase):
     value_type: Literal["current"] = "current"
 
 
+def _require_non_blank(model: Any, *fields: str) -> None:
+    """Legacy parity: required identifier fields stay non-blank after .strip()."""
+    for name in fields:
+        value = getattr(model, name)
+        if not value.strip():
+            raise _cardinality_error(f"{name} must be a non-blank string")
+
+
 class ProfilePropertySourceV1(_ProcessIRBase):
     value_type: Literal["profile"] = "profile"
     element_id: str = Field(..., min_length=1)
@@ -237,17 +245,32 @@ class ProfilePropertySourceV1(_ProcessIRBase):
     profile_ref: ComponentRefV1
     profile_type: str = Field(..., min_length=1, description="e.g. profile.json")
 
+    @model_validator(mode="after")
+    def _non_blank(self) -> "ProfilePropertySourceV1":
+        _require_non_blank(self, "element_id", "element_name", "profile_type")
+        return self
+
 
 class DdpPropertySourceV1(_ProcessIRBase):
     value_type: Literal["ddp"] = "ddp"
     property_name: str = Field(..., min_length=1)
     default_value: Optional[str] = None
 
+    @model_validator(mode="after")
+    def _non_blank(self) -> "DdpPropertySourceV1":
+        _require_non_blank(self, "property_name")
+        return self
+
 
 class DppPropertySourceV1(_ProcessIRBase):
     value_type: Literal["dpp"] = "dpp"
     property_name: str = Field(..., min_length=1)
     default_value: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _non_blank(self) -> "DppPropertySourceV1":
+        _require_non_blank(self, "property_name")
+        return self
 
 
 # 'definedparameter' is deliberately absent: it is capability-gated (no
@@ -290,6 +313,11 @@ class SplitDocumentsOpV1(_ProcessIRBase):
     link_element_key: str = Field(..., min_length=1)
     link_element_name: str = Field(..., min_length=1)
 
+    @model_validator(mode="after")
+    def _non_blank(self) -> "SplitDocumentsOpV1":
+        _require_non_blank(self, "link_element_key", "link_element_name")
+        return self
+
 
 class CombineDocumentsOpV1(_ProcessIRBase):
     operation: Literal["combine_documents"] = "combine_documents"
@@ -300,6 +328,13 @@ class CombineDocumentsOpV1(_ProcessIRBase):
     combine_into_link_element_key: str = Field(
         default="null", min_length=1, description="'null' combines into the document root"
     )
+
+    @model_validator(mode="after")
+    def _non_blank(self) -> "CombineDocumentsOpV1":
+        _require_non_blank(
+            self, "link_element_key", "link_element_name", "combine_into_link_element_key"
+        )
+        return self
 
 
 DataProcessOperationV1 = Annotated[
@@ -690,7 +725,8 @@ class SequenceNodeV1(_ProcessIRBase):
     """Ordered root sequence. Local structural rules mirror today's builder:
 
     - a connector flow starts with ``source`` and ends in exactly one of
-      ``target``+``stop``, ``target``+``return_documents``, or a terminal
+      ``target``+``stop``, a standalone ``return_documents`` terminal (the
+      legacy Return Documents path never emits the target), or a terminal
       control (``branch``/``decision``/``exception``);
     - a process-call flow contains only ``process_call`` steps plus a
       ``stop``/``return_documents`` terminal (mixed connector execution is
@@ -740,23 +776,25 @@ class SequenceNodeV1(_ProcessIRBase):
             )
 
         # Determine the terminal shape. Legacy parity: the success terminal of
-        # a linear connector flow is target+stop, or target+return_documents
-        # (Return Documents replaces the Stop, target still emitted before it).
-        if body[-1] in ("stop", "return_documents"):
+        # a linear connector flow is target+stop, OR a standalone Return
+        # Documents terminal — with return_documents enabled the builder emits
+        # ONLY `returndocuments` after the sequence (_target_terminal_entries);
+        # the configured legacy target is dead and is not represented in IR.
+        if body[-1] == "stop":
             if len(body) < 2 or body[-2] != "target":
                 raise _cardinality_error(
-                    f"a {body[-1]} terminal must be immediately preceded by the target endpoint"
+                    "a stop terminal must be immediately preceded by the target endpoint"
                 )
             linear = body[:-2]
-        elif body[-1] in _ROOT_CONTROL_TERMINAL_KINDS:
+        elif body[-1] == "return_documents" or body[-1] in _ROOT_CONTROL_TERMINAL_KINDS:
             linear = body[:-1]
         elif body[-1] == "target":
             raise _cardinality_error(
-                "the target endpoint must be immediately followed by a stop or return_documents terminal"
+                "the target endpoint must be immediately followed by a stop terminal"
             )
         else:
             raise _cardinality_error(
-                "a connector-flow sequence must end in target+stop, target+return_documents, "
+                "a connector-flow sequence must end in target+stop, return_documents, "
                 "or a branch/decision/exception terminal"
             )
 
@@ -956,6 +994,19 @@ def _translate_pydantic_error(error: Mapping[str, Any]) -> ProcessIRDiagnostic:
                 message="keyed/indexed cache retrieval is capability-gated in ProcessIR v1",
             )
         return _diagnostic(PROCESS_IR_SCHEMA_UNKNOWN_FIELD, path)
+
+    if err_type == "literal_error" and isinstance(last, str) and last in (
+        "load_all_documents",
+        "remove_all_documents",
+    ):
+        # Legacy parity: load_all_documents/remove_all_documents accept only
+        # True — any other value is a keyed/indexed cache request, which the
+        # capability manifest marks gated (not a generic schema mismatch).
+        return _diagnostic(
+            PROCESS_IR_CAPABILITY_UNSUPPORTED,
+            path,
+            message="keyed/indexed cache retrieval is capability-gated in ProcessIR v1",
+        )
 
     if err_type in ("union_tag_invalid", "union_tag_not_found"):
         ctx = error.get("ctx") or {}

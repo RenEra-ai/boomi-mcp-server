@@ -69,9 +69,12 @@ Root sequence (`SequenceNodeV1.steps`, discriminated on `kind`):
 
 Sequence rules (local/structural — the CFG-aware checks are #137/#143):
 
-- A **connector flow** starts with `source` and ends in exactly one of `target`+`stop`,
-  `target`+`return_documents`, or a terminal control (`branch`/`decision`/`exception`).
-  Controls and terminals may appear only in the final position.
+- A **connector flow** starts with `source` and ends in exactly one of `target`+`stop`, a
+  **standalone** `return_documents` terminal, or a terminal control
+  (`branch`/`decision`/`exception`). Controls and terminals may appear only in the final
+  position. The Return Documents terminal is standalone because the legacy builder emits
+  ONLY `returndocuments` after the sequence when `return_documents` is enabled — the
+  configured legacy root target is dead config and is not represented in IR.
 - A **process-call flow** contains only `process_call` steps plus a `stop`/`return_documents`
   terminal; mixing connector nodes with process calls is capability-gated
   (`mixed_connector_execution`).
@@ -98,8 +101,9 @@ legacy-required-but-unemitted root target — carries an M12 removal gate in #14
 The codec's equivalence contract is **canonical-IR equality** (`canonical(legacy→IR) ==
 canonical(legacy→IR→legacy→IR)`) with defaults expanded — legacy spelling identity is
 explicitly not a goal. The decision true-arm target is the hoisted legacy root target (its
-emitted fallthrough); a root target made dead by a branch/exception terminal is not
-represented in IR.
+emitted fallthrough); a root target made dead by a branch/exception/return_documents
+terminal is not represented in IR (the codec re-synthesizes it from `fallback_target` on
+the reverse path). Legacy endpoint `label`s ride through both directions.
 
 ## 5. Canonical serialization and goldens
 

@@ -193,9 +193,17 @@ def test_wrapper_vocabulary_parses_and_roundtrips():
     assert calls[1].wait is False and calls[1].abort_on_error is True
 
 
-def test_linear_return_documents_terminal_after_target():
-    ir = parse_process_ir_v1(doc(source(), message(), target(), {"kind": "return_documents"}))
+def test_linear_return_documents_is_a_standalone_terminal():
+    # Legacy parity: with return_documents enabled the builder emits ONLY the
+    # returndocuments terminal after the sequence — the configured target is
+    # dead and is NOT represented in IR (_target_terminal_entries).
+    ir = parse_process_ir_v1(doc(source(), message(), {"kind": "return_documents", "label": "out"}))
     assert ir.body.steps[-1].kind == "return_documents"
+
+
+def test_target_followed_by_return_documents_rejected():
+    err = parse_error(doc(source(), message(), target(), {"kind": "return_documents"}))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
 
 
 def test_defaults_expand_to_current_parity_values():
@@ -332,6 +340,21 @@ def test_keyed_cache_keys_on_cache_get_are_capability_gated(gated_key):
 def test_gated_key_on_other_node_stays_unknown_field():
     err = parse_error(linear_doc({**message(), "doc_cache_index": 1}))
     assert codes_of(err) == [(PROCESS_IR_SCHEMA_UNKNOWN_FIELD, "/body/steps/1/doc_cache_index")]
+
+
+def test_keyed_cache_literal_false_is_capability_gated():
+    # load_all_documents/remove_all_documents accept only True; False is a
+    # keyed/indexed cache request — the NAMED gate, not a generic mismatch.
+    retrieve = {"kind": "document_cache_retrieve", "cache_ref": "$ref:c", "load_all_documents": False}
+    err = parse_error(linear_doc(retrieve))
+    assert codes_of(err) == [
+        (PROCESS_IR_CAPABILITY_UNSUPPORTED, "/body/steps/1/load_all_documents")
+    ]
+    remove = {"kind": "cache_remove", "cache_ref": "$ref:c", "remove_all_documents": False}
+    err = parse_error(linear_doc(remove))
+    assert codes_of(err) == [
+        (PROCESS_IR_CAPABILITY_UNSUPPORTED, "/body/steps/1/remove_all_documents")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +526,43 @@ def test_property_name_rules(name):
         PROCESS_IR_SCHEMA_INVALID_CARDINALITY,
         PROCESS_IR_CAPABILITY_UNSUPPORTED,
     )
+
+
+@pytest.mark.parametrize(
+    "op_field", ["link_element_key", "link_element_name", "combine_into_link_element_key"]
+)
+def test_whitespace_only_dataprocess_identifiers_rejected(op_field):
+    op = {
+        "operation": "combine_documents",
+        "profile_type": "json",
+        "profile_ref": "$ref:p",
+        "link_element_key": "k",
+        "link_element_name": "n",
+        op_field: "   ",
+    }
+    err = parse_error(linear_doc({"kind": "data_process", "steps": [op]}))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+
+
+@pytest.mark.parametrize("field", ["element_id", "element_name", "profile_type"])
+def test_whitespace_only_profile_source_identifiers_rejected(field):
+    src = {
+        "value_type": "profile",
+        "element_id": "el",
+        "element_name": "eln",
+        "profile_ref": "$ref:p",
+        "profile_type": "profile.json",
+        field: " ",
+    }
+    node = {"kind": "set_ddp", "name": "N", "source_values": [src]}
+    err = parse_error(linear_doc(node))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
+
+
+def test_whitespace_only_property_source_name_rejected():
+    node = {"kind": "set_dpp", "name": "N", "source_values": [{"value_type": "ddp", "property_name": "  "}]}
+    err = parse_error(linear_doc(node))
+    assert err.diagnostics[0].code == PROCESS_IR_SCHEMA_INVALID_CARDINALITY
 
 
 def test_exception_placeholder_required_when_binding():

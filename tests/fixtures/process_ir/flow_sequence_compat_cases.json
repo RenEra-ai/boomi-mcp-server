@@ -7,8 +7,8 @@
       "$ref:rest_op": {"connector_type": "rest_client", "action_type": "POST"},
       "$ref:rest_op_b": {"connector_type": "rest_client", "action_type": "PUT"}
     },
-    "source": {"connector_type": "database", "connection_id": "$ref:db_conn", "operation_id": "$ref:db_op", "action_type": "Get"},
-    "target": {"connector_type": "rest_client", "connection_id": "$ref:rest_conn", "operation_id": "$ref:rest_op", "action_type": "POST"},
+    "source": {"connector_type": "database", "connection_id": "$ref:db_conn", "operation_id": "$ref:db_op", "action_type": "Get", "label": "DB Read"},
+    "target": {"connector_type": "rest_client", "connection_id": "$ref:rest_conn", "operation_id": "$ref:rest_op", "action_type": "POST", "label": "REST Send"},
     "target_b": {"connector_type": "rest_client", "connection_id": "$ref:rest_conn_b", "operation_id": "$ref:rest_op_b", "action_type": "PUT"}
   },
   "cases": {
@@ -115,7 +115,8 @@
         "target": "@target",
         "flow_sequence": [{"kind": "message", "message_text": "hand back"}],
         "return_documents": {"enabled": true, "label": "returned-docs"}
-      }
+      },
+      "needs_fallback_target": true
     },
     "one_step_sequence": {
       "config": {
