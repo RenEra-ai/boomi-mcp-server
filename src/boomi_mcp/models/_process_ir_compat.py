@@ -61,7 +61,20 @@ class _FrozenMapping(MappingABC):
     bound or unbound (``dict.__setitem__(m, ...)``, review r2d) — applies to
     it. Deep copies and pickles reproduce a frozen instance; the paired
     ``field_serializer``s keep standard Pydantic ``model_dump``/JSON working
-    (a ``MappingProxyType`` broke those, review r2b)."""
+    (a ``MappingProxyType`` broke those, review r2b).
+
+    Contract boundary: this blocks every mutation reachable through the
+    class's own API — bound and unbound public methods, operators,
+    ``__init__`` re-calls, attribute set/delete, and the ``._data`` backing
+    store (a read-only proxy). DELIBERATE base-class dunder invocation
+    (``object.__setattr__`` / ``object.__delattr__``) is out of contract:
+    it bypasses every pure-Python guard by construction — exactly as it
+    bypasses Pydantic's own ``frozen=True`` models (this module's context
+    and binding models included) — and no pure-Python storage design closes
+    it (a side store is equally reachable via the class; ``gc``/``ctypes``
+    remain regardless). The freeze targets accidental mutation and
+    key-hygiene bypass through normal usage, not in-process adversaries.
+    """
 
     __slots__ = ("_data",)
 
@@ -76,6 +89,10 @@ class _FrozenMapping(MappingABC):
         object.__setattr__(self, "_data", MappingProxyType(dict(data)))
 
     def __setattr__(self, name: str, value: Any):
+        raise TypeError("context mappings are read-only")
+
+    def __delattr__(self, name: str):
+        # del m._data would defeat the one-shot __init__ guard (review r3).
         raise TypeError("context mappings are read-only")
 
     def __getitem__(self, key: str) -> Any:

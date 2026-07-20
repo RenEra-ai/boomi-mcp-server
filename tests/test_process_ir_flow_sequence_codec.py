@@ -578,3 +578,10 @@ def test_context_deep_immutability_and_fallback_key_hygiene():
     with pytest.raises(TypeError):
         context.fallback_target._data["shape_id"] = "shape-INJECTED"
     assert dict(context.fallback_target) == before
+    # Nor can the slot be deleted to defeat the one-shot __init__ guard and
+    # re-populate with unvalidated keys (review r3).
+    with pytest.raises(TypeError):
+        del context.fallback_target._data
+    with pytest.raises(TypeError):
+        context.fallback_target.__init__({"shape_id": "shape-INJECTED"})
+    assert dict(context.fallback_target) == before
