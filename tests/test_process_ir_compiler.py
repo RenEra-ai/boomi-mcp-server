@@ -310,6 +310,125 @@ def _assert_emitter_inputs_match_legacy_config(plan, process_xml):
     return checked
 
 
+def _assert_nested_emitter_facts_match_legacy(plan, process_xml):
+    """Compare the NESTED emitter-input facts the flat attribute map misses.
+
+    Decision operands, Exception bindings, Stop continuation, Process Call
+    flags, cache booleans and Data Process steps all live in child elements, so
+    the attribute projection above cannot see them — which is exactly where a
+    normalization bug (padded operand ids, unresolved bindings) would hide.
+    """
+    root = ET.fromstring(process_xml)
+    by_shape = {shape.get("name"): shape for shape in root.iter("shape")}
+    checked = 0
+    for node in plan.nodes:
+        emitter = node.emitter_input
+        kind = emitter.emitter_kind
+        shape = by_shape.get(node.shape_id)
+        if shape is None:
+            continue
+
+        if kind == "stop":
+            element = shape.find("configuration/stop")
+            assert element is not None
+            assert str(emitter.continue_).lower() == element.get("continue")
+            checked += 1
+        elif kind == "processcall":
+            element = shape.find("configuration/processcall")
+            assert element is not None
+            assert str(emitter.wait).lower() == element.get("wait")
+            assert str(emitter.abort).lower() == element.get("abort")
+            checked += 1
+        elif kind == "flowcontrol":
+            element = shape.find("configuration/flowcontrol")
+            assert element is not None
+            assert str(emitter.for_each_count) == element.get("forEachCount")
+            checked += 1
+        elif kind == "doccacheretrieve":
+            element = shape.find("configuration/doccacheretrieve")
+            assert element is not None
+            assert str(emitter.load_all_documents).lower() == element.get("loadAllDoc")
+            checked += 1
+        elif kind == "doccacheremove":
+            element = shape.find("configuration/doccacheremove")
+            assert element is not None
+            assert str(emitter.remove_all_documents).lower() == element.get(
+                "removeAllDocuments"
+            )
+            checked += 1
+        elif kind == "decision":
+            element = shape.find("configuration/decision")
+            assert element is not None
+            operands = element.findall("decisionvalue")
+            assert len(operands) == 2
+            for planned, emitted in zip((emitter.left, emitter.right), operands):
+                assert planned.value_type == emitted.get("valueType")
+                if planned.value_type == "track":
+                    track = emitted.find("trackparameter")
+                    assert planned.property_id == track.get("propertyId")
+                else:
+                    static = emitted.find("staticparameter")
+                    assert planned.static_value == static.get("staticproperty")
+                checked += 1
+        elif kind == "exception":
+            element = shape.find("configuration/exception")
+            assert element is not None
+            assert str(emitter.stop_single_document).lower() == element.get(
+                "stopsingledoc"
+            )
+            values = element.findall("exParameters/parametervalue")
+            binding = emitter.binding
+            if binding.binding == "none":
+                assert values == []
+            else:
+                assert len(values) == 1
+                assert binding.value_type == values[0].get("valueType")
+                assert str(binding.key) == values[0].get("key")
+                if binding.binding == "caught_error":
+                    track = values[0].find("trackparameter")
+                    assert binding.property_id == track.get("propertyId")
+                    assert binding.property_name == track.get("propertyName")
+            checked += 1
+        elif kind == "dataprocess":
+            steps = shape.findall("configuration/dataprocess/step")
+            assert len(steps) == len(emitter.steps)
+            for planned, emitted in zip(emitter.steps, steps):
+                assert planned.processtype == emitted.get("processtype")
+                assert planned.name == emitted.get("name")
+                assert str(planned.key) == emitted.get("key")
+                assert str(planned.index) == emitted.get("index")
+                checked += 1
+        elif kind == "setproperties_step":
+            values = shape.findall(
+                "configuration/documentproperties/documentproperty"
+                "/sourcevalues/parametervalue"
+            )
+            assert len(values) == len(emitter.source_values)
+            for planned, emitted in zip(emitter.source_values, values):
+                expected_type = {
+                    "static": "static",
+                    "current": "current",
+                    "profile": "profile",
+                    "ddp": "track",
+                    "dpp": "process",
+                }[planned.value_type]
+                assert expected_type == emitted.get("valueType")
+                if planned.value_type == "ddp":
+                    assert planned.property_id == emitted.find(
+                        "trackparameter"
+                    ).get("propertyId")
+                elif planned.value_type == "dpp":
+                    assert planned.process_property == emitted.find(
+                        "processparameter"
+                    ).get("processproperty")
+                elif planned.value_type == "profile":
+                    assert planned.profile_id == emitted.find("profileelement").get(
+                        "profileId"
+                    )
+                checked += 1
+    return checked
+
+
 def _assert_property_wire_ids_match_legacy(plan, process_xml):
     """DDP/DPP wire ids and persist flags must match the legacy emitter."""
     root = ET.fromstring(process_xml)
@@ -379,7 +498,8 @@ def test_emitter_inputs_match_legacy_configuration_for_goldens(doc_name):
     process_xml = _build_legacy(legacy_config)
     checked = _assert_emitter_inputs_match_legacy_config(plan, process_xml)
     checked += _assert_property_wire_ids_match_legacy(plan, process_xml)
-    assert checked > 0, "projection compared nothing — the test would be vacuous"
+    checked += _assert_nested_emitter_facts_match_legacy(plan, process_xml)
+    assert checked >= 2, "projection compared almost nothing — near-vacuous"
 
 
 @pytest.mark.parametrize("case_name", sorted(COMPAT_CASES))
@@ -391,7 +511,8 @@ def test_emitter_inputs_match_legacy_configuration_for_compat_cases(case_name):
     process_xml = _build_legacy(config)
     checked = _assert_emitter_inputs_match_legacy_config(plan, process_xml)
     checked += _assert_property_wire_ids_match_legacy(plan, process_xml)
-    assert checked > 0, "projection compared nothing — the test would be vacuous"
+    checked += _assert_nested_emitter_facts_match_legacy(plan, process_xml)
+    assert checked >= 2, "projection compared almost nothing — near-vacuous"
 
 
 def test_connector_canonicalization_matches_the_legacy_builder():
@@ -851,3 +972,139 @@ def test_component_reuse_across_two_references_is_allowed():
     )
     # Canonicalised by ref, so caller insertion order cannot reach output.
     assert [symbol.ref for symbol in table.symbols] == ["$ref:a", "$ref:b"]
+
+
+@pytest.mark.parametrize("case_name", sorted(COMPAT_CASES))
+def test_compat_cases_compile_deterministically(case_name):
+    """Determinism must hold for the ten frozen codec cases, not just the goldens.
+
+    The goldens exercise three documents; the codec cases cover the rest of the
+    frozen vocabulary (staging legs, exception terminals, wrapper flows), so
+    pinning determinism only on the goldens leaves most of it unchecked.
+    """
+    config = copy.deepcopy(COMPAT_CASES[case_name]["config"])
+    first_ir = legacy_flow_sequence_to_ir(copy.deepcopy(config))
+    first_cfg = lower_process_ir_to_cfg(first_ir)
+    first_plan = lower_cfg_to_emission_plan(first_cfg, _symbols_for(first_cfg))
+
+    second_ir = legacy_flow_sequence_to_ir(copy.deepcopy(config))
+    second_cfg = lower_process_ir_to_cfg(second_ir)
+    second_plan = lower_cfg_to_emission_plan(second_cfg, _symbols_for(second_cfg))
+
+    assert canonical_cfg_json(first_cfg) == canonical_cfg_json(second_cfg)
+    assert canonical_emission_plan_json(first_plan) == canonical_emission_plan_json(
+        second_plan
+    )
+    # Symbol insertion order must not reach output either.
+    reversed_plan = lower_cfg_to_emission_plan(
+        first_cfg, _symbols_for(first_cfg, reverse=True)
+    )
+    assert canonical_emission_plan_json(reversed_plan) == canonical_emission_plan_json(
+        first_plan
+    )
+
+
+def test_terminal_error_diagnostics_are_stable():
+    """Pin the terminal/error diagnostics, not just the happy-path snapshots.
+
+    The plan's fixture list includes "terminal error cases"; a diagnostic whose
+    code, phase or path silently changed would otherwise go unnoticed.
+    """
+    cases = []
+
+    # Unresolved reference during reference resolution.
+    ir = parse_process_ir_v1(GOLDEN_DOCS["linear_flow"])
+    cfg = lower_process_ir_to_cfg(ir)
+    with pytest.raises(ProcessIRCompileError) as unresolved:
+        lower_cfg_to_emission_plan(cfg, SymbolTableV1(symbols=()))
+    cases.append(unresolved.value.diagnostics[0])
+
+    # Schema failure translated from #136.
+    with pytest.raises(ProcessIRCompileError) as schema:
+        parse_and_compile_process_ir_v1({"version": "9"}, SymbolTableV1(symbols=()))
+    cases.append(schema.value.diagnostics[0])
+
+    # Capability gate (listener entry).
+    listener_symbols = SymbolTableV1(
+        symbols=tuple(
+            ComponentSymbolV1(
+                ref=symbol.ref,
+                component_id=symbol.component_id,
+                component_type=symbol.component_type,
+                connector_type=(
+                    "wss" if symbol.connector_type == "database" else symbol.connector_type
+                ),
+                action_type=symbol.action_type,
+            )
+            for symbol in _symbols_for(cfg).symbols
+        )
+    )
+    with pytest.raises(ProcessIRCompileError) as capability:
+        lower_cfg_to_emission_plan(cfg, listener_symbols)
+    cases.append(capability.value.diagnostics[0])
+
+    assert [(d.code, d.phase, d.path) for d in cases] == [
+        (
+            "PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID",
+            "reference_resolution",
+            "/body/steps/0",
+        ),
+        ("PROCESS_IR_SCHEMA_VERSION_UNSUPPORTED", "schema", "/version"),
+        ("PROCESS_IR_CAPABILITY_UNSUPPORTED", "reference_resolution", "/body/steps/0"),
+    ]
+    for diagnostic in cases:
+        assert diagnostic.node_identity
+        assert diagnostic.message
+        assert diagnostic.remediation
+
+
+def test_unexpected_parser_failure_does_not_leak_its_text():
+    """An unexpected parse error must become a static internal diagnostic."""
+    import boomi_mcp.compiler.process_ir.pipeline as pipeline
+
+    sentinel = "PARSER-INTERNAL-SENTINEL"
+    original = pipeline.parse_process_ir_v1
+
+    def _boom(_payload):
+        raise RuntimeError(sentinel)
+
+    pipeline.parse_process_ir_v1 = _boom
+    try:
+        with pytest.raises(ProcessIRCompileError) as excinfo:
+            parse_and_compile_process_ir_v1({"version": "1"}, SymbolTableV1(symbols=()))
+    finally:
+        pipeline.parse_process_ir_v1 = original
+
+    error = excinfo.value
+    assert error.diagnostics[0].code == "PROCESS_IR_COMPILE_INTERNAL"
+    assert error.diagnostics[0].phase == "schema"
+    assert sentinel not in str(error)
+    assert sentinel not in repr(error)
+
+
+@pytest.mark.parametrize(
+    "connector_type", ["wss", "WSS", "  wss  ", "web_services_server", "Listener"]
+)
+def test_listener_aliases_are_all_rejected(connector_type):
+    """The guard matches the canonical, case-folded family, not one exact token."""
+    ir = parse_process_ir_v1(GOLDEN_DOCS["linear_flow"])
+    cfg = lower_process_ir_to_cfg(ir)
+    symbols = SymbolTableV1(
+        symbols=tuple(
+            ComponentSymbolV1(
+                ref=symbol.ref,
+                component_id=symbol.component_id,
+                component_type=symbol.component_type,
+                connector_type=(
+                    connector_type
+                    if symbol.connector_type == "database"
+                    else symbol.connector_type
+                ),
+                action_type=symbol.action_type,
+            )
+            for symbol in _symbols_for(cfg).symbols
+        )
+    )
+    with pytest.raises(ProcessIRCompileError) as excinfo:
+        lower_cfg_to_emission_plan(cfg, symbols)
+    assert excinfo.value.diagnostics[0].code == PROCESS_IR_CAPABILITY_UNSUPPORTED

@@ -46,6 +46,8 @@ from .contracts import (
     START_SHAPE_Y,
     EmissionPlanV1,
     SemanticCfgV1,
+    StartNoActionInputV1,
+    StopInputV1,
     SymbolTableV1,
     dragpoint_name,
     dragpoint_x,
@@ -73,29 +75,12 @@ _ALLOWED_EXIT_ROLES = {
     "cache_put": (None, "cache_stage"),
 }
 
-# Semantic kind -> the emitter kind the plan must resolve it to.
-_EXPECTED_EMITTER_KIND = {
-    "message": ("message",),
-    "map": ("map",),
-    "flow_control": ("flowcontrol",),
-    "data_process": ("dataprocess",),
-    "cache_put": ("doccacheload",),
-    "cache_get": ("doccacheretrieve",),
-    "document_cache_retrieve": ("doccacheretrieve",),
-    "cache_remove": ("doccacheremove",),
-    "set_property": ("setproperties_step",),
-    "process_call": ("processcall",),
-    "branch": ("branch",),
-    "decision": ("decision",),
-    "exception": ("exception",),
-    "stop": ("stop",),
-    "return_documents": ("returndocuments",),
-    "connector": ("connectoraction_source", "connectoraction_target"),
-}
-
 # The only authored positions that can hold a target terminal:
 # ``BranchLegV1.terminal`` and ``DecisionTrueArmV1.terminal``.
 _ROUTED_TARGET_PATH = re.compile(r"(?:/legs/\d+|/true_arm)/terminal$")
+
+# ``cache_stage`` is authored only as ``BranchLegV1.terminal``.
+_CACHE_STAGE_PATH = re.compile(r"/legs/\d+/terminal$")
 
 # Emitter-input fields that must name a component resolved through the symbol
 # table. Anything here that is absent from the table means the plan carries a
@@ -189,6 +174,13 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 _SEMANTIC_PHASE,
                 edge.provenance_path,
                 "CFG edge ordinals are not contiguous and ascending",
+            )
+        if edge.edge_id != "e{0}".format(edge.ordinal):
+            raise _fail(
+                PROCESS_IR_COMPILE_INTERNAL,
+                _SEMANTIC_PHASE,
+                edge.provenance_path,
+                "CFG edge id does not match its ordinal",
             )
         if edge.source_node_id not in by_id or edge.target_node_id not in by_id:
             raise _fail(
@@ -342,6 +334,18 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 "routed_target is only valid in a branch leg or decision true-arm terminal",
                 node.node_id,
             )
+        # ``cache_stage`` is the target-less staging leg, authored ONLY as
+        # ``BranchLegV1.terminal``. A root or mid-flow cache_put is an ordinary
+        # linear node, so accepting the role there would mark it terminal and
+        # silently truncate the path.
+        if role == "cache_stage" and not _CACHE_STAGE_PATH.search(node.source_path):
+            raise _fail(
+                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                _SEMANTIC_PHASE,
+                node.source_path,
+                "cache_stage is only valid in a branch leg terminal",
+                node.node_id,
+            )
 
     # --- per-node successor rules -----------------------------------------
     for node in nodes:
@@ -393,6 +397,19 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                     "branch legs are not in ascending authored order",
                     node.node_id,
                 )
+            # Bind each leg edge to ITS authored leg subtree; ascending ordinals
+            # alone would allow two legs' targets to be swapped.
+            for edge in legs:
+                prefix = "{0}/legs/{1}".format(node.source_path, edge.leg_ordinal - 1)
+                target_path = by_id[edge.target_node_id].source_path
+                if not target_path.startswith(prefix):
+                    raise _fail(
+                        PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                        _SEMANTIC_PHASE,
+                        node.source_path,
+                        "a branch leg targets a node outside its own leg",
+                        node.node_id,
+                    )
             continue
 
         if kind == "decision":
@@ -413,6 +430,21 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                     "decision outcomes must be ordered true then false",
                     node.node_id,
                 )
+            # Order alone does not bind an outcome to its ARM: swapping the two
+            # targets keeps the order valid while routing True into the false
+            # subtree. Each outcome's target must live under its own arm.
+            for edge in outcomes:
+                arm = "true_arm" if edge.outcome == "true" else "false_arm"
+                prefix = "{0}/{1}".format(node.source_path, arm)
+                target_path = by_id[edge.target_node_id].source_path
+                if not target_path.startswith(prefix):
+                    raise _fail(
+                        PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                        _SEMANTIC_PHASE,
+                        node.source_path,
+                        "a decision outcome targets a node outside its own arm",
+                        node.node_id,
+                    )
             continue
 
         if len(successors) != 1:
@@ -687,27 +719,22 @@ def check_emission_plan_invariants(
                     path,
                     "plan node source path disagrees with its CFG node",
                 )
-            # The emitter input must actually correspond to the node's
-            # semantics; otherwise a Map node carrying a MessageInputV1 would
-            # reach the emitter and serialise the wrong shape entirely.
-            semantic_kind = cfg_by_id[node.cfg_node_id].semantic.semantic_kind
-            expected = _EXPECTED_EMITTER_KIND.get(semantic_kind, ())
-            if node.emitter_input.emitter_kind not in expected:
+            # Recompute the emitter input from the CFG node + symbols and
+            # compare EXACTLY. Checking only the emitter kind plus global
+            # component-id membership was far too weak: a wrong semantic value,
+            # a Stop with continue_=False, or a map id belonging to an unrelated
+            # symbol all passed. Recomputation makes the check total, and is
+            # simpler than enumerating per-field rules.
+            from .lowering import _emitter_input_for
+
+            expected_input = _emitter_input_for(cfg_by_id[node.cfg_node_id], symbols)
+            if node.emitter_input != expected_input:
                 raise _fail(
                     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
                     _PLAN_PHASE,
                     path,
-                    "emitter input does not correspond to the CFG node's semantics",
+                    "emitter input does not match the CFG node's resolved semantics",
                 )
-            if semantic_kind == "connector":
-                role = cfg_by_id[node.cfg_node_id].semantic.role
-                if node.emitter_input.emitter_kind != "connectoraction_{0}".format(role):
-                    raise _fail(
-                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
-                        _PLAN_PHASE,
-                        path,
-                        "connector emitter input does not match the node's role",
-                    )
         else:
             if node.cfg_node_id is not None or node.source_path is not None:
                 raise _fail(
@@ -723,11 +750,15 @@ def check_emission_plan_invariants(
                     "",
                     "a synthetic plan node must declare its synthetic role",
                 )
+            # Compare the whole input, not just its kind: a synthetic Stop with
+            # ``continue_`` flipped would otherwise pass, since both variants
+            # share the "stop" emitter kind. Both synthetic inputs are fully
+            # determined by their role, so the expected value is exact.
             expected_synthetic = {
-                "start": "start_noaction",
-                "terminal_stop": "stop",
+                "start": StartNoActionInputV1(),
+                "terminal_stop": StopInputV1(),
             }.get(node.synthetic_role)
-            if node.emitter_input.emitter_kind != expected_synthetic:
+            if node.emitter_input != expected_synthetic:
                 raise _fail(
                     PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
                     _PLAN_PHASE,
@@ -945,6 +976,17 @@ def check_emission_plan_invariants(
                     )
 
     # --- terminals ----------------------------------------------------------
+    # Canonical form: every shape with no outgoing flow, in plan order, each
+    # exactly once. Membership-only checking accepted duplicates and arbitrary
+    # order, either of which makes two equivalent plans serialise differently.
+    canonical_terminals = [item.shape_id for item in nodes if not item.outgoing]
+    if declared_terminals != canonical_terminals:
+        raise _fail(
+            PROCESS_IR_COMPILE_NONDETERMINISTIC,
+            _PLAN_PHASE,
+            "",
+            "terminal_shape_ids is not the canonical ordered set of terminal shapes",
+        )
     if not declared_terminals:
         raise _fail(
             PROCESS_IR_SEMANTIC_MISSING_TERMINAL,

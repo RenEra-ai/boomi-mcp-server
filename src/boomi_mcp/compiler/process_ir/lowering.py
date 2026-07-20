@@ -383,7 +383,9 @@ def _operand_semantic(operand: Any) -> Any:
 
     if operand.value_type == "track":
         return _TrackOperandSemanticV1(
-            property_id=operand.property_id,
+            # ``property_id`` is stripped on the wire (builder :4447);
+            # ``property_name`` and ``default_value`` deliberately are NOT.
+            property_id=operand.property_id.strip(),
             property_name=operand.property_name,
             default_value=operand.default_value,
         )
@@ -663,13 +665,29 @@ def _emitter_input_for(node: CfgNodeV1, symbols: SymbolTableV1) -> Any:
                 internal_node_id=node_id,
                 message="operation symbol is missing derived connector metadata",
             )
+        connector_type, action_type = _canonical_connector_metadata(
+            semantic.role, operation.connector_type, operation.action_type
+        )
+        # Canonicalization can still yield a blank (e.g. a whitespace-only
+        # family passes the non-empty check above but strips to "").
+        if not connector_type or not action_type:
+            raise raise_compile_error(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                "reference_resolution",
+                path,
+                internal_node_id=node_id,
+                message="connector metadata is blank after canonicalization",
+            )
         # The legacy entry for a listener FUSES start + connector into one
         # ``start_listen`` shape; this compiler always emits the
         # start_noaction + connectoraction pair, so a listener source would be
         # silently mis-shaped. Fail closed until #140 adds the entry policy.
+        # Matched on the CANONICAL, case-folded family so that ``WSS``,
+        # ``  wss  `` and the spelled-out aliases cannot slip past an exact
+        # lowercase comparison against the raw symbol value.
         if (
             semantic.role == "source"
-            and operation.connector_type in LISTENER_CONNECTOR_TYPES
+            and connector_type.strip().lower() in LISTENER_CONNECTOR_TYPES
         ):
             raise raise_compile_error(
                 PROCESS_IR_CAPABILITY_UNSUPPORTED,
@@ -681,9 +699,6 @@ def _emitter_input_for(node: CfgNodeV1, symbols: SymbolTableV1) -> Any:
                     "path fuses the start and connector shapes"
                 ),
             )
-        connector_type, action_type = _canonical_connector_metadata(
-            semantic.role, operation.connector_type, operation.action_type
-        )
         return ConnectorActionInputV1(
             emitter_kind=(
                 "connectoraction_source"
@@ -796,12 +811,34 @@ def _emitter_input_for(node: CfgNodeV1, symbols: SymbolTableV1) -> Any:
             title=semantic.title or "",
             stop_single_document=semantic.stop_single_document,
             parameter_source=semantic.parameter_source,
+            binding=_exception_binding(semantic.parameter_source),
         )
     if kind == "stop":
         return StopInputV1()
     if kind == "return_documents":
         return ReturnDocumentsInputV1(label=label)
     raise ValueError("unhandled semantic kind")  # pragma: no cover
+
+
+def _exception_binding(parameter_source: str):
+    """Resolve an Exception's parameter source into its wire binding facts.
+
+    The plan calls for a resolved "Exception binding", not a raw enum: #138
+    should only have to serialise it. Mirrors ``_emit_exception_parameters``
+    (builder :6164) — ``none`` emits nothing, ``current_document`` a bare
+    current parametervalue, ``caught_error`` the fixed Try/Catch message token.
+    """
+    from .contracts import (
+        _CaughtErrorBindingV1,
+        _CurrentDocumentBindingV1,
+        _NoExceptionBindingV1,
+    )
+
+    if parameter_source == "none":
+        return _NoExceptionBindingV1()
+    if parameter_source == "current_document":
+        return _CurrentDocumentBindingV1()
+    return _CaughtErrorBindingV1()
 
 
 def _transition(

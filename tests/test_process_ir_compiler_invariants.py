@@ -594,12 +594,40 @@ def test_synthetic_node_claiming_authored_provenance_is_rejected():
 
 
 def test_plan_cfg_correspondence_is_enforced():
+    """Dropping a plan node breaks the one-to-one CFG correspondence.
+
+    Pinned to the EXACT code rather than "either of two": an assertion that
+    accepts two codes cannot tell a correspondence failure from a missing
+    terminal, so it would keep passing if the wrong check fired.
+    """
     base = _linear_plan()
     broken = base.model_copy(update={"nodes": base.nodes[:2], "terminal_shape_ids": ()})
-    assert _check_plan(broken).code in (
-        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
-        PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+    diagnostic = _check_plan(broken)
+    assert diagnostic.code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    assert diagnostic.phase == "emission_planning"
+    assert diagnostic.message == (
+        "plan nodes do not correspond one-to-one with CFG nodes in order"
     )
+
+
+def test_diagnostics_pin_every_contract_field():
+    """The plan requires code, phase, path, identity, message, remediation, id."""
+    cfg = _linear_cfg().model_copy(
+        update={
+            "nodes": (
+                _node(1),
+                _node(2, _msg(), path="/body/steps/1", exit_role="stop"),
+            )
+        }
+    )
+    diagnostic = _raises(check_cfg_invariants, cfg)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.phase == "semantic_lowering"
+    assert diagnostic.path == "/body/steps/1"
+    assert diagnostic.node_identity == "/body/steps/1"
+    assert diagnostic.internal_node_id == "n2"
+    assert diagnostic.message == "exit role is not valid for this node's semantics"
+    assert diagnostic.remediation.startswith("Give the flow exactly one entry")
 
 
 def test_plan_source_path_disagreeing_with_cfg_is_rejected():
@@ -964,7 +992,15 @@ def test_synthetic_stop_must_follow_its_routed_target():
     symbols = SymbolTableV1(
         symbols=(
             ComponentSymbolV1(ref="$ref:c", component_id="cid", component_type="t"),
-            ComponentSymbolV1(ref="$ref:o", component_id="oid", component_type="t"),
+            # The plan checker now recomputes the emitter input from these, so
+            # the operation symbol must carry its derived connector metadata.
+            ComponentSymbolV1(
+                ref="$ref:o",
+                component_id="oid",
+                component_type="t",
+                connector_type="database",
+                action_type="Send",
+            ),
         )
     )
     assert (
@@ -1115,7 +1151,15 @@ def test_synthetic_stop_may_not_carry_outgoing_flow():
     symbols = SymbolTableV1(
         symbols=(
             ComponentSymbolV1(ref="$ref:c", component_id="cid", component_type="t"),
-            ComponentSymbolV1(ref="$ref:o", component_id="oid", component_type="t"),
+            # The plan checker now recomputes the emitter input from these, so
+            # the operation symbol must carry its derived connector metadata.
+            ComponentSymbolV1(
+                ref="$ref:o",
+                component_id="oid",
+                component_type="t",
+                connector_type="database",
+                action_type="Send",
+            ),
         )
     )
 
@@ -1364,4 +1408,208 @@ def test_plan_validation_never_rescans_cfg_edges_per_node():
     assert small == large, (
         "cfg.edges iteration count grew from {0} to {1} when the node count grew "
         "8x — validation is rescanning edges per node".format(small, large)
+    )
+
+
+def test_decision_outcome_must_target_its_own_arm():
+    """Ordering alone does not bind an outcome to its arm."""
+    base = _decision_cfg()
+    swapped = (
+        base.edges[0].model_copy(update={"target_node_id": "n3"}),
+        base.edges[1].model_copy(update={"target_node_id": "n2"}),
+    )
+    cfg = base.model_copy(update={"edges": swapped})
+    diagnostic = _raises(check_cfg_invariants, cfg)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.message == "a decision outcome targets a node outside its own arm"
+
+
+def test_branch_leg_must_target_its_own_leg():
+    base = _branch_cfg(2)
+    swapped = (
+        base.edges[0].model_copy(update={"target_node_id": "n3"}),
+        base.edges[1].model_copy(update={"target_node_id": "n2"}),
+    )
+    cfg = base.model_copy(update={"edges": swapped})
+    diagnostic = _raises(check_cfg_invariants, cfg)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.message == "a branch leg targets a node outside its own leg"
+
+
+def test_cache_stage_is_rejected_outside_a_branch_leg_terminal():
+    """A root or mid-flow cache_put marked ``cache_stage`` would truncate the path."""
+    from boomi_mcp.compiler.process_ir.contracts import CachePutSemanticV1
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                CachePutSemanticV1(cache_ref="$ref:cache"),
+                path="/body/steps/0",
+                exit_role="cache_stage",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    diagnostic = _raises(check_cfg_invariants, cfg)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.message == "cache_stage is only valid in a branch leg terminal"
+
+
+def test_cache_stage_accepted_in_a_branch_leg_terminal():
+    from boomi_mcp.compiler.process_ir.contracts import CachePutSemanticV1
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                CachePutSemanticV1(cache_ref="$ref:cache"),
+                path="/body/steps/0/legs/1/terminal",
+                exit_role="cache_stage",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    check_cfg_invariants(cfg)
+
+
+def test_edge_id_must_match_its_ordinal():
+    cfg = _linear_cfg()
+    broken = cfg.model_copy(
+        update={"edges": (cfg.edges[0].model_copy(update={"edge_id": "e9"}),)}
+    )
+    assert _raises(check_cfg_invariants, broken).code == PROCESS_IR_COMPILE_INTERNAL
+
+
+def test_terminal_shape_ids_must_be_canonical():
+    """Duplicates or reordering make two equivalent plans serialise differently."""
+    base = _linear_plan()
+    duplicated = base.model_copy(update={"terminal_shape_ids": ("shape3", "shape3")})
+    assert _check_plan(duplicated).code == PROCESS_IR_COMPILE_NONDETERMINISTIC
+
+
+def test_emitter_input_is_compared_exactly_against_recomputation():
+    """A Stop with continue_=False used to pass; recomputation catches it."""
+    base = _linear_plan()
+    flipped = base.nodes[2].model_copy(
+        update={"emitter_input": StopInputV1(continue_=False)}
+    )
+    broken = base.model_copy(update={"nodes": base.nodes[:2] + (flipped,)})
+    diagnostic = _check_plan(broken)
+    assert diagnostic.code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    assert diagnostic.message == (
+        "emitter input does not match the CFG node's resolved semantics"
+    )
+
+
+def test_emitter_input_with_a_foreign_component_id_is_rejected():
+    """A map id belonging to an unrelated symbol used to pass membership-only."""
+    from boomi_mcp.compiler.process_ir.contracts import MapInputV1, MapSemanticV1
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(1, MapSemanticV1(map_ref="$ref:m")),
+            _node(2, StopSemanticV1(), path="/body/steps/1", exit_role="stop"),
+        ),
+        edges=(_edge(1, 1, 2, kind="terminal"),),
+        exit_node_ids=("n2",),
+    )
+    symbols = SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(ref="$ref:m", component_id="right", component_type="t"),
+            ComponentSymbolV1(ref="$ref:other", component_id="wrong", component_type="t"),
+        )
+    )
+    base = _linear_plan()
+    # "wrong" IS in the symbol table — just not the one $ref:m resolves to.
+    foreign = base.nodes[1].model_copy(
+        update={"emitter_input": MapInputV1(map_id="wrong")}
+    )
+    broken = base.model_copy(update={"nodes": (base.nodes[0], foreign, base.nodes[2])})
+    assert (
+        _raises(check_emission_plan_invariants, broken, cfg, symbols).code
+        == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    )
+    correct = base.model_copy(
+        update={
+            "nodes": (
+                base.nodes[0],
+                base.nodes[1].model_copy(
+                    update={"emitter_input": MapInputV1(map_id="right")}
+                ),
+                base.nodes[2],
+            )
+        }
+    )
+    check_emission_plan_invariants(correct, cfg, symbols)
+
+
+def test_synthetic_stop_with_flipped_continue_is_rejected():
+    """Synthetic inputs are compared whole, not just by emitter kind.
+
+    A synthetic Stop with ``continue_=False`` shares the "stop" emitter kind
+    with the correct one, so a kind-only check let it through. Both synthetic
+    inputs are fully determined by their role, so the expected value is exact.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import ConnectorActionInputV1
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                ConnectorSemanticV1(
+                    role="target", connection_ref="$ref:c", operation_ref="$ref:o"
+                ),
+                path="/body/steps/0/legs/0/terminal",
+                exit_role="routed_target",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    symbols = SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(ref="$ref:c", component_id="cid", component_type="t"),
+            ComponentSymbolV1(
+                ref="$ref:o",
+                component_id="oid",
+                component_type="t",
+                connector_type="database",
+                action_type="Send",
+            ),
+        )
+    )
+    connector = ConnectorActionInputV1(
+        emitter_kind="connectoraction_target",
+        connector_type="database",
+        action_type="SEND",
+        connection_id="cid",
+        operation_id="oid",
+    )
+
+    def _plan(stop_input):
+        return EmissionPlanV1(
+            entry_shape_id="shape1",
+            nodes=(
+                _plan_node(1, StartNoActionInputV1(), role="start",
+                           out=[_wire(1, 1, 2, provenance="synthetic")]),
+                _plan_node(2, connector, cfg_node="n1",
+                           path="/body/steps/0/legs/0/terminal",
+                           out=[_wire(2, 1, 3, provenance="synthetic")]),
+                _plan_node(3, stop_input, role="terminal_stop"),
+            ),
+            terminal_shape_ids=("shape3",),
+        )
+
+    check_emission_plan_invariants(_plan(StopInputV1()), cfg, symbols)
+    broken = _plan(StopInputV1(continue_=False))
+    assert (
+        _raises(check_emission_plan_invariants, broken, cfg, symbols).code
+        == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
     )

@@ -93,6 +93,15 @@ def parse_and_compile_process_ir_v1(
                 for item in exc.diagnostics
             ]
         ) from None
+    except ProcessIRCompileError:
+        raise
+    except Exception:  # noqa: BLE001 - deliberate: never leak internals
+        # An UNEXPECTED parser failure must not escape carrying its text: the
+        # message can echo authored values, and diagnostics get logged. The
+        # compile stages are already guarded this way; parse was not.
+        raise ProcessIRCompileError(
+            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "schema", "")]
+        ) from None
     cfg, plan = compile_process_ir_v1(ir, symbols)
     return ir, cfg, plan
 

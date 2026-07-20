@@ -98,7 +98,7 @@ so the reservation cannot rot into an accidental capability.
 | `return_documents` | authored standalone terminal | emitted as-is |
 | `exception` | authored `ExceptionNodeV1` | emitted as-is, no Stop follows |
 | `routed_target` | a `target` terminating a branch leg or decision true arm | **compiler appends a synthetic Stop** |
-| `cache_stage` | a target-less staging leg ending in `cache_put` | no terminal shape at all |
+| `cache_stage` | a target-less staging leg ending in `cache_put` | **no additional synthetic Stop** — the cache shape itself is the terminal |
 
 ## 4. Research ledger (the #137 research gate)
 
@@ -136,7 +136,8 @@ root sequence and decision false arm author one explicitly. The compiler therefo
 Stop to IR whenever IR authored it and synthesises one only after a `routed_target` — the single
 case where legacy emits a Stop that IR does not represent. `return_documents.enabled` *replaces*
 the Stop (verifier invariant `RETURN_DOCS_STOP_EXCLUSIVE`), and a target-less staging leg gets no
-terminal shape at all (`:5685-5688`).
+*additional* terminal shape — its last linear shape (the cache write) is emitted with no outbound
+wire and is itself the terminal (`:5685-5688`).
 
 **Branch/Decision edge ordering.** Branch legs run in authored order with indices allocated
 leg-by-leg (leg *n+1* starts where leg *n* ended). Decision allocates the **true** arm first
@@ -162,6 +163,24 @@ helper so the alias table cannot drift (pinned by
 `test_connector_canonicalization_matches_the_legacy_builder`). Passing a symbol's raw alias through
 would hand #138 an input that serialises non-parity connector XML — the frozen compat bindings
 literally carry `rest_client`.
+
+**Why the compiler canonicalizes rather than trusting the symbol table.** The symbol table is
+*specified* to carry canonical connector metadata, so canonicalizing is a **no-op on conforming
+input** — `_canonical_connector_type` is idempotent. It is applied anyway because the alternative
+to normalizing is not decoupling: detecting non-canonical input requires the *same* alias
+knowledge, and the canonical set is open (`database` and any future family pass through verbatim),
+so no closed accept-set can be enumerated. Given both options need the knowledge, normalizing is
+strictly more useful than rejecting — it turns a contract violation by a future adapter into
+correct output instead of silently wrong XML, which is exactly the defect this replaced. The
+dependency is a deliberate, drift-tested M12 seam and moves to #139 when the production adapters
+own legacy normalization.
+
+**Exception parameter sources are resolved, not passed through.** `ExceptionInputV1` carries a
+closed `binding` union — `none` (emits nothing), `current_document` (a bare current
+`parametervalue`), or `caught_error` (the fixed `meta.base.catcherrorsmessage` /
+`Base - Try/Catch Message` token) — mirroring `_emit_exception_parameters` (builder `:6164`), so
+#138 only has to serialise it. This matches how Data Process operations already carry their fixed
+wire metadata rather than a raw enum.
 
 **Property names are stripped on the wire.** `_validate_bare_property_name` checks the *stripped*
 name but `SetDdpNodeV1`/`SetDppNodeV1` store the original, so `" DDP_X "` is a **valid** ProcessIR
@@ -260,8 +279,20 @@ guards this and is calibrated to discriminate (measured: ~8.3× for 8× nodes gr
 it fails if the rescan returns, and sizes below ~400 do not discriminate at all).
 - **Emitter input matches the node's semantics** (and, for connectors, its role), so a Map node
   cannot carry a `MessageInputV1`.
-- **Every component id came from the symbol table** — the `symbols` argument is genuinely consulted,
-  including nested Data Process and property-source `profile_id`s.
+- **Emitter inputs are RECOMPUTED and compared exactly** — the checker re-derives each node's
+  emitter input from its CFG semantics plus the symbol table and requires equality. Checking only
+  the emitter *kind* plus global component-id membership was far too weak: a wrong semantic value,
+  a Stop with `continue_=False`, or a map id belonging to an unrelated symbol all passed.
+  Recomputation makes the check total and is simpler than enumerating per-field rules.
+- **Control edges are bound to their authored subtree** — a decision outcome must target a node
+  under its own `true_arm`/`false_arm`, and a branch leg edge under its own `legs/{j}`. Ordering
+  alone would let two targets be swapped while every ordinal stayed valid.
+- **`cache_stage` is position-checked** like `routed_target` — it is authored only as
+  `BranchLegV1.terminal`, so a root or mid-flow `cache_put` claiming it would mark an ordinary
+  linear node terminal and silently truncate the path.
+- **Identities and terminal sets are canonical** — `edge_id` must equal `e{ordinal}` (not merely be
+  unique), and `terminal_shape_ids` must be exactly the ordered set of shapes with no outgoing
+  flow, so duplicates or reordering cannot make two equivalent plans serialise differently.
 - **Synthetic Stop adjacency** — a routed target must be *immediately* followed by its own synthetic
   Stop and wired to it; matching counts alone would let the Stop sit anywhere.
 - **Branch dragpoint row** — Branch dragpoints all sit on `DRAGPOINT_Y`; unlike Decision there is no

@@ -204,3 +204,52 @@ def test_compiler_package_is_importable_directly():
     from boomi_mcp.compiler.process_ir import compile_process_ir_v1
 
     assert callable(compile_process_ir_v1)
+
+
+# ---------------------------------------------------------------------------
+# Schema-name / template discovery (the OTHER public schema surface)
+# ---------------------------------------------------------------------------
+
+
+def _schema_names():
+    from boomi_mcp.categories.meta_tools import _valid_schema_names
+
+    return list(_valid_schema_names())
+
+
+def test_schema_name_discovery_is_non_empty():
+    """Guard the guard — an empty name list makes the scans below vacuous."""
+    assert len(_schema_names()) > 0
+
+
+@pytest.mark.parametrize("forbidden", FORBIDDEN_NAMES)
+def test_no_compiler_internal_in_schema_name_discovery(forbidden):
+    assert forbidden not in json.dumps(_schema_names(), sort_keys=True)
+
+
+def test_no_compiler_internal_in_any_schema_template_payload():
+    """Scan every discoverable schema template, not just the tool signatures.
+
+    ``get_schema_template`` is a separate public surface from the MCP tool
+    schemas: an LLM asks it for authoring templates, so a compiler-internal name
+    appearing there would be just as authorable.
+    """
+    from boomi_mcp.categories.meta_tools import get_schema_template_action
+
+    scanned = 0
+    leaked = []
+    for name in _schema_names():
+        try:
+            payload = get_schema_template_action(schema_name=name)
+        except TypeError:
+            # Not a schema_name-style template (different selector); skip.
+            continue
+        except Exception:  # pragma: no cover - discovery is best-effort
+            continue
+        blob = json.dumps(payload, sort_keys=True, default=str)
+        scanned += 1
+        for forbidden in FORBIDDEN_NAMES:
+            if forbidden in blob:
+                leaked.append((name, forbidden))
+    assert scanned > 0, "no schema template was actually scanned — test is vacuous"
+    assert leaked == [], leaked

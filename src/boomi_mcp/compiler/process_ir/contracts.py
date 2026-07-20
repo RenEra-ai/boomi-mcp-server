@@ -64,7 +64,12 @@ BRANCH_MAX_LEGS = 25
 # pair this compiler emits. ProcessIRV1 has no listener node kind, so such an
 # entry can only arrive through the symbol table — the guard therefore lives in
 # reference resolution, not in IR lowering. #140 owns the alternate entry policy.
-LISTENER_CONNECTOR_TYPES = frozenset({"wss"})
+# Compared against the CANONICAL, case-folded connector family, so every
+# spelling that resolves to the listener family is covered rather than just the
+# exact lowercase token.
+LISTENER_CONNECTOR_TYPES = frozenset(
+    {"wss", "web_services", "web_services_server", "wssserver", "listener"}
+)
 
 # Only structural discriminators and generated identities render in ``repr``.
 # Every other field renders as "..." so authored text can never leak into a log.
@@ -656,12 +661,49 @@ class DecisionInputV1(_CompilerModel):
     userlabel: str = ""
 
 
+# Wire binding for an Exception's parameter source, resolved by the compiler so
+# #138 only has to serialise it (``_emit_exception_parameters``, builder :6164).
+# ``caught_error`` binds the fixed Try/Catch message token.
+CAUGHT_ERROR_PROPERTY_ID = "meta.base.catcherrorsmessage"
+CAUGHT_ERROR_PROPERTY_NAME = "Base - Try/Catch Message"
+
+
+class _NoExceptionBindingV1(_CompilerModel):
+    binding: Literal["none"] = "none"
+
+
+class _CurrentDocumentBindingV1(_CompilerModel):
+    binding: Literal["current_document"] = "current_document"
+    key: int = 0
+    value_type: Literal["current"] = "current"
+
+
+class _CaughtErrorBindingV1(_CompilerModel):
+    binding: Literal["caught_error"] = "caught_error"
+    key: int = 0
+    value_type: Literal["track"] = "track"
+    property_id: Literal[CAUGHT_ERROR_PROPERTY_ID] = CAUGHT_ERROR_PROPERTY_ID
+    property_name: Literal[CAUGHT_ERROR_PROPERTY_NAME] = CAUGHT_ERROR_PROPERTY_NAME
+    default_value: str = ""
+
+
+ExceptionBindingV1 = Annotated[
+    Union[
+        _NoExceptionBindingV1,
+        _CurrentDocumentBindingV1,
+        _CaughtErrorBindingV1,
+    ],
+    Field(discriminator="binding"),
+]
+
+
 class ExceptionInputV1(_CompilerModel):
     emitter_kind: Literal["exception"] = "exception"
     message_template: str
     title: str = ""
     stop_single_document: bool = False
     parameter_source: str = "caught_error"
+    binding: ExceptionBindingV1
 
 
 class StopInputV1(_CompilerModel):
