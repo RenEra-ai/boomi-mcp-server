@@ -1613,3 +1613,102 @@ def test_synthetic_stop_with_flipped_continue_is_rejected():
         _raises(check_emission_plan_invariants, broken, cfg, symbols).code
         == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
     )
+
+
+def test_branch_leg_prefix_matching_respects_pointer_boundaries():
+    """``/legs/1`` must not match ``/legs/10`` — a Branch may have 25 legs.
+
+    Without a trailing-slash boundary, leg 2's subtree prefix ``/legs/1``
+    silently accepts a target living in leg 11, so a misrouted control edge
+    survives for any branch with 11 or more legs.
+    """
+    leg_count = 12
+    nodes = [_node(1, BranchSemanticV1(leg_count=leg_count))]
+    edges = []
+    for leg in range(leg_count):
+        ordinal = 2 + leg
+        nodes.append(
+            _node(
+                ordinal,
+                StopSemanticV1(),
+                path="/body/steps/0/legs/{0}/terminal".format(leg),
+                exit_role="stop",
+            )
+        )
+        edges.append(
+            _edge(leg + 1, 1, ordinal, kind="branch_leg", local=leg + 1,
+                  leg_ordinal=leg + 1)
+        )
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=tuple(nodes),
+        edges=tuple(edges),
+        exit_node_ids=tuple("n{0}".format(2 + leg) for leg in range(leg_count)),
+    )
+    check_cfg_invariants(cfg)  # the honest 12-leg branch is valid
+
+    # Now point leg 2 (prefix "/legs/1") at leg 11's node ("/legs/10/terminal").
+    misrouted = list(cfg.edges)
+    misrouted[1] = misrouted[1].model_copy(update={"target_node_id": "n12"})
+    # Give leg 11's own edge the vacated target so only ONE rule is violated.
+    misrouted[10] = misrouted[10].model_copy(update={"target_node_id": "n3"})
+    broken = cfg.model_copy(update={"edges": tuple(misrouted)})
+    diagnostic = _raises(check_cfg_invariants, broken)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.message == "a branch leg targets a node outside its own leg"
+
+
+def test_decision_arm_prefix_matching_respects_pointer_boundaries():
+    """``/true_arm`` must not match ``/true_arm_extra``."""
+    base = _decision_cfg()
+    nodes = list(base.nodes)
+    nodes[1] = nodes[1].model_copy(
+        update={"source_path": "/body/steps/0/true_arm_extra/terminal"}
+    )
+    cfg = base.model_copy(update={"nodes": tuple(nodes)})
+    diagnostic = _raises(check_cfg_invariants, cfg)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.message == "a decision outcome targets a node outside its own arm"
+
+
+def test_omitted_terminal_is_reported_as_missing_not_nondeterministic():
+    """An omitted leaf is a MISSING terminal, not a nondeterminism defect.
+
+    Checking canonical order first reported every omission as
+    NONDETERMINISTIC and made the empty-declaration branch unreachable.
+    """
+    base = _linear_plan()
+    omitted = base.model_copy(update={"terminal_shape_ids": ()})
+    diagnostic = _check_plan(omitted)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_MISSING_TERMINAL
+    assert diagnostic.message == (
+        "a shape with no outgoing transition is not declared terminal"
+    )
+    # Duplicates/reordering remain nondeterminism.
+    duplicated = base.model_copy(update={"terminal_shape_ids": ("shape3", "shape3")})
+    assert _check_plan(duplicated).code == PROCESS_IR_COMPILE_NONDETERMINISTIC
+
+
+def test_symbol_lookup_is_indexed_not_a_linear_scan():
+    """Symbol resolution must not make plan validation O(nodes x symbols).
+
+    Structural rather than timed: the index is built once at construction, so
+    two equivalent tables stay equal and lookups are dict-backed.
+    """
+    symbols = SymbolTableV1(
+        symbols=tuple(
+            ComponentSymbolV1(
+                ref="$ref:s{0}".format(i),
+                component_id="c{0}".format(i),
+                component_type="t",
+            )
+            for i in range(500)
+        )
+    )
+    assert symbols.lookup("$ref:s499").component_id == "c499"
+    assert symbols.lookup("$ref:missing") is None
+    # Eagerly built, so using one table cannot make it unequal to its twin.
+    twin = SymbolTableV1(symbols=symbols.symbols)
+    symbols.lookup("$ref:s1")
+    assert symbols == twin
+    assert "index" not in symbols.model_dump_json()

@@ -40,7 +40,7 @@ from __future__ import annotations
 import json
 from typing import Any, List, Literal, Optional, Tuple, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from typing_extensions import Annotated
 
 # Geometry, byte-locked to the legacy emitter
@@ -181,12 +181,24 @@ class SymbolTableV1(_CompilerModel):
             seen.add(symbol.ref)
         return tuple(sorted(value, key=lambda item: item.ref))
 
+    _index: dict = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, __context: Any) -> None:
+        # Built EAGERLY, not lazily. Pydantic v2 includes private attributes in
+        # ``__eq__``, so a lazily-populated cache would make equality depend on
+        # whether ``lookup`` had been called — two identical tables comparing
+        # unequal purely because one had been used. Eager construction keeps
+        # every equivalent table byte-identical in state.
+        self._index = {symbol.ref: symbol for symbol in self.symbols}
+
     def lookup(self, ref: str) -> Optional[ComponentSymbolV1]:
-        """Resolve one reference, or ``None`` when it is not in the table."""
-        for symbol in self.symbols:
-            if symbol.ref == ref:
-                return symbol
-        return None
+        """Resolve one reference, or ``None`` when it is not in the table.
+
+        Index-backed: a linear scan here would make plan validation
+        O(nodes x symbols), since the checker resolves every node's references —
+        silently breaking the linear-validation contract on a symbol-heavy flow.
+        """
+        return self._index.get(ref)
 
 
 # ---------------------------------------------------------------------------

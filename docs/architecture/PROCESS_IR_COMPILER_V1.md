@@ -272,9 +272,13 @@ ids, unreachable nodes, missing terminals, noncanonical ordinals) they enforce:
   declared, so a multi-exit plan could otherwise wire one synthetic Stop onward to another exit and
   simply omit it from the declaration.
 
-**Complexity.** Validation is linear in nodes+edges. CFG out-edges are grouped by source **once**
-before the plan-node loop; rescanning `cfg.edges` per node would make it O(V·E), and
-`SequenceNodeV1.steps` has no upper bound. `test_plan_validation_scales_linearly_with_node_count`
+**Complexity.** Validation is linear in nodes+edges. Two places matter: CFG out-edges are grouped
+by source **once** before the plan-node loop (rescanning `cfg.edges` per node would make it O(V·E)),
+and `SymbolTableV1.lookup` is index-backed rather than a linear scan (the checker resolves every
+node's references, so a scan would make it O(nodes x symbols)). The index is built **eagerly** at
+construction, not lazily: pydantic v2 includes private attributes in `__eq__`, so a lazy cache would
+make two identical tables compare unequal once one had been used. `SequenceNodeV1.steps` has no
+upper bound, so neither cost is bounded by the schema. `test_plan_validation_scales_linearly_with_node_count`
 guards this and is calibrated to discriminate (measured: ~8.3× for 8× nodes grouped, ~30× rescanned;
 it fails if the rescan returns, and sizes below ~400 do not discriminate at all).
 - **Emitter input matches the node's semantics** (and, for connectors, its role), so a Map node

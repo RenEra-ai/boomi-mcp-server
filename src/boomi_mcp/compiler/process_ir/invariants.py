@@ -400,7 +400,10 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
             # Bind each leg edge to ITS authored leg subtree; ascending ordinals
             # alone would allow two legs' targets to be swapped.
             for edge in legs:
-                prefix = "{0}/legs/{1}".format(node.source_path, edge.leg_ordinal - 1)
+                # Trailing "/" is load-bearing: without it "/legs/1" also
+                # matches "/legs/10..19", which is reachable — a Branch may
+                # have up to 25 legs.
+                prefix = "{0}/legs/{1}/".format(node.source_path, edge.leg_ordinal - 1)
                 target_path = by_id[edge.target_node_id].source_path
                 if not target_path.startswith(prefix):
                     raise _fail(
@@ -435,7 +438,9 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
             # subtree. Each outcome's target must live under its own arm.
             for edge in outcomes:
                 arm = "true_arm" if edge.outcome == "true" else "false_arm"
-                prefix = "{0}/{1}".format(node.source_path, arm)
+                # Trailing "/" is load-bearing: a bare prefix test would let
+                # "/true_arm_extra/..." satisfy "/true_arm".
+                prefix = "{0}/{1}/".format(node.source_path, arm)
                 target_path = by_id[edge.target_node_id].source_path
                 if not target_path.startswith(prefix):
                     raise _fail(
@@ -980,6 +985,19 @@ def check_emission_plan_invariants(
     # exactly once. Membership-only checking accepted duplicates and arbitrary
     # order, either of which makes two equivalent plans serialise differently.
     canonical_terminals = [item.shape_id for item in nodes if not item.outgoing]
+    # OMISSIONS first: a leaf shape left out of the declaration is a MISSING
+    # terminal, not a nondeterminism defect. Checking canonical order first
+    # would report every omission as NONDETERMINISTIC and make the
+    # empty-declaration branch below unreachable for an otherwise valid plan.
+    missing = [shape for shape in canonical_terminals if shape not in declared_terminals]
+    if missing:
+        raise _fail(
+            PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
+            _PLAN_PHASE,
+            by_shape[missing[0]].source_path or "",
+            "a shape with no outgoing transition is not declared terminal",
+        )
+    # Whatever remains is a duplicate or a reordering — genuinely nondeterministic.
     if declared_terminals != canonical_terminals:
         raise _fail(
             PROCESS_IR_COMPILE_NONDETERMINISTIC,
