@@ -150,6 +150,26 @@ connector and the transform slot (`:880-1149`); and `_emit_map:3612` emits a sin
 straight to the next shape name. Pinned by
 `test_no_transport_shape_between_connector_and_map`.
 
+**Connector metadata is NORMALIZED, not passed through.** The legacy builder resolves connector
+aliases to a canonical subtype and normalizes action case, with role-dependent rules:
+`_canonical_connector_type:` maps `rest_client`/`rest` → `officialboomi-X3979C-rest-prod` and
+`soap_client` → `wssoapclientsdk`, passing other families through. A **source**
+(`_source_prefix_flow_entries:5467`) uses the canonical subtype and upper-cased action for the REST
+family, but a **lower-cased** subtype and raw action otherwise; a **target**
+(`_target_terminal_entries:5500`, `_branch_target_params:2402`) always uses the canonical subtype
+and an upper-cased action. The compiler reproduces these rules exactly, reusing the builder's own
+helper so the alias table cannot drift (pinned by
+`test_connector_canonicalization_matches_the_legacy_builder`). Passing a symbol's raw alias through
+would hand #138 an input that serialises non-parity connector XML — the frozen compat bindings
+literally carry `rest_client`.
+
+**Property names are stripped on the wire.** `_validate_bare_property_name` checks the *stripped*
+name but `SetDdpNodeV1`/`SetDppNodeV1` store the original, so `" DDP_X "` is a **valid** ProcessIR
+payload. The legacy emitter strips it (`_seq_linear_emit:5443` for the step name;
+`_emit_property_source_value:4051`/`:4063` for ddp/dpp source `property_name`; `:4040` for
+`profile_type`), so the compiler strips at snapshot time. `default_value` and static `value` are
+deliberately **not** stripped, matching the emitter.
+
 **Mapping dictionaries.** `_DATAPROCESS_OPERATIONS:162` (`custom_scripting`→`processtype "12"`
 "Custom Scripting", `split_documents`→`"8"` "Split Documents", `combine_documents`→`"9"` "Combine
 Documents"); cache aliases `cache_put`→`doccacheload`, `cache_get`→`doccacheretrieve` (with
@@ -199,6 +219,33 @@ requires the emission plan to describe exactly those facts for:
 
 There is deliberately **no test-only plan→XML emitter**: emission is #138's boundary, and a second
 emitter would only prove the two agreed with each other.
+
+## 5a. What the invariant checkers cover
+
+The checkers exist to catch a **compiler** defect, so they are exercised against hand-built
+malformed records, not just against real lowering output. Beyond the obvious (duplicate/dangling
+ids, unreachable nodes, missing terminals, noncanonical ordinals) they enforce:
+
+- **Exit role agrees with semantics** — a `stop`/`return_documents`/`exception` node must carry its
+  role, a `target` may be `routed_target` only, a `cache_put` may be `cache_stage` only, and no
+  other kind may claim a role. Without this a Stop with `exit_role=None` reads as a linear node and
+  would be planned with an outgoing transition the Stop emitter cannot serialise.
+- **Forward-only control flow** — checked *after* reachability, because a fully-reachable, acyclic,
+  join-free graph can still be ordered backwards (`n1 -> n3 -> n2`), which would wire a later shape
+  to an earlier one.
+- **Per-source local ordinals unique and contiguous** — sorted order alone accepts two edges sharing
+  `(source, local_ordinal)`, which plan lowering would silently renumber.
+- **Transitions match their CFG edge** — a transition must name a real edge *leaving that node* and
+  target that edge's shape. Checking only that the target shape exists would let a corrupted plan
+  turn a `message -> stop` edge into a self-loop. The synthetic Start must wire to the CFG entry.
+- **Emitter input matches the node's semantics** (and, for connectors, its role), so a Map node
+  cannot carry a `MessageInputV1`.
+- **Every component id came from the symbol table** — the `symbols` argument is genuinely consulted,
+  including nested Data Process and property-source `profile_id`s.
+- **Synthetic Stop adjacency** — a routed target must be *immediately* followed by its own synthetic
+  Stop and wired to it; matching counts alone would let the Stop sit anywhere.
+- **Branch dragpoint row** — Branch dragpoints all sit on `DRAGPOINT_Y`; unlike Decision there is no
+  second row.
 
 ## 6. Diagnostics
 

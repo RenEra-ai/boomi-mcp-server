@@ -30,6 +30,22 @@ from .invariants import check_cfg_invariants, check_emission_plan_invariants
 from .lowering import lower_cfg_to_emission_plan, lower_process_ir_to_cfg
 
 
+def _guarded(phase, action, *args):
+    """Run one compiler stage, converting an unexpected error into a diagnostic.
+
+    The exception's text and type are deliberately discarded: an internal
+    message can carry authored values, and diagnostics are logged.
+    """
+    try:
+        return action(*args)
+    except ProcessIRCompileError:
+        raise
+    except Exception:  # noqa: BLE001 - deliberate: never leak internals
+        raise ProcessIRCompileError(
+            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, phase, "")]
+        ) from None
+
+
 def compile_process_ir_v1(
     ir: ProcessIRV1, symbols: SymbolTableV1
 ) -> Tuple[SemanticCfgV1, EmissionPlanV1]:
@@ -39,18 +55,15 @@ def compile_process_ir_v1(
     diagnostic. The exception's text and type are deliberately NOT interpolated:
     an internal message can carry authored values, and diagnostics are logged.
     """
-    try:
-        cfg = lower_process_ir_to_cfg(ir)
-        check_cfg_invariants(cfg)
-        plan = lower_cfg_to_emission_plan(cfg, symbols)
-        check_emission_plan_invariants(plan, cfg, symbols)
-        return cfg, plan
-    except ProcessIRCompileError:
-        raise
-    except Exception:  # noqa: BLE001 - deliberate: never leak internals
-        raise ProcessIRCompileError(
-            [diagnostic(PROCESS_IR_COMPILE_INTERNAL, "emission_planning", "")]
-        ) from None
+    # Phase is part of the diagnostic contract, so an unexpected defect is
+    # attributed to the stage it actually happened in — reporting a CFG-lowering
+    # crash as "emission_planning" sends a reader to the wrong half of the
+    # compiler.
+    cfg = _guarded("semantic_lowering", lower_process_ir_to_cfg, ir)
+    _guarded("semantic_lowering", check_cfg_invariants, cfg)
+    plan = _guarded("emission_planning", lower_cfg_to_emission_plan, cfg, symbols)
+    _guarded("emission_planning", check_emission_plan_invariants, plan, cfg, symbols)
+    return cfg, plan
 
 
 def parse_and_compile_process_ir_v1(

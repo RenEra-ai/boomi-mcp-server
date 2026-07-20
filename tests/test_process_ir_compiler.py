@@ -239,6 +239,96 @@ def _plan_facts(plan):
     return facts
 
 
+# Emitter-input field -> the legacy XML attribute it must equal, per shapetype.
+# Escaped/derived text (message body, exception template) is deliberately absent:
+# MessageFormat and XML escaping are the #138 emitter's boundary, so the plan
+# carries the RAW value and comparing it here would pin the wrong layer.
+_CONFIG_FIELD_MAP = {
+    "connectoraction": {
+        "connector_type": "connectorType",
+        "action_type": "actionType",
+        "connection_id": "connectionId",
+        "operation_id": "operationId",
+    },
+    "map": {"map_id": "mapId"},
+    "doccacheload": {"document_cache_id": "docCache"},
+    "doccacheretrieve": {
+        "document_cache_id": "docCache",
+        "empty_cache_behavior": "emptyCacheBehavior",
+    },
+    "doccacheremove": {"document_cache_id": "docCache"},
+    "processcall": {"process_id": "processId"},
+    "decision": {"comparison": "comparison"},
+    "returndocuments": {"label": "label"},
+}
+
+
+def _config_element(shape):
+    configuration = shape.find("configuration")
+    if configuration is None or len(configuration) == 0:
+        return None
+    return configuration[0]
+
+
+def _legacy_config_attrs(process_xml):
+    """Map shape name -> (config tag, attrib dict) from emitted XML."""
+    root = ET.fromstring(process_xml)
+    out = {}
+    for shape in root.iter("shape"):
+        element = _config_element(shape)
+        if element is not None:
+            out[shape.get("name")] = (element.tag, dict(element.attrib))
+    return out
+
+
+def _assert_emitter_inputs_match_legacy_config(plan, process_xml):
+    """Every resolved emitter-input value must equal the legacy XML attribute.
+
+    This is what catches connector-alias and wire-prefix drift — the shape/
+    geometry projection alone cannot see inside ``<configuration>``.
+    """
+    legacy = _legacy_config_attrs(process_xml)
+    checked = 0
+    for node in plan.nodes:
+        shapetype = _PLAN_SHAPETYPE[node.emitter_input.emitter_kind]
+        fields = _CONFIG_FIELD_MAP.get(shapetype)
+        entry = legacy.get(node.shape_id)
+        if not fields or entry is None:
+            continue
+        _tag, attrib = entry
+        for field, attribute in fields.items():
+            planned = getattr(node.emitter_input, field, None)
+            if planned is None or attribute not in attrib:
+                continue
+            assert planned == attrib[attribute], (
+                node.shape_id,
+                field,
+                planned,
+                attrib[attribute],
+            )
+            checked += 1
+    return checked
+
+
+def _assert_property_wire_ids_match_legacy(plan, process_xml):
+    """DDP/DPP wire ids and persist flags must match the legacy emitter."""
+    root = ET.fromstring(process_xml)
+    by_shape = {shape.get("name"): shape for shape in root.iter("shape")}
+    checked = 0
+    for node in plan.nodes:
+        if node.emitter_input.emitter_kind != "setproperties_step":
+            continue
+        prop = by_shape[node.shape_id].find(
+            "configuration/documentproperties/documentproperty"
+        )
+        assert prop is not None, node.shape_id
+        assert node.emitter_input.property_id == prop.get("propertyId")
+        assert node.emitter_input.display_name == prop.get("name")
+        assert str(node.emitter_input.persist).lower() == prop.get("persist")
+        checked += 1
+    return checked
+
+
 def _build_legacy(config, name="ParityProcess"):
     builder = (
         WrapperSubprocessBuilder
@@ -273,6 +363,129 @@ def test_plan_matches_legacy_builder_xml_for_compat_cases(case_name):
     check_cfg_invariants(cfg)
     check_emission_plan_invariants(plan, cfg, symbols)
     assert _plan_facts(plan) == _xml_facts(_build_legacy(config))
+
+
+@pytest.mark.parametrize("doc_name", sorted(GOLDEN_DOCS))
+def test_emitter_inputs_match_legacy_configuration_for_goldens(doc_name):
+    """Resolved emitter-input values must equal the legacy `<configuration>`.
+
+    The shape/geometry projection above cannot see inside `<configuration>`, so
+    it happily passed while the plan carried a raw connector alias
+    (``rest_client``) that the legacy builder canonicalizes to
+    ``officialboomi-X3979C-rest-prod``. This closes that blind spot.
+    """
+    ir, _cfg, plan = _compile(GOLDEN_DOCS[doc_name])
+    legacy_config = ir_to_legacy_flow_sequence(ir, _context(with_fallback=True))
+    process_xml = _build_legacy(legacy_config)
+    checked = _assert_emitter_inputs_match_legacy_config(plan, process_xml)
+    checked += _assert_property_wire_ids_match_legacy(plan, process_xml)
+    assert checked > 0, "projection compared nothing — the test would be vacuous"
+
+
+@pytest.mark.parametrize("case_name", sorted(COMPAT_CASES))
+def test_emitter_inputs_match_legacy_configuration_for_compat_cases(case_name):
+    config = copy.deepcopy(COMPAT_CASES[case_name]["config"])
+    ir = legacy_flow_sequence_to_ir(config)
+    cfg = lower_process_ir_to_cfg(ir)
+    plan = lower_cfg_to_emission_plan(cfg, _symbols_for(cfg))
+    process_xml = _build_legacy(config)
+    checked = _assert_emitter_inputs_match_legacy_config(plan, process_xml)
+    checked += _assert_property_wire_ids_match_legacy(plan, process_xml)
+    assert checked > 0, "projection compared nothing — the test would be vacuous"
+
+
+def test_connector_canonicalization_matches_the_legacy_builder():
+    """Pin the compiler's normalization against the builder's own helper.
+
+    The compiler reuses ``_canonical_connector_type`` lazily rather than
+    duplicating the alias table; this fails loudly if that reuse is ever
+    replaced by a local copy that drifts.
+    """
+    from boomi_mcp.categories.components.builders.process_flow_builder import (
+        _canonical_connector_type,
+    )
+    from boomi_mcp.compiler.process_ir.lowering import _canonical_connector_metadata
+
+    for alias in ("rest_client", "rest", "database", "soap_client", "wssoapclientsdk"):
+        canonical = _canonical_connector_type(alias)
+        target_type, target_action = _canonical_connector_metadata(
+            "target", alias, " send "
+        )
+        assert target_type == canonical
+        assert target_action == "SEND"
+
+        source_type, source_action = _canonical_connector_metadata(
+            "source", alias, " Get "
+        )
+        if alias in ("rest_client", "rest"):
+            assert source_type == canonical
+            assert source_action == "GET"
+        else:
+            assert source_type == canonical.lower()
+            assert source_action == "Get"
+
+
+def test_padded_property_name_is_stripped_like_the_legacy_emitter():
+    """``_validate_bare_property_name`` accepts a padded name; the wire must not.
+
+    The validator checks the STRIPPED string, but the model stores the original,
+    so `" DDP_X "` is a valid ProcessIR payload. The legacy emitter strips it, so
+    the compiler must too — otherwise the wire id becomes
+    ``dynamicdocument. DDP_X ``.
+    """
+    payload = {
+        "version": "1",
+        "body": {
+            "kind": "sequence",
+            "steps": [
+                {
+                    "kind": "source",
+                    "connection_ref": "$ref:db_conn",
+                    "operation_ref": "$ref:db_op",
+                },
+                # Written first, so the lineage validator accepts the read below.
+                {
+                    "kind": "set_ddp",
+                    "name": "SRC_PADDED",
+                    "source_values": [{"value_type": "static", "value": "seed"}],
+                },
+                {
+                    "kind": "set_ddp",
+                    "name": "  DDP_PADDED  ",
+                    "source_values": [
+                        {"value_type": "ddp", "property_name": "  SRC_PADDED  "}
+                    ],
+                },
+                {
+                    "kind": "target",
+                    "connection_ref": "$ref:rest_conn",
+                    "operation_ref": "$ref:rest_op",
+                },
+                {"kind": "stop"},
+            ],
+        },
+    }
+    # The padded name really is accepted by the #136 validator, and stored raw.
+    ir = parse_process_ir_v1(payload)
+    assert ir.body.steps[2].name == "  DDP_PADDED  "
+
+    cfg = lower_process_ir_to_cfg(ir)
+    plan = lower_cfg_to_emission_plan(cfg, _symbols_for(cfg))
+    properties = [
+        node.emitter_input
+        for node in plan.nodes
+        if node.emitter_input.emitter_kind == "setproperties_step"
+    ]
+    assert len(properties) == 2
+    prop = properties[1]  # the one authored with a padded name
+    assert prop.property_id == "dynamicdocument.DDP_PADDED"
+    assert prop.display_name == "Dynamic Document Property - DDP_PADDED"
+    assert prop.source_values[0].property_id == "dynamicdocument.SRC_PADDED"
+    assert prop.source_values[0].property_name == "Dynamic Document Property - SRC_PADDED"
+
+    # And it agrees with what the legacy emitter actually writes.
+    legacy_config = ir_to_legacy_flow_sequence(ir, _context(with_fallback=True))
+    _assert_property_wire_ids_match_legacy(plan, _build_legacy(legacy_config))
 
 
 @pytest.mark.parametrize("case_name", sorted(COMPAT_CASES))

@@ -98,6 +98,40 @@ _EXIT_KINDS = {
 }
 
 
+def _canonical_connector_metadata(role: str, connector_type: str, action_type: str):
+    """Normalise connector metadata exactly as the legacy composed path does.
+
+    The legacy builder does NOT emit a symbol's connector family verbatim: it
+    resolves aliases to the canonical subtype (``rest_client`` ->
+    ``officialboomi-X3979C-rest-prod``, ``soap_client`` -> ``wssoapclientsdk``)
+    and normalises action case, with rules that differ by role
+    (``_source_prefix_flow_entries:5467`` vs ``_target_terminal_entries:5500``):
+
+    * source, REST family -> canonical subtype, action upper-cased
+    * source, other       -> canonical subtype LOWER-cased, action left raw
+    * target, any family  -> canonical subtype, action upper-cased
+
+    Passing a symbol's raw alias straight through would hand #138 an input that
+    serialises non-parity connector XML. The legacy helpers are imported lazily
+    so they stay the single source of truth (a duplicated alias table would
+    drift) without charging every ``import boomi_mcp.compiler`` for the 7.5k-line
+    builder module. ``test_compiler_connector_canonicalization_matches_builder``
+    pins the agreement.
+    """
+    from ...categories.components.builders.process_flow_builder import (
+        _canonical_connector_type,
+        _resolve_rest_connector_type,
+    )
+
+    canonical = _canonical_connector_type(connector_type)
+    action = str(action_type or "").strip()
+    if role == "target":
+        return canonical, action.upper()
+    if _resolve_rest_connector_type(connector_type) is not None:
+        return canonical, action.upper()
+    return canonical.lower(), action
+
+
 def _pointer_escape(token: str) -> str:
     return token.replace("~", "~0").replace("/", "~1")
 
@@ -234,7 +268,12 @@ def _semantic_for(node: Any, *, routed: bool = False) -> Any:
     if kind in ("set_ddp", "set_dpp"):
         return SetPropertySemanticV1(
             scope="ddp" if kind == "set_ddp" else "dpp",
-            name=node.name,
+            # ``_validate_bare_property_name`` checks the STRIPPED name but the
+            # model stores the original, so " DDP_X " is a valid payload. The
+            # legacy emitter strips it (``_seq_linear_emit:5443``), so stripping
+            # here is required for parity — otherwise the wire id would be
+            # "dynamicdocument. DDP_X ".
+            name=node.name.strip(),
             persist=bool(getattr(node, "persist", False)),
             source_values=tuple(
                 _property_source_semantic(source) for source in node.source_values
@@ -319,14 +358,23 @@ def _property_source_semantic(source: Any) -> Any:
             element_id=source.element_id,
             element_name=source.element_name,
             profile_ref=source.profile_ref,
-            profile_type=source.profile_type,
+            # ``profile_type`` is stripped on the wire (builder :4040).
+            profile_type=(
+                source.profile_type.strip()
+                if isinstance(source.profile_type, str)
+                else source.profile_type
+            ),
         )
+    # ``property_name`` is stripped on the wire for BOTH ddp and dpp sources
+    # (builder :4051 / :4063); ``default_value`` deliberately is NOT.
     if value_type == "ddp":
         return _DdpPropertySourceSemanticV1(
-            property_name=source.property_name, default_value=source.default_value
+            property_name=source.property_name.strip(),
+            default_value=source.default_value,
         )
     return _DppPropertySourceSemanticV1(
-        property_name=source.property_name, default_value=source.default_value
+        property_name=source.property_name.strip(),
+        default_value=source.default_value,
     )
 
 
@@ -633,14 +681,17 @@ def _emitter_input_for(node: CfgNodeV1, symbols: SymbolTableV1) -> Any:
                     "path fuses the start and connector shapes"
                 ),
             )
+        connector_type, action_type = _canonical_connector_metadata(
+            semantic.role, operation.connector_type, operation.action_type
+        )
         return ConnectorActionInputV1(
             emitter_kind=(
                 "connectoraction_source"
                 if semantic.role == "source"
                 else "connectoraction_target"
             ),
-            connector_type=operation.connector_type,
-            action_type=operation.action_type,
+            connector_type=connector_type,
+            action_type=action_type,
             connection_id=connection.component_id,
             operation_id=operation.component_id,
             userlabel=label,

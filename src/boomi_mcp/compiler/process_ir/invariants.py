@@ -60,6 +60,49 @@ _PLAN_PHASE = "emission_planning"
 # sequential successor.
 _CONTROL_KINDS = frozenset({"branch", "decision"})
 
+# Which exit roles each semantic kind may carry. A terminal semantic MUST carry
+# its role; a ``target`` is an exit only in a leg/arm position (routed), and a
+# ``cache_put`` only as a target-less staging terminal — hence the ``None``
+# alternative on those two. Everything else may never claim an exit role.
+_ALLOWED_EXIT_ROLES = {
+    "stop": ("stop",),
+    "return_documents": ("return_documents",),
+    "exception": ("exception",),
+    "connector": (None, "routed_target"),
+    "cache_put": (None, "cache_stage"),
+}
+
+# Semantic kind -> the emitter kind the plan must resolve it to.
+_EXPECTED_EMITTER_KIND = {
+    "message": ("message",),
+    "map": ("map",),
+    "flow_control": ("flowcontrol",),
+    "data_process": ("dataprocess",),
+    "cache_put": ("doccacheload",),
+    "cache_get": ("doccacheretrieve",),
+    "document_cache_retrieve": ("doccacheretrieve",),
+    "cache_remove": ("doccacheremove",),
+    "set_property": ("setproperties_step",),
+    "process_call": ("processcall",),
+    "branch": ("branch",),
+    "decision": ("decision",),
+    "exception": ("exception",),
+    "stop": ("stop",),
+    "return_documents": ("returndocuments",),
+    "connector": ("connectoraction_source", "connectoraction_target"),
+}
+
+# Emitter-input fields that must name a component resolved through the symbol
+# table. Anything here that is absent from the table means the plan carries a
+# component reference the caller never supplied.
+_RESOLVED_ID_FIELDS = (
+    "connection_id",
+    "operation_id",
+    "map_id",
+    "document_cache_id",
+    "process_id",
+)
+
 
 def _fail(code: str, phase: str, path: str, message: str, node_id: Optional[str] = None):
     return raise_compile_error(
@@ -168,6 +211,21 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
             edges[0].provenance_path if edges else "",
             "CFG edges are not in canonical (source ordinal, local ordinal) order",
         )
+    # Sorted order alone is too weak: two edges sharing (source, local_ordinal)
+    # sort fine, and plan lowering would silently renumber them. Local ordinals
+    # must be unique and contiguous from 1 per source.
+    local_by_source = {}
+    for edge in edges:
+        local_by_source.setdefault(edge.source_node_id, []).append(edge.local_ordinal)
+    for source_id, locals_ in local_by_source.items():
+        if locals_ != list(range(1, len(locals_) + 1)):
+            raise _fail(
+                PROCESS_IR_COMPILE_NONDETERMINISTIC,
+                _SEMANTIC_PHASE,
+                by_id[source_id].source_path,
+                "edge local ordinals must be unique and contiguous from 1 per source",
+                source_id,
+            )
 
     # --- entry, joins, cycles ---------------------------------------------
     inbound: Dict[str, int] = {node.node_id: 0 for node in nodes}
@@ -225,6 +283,37 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 _SEMANTIC_PHASE,
                 node.source_path,
                 "node is not reachable from the control-flow entry",
+                node.node_id,
+            )
+
+    # V1 wiring is forward-only: plan shape ordinals follow CFG ordinals, so a
+    # backward edge would emit a shape wired to an EARLIER shape. Checked after
+    # reachability because a fully-reachable, acyclic, join-free graph can still
+    # be ordered backwards (n1 -> n3 -> n2), which every check above accepts.
+    for edge in edges:
+        if by_id[edge.target_node_id].ordinal <= by_id[edge.source_node_id].ordinal:
+            raise _fail(
+                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                _SEMANTIC_PHASE,
+                edge.provenance_path,
+                "control flow must be forward-only: an edge targets an earlier node",
+            )
+
+    # --- exit role must agree with the node's semantics --------------------
+    # Without this, a Stop carrying ``exit_role=None`` reads as an ordinary
+    # linear node (so it is allowed a successor, and the plan would emit a Stop
+    # with an outgoing transition the Stop emitter cannot serialise), and a
+    # Message carrying ``exit_role="stop"`` reads as a terminal.
+    for node in nodes:
+        kind = node.semantic.semantic_kind
+        role = node.exit_role
+        allowed = _ALLOWED_EXIT_ROLES.get(kind, (None,))
+        if role not in allowed:
+            raise _fail(
+                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                _SEMANTIC_PHASE,
+                node.source_path,
+                "exit role is not valid for this node's semantics",
                 node.node_id,
             )
 
@@ -426,6 +515,75 @@ def check_emission_plan_invariants(
             "the plan must contain exactly one synthetic start shape",
         )
 
+    # The Start shape is synthetic, so it has no CFG edge to check against —
+    # but it must still target the CFG entry node's shape.
+    shape_for_cfg_node = {
+        node.cfg_node_id: node.shape_id for node in nodes if node.origin == "ir"
+    }
+    cfg_edges_by_id = {edge.edge_id: edge for edge in cfg.edges}
+    entry_shape = shape_for_cfg_node.get(cfg.entry_node_id)
+    if [item.to_shape_id for item in start.outgoing] != [entry_shape]:
+        raise _fail(
+            PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+            _PLAN_PHASE,
+            "",
+            "the synthetic start shape must wire to the CFG entry node's shape",
+        )
+
+    # --- symbol resolution --------------------------------------------------
+    # Every component id the plan carries must have come from the symbol table.
+    known_component_ids = {symbol.component_id for symbol in symbols.symbols}
+    for node in nodes:
+        emitter = node.emitter_input
+        for field in _RESOLVED_ID_FIELDS:
+            value = getattr(emitter, field, None)
+            if value is not None and value not in known_component_ids:
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    node.source_path or "",
+                    "plan carries a component id absent from the symbol table",
+                )
+        for step in getattr(emitter, "steps", ()) or ():
+            profile_id = getattr(step, "profile_id", None)
+            if profile_id is not None and profile_id not in known_component_ids:
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    node.source_path or "",
+                    "plan carries a profile id absent from the symbol table",
+                )
+        for source in getattr(emitter, "source_values", ()) or ():
+            profile_id = getattr(source, "profile_id", None)
+            if profile_id is not None and profile_id not in known_component_ids:
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    node.source_path or "",
+                    "plan carries a profile id absent from the symbol table",
+                )
+
+    # --- terminals may not carry outgoing flow ------------------------------
+    # Checked BEFORE per-transition wiring so that "flow continues past a
+    # terminal" is reported as ambiguous control flow rather than as whatever
+    # wiring detail of the bogus transition happens to fail first.
+    declared_terminals = list(plan.terminal_shape_ids)
+    for shape in declared_terminals:
+        if shape not in by_shape:
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                "",
+                "declared terminal shape does not exist",
+            )
+        if by_shape[shape].outgoing:
+            raise _fail(
+                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                _PLAN_PHASE,
+                by_shape[shape].source_path or "",
+                "a terminal shape must have no outgoing transitions",
+            )
+
     # --- CFG correspondence -------------------------------------------------
     cfg_by_id = {node.node_id: node for node in cfg.nodes}
     routed = {
@@ -450,6 +608,28 @@ def check_emission_plan_invariants(
             "",
             "synthetic terminal stops do not match the routed-target exits",
         )
+    # Counting alone would let a synthetic Stop sit anywhere in the sequence.
+    # V1 shape allocation requires it IMMEDIATELY after its routed target, with
+    # the target wired to it — that adjacency is what reproduces the legacy
+    # ``fallthrough=[target, stop]`` numbering.
+    for index, node in enumerate(nodes):
+        if node.origin != "ir" or node.cfg_node_id not in routed:
+            continue
+        following = nodes[index + 1] if index + 1 < len(nodes) else None
+        if following is None or following.synthetic_role != "terminal_stop":
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                node.source_path or "",
+                "a routed target must be immediately followed by its synthetic stop",
+            )
+        if [item.to_shape_id for item in node.outgoing] != [following.shape_id]:
+            raise _fail(
+                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                _PLAN_PHASE,
+                node.source_path or "",
+                "a routed target must wire to its own synthetic stop",
+            )
 
     for node in nodes:
         path = node.source_path or ""
@@ -475,6 +655,27 @@ def check_emission_plan_invariants(
                     path,
                     "plan node source path disagrees with its CFG node",
                 )
+            # The emitter input must actually correspond to the node's
+            # semantics; otherwise a Map node carrying a MessageInputV1 would
+            # reach the emitter and serialise the wrong shape entirely.
+            semantic_kind = cfg_by_id[node.cfg_node_id].semantic.semantic_kind
+            expected = _EXPECTED_EMITTER_KIND.get(semantic_kind, ())
+            if node.emitter_input.emitter_kind not in expected:
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    path,
+                    "emitter input does not correspond to the CFG node's semantics",
+                )
+            if semantic_kind == "connector":
+                role = cfg_by_id[node.cfg_node_id].semantic.role
+                if node.emitter_input.emitter_kind != "connectoraction_{0}".format(role):
+                    raise _fail(
+                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _PLAN_PHASE,
+                        path,
+                        "connector emitter input does not match the node's role",
+                    )
         else:
             if node.cfg_node_id is not None or node.source_path is not None:
                 raise _fail(
@@ -489,6 +690,17 @@ def check_emission_plan_invariants(
                     _PLAN_PHASE,
                     "",
                     "a synthetic plan node must declare its synthetic role",
+                )
+            expected_synthetic = {
+                "start": "start_noaction",
+                "terminal_stop": "stop",
+            }.get(node.synthetic_role)
+            if node.emitter_input.emitter_kind != expected_synthetic:
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    "",
+                    "synthetic plan node carries the wrong emitter input",
                 )
 
         # --- geometry -------------------------------------------------------
@@ -539,6 +751,35 @@ def check_emission_plan_invariants(
                     path,
                     "dragpoint geometry does not match the parity formula",
                 )
+            # A transition must correspond to a REAL CFG edge out of this node,
+            # to that edge's target. Checking only that the target shape exists
+            # would let a corrupted plan turn a message->stop edge into a
+            # self-loop and still pass.
+            if transition.provenance == "cfg_edge":
+                edge = cfg_edges_by_id.get(transition.cfg_edge_id or "")
+                if edge is None or edge.source_node_id != node.cfg_node_id:
+                    raise _fail(
+                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _PLAN_PHASE,
+                        path,
+                        "transition does not reference a CFG edge out of this node",
+                    )
+                if transition.to_shape_id != shape_for_cfg_node.get(
+                    edge.target_node_id
+                ):
+                    raise _fail(
+                        PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                        _PLAN_PHASE,
+                        path,
+                        "transition target does not match its CFG edge target",
+                    )
+            elif transition.cfg_edge_id is not None:
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    path,
+                    "a synthetic transition must not claim a CFG edge",
+                )
 
         kind = node.emitter_input.emitter_kind
         if kind == "decision":
@@ -579,6 +820,15 @@ def check_emission_plan_invariants(
                     path,
                     "branch numBranches does not match its wired leg count",
                 )
+            # Every branch dragpoint sits on the SAME row as an ordinary edge —
+            # unlike Decision, a Branch has no second row (builder :4368).
+            if any(item.y != DRAGPOINT_Y for item in transitions):
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    path,
+                    "branch dragpoint row does not match parity geometry",
+                )
         else:
             for item in transitions:
                 if item.identifier is not None or item.text is not None:
@@ -597,22 +847,6 @@ def check_emission_plan_invariants(
                     )
 
     # --- terminals ----------------------------------------------------------
-    declared_terminals = list(plan.terminal_shape_ids)
-    for shape in declared_terminals:
-        if shape not in by_shape:
-            raise _fail(
-                PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
-                _PLAN_PHASE,
-                "",
-                "declared terminal shape does not exist",
-            )
-        if by_shape[shape].outgoing:
-            raise _fail(
-                PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
-                _PLAN_PHASE,
-                by_shape[shape].source_path or "",
-                "a terminal shape must have no outgoing transitions",
-            )
     if not declared_terminals:
         raise _fail(
             PROCESS_IR_SEMANTIC_MISSING_TERMINAL,

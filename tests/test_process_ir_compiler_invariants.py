@@ -180,13 +180,18 @@ def _plan_node(ordinal, emitter=None, *, cfg_node=None, path=None, role=None, ou
 
 
 def _wire(source_ordinal, local, target, **kwargs):
+    provenance = kwargs.pop("provenance", "cfg_edge")
+    # A cfg_edge-provenance transition must name the CFG edge it came from; the
+    # checker verifies the edge exists, leaves this node, and targets this shape.
+    cfg_edge = kwargs.pop("cfg_edge_id", "e1" if provenance == "cfg_edge" else None)
     return EmissionTransitionV1(
         local_ordinal=local,
         dragpoint_name="shape{0}.dragpoint{1}".format(source_ordinal, local),
         to_shape_id="shape{0}".format(target),
         x=dragpoint_x(source_ordinal),
         y=kwargs.pop("y", DRAGPOINT_Y),
-        provenance=kwargs.pop("provenance", "cfg_edge"),
+        provenance=provenance,
+        cfg_edge_id=cfg_edge,
         **kwargs
     )
 
@@ -312,6 +317,65 @@ def test_unreachable_node_is_a_semantic_defect():
         exit_node_ids=("n1",),
     )
     assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_UNREACHABLE
+
+
+def test_backward_edge_is_ambiguous_flow():
+    """A backward-ordered graph passes entry/join/cycle/reachability but is invalid.
+
+    ``n1 -> n3 -> n2`` has one entry, no join, no cycle, and full reachability —
+    yet plan shape ordinals follow CFG ordinals, so it would wire shape4 back to
+    shape3. V1 control flow is forward-only.
+    """
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(1),
+            _node(2, StopSemanticV1(), path="/body/steps/1", exit_role="stop"),
+            _node(3, path="/body/steps/2"),
+        ),
+        edges=(_edge(1, 1, 3), _edge(2, 3, 2, kind="terminal")),
+        exit_node_ids=("n2",),
+    )
+    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+
+
+def test_duplicate_local_ordinals_on_one_source_are_nondeterministic():
+    """Sorted order alone accepts two edges sharing (source, local_ordinal)."""
+    base = _branch_cfg(2)
+    edges = (
+        base.edges[0],
+        base.edges[1].model_copy(update={"local_ordinal": 1}),
+    )
+    cfg = base.model_copy(update={"edges": edges})
+    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_COMPILE_NONDETERMINISTIC
+
+
+def test_stop_semantics_must_carry_the_stop_exit_role():
+    """A Stop with ``exit_role=None`` would read as a linear node with a successor."""
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(1, StopSemanticV1()),
+            _node(2, StopSemanticV1(), path="/body/steps/1", exit_role="stop"),
+        ),
+        edges=(_edge(1, 1, 2, kind="terminal"),),
+        exit_node_ids=("n2",),
+    )
+    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+
+
+def test_non_terminal_semantics_may_not_claim_an_exit_role():
+    """A Message marked ``exit_role="stop"`` must not read as a terminal."""
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(1),
+            _node(2, _msg(), path="/body/steps/1", exit_role="stop"),
+        ),
+        edges=(_edge(1, 1, 2, kind="terminal"),),
+        exit_node_ids=("n2",),
+    )
+    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
 
 
 def test_zero_entries_is_ambiguous_flow():
@@ -730,3 +794,180 @@ def test_generated_identities_are_positional_not_derived_from_values():
     check_cfg_invariants(cfg)
     assert [node.node_id for node in cfg.nodes] == ["n1", "n2"]
     assert [edge.edge_id for edge in cfg.edges] == ["e1"]
+
+
+def test_transition_must_match_its_cfg_edge_target():
+    """A rewired transition must not pass just because the target shape exists."""
+    base = _linear_plan()
+    # Turn message->stop into a self-loop on the message shape.
+    looped = base.nodes[1].outgoing[0].model_copy(update={"to_shape_id": "shape2"})
+    node = base.nodes[1].model_copy(update={"outgoing": (looped,)})
+    broken = base.model_copy(update={"nodes": (base.nodes[0], node, base.nodes[2])})
+    assert _check_plan(broken).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+
+
+def test_transition_must_reference_an_edge_leaving_this_node():
+    base = _linear_plan()
+    orphan = base.nodes[1].outgoing[0].model_copy(update={"cfg_edge_id": "e9"})
+    node = base.nodes[1].model_copy(update={"outgoing": (orphan,)})
+    broken = base.model_copy(update={"nodes": (base.nodes[0], node, base.nodes[2])})
+    assert _check_plan(broken).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+
+
+def test_start_must_wire_to_the_cfg_entry_shape():
+    base = _linear_plan()
+    misrouted = base.nodes[0].outgoing[0].model_copy(update={"to_shape_id": "shape3"})
+    node = base.nodes[0].model_copy(update={"outgoing": (misrouted,)})
+    broken = base.model_copy(update={"nodes": (node,) + base.nodes[1:]})
+    assert _check_plan(broken).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+
+
+def test_emitter_input_must_match_the_cfg_node_semantics():
+    """A Map node carrying a MessageInputV1 would serialise the wrong shape."""
+    from boomi_mcp.compiler.process_ir.contracts import MapSemanticV1
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(1, MapSemanticV1(map_ref="$ref:m")),
+            _node(2, StopSemanticV1(), path="/body/steps/1", exit_role="stop"),
+        ),
+        edges=(_edge(1, 1, 2, kind="terminal"),),
+        exit_node_ids=("n2",),
+    )
+    plan = _linear_plan()  # its shape2 carries MessageInputV1, not MapInputV1
+    assert (
+        _raises(check_emission_plan_invariants, plan, cfg, SymbolTableV1(symbols=())).code
+        == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    )
+
+
+def test_component_id_absent_from_the_symbol_table_is_rejected():
+    """The ``symbols`` argument must actually be consulted."""
+    from boomi_mcp.compiler.process_ir.contracts import MapInputV1, MapSemanticV1
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(1, MapSemanticV1(map_ref="$ref:m")),
+            _node(2, StopSemanticV1(), path="/body/steps/1", exit_role="stop"),
+        ),
+        edges=(_edge(1, 1, 2, kind="terminal"),),
+        exit_node_ids=("n2",),
+    )
+    base = _linear_plan()
+    mapped = base.nodes[1].model_copy(
+        update={"emitter_input": MapInputV1(map_id="never-resolved")}
+    )
+    plan = base.model_copy(update={"nodes": (base.nodes[0], mapped, base.nodes[2])})
+
+    known = SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(ref="$ref:m", component_id="resolved", component_type="t"),
+        )
+    )
+    assert (
+        _raises(check_emission_plan_invariants, plan, cfg, known).code
+        == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    )
+    # And the same plan passes once the id is one the symbol table resolved.
+    ok = base.model_copy(
+        update={
+            "nodes": (
+                base.nodes[0],
+                base.nodes[1].model_copy(
+                    update={"emitter_input": MapInputV1(map_id="resolved")}
+                ),
+                base.nodes[2],
+            )
+        }
+    )
+    check_emission_plan_invariants(ok, cfg, known)
+
+
+def test_branch_dragpoint_row_is_checked():
+    """The Branch block validated labels but never the dragpoint row."""
+    cfg = _branch_cfg(2)
+    plan = EmissionPlanV1(
+        entry_shape_id="shape1",
+        nodes=(
+            _plan_node(
+                1, StartNoActionInputV1(), role="start",
+                out=[_wire(1, 1, 2, provenance="synthetic")],
+            ),
+            _plan_node(
+                2,
+                BranchInputV1(num_branches=2),
+                cfg_node="n1",
+                path="/body/steps/0",
+                out=[
+                    _wire(2, 1, 3, identifier="1", text="1", y=999.0, cfg_edge_id="e1"),
+                    _wire(2, 2, 4, identifier="2", text="2", y=999.0, cfg_edge_id="e2"),
+                ],
+            ),
+            _plan_node(3, StopInputV1(), cfg_node="n2", path="/body/steps/0/legs/0/terminal"),
+            _plan_node(4, StopInputV1(), cfg_node="n3", path="/body/steps/0/legs/1/terminal"),
+        ),
+        terminal_shape_ids=("shape3", "shape4"),
+    )
+    assert _check_plan(plan, cfg).code == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+
+
+def test_synthetic_stop_must_follow_its_routed_target():
+    """Counting synthetic stops is not enough — adjacency is what V1 pins."""
+    from boomi_mcp.compiler.process_ir.contracts import (
+        ConnectorActionInputV1,
+        MessageInputV1 as _Msg,
+    )
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                ConnectorSemanticV1(
+                    role="target", connection_ref="$ref:c", operation_ref="$ref:o"
+                ),
+                exit_role="routed_target",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    # The synthetic stop is present (count matches) but is NOT adjacent: an
+    # unrelated shape sits between the routed target and its stop.
+    plan = EmissionPlanV1(
+        entry_shape_id="shape1",
+        nodes=(
+            _plan_node(
+                1, StartNoActionInputV1(), role="start",
+                out=[_wire(1, 1, 2, provenance="synthetic")],
+            ),
+            _plan_node(
+                2,
+                ConnectorActionInputV1(
+                    emitter_kind="connectoraction_target",
+                    connector_type="database",
+                    action_type="SEND",
+                    connection_id="cid",
+                    operation_id="oid",
+                ),
+                cfg_node="n1",
+                path="/body/steps/0",
+                out=[_wire(2, 1, 4, provenance="synthetic")],
+            ),
+            _plan_node(3, _Msg(text="interloper"), role="terminal_stop"),
+            _plan_node(4, StopInputV1(), role="terminal_stop"),
+        ),
+        terminal_shape_ids=("shape4",),
+    )
+    symbols = SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(ref="$ref:c", component_id="cid", component_type="t"),
+            ComponentSymbolV1(ref="$ref:o", component_id="oid", component_type="t"),
+        )
+    )
+    assert (
+        _raises(check_emission_plan_invariants, plan, cfg, symbols).code
+        == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    )
