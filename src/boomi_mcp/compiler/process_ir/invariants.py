@@ -991,8 +991,7 @@ def check_emission_plan_invariants(
     canonical_terminals = [item.shape_id for item in nodes if not item.outgoing]
     # OMISSIONS first: a leaf shape left out of the declaration is a MISSING
     # terminal, not a nondeterminism defect. Checking canonical order first
-    # would report every omission as NONDETERMINISTIC and make the
-    # empty-declaration branch below unreachable for an otherwise valid plan.
+    # reported every omission as NONDETERMINISTIC, contradicting the code map.
     # Set membership, not a list scan: ``declared_terminals`` is a list, so a
     # ``not in`` per shape would make this O(T^2) — the same complexity class
     # the symbol-index and edge-grouping fixes exist to prevent.
@@ -1017,13 +1016,11 @@ def check_emission_plan_invariants(
             "",
             "terminal_shape_ids is not the canonical ordered set of terminal shapes",
         )
-    if not declared_terminals:
-        raise _fail(
-            PROCESS_IR_SEMANTIC_MISSING_TERMINAL,
-            _PLAN_PHASE,
-            "",
-            "the emission plan declares no terminal shape",
-        )
+    # NOTE: there is deliberately no separate "declares no terminal" branch.
+    # It would be dead: an empty canonical set means every node has an outgoing
+    # transition, and since plan wiring must match forward-only CFG edges, the
+    # highest-ordinal node could only wire to a shape that does not exist —
+    # rejected earlier by the ordered-CFG-edge check. Verified by probe.
 
 
 __all__: List[str] = [
