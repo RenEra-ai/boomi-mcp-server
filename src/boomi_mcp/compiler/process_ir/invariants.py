@@ -25,6 +25,7 @@ error is how a caller ends up "fixing" correct input.
 
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional, Set
 
 from ...errors import (
@@ -91,6 +92,10 @@ _EXPECTED_EMITTER_KIND = {
     "return_documents": ("returndocuments",),
     "connector": ("connectoraction_source", "connectoraction_target"),
 }
+
+# The only authored positions that can hold a target terminal:
+# ``BranchLegV1.terminal`` and ``DecisionTrueArmV1.terminal``.
+_ROUTED_TARGET_PATH = re.compile(r"(?:/legs/\d+|/true_arm)/terminal$")
 
 # Emitter-input fields that must name a component resolved through the symbol
 # table. Anything here that is absent from the table means the plan carries a
@@ -321,15 +326,20 @@ def check_cfg_invariants(cfg: SemanticCfgV1) -> None:
                 "exit role is not valid for this node's semantics",
                 node.node_id,
             )
-        # A routed target is by definition a leg/arm TERMINAL. A root target is
-        # followed by an authored Stop and is not itself an exit, so accepting
-        # ``routed_target`` at a root position would synthesise a second Stop.
-        if role == "routed_target" and not node.source_path.endswith("/terminal"):
+        # A routed target is valid ONLY where the IR can actually author a
+        # target terminal: a Branch leg (``BranchLegV1.terminal``) or a Decision
+        # TRUE arm (``DecisionTrueArmV1.terminal``). A bare "/terminal" suffix
+        # test would also accept ``/false_arm/terminal``, but
+        # ``DecisionFalseArmV1.terminal`` is Stop/Branch/Exception only — no
+        # target — so that CFG is unrepresentable, and planning it would append
+        # a synthetic Stop on the reject route. A root target is likewise not an
+        # exit (an authored Stop follows it).
+        if role == "routed_target" and not _ROUTED_TARGET_PATH.search(node.source_path):
             raise _fail(
                 PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
                 _SEMANTIC_PHASE,
                 node.source_path,
-                "routed_target is only valid in a leg/arm terminal position",
+                "routed_target is only valid in a branch leg or decision true-arm terminal",
                 node.node_id,
             )
 
@@ -537,6 +547,12 @@ def check_emission_plan_invariants(
         node.cfg_node_id: node.shape_id for node in nodes if node.origin == "ir"
     }
     cfg_edges_by_id = {edge.edge_id: edge for edge in cfg.edges}
+    # Grouped ONCE. Scanning ``cfg.edges`` inside the per-node loop below would
+    # make validation O(V*E), and ``SequenceNodeV1.steps`` has no upper bound —
+    # 20k nodes would mean ~400M edge predicates on a perfectly valid input.
+    cfg_out_by_source: Dict[str, List] = {}
+    for edge in cfg.edges:
+        cfg_out_by_source.setdefault(edge.source_node_id, []).append(edge)
     entry_shape = shape_for_cfg_node.get(cfg.entry_node_id)
     if [item.to_shape_id for item in start.outgoing] != [entry_shape]:
         raise _fail(
@@ -751,9 +767,7 @@ def check_emission_plan_invariants(
         # then route True down the false arm. Comparing the ordered edge-id
         # sequence closes that.
         if node.origin == "ir":
-            cfg_out = [
-                edge for edge in cfg.edges if edge.source_node_id == node.cfg_node_id
-            ]
+            cfg_out = cfg_out_by_source.get(node.cfg_node_id, ())
             if cfg_by_id[node.cfg_node_id].exit_role == "routed_target":
                 # Its one transition is the compiler-owned Stop wire, checked
                 # for adjacency above; it has no CFG edges by construction.
@@ -790,6 +804,26 @@ def check_emission_plan_invariants(
                     _PLAN_PHASE,
                     path,
                     "the synthetic start must carry exactly one synthetic wire",
+                )
+        else:
+            # A synthetic Stop ends its path, full stop. Without this, a plan
+            # with several exits could wire one terminal_stop onward to another
+            # exit and omit it from ``terminal_shape_ids`` — the generic
+            # terminal check only inspects shapes that ARE declared, so flow
+            # would continue through a Stop the emitter cannot serialise.
+            if transitions:
+                raise _fail(
+                    PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW,
+                    _PLAN_PHASE,
+                    path,
+                    "a synthetic terminal stop must have no outgoing transitions",
+                )
+            if node.shape_id not in declared_terminals:
+                raise _fail(
+                    PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID,
+                    _PLAN_PHASE,
+                    path,
+                    "a synthetic terminal stop must be declared terminal",
                 )
         for transition in transitions:
             if transition.to_shape_id not in by_shape:

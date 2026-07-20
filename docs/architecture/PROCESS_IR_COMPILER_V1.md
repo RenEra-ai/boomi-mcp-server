@@ -243,9 +243,21 @@ ids, unreachable nodes, missing terminals, noncanonical ordinals) they enforce:
   provenance is restricted to exactly the Start wire and routed-target Stop wires — otherwise a
   malformed plan could relabel an ordinary wire as synthetic and skip correspondence entirely.
 - **`routed_target` is role- and position-checked** — only a `target` endpoint may carry it (a
-  *source* marked routed would get a synthetic Stop appended after it), and only in a leg/arm
-  `/terminal` position (a root target is followed by an authored Stop, so accepting it there would
-  synthesise a second one). Keying the exit-role table on `semantic_kind` alone missed both.
+  *source* marked routed would get a synthetic Stop appended after it), and only where the IR can
+  actually author a target terminal: `…/legs/{j}/terminal` or `…/true_arm/terminal`. Keying the
+  exit-role table on `semantic_kind` alone missed the role; a bare `/terminal` suffix test missed
+  the position, since `DecisionFalseArmV1.terminal` is Stop/Branch/Exception only — a target there
+  is unrepresentable, and planning it would append a synthetic Stop on the reject route.
+- **Synthetic Stops are inert and declared** — a `terminal_stop` must have no outgoing transitions
+  *and* appear in `terminal_shape_ids`. The generic terminal check only inspects shapes that are
+  declared, so a multi-exit plan could otherwise wire one synthetic Stop onward to another exit and
+  simply omit it from the declaration.
+
+**Complexity.** Validation is linear in nodes+edges. CFG out-edges are grouped by source **once**
+before the plan-node loop; rescanning `cfg.edges` per node would make it O(V·E), and
+`SequenceNodeV1.steps` has no upper bound. `test_plan_validation_scales_linearly_with_node_count`
+guards this and is calibrated to discriminate (measured: ~8.3× for 8× nodes grouped, ~30× rescanned;
+it fails if the rescan returns, and sizes below ~400 do not discriminate at all).
 - **Emitter input matches the node's semantics** (and, for connectors, its role), so a Map node
   cannot carry a `MessageInputV1`.
 - **Every component id came from the symbol table** — the `symbols` argument is genuinely consulted,

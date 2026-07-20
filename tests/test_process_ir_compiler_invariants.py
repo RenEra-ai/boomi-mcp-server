@@ -1070,3 +1070,298 @@ def test_routed_target_must_sit_in_a_terminal_position():
         exit_node_ids=("n1",),
     )
     assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+
+
+def test_synthetic_stop_may_not_carry_outgoing_flow():
+    """A terminal_stop wired onward, and omitted from terminal_shape_ids.
+
+    The generic terminal check only inspects shapes that ARE declared terminal,
+    so omitting the stop from the declaration used to hide the extra wire.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import ConnectorActionInputV1
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(1, BranchSemanticV1(leg_count=2)),
+            _node(
+                2,
+                ConnectorSemanticV1(
+                    role="target", connection_ref="$ref:c", operation_ref="$ref:o"
+                ),
+                path="/body/steps/0/legs/0/terminal",
+                exit_role="routed_target",
+            ),
+            _node(
+                3,
+                StopSemanticV1(),
+                path="/body/steps/0/legs/1/terminal",
+                exit_role="stop",
+            ),
+        ),
+        edges=(
+            _edge(1, 1, 2, kind="branch_leg", local=1, leg_ordinal=1),
+            _edge(2, 1, 3, kind="branch_leg", local=2, leg_ordinal=2),
+        ),
+        exit_node_ids=("n2", "n3"),
+    )
+    connector = ConnectorActionInputV1(
+        emitter_kind="connectoraction_target",
+        connector_type="database",
+        action_type="SEND",
+        connection_id="cid",
+        operation_id="oid",
+    )
+    symbols = SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(ref="$ref:c", component_id="cid", component_type="t"),
+            ComponentSymbolV1(ref="$ref:o", component_id="oid", component_type="t"),
+        )
+    )
+
+    def _plan(stop_out, terminals):
+        return EmissionPlanV1(
+            entry_shape_id="shape1",
+            nodes=(
+                _plan_node(
+                    1, StartNoActionInputV1(), role="start",
+                    out=[_wire(1, 1, 2, provenance="synthetic")],
+                ),
+                _plan_node(
+                    2, BranchInputV1(num_branches=2), cfg_node="n1",
+                    path="/body/steps/0",
+                    out=[
+                        _wire(2, 1, 3, identifier="1", text="1", cfg_edge_id="e1"),
+                        _wire(2, 2, 5, identifier="2", text="2", cfg_edge_id="e2"),
+                    ],
+                ),
+                _plan_node(
+                    3, connector, cfg_node="n2",
+                    path="/body/steps/0/legs/0/terminal",
+                    out=[_wire(3, 1, 4, provenance="synthetic")],
+                ),
+                _plan_node(4, StopInputV1(), role="terminal_stop", out=stop_out),
+                _plan_node(5, StopInputV1(), cfg_node="n3",
+                           path="/body/steps/0/legs/1/terminal"),
+            ),
+            terminal_shape_ids=terminals,
+        )
+
+    # Correct: the synthetic stop is inert and declared.
+    check_emission_plan_invariants(_plan((), ("shape4", "shape5")), cfg, symbols)
+    # Wired onward AND undeclared — must be rejected.
+    broken = _plan([_wire(4, 1, 5, provenance="synthetic")], ("shape5",))
+    assert (
+        _raises(check_emission_plan_invariants, broken, cfg, symbols).code
+        == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    )
+
+
+def test_routed_target_is_rejected_in_a_decision_false_arm():
+    """``DecisionFalseArmV1.terminal`` is Stop/Branch/Exception — never a target.
+
+    A bare "/terminal" suffix test would accept ``/false_arm/terminal`` and the
+    planner would append a synthetic Stop on the reject route.
+    """
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                ConnectorSemanticV1(
+                    role="target", connection_ref="$ref:c", operation_ref="$ref:o"
+                ),
+                path="/body/steps/0/false_arm/terminal",
+                exit_role="routed_target",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    assert _raises(check_cfg_invariants, cfg).code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+
+
+@pytest.mark.parametrize("path", [
+    "/body/steps/0/legs/0/terminal",
+    "/body/steps/2/legs/17/terminal",
+    "/body/steps/0/true_arm/terminal",
+    "/body/steps/1/true_arm/terminal/legs/3/terminal",
+])
+def test_routed_target_accepted_in_supported_terminal_positions(path):
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                ConnectorSemanticV1(
+                    role="target", connection_ref="$ref:c", operation_ref="$ref:o"
+                ),
+                path=path,
+                exit_role="routed_target",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    check_cfg_invariants(cfg)
+
+
+def test_plan_validation_scales_linearly_with_node_count():
+    """Guard against reintroducing an O(V*E) edge scan in the node loop.
+
+    ``SequenceNodeV1.steps`` has no upper bound, so a per-node rescan of
+    ``cfg.edges`` turns a valid large process into hundreds of millions of
+    predicates. Doubling the size must roughly double the work, not quadruple it.
+    """
+    import time
+
+    from boomi_mcp.compiler.process_ir.contracts import MessageInputV1 as _Msg
+
+    def _build(size):
+        nodes = [_node(i, _msg("m{0}".format(i)), path="/body/steps/{0}".format(i - 1))
+                 for i in range(1, size)]
+        nodes.append(
+            _node(size, StopSemanticV1(), path="/body/steps/{0}".format(size - 1),
+                  exit_role="stop")
+        )
+        edges = [
+            _edge(i, i, i + 1, kind="terminal" if i + 1 == size else "ordering")
+            for i in range(1, size)
+        ]
+        cfg = SemanticCfgV1(
+            entry_node_id="n1",
+            nodes=tuple(nodes),
+            edges=tuple(edges),
+            exit_node_ids=("n{0}".format(size),),
+        )
+        plan_nodes = [
+            _plan_node(1, StartNoActionInputV1(), role="start",
+                       out=[_wire(1, 1, 2, provenance="synthetic")])
+        ]
+        for i in range(1, size + 1):
+            ordinal = i + 1
+            is_last = i == size
+            plan_nodes.append(
+                _plan_node(
+                    ordinal,
+                    StopInputV1() if is_last else _Msg(text="m{0}".format(i)),
+                    cfg_node="n{0}".format(i),
+                    path="/body/steps/{0}".format(i - 1),
+                    out=() if is_last else [
+                        _wire(ordinal, 1, ordinal + 1, cfg_edge_id="e{0}".format(i))
+                    ],
+                )
+            )
+        plan = EmissionPlanV1(
+            entry_shape_id="shape1",
+            nodes=tuple(plan_nodes),
+            terminal_shape_ids=("shape{0}".format(size + 1),),
+        )
+        return cfg, plan
+
+    symbols = SymbolTableV1(symbols=())
+
+    def _time(size):
+        cfg, plan = _build(size)
+
+        def _once():
+            start = time.perf_counter()
+            check_cfg_invariants(cfg)
+            check_emission_plan_invariants(plan, cfg, symbols)
+            return time.perf_counter() - start
+
+        # Best-of-3: a single sample was measured at up to 14.1x under parallel
+        # load (88% of the threshold), which would eventually flake on a busy CI
+        # runner. Taking the minimum collapses that tail to ~8.5x max for ~0.07s.
+        return min(_once() for _ in range(3))
+
+    small = _time(400)
+    large = _time(3200)
+    # 8x the nodes. Measured on this codebase: the grouped implementation costs
+    # ~8.3x (linear), a per-node rescan of cfg.edges costs ~30x (quadratic).
+    # 16x sits well clear of both, so this discriminates without flaking on a
+    # loaded machine. Sizes below ~400 do NOT discriminate — constant factors
+    # swamp the difference and the test passes either way.
+    assert large < small * 16, (small, large)
+
+
+class _CountingTuple(tuple):
+    """A tuple that records how many times it is iterated."""
+
+    def __new__(cls, items):
+        obj = super().__new__(cls, items)
+        obj.iterations = 0
+        return obj
+
+    def __iter__(self):
+        self.iterations += 1
+        return super().__iter__()
+
+
+def test_plan_validation_never_rescans_cfg_edges_per_node():
+    """Structural, load-independent proof that validation is not O(V*E).
+
+    The timing test above is calibrated but is still a wall-clock measurement.
+    This one counts how many times ``cfg.edges`` is iterated: with edges grouped
+    once, the count is CONSTANT in the node count; with a per-node rescan it
+    grows as N. A constant count cannot be achieved by a quadratic scan, so this
+    cannot flake under load.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import MessageInputV1 as _Msg
+
+    symbols = SymbolTableV1(symbols=())
+
+    def _count(size):
+        nodes = [
+            _node(i, _msg("m{0}".format(i)), path="/body/steps/{0}".format(i - 1))
+            for i in range(1, size)
+        ]
+        nodes.append(
+            _node(size, StopSemanticV1(), path="/body/steps/{0}".format(size - 1),
+                  exit_role="stop")
+        )
+        edges = [
+            _edge(i, i, i + 1, kind="terminal" if i + 1 == size else "ordering")
+            for i in range(1, size)
+        ]
+        cfg = SemanticCfgV1(
+            entry_node_id="n1",
+            nodes=tuple(nodes),
+            edges=tuple(edges),
+            exit_node_ids=("n{0}".format(size),),
+        )
+        plan_nodes = [
+            _plan_node(1, StartNoActionInputV1(), role="start",
+                       out=[_wire(1, 1, 2, provenance="synthetic")])
+        ]
+        for i in range(1, size + 1):
+            ordinal = i + 1
+            is_last = i == size
+            plan_nodes.append(
+                _plan_node(
+                    ordinal,
+                    StopInputV1() if is_last else _Msg(text="m{0}".format(i)),
+                    cfg_node="n{0}".format(i),
+                    path="/body/steps/{0}".format(i - 1),
+                    out=() if is_last else [
+                        _wire(ordinal, 1, ordinal + 1, cfg_edge_id="e{0}".format(i))
+                    ],
+                )
+            )
+        plan = EmissionPlanV1(
+            entry_shape_id="shape1",
+            nodes=tuple(plan_nodes),
+            terminal_shape_ids=("shape{0}".format(size + 1),),
+        )
+        # ``model_copy(update=...)`` skips validation, so the instrumented tuple
+        # survives instead of being coerced back to a plain tuple.
+        counting = _CountingTuple(cfg.edges)
+        instrumented = cfg.model_copy(update={"edges": counting})
+        check_emission_plan_invariants(plan, instrumented, symbols)
+        return counting.iterations
+
+    small, large = _count(100), _count(800)
+    assert small == large, (
+        "cfg.edges iteration count grew from {0} to {1} when the node count grew "
+        "8x — validation is rescanning edges per node".format(small, large)
+    )
