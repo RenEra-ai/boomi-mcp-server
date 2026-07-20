@@ -1693,6 +1693,204 @@ def test_omitted_terminal_is_reported_as_missing_not_nondeterministic():
     assert _check_plan(duplicated).code == PROCESS_IR_COMPILE_NONDETERMINISTIC
 
 
+def test_symbol_index_is_state_free():
+    """``build_index`` returns a FRESH dict; nothing is cached on the model.
+
+    Caching the index on the model was tried and deliberately abandoned:
+    pydantic v2 includes private attrs in ``__eq__`` (a lazy cache makes two
+    identical tables compare unequal once one is used), ``model_copy(update=)``
+    does not re-run ``model_post_init`` (an eager cache goes stale and resolves
+    a PRESENT symbol to ``None``), and a private attr stays writable despite
+    ``frozen=True``. This pins the state-free behaviour that replaced it.
+    """
+    symbols = SymbolTableV1(
+        symbols=tuple(
+            ComponentSymbolV1(
+                ref="$ref:s{0}".format(i),
+                component_id="c{0}".format(i),
+                component_type="t",
+            )
+            for i in range(200)
+        )
+    )
+
+    first, second = symbols.build_index(), symbols.build_index()
+    assert first == second and first is not second, "index must be fresh each call"
+
+    # Mutating a returned index cannot reach the table or a later index.
+    first["$ref:s0"] = None
+    assert symbols.build_index()["$ref:s0"].component_id == "c0"
+    assert symbols.lookup("$ref:s0").component_id == "c0"
+
+    # lookup() agrees with the index for present and absent refs.
+    assert symbols.lookup("$ref:s199").component_id == "c199"
+    assert symbols.lookup("$ref:absent") is None
+    assert second.get("$ref:absent") is None
+
+    # No hidden state: using a table never changes its equality or serialization,
+    # and a model_copy with new symbols resolves against the NEW symbols.
+    twin = SymbolTableV1(symbols=symbols.symbols)
+    symbols.build_index()
+    symbols.lookup("$ref:s1")
+    assert symbols == twin
+    assert "index" not in symbols.model_dump_json()
+
+    replaced = symbols.model_copy(
+        update={
+            "symbols": (
+                ComponentSymbolV1(ref="$ref:new", component_id="n", component_type="t"),
+            )
+        }
+    )
+    assert replaced.lookup("$ref:new").component_id == "n"
+    assert replaced.lookup("$ref:s0") is None
+    assert replaced == SymbolTableV1(symbols=replaced.symbols)
+
+
+def test_synthetic_stop_with_flipped_continue_is_rejected():
+    """Synthetic inputs are compared whole, not just by emitter kind.
+
+    A synthetic Stop with ``continue_=False`` shares the "stop" emitter kind
+    with the correct one, so a kind-only check let it through. Both synthetic
+    inputs are fully determined by their role, so the expected value is exact.
+    """
+    from boomi_mcp.compiler.process_ir.contracts import ConnectorActionInputV1
+
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=(
+            _node(
+                1,
+                ConnectorSemanticV1(
+                    role="target", connection_ref="$ref:c", operation_ref="$ref:o"
+                ),
+                path="/body/steps/0/legs/0/terminal",
+                exit_role="routed_target",
+            ),
+        ),
+        edges=(),
+        exit_node_ids=("n1",),
+    )
+    symbols = SymbolTableV1(
+        symbols=(
+            ComponentSymbolV1(ref="$ref:c", component_id="cid", component_type="t"),
+            ComponentSymbolV1(
+                ref="$ref:o",
+                component_id="oid",
+                component_type="t",
+                connector_type="database",
+                action_type="Send",
+            ),
+        )
+    )
+    connector = ConnectorActionInputV1(
+        emitter_kind="connectoraction_target",
+        connector_type="database",
+        action_type="SEND",
+        connection_id="cid",
+        operation_id="oid",
+    )
+
+    def _plan(stop_input):
+        return EmissionPlanV1(
+            entry_shape_id="shape1",
+            nodes=(
+                _plan_node(1, StartNoActionInputV1(), role="start",
+                           out=[_wire(1, 1, 2, provenance="synthetic")]),
+                _plan_node(2, connector, cfg_node="n1",
+                           path="/body/steps/0/legs/0/terminal",
+                           out=[_wire(2, 1, 3, provenance="synthetic")]),
+                _plan_node(3, stop_input, role="terminal_stop"),
+            ),
+            terminal_shape_ids=("shape3",),
+        )
+
+    check_emission_plan_invariants(_plan(StopInputV1()), cfg, symbols)
+    broken = _plan(StopInputV1(continue_=False))
+    assert (
+        _raises(check_emission_plan_invariants, broken, cfg, symbols).code
+        == PROCESS_IR_COMPILE_EMISSION_PLAN_INVALID
+    )
+
+
+def test_branch_leg_prefix_matching_respects_pointer_boundaries():
+    """``/legs/1`` must not match ``/legs/10`` — a Branch may have 25 legs.
+
+    NOTE on construction: this mutates a target's ``source_path``, NOT the edge
+    wiring. Retargeting edges cannot discriminate here — reachability runs
+    before the leg rule and forces the leg->subtree map to be the identity
+    permutation, so any swap makes the *other* leg violate the same rule with
+    the same message, and the test would pass even without the boundary fix.
+    """
+    leg_count = 12
+    nodes = [_node(1, BranchSemanticV1(leg_count=leg_count))]
+    edges = []
+    for leg in range(leg_count):
+        ordinal = 2 + leg
+        nodes.append(
+            _node(
+                ordinal,
+                StopSemanticV1(),
+                path="/body/steps/0/legs/{0}/terminal".format(leg),
+                exit_role="stop",
+            )
+        )
+        edges.append(
+            _edge(leg + 1, 1, ordinal, kind="branch_leg", local=leg + 1,
+                  leg_ordinal=leg + 1)
+        )
+    cfg = SemanticCfgV1(
+        entry_node_id="n1",
+        nodes=tuple(nodes),
+        edges=tuple(edges),
+        exit_node_ids=tuple("n{0}".format(2 + leg) for leg in range(leg_count)),
+    )
+    check_cfg_invariants(cfg)  # the honest 12-leg branch is valid
+
+    # Leg 2's edge (prefix "/legs/1") now points at a node whose authored path
+    # is "/legs/10/..." — which a bare prefix test accepts and a boundary-aware
+    # one rejects. Only this one node moves, so exactly one rule is violated.
+    moved = list(cfg.nodes)
+    moved[2] = moved[2].model_copy(
+        update={"source_path": "/body/steps/0/legs/10/terminal/nested"}
+    )
+    broken = cfg.model_copy(update={"nodes": tuple(moved)})
+    diagnostic = _raises(check_cfg_invariants, broken)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.message == "a branch leg targets a node outside its own leg"
+
+
+def test_decision_arm_prefix_matching_respects_pointer_boundaries():
+    """``/true_arm`` must not match ``/true_arm_extra``."""
+    base = _decision_cfg()
+    nodes = list(base.nodes)
+    nodes[1] = nodes[1].model_copy(
+        update={"source_path": "/body/steps/0/true_arm_extra/terminal"}
+    )
+    cfg = base.model_copy(update={"nodes": tuple(nodes)})
+    diagnostic = _raises(check_cfg_invariants, cfg)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_AMBIGUOUS_FLOW
+    assert diagnostic.message == "a decision outcome targets a node outside its own arm"
+
+
+def test_omitted_terminal_is_reported_as_missing_not_nondeterministic():
+    """An omitted leaf is a MISSING terminal, not a nondeterminism defect.
+
+    Checking canonical order first reported every omission as
+    NONDETERMINISTIC and made the empty-declaration branch unreachable.
+    """
+    base = _linear_plan()
+    omitted = base.model_copy(update={"terminal_shape_ids": ()})
+    diagnostic = _check_plan(omitted)
+    assert diagnostic.code == PROCESS_IR_SEMANTIC_MISSING_TERMINAL
+    assert diagnostic.message == (
+        "a shape with no outgoing transition is not declared terminal"
+    )
+    # Duplicates/reordering remain nondeterminism.
+    duplicated = base.model_copy(update={"terminal_shape_ids": ("shape3", "shape3")})
+    assert _check_plan(duplicated).code == PROCESS_IR_COMPILE_NONDETERMINISTIC
+
+
 def test_symbol_lookup_is_indexed_not_a_linear_scan():
     """Symbol resolution must not make plan validation O(nodes x symbols).
 

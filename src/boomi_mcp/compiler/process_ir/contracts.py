@@ -40,7 +40,7 @@ from __future__ import annotations
 import json
 from typing import Any, List, Literal, Optional, Tuple, Union
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing_extensions import Annotated
 
 # Geometry, byte-locked to the legacy emitter

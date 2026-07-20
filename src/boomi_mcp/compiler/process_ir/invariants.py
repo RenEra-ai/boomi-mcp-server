@@ -993,7 +993,13 @@ def check_emission_plan_invariants(
     # terminal, not a nondeterminism defect. Checking canonical order first
     # would report every omission as NONDETERMINISTIC and make the
     # empty-declaration branch below unreachable for an otherwise valid plan.
-    missing = [shape for shape in canonical_terminals if shape not in declared_terminals]
+    # Set membership, not a list scan: ``declared_terminals`` is a list, so a
+    # ``not in`` per shape would make this O(T^2) — the same complexity class
+    # the symbol-index and edge-grouping fixes exist to prevent.
+    declared_terminal_set = set(declared_terminals)
+    missing = [
+        shape for shape in canonical_terminals if shape not in declared_terminal_set
+    ]
     if missing:
         raise _fail(
             PROCESS_IR_SEMANTIC_MISSING_TERMINAL,

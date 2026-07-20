@@ -17,7 +17,7 @@ plan that was already produced.
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from ...errors import (
     PROCESS_IR_CAPABILITY_UNSUPPORTED,
@@ -556,8 +556,10 @@ def lower_process_ir_to_cfg(ir: ProcessIRV1) -> SemanticCfgV1:
 # ---------------------------------------------------------------------------
 
 
-def _resolve(symbols, ref: str, path: str, node_id: str) -> ComponentSymbolV1:
-    """Resolve one reference. ``symbols`` is a prebuilt ref->symbol index."""
+def _resolve(
+    symbols: Mapping[str, Any], ref: str, path: str, node_id: str
+) -> ComponentSymbolV1:
+    """Resolve one reference against a prebuilt ref->symbol index."""
     symbol = symbols.get(ref)
     if symbol is None:
         raise raise_compile_error(
@@ -571,7 +573,7 @@ def _resolve(symbols, ref: str, path: str, node_id: str) -> ComponentSymbolV1:
 
 
 def _resolved_property_source(
-    source: Any, symbols: SymbolTableV1, path: str, node_id: str
+    source: Any, symbols: Mapping[str, Any], path: str, node_id: str
 ) -> Any:
     from .contracts import (
         _CurrentPropertySourceInputV1,
@@ -607,7 +609,7 @@ def _resolved_property_source(
 
 
 def _resolved_dataprocess_step(
-    step: Any, ordinal: int, symbols: SymbolTableV1, path: str, node_id: str
+    step: Any, ordinal: int, symbols: Mapping[str, Any], path: str, node_id: str
 ) -> Any:
     from .contracts import (
         _CombineDocumentsStepInputV1,
@@ -644,14 +646,15 @@ def _resolved_dataprocess_step(
     )
 
 
-def _emitter_input_for(node: CfgNodeV1, symbols, index=None) -> Any:
+def _emitter_input_for(node: CfgNodeV1, symbols: Mapping[str, Any]) -> Any:
     """Resolve one CFG node into its fully-bound emitter input.
 
-    ``symbols`` may be a ``SymbolTableV1`` or a prebuilt ref->symbol index.
-    Callers resolving many nodes pass the index so lookup stays O(1) per ref.
+    ``symbols`` is a prebuilt ref->symbol index (``SymbolTableV1.build_index()``),
+    NOT the table itself: every caller resolves many nodes, so building the
+    index once keeps resolution O(1) per reference. Taking the mapping directly
+    — rather than accepting either type — keeps this a plain semantic function
+    with no optimisation branch inside it.
     """
-    if isinstance(symbols, SymbolTableV1):
-        symbols = index if index is not None else symbols.build_index()
     semantic = node.semantic
     path = node.source_path
     node_id = node.node_id
